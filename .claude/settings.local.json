@@ -47,7 +47,10 @@
       "ClaudeInChromeDomain(127.0.0.1:8078)",
       "ClaudeInChromeDomain(127.0.0.1:8079)",
       "ClaudeInChromeDomain(127.0.0.1:8080)",
-      "ClaudeInChromeDomain(127.0.0.1:8081)"
+      "ClaudeInChromeDomain(127.0.0.1:8081)",
+      "ClaudeInChromeDomain(127.0.0.1:8082)",
+      "ClaudeInChromeDomain(127.0.0.1:8083)",
+      "ClaudeInChromeDomain(127.0.0.1:8084)"
     ]
   }
 }

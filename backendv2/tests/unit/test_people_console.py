@@ -149,7 +149,7 @@ def test_labels_do_not_force_the_feminine_nor_call_an_unbound_handle_bound(tmp_p
     assert "propriétaire" in adrien.subtitle and "sa propriétaire" not in adrien.subtitle
     assert "inconnue" not in adrien.subtitle
     badges = {b.text for b in handle.badges}
-    assert "certitude 0,85 (sûre du compte)" in badges and "non liée" in badges
+    assert "certitude 0,85 (sûre du compte)" in badges and "non lié" in badges
     assert certainty_fr(privacy.BOUND) == "0,85 (liée)"  # contrôle : une vraie liaison se dit liée
 
 

@@ -83,6 +83,9 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert done.status_code == 200 and "echo : activé" in html_of(done)
     assert live.kernel.registry.is_dynamic("mcp_meteo_echo")
     assert live.kernel.registry.bundles["mcp.meteo"].startswith("la météo et les prévisions d'une ville")
+    # « Pour qui, quand » mène à la grille où l'on retire un outil, ouverte sur sa famille, et à ses réglages
+    served = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
+    assert "/inspecteur/outils/tous?lot=mcp.meteo" in served and "Changer pour qui il est prévu" in served
     all_tools = html_of(client.get("/inspecteur/outils/tous", params={"lot": "mcp.meteo"}))
     assert "mcp_meteo_echo" in all_tools and "Service « meteo »" in all_tools
     tool_fiche = html_of(client.get("/inspecteur/outils/tous", params={"outil": "mcp_meteo_echo"}))

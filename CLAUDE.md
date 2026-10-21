@@ -765,7 +765,8 @@ Tout le reste se déclare par décorateurs.
 - Les outils : `@f.tool(name, args=…, bundle=…, episodes=…, ends_loop=…, owner_only=…, when=…)`, `f.bundle(...)`,
   `@f.tool_source(famille)` pour des outils dynamiques.
 - Les effets : `@f.capability(name, preview=…)`, `@f.effect(type, lane=…)`, `projector(name, version, tier=…)`.
-- La console : `@f.inspect`, `@f.subject`, `@f.search`, `@f.download`, `@f.action`, `@f.vital`, `@f.series`.
+- La console : `@f.inspect` (un onglet de fiche qui ne se montre que s'il a quelque chose à dire : `shown=`),
+  `@f.subject`, `@f.search`, `@f.download`, `@f.action`, `@f.vital`, `@f.series`.
 - La cohérence : `@f.invariant`.
 
 **Ajouter une faculté** : les tests exigent tout ce qui suit.

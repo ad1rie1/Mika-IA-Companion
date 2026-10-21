@@ -57,10 +57,10 @@ from tests.fixtures.mika import befriend, boot, build, connect, said
 #: (propriétaire, nom) → (titre, paramètres, destination)
 OWN_VIEWS = {
     ("identity", "personnes"): ("Personnes", ("q",), "personnes"),
-    ("identity", "annuaire"): ("Adresses", ("q", "confiance"), "identites"),
+    ("identity", "annuaire"): ("Moyens de communication", ("q", "confiance"), "identites"),
     ("identity", "revendications"): ("Identités à confirmer", (), "identites"),
     ("identity", "politique"): ("Règles de divulgation", (), "identites"),
-    ("identity", "personne"): ("Une adresse (ancienne page)", ("handle",), ""),
+    ("identity", "personne"): ("Un moyen de communication (ancienne page)", ("handle",), ""),
     ("social", "liens"): ("Liens", ("q", "proximite", "person"), "personnes"),
     ("presence", "presents"): ("Présents", (), "personnes"),
     ("transcript", "messages"): ("Messages", ("handle", "q", "role"), "fil"),
@@ -240,7 +240,7 @@ def test_each_view_and_tab_is_declared_in_its_place(tmp_path):
     assert person_tabs[:2] == PERSON_TABS[:2]
     assert handle_tabs == HANDLE_TABS
     assert (person.label, person.plural, person.forgettable) == ("Personne", "Personnes", True)
-    assert (handle.label, handle.plural, handle.forgettable) == ("Adresse", "Adresses", False)
+    assert (handle.label, handle.plural, handle.forgettable) == ("Moyen de communication", "Moyens de communication", False)
     assert person.search is not None and handle.search is not None
 
 
@@ -270,13 +270,13 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
     got, heads, searches = run(tmp_path, scenario)
     for key, blocks in got.items():
         assert blocks and not failed(blocks), (key, blocks)
-    assert table(got[("identity", "annuaire")], "adresse").rows == ()
+    assert table(got[("identity", "annuaire")], "moyen de communication").rows == ()
     assert table(got[("identity", "personnes")], "personne").rows == ()
     assert table(got[("presence", "presents")], "personne").rows == ()
     assert table(got[("social", "liens")], "personne").rows == ()
     assert titled(got[("identity", "politique")], "Les canaux").rows
-    assert "Choisissez une adresse" in text(got[("identity", "personne")])
-    assert "Adresse inconnue : « ext_404 »" in text(got["personne inconnue"])
+    assert "Choisissez un moyen de communication" in text(got[("identity", "personne")])
+    assert "Moyen de communication inconnu : « ext_404 »" in text(got["personne inconnue"])
     assert "Aucun lien avec « user_404 »" in text(got["lien inconnu"])
     assert "Aucun message avec « web_404 »" in text(got["fil inconnu"])
     assert table(got["recherche piégée"], "n°").rows == ()
@@ -306,7 +306,7 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     assert anon_before.key == ANON  # pas encore reliée : elle parle pour elle-même
     assert {b.text for b in alice_before.badges} >= {"propriétaire", "non liée", "en privé : personnel"}
     assert alice_before.subtitle.startswith("Proche · propriétaire")  # sans genre imposé
-    assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["adresses"] == 1
+    assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["moyens de communication"] == 1
     # l'oubli atteint ses adresses, et le nom qu'elle seule porte (« name:alice », ce que d'autres ont dit d'elle)
     assert alice_before.aliases == ("user_1", "name:alice")
 
@@ -314,9 +314,9 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     # une adresse reliée renvoie à sa personne (la console y redirige)
     assert after[ANON].key == "user_1" and after["user_1"].key == "user_1"
     assert after["user_1"].aliases == (*sorted(("user_1", ANON)), "name:alice")
-    assert "liée · 2 adresses" in {b.text for b in after["user_1"].badges}
+    assert "liée · 2 moyens de communication" in {b.text for b in after["user_1"].badges}
     assert isinstance(handle, Head) and handle.key == ANON and "Parle pour Alice" in handle.subtitle
-    assert {b.text for b in handle.badges} >= {"publique", "liée"}
+    assert {b.text for b in handle.badges} >= {"publique", "lié"}
 
     assert [f.key for f in found["ali"]] == ["user_1"] and isinstance(found["ali"][0], Found)
     assert [f.key for f in found["4F2A"]] == ["user_1"]  # par une de ses adresses
@@ -326,17 +326,17 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     for key, blocks in tabs.items():
         assert blocks and not failed(blocks), key
     synthese = tabs[("person", "identity", "synthese")]
-    handles = titled(tabs[("person", "identity", "adresses")], "Ses adresses")  # la table vit dans son onglet
+    handles = titled(tabs[("person", "identity", "adresses")], "Ses moyens de communication")  # la table vit dans son onglet
     assert {row_cells(r)[0].key for r in handles.rows} == {"handle/user_1", f"handle/{ANON}"}
     assert all(isinstance(r, Row) and r.href.kind == "subject" for r in handles.rows)
-    pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses adresses")
+    pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses moyens de communication")
     assert pointer.pairs[0][1].params == (("onglet", "adresses"),)  # la synthèse y renvoie, sans la répéter
-    assert not any(isinstance(b, Table) and b.title == "Ses adresses" for b in synthese)
+    assert not any(isinstance(b, Table) and b.title == "Ses moyens de communication" for b in synthese)
     opens = row_of(titled(synthese, "Ce que ça ouvre"), "en privé")
     # proche : l'anecdote sur autrui ; la confidence, seulement sur quelqu'un qu'elle connaît (ADR 0058)
     assert opens["sur autrui"] == "personnel" and opens["sur quelqu'un qu'elle connaît"] == "confidences"
     others = tabs[("handle", "identity", "autres")]
-    assert [row_cells(r)[0].key for r in titled(others, "Les autres adresses").rows] == ["handle/user_1"]
+    assert [row_cells(r)[0].key for r in titled(others, "Les autres moyens de communication").rows] == ["handle/user_1"]
 
 
 def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymous_handle(tmp_path):
@@ -405,11 +405,11 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
     directory, accounts, listing, searched, policy, facts = run(tmp_path, scenario)
     for blocks in (directory, accounts, listing, searched, policy):
         assert not failed(blocks)
-    handles = table(directory, "adresse")
+    handles = table(directory, "moyen de communication")
     alice, anon = row_of(handles, "user_1"), row_of(handles, ANON)
     # le nom et par où, pas la clé : elle reste en détail
-    assert plain(alice["adresse"]) == "Alice · compte opérateur" and plain(alice["clé"]) == "user_1"
-    assert plain(anon["adresse"]) == "web, sans nom" and plain(anon["clé"]) == ANON
+    assert plain(alice["moyen de communication"]) == "Alice · compte opérateur" and plain(alice["clé"]) == "user_1"
+    assert plain(anon["moyen de communication"]) == "web, sans nom" and plain(anon["clé"]) == ANON
     assert plain(alice["confiance du canal"]).startswith("authentifiée")
     assert alice["certitude"] == "1,00 (vérifiée)" and alice["propriétaire"] == "oui"
     assert plain(anon["confiance du canal"]).startswith("publique") and anon["certitude"] == "0,00 (inconnue)"
@@ -425,7 +425,7 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
         assert as_dict(handles, row)["divulgation en public"] == "anodin · sa fiche fermée"
     assert all(isinstance(r, Row) and r.href.key == f"handle/{plain(as_dict(handles, r)['clé'])}"
                for r in handles.rows)
-    assert table(accounts, "adresse").rows == ()  # aucune adresse de compte
+    assert table(accounts, "moyen de communication").rows == ()  # aucune adresse de compte
 
     people = table(listing, "personne")
     assert {row_cells(r)[0].key for r in people.rows} == {"person/user_1", f"person/{ANON}"}
@@ -454,7 +454,7 @@ def test_the_claims_badge_counts_pending_claims(tmp_path):
 
     counts, blocks = run(tmp_path, scenario)
     assert counts == [None, (1, ""), (2, ""), (1, "")]
-    claims = table(blocks, "adresse")
+    claims = table(blocks, "moyen de communication")
     assert len(claims.rows) == 1 and row_cells(claims.rows[0])[0].key == f"handle/{ANON}"
     assert claims.rows[0].href.params == (("onglet", "revendication"),)
 
@@ -744,11 +744,11 @@ def test_views_stay_bounded_in_a_crowd(tmp_path):
         blocks = got[key]
         assert not failed(blocks), key
         assert all(len(t.rows) <= 50 for t in tables(blocks)), key
-    for key, first in ((("identity", "annuaire"), "adresse"), (("identity", "personnes"), "personne"),
+    for key, first in ((("identity", "annuaire"), "moyen de communication"), (("identity", "personnes"), "personne"),
                        (("presence", "presents"), "personne"), (("social", "liens"), "personne")):
         t = table(got[key], first)
         assert len(t.rows) == 50 and t.pager is not None and t.pager.total == 210, key
-    assert len(table(got["page 5"], "adresse").rows) == 10
+    assert len(table(got["page 5"], "moyen de communication").rows) == 10
     fil = table(got[("transcript", "messages")], "n°")
     assert len(fil.rows) == 50 and fil.pager is not None and fil.pager.older
     assert len(table(got[("transcript", "questions")], "n°").rows) == 50

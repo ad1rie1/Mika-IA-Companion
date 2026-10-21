@@ -1,0 +1,15 @@
+{# La fiche d'une personne › Son téléphone (app/handmade/senses.py, ADR 0120, 0123) : ses conversations en bulles, et
+   les réponses qu'elle a proposées à sa place. #}
+{% import "handmade/sens/macros.html" as senses %}
+<div class="now-page person-tab senses">
+  <section class="now-card" aria-labelledby="senses-phone">
+    <header class="now-card-head">
+      <h2 id="senses-phone">Ses conversations</h2>
+      <span class="person-count now-num">{{ conversations|length }}</span>
+      <p>Ce que le téléphone de {{ name }} lui a montré (WhatsApp, Messages). Elle ne le lit qu'en tête-à-tête avec {{ name }}. Ouvre une conversation pour la lire.</p>
+    </header>
+    {% if conversations %}<div class="senses-convs">{% for c in conversations %}{{ senses.conversation(c) }}{% endfor %}</div>
+    {% else %}<p class="now-muted">Aucun message pour l'instant.</p>{% endif %}
+  </section>
+  {{ senses.offers(offers, False) }}
+</div>

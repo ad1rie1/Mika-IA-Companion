@@ -31,7 +31,8 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Ses relations", (
         Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
                     subjects=("person",)),
-        Destination("identites", "Identités", "◎", "Qui parle derrière chaque adresse, et ce que ça ouvre.",
+        Destination("identites", "Identités", "◎", "Qui parle derrière chaque moyen de communication, et ce "
+                    "que ça ouvre.",
                     subjects=("handle",)),
         Destination("fil", "Conversations", "❝", "Ce qui a été dit, avec qui, et les questions qui attendent."),
     )),
@@ -234,7 +235,7 @@ EVENT_LABELS: dict[str, str] = {
     "world.joined": "Quelqu'un est entré dans le monde", "world.left": "Quelqu'un est sorti du monde",
     "world.noticed": "Quelque chose de remarqué dans le monde",
     "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
-    "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
+    "identity.linked": "Un moyen de communication relié", "identity.registered": "Un compte enregistré",
     "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",
     "identity.name_dismissed": "Un nom écarté pour une personne (« ce n'est pas elle »)",
     "transcript.compacted": "Un fil replié en résumé",

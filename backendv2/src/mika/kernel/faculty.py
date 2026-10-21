@@ -281,6 +281,9 @@ class InspectSpec:
     description: str = ""
     #: hors de la navigation (joignable par lien seulement)
     hidden: bool = False
+    #: un onglet de fiche qui ne se montre que pour les objets dont il a quelque chose à dire :
+    #: ``shown(tranche, clé) -> bool`` (vide : toujours)
+    shown: Callable[..., Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -703,7 +706,8 @@ class Faculty(Generic[S, Pm]):
     # ── exploitation (la console) ──
     def inspect(self, name: str, *, title: str = "", params: Iterable[tuple[str, str] | Param] = (),
                 section: str = "", order: int = 100, subject: str = "", subject_param: str = "",
-                badge: Callable[..., Any] | None = None, description: str = "", hidden: bool = False):
+                badge: Callable[..., Any] | None = None, description: str = "", hidden: bool = False,
+                shown: Callable[..., Any] | None = None):
         """Une vue de la console : ``fn(tranche, frame, ctx) -> Sequence[Block]``,
         en lecture seule. ``params`` : des ``Param`` typés (ou d'anciennes paires
         (nom, libellé), lues comme des recherches)."""
@@ -712,7 +716,7 @@ class Faculty(Generic[S, Pm]):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.inspectors.append(InspectSpec(
                 self.name, name, fn, title or name, tuple((p.name, p.label) for p in typed), typed, section,
-                order, subject, subject_param, badge, description, hidden))
+                order, subject, subject_param, badge, description, hidden, shown))
             return fn
 
         return deco

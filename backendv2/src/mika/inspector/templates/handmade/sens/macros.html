@@ -1,0 +1,69 @@
+{# Les morceaux des pages du téléphone et de la localisation (app/handmade/senses.py), partagés avec leurs onglets sur
+   la fiche d'une personne : le filtre par personne, une conversation, une réponse proposée, une position, le journal
+   de ce que les téléphones lui ont dit. #}
+
+{% macro chips(items) %}
+{% if items %}<nav class="hm-chips senses-chips" aria-label="Personne"><span class="hm-chips-title">Personne</span>{% for i in items %}<a class="hm-chip{{ ' on' if i.on }}" href="{{ i.href }}"{% if i.on %} aria-current="page"{% endif %}>{{ i.text }} <span class="hm-count">{{ i.count }}</span></a>{% endfor %}</nav>{% endif %}
+{% endmacro %}
+
+{% macro conversation(c) %}
+<details class="senses-conv">
+  <summary>
+    <span class="senses-conv-top"><b>{{ c.label }}</b>{% if c.group %}<span class="now-tag">groupe</span>{% endif %}<span class="now-tag info">{{ c.app }}</span><span class="senses-when">{{ c.when }}</span></span>
+    <span class="senses-preview">{{ c.preview }}</span>
+    <span class="senses-count">{{ c.count }} message{{ 's' if c.count > 1 }}</span>
+  </summary>
+  {% if c.cut %}<p class="now-muted senses-cut">Les {{ c.count - c.cut }} derniers ; {{ c.cut }} plus ancien{{ 's' if c.cut > 1 }} restent au journal.</p>{% endif %}
+  {% for d in c.days %}
+  <h3 class="person-day"><span>{{ d.day }}</span></h3>
+  <ol class="person-thread">
+    {% for m in d.messages %}<li class="{{ 'mine' if m.mine else 'theirs' }}"><p class="person-bubble">{{ m.text }}</p><p class="person-meta">{% if m.who %}{{ m.who }} · {% endif %}{{ m.time }}</p></li>{% endfor %}
+  </ol>
+  {% endfor %}
+</details>
+{% endmacro %}
+
+{% macro offers(items, who) %}
+<section class="now-card" aria-labelledby="senses-offers">
+  <header class="now-card-head">
+    <h2 id="senses-offers">Ses réponses proposées</h2>
+    <span class="person-count now-num">{{ items|length }}</span>
+    <p>Ce qu'elle a préparé à la place de la personne. Rien ne part sans le geste « Envoyer » sur son téléphone.</p>
+  </header>
+  {% if items %}
+  <ul class="senses-list" role="list">
+    {% for o in items %}
+    <li>
+      <div class="senses-line"><span class="now-tag {{ o.tone }}">{{ o.state }}</span>{% if who %}{% if o.who.href %}<a href="{{ o.who.href }}">{{ o.who.name }}</a>{% else %}{{ o.who.name }}{% endif %} · {% endif %}{{ o.app }}<span class="senses-when">{{ o.when }}</span></div>
+      <p class="senses-text">{{ o.text }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="now-muted">Aucune pour l'instant.</p>{% endif %}
+</section>
+{% endmacro %}
+
+{% macro place(f) %}
+<p class="senses-place">{{ f.place or 'Un lieu sans nom' }}</p>
+<p class="senses-facts"><span>{{ f.when }}</span><span>{{ f.accuracy }}</span><span><code>{{ f.coords }}</code></span></p>
+{% endmacro %}
+
+{% macro said(s, who) %}
+<section class="now-card" aria-labelledby="senses-said">
+  <header class="now-card-head">
+    <h2 id="senses-said">{{ 'Ce que les téléphones lui ont dit' if who else 'Ce que son téléphone lui a dit' }}</h2>
+    <p>Chaque position reçue, la plus récente d'abord ; quand le partage est coupé, la dernière s'efface.</p>
+  </header>
+  {% if s.entries %}
+  <ol class="senses-said" role="list">
+    {% for e in s.entries %}
+    <li class="{{ 'cleared' if e.cleared }}">
+      <span class="senses-when">{{ e.when }}</span>
+      <span>{% if who %}{% if e.who.href %}<a href="{{ e.who.href }}">{{ e.who.name }}</a>{% else %}{{ e.who.name }}{% endif %} · {% endif %}{% if e.cleared %}partage coupé : position effacée{% else %}{{ e.place or 'un lieu sans nom' }} <span class="now-muted">· {{ e.accuracy }} · <code>{{ e.coords }}</code></span>{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if s.older or s.newer %}<p class="senses-pages">{% if s.newer %}<a href="{{ s.newer }}">← Les plus récents</a>{% endif %}{% if s.older %}<a href="{{ s.older }}">Plus anciens →</a>{% endif %}</p>{% endif %}
+  {% else %}<p class="now-muted">Rien pour l'instant.</p>{% endif %}
+</section>
+{% endmacro %}

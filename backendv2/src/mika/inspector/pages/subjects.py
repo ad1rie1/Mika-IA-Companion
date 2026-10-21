@@ -71,7 +71,7 @@ class Subjects:
             query = urlencode(dict(request.query_params))
             return RedirectResponse(fiche_url(kind, head.key) + ("?" + query if query else ""),
                                     status_code=303)
-        tabs = self.ui.inspection.tabs(kind)
+        tabs = self.ui.inspection.tabs(kind, key)
         asked = request.query_params.get("onglet", "")
         # une vue d'ensemble dessinée à la main (ADR 0121) : le premier onglet, ouvert par défaut
         overview = self.ui.deps.overviews.get(kind) if isinstance(head, Head) else None

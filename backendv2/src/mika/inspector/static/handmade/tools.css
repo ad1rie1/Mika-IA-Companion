@@ -168,6 +168,8 @@
 .server-facts dt { color: var(--muted); }
 .server-facts dd { margin: 0; }
 .server-address { font-size: 12px; overflow-wrap: anywhere; }
+.server-who-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
+.server-who-actions p { flex-basis: 100%; margin: 2px 0 0; font-size: 12.5px; }
 .server-who { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .server-who th, .server-who td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   text-align: left; vertical-align: middle; }
@@ -187,14 +189,8 @@
 }
 
 /* L'en-tête de la fiche d'un service branché (handmade/outils/serveur_tete.html) */
-.fiche-head { align-items: flex-start; gap: 18px 24px; margin-bottom: 22px; }
-.fiche-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-.fiche-head-side .action-bar { margin: 0; }
 .server-head { display: grid; flex: 1 1 520px; gap: 8px; min-width: 0; }
 .server-head h1 { margin: 0; }
 .server-head-what { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
 .server-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 4px; }
 .server-head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
-@media (max-width: 640px) {
-  .fiche-head-side { justify-content: flex-start; }
-}

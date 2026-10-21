@@ -240,7 +240,7 @@ async def live(ui: Any, request: Request) -> list[Any]:
             Disclosure("Comprendre les seuils de décision", (policy_fields,))]
 
 
-PERSON_PARAMS = (Param("personne", "personne", "search", placeholder="un nom (Adrien) ou une adresse"),)
+PERSON_PARAMS = (Param("personne", "personne", "search", placeholder="un nom (Adrien) ou un moyen de communication"),)
 
 
 @TABS.tab("decisions.envers", title="Que ferait-elle ?",
@@ -257,7 +257,7 @@ async def towards(ui: Any, request: Request) -> Any:
     if not wanted:
         chips = tuple(Ref("local", "/inspecteur/decisions/envers", ui.names.who(h), (("personne", h),))
                       for h in people)
-        out.append(Note("Choisis une personne (son nom ou son adresse) : la console montre les lignes de l'arbitre "
+        out.append(Note("Choisis une personne (son nom ou un moyen de communication) : la console montre les lignes de l'arbitre "
                         "qui la concernent, et celles qui visent « n'importe qui de présent ».", "info"))
         if chips:
             out.append(Table(("personne",), tuple((c,) for c in chips), title="Personnes dont une ligne existe"))
@@ -356,7 +356,7 @@ def selection_detail(ui: Any, d: Any, fired: frozenset[str]) -> list[Any]:
 EPISODE_PARAMS = (
     Param("sorte", "sorte", "select", tuple(KINDS.items())),
     Param("issue", "issue", "select", tuple((k, v[0]) for k, v in OUTCOMES.items())),
-    Param("cible", "vers", "search", placeholder="un nom (Adrien) ou une adresse"),
+    Param("cible", "vers", "search", placeholder="un nom (Adrien) ou un moyen de communication"),
 )
 
 
@@ -424,7 +424,7 @@ async def episodes(ui: Any, request: Request) -> Any:
     out: list[Any] = [Note(n, "warn") for n in notes]
     if values["cible"] and targets == {values["cible"]} and not ui.names.handles_named(values["cible"],
                                                                                         ui.inspection.search):
-        out.append(Note(f"Personne ne s'appelle « {values['cible'][:80]} » : filtre sur cette adresse exacte.", "info"))
+        out.append(Note(f"Personne ne s'appelle « {values['cible'][:80]} » : filtre sur ce moyen de communication exact.", "info"))
     if stopped:
         out.append(Note("La recherche continue dans les épisodes plus anciens : utilise « Plus anciens ».", "info"))
     out.append(Table((Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")), rows, title="Épisodes",

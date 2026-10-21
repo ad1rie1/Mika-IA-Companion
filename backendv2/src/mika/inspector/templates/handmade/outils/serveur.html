@@ -1,5 +1,6 @@
 {# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123) : s'il marche et ce qui attend ton
    regard, ce qu'elle en lit, ses outils et ce que tu en as décidé, pour qui et quand ; le côté technique replié. #}
+{% from "_navigation.html" import pager as pages %}
 <div class="now-page server">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
 
@@ -36,11 +37,16 @@
     {% endif %}
   </section>
 
-  <section class="now-card" aria-labelledby="server-who">
+  <section class="now-card table-block" aria-labelledby="server-who">
     <header class="now-card-head">
       <h2 id="server-who">Pour qui, quand</h2>
-      <p>Situation par situation, si elle peut se servir de ce service : ce que donnent ses réglages et ceux de ses outils. <a href="{{ settings }}">Le changer</a></p>
+      <p>Situation par situation, si elle peut se servir de ce service : ce que donnent ses réglages et ceux de ses outils.</p>
     </header>
+    <div class="server-who-actions">
+      {% if grid %}<a class="btn" href="{{ grid }}">Régler outil par outil</a>{% endif %}
+      <a class="btn quiet" href="{{ settings }}">Changer pour qui il est prévu</a>
+      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir aussi à une personne qui a un compte, ou à d'autres moments, c'est dans ses réglages.</p>
+    </div>
     <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Pour qui, quand">
       <table class="server-who">
         <thead><tr><th scope="col">Situation</th><th scope="col">Elle peut s'en servir</th><th scope="col">Comment, ou pourquoi pas</th></tr></thead>
@@ -58,6 +64,7 @@
         {% endfor %}
       </table>
     </div>
+    <div class="hm-pager single">{{ pages(who_pager) }}</div>
   </section>
 
   <details class="now-card server-tech">

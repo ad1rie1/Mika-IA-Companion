@@ -8,6 +8,7 @@ clic (« État » sous « Le détail », « Ses outils » pour les régler, « A
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 from markupsafe import Markup
 
@@ -15,7 +16,7 @@ from mika.inspector import render
 from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview, env
-from mika.kernel.inspect import When
+from mika.kernel.inspect import Pager, When
 from mika.plugins.mcp.console import STATE_TONES, edit_server, tool_state
 from mika.ports.mcp import AUDIENCES, STATES
 from mika.runtime.tools import deferred
@@ -98,6 +99,10 @@ class ServerOverview(Overview):
 
         tools_tab = fiche_url(KIND, key, "outils")
         settings = render.href(edit_server(key, fiche_url(KIND, key)))
+        # la grille de « Ce qu'elle peut faire », ouverte sur la famille de ses outils : là où l'on en retire
+        bundles = {ui.kernel.registry.tools[t.name].bundle for t in port.offered()
+                   if t.server == key and t.name in ui.kernel.registry.tools}
+        grid = f"{catalog.BASE}/tous?" + urlencode({"lot": next(iter(bundles))}) if len(bundles) == 1 else ""
         served = sum(1 for t in port.offered() if t.server == key)
         review = len(st.new) + len(st.changed)
         alerts = []
@@ -127,12 +132,15 @@ class ServerOverview(Overview):
             ("dernière panne", ui.when(st.last_error_at) if st.last_error_at else "aucune"),
             ("pannes d'affilée", str(st.consecutive)),
         ]
+        situations = _where(ui, key)
+        rows = max(1, sum(len(g["rows"]) for g in situations))
         return Markup(env.get_template("handmade/outils/serveur.html").render(
             state=STATES.get(st.state, st.state), state_tone=STATE_TONES.get(st.state, ""),
             joined=ago(st.last_ok_at), served=served, live=len(st.live), review=review,
             calls=st.calls, failures=st.failures, alerts=alerts,
             purpose=_capital(st.purpose.strip()), when_to_use=_capital(st.when_to_use.strip()),
-            tools=tools, situations=_where(ui, key), technical=technical, log=list(st.log), instructions=st.instructions,
+            tools=tools, situations=situations, who_pager=render._pager(Pager(size=rows, total=rows), {}),
+            technical=technical, log=list(st.log), instructions=st.instructions,
             local=st.kind == "local", address=st.address, settings=settings, tools_tab=tools_tab,
-            calls_tab=fiche_url(KIND, key, "appels")))
+            calls_tab=fiche_url(KIND, key, "appels"), grid=grid))
 

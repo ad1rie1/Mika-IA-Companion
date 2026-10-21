@@ -126,6 +126,33 @@ puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en
 échec. Dans le fil, la colonne « réponse » dit cette cause (« sans réponse :
 s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 
+### Le téléphone et la localisation, par personne (ADR 0119, 0120, 0123)
+- **Messages du téléphone** (`sens/messages`, dessinée : `app/handmade/senses.py`) :
+  le téléphone de chaque personne, puis ses conversations (un contact, un
+  groupe), repliées, qui s'ouvrent en bulles jour par jour ; huit conversations
+  par personne quand on regarde tout le monde, toutes quand on en choisit une
+  (`?personne=`, des puces) ; puis les réponses qu'elle a proposées et leur sort.
+- **Localisation** (`sens/positions`, dessinée) : une ligne par personne, ses
+  téléphones réunis (ses autres adresses dépliées), puis ce que les téléphones
+  lui ont dit, par pages (`?avant=`) ; le même filtre par personne.
+- Sur la fiche d'une personne, **Son téléphone** et **Sa position** : les mêmes
+  données, pour elle seule. Ces onglets n'apparaissent que si elle en a
+  (`@f.inspect(..., shown=)`, `Inspection.tabs(kind, key)`).
+- Le mot *adresse* (une identité qui parle pour une personne : un compte, un
+  téléphone, un compte extérieur) devient partout **moyen de communication** :
+  l'onglet de la fiche d'une personne, la page Identités › Moyens de
+  communication, le menu « Identités et moyens de communication », la fiche
+  d'un moyen de communication (`fiche/handle/<clé>`). Les clés techniques
+  restent (l'onglet `adresses`, le paramètre `handle`).
+- La fiche d'un moyen de communication s'ouvre sur **En bref**, dessinée
+  (`app/handmade/handles.py`) : quatre tuiles (par où, ce que le canal prouve,
+  si elle peut lui écrire d'elle-même, son dernier message), *Le canal*, *Qui
+  écrit d'ici* (pour qui il parle, ses droits de propriétaire, ses autres
+  moyens), *Ce que ça ouvre* (une ligne par sorte de chose, en privé et en
+  public, et pourquoi), le verdict pas à pas replié. Son *Fil* est en bulles ;
+  *Verdict* et *Ses autres moyens de communication* passent sous « Le
+  détail » ; *Revendication* ne se montre pas pour un compte authentifié.
+
 ### Décisions
 - **Table de l'arbitre** : preuves → score → taux, la politique.
 - **Que ferait-elle ?** *(nouveau)* : pour une personne, ses lignes, ce qui la

@@ -41,6 +41,7 @@ from mika.app.handmade import (
     emotion,
     excerpt,
     read_parts,
+    senses,
     span,
     unit,
 )
@@ -171,7 +172,7 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         "online": bool(set(frame.get(presence_c.PRESENT) or ()) & set(who.handles)),
         "composing": any(frame.get(presence_c.COMPOSING(h)) for h in who.handles),
         "facts": facts,
-        "where": f"{count} adresse{'s' if count > 1 else ''}" + (f" · {view.channel}, {how}" if view.channel else ""),
+        "where": f"{count} moyen{'s' if count > 1 else ''} de communication" + (f" · {view.channel}, {how}" if view.channel else ""),
         "where_href": f"{fiche}?onglet=adresses",
         "toward": f"{PREFIX}/decisions/envers?personne={quote(person, safe='')}",
     }
@@ -485,12 +486,14 @@ def circle(look: Look, who: Who) -> dict[str, Any]:
 TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "echanges": exchanges,
     "memoire": memory,
-    "adresses": drawn(Roles(title="adresse", badges=("confiance",), tiles=True), "adresses"),
+    "adresses": drawn(Roles(title="moyen de communication", badges=("confiance",), tiles=True), "adresses"),
     "fichiers": drawn(Roles(title="nom", badges=("état",), time="quand", tiles=True), "fichiers"),
     "pieces": drawn(Roles(title="nom", badges=("sorte", "état"), body=("ce qu'elle y a lu",), time="reçue",
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
     "projets": drawn(Roles(title="projet", badges=("mode", "état"), time="ouvert"), "projets"),
+    # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
+    "telephone": senses.phone_tab, "position": senses.position_tab,
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console
     "synthese": blocks_tab, "lien": blocks_tab, "devine": blocks_tab, "affect": blocks_tab, "pensees_personne": blocks_tab,
 }
@@ -508,7 +511,7 @@ class PersonOverview(Overview):
 
     slug = "ensemble"
     title = "Vue d'ensemble"
-    styles = ("handmade/person.css",)
+    styles = ("handmade/person.css", "handmade/senses.css")
     scripts = ("handmade/live.js",)
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre

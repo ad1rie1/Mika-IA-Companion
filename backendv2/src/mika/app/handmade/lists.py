@@ -37,7 +37,7 @@ ORDINARY = frozenset({"anodin", "actif", "active"})
 WHOSE = frozenset({"concerne", "de qui", "à qui", "de", "avec", "à"})
 #: des libellés de colonne qui nomment l'élément : son titre, dans une liste qui n'a pas de rôles
 TITLES = frozenset({"titre", "nom", "intitulé", "sujet", "objet", "texte", "question", "but", "projet", "outil", "app",
-                    "flux", "réveil", "adresse", "fichier", "pièce", "service", "serveur", "processus", "appareil"})
+                    "flux", "réveil", "adresse", "moyen de communication", "fichier", "pièce", "service", "serveur", "processus", "appareil"})
 #: des libellés de date (ou de numéro) qui ne disent rien de plus que leur valeur : remontée près du titre, elle
 #: les perd
 PLAIN_TIMES = frozenset({"quand", "date", "heure", "le", "moment", "n°"})

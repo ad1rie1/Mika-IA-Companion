@@ -59,8 +59,20 @@ class Inspection:
         return sorted((v for v in self.registry.inspectors if v.section == section),
                       key=lambda v: (v.order, v.title))
 
-    def tabs(self, kind: str) -> list[InspectSpec]:
-        return sorted((v for v in self.registry.inspectors if v.subject == kind), key=lambda v: (v.order, v.title))
+    def tabs(self, kind: str, key: str = "") -> list[InspectSpec]:
+        """Les onglets de la fiche de ce type d'objet ; ``key`` : sans ceux qui n'ont rien à dire de cet objet-là
+        (``InspectSpec.shown``, une panne le montre)."""
+        views = sorted((v for v in self.registry.inspectors if v.subject == kind), key=lambda v: (v.order, v.title))
+        if not key:
+            return views
+        frame = self.kernel.mind.frame()
+
+        def shown(v: InspectSpec) -> bool:
+            if v.shown is None:
+                return True
+            got = call(v.shown, frame.state(v.owner), key, label=f"onglet {v.owner}/{v.name}")
+            return isinstance(got, Failed) or bool(got)
+        return [v for v in views if shown(v)]
 
     def subject(self, kind: str) -> SubjectSpec | None:
         return self.registry.subjects.get(kind)

@@ -21,7 +21,7 @@
 
 <form class="people-find" method="get" action="{{ base }}" role="search">
   <label class="sr" for="people-q">Chercher une personne</label>
-  <input id="people-q" type="search" name="q" value="{{ P.q }}" placeholder="Chercher par nom ou par adresse…" autocomplete="off">
+  <input id="people-q" type="search" name="q" value="{{ P.q }}" placeholder="Chercher par nom ou par moyen de communication…" autocomplete="off">
   {% if P.level %}<input type="hidden" name="proximite" value="{{ P.level }}">{% endif %}
   {% if P.only_online %}<input type="hidden" name="presence" value="en-ligne">{% endif %}
   <button class="btn">Chercher</button>
@@ -47,7 +47,7 @@
     {% if p.summary %}<p class="people-card-summary">{{ p.summary }}</p>{% endif %}
     <div class="people-card-foot">
       <span class="people-bond" title="ce qui l'attache à cette personne">attachement {{ bar(p.bond_w, "bond") }} <span class="now-num">{{ p.bond }}</span></span>
-      <span class="now-muted">{% if p.rhythm %}{{ p.rhythm }} · {% endif %}{{ p.handles }} adresse{{ 's' if p.handles > 1 }}</span>
+      <span class="now-muted">{% if p.rhythm %}{{ p.rhythm }} · {% endif %}{{ p.handles }} moyen{{ 's' if p.handles > 1 }} de communication</span>
     </div>
   </li>
   {% endfor %}

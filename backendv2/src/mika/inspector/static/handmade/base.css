@@ -480,3 +480,12 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 /* une carte dans le détail d'une ligne ou dans un repli de second rang : une section, pas une carte de plus */
 .hm-subfold .now-card, .person-entry-detail .now-card, .hm-table-detail .now-card { padding: 0; border: 0; border-radius: 0;
   background: none; box-shadow: none; }
+
+/* L'en-tête d'une fiche que la composition dessine (une personne, un service, une adresse) : la console y ajoute ses
+   actions, à droite ; une fiche peut le resserrer (person.css). */
+.fiche-head { align-items: flex-start; gap: 18px 24px; margin-bottom: 22px; }
+.fiche-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.fiche-head-side .action-bar { margin: 0; }
+@media (max-width: 700px) {
+  .fiche-head-side { justify-content: flex-start; }
+}

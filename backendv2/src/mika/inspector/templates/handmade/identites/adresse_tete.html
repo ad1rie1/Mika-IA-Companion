@@ -1,0 +1,8 @@
+{# L'en-tête de la fiche d'un moyen de communication (app/handmade/handles.py, ADR 0121), sur tous ses onglets : qui,
+   par où, ce que ça prouve ; la console y ajoute ses actions (relier, délier, verser une preuve…). #}
+<div class="handle-head">
+  <h1>{{ title }}</h1>
+  <p class="handle-head-what">Par {{ channel }} · {{ kind }}</p>
+  <p class="handle-head-tags">{% for text, tone in tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</p>
+  <p class="handle-head-who">{% if person %}Parle pour <a href="{{ person.href }}">{{ person.name }}</a>, {{ said }}.{% else %}{{ said|capitalize }}.{% endif %}</p>
+</div>

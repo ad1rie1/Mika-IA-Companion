@@ -1,0 +1,37 @@
+/* La fiche d'un moyen de communication (app/handmade/handles.py) : son en-tête, le canal, qui écrit d'ici, ce que ça ouvre. */
+.handle-head { display: grid; flex: 1 1 520px; gap: 6px; min-width: 0; }
+.handle-head h1 { margin: 0; }
+.handle-head-what { margin: 0; color: var(--text-2); font-size: 14.5px; }
+.handle-head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
+.handle-head-who { margin: 2px 0 0; font-size: 14px; }
+
+.handle { display: grid; gap: 18px; }
+.handle-alert { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; }
+.handle-alert.warn { background: var(--warn-bg); color: var(--warn); }
+.handle-alert a { color: inherit; font-weight: 600; }
+
+.handle-facts { display: grid; gap: 9px; margin: 0; }
+.handle-facts > div { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 14px; font-size: 13.5px; }
+.handle-facts dt { color: var(--muted); }
+.handle-facts dd { margin: 0; }
+.handle-facts code { font-size: 12px; }
+.handle-others { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+
+.handle-opens { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.handle-opens th, .handle-opens td { padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  text-align: left; vertical-align: top; }
+.handle-opens thead th { color: var(--muted); font-size: 12px; font-weight: 600; }
+.handle-opens tbody th { font-weight: 600; }
+.handle-hint { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.handle-why { display: grid; gap: 8px; margin: 14px 0 0; }
+.handle-why > div { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 14px; font-size: 13px; }
+.handle-why dt { color: var(--muted); }
+.handle-why dd { margin: 0; color: var(--text-2); }
+
+.handle-steps > summary { cursor: pointer; font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.handle-steps-list { display: grid; gap: 6px; margin: 12px 0; padding-left: 20px; font-size: 13.5px; }
+.handle-steps-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.handle-step { min-width: 170px; color: var(--muted); }
+@media (max-width: 640px) {
+  .handle-facts > div, .handle-why > div { grid-template-columns: 1fr; gap: 2px; }
+}

@@ -1,0 +1,17 @@
+{# La fiche d'une personne › Sa position (app/handmade/senses.py, ADR 0119, 0123) : sa dernière position, téléphone par
+   téléphone, et ce que son téléphone lui a dit. #}
+{% import "handmade/sens/macros.html" as senses %}
+<div class="now-page person-tab senses">
+  <section class="now-card" aria-labelledby="senses-last">
+    <header class="now-card-head">
+      <h2 id="senses-last">Sa dernière position</h2>
+      <p>Ce que le téléphone de {{ name }} lui a donné (l'application ouverte, si le partage est permis). Elle ne la regarde qu'en tête-à-tête avec {{ name }}, et chaque regard se voit dans le fil.</p>
+    </header>
+    {% if fixes %}
+    <ul class="senses-where" role="list">
+      {% for f in fixes %}<li>{% if fixes|length > 1 %}<p class="now-muted"><code>{{ f.handle }}</code></p>{% endif %}{{ senses.place(f) }}</li>{% endfor %}
+    </ul>
+    {% else %}<p class="now-muted">Son téléphone ne dit plus où se trouve {{ name }}.</p>{% endif %}
+  </section>
+  {{ senses.said(said, False) }}
+</div>

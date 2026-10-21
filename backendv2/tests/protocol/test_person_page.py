@@ -70,7 +70,7 @@ def test_the_page_crosses_what_she_lives_with_a_person(world):  # noqa: F811
     # l'en-tête est dessiné : son nom, ce qu'elle est pour elle, par où elles se parlent, ce qu'elle ferait envers
     # elle — plus les clés et les certitudes en vrac
     assert 'class="person-head' in text and 'class="person-avatar"' in text
-    assert "1 adresse · web, vérifiée" in text and "Que ferait-elle envers adrien maintenant ?" in text
+    assert "1 moyen de communication · web, vérifiée" in text and "Que ferait-elle envers adrien maintenant ?" in text
     assert "canal principal" not in text and "vue pour la première fois" not in text
     assert re.search(r'<a class="nav-item on" href="/inspecteur/personnes"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
@@ -202,7 +202,7 @@ def test_every_list_tab_is_drawn(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     chat(client)
-    for tab, expected in (("adresses", "Ses adresses"), ("fichiers", "elle ne lui a encore envoyé aucun fichier"),
+    for tab, expected in (("adresses", "Ses moyens de communication"), ("fichiers", "elle ne lui a encore envoyé aucun fichier"),
                           ("pieces", "elle ne lui a encore rien envoyé"),
                           ("buts", "rien d'entrepris pour cette personne ni à son sujet"),
                           ("projets", "aucun projet pour cette personne ni à son sujet")):

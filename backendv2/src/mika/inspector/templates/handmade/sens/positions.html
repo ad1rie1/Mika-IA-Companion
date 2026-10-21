@@ -1,0 +1,27 @@
+{# Connexions extérieures › Localisation (app/handmade/senses.py, ADR 0119, 0123) : où est chaque personne (tous ses
+   téléphones réunis), puis ce que les téléphones lui ont dit. #}
+{% import "handmade/sens/macros.html" as senses %}
+<div class="now-page senses">
+  {% if empty %}
+  <section class="now-card"><p class="now-empty">Aucun téléphone ne lui dit où il est. Dans l'application Android : Paramètres › « Lui dire où je suis ».</p></section>
+  {% else %}
+  {{ senses.chips(chips) }}
+  <section class="now-card" aria-labelledby="senses-where">
+    <header class="now-card-head">
+      <h2 id="senses-where">Dernière position connue</h2>
+      <span class="person-count now-num">{{ where|length }}</span>
+      <p>La dernière position que chaque téléphone lui a donnée (l'application ouverte, si le partage est permis).</p>
+    </header>
+    <ul class="senses-where" role="list">
+      {% for w in where %}
+      <li>
+        <div class="senses-line"><b>{% if w.href %}<a href="{{ w.href }}">{{ w.name }}</a>{% else %}{{ w.name }}{% endif %}</b><span class="now-tag">{{ w.phones }} téléphone{{ 's' if w.phones > 1 }}</span><span class="senses-when">{{ w.ago }}</span></div>
+        {{ senses.place(w) }}
+        {% if w.others %}<details class="senses-others"><summary>Ses autres téléphones</summary>{% for f in w.others %}<div class="senses-other"><p class="now-muted"><code>{{ f.handle }}</code></p>{{ senses.place(f) }}</div>{% endfor %}</details>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% if not empty or said.entries %}{{ senses.said(said, who) }}{% endif %}
+</div>

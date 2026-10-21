@@ -134,3 +134,22 @@ def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
     assert "Brancher un service" in actions and "Leurs réglages" in actions
     assert "Les services branchés" in page and "Les outils de ses apps" in page
     assert "Comprendre cette liste" not in page and "un nouveau service" not in page
+
+
+def test_a_means_of_communication_is_drawn(world):  # noqa: F811
+    """La fiche d'un moyen de communication : son en-tête et « En bref » (le canal et ce qu'il prouve, qui écrit
+    d'ici, ce que ça ouvre en privé et en public) ; son fil en bulles ; son verdict sous « Le détail ». Un compte
+    authentifié prouve déjà qui écrit : pas d'onglet « Revendication »."""
+    client, _, _ = world
+    bootstrap(client)
+    chat(client, "salut ! je reviens d'un concert")
+    page = drawn(client, "/inspecteur/fiche/handle/user_1")
+    assert 'class="handle-head"' in page and "Par le chat, dans un navigateur" in page
+    for part in ("En bref", "Le canal", "Ce qu'il prouve", "Qui écrit d'ici", "Ce que ça ouvre", "En privé",
+                 "En public", "Le verdict, pas à pas"):
+        assert part in page, part
+    more = page.split('<details class="tabs-more')[1].split("</details>")[0]
+    assert "onglet=verdict" in more and "onglet=autres" in more
+    assert "onglet=revendication" not in page
+    thread = drawn(client, "/inspecteur/fiche/handle/user_1?onglet=fil")
+    assert 'class="person-thread"' in thread and "salut ! je reviens d'un concert" in thread

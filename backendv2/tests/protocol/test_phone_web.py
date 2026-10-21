@@ -5,15 +5,20 @@ et la réponse proposée scellée pour le téléphone.
   ou un compte qui n'est pas propriétaire, 403 ; un corps illisible, 400 ; trop grand, 413 ;
 - un lot admis s'écrit au journal, un message dédoublonné ;
 - une réponse proposée part scellée à chaque téléphone du compte (``phone_draft``), même quand l'application est
-  ouverte, et s'ouvre avec sa clé.
+  ouverte, et s'ouvre avec sa clé ;
+- la console montre le téléphone de chaque personne, conversation par conversation, et l'onglet « Son téléphone »
+  de sa fiche — seulement sur la fiche de qui en a montré.
 """
 
 from __future__ import annotations
+
+import html
 
 from mika.adapters.push import seal
 from mika.app.server import register_accounts
 from mika.contracts import phone as c
 from tests.protocol.test_mobile_push import KEY, PASSWORD, Phone, ctx  # noqa: F401 — la fixture
+from tests.protocol.test_web import bootstrap
 
 THREAD, LEA = "c3" * 16, "a1" * 16
 
@@ -76,3 +81,24 @@ def test_a_long_reply_is_clipped_to_fit_firebase() -> None:
     body = seal.phone_payload(draft=1, app="whatsapp", thread=THREAD, to="Léa", text='"\n' * 3000,
                               expires_ms=1, ts_ms=1)
     assert len(seal._plain(body)) <= seal.PLAIN_MAX_BYTES and body["text"].endswith(seal.ELLIPSIS)
+
+
+def test_the_console_shows_each_phone_conversation_by_conversation(ctx) -> None:  # noqa: F811
+    """Messages du téléphone : le téléphone de chaque personne, ses conversations (un contact, un groupe) en bulles ;
+    sur sa fiche, l'onglet « Son téléphone », qui n'apparaît pas sur la fiche de qui n'a rien montré."""
+    bootstrap(ctx.client, "adrien", PASSWORD)
+    adrien = ctx.phone("adrien")
+    family = {"id": f"{9:032x}", "app": "whatsapp", "thread": "d4" * 16, "group": True, "title": "Famille",
+              "sender": "b2" * 16, "name": "Maman", "text": "On mange à 20 h", "time": 1_760_950_000_100}
+    r = inbox(ctx, adrien, {"messages": [*lot("Tu viens samedi ?", "On sera chez Inès")["messages"], family]})
+    assert r.status_code == 200, r.text
+    page = html.unescape(ctx.client.get("/inspecteur/sens/messages").text)
+    assert "Le téléphone de" in page and page.count('<details class="senses-conv">') == 2
+    assert all(part in page for part in ("Léa", "Tu viens samedi ?", "Famille", "groupe", "On mange à 20 h"))
+    fiche = ctx.client.get(f"/inspecteur/fiche/person/{adrien.handle}")
+    assert fiche.status_code == 200 and "onglet=telephone" in fiche.text
+    tab = html.unescape(ctx.client.get(f"{fiche.url.path}?onglet=telephone").text)
+    assert "Ses conversations" in tab and "On sera chez Inès" in tab and "Ses réponses proposées" in tab
+    bea = ctx.phone("bea")
+    other = ctx.client.get(f"/inspecteur/fiche/person/{bea.handle}")
+    assert other.status_code == 200 and "onglet=telephone" not in other.text

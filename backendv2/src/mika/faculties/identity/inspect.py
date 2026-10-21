@@ -140,7 +140,7 @@ def handle_ref(s: IdentityState, handle: str, tab: str = "") -> Ref:
     return Ref.subject("handle", handle, handle_label(s, handle), tab)
 
 
-def _reach_fr(h: Handle) -> str:
+def reach_fr(h: Handle) -> str:
     """Peut-elle lui écrire d'elle-même, quand la personne n'est pas là ?"""
     if not h.push:
         return "non"
@@ -166,7 +166,7 @@ def handle_label(s: IdentityState, key: str) -> str:
     return f"{name} · {kind_of(h)}" if name else f"{kind_of(h)}, sans nom"
 
 
-def _stance(frame: Frame, handle: str, person: str) -> tuple[str, float]:
+def stance(frame: Frame, handle: str, person: str) -> tuple[str, float]:
     """Proximité et chaleur, lues comme le fait ``DISCLOSURE`` (rien pour une
     adresse jetable)."""
     if not is_identifiable(handle):
@@ -174,7 +174,7 @@ def _stance(frame: Frame, handle: str, person: str) -> tuple[str, float]:
     return frame.get(social_c.CLOSENESS(person)), frame.get(affect_c.WARMTH(person))
 
 
-def _disclosures(frame: Frame, handle: str, h: Handle) -> tuple[Disclosure, Disclosure]:
+def disclosures(frame: Frame, handle: str, h: Handle) -> tuple[Disclosure, Disclosure]:
     return (frame.get(c.DISCLOSURE((handle, h.channel, False))),
             frame.get(c.DISCLOSURE((handle, h.channel, True))))
 
@@ -231,7 +231,7 @@ def _why_owner(s: IdentityState, frame: Frame, person: str) -> str:
         if h is not None and h.authenticated and h.operator:
             return f"compte d'opérateur authentifié ({k})"
         if k in owners and (h is None or proves_owner(k, h, owners)):
-            return f"adresse déclarée propriétaire ({k})"
+            return f"moyen de communication déclaré propriétaire ({k})"
     return ""
 
 
@@ -422,12 +422,12 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
     badges: list[Badge] = []
     if owner:
         badges.append(Badge("propriétaire", "info"))
-    badges.append(Badge(f"liée · {len(handles)} adresses", "ok") if len(handles) > 1 else Badge("non liée", "muted"))
-    facts: list[tuple[str, Cell]] = [("adresses", len(handles))]
+    badges.append(Badge(f"liée · {len(handles)} moyens de communication", "ok") if len(handles) > 1 else Badge("non liée", "muted"))
+    facts: list[tuple[str, Cell]] = [("moyens de communication", len(handles))]
     if main is not None:
         h = s.handles[main]
         view = view_of(s, main, frame.now)
-        private, _public = _disclosures(frame, main, h)
+        private, _public = disclosures(frame, main, h)
         badges.append(Badge(f"en privé : {LEVEL_FR.get(private.level, '?')}", LEVEL_TONE.get(private.level, "")))
         facts += [("canal principal", f"{h.channel or '—'} · {TRUST_SHORT[h.trust]}"),
                   ("certitude", view_certainty(view))]
@@ -466,10 +466,10 @@ def _where(s: IdentityState, handles: Sequence[str]) -> str:
         word = kind_of(h)
         if word not in words:
             words.append(word)
-    return " · ".join(words) or "déclarée (sans adresse vue)"
+    return " · ".join(words) or "déclarée (sans moyen de communication vu)"
 
 
-@IDENTITY.subject("handle", label="Adresse", plural="Adresses", icon="◎")
+@IDENTITY.subject("handle", label="Moyen de communication", plural="Moyens de communication", icon="◎")
 def _handle_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) -> Head | None:
     h = s.handles.get(key.strip())
     if h is None:
@@ -477,15 +477,15 @@ def _handle_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
     handle = key.strip()
     view = view_of(s, handle, frame.now)
     if view.bound:
-        subtitle = f"Parle pour {known_as(s, view.person)} (liée par {VIA_FR.get(h.via, h.via or '?')})."
+        subtitle = f"Parle pour {known_as(s, view.person)} (lié par {VIA_FR.get(h.via, h.via or '?')})."
     elif view.name:
-        subtitle = f"Parle pour {view.name}, et n'est reliée à personne d'autre."
+        subtitle = f"Parle pour {view.name}, et n'est relié à personne d'autre."
     else:
-        subtitle = "Reliée à personne : rien ne dit encore qui écrit d'ici."
+        subtitle = "Relié à personne : rien ne dit encore qui écrit d'ici."
     badges = [Badge(TRUST_SHORT[h.trust], TRUST_TONE[h.trust]),
               Badge(f"certitude {view_certainty(view)}",
                     "ok" if view.certainty >= privacy.POLICY.private_threshold else "muted"),
-              Badge("liée", "ok") if view.bound else Badge("non liée", "muted")]
+              Badge("lié", "ok") if view.bound else Badge("non lié", "muted")]
     if view.claim:
         badges.append(Badge(f"revendique « {view.claim} »", "warn"))
     if frame.get(c.SPEAKS_AS_OWNER(handle)):
@@ -501,7 +501,7 @@ def _handle_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         ("parle pour", person_ref(s, view.person)),
         ("vue pour la première fois", _when(ctx, h.first_seen, "—")),
         ("dernier message reçu", _when(ctx, frame.get(transcript_c.LAST_FROM(handle)))),
-        ("joignable d'elle-même", _reach_fr(h)),
+        ("joignable d'elle-même", reach_fr(h)),
     )
     return Head(handle, handle_label(s, handle), subtitle, tuple(badges), facts)
 
@@ -538,7 +538,7 @@ def _stored(h: Handle) -> tuple[float, str]:
     return 0.0, "reliée à personne d'autre, mais rien ne prouve la continuité de qui écrit"
 
 
-def _steps(h: Handle, effective: float) -> list[tuple[str, str, str]]:
+def verdict_steps(h: Handle, effective: float) -> list[tuple[str, str, str]]:
     stored, why = _stored(h)
     floor, ceiling = privacy.FLOORS[h.trust], privacy.CEILINGS[h.trust]
     raised = max(stored, floor)
@@ -597,8 +597,8 @@ def why_file(certainty: float, trust: ChannelTrust, *, public: bool) -> str:
 
 
 def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
-    closeness, warmth = _stance(frame, handle, view.person)
-    private, public = _disclosures(frame, handle, h)
+    closeness, warmth = stance(frame, handle, view.person)
+    private, public = disclosures(frame, handle, h)
     rows = []
     for label, d, flag in (("en privé", private, False), ("en public", public, True)):
         # comme le fait : un canal public rend toute audience publique
@@ -618,21 +618,21 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
 
 
 def _verdict(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> list[Block]:
-    return [Table(("étape", "valeur", "pourquoi"), tuple(_steps(h, view.certainty)), title="Le verdict, pas à pas"),
+    return [Table(("étape", "valeur", "pourquoi"), tuple(verdict_steps(h, view.certainty)), title="Le verdict, pas à pas"),
             _opens(frame, handle, h, view)]
 
 
-def _owner_here(s: IdentityState, frame: Frame, handle: str, h: Handle, person: str) -> str:
+def owner_here(s: IdentityState, frame: Frame, handle: str, h: Handle, person: str) -> str:
     """Les droits de propriétaire de qui écrit par cette adresse, et pourquoi (ou pourquoi pas)."""
     if not frame.get(c.IS_OWNER(person)):
         return "non"
-    why = _why_owner(s, frame, person) or "par une autre de ses adresses"
+    why = _why_owner(s, frame, person) or "par un autre de ses moyens de communication"
     if frame.get(c.SPEAKS_AS_OWNER(handle)):
-        how = "" if not h.person else " ; un opérateur a relié cette adresse"
+        how = "" if not h.person else " ; un opérateur a relié ce moyen de communication"
         return f"oui — {why}{how} (jamais dans un salon public)"
     if h.trust not in (ChannelTrust.ACCOUNT, ChannelTrust.AUTHENTICATED):
         return f"la personne l'est ({why}), mais rien ne prouve qui écrit d'ici : pas ses droits"
-    return (f"la personne l'est ({why}), mais cette adresse a été reliée par "
+    return (f"la personne l'est ({why}), mais ce moyen de communication a été relié par "
             f"{VIA_FR.get(h.via, h.via or '?')} : pas ses droits tant qu'un opérateur ne l'a pas reliée")
 
 
@@ -641,13 +641,13 @@ def _handle_fields(s: IdentityState, frame: Frame, handle: str, h: Handle, view:
         ("clé", Text(handle, "mono")), ("nom", view.name or "—"), ("canal", h.channel or "—"),
         ("confiance du canal", TRUST_FR.get(h.trust, str(h.trust))),
         ("vue pour la première fois", When(h.first_seen) if h.first_seen else "—"),
-        ("connue depuis (toutes adresses)", When(view.first_seen) if view.first_seen else "—"),
+        ("connue depuis (tous ses moyens de communication)", When(view.first_seen) if view.first_seen else "—"),
         ("compte authentifié", "oui" if h.authenticated else "non"),
-        ("joignable d'elle-même", _reach_fr(h)),
+        ("joignable d'elle-même", reach_fr(h)),
         ("parle pour", person_ref(s, view.person)),
-        ("droits de propriétaire", _owner_here(s, frame, handle, h, view.person)),
+        ("droits de propriétaire", owner_here(s, frame, handle, h, view.person)),
         ("jetable", "non" if is_identifiable(handle) else "oui : aucune mémoire durable ne s'y attache"),
-    ), title="L'adresse", columns=2)
+    ), title="Le moyen de communication", columns=2)
 
 
 def _used(mark: str) -> str:
@@ -683,13 +683,13 @@ def _claim(s: IdentityState, h: Handle, view: c.IdentityView, ctx: InspectContex
             f"{known_as(s, claim.target)} pouvait savoir, recoupé sur deux messages différents (jamais celui où "
             f"la personne se présente), dont un avec un détail rare — un nom propre, un nombre, une date "
             f"(+{number(privacy.EVIDENCE[c.SHARED_MEMORY])}) ; un opérateur qui s'en porte garant "
-            f"(+{number(privacy.EVIDENCE[c.VOUCHED])}) ; ou qui relie directement cette adresse (certitude "
+            f"(+{number(privacy.EVIDENCE[c.VOUCHED])}) ; ou qui relie directement ce moyen de communication (certitude "
             f"{number(privacy.BOUND)}). Le plafond du canal reste {number(privacy.CEILINGS[h.trust])}. Une liaison "
-            "par recoupement reste « à confirmer » : le fil des autres adresses lui reste fermé tant qu'un opérateur "
+            "par recoupement reste « à confirmer » : le fil de ses autres moyens de communication lui reste fermé tant qu'un opérateur "
             "ne l'a pas confirmée.", title="Pour la confirmer"))
     elif view.claim and claim.target == view.handle:
         blocks.append(Note(f"Elle se donne un autre nom que celui sous lequel elle la connaît : rien ne change tant "
-                           f"que rien ne le confirme (« {claim.name} » ne délie ni ne renomme cette adresse).",
+                           f"que rien ne le confirme (« {claim.name} » ne délie ni ne renomme ce moyen de communication).",
                            tone="muted", title="Un autre nom"))
     return blocks
 
@@ -786,7 +786,7 @@ def _handles_table(s: IdentityState, frame: Frame, ctx: InspectContext, handles:
                          When(last) if (last := frame.get(transcript_c.LAST_FROM(k))) else "jamais",
                          Text(k, "mono")),
                         href=handle_ref(s, k)))
-    return Table(("adresse", "canal", "confiance", Column("certitude", detail=True),
+    return Table(("moyen de communication", "canal", "confiance", Column("certitude", detail=True),
                   Column("liée par", detail=True), Column("revendique", detail=True),
                   Column("vue pour la première fois", detail=True), "dernier message", Column("clé", detail=True)),
                  tuple(rows), title=title, empty=empty, pager=pager)
@@ -883,27 +883,28 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     ), title="Qui", columns=2))
     main = principal(s, person)
     if main is None:
-        blocks.append(Note("Aucune adresse connue : adresse déclarée propriétaire, qui n'a encore jamais écrit.",
+        blocks.append(Note("Aucun moyen de communication connu : une propriétaire déclarée qui n'a encore jamais écrit.",
                            tone="muted"))
         return blocks
     h = s.handles[main]
     view = view_of(s, main, frame.now)
     blocks.append(Section("Ce qu'elle peut lui dire", (
-        Fields((("adresse principale", handle_ref(s, main)), ("canal", f"{h.channel or '—'} · {TRUST_FR[h.trust]}"),
+        Fields((("moyen principal", handle_ref(s, main)), ("canal", f"{h.channel or '—'} · {TRUST_FR[h.trust]}"),
                 ("certitude effective", view_certainty(view)),
                 ("barre de divulgation", number(privacy.POLICY.private_threshold))), columns=2),
         _opens(frame, main, h, view),
-    ), description="Sur son adresse principale (celle dont le canal prouve le plus). Chaque adresse a son verdict "
+    ), description="Sur son moyen de communication principal (celui dont le canal prouve le plus). Chacun a son verdict "
                    "pas à pas sur sa fiche."))
-    # la liste des adresses vit dans l'onglet « Adresses » : ici, un renvoi (pas deux fois la même table)
-    blocks.append(Fields((("ses adresses", Ref.subject("person", person, f"{len(handles)} adresse(s) : voir l'onglet "
-                                                                          "Adresses", "adresses")),),
-                         title="Ses adresses"))
+    # la liste de ses adresses vit dans l'onglet « Moyens de communication » : ici, un renvoi (pas deux fois la table)
+    blocks.append(Fields((("ses moyens de communication", Ref.subject("person", person, f"{len(handles)} : voir l'onglet "
+                                                                          "Moyens de communication", "adresses")),),
+                         title="Ses moyens de communication"))
     return blocks
 
 
-@IDENTITY.inspect("adresses", title="Adresses", subject="person", order=20,
-                  description="Les adresses qui parlent pour cette personne, et comment elles ont été reliées.")
+@IDENTITY.inspect("adresses", title="Moyens de communication", subject="person", order=20,
+                  description="Par où cette personne lui parle (son compte, son téléphone, sa boîte…), et comment "
+                              "chacun a été relié à elle.")
 def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person, blocks = _person_of(s, frame, ctx)
     if person is None:
@@ -911,10 +912,10 @@ def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
     handles = handles_of(s, person)
     bound = sum(1 for k in handles if s.handles[k].person)
     blocks += [
-        Stats((Stat("adresses", len(handles)), Stat("reliées à elle", bound, "par recoupement ou par un opérateur"),
+        Stats((Stat("moyens de communication", len(handles)), Stat("reliés à elle", bound, "par recoupement ou par un opérateur"),
                Stat("revendications en attente", sum(1 for k in handles if view_of(s, k, frame.now).claim)))),
-        _handles_table(s, frame, ctx, handles, title="Ses adresses", empty="aucune adresse connue"),
-        Note(f"Pour relier une autre adresse à cette personne : ouvre la fiche de l'adresse, puis « Relier », "
+        _handles_table(s, frame, ctx, handles, title="Ses moyens de communication", empty="aucun moyen de communication connu"),
+        Note(f"Pour relier un autre moyen de communication à cette personne : ouvre sa fiche, puis « Relier », "
              f"et indique « {person} ».", tone="muted"),
     ]
     return blocks
@@ -926,15 +927,15 @@ def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
 def _handle_of(s: IdentityState, ctx: InspectContext) -> tuple[str, Handle | None, list[Block]]:
     handle = ctx.subject or ctx.param("handle")
     if not handle:
-        return "", None, [Note("Ouvre la fiche d'une adresse : Identités, puis l'adresse.", tone="muted")]
+        return "", None, [Note("Ouvre la fiche d'un moyen de communication : Identités, puis le moyen de communication.", tone="muted")]
     h = s.handles.get(handle)
     if h is None:
-        return handle, None, [Note(f"Adresse inconnue : « {handle} ». Elle n'a jamais été vue.", tone="muted")]
+        return handle, None, [Note(f"Moyen de communication inconnu : « {handle} ». Il n'a jamais été vu.", tone="muted")]
     return handle, h, []
 
 
 @IDENTITY.inspect("verdict", title="Verdict", subject="handle", subject_param="handle", order=10,
-                  description="Pourquoi cette adresse ouvre ce qu'elle ouvre, pas à pas.")
+                  description="Pourquoi ce moyen de communication ouvre ce qu'il ouvre, pas à pas.")
 def _handle_verdict(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
     if h is None:
@@ -943,8 +944,14 @@ def _handle_verdict(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
     return [_handle_fields(s, frame, handle, h, view), *_verdict(frame, handle, h, view)]
 
 
+def _may_claim(s: IdentityState, key: str) -> bool:
+    """Un moyen de communication authentifié prouve déjà qui écrit : aucune revendication n'y compte, l'onglet ne se montre pas."""
+    h = s.handles.get(key)
+    return h is None or not h.authenticated
+
+
 @IDENTITY.inspect("revendication", title="Revendication", subject="handle", subject_param="handle", order=20,
-                  description="Qui elle dit être, et ce qui manque pour le croire.")
+                  shown=_may_claim, description="Qui elle dit être, et ce qui manque pour le croire.")
 def _handle_claim(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
     if h is None:
@@ -964,8 +971,8 @@ def _handle_evidence(s: IdentityState, frame: Frame, ctx: InspectContext) -> lis
     return [_ledger(s, handle, ctx)]
 
 
-@IDENTITY.inspect("autres", title="Autres adresses", subject="handle", subject_param="handle", order=40,
-                  description="Les autres adresses de la même personne.")
+@IDENTITY.inspect("autres", title="Ses autres moyens de communication", subject="handle", subject_param="handle", order=40,
+                  description="Les autres moyens de communication de la même personne.")
 def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
     if h is None:
@@ -973,19 +980,19 @@ def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[
     view = view_of(s, handle, frame.now)
     others = [k for k in handles_of(s, view.person) if k != handle]
     return [Fields((("personne", person_ref(s, view.person)),)),
-            _handles_table(s, frame, ctx, others, title=f"Les autres adresses de {known_as(s, view.person)}",
-                           empty="aucune autre adresse ne parle pour cette personne")]
+            _handles_table(s, frame, ctx, others, title=f"Les autres moyens de communication de {known_as(s, view.person)}",
+                           empty="aucun autre moyen de communication ne parle pour cette personne")]
 
 
 # ── Les destinations ──────────────────────────────────────────────────────
 
-SEARCH = Param("q", "nom ou adresse", placeholder="Alice, user_7…")
+SEARCH = Param("q", "nom ou moyen de communication", placeholder="Alice, user_7…")
 TRUSTS = Param("confiance", "confiance du canal", kind="select",
                choices=tuple((t.value, TRUST_SHORT[t]) for t in ChannelTrust if t is not ChannelTrust.INTERNAL))
 
 
 @IDENTITY.inspect("personnes", title="Personnes", section="personnes", order=10, params=[SEARCH],
-                  description="Retrouver une personne, ses adresses, ses échanges et son lien avec elle.")
+                  description="Retrouver une personne, ses moyens de communication, ses échanges et son lien avec elle.")
 def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     q = fold(str(ctx.value("q") or ""))
     everyone = people(s, frame)
@@ -1016,8 +1023,8 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [
         Stats((Stat("personnes", len(everyone)),
                Stat("propriétaires", len(frame.get(c.OWNERS))),
-               Stat("reliées à plusieurs adresses", sum(1 for hs in everyone.values() if len(hs) > 1)))),
-        Table((Column("personne", role="title"), Column("adresses", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
+               Stat("avec plusieurs moyens de communication", sum(1 for hs in everyone.values() if len(hs) > 1)))),
+        Table((Column("personne", role="title"), Column("moyens de communication", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
                Column("proximité", role="badge"), Column("propriétaire", role="badge"), "dernier message reçu", Column("vue pour la première fois", detail=True)),
               tuple(rows), title="Personnes", pager=pager, layout="cards",
               filters=("q",),
@@ -1025,8 +1032,9 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     ]
 
 
-@IDENTITY.inspect("annuaire", title="Adresses", section="identites", order=10, params=[SEARCH, TRUSTS],
-                  description="Chaque adresse vue, ce qu'elle prouve et ce qu'elle ouvre ; une ligne mène à sa fiche.")
+@IDENTITY.inspect("annuaire", title="Moyens de communication", section="identites", order=10, params=[SEARCH, TRUSTS],
+                  description="Chaque moyen de communication vu, ce qu'il prouve et ce qu'il ouvre ; une ligne mène à sa "
+                              "fiche.")
 def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     q = fold(str(ctx.value("q") or ""))
     trust = str(ctx.value("confiance") or "")
@@ -1037,7 +1045,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     rows = []
     for handle, h in page:
         view = view_of(s, handle, frame.now)
-        private, public = _disclosures(frame, handle, h)
+        private, public = disclosures(frame, handle, h)
         rows.append(Row((
             handle_ref(s, handle), h.channel or "—", Badge(TRUST_FR[h.trust], TRUST_TONE[h.trust]),
             view_certainty(view), person_ref(s, view.person),
@@ -1047,19 +1055,19 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
         ), href=handle_ref(s, handle)))
     owners = ", ".join(known_as(s, p) for p in frame.get(c.OWNERS)) or "aucun"
     return [
-        Stats((Stat("adresses connues", len(s.handles)),
+        Stats((Stat("moyens de communication connus", len(s.handles)),
                Stat("liées à une autre personne", sum(1 for h in s.handles.values() if h.person)),
                Stat("revendications en attente", len(pending_claims(s, frame.now)),
                     href=Ref.view("identity", "revendications", "revendications")),
                Stat("propriétaires", owners),
                Stat("barre de divulgation", number(privacy.POLICY.private_threshold),
                     href=Ref.view("identity", "politique", "politique")))),
-        Table(("adresse", "canal", "confiance du canal", Column("certitude", detail=True), "parle pour",
+        Table(("moyen de communication", "canal", "confiance du canal", Column("certitude", detail=True), "parle pour",
                Column("propriétaire", detail=True), "revendique", Column("divulgation en privé", detail=True),
                Column("divulgation en public", detail=True), Column("vue pour la première fois", detail=True),
                Column("clé", detail=True)),
-              tuple(rows), title="Adresses", pager=pager, filters=("q", "confiance"),
-              empty="aucune adresse ne correspond" if q or trust else "aucune adresse vue pour l'instant"),
+              tuple(rows), title="Moyens de communication", pager=pager, filters=("q", "confiance"),
+              empty="aucun ne correspond" if q or trust else "aucun moyen de communication vu pour l'instant"),
     ]
 
 
@@ -1075,7 +1083,7 @@ def _claims_badge(s: IdentityState, frame: Frame) -> int:
 
 @IDENTITY.inspect("revendications", title="Identités à confirmer", section="identites", order=20, badge=_claims_badge,
                   description="Qui dit être quelqu'un d'autre, sans preuve encore : à confirmer, garantir ou "
-                              "démentir depuis la fiche de l'adresse.")
+                              "démentir depuis la fiche du moyen de communication.")
 def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pending = pending_claims(s, frame.now)
     page, pager = paginate(pending, ctx.pager(size=PAGE))
@@ -1094,7 +1102,7 @@ def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
             Meter(certainty / bar if bar else 0.0, f"{number(certainty)} / {number(bar)}"),
             ", ".join(_used(u) for u in claim.used) or "—", When(claim.at), When(claim.at + ttl),
         ), href=handle_ref(s, handle, tab="revendication")))
-    return [Table(("adresse", "nom revendiqué", "vise", "canal", "vers la barre", "preuves comptées", "depuis",
+    return [Table(("moyen de communication", "nom revendiqué", "vise", "canal", "vers la barre", "preuves comptées", "depuis",
                    "s'éteint"), tuple(rows), title="Revendications en attente", pager=pager,
                   empty="aucune revendication en attente"),
             Note(f"Une affirmation seule ne franchit jamais la barre ({number(bar)}) ; une revendication jamais "
@@ -1195,20 +1203,21 @@ def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     ]
 
 
-@IDENTITY.inspect("personne", title="Une adresse (ancienne page)", hidden=True, params=[("handle", "adresse")])
+@IDENTITY.inspect("personne", title="Un moyen de communication (ancienne page)", hidden=True,
+                  params=[("handle", "moyen de communication")])
 def _legacy_person(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     """L'ancienne page d'une adresse : ses liens mènent désormais aux fiches."""
     handle, h, blocks = _handle_of(s, ctx)
     if h is None:
         if not handle:
-            return [Note("Choisissez une adresse dans la liste des adresses (paramètre « handle »).")]
+            return [Note("Choisissez un moyen de communication dans la liste (paramètre « handle »).")]
         return blocks
     view = view_of(s, handle, frame.now)
-    return [Fields((("fiche de l'adresse", handle_ref(s, handle)), ("fiche de la personne", person_ref(s, view.person))),
+    return [Fields((("fiche du moyen de communication", handle_ref(s, handle)), ("fiche de la personne", person_ref(s, view.person))),
                    title="Cette page vit désormais sur les fiches"),
             _handle_fields(s, frame, handle, h, view), *_verdict(frame, handle, h, view),
             *_claim(s, h, view, ctx),
             _handles_table(s, frame, ctx, [k for k in handles_of(s, view.person) if k != handle],
-                           title=f"Les autres adresses de {known_as(s, view.person)}",
-                           empty="aucune autre adresse ne parle pour cette personne"),
+                           title=f"Les autres moyens de communication de {known_as(s, view.person)}",
+                           empty="aucun autre moyen de communication ne parle pour cette personne"),
             _ledger(s, handle, ctx)]

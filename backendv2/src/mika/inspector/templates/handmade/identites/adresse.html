@@ -1,0 +1,61 @@
+{# La fiche d'un moyen de communication, « En bref » (app/handmade/handles.py, ADR 0121) : le canal et ce qu'il prouve, qui écrit
+   d'ici, ce que ça ouvre (en privé, en public), et le verdict pas à pas, replié. #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page handle">
+  {% for a in alerts %}<p class="handle-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
+
+  <ul class="person-tiles-list" aria-label="En bref">
+    <li><span class="person-tile-label">Par où</span><span class="person-tile-value">{{ channel_short }}</span><span class="person-tile-sub">{{ account }}</span></li>
+    <li class="{{ trust_tone }}"><span class="person-tile-label">Ce que le canal prouve</span><span class="person-tile-value">{{ trust_short }}</span><span class="person-tile-sub">certitude {{ certainty }}</span></li>
+    <li><span class="person-tile-label">Elle peut lui écrire d'elle-même</span><span class="person-tile-value">{{ 'oui' if reach_yes else 'non' }}</span><span class="person-tile-sub">{{ reach_how }}</span></li>
+    <li><span class="person-tile-label">Dernier message reçu</span><span class="person-tile-value">{{ last_short }}</span></li>
+  </ul>
+
+  <section class="now-card" aria-labelledby="handle-channel">
+    <header class="now-card-head"><h2 id="handle-channel">Le canal</h2><p>Par où cette personne lui écrit, et ce que ce canal prouve de qui écrit.</p></header>
+    <dl class="handle-facts">
+      <div><dt>Par où</dt><dd>{{ channel_long|capitalize }} <span class="now-muted">(canal <code>{{ channel_key }}</code>)</span></dd></div>
+      <div><dt>Ce qu'il prouve</dt><dd><span class="now-tag {{ trust_tone }}">{{ trust_short }}</span> {{ trust_long }}</dd></div>
+      <div><dt>Son compte</dt><dd>{{ account }}</dd></div>
+      <div><dt>Elle peut lui écrire d'elle-même</dt><dd>{{ reach }}</dd></div>
+      <div><dt>Vue pour la première fois</dt><dd>{{ first }}</dd></div>
+      <div><dt>Dernier message reçu</dt><dd>{{ last }}</dd></div>
+      <div><dt>Sa clé</dt><dd><code>{{ key }}</code></dd></div>
+    </dl>
+  </section>
+
+  <section class="now-card" aria-labelledby="handle-who">
+    <header class="now-card-head"><h2 id="handle-who">Qui écrit d'ici</h2><p>Pour qui ce moyen de communication parle, et ce que ça lui donne.</p></header>
+    <dl class="handle-facts">
+      <div><dt>Parle pour</dt><dd>{% if person %}<a href="{{ person.href }}">{{ person.name }}</a>{% if bound %} <span class="now-muted">— lié par {{ via }}</span>{% else %} <span class="now-muted">— relié à personne d'autre</span>{% endif %}{% else %}personne encore : rien ne dit qui écrit d'ici{% endif %}</dd></div>
+      <div><dt>Certitude</dt><dd><span class="now-tag {{ certainty_tone }}">{{ certainty }}</span></dd></div>
+      <div><dt>Droits de propriétaire</dt><dd>{{ owner }}</dd></div>
+      <div><dt>Connue depuis</dt><dd>{{ known_since }} <span class="now-muted">(tous ses moyens de communication)</span></dd></div>
+      <div><dt>Ses autres moyens de communication</dt><dd>{% if others %}<ul class="handle-others" role="list">{% for o in others %}<li><a href="{{ o.href }}">{{ o.label }}</a> <span class="now-tag {{ o.tone }}">{{ o.trust }}</span></li>{% endfor %}</ul>{% else %}aucun{% endif %}</dd></div>
+      {% if jetable %}<div><dt>Jetable</dt><dd>oui : aucune mémoire durable ne s'y attache</dd></div>{% endif %}
+    </dl>
+  </section>
+
+  <section class="now-card table-block" aria-labelledby="handle-opens">
+    <header class="now-card-head"><h2 id="handle-opens">Ce que ça ouvre</h2><p>Ce qu'elle peut dire à qui écrit d'ici, selon qu'on l'écoute seul ou à plusieurs.</p></header>
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Ce que ça ouvre">
+      <table class="handle-opens">
+        <thead><tr><th scope="col">Ce qu'elle peut dire</th>{% for a in audiences %}<th scope="col">{{ a.label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for o in opens %}{% set row = loop.index0 %}
+          <tr><th scope="row">{{ o.label }}<span class="handle-hint">{{ o.hint }}</span></th>{% for a in audiences %}<td><span class="now-tag {{ a.levels[row].tone }}">{{ a.levels[row].text }}</span></td>{% endfor %}</tr>
+          {% endfor %}
+          <tr><th scope="row">Sa propre fiche<span class="handle-hint">ce qu'elle sait de cette personne, si elle le lui demande</span></th>{% for a in audiences %}<td><span class="now-tag {{ 'ok' if a.file == 'ouverte' else '' }}">{{ a.file }}</span><span class="handle-hint">{{ a.file_why }}</span></td>{% endfor %}</tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager single">{{ pages(opens_pager) }}</div>
+    <dl class="handle-why">{% for a in audiences %}<div><dt>Pourquoi, {{ a.label|lower }}</dt><dd>{{ a.why|capitalize }}</dd></div>{% endfor %}</dl>
+  </section>
+
+  <details class="now-card handle-steps">
+    <summary>Le verdict, pas à pas</summary>
+    <ol class="handle-steps-list">{% for step, value, why in steps %}<li><span class="handle-step">{{ step }}</span><b>{{ value }}</b><span class="now-muted">{{ why }}</span></li>{% endfor %}</ol>
+    <p class="now-muted">Le détail, et la même chose en tableau : <a href="{{ verdict_tab }}">l'onglet Verdict</a>.</p>
+  </details>
+</div>

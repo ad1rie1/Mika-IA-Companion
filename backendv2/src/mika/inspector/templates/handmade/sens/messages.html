@@ -1,0 +1,22 @@
+{# Connexions extérieures › Messages du téléphone (app/handmade/senses.py, ADR 0120, 0123) : le téléphone de chaque
+   personne, ses conversations (un contact, un groupe) en bulles ; les réponses qu'elle a proposées. #}
+{% import "handmade/sens/macros.html" as senses %}
+<div class="now-page senses">
+  {% if empty %}
+  <section class="now-card"><p class="now-empty">Aucun téléphone ne lui a montré de message. Dans l'application Android : Paramètres › « Lui montrer mes messages ».</p></section>
+  {% else %}
+  {{ senses.chips(chips) }}
+  {% for p in phones %}
+  <section class="now-card" aria-label="Le téléphone de {{ p.name }}">
+    <header class="now-card-head">
+      <h2>Le téléphone de {% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</h2>
+      <span class="person-count now-num">{{ p.total }}</span>
+      <p>{{ p.total }} conversation{{ 's' if p.total > 1 }}, {{ p.count }} message{{ 's' if p.count > 1 }}. Ouvre une conversation pour la lire.</p>
+    </header>
+    <div class="senses-convs">{% for c in p.conversations %}{{ senses.conversation(c) }}{% endfor %}</div>
+    {% if p.more %}<p class="senses-more"><a href="{{ p.only }}">Ses {{ p.more }} autres conversations →</a></p>{% endif %}
+  </section>
+  {% endfor %}
+  {{ senses.offers(offers, who) }}
+  {% endif %}
+</div>
