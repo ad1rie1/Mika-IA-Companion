@@ -693,7 +693,7 @@ def _thoughts(s: RssState, frame: Frame, ctx: InspectContext, feed: str) -> Tabl
                 "montré. Oublier la personne efface sa copie du titre.")
 
 
-@RSS.inspect("flux", title="Flux", section="sens", order=20,
+@RSS.inspect("flux", title="Flux RSS", section="sens", order=20,
              description="Ses flux : ce qui paraît, ce qui la touche, ce qu'elle laisse passer.",
              params=[Param("flux", "Flux", placeholder="titre d'un flux"),
                      Param("q", "Recherche", placeholder="titre ou résumé")])

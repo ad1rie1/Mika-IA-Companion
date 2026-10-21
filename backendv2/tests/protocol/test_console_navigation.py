@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from mika.app.console_menu import MENU
+from mika.app.console_menu import MENU, SHORTCUT_GROUPS
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -29,36 +29,41 @@ def test_operator_menu_links_open_real_pages(world):  # noqa: F811
             ConsoleHTML(response.text).check()
 
 
-def tab_order(page, destination):
-    """Les onglets d'une destination dans l'ordre où sa page les montre (sa barre d'onglets, ou son sous-menu)."""
-    order = []
+def tabs_of(page, destination):
+    """Les onglets d'une destination dans l'ordre où sa page les montre (sa barre d'onglets, ou son sous-menu) :
+    ``(slug, titre)``."""
+    tabs = []
     for nav in re.findall(r'<nav class="(?:tabs|submenu)"[^>]*>.*?</nav>', html.unescape(page), re.S):
-        for slug in re.findall(rf'href="/inspecteur/{destination}/([^"?#]+)"', nav):
-            if slug not in order:
-                order.append(slug)
-    return order
+        for slug, title in re.findall(rf'href="/inspecteur/{destination}/([^"?#]+)"[^>]*>(.*?)</a>', nav, re.S):
+            tab = (slug, re.sub(r"<[^>]+>", "", title).strip())
+            if tab[0] not in [t[0] for t in tabs]:
+                tabs.append(tab)
+    return tabs
 
 
-def test_menu_links_follow_the_tab_order_of_their_destination(world):  # noqa: F811
-    """Le menu et la barre d'onglets ne se contredisent pas : dans une rubrique, les liens qui mènent à la même
-    destination suivent l'ordre de ses onglets (le lien vers la destination elle-même : son premier onglet)."""
+def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
+    """Le menu et la barre d'onglets ne se contredisent pas : dans une rubrique, une destination a un seul lien (la
+    page entière), ou un lien par onglet — tous ses onglets, dans leur ordre, sous leur nom (le lien vers la
+    destination elle-même : son premier onglet). Sauf les raccourcis d'« À valider » et l'annuaire des réglages."""
     client, _, _ = world
     bootstrap(client)
     for group in MENU:
+        if group.label in SHORTCUT_GROUPS:
+            continue
         by_destination = {}
         for link in group.items:
             destination, _, slug = link.target.partition('/')
-            by_destination.setdefault(destination, []).append(slug)
-        for destination, slugs in by_destination.items():
-            if len(slugs) < 2:
+            by_destination.setdefault(destination, []).append((slug, link.label))
+        for destination, links in by_destination.items():
+            if len(links) < 2:
                 continue
-            order = tab_order(client.get(f'/inspecteur/{destination}').text, destination)
-            ranks = [order.index(slug or order[0]) for slug in slugs]
-            assert ranks == sorted(ranks), (group.title, destination, slugs, order)
+            tabs = tabs_of(client.get(f'/inspecteur/{destination}').text, destination)
+            shown = [(slug or tabs[0][0], label) for slug, label in links]
+            assert shown == tabs, (group.label, destination, shown, tabs)
 
 
 @pytest.mark.parametrize(('path', 'group', 'label'), [
-    ('sens/dessins', 'Activité', 'Dessins'),
+    ('sens/dessins', 'Outils & connexions', 'Dessins'),
     ('sens/camera', 'Outils & connexions', 'Caméra'),
     ('courrier/brouillons', 'À valider', 'Brouillons de courrier'),
     ('courrier/reception', 'Relations & échanges', 'Courrier'),

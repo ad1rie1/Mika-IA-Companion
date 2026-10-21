@@ -106,3 +106,16 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
     assert nights.count("<h3>Nuit du lundi 19 oct.</h3>") == 1  # le journal et le rêve de cette nuit, ensemble
     night = nights.partition("<h3>Nuit du lundi 19 oct.</h3>")[2].partition("Nuit du dimanche")[0]
     assert night.index("Une soirée au bureau") < night.index("Un toit où chaque note")  # son journal, puis ses rêves
+
+
+def test_who_gets_what_is_a_grid_of_lots_and_situations(world):  # noqa: F811
+    """Outils › Qui reçoit quoi : ses lots en lignes, les situations en colonnes rangées par ce qui se passe ; une
+    case dit en main, à la demande ou pas offert, et mène au catalogue sur ce lot, dans cette situation."""
+    client, _, _ = world
+    bootstrap(client)
+    page = drawn(client, "/inspecteur/outils/qui")
+    head = page.split("<thead>")[1].split("</thead>")[0]
+    assert head.index("Elle répond") < head.index("Elle prend la parole") < head.index("Personne n'écoute")
+    memory = page.split('href="/inspecteur/outils/tous?lot=memory"')[1].split("</tr>")[0]
+    assert '<a class="offer offer-hand" href="/inspecteur/outils/tous?lot=memory&pour=proprietaire"' in memory
+    assert page.count('class="offer offer-') > 20 and "pas offert" in page

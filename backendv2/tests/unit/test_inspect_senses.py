@@ -62,7 +62,7 @@ from tests.fixtures.mail_servers import Imap, raw_mail, serve
 from tests.fixtures.mika import at_paris, boot, build, reply
 
 #: les vues des sens, et leur place dans la console
-SENSE_VIEWS = {("email", "reception"): ("Réception", "courrier", 10), ("rss", "flux"): ("Flux", "sens", 20),
+SENSE_VIEWS = {("email", "reception"): ("Réception", "courrier", 10), ("rss", "flux"): ("Flux RSS", "sens", 20),
                ("camera", "camera"): ("Caméra", "sens", 30), ("sensors", "appareils"): ("Appareils", "sens", 40)}
 #: les onglets de la fiche d'un mail
 MAIL_TABS = {("email", "message"): "Message", ("email", "fil"): "Fil", ("email", "remarque"): "Ce qu'elle en sait"}

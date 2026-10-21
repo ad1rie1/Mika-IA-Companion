@@ -219,7 +219,7 @@ async def running(ui: Any, request: Request) -> list[Any]:
     return blocks
 
 
-@TABS.tab("decisions.maintenant", title="Maintenant",
+@TABS.tab("decisions.maintenant", title="Table de l'arbitre",
           description="La table de l'arbitre à cet instant : pour chaque ligne (une sorte d'épisode envers "
                       "quelqu'un), ce qui pousse, le seuil, le score et le taux qui en sortent.")
 async def live(ui: Any, request: Request) -> list[Any]:

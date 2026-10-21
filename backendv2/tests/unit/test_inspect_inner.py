@@ -59,7 +59,7 @@ INNER = {
     ("memory", "souvenirs"): ("Souvenirs", "memoire", 10), ("memory", "croyances"): ("Croyances", "memoire", 20),
     ("memory", "promesses"): ("Promesses", "memoire", 30),
     ("memory", "consolidation"): ("Consolidation", "memoire", 40),
-    ("attention", "pensees"): ("Pensées", "pensees", 10), ("attention", "remarque"): ("Remarqué", "pensees", 20),
+    ("attention", "pensees"): ("Pensées", "pensees", 10), ("attention", "remarque"): ("Ce qu'elle remarque", "pensees", 20),
     ("attention", "attentes"): ("Attentes", "pensees", 30),
     ("self", "soi"): ("Estime et récit", "vie", 50), ("self", "nuits"): ("Journal et rêves", "pensees", 40),
 }

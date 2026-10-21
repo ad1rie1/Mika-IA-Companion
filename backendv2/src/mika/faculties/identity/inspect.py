@@ -1073,7 +1073,7 @@ def _claims_badge(s: IdentityState, frame: Frame) -> int:
     return len(pending_claims(s, frame.now))
 
 
-@IDENTITY.inspect("revendications", title="Revendications", section="identites", order=20, badge=_claims_badge,
+@IDENTITY.inspect("revendications", title="Identités à confirmer", section="identites", order=20, badge=_claims_badge,
                   description="Qui dit être quelqu'un d'autre, sans preuve encore : à confirmer, garantir ou "
                               "démentir depuis la fiche de l'adresse.")
 def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1108,7 +1108,7 @@ def _names_badge(s: IdentityState, frame: Frame, ports: Mapping[str, Any]) -> tu
     return len(waiting_names(s, store)), "nom(s) dont on lui a parlé que porte quelqu'un qu'elle connaît"
 
 
-@IDENTITY.inspect("noms", title="Noms qui attendent quelqu'un", section="identites", order=25, badge=_names_badge,
+@IDENTITY.inspect("noms", title="Noms à relier", section="identites", order=25, badge=_names_badge,
                   description="On lui a parlé de quelqu'un avant de le connaître, et une personne qu'elle connaît "
                               "porte ce nom : à relier ou à écarter depuis la fiche de la personne. Rien n'est relié "
                               "d'une ressemblance de nom.")
@@ -1156,7 +1156,7 @@ def _opens_at_best(trust: ChannelTrust) -> str:
     return f"{LEVEL_FR.get(level, '?')} · sa fiche {own}"
 
 
-@IDENTITY.inspect("politique", title="Politique", section="identites", order=30,
+@IDENTITY.inspect("politique", title="Règles de divulgation", section="identites", order=30,
                   description="Les barres que la faculté applique : lues dans la politique, jamais recopiées.")
 def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pol = privacy.POLICY

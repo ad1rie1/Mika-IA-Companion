@@ -466,7 +466,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         servers = settings.mcp().servers
         ready = sum(1 for x in servers.values() if x.enabled and x.ready)
         return [("Serveurs", f"{len(servers)} ({ready} actif(s) et prêt(s))" if servers else "aucun"),
-                ("État et outils", "Ses outils › Serveurs extérieurs")]
+                ("État et outils", "Ses outils › Services MCP")]
 
     async def save_feeds(cfg: FeedsSettings, by: str) -> list[str]:
         await settings.save_feeds(list(cfg.urls))
@@ -745,7 +745,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Chaque serveur a sa page : d'abord à quoi il sert, pour elle — la ligne de son "
                             "catalogue —, puis où le joindre (une adresse, ou une commande lancée ici, isolée), pour "
                             "qui et quand. Ses outils ne lui sont servis qu'une fois approuvés, un par un, sur la "
-                            "fiche du serveur (Ses outils › Serveurs extérieurs).")),)),
+                            "fiche du serveur (Ses outils › Services MCP).")),)),
         SettingsSection("reveils", "Réveils par API", "sens", WakeupConfig, settings.wakeup, save_wakeup, order=45,
                         description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>, ADR "
                                     "0068) : ce qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés "

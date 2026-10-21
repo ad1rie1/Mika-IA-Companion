@@ -97,7 +97,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
-    "imaging": "Dessins", "location": "Localisation",
+    "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
     "phone": "Messages du téléphone",
 }

@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from mika.app.handmade import blocks, conversations, mail, nights, system
+from mika.app.handmade import blocks, conversations, mail, nights, system, tools
 from mika.inspector.ui import UI, Drawn
 
 
@@ -67,7 +67,8 @@ DRAWN: dict[str, Drawn] = {
     **{f"buts/{t}": CARDS for t in ("vivants", "clos")},
     **{f"projets/{t}": CARDS for t in ("tous", "toutes_executions", "toutes_decisions")},
     # Outils & connexions
-    **{f"outils/{t}": CARDS for t in ("tous", "qui", "texte", "expose", "serveurs", "outils_apps")},
+    **{f"outils/{t}": CARDS for t in ("tous", "texte", "expose", "serveurs", "outils_apps")},
+    "outils/qui": Shaped(tools.who_gets_what, "handmade/tools.css"),
     **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils", "positions", "messages")},
     "reveils/reveils": CARDS, "apps/apps": CARDS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)

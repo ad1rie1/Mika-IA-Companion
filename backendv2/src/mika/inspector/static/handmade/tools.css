@@ -1,0 +1,34 @@
+/* Outils › Qui reçoit quoi (app/handmade/tools.py) : une grille lots × situations, une couleur par état. */
+.offers-intro { display: grid; gap: 10px; font-size: 14px; }
+.offers-intro p { margin: 0; }
+.offers-legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; padding: 0; list-style: none; }
+.offers-legend li { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
+
+.offers-card { padding: 8px 0 4px; }
+.offers-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.offers-grid th, .offers-grid td { padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.offers-grid tbody tr:last-child > * { border-bottom: 0; }
+.offers-grid tbody tr:hover > * { background: var(--surface-2); }
+.offers-grid th.offers-lot-head { padding-left: 20px; text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; vertical-align: bottom; }
+.offers-moment { padding-top: 10px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; text-align: center;
+  border-left: 1px solid var(--border); }
+.offers-situation { color: var(--muted); font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; }
+.offers-grid td { text-align: center; }
+.offers-grid th.offers-lot { padding-left: 20px; text-align: left; font-weight: 400; white-space: nowrap; }
+.offers-lot a { display: block; color: var(--text); font-weight: 600; text-decoration: none; }
+.offers-lot a:hover { color: var(--accent); }
+.offers-lot span { color: var(--muted); font-size: 11.5px; }
+.offers-lot code { font-size: 11px; }
+
+/* une case : en main (plein), à la demande (cerclé), pas offert (vide) */
+.offer { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 34px; height: 26px; padding: 0 6px;
+  border-radius: 8px; font-size: 15px; line-height: 1; text-decoration: none; }
+.offer-hand { background: var(--ok-bg); color: var(--ok); }
+.offer-ask { background: var(--info-bg); color: var(--info); }
+.offer-none { color: var(--border-strong); }
+.offer-none::before { content: "–"; }
+.offers-legend .offer-none { border: 1px dashed var(--border-strong); }
+.offers-legend .offer { min-width: 26px; height: 22px; }
+a.offer:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.offer-part { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.offers-grid .offers-start { border-left: 1px solid var(--border); }

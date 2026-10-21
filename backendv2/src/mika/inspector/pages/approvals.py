@@ -21,7 +21,7 @@ def _pending(ui: Any) -> int:
     return len(ui.kernel.mind.frame().get(rt.PENDING_EFFECTS))
 
 
-@TABS.tab("approbations.en_attente", title="En attente", badge=_pending,
+@TABS.tab("approbations.en_attente", title="Actions à autoriser", badge=_pending,
           description="Ce qui attend ton accord. Ce qui est montré est exactement ce qui partira.")
 async def pending(ui: Any, request: Request) -> Any:
     kernel = ui.kernel
@@ -59,7 +59,7 @@ async def pending(ui: Any, request: Request) -> Any:
 HISTORY_PAGE = 30
 
 
-@TABS.tab("approbations.historique", title="Historique",
+@TABS.tab("approbations.historique", title="Historique des autorisations",
           description="Chaque décision (approuvé, refusé, par qui) et chaque exécution (réussie ou non), avec la "
                       "capacité concernée.")
 async def history(ui: Any, request: Request) -> list[Any]:

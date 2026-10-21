@@ -82,7 +82,7 @@ def _attention(s: McpState, frame: Frame | None = None) -> tuple[int, str] | Non
     return review + broken, "danger" if broken else "warn"
 
 
-@MCP.inspect("serveurs", title="Serveurs extérieurs", section="outils", order=40, badge=_attention,
+@MCP.inspect("serveurs", title="Services MCP", section="outils", order=40, badge=_attention,
              description="Les serveurs MCP dont elle peut utiliser les outils : leur état, ce qu'ils proposent, ce "
                          "qui attend ton regard. Les connexions se règlent dans Configuration.")
 def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -126,7 +126,7 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
     return Head(key=key, title=key, subtitle=st.purpose, badges=tuple(badges),
                 facts=(("réglages", edit_server(key, _fiche_url(key))),
                        ("joint", ctx.when(st.last_ok_at) if st.last_ok_at else "jamais")),
-                back=Ref("local", LIST, "Serveurs extérieurs"))
+                back=Ref("local", LIST, "Services MCP"))
 
 
 @MCP.search("serveur")
@@ -338,4 +338,4 @@ def _vital(s: McpState, frame: Frame) -> Vital | None:
     broken = [x.name for x in s.servers if x.state == "panne"]
     text = f"{len(broken)} en panne" if broken else f"{n} à revoir"
     return Vital(text, tone, hint=", ".join(broken) or "des outils attendent ton regard",
-                 href=Ref("local", LIST, "Serveurs extérieurs"))
+                 href=Ref("local", LIST, "Services MCP"))

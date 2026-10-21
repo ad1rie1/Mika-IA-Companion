@@ -262,7 +262,7 @@ def _noticed_history(ctx: InspectContext) -> Table:
                  pager=pager)
 
 
-@ATTENTION.inspect("remarque", title="Remarqué", section="pensees", order=20,
+@ATTENTION.inspect("remarque", title="Ce qu'elle remarque", section="pensees", order=20,
                    description="Ce que ses sens et ses sources lui signalent (courrier, flux, caméra, apps) : la "
                                "même source qui se répète se remarque de moins en moins, et une source ne lui fait "
                                "jamais plus qu'une petite émotion en quelques minutes.")

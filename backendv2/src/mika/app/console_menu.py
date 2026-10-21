@@ -1,13 +1,16 @@
 """Le menu opérateur, indépendant des sections techniques des facultés.
 
-Les routes et les fiches gardent leurs adresses. Un même ancien espace peut
-alimenter plusieurs rubriques : dessins dans Activité, caméra dans Outils.
-Dans une rubrique, les liens vers une même destination suivent l'ordre de ses
-onglets (test_console_navigation.py) : le menu et la barre d'onglets ne se
-contredisent pas.
+Les routes et les fiches gardent leurs adresses. Le menu et les onglets disent la même chose (ADR 0121) : dans une
+rubrique, une destination a soit un seul lien (la page entière : Mémoire, Personnes, Courrier…), soit un lien par
+onglet — tous ses onglets, dans leur ordre et sous leur nom (test_console_navigation.py). Deux rubriques font
+exception : « À valider », des raccourcis nommés par la tâche vers ce qui attend une décision, et « Réglages », une
+sélection d'entrées dans un annuaire d'une cinquantaine de pages (le sien).
 """
 
 from mika.inspector.catalog import MenuGroup, MenuLink
+
+#: les rubriques dont les liens ne suivent pas les onglets de leurs destinations (voir plus haut)
+SHORTCUT_GROUPS = ("À valider", "Réglages")
 
 MENU = (
     MenuGroup("", "home", (MenuLink("Accueil", ""),)),
@@ -21,11 +24,16 @@ MENU = (
     )),
     MenuGroup("Elle", "heart", (
         MenuLink("En ce moment", "maintenant"),
-        MenuLink("Émotions et besoins", "vie"),
+        MenuLink("Humeur", "vie"),
+        MenuLink("Postures", "vie/postures"),
+        MenuLink("Besoins", "vie/needs"),
         MenuLink("Sommeil et rythme", "vie/rythme"),
         MenuLink("Monde et corps", "vie/monde"),
         MenuLink("Estime et récit", "vie/soi"),
-        MenuLink("Pensées et attention", "pensees"),
+        MenuLink("Qui elle devient", "vie/devenir"),
+        MenuLink("Pensées", "pensees"),
+        MenuLink("Ce qu'elle remarque", "pensees/remarque"),
+        MenuLink("Attentes", "pensees/attentes"),
         MenuLink("Journal et rêves", "pensees/nuits"),
         MenuLink("Mémoire", "memoire"),
         MenuLink("Constellation", "constellation"),
@@ -40,19 +48,28 @@ MENU = (
     MenuGroup("Activité", "activity", (
         MenuLink("Projets", "projets"),
         MenuLink("Buts et rappels", "buts"),
-        MenuLink("Décisions et initiatives", "decisions"),
+        MenuLink("Table de l'arbitre", "decisions"),
+        MenuLink("Que ferait-elle ?", "decisions/envers"),
         MenuLink("En cours", "decisions/en_cours"),
+        MenuLink("Initiatives", "decisions/initiatives"),
+        MenuLink("Ses choix", "decisions/selections"),
+        MenuLink("Épisodes", "decisions/episodes"),
         MenuLink("Échéances", "decisions/echeances"),
-        MenuLink("Dessins", "sens/dessins"),
     )),
     MenuGroup("Outils & connexions", "tools", (
         MenuLink("Catalogue des outils", "outils"),
-        MenuLink("Apps forgées", "apps"),
+        MenuLink("Qui reçoit quoi", "outils/qui"),
+        MenuLink("Ce que son prompt en dit", "outils/texte"),
+        MenuLink("Ce qu'elle expose", "outils/expose"),
         MenuLink("Services MCP", "outils/serveurs", ("reglages/serveurs-mcp",)),
+        MenuLink("Outils de ses apps", "outils/outils_apps"),
+        MenuLink("Apps forgées", "apps"),
         MenuLink("Flux RSS", "sens/flux", ("reglages/flux",)),
         MenuLink("Caméra", "sens/camera"),
+        MenuLink("Dessins", "sens/dessins"),
         MenuLink("Appareils", "sens/appareils", ("reglages/appareils",)),
         MenuLink("Localisation", "sens/positions"),
+        MenuLink("Messages du téléphone", "sens/messages"),
         MenuLink("Réveils par API", "reveils", ("reglages/reveils",)),
         MenuLink("Dépôts Git", "reglages/depots"),
     )),
@@ -80,7 +97,9 @@ MENU = (
         MenuLink("Stockage et sauvegardes", "systeme/stockage"),
         MenuLink("Journal d’événements", "systeme/chronologie"),
         MenuLink("Actions des opérateurs", "systeme/operations"),
-        MenuLink("Diagnostic avancé", "systeme/etat", ("systeme/contributions", "systeme/vues")),
+        MenuLink("Diagnostic avancé", "systeme/etat"),
+        MenuLink("Contributions", "systeme/contributions"),
+        MenuLink("Toutes les vues", "systeme/vues"),
         MenuLink("Simulations", "systeme/simulations"),
     )),
 )

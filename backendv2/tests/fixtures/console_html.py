@@ -29,7 +29,7 @@ class ConsoleHTML(HTMLParser):
             self.errors.append(f"élément imbriqué : {tag}")
         if tag == "h1":
             self.headings += 1
-        if tag == "th" and attrs.get("scope") != "col":
+        if tag == "th" and attrs.get("scope") not in ("col", "row", "colgroup", "rowgroup"):  # chaque en-tête dit sa portée
             self.errors.append("colonne sans scope")
         container = next((i for _, classes, i in reversed(self.stack) if "table-block" in classes), None)
         if tag == "table":

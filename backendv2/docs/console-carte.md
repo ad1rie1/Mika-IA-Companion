@@ -127,7 +127,7 @@ puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en
 s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 
 ### Décisions
-- **Maintenant** : la table de l'arbitre (preuves → score → taux), la politique.
+- **Table de l'arbitre** : preuves → score → taux, la politique.
 - **Que ferait-elle ?** *(nouveau)* : pour une personne, ses lignes, ce qui la
   pousse, ce qui la retient, dans combien de temps elle agirait en moyenne ; la
   fiche d'une personne y mène.
@@ -138,7 +138,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
   **Échéances**.
 
 ### Ses outils (ADR 0064)
-- **Tous ses outils** : une ligne par outil du registre (origine interne ou
+- **Catalogue des outils** : une ligne par outil du registre (origine interne ou
   extérieure, lot et sa phrase, ce qu'il fait, à qui il est offert, appels des
   14 derniers jours) ; `?outil=<nom>` ouvre sa fiche (arguments lus du schéma,
   condition d'offre, règle vérifiée à l'exécution, qui le reçoit et pourquoi
@@ -147,16 +147,16 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 - **Qui reçoit quoi** : lots × situations types (propriétaire, compte,
   inconnue, salon, initiative, pas, projet, tâche) — en main, à la demande, pas
   offert —, calculé par la porte d'offre du pipeline (`runtime.tools.offer`).
-- **Ce qu'elle lit** : le texte exact de la règle de ses mains et du catalogue
+- **Ce que son prompt en dit** : le texte exact de la règle de ses mains et du catalogue
   pour une situation, et ses outils en main / à la demande.
-- **Ce que Mika expose** : le relais MCP du moteur Claude Code et la console en
+- **Ce qu'elle expose** : le relais MCP du moteur Claude Code et la console en
   MCP (ses outils, son jeton).
-- Ajoutés par les plugins : **Outils de ses apps** (Forge) ; **Serveurs extérieurs** (MCP : état, servis / proposés, à revoir — badge et vitale), et la fiche d'un serveur : *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé est suspendu), *Appels*.
+- Ajoutés par les plugins : **Outils de ses apps** (Forge) ; **Services MCP** (MCP : état, servis / proposés, à revoir — badge et vitale), et la fiche d'un serveur : *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé est suspendu), *Appels*.
 
 ### Approbations
-- **En attente** : une carte par demande (ce qui partira, contexte, arguments),
+- **Actions à autoriser** : une carte par demande (ce qui partira, contexte, arguments),
   approuver / refuser.
-- **Historique** : décisions et exécutions, avec la capacité (pas seulement un
+- **Historique des autorisations** : décisions et exécutions, avec la capacité (pas seulement un
   numéro), paginé.
 
 ### Configuration (sous-menu)

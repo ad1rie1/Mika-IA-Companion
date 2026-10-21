@@ -112,7 +112,12 @@ La constellation (ADR 0103) avait déjà montré l'autre voie : une page faite �
     Ses réponses jugées, **Système › Processus** (`system.py`, lu à l'ordonnanceur : une barre de leurs états, ce qui
     échoue ou est retenu avec sa dernière erreur en clair et son prochain essai, une carte par faculté),
     **Système › Santé** (lu au rapport de santé : son verdict, ses dix contrôles en tuiles, ce qui ne va pas d'abord ;
-    `Drawn.panel` faux : il dit ce que disait le panneau), **Courrier › Réception et Envoyés** (`mail.py` : une
+    `Drawn.panel` faux : il dit ce que disait le panneau), **Pensées › Journal et rêves** (`nights.py` : son
+    journal en page de carnet, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit — son journal et
+    ses rêves ensemble), **Outils › Qui reçoit quoi** (`tools.py` : une grille, ses lots en lignes, les situations
+    en colonnes rangées par ce qui se passe — elle répond, elle prend la parole, personne n'écoute —, chaque case en
+    main, à la demande ou pas offert, et menant au catalogue sur ce lot dans cette situation),
+    **Courrier › Réception et Envoyés** (`mail.py` : une
     boîte aux lettres — une ligne par message, douze par page, et sous la liste une liseuse, `?lire=<clé>` : l'onglet
     « Message » de la fiche du mail, ses actions préparées à son nom, ses listes numérotées à part) ;
   - **sous ce que garde la console** (`Drawn.last`) : **Système › File de sortie** — ses chiffres, ses états et son panneau
@@ -129,11 +134,13 @@ La constellation (ADR 0103) avait déjà montré l'autre voie : une page faite �
   noms et les boutons restent ceux de la console ; `handmade/base.css` est chargée partout (ses classes ne touchent
   qu'elles). **Seules les vues de la Forge gardent le rendu de la console** (`InspectorDeps.plain_owners`) : ses apps
   déclarent leur interface par un contrat.
-- **Le menu et les onglets disent la même chose** : une page porte le nom de son lien dans le menu
-  (`app/console_menu.py` : « Sommeil et rythme », « Monde et corps », « Journal et rêves », « File de sortie »,
-  « Moteur des modèles », « Écrans du monde », « Appels et coûts », « Stockage et sauvegardes », « Journal
-  d’événements », « Actions des opérateurs », « Diagnostic avancé »), et dans une rubrique, les liens qui mènent à
-  la même destination suivent l'ordre de ses onglets (`test_console_navigation.py`).
+- **Le menu et les onglets disent la même chose** (`app/console_menu.py`, `test_console_navigation.py`) : dans une
+  rubrique, une destination a un seul lien (la page entière : Mémoire, Personnes, Courrier…) ou un lien par onglet —
+  tous ses onglets, dans leur ordre, sous leur nom (Humeur, Postures, Besoins, Sommeil et rythme… ; les sept onglets
+  des décisions ; ceux des outils et des flux et capteurs ; les quatorze pages de Système). Un onglet porte le nom
+  de son lien, et un nom qui ne disait pas ce que montre la page a changé (« Table de l'arbitre », « Ce qu'elle
+  remarque », « Règles de divulgation », « Ce que son prompt en dit »). Deux exceptions : « À valider », des
+  raccourcis nommés par la tâche, et « Réglages », une sélection dans l'annuaire de ses cinquante pages.
 - **Rangées dans des dossiers** : le code dans `app/handmade/` (ce qu'elles partagent dans `__init__.py` ; `home.py`,
   `now.py`, `people.py`, `person/` ; `lists.py` et `blocks.py`, les listes et les blocs en cartes ;
   `conversations.py`, `system.py`, `mail.py` ; `pages.py`, la table des onglets dessinés), les gabarits dans

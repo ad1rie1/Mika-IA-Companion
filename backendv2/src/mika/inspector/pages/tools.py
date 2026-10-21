@@ -193,7 +193,7 @@ def _params(ui: Any) -> tuple[Param, ...]:
             Param("origine", "Origine", "select", (("interne", "Interne"), ("exterieur", "Extérieur"))))
 
 
-@TABS.tab("outils.tous", title="Tous ses outils",
+@TABS.tab("outils.tous", title="Catalogue des outils",
           description="Trouver un outil, comprendre ce qu'il fait et vérifier dans quelles situations elle peut l'utiliser.")
 async def all_tools(ui: Any, request: Request) -> Any:
     name = str(request.query_params.get("outil", "") or "")
@@ -397,7 +397,7 @@ async def who_gets_what(ui: Any, request: Request) -> list[Any]:
                           "différer reçoit tout en main.")]
 
 
-@TABS.tab("outils.texte", title="Ce qu'elle lit",
+@TABS.tab("outils.texte", title="Ce que son prompt en dit",
           description="Le texte exact que son prompt porte sur ses outils dans une situation : la règle de ses "
                       "mains, le catalogue de ce qu'elle peut aller chercher, et les outils qu'elle a en main.")
 async def what_she_reads(ui: Any, request: Request) -> Any:
