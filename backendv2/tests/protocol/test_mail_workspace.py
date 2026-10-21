@@ -35,15 +35,15 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
     page = export_page(client, "/inspecteur/courrier/reception?compte=perso", tmp_path / 'review')
     export_page(client, "/inspecteur/courrier/reception?compte=pro", tmp_path / 'review')
     assert "Personnel · message 000" in page and "Maquettes du projet" not in page
-    assert "530 au total" in page  # pas seulement les 500 premiers du cache
+    assert '<span class="person-count now-num">530</span>' in page  # pas seulement les 500 premiers du cache
     for tab in ("brouillons", "envoyes", "contacts"):
         assert f'href="/inspecteur/courrier/{tab}?compte=perso"' in page
         get(client, f"/inspecteur/courrier/{tab}?compte=perso")
     assert 'value="perso" selected' in page  # composer depuis le compte choisi
     assert 'name="compte" value="perso"' in page  # filtres conservent le compte
-    assert "Personnel · message 529" in get(client, "/inspecteur/courrier/reception?compte=perso&page=22")
+    assert "Personnel · message 529" in get(client, "/inspecteur/courrier/reception?compte=perso&page=45")  # 12 par page
     searched = get(client, "/inspecteur/courrier/reception?compte=perso&q=529")
-    assert "1 au total" in searched and "Personnel · message 529" in searched
+    assert '<span class="person-count now-num">1</span>' in searched and "Personnel · message 529" in searched
     assert not box.sent and not box.actions  # consulter ne marque pas lu et n'envoie rien
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S).group()
     assert "Comptes" not in tabs and "Réglages" not in tabs
@@ -59,7 +59,7 @@ def test_reader_displays_html_safely_and_replies_from_the_original_account(world
     assert "FIN DU MESSAGE LONG" in page
     assert '<a href="https://example.test/projet"' in page
     assert 'src="https://tracker.example.test' not in page and "window.mailExecuted" not in page
-    assert 'class="reading-document"' in page or 'card reading-document' in page
+    assert 'class="hm-reading"' in page  # un document à lire (ADR 0121)
     assert "maquettes.pdf" in page and "150 Ko" in page
     assert "/inspecteur/courrier/reception?compte=pro&dossier=INBOX" in page
     # Submit the actual displayed reply form into the fake mail port.
@@ -174,9 +174,9 @@ def test_inbox_reading_list_and_table_keep_account_filters_and_return_path(world
     client, box = setup(world)
     url = '/inspecteur/courrier/reception?compte=perso&q=message&etat=non_lus'
     listing = get(client, url)
-    assert 'class="collection list"' in listing and 'Lire le message' in listing
+    assert 'class="mail-lines"' in listing and "lire=" in listing  # une ligne ouvre le message sous la liste
     table = get(client, url + '&vue_pg1=table')
-    assert 'class="collection list"' not in table and 'class="tbl"' in table
+    assert 'class="mail-lines"' not in table and 'class="hm-table"' in table
     assert 'name="vue_pg1" value="table"' in table
     assert 'name="compte" value="perso"' in table
     assert 'Personnel · message 001' in listing and 'Personnel · message 001' in table
@@ -188,3 +188,22 @@ def test_inbox_reading_list_and_table_keep_account_filters_and_return_path(world
     next_page = re.search(r'<a href="([^\"]+)" rel="next">', table).group(1)
     assert 'vue_pg1=table' in next_page and 'compte=perso' in next_page
     assert not box.sent and not box.actions
+
+
+def test_a_line_opens_the_message_under_the_list_with_its_actions(world):  # noqa: F811
+    """La boîte se lit comme une messagerie : une ligne par message, douze par page ; une ligne ouvre le message
+    sous la liste (``?lire=``) avec ses actions, préparées à son nom (leur jeton), et un lien vers sa fiche."""
+    client, box = setup(world)
+    listing = get(client, "/inspecteur/courrier/reception?compte=perso")
+    assert listing.count('<li class="') >= 12 and len(re.findall(r'<li class="[^"]*"><a href="\?', listing)) == 12
+    assert 'rel="next"' in listing and "Choisis un message pour le lire ici." in listing
+    key = quote("pro:<projet@example.test>", safe="")
+    page = get(client, f"/inspecteur/courrier/reception?compte=pro&lire={key}")
+    assert '<li class="unread on">' in page  # la ligne du message ouvert
+    reader = page.split('class="now-card mail-reader"')[1]
+    assert "Maquettes du projet" in reader and "<strong>Ton retour jeudi</strong>" in reader
+    assert "maquettes.pdf" in reader and f'href="/inspecteur/fiche/mail/{key}"' in reader
+    form = re.search(r'<form[^>]+action="/inspecteur/action/email.repondre".*?</form>', reader, re.S).group()
+    assert 'name="csrf"' in form  # le retour ramène au message ouvert
+    assert 'name="_retour" value="/inspecteur/courrier/reception?compte=pro&lire=' in form
+    assert not box.sent and not box.actions  # lire ne marque pas lu et n'envoie rien

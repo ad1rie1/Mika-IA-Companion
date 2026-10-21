@@ -1,0 +1,45 @@
+{# Approbations › En attente (pages/approvals.py), dans le vocabulaire des pages dessinées (ADR 0121) : chaque demande
+   en carte — ce qu'elle veut faire, ce qui partira tel quel après ton accord, ta note, approuver ou refuser. #}
+{% from "_navigation.html" import pager %}
+<div class="now-page person-tab">
+{% for p in items %}
+<article class="now-card hm-approval st-{{ 'danger' if p.blocked else 'warn' }}">
+  <header class="hm-approval-head">
+    <div>
+      <p class="now-eyebrow">{{ p.capability }} · proposition n° {{ p.proposal }}</p>
+      <h2>{{ p.summary[:110] or p.capability }}</h2>
+      <p class="now-sub">{{ p.when }}{% if p.context %} · {{ p.context }}{% endif %}</p>
+    </div>
+    <span class="now-tag {{ 'danger' if p.blocked else 'warn' }}">{{ 'À corriger' if p.blocked else 'Ton accord est attendu' }}</span>
+  </header>
+  {% if p.summary|length > 110 %}<p class="person-self">{{ p.summary }}</p>{% endif %}
+  {% if p.blocked %}<p class="person-tab-note danger" role="alert"><b>L'action est bloquée</b> {{ p.blocked }}</p>{% endif %}
+  {% if p.preview %}
+  <section class="hm-approval-preview" aria-label="Aperçu">
+    <h3 class="now-subhead first">{{ 'Aperçu de la demande' if p.blocked else 'Ce qui partira après ton accord' }}</h3>
+    <div class="hm-reading document-text">{{ p.preview }}</div>
+  </section>
+  <details class="hm-subfold"><summary>Détails techniques</summary><p class="mono">{{ p.capability_key }}</p><pre class="hm-code">{{ p.args }}</pre></details>
+  {% else %}
+  <section class="hm-approval-preview" aria-label="Ce qui sera exécuté">
+    <h3 class="now-subhead first">Ce qui sera exécuté</h3>
+    <pre class="hm-code">{{ p.args }}</pre>
+    <p class="now-muted mono">{{ p.capability_key }}</p>
+  </section>
+  {% endif %}
+  <form method="post" action="{{ PREFIX }}/approbations" class="approve-form">
+    {# Entrée dans la note ne décide rien : le bouton par défaut d'un formulaire est son premier, désactivé ici #}
+    <button type="submit" class="default-submit" disabled hidden tabindex="-1">Entrée : rien</button>
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="proposal" value="{{ p.proposal }}">
+    <input type="hidden" name="seen" value="{{ p.seen }}">
+    <label class="field">Ta note <input name="note" placeholder="facultative : pourquoi, pour elle et pour l'historique"></label>
+    <button class="btn" name="decision" value="approve" data-confirm="Approuver « {{ (p.summary or p.capability)[:90] }} » ? Ce qui est montré partira tel quel."{% if p.blocked %} disabled title="{{ p.blocked }}"{% endif %}>Approuver</button>
+    <button class="btn quiet" name="decision" value="reject">Refuser</button>
+  </form>
+</article>
+{% else %}
+<p class="hm-calm"><span class="hm-calm-dot" aria-hidden="true"></span><b>Rien n'attend ton accord.</b> Quand elle voudra envoyer un mail ou lancer une commande avec le réseau, c'est ici que tu décideras.</p>
+{% endfor %}
+{% set pp = pending_pager or {} %}
+{% if pp.prev or pp.next or pp.older or pp.newer %}{{ pager(pending_pager) }}{% endif %}
+</div>

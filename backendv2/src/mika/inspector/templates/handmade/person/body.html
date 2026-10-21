@@ -1,0 +1,193 @@
+{# Le corps de la page d'une personne : rendu dans la page, puis relu seul par handmade/live.js (le fragment). La personne
+   se nomme toujours par son nom (jamais « il » ni « elle »). Aucun style en ligne (CSP). #}
+{% from "handmade/macros.html" import bar, people, failed %}
+<span hidden data-now-stamp>{{ now.stamp }}</span>
+{% set name = now.name %}
+
+{# ── Qui elle est pour elle ──────────────────────────────────────────────── #}
+{% set p = now.portrait %}
+{% if p %}
+<section class="now-hero person-hero sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-labelledby="person-felt-title">
+  <p class="now-live person-live" data-now-state role="status"><span class="now-live-dot" aria-hidden="true"></span><span data-now-state-text>À jour · {{ now.stamp }}</span></p>
+  <div class="person-felt">
+    <h2 class="now-eyebrow" id="person-felt-title">Ce qu'elle ressent envers {{ name }}</h2>
+    <p class="now-word person-word">{% if p.felt %}{{ p.felt.word }}{% else %}au repos{% endif %}</p>
+    <p class="now-qualifier">{% if p.felt %}{{ p.felt.how|capitalize }} {{ p.felt.word }} en ce moment.{% else %}Rien de particulier en ce moment.{% endif %}</p>
+    {% if p.voice %}
+    <blockquote class="now-voice">{% for line in p.voice %}<p>{{ line }}</p>{% endfor %}<footer>ce que son prompt lui en dit</footer></blockquote>
+    {% endif %}
+    {% if p.withdrawn or p.apologized %}
+    <ul class="now-chips">
+      {% if p.withdrawn %}<li class="warn">blessée, elle s'est refermée jusqu'à {{ p.withdrawn }}</li>{% endif %}
+      {% if p.apologized %}<li>des excuses qui ont compté, {{ p.apologized }}</li>{% endif %}
+    </ul>
+    {% endif %}
+  </div>
+  <div class="person-bond">
+    <h2 class="now-eyebrow">Ce que leur lien a installé</h2>
+    <div class="person-meters">
+      <div class="now-meter"><div class="now-meter-head"><span title="ce que leurs échanges ont installé, de −1 (froid) à +1 (chaleureux)">Chaleur</span><span class="now-num">{{ p.regard }}</span></div>{{ bar(p.regard_w, "regard " ~ p.regard_tone) }}</div>
+      <div class="now-meter"><div class="now-meter-head"><span title="ce qui l'attache à cette personne, lentement">Attachement</span><span class="now-num">{{ p.bond }}</span></div>{{ bar(p.bond_w, "bond") }}</div>
+      {% if p.hostility %}<div class="now-meter"><div class="now-meter-head"><span title="la rancune, qui guérit lentement">Rancune</span><span class="now-num">{{ p.hostility }}</span></div>{{ bar(p.hostility_w, "hostility") }}</div>{% endif %}
+    </div>
+    {% if p.hard %}<p class="person-hard">Un moment difficile pour {{ name }} depuis le {{ p.hard }} : le banal se tait.</p>{% endif %}
+  </div>
+</section>
+{% else %}
+<section class="now-hero">{{ failed("ce qu'elle ressent") }}</section>
+{% endif %}
+
+{# ── Leur histoire ───────────────────────────────────────────────────────── #}
+<section class="now-card" aria-labelledby="person-story-title">
+  <header class="now-card-head">
+    <h2 id="person-story-title">Leur histoire</h2>
+    {% if now.story %}<p>{{ now.story.active_days }} jour{{ 's' if now.story.active_days > 1 }} échangé{{ 's' if now.story.active_days > 1 }} sur {{ now.story.weeks }} semaines · une case par jour, de la couleur de ce qu'elle ressentait en lui écrivant</p>{% endif %}
+  </header>
+  {% set S = now.story %}
+  {% if S %}
+  <div class="person-story">
+    <figure class="person-calendar">
+      <div class="person-calendar-wrap" tabindex="0" role="region" aria-label="Leurs jours échangés">
+      <svg width="{{ S.w }}" height="{{ S.h }}" viewBox="0 0 {{ S.w }} {{ S.h }}" role="img" aria-label="Leurs jours échangés, semaine par semaine">
+        {% for m in S.months %}<text class="cal-month" x="{{ m.x }}" y="11">{{ m.label }}</text>{% endfor %}
+        {% for d in S.weekdays %}<text class="cal-weekday" x="0" y="{{ d.y }}">{{ d.label }}</text>{% endfor %}
+        {% for c in S.cells %}<rect class="cal l{{ c.level }}{{ ' sw-' ~ c.emotion if c.emotion }}{{ ' today' if c.today }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ S.cell }}" height="{{ S.cell }}" rx="3"><title>{{ c.title }}</title></rect>{% endfor %}
+      </svg>
+      </div>
+      <figcaption class="cal-legend"><span>moins</span>{% for l in (1, 2, 3, 4) %}<span class="cal-key l{{ l }}"></span>{% endfor %}<span>plus de messages</span></figcaption>
+    </figure>
+    <div class="person-rhythm">
+      <h3 class="now-subhead">Quand {{ name }} écrit</h3>
+      {% if S.hours_any %}
+      <svg class="person-hours" width="{{ S.hours_w }}" height="{{ S.hours_h }}" viewBox="0 0 {{ S.hours_w }} {{ S.hours_h }}" role="img" aria-label="Ses messages, heure par heure">
+        {% for b in S.hours %}<rect class="hour{{ ' usual' if b.usual }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ S.hour_bar }}" height="{{ b.h }}" rx="2"><title>{{ b.title }}</title></rect>{% endfor %}
+        {% for m in S.hour_marks %}<text class="hour-mark" x="{{ m.x }}" y="{{ S.hours_h - 2 }}" text-anchor="middle">{{ m.label }}</text>{% endfor %}
+      </svg>
+      {% if S.hours_learned %}<p class="now-muted person-note">en couleur : les heures qu'elle lui a apprises (on n'est pas ignorée par quelqu'un qui dort)</p>{% endif %}
+      {% else %}<p class="now-empty">Pas encore de message de sa part sur ces semaines.</p>{% endif %}
+      {% if S.rhythm %}<ul class="now-lines person-lines">{% for r in S.rhythm %}<li class="{{ r.tone }}">{{ r.text|capitalize }}</li>{% endfor %}</ul>{% endif %}
+      {% if S.steps %}
+      <h3 class="now-subhead">Les étapes de leur lien</h3>
+      <ol class="person-steps">{% for s in S.steps %}<li><time>{{ s.date }}</time> {{ s.text }}</li>{% endfor %}</ol>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}{{ failed("leur histoire") }}{% endif %}
+</section>
+
+<div class="now-grid two">
+  {# ── Ce qu'elle sait ────────────────────────────────────────────────────── #}
+  <section class="now-card" aria-labelledby="person-knows-title">
+    <header class="now-card-head"><h2 id="person-knows-title">Ce qu'elle sait {{ now.of }}</h2><a class="now-more" href="{{ p.fiche if p else '' }}?onglet=memoire">Toute sa mémoire →</a></header>
+    {% set K = now.knows %}
+    {% if K %}
+    {% if K.life %}
+    <h3 class="now-subhead first">Sa vie en ce moment</h3>
+    <ul class="person-life">
+      {% for ev in K.life %}
+      <li class="{{ 'ongoing' if ev.ongoing }}{{ ' past' if ev.past }}">
+        <time>{{ ev.when }}</time>
+        <div><p>{{ ev.text }}</p>
+          <p class="person-meta">{% if ev.ongoing %}<span class="now-tag">en cours</span> {% endif %}{% if ev.important %}<span class="now-tag close">important</span> {% endif %}{% if ev.festive %}<span class="now-tag owner">à fêter</span> {% endif %}{% if ev.secret %}<span class="now-tag secret">secret</span> {% endif %}{% for f in ev.felt %}<span class="now-dot sw-{{ f.emotion }}" aria-hidden="true"></span>{{ f.word }} {% endfor %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if K.self %}
+    <h3 class="now-subhead">Ce {{ now.that }} dit de soi</h3>
+    {% if K.self.summary %}<p class="person-self">{{ K.self.summary }}</p>{% endif %}
+    {% if K.self.interests %}<ul class="person-chips">{% for i in K.self.interests %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% if K.self.sensitive %}<p class="person-meta">sujets délicats :</p><ul class="person-chips delicate">{% for i in K.self.sensitive %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% endif %}
+    {% if K.beliefs %}
+    <h3 class="now-subhead">Ce qu'elle croit</h3>
+    <ul class="person-known">
+      {% for b in K.beliefs %}
+      <li><p>{{ b.text }}</p>
+        <div class="person-belief"><span class="person-meta">{% if b.origin %}{{ b.origin }}{% endif %}{% if b.told_by %} par {{ people(b.told_by) }}{% endif %} · {{ b.when }}{% if b.tag %} · <span class="{{ b.tone }}">{{ b.tag }}</span>{% endif %}</span>{% if b.confidence %}<span class="person-confidence" title="sa confiance">{{ bar(b.confidence_w, "confidence") }}<span class="now-num">{{ b.confidence }}</span></span>{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if K.souvenirs %}
+    <h3 class="now-subhead">Ses souvenirs</h3>
+    <ul class="person-known">
+      {% for s in K.souvenirs %}<li><p>{{ s.text }}</p><p class="person-meta">{{ s.when }}{% if s.told_by %} · confié par {{ people(s.told_by) }}{% endif %}{% if s.tag %} · <span class="{{ s.tone }}">{{ s.tag }}</span>{% endif %}</p></li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if K.lies %}
+    <h3 class="now-subhead danger">Ce qu'elle lui a caché</h3>
+    <ul class="person-known lies">
+      {% for s in K.lies %}<li><p>{{ s.text }}</p><p class="person-meta">{{ s.when }} · un mensonge, qu'elle ne porte que devant {{ name }}</p></li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if not (K.life or K.self or K.beliefs or K.souvenirs or K.lies) %}<p class="now-empty">Elle ne sait encore rien de particulier sur {{ name }}.</p>{% endif %}
+    {% else %}{{ failed("sa mémoire") }}{% endif %}
+  </section>
+
+  <div class="now-stack">
+    {# ── Ce qu'elle lit ──────────────────────────────────────────────────── #}
+    <section class="now-card" aria-labelledby="person-reads-title">
+      <header class="now-card-head"><h2 id="person-reads-title">Ce qu'elle lit {{ now.of }}</h2><a class="now-more" href="{{ p.fiche if p else '' }}?onglet=devine">Ce qu'elle devine →</a></header>
+      {% set R = now.reads %}
+      {% if R and R.observed %}
+      <dl class="now-facts">
+        <div><dt>Ton</dt><dd>{{ R.usual }} <span class="now-muted">d'habitude</span></dd></div>
+        <div><dt>Là</dt><dd>{{ R.now }}{% if R.shift %} <span class="warn">· {{ R.shift }}</span>{% endif %}</dd></div>
+        {% if R.last %}<div><dt>Dernier</dt><dd>{% for f in R.last %}<span class="person-facet"><span class="now-dot sw-{{ f.emotion }}" aria-hidden="true"></span>{{ f.word }} <span class="now-num now-muted">{{ f.pct }}</span></span>{% endfor %}{% if R.last_at %} <span class="now-muted">· {{ R.last_at }}</span>{% endif %}</dd></div>{% endif %}
+      </dl>
+      <div class="now-meter"><div class="now-meter-head"><span>Sa confiance dans cette lecture</span><span class="now-num">{{ R.confidence }}</span></div>{{ bar(R.confidence_w, "confidence") }}</div>
+      <p class="now-muted person-note">{{ R.observed }} message{{ 's' if R.observed > 1 }} lu{{ 's' if R.observed > 1 }} par le modèle, jamais devinés par des mots</p>
+      {% elif R %}<p class="now-empty">Elle n'a encore lu aucun message {{ now.of }}.</p>
+      {% else %}{{ failed("ce qu'elle lit") }}{% endif %}
+    </section>
+
+    {# ── Ce qui attend ───────────────────────────────────────────────────── #}
+    <section class="now-card" aria-labelledby="person-pending-title">
+      <header class="now-card-head"><h2 id="person-pending-title">Ce qui reste en suspens</h2></header>
+      {% set W = now.pending %}
+      {% if W and W["items"] %}
+      <ul class="person-pending">
+        {% for x in W["items"] %}
+        <li class="tone-{{ x.tone or 'plain' }}{{ ' sw-' ~ x.emotion if x.emotion }}">
+          <span class="now-tag">{{ x.kind }}</span>
+          <div><p>{% if x.href %}<a href="{{ x.href }}">{{ x.text }}</a>{% else %}{{ x.text }}{% endif %}</p>{% if x.note %}<p class="person-meta">{{ x.note }}</p>{% endif %}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% elif W %}<p class="now-empty">Rien ne reste en suspens.</p>
+      {% else %}{{ failed("ce qui attend") }}{% endif %}
+    </section>
+
+    {# ── Son entourage ───────────────────────────────────────────────────── #}
+    <section class="now-card" aria-labelledby="person-circle-title">
+      <header class="now-card-head"><h2 id="person-circle-title">L'entourage {{ now.of }}</h2></header>
+      {% set C = now.circle %}
+      {% if C and C.people %}
+      <ul class="person-circle">
+        {% for o in C.people %}<li>{% if o.href %}<a href="{{ o.href }}">{{ o.name }}</a>{% else %}{{ o.name }}{% endif %}{% for k in o.kinds %} <span class="now-tag">{{ k }}</span>{% endfor %}{% if o.closeness %} <span class="now-muted">· pour elle : {{ o.closeness }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+      {% if C.more %}<p class="now-muted now-after">et {{ C.more }} autre{{ 's' if C.more > 1 }}</p>{% endif %}
+      {% elif C %}<p class="now-empty">Personne de son entourage ne lui a été raconté.</p>
+      {% else %}{{ failed("son entourage") }}{% endif %}
+    </section>
+  </div>
+</div>
+
+{# ── Leurs derniers mots ─────────────────────────────────────────────────── #}
+<section class="now-card" aria-labelledby="person-thread-title">
+  <header class="now-card-head"><h2 id="person-thread-title">Leurs derniers mots</h2>{% if now.thread %}<a class="now-more" href="{{ now.thread.all }}">Toute la conversation →</a>{% endif %}</header>
+  {% set T = now.thread %}
+  {% if T and T.messages %}
+  <ol class="person-thread">
+    {% for m in T.messages %}
+    <li class="{{ 'mine' if m.mine else 'theirs' }}{{ ' sw-' ~ m.emotion if m.emotion }}">
+      <p class="person-bubble">{{ m.text }}</p>
+      <p class="person-meta">{% if m.mine %}{% if m.emotion %}<span class="now-dot sw-{{ m.emotion }}" aria-hidden="true"></span>{{ m.word }} · {% endif %}{% else %}{{ name }} · {% endif %}{{ m.when }}{% if m.room %} · en salon{% endif %}{% if m.unanswered %} · <span class="warn">resté sans réponse</span>{% endif %}{% if m.why %} · <a href="{{ m.why }}">pourquoi ?</a>{% endif %}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% elif T %}<p class="now-empty">Aucun message échangé.</p>
+  {% else %}{{ failed("leur conversation") }}{% endif %}
+</section>

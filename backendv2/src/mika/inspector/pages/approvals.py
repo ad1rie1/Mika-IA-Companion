@@ -51,7 +51,7 @@ async def pending(ui: Any, request: Request) -> Any:
                 "change": [("warn", decisions.MESSAGES[decisions.CHANGED])],
                 "bloque": [("warn", "Ça ne peut pas partir tel quel : relis-le.")],
                 "jeton": [("danger", "Jeton de formulaire invalide : recharge la page.")]}.get(done_flag, [])
-    return {"panel": Panel("approvals.html", {"items": items, "pending_pager": render._pager(pager, request.query_params)}),
+    return {"panel": Panel("handmade/approbations/attente.html", {"items": items, "pending_pager": render._pager(pager, request.query_params)}),
             "blocks": [], "messages": messages}
 
 

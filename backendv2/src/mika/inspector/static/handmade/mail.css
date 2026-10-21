@@ -1,0 +1,43 @@
+/* Le courrier (app/handmade/mail.py) : une liste en lignes, la liseuse dessous. */
+
+/* une ligne par message : un point s'il n'est pas lu, qui, l'objet et son début, ses étiquettes, la date */
+.mail-list { padding-bottom: 12px; }
+.mail-lines { display: grid; margin: 0 -10px; padding: 0; list-style: none; }
+.mail-lines a { display: grid; grid-template-columns: 10px minmax(7em, 13em) minmax(0, 1fr) auto auto; align-items: center;
+  gap: 12px; padding: 8px 10px; border-radius: 10px; color: var(--text-2); font-size: 13.5px; text-decoration: none; }
+.mail-lines li + li a { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.mail-lines a:hover { background: var(--surface-2); }
+.mail-lines li.on a { background: var(--accent-soft); border-top-color: transparent; }
+.mail-lines li.on + li a { border-top-color: transparent; }
+.mail-dot { width: 8px; height: 8px; border-radius: 50%; }
+.mail-lines li.unread .mail-dot { background: var(--accent); }
+.mail-who, .mail-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-who { color: var(--text); }
+.mail-subject { color: var(--text); }
+.mail-snippet { color: var(--muted); }
+.mail-lines li.unread .mail-who, .mail-lines li.unread .mail-subject { font-weight: 650; }
+.mail-tags { display: flex; gap: 4px; }
+.mail-when { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mail-hint { margin: 0; color: var(--muted); font-size: 13px; text-align: center; }
+@media (max-width: 700px) {
+  .mail-lines a { grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-areas: "dot who when" ". what what" ". tags tags"; row-gap: 2px; }
+  .mail-dot { grid-area: dot; } .mail-who { grid-area: who; } .mail-what { grid-area: what; white-space: normal; }
+  .mail-tags { grid-area: tags; } .mail-when { grid-area: when; }
+}
+
+/* la liseuse : l'en-tête du message, ses actions, son texte */
+.mail-reader { display: grid; gap: 16px; }
+.mail-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--border); }
+.mail-reader-title { display: grid; gap: 6px; min-width: 0; }
+.mail-reader-title h2 { margin: 0; font-family: var(--now-serif); font-size: 1.35rem; font-weight: 600; overflow-wrap: anywhere; }
+.mail-reader-title .now-sub { margin: 0; }
+.mail-reader-links { display: flex; flex: none; align-items: center; gap: 14px; margin: 0; font-size: 13px; }
+.mail-close { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted);
+  text-decoration: none; }
+.mail-close:hover { background: var(--sunken); color: var(--text); }
+.hm-reading { padding: 4px 2px; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.hm-reading-mode { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.hm-reading .document-text { white-space: pre-wrap; }
+.mail-reader .now-card { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.mail-reader .now-card-head h2 { font-size: 1.05rem; }

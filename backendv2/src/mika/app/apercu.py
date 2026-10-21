@@ -115,7 +115,7 @@ class _Model(PersonaSimLLM):
 def _page(text: str, theme: str, depth: int) -> str:
     prefix = "../" * depth
     text = text.replace("/inspecteur/static/", f"{prefix}static/")
-    text = re.sub(r"<script[^>]*console\.js[^>]*></script>", "", text)
+    text = re.sub(r"<script[^>]*(?:console|live)\.js[^>]*></script>", "", text)  # une copie ne relit rien
     return text.replace('<html lang="fr">', f'<html lang="fr" data-theme="{theme}">', 1)
 
 
@@ -239,6 +239,7 @@ def export(out: Path) -> list[str]:
                 select(JournalEvent.seq).order_by(JournalEvent.seq)))
             urls += [f"/inspecteur/evenement/{seq}" for seq, in event_ids]
             urls.append("/inspecteur/decisions/envers?personne=adrien")
+            urls.append("/inspecteur/maintenant")  # elle, en ce moment : la page qui croise ses facultés
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/projets?vue_pg1=table", "/inspecteur/personnes?vue_pg1=table",
                      "/inspecteur/fil/messages?vue_pg1=table", "/inspecteur/projets?etat=archive",

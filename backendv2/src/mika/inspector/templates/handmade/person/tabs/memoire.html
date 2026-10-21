@@ -1,0 +1,8 @@
+{# L'onglet Mémoire, dessiné (app/handmade/person/memoire.py) : quatre cartes, les données de la faculté. #}
+{% from "handmade/shared/list_macros.html" import counts_line, entries %}
+<div class="now-page person-tab">
+  {{ counts_line(counts) }}
+  <div class="now-grid two person-lists">
+    {% for s in sections %}{{ entries(s, "aucun résultat pour cette recherche" if searched else "") }}{% endfor %}
+  </div>
+</div>

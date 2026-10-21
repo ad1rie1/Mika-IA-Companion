@@ -421,9 +421,11 @@ def filters_ctx(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[list[di
     return out, any(values[p.name] != defaults[p.name] for p in specs if p.kind != "hidden")
 
 
-def blocks(items: Sequence[Any], env: Env, query: Mapping[str, str]) -> list[dict[str, Any]]:
+def blocks(items: Sequence[Any], env: Env, query: Mapping[str, str], namespace: str = "pg") -> list[dict[str, Any]]:
+    """Des blocs rendus, leurs listes numérotées dans l'ordre (``namespace`` : le préfixe de leurs clés — une
+    fiche ouverte dans une page numérote les siennes à part)."""
     counter = [0]
-    rendered = [block(b, env, query, 0, counter) for b in items]
+    rendered = [block(b, env, query, 0, counter, namespace) for b in items]
     slots = [0]
 
     def unique_forms(nodes: Sequence[dict[str, Any]]) -> None:

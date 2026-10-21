@@ -11,7 +11,7 @@
     "idle_happy": {
       "url": "/animations/atelier/idle_happy.json.gz",
       "category": "idle",
-      "weight": 2,
+      "weight": 0,
       "hold": [7, 14],
       "valence": 0.7,
       "arousal": 0.2,
@@ -36,6 +36,13 @@
       "category": "idle",
       "weight": 0,
       "hold": [7, 12],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "waiting": {
+      "url": "/animations/atelier/waiting.json.gz",
+      "category": "idle",
+      "weight": 2,
+      "hold": [8, 14],
       "hands": ["relaxed", "relaxed"]
     },
     "talk_main": {

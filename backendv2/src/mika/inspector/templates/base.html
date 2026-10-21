@@ -7,7 +7,10 @@
 <meta name="color-scheme" content="light dark">
 <title>{{ title }} · Mika</title>
 <link rel="stylesheet" href="{{ PREFIX }}/static/console.css?v={{ ASSET_VERSION }}">
+{# le vocabulaire des pages dessinées (ADR 0121) : sur toute la console, ses classes ne touchent qu'elles #}
+<link rel="stylesheet" href="{{ PREFIX }}/static/handmade/base.css?v={{ ASSET_VERSION }}">
 <script src="{{ PREFIX }}/static/console.js?v={{ ASSET_VERSION }}"></script>
+{% block head %}{% endblock %}
 </head>
 <body{% if posted %} data-posted{% endif %}>
 <a class="skip-link" href="#contenu">Aller au contenu</a>

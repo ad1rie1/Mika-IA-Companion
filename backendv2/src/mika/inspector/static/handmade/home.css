@@ -1,0 +1,40 @@
+/* L'accueil (app/handmade/home.py) : les priorités, son état en bref, qui est là, sa journée. Le reste vient de
+   base.css et now.css. */
+
+/* ce qui t'attend : une ligne par priorité, sa valeur dans une pastille de son ton */
+.home-priorities { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.home-priorities > li > a, .home-priorities > li > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2);
+  color: var(--text); text-decoration: none; }
+.home-priorities > li > a:hover { border-color: color-mix(in srgb, var(--tone) 45%, var(--border)); }
+.home-priorities > li.st-warn { --tone: var(--warn); --tone-bg: var(--warn-bg); }
+.home-priorities > li.st-danger { --tone: var(--danger); --tone-bg: var(--danger-bg); }
+.home-priorities > li.st-info { --tone: var(--info); --tone-bg: var(--info-bg); }
+.home-priority-value { display: inline-grid; place-items: center; min-width: 44px; height: 36px; padding: 0 10px;
+  border-radius: 10px; background: var(--tone-bg, var(--sunken)); color: var(--tone, var(--text)); font-weight: 700; font-size: 15px; }
+.home-priority-text { display: grid; gap: 2px; min-width: 0; }
+.home-priority-text strong { font-size: 14px; font-weight: 600; }
+.home-priority-text span { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.home-priority-go { color: var(--muted); }
+
+/* elle, en bref */
+.home-her .now-word { margin-top: 0; }
+.home-her .now-facets { margin-top: 12px; }
+.home-body { margin-top: 16px; }
+.home-energy { display: flex; align-items: center; gap: 10px; }
+.home-energy .now-bar { flex: 1; max-width: 160px; }
+.home-needs { display: grid; gap: 6px; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); list-style: none; }
+.home-needs li { display: grid; grid-template-columns: 9em 1fr 3.4em; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
+.home-needs li .now-num { text-align: right; }
+.home-needs li.dominant > span:first-child { color: var(--text); font-weight: 600; }
+
+/* qui est là */
+.home-people { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.home-people li { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; }
+.home-people p { margin: 0; font-size: 13px; }
+.home-people p.home-person-name { font-weight: 600; font-size: 14px; }
+.home-people li:not(.online) .now-avatar { opacity: .75; }
+
+/* sa journée */
+.home-episodes { display: grid; gap: 8px; }
+.home-more { margin: 0; color: var(--muted); font-size: 13px; text-align: right; }

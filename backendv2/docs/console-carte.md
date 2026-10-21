@@ -501,6 +501,39 @@ Réglages, Système**. Sa rubrique porte son nom, lu dans sa persona au rendu
 existants, les fiches, les vues des facultés et les formulaires gardent leurs
 adresses. `InspectorDeps.menu` transmet cette présentation à l'inspecteur.
 
+**Personnes** (`/inspecteur/personnes`, ADR 0121) est une page dessinée : une
+carte par personne — ce qu'elle est pour elle, ce qu'elle ressent, ce qui se passe
+entre elles, ce qu'elle en sait —, qui est là, qui lui manque, une recherche et des
+filtres (proximité, en ligne) ; l'annuaire, les liens et les présents restent sous
+« Le détail ».
+
+Sa rubrique s'ouvre sur **En ce moment** (`/inspecteur/maintenant`, ADR 0121) : une
+page dessinée à la main, pas une vue déclarée, qui répond à « comment va-t-elle,
+et pourquoi ? » en croisant ses facultés — son humeur et le plan plaisir × éveil,
+ses 24 heures sur un seul axe, son corps, ses besoins, ses pensées, les gens, le
+fil de sa journée, ce qu'elle entreprend et la journée en chiffres. Chaque
+personne y mène à **sa fiche**, qui s'ouvre sur sa vue d'ensemble (premier
+onglet, ADR 0121) : ce qu'elle vit avec elle — son ressenti, leur histoire, ce
+qu'elle sait d'elle, ce qui reste en suspens, leurs derniers mots — ; les
+onglets des facultés suivent, dessinés eux aussi sur leurs données (Échanges en
+conversation, Mémoire en quatre cartes, les listes en cartes) ; ce que la vue
+d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé
+au bout de la barre, sous « Le détail ». L'en-tête est dessiné, ses actions
+restent celles de la console.
+
+Toute la console est dessinée de même (ADR 0121) : l'accueil (ce qui t'attend, une
+ligne par page où décider ; comment elle va ; qui est là ; la journée), les onglets
+des destinations sur les données de leur faculté (`app/handmade/pages.py::DRAWN` :
+des chiffres en tuiles, des faits en grille, des listes en cartes ou en lignes
+serrées, des tableaux sobres pour l'exploitation, les formulaires à leur place).
+Conversations › Messages est un fil jour par jour ; Système › Processus met d'abord
+ce qui échoue, Santé ses dix contrôles en tuiles ; le Courrier se lit comme une
+messagerie (une ligne par message, douze par page, le message ouvert dessous). Les
+fiches, les épisodes, « pourquoi a-t-elle dit ça ? » et les panneaux (réglages,
+comptes, demandes en attente) suivent le même vocabulaire. « Tableau »
+(`vue_…=table`) montre une liste en tableau sobre. Seules les vues de la Forge
+gardent le rendu de la console : ses apps déclarent leur interface par un contrat.
+
 Chaque entrée peut réunir plusieurs pages liées. La page la plus précise
 allume le bon lien : les dessins sont dans Activité, la caméra dans Outils,
 les brouillons et les identités à confirmer dans À valider. Les compteurs
@@ -565,7 +598,7 @@ catégories, descriptions courtes, recherche par plusieurs mots sans distinction
 d'accents. Les paramètres internes restent dans un panneau avancé, ouvert
 lorsqu'une recherche les trouve. Chaque lien mène au formulaire existant.
 Les entrées configurées (fournisseurs, boîtes, etc.) utilisent un gabarit de
-fiches séparé, `_settings_records.html`, avec leurs valeurs non secrètes,
+fiches séparé, `handmade/reglages/enregistrements.html`, avec leurs valeurs non secrètes,
 la modification et le retrait confirmé ; la pagination reste la même.
 
 Le courrier utilise une liste de lecture : objet, extrait, expéditeur, date

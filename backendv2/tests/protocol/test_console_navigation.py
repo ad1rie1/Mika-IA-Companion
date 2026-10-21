@@ -72,20 +72,21 @@ def test_login_has_a_main_heading(world):  # noqa: F811
 
 
 def test_people_view_switch_keeps_filter_and_subject_links(world):  # noqa: F811
+    # l'annuaire des identités, onglet de la destination Personnes (dont la page d'entrée est dessinée, ADR 0121)
     client, _, _ = world
     bootstrap(client)
-    cards = client.get('/inspecteur/personnes?q=adrien')
-    table = client.get('/inspecteur/personnes?q=adrien&vue_pg1=table')
+    cards = client.get('/inspecteur/personnes/personnes?q=adrien')
+    table = client.get('/inspecteur/personnes/personnes?q=adrien&vue_pg1=table')
     for response in (cards, table):
         assert response.status_code == 200
         ConsoleHTML(response.text).check()
         assert 'href="/inspecteur/fiche/person/user_1"' in response.text
-    assert 'class="collection cards"' in cards.text
-    assert 'class="collection cards"' not in table.text
+    assert 'class="now-card person-list' in cards.text  # l'onglet est dessiné (ADR 0121)
+    assert 'class="now-card person-list' not in table.text
     assert 'name="vue_pg1" value="table"' in table.text
     assert '?q=adrien' in table.text
-    empty = client.get('/inspecteur/personnes?q=personne-inconnue')
-    assert 'Aucun élément à afficher' in empty.text and 'personne-inconnue' in empty.text
+    empty = client.get('/inspecteur/personnes/personnes?q=personne-inconnue')
+    assert 'personne ne correspond à « personne-inconnue »' in empty.text  # le mot de la faculté
 
 
 def test_search_finds_settings_without_accents_and_preserves_subject_filter(world):  # noqa: F811

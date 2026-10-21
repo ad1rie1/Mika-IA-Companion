@@ -12,6 +12,7 @@ from starlette.requests import Request
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.names import KINDS, OUTCOMES
+from mika.inspector.pages.diagnostics import CHECKS
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, MINUTE, US
@@ -128,7 +129,7 @@ async def attention(ui: Any, request: Request) -> list[Any]:
         out.append(Stats(tuple(cards)))
     for c in report.checks:
         if c.state != health.OK:
-            out.append(Note(c.summary, "danger" if c.state == health.KO else "warn", title=f"Santé · {c.name}"))
+            out.append(Note(c.summary, "danger" if c.state == health.KO else "warn", title=f"Santé · {CHECKS.get(c.name, c.name)}"))
     if not cards and len(out) == 0:
         out.append(Note("Rien ne demande ton attention.", "ok", title="Tout va bien"))
     return out

@@ -1,0 +1,11 @@
+{# Les macros des pages dessinées à la main (app/handmade) : une jauge, des noms en liens, une carte dont la
+   lecture a échoué. Aucun style en ligne (CSP) : une longueur est un attribut SVG. #}
+{% macro bar(w, cls="") -%}
+<svg class="now-bar {{ cls }}" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% if w > 0 %}<line class="fill" x1="0" x2="{{ w }}" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% endif %}</svg>
+{%- endmacro %}
+{% macro people(list) -%}
+{% for p in list %}{% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}{{ ", " if not loop.last }}{% endfor %}
+{%- endmacro %}
+{% macro failed(what) -%}
+<p class="now-failed">Impossible de lire {{ what }} pour l'instant. <a href="{{ PREFIX }}/systeme/anomalies">Voir les anomalies</a></p>
+{%- endmacro %}

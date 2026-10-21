@@ -1,0 +1,68 @@
+/* Système, dessiné (app/handmade/system.py) : les états d'un processus, une barre, ce qui ne va pas, une carte par
+   faculté. Les couleurs viennent des jetons de la console. */
+.sys { --st-ko: var(--danger); --st-stumbling: var(--warn); --st-held: var(--warn); --st-running: var(--accent);
+  --st-ok: color-mix(in srgb, var(--ok) 70%, var(--muted)); --st-never: var(--border-strong); }
+.sys .st-ko { --st: var(--st-ko); } .sys .st-stumbling { --st: var(--st-stumbling); } .sys .st-held { --st: var(--st-held); }
+.sys .st-running { --st: var(--st-running); } .sys .st-ok { --st: var(--st-ok); } .sys .st-never { --st: var(--st-never); }
+
+.sys-summary { display: grid; gap: 12px; }
+.sys-summary-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.sys-total { margin: 0; color: var(--text-2); font-size: 14px; }
+.sys-total .now-num { margin-right: 4px; color: var(--text); font-family: var(--now-serif); font-size: 1.7rem; font-weight: 600; }
+.sys-bar { display: block; width: 100%; height: 10px; clip-path: inset(0 round 999px); background: var(--sunken); }
+.sys-bar rect { fill: var(--st); }
+.sys-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; color: var(--text-2); font-size: 13px; }
+.sys-legend .now-num { color: var(--text); font-weight: 600; }
+.sys-dot { display: inline-block; flex: none; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: var(--st); }
+.sys-dot.st-never { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.sys-dot.st-running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st) 25%, transparent); }
+
+.sys-fine { display: flex; align-items: center; margin: 0; padding: 12px 16px; border-radius: 14px; background: var(--ok-bg); color: var(--ok); font-size: 14px; }
+.sys-issues { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.sys-issues > li { display: grid; gap: 8px; padding: 14px 0 14px 14px; border-top: 1px solid var(--border); box-shadow: inset 3px 0 0 var(--st); }
+.sys-issues > li:first-child { border-top: 0; }
+.sys-issues code { font-size: 12px; }
+
+.sys-section { margin: 6px 0 12px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.sys-columns { columns: 3 290px; column-gap: var(--now-gap); }
+.sys-faculty { break-inside: avoid; margin-bottom: var(--now-gap); padding: 16px 18px; }
+.sys-faculty-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.sys-faculty-head h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.sys-faculty-head .now-muted { font-size: 12px; }
+.sys-warn { color: var(--warn); font-weight: 600; }
+.sys-procs { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-procs > li { display: flex; align-items: center; gap: 0 10px; padding: 5px 0; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-size: 13px; }
+.sys-procs > li:first-child { border-top: 0; }
+.sys-proc-name { flex: 1; min-width: 0; color: var(--text); }
+.sys-procs > li.st-never .sys-proc-name { color: var(--muted); }
+.sys-procs > li.st-ko .sys-proc-name { color: var(--danger); font-weight: 600; }
+.sys-proc-when { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* santé : le verdict, puis une tuile par contrôle */
+.sys .tone-ok { --st: var(--ok); } .sys .tone-warn { --st: var(--warn); } .sys .tone-danger { --st: var(--danger); }
+.sys-health { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 28px;
+  box-shadow: inset 4px 0 0 var(--st); }
+.sys-health-main { flex: 1 1 360px; display: grid; gap: 6px; }
+.sys-health-main h2 { margin: 0; color: color-mix(in srgb, var(--st) 80%, var(--text)); font-family: var(--now-serif);
+  font-size: 1.6rem; font-weight: 600; }
+.sys-health-main .now-sub { margin: 0; }
+.sys-health-stamp { margin: 0; color: var(--muted); font-size: 12.5px; }
+.sys-health-counts { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.sys-health-counts li { display: grid; gap: 2px; min-width: 96px; padding: 10px 14px; border-radius: 12px; background: var(--surface-2);
+  color: var(--muted); font-size: 12.5px; }
+.sys-health-counts .now-num { color: var(--text); font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; }
+.sys-health-counts li.warn .now-num { color: var(--warn); } .sys-health-counts li.danger .now-num { color: var(--danger); }
+.sys-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; gap: 12px;
+  margin: 0; padding: 0; list-style: none; }
+.sys-check { display: grid; align-content: start; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); box-shadow: inset 3px 0 0 var(--st); }
+.sys-check.tone-ok { box-shadow: none; }
+.sys-check.tone-ok .now-tag { display: none; }
+.sys-check-head { display: flex; align-items: center; gap: 8px; }
+.sys-check-head h3 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; }
+.sys-check-head .sys-dot { margin-right: 0; background: var(--st); }
+.sys-check-summary { margin: 0; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.sys-check-more { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; font-size: 12.5px; }
+.sys-check-more details { flex-basis: 100%; }
+.sys-check-more summary { cursor: pointer; color: var(--muted); }
+.sys-check-more .hm-error { margin-top: 8px; }

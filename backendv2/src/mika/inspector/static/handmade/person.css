@@ -1,0 +1,101 @@
+/* La fiche d'une personne (app/handmade/person, ADR 0121) : son en-tête, sa vue d'ensemble et ses onglets
+   dessinés, sur le vocabulaire commun (base.css). */
+
+/* ── L'en-tête, sur tous ses onglets : la console y ajoute ses actions ── */
+.fiche-head { align-items: center; gap: 18px 24px; margin-bottom: 22px; }
+.fiche-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.fiche-head-side .action-bar { margin: 0; }
+.person-head { display: flex; flex: 1 1 520px; align-items: center; gap: 22px; min-width: 0; }
+.person-avatar { position: relative; display: grid; flex: none; place-items: center; width: 84px; height: 84px;
+  border: 2px solid color-mix(in srgb, var(--sw) 50%, transparent); border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--sw) 26%, var(--surface)),
+                              color-mix(in srgb, var(--sw) 12%, var(--surface)));
+  color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--now-serif); font-size: 38px;
+  font-weight: 600; }
+.person-avatar .now-presence { right: 3px; bottom: 3px; width: 18px; height: 18px; border-width: 3px; }
+.person-avatar .now-presence.typing { background: var(--accent); animation: now-typing 1.1s ease-in-out infinite; }
+.person-head-text { display: grid; gap: 6px; min-width: 0; }
+.person-head-text h1 { font-family: var(--now-serif); font-size: clamp(2rem, 3vw, 2.7rem); font-weight: 600; letter-spacing: -.015em; line-height: 1.05; }
+.person-head-facts { margin: 0; color: var(--text-2); font-size: 13.5px; }
+.person-head-links { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: var(--muted); font-size: 13px; }
+
+/* ── La vue d'ensemble (son premier onglet) ───────────────────────────── */
+.person-live { position: absolute; top: 16px; right: 18px; padding: 3px 10px; font-size: 11.5px; }
+.person-hero { grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: start; }
+.person-bond { display: grid; gap: 12px; padding-left: 28px; border-left: 1px solid var(--border); }
+.person-facts { margin: 0; color: var(--text-2); font-size: 13px; }
+.person-hard { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn);
+  font-size: 13px; }
+.person-word { font-size: clamp(2.2rem, 4vw, 3.2rem); }
+.person-meters { display: grid; gap: 0; }
+.person-meters .now-meter { margin-top: 10px; }
+.person-note { margin: 6px 0 0; font-size: 12px; }
+
+/* Leur histoire : six mois de jours, et les heures où la personne écrit (des pixels : rien ne s'étire). */
+.person-story { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 20px 44px; }
+.person-calendar { min-width: 0; margin: 0; }
+.person-calendar-wrap { overflow-x: auto; }
+.person-calendar svg { display: block; overflow: visible; }
+.cal { fill: var(--sunken); }
+.cal.l1, .cal.l2, .cal.l3, .cal.l4 { fill: var(--sw, var(--accent)); }
+.cal.l1 { fill-opacity: .38; } .cal.l2 { fill-opacity: .58; } .cal.l3 { fill-opacity: .8; } .cal.l4 { fill-opacity: 1; }
+.cal.today { stroke: var(--text); stroke-width: 1.5; }
+.cal-month { fill: var(--muted); font: 11px var(--font); }
+.cal-weekday { fill: var(--muted); font: 10px var(--font); }
+.cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+.cal-legend span:first-child { margin-right: 4px; }
+.cal-legend span:last-child { margin-left: 4px; }
+.cal-key { width: 11px; height: 11px; border-radius: 3px; background: var(--accent); }
+.cal-key.l1 { opacity: .38; } .cal-key.l2 { opacity: .58; } .cal-key.l3 { opacity: .8; }
+.person-rhythm .now-subhead:first-child { margin-top: 0; }
+.person-hours { display: block; max-width: 100%; height: auto; overflow: visible; }
+.hour { fill: var(--border-strong); }
+.hour.usual { fill: var(--accent); }
+.hour-mark { fill: var(--muted); font: 10px var(--font); }
+.person-lines { margin-top: 14px; }
+.person-steps { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.person-steps time { margin-right: 6px; color: var(--muted); font-size: 12px; }
+
+/* Ce qu'elle sait, ce qu'elle lit, ce qui reste en suspens. */
+.person-life, .person-known, .person-pending, .person-circle { margin: 0; padding: 0; list-style: none; }
+.person-life { display: grid; gap: 12px; }
+.person-life li { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 12px; }
+.person-life time { color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.person-life li.past time { color: var(--muted); }
+.person-life li.ongoing time { color: var(--warn); }
+.person-life p, .person-known p, .person-pending p { margin: 0; }
+.person-self { margin: 0; font-family: var(--now-serif); font-size: 15px; font-style: italic; line-height: 1.5; }
+.person-known { display: grid; gap: 10px; }
+.person-known li { padding-bottom: 10px; border-bottom: 1px dashed var(--border); }
+.person-known li:last-child { padding-bottom: 0; border-bottom: 0; }
+.person-known.lies li > p:first-child { color: var(--danger); }
+.person-belief { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 3px; }
+.person-belief .person-meta { margin: 0; }
+.person-confidence { display: grid; flex: none; grid-template-columns: 70px auto; align-items: center; gap: 8px;
+  color: var(--muted); font-size: 12px; }
+.person-facet { margin-right: 10px; white-space: nowrap; }
+.person-pending { display: grid; gap: 10px; }
+.person-pending li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 10px; }
+.person-pending li.tone-warn > div > p:first-child { color: var(--warn); }
+.person-pending li.tone-danger > div > p:first-child { color: var(--danger); }
+.person-pending li.tone-ok > div > p:first-child { color: var(--ok); }
+.person-pending li.tone-thought > div > p:first-child { font-family: var(--now-serif); font-style: italic; }
+.person-circle { display: grid; gap: 7px; }
+
+/* ── Écrans plus étroits ──────────────────────────────────────────────── */
+@media (max-width: 1000px) {
+  .person-story { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+  .person-bond { padding: 18px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+  .person-head { gap: 14px; }
+  .person-avatar { width: 60px; height: 60px; font-size: 27px; }
+  .fiche-head-side { justify-content: flex-start; }
+  .person-head-links { flex-direction: column; }
+  .person-head-links span[aria-hidden] { display: none; }
+  .person-live { position: static; justify-self: start; }
+  .person-life li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .person-avatar .now-presence.typing { animation: none; }
+}

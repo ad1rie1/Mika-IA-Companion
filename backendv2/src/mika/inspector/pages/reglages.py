@@ -289,7 +289,7 @@ async def faculty_page(ui: Any, request: Request, owner: str, state: Mapping[str
             items.append({"field": view, "label": f.label, "help": f.help, "value": _value(f, flat.get(f.path)),
                           **meta})
         views.append({"title": title, "items": items})
-    panel = Panel("params_form.html", {
+    panel = Panel("handmade/reglages/parametres.html", {
         "owner": owner, "label": _label_of(ui, owner), "groups": views, "panel_messages": state.get("messages") or [],
         "action": faculty_url(owner), "group": _slug(shown[0][0]) if not one_page else "",
         "overridden": sorted(overrides), "panel_after": True,

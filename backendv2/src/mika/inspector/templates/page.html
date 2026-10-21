@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 {% from "_blocks.html" import render %}
+{# les blocs d'une page dans le vocabulaire des pages dessinées (ADR 0121) ; ``console_blocks`` : le rendu de la
+   console (une vue dont l'interface est un contrat) #}
+{% from "handmade/shared/drawn.html" import one with context %}
 {% from "_forms.html" import action_form, action_button %}
 {% from "_cells.html" import cell %}
 {% from "_navigation.html" import filters_form %}
-{% macro head_and_body() %}
-{% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}
-<div class="page-head">
-  <div class="page-title">
-    {% if eyebrow %}<span class="eyebrow">{{ eyebrow }}</span>{% endif %}
-    <h1>{{ heading or title }}</h1>
-    {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
-    {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
-    {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
-  </div>
+{# Une fiche dont la composition dessine l'en-tête ou la vue d'ensemble (ADR 0121) : les feuilles et les scripts
+   qu'elle déclare (Overview.styles, Overview.scripts). #}
+{% block head %}
+{% for s in fiche_styles or [] %}<link rel="stylesheet" href="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}">
+{% endfor %}{% for s in fiche_scripts or [] %}<script src="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}" defer></script>
+{% endfor %}{% endblock %}
+{% macro head_side() %}
 {% if head_actions %}
 <div class="action-bar" role="group" aria-label="Actions">
   {% for a in head_actions if not a.danger %}
@@ -22,16 +22,41 @@
 </div>
 {% endif %}
 {% if gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
+{% endmacro %}
+{% macro head_and_body() %}
+{% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}
+{% if fiche_head %}
+<div class="page-head fiche-head">{{ fiche_head }}<div class="fiche-head-side">{{ head_side() }}</div></div>
+{% else %}
+<div class="page-head">
+  <div class="page-title">
+    {% if eyebrow %}<span class="eyebrow">{{ eyebrow }}</span>{% endif %}
+    <h1>{{ heading or title }}</h1>
+    {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
+    {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
+    {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
+  </div>
+{{ head_side() }}
 </div>
+{% endif %}
 {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
 {% if view_description %}<p class="view-description">{{ view_description }}</p>{% endif %}
-{% if tabs and tabs|length > 1 %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
+{% if tabs_more %}
+{# des onglets rangés au bout de la barre (ce qu'une vue d'ensemble résume) : hors de la barre qui défile #}
+{% set folded_on = tabs_more|selectattr('on')|list %}
+<div class="tabs-row">
+<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>
+<details class="tabs-more{{ ' on' if folded_on }}"><summary class="tab{{ ' on' if folded_on }}">{{ tabs_more_title }}{% if folded_on %} · {{ folded_on[0].title }}{% endif %} <span aria-hidden="true">▾</span></summary><nav class="tabs-more-panel" aria-label="{{ tabs_more_title }}">{% for t in tabs_more %}<a class="{{ 'on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}</a>{% endfor %}</nav></details>
+</div>
+{% elif tabs and tabs|length > 1 %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
 {{ filters_form(filters or [], keep or [], filtered, reset) }}
 {% if panel and not panel_after and not panel_after_blocks %}{% include panel %}{% endif %}
 <div class="stack">
-{% for b in blocks or [] %}{{ render([b], forms or {}) }}{% if panel and panel_after_blocks == loop.index %}{% include panel %}{% endif %}{% endfor %}
+{% if overview and not overview_last %}{{ overview }}{% endif %}
+{% for b in blocks or [] %}{% if console_blocks %}{{ render([b], forms or {}) }}{% else %}{{ one(b) }}{% endif %}{% if panel and panel_after_blocks == loop.index %}{% include panel %}{% endif %}{% endfor %}
 {% if panel and panel_after %}{% include panel %}{% endif %}
-{% if not blocks and not panel %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
+{% if overview and overview_last %}{{ overview }}{% endif %}
+{% if not blocks and not panel and not overview %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
 </div>
 {% endmacro %}
 {% block content %}

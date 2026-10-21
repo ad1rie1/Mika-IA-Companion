@@ -1,0 +1,21 @@
+{# Conversations › Ses réponses jugées, dessinées (app/handmade/conversations.py) : pour chaque réponse jugée, le
+   message reçu, sa réponse, ton avis et ce qu'elle aurait dû dire. #}
+{% from "_cells.html" import cell %}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page person-tab">
+  {% if verdicts %}
+  <ul class="judged-list">
+    {% for v in verdicts %}
+    <li class="now-card judged {{ 'ok' if v.ok else 'ko' }}">
+      <p class="judged-head"><span class="now-tag {{ 'ok' if v.ok else 'warn' }}">{{ v.verdict }}</span>{% if v.who %} {{ cell(v.who) }}{% endif %}<span class="now-muted"> · {{ v.when }}</span>{% if v.why %} · <a href="{{ v.why }}">pourquoi ?</a>{% endif %}</p>
+      <ol class="person-thread">
+        {% if v.asked %}<li class="theirs"><p class="person-bubble">{{ v.asked }}</p></li>{% endif %}
+        <li class="mine"><p class="person-bubble">{{ v.said }}</p></li>
+      </ol>
+      {% if v.should %}<div class="judged-should"><p class="now-eyebrow">Ce qu'elle aurait dû dire</p><p>{{ v.should }}</p></div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if pager and (pager.prev or pager.next or pager.older or pager.newer) %}{{ pages(pager) }}{% endif %}
+  {% else %}<p class="now-empty">{{ empty }}{{ '' if (empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+</div>

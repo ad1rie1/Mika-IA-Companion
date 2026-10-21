@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -28,7 +28,7 @@ from mika.inspector.pages.journal import (
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.why import silence_page, why_page
-from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
+from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, Forms, secure, wants_table
 from mika.kernel.faculty import InspectSpec
 from mika.kernel.forms import RENDERED, describe
 from mika.kernel.inspect import (
@@ -42,6 +42,7 @@ from mika.kernel.inspect import (
     walk_blocks,
 )
 from mika.ports.journal import JournalEvent
+from mika.runtime.boundary import Failed, call
 from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
@@ -208,7 +209,7 @@ class Pages:
         crumbs = ([(home.label, dest_url(home.key))] if home else []) + [("Retour", back)]
         return self.render_page(request, title=spec.title, heading=spec.title, subtitle=spec.description,
                                 active=home.key if home else "", crumbs=crumbs, blocks=[],
-                                panel=Panel("_action_page.html", {"form": form}))
+                                panel=Panel("handmade/shared/action.html", {"form": form}))
 
     def render_page(self, request: Request, *, title: str, active: str, blocks: Sequence[Any],
                     filters: Sequence[Param] = (), panel: Panel | None = None, keep: Sequence[tuple[str, str]] = (),
@@ -257,18 +258,16 @@ class Pages:
                                     blocks=[Note("Cette page n'existe pas.", "warn")])
         tabs = self.tabs_of(d)
         if d.layout == "stack":
+            if request.path_params.get("tab") or tab:  # un onglet d'une page empilée : la page entière
+                return RedirectResponse(dest_url(d.key), status_code=303)
             blocks: list[Any] = []
-            slots: dict[str, int] = {}  # l'onglet → sa section : l'accueil les place par nom, pas par rang
-            for slug, title, item in tabs:
+            for _slug, title, item in tabs:
                 got = await self.produce(item, request)
                 if "response" in got:
                     continue
-                slots[slug] = len(blocks)
                 blocks.append(Section(title, tuple(got["blocks"]),
                                       item.description if isinstance(item, Builtin) else ""))
             return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description,
-                                    template="home.html" if d.key == "accueil" else "page.html",
-                                    snapshot=self.ui.when_long(self.ui.now()), slots=slots,
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [])
         slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
         current = next((t for t in tabs if t[0] == slug), None)
@@ -280,6 +279,9 @@ class Pages:
         got = produced if produced is not None else await self.produce(item, request)
         if "response" in got:
             return got["response"]
+        drawn = self.drawn(request, f"{d.key}/{slug}", got) if produced is None else {}
+        if drawn:
+            got = {**got, "blocks": drawn.pop("blocks"), **({} if drawn.pop("panel") else {"panel": None})}
         tab_list = [{"title": t, "href": (b.href if isinstance(b, Builtin) and b.href else f"{dest_url(d.key)}/{s}"
                                           if d.key != "accueil" else f"{PREFIX}/accueil/{s}"),
                      "on": s == slug, "badge": self.tab_badge(b),
@@ -308,17 +310,41 @@ class Pages:
             related = [t for t in tab_list if t["href"].removeprefix(PREFIX + "/") in family]
             return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
                                     subtitle=description or "", submenu=submenu, tabs=related, blocks=got["blocks"],
+                                    console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
                                 eyebrow=d.label if current[1] != d.label else "",
                                 subtitle=item.description or d.description, tabs=tab_list, blocks=got["blocks"],
+                                console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                 head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                 filters=got.get("filters") or (), panel=got.get("panel"),
                                 messages=got.get("messages") or [],
                                 crumbs=got.get("crumbs") or [],
                                 status=status)
+
+    def drawn(self, request: Request, where: str, got: Mapping[str, Any]) -> dict[str, Any]:
+        """Un onglet que la composition dessine (ADR 0121) : son HTML, ses feuilles, et les blocs que la console
+        rend encore (ses formulaires) ; rien s'il ne l'est pas, ou si son dessin échoue (ses blocs, alors)."""
+        known = self.ui.deps.drawn
+        # « destination/préfixe-* » : tous les onglets qui commencent ainsi (les pages de réglages d'une faculté)
+        drawn = known.get(where) or next((v for k, v in known.items() if k.endswith("*") and where.startswith(k[:-1])),
+                                         None)
+        if drawn is None or "blocks" not in got or wants_table(request.query_params):
+            return {}
+        blocks, query = list(got["blocks"]), dict(request.query_params)
+        forms = Forms(self.slot_forms(request, render.blocks(blocks, self.ui.env(), query), ""),
+                      lambda rendered, subject: self.slot_forms(request, rendered, subject))
+        out = call(drawn.render, self.ui, blocks, query, forms, label=f"onglet dessiné {where}")
+        if isinstance(out, tuple):
+            html, rest = out[0], list(out[1])
+        elif out is None or isinstance(out, Failed):
+            return {}
+        else:
+            html, rest = out, []
+        return {"blocks": rest, "panel": drawn.panel, "overview": html, "overview_last": drawn.last,
+                "fiche_styles": drawn.styles, "fiche_scripts": drawn.scripts}
 
     async def view(self, request: Request) -> Response:
         owner, name = request.path_params["owner"], request.path_params["name"]
@@ -335,7 +361,8 @@ class Pages:
         crumbs = [(d.label, dest_url(d.key))] if d else [("Toutes les vues", f"{PREFIX}/systeme/vues")]
         blocks = await self.ui.inspection.arun(spec, request.query_params, self.ui.when_long)
         return self.render_page(request, title=spec.title, active=d.key if d else "systeme", crumbs=crumbs,
-                                blocks=blocks, filters=spec.typed, subtitle=spec.description)
+                                blocks=blocks, filters=spec.typed, subtitle=spec.description,
+                                console_blocks=spec.owner in self.ui.deps.plain_owners)
 
     # ── épisode, événement ──
     async def episode(self, request: Request) -> Response:
@@ -536,7 +563,7 @@ class Pages:
                                values=values, errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
             return self.render_page(request, title=spec.title, active="", status=400, crumbs=[("Retour", back)],
                                     blocks=[], head_actions=[], messages=[("danger", outcome.message)],
-                                    panel=Panel("_action_page.html", {"form": form}))
+                                    panel=Panel("handmade/shared/action.html", {"form": form}))
         if outcome.show:
             return self.render_page(request, title=spec.title, active="", crumbs=[("Retour", back)],
                                     blocks=list(outcome.show), messages=[(outcome.tone, outcome.message)])

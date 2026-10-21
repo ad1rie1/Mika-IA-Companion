@@ -1,0 +1,23 @@
+{# Réglages › Tous les réglages (pages/reglages.py), dans le vocabulaire des pages dessinées (ADR 0121) : une carte par
+   rubrique, une ligne par page — son nom, ce qu'on y règle ; les paramètres avancés repliés. #}
+{% macro category(g) -%}
+<section class="now-card hm-dir-group" id="{{ g.id }}" aria-labelledby="{{ g.id }}-titre">
+  <header class="now-card-head"><h2 id="{{ g.id }}-titre">{{ g.title }}</h2><span class="person-count now-num" title="{{ g['items']|length }} {{ 'page' if g['items']|length == 1 else 'pages' }}">{{ g['items']|length }}</span></header>
+  <ul class="hm-dir-links">{% for item in g['items'] %}<li><a href="{{ item.href }}"><span class="hm-dir-title">{{ item.title }}</span>{% if item.description %}<span class="hm-dir-desc">{{ item.description }}</span>{% endif %}<span class="hm-dir-go" aria-hidden="true">→</span></a></li>{% endfor %}</ul>
+</section>
+{%- endmacro %}
+<div class="settings-directory stack">
+  <div class="hm-dir-summary">
+    <p class="now-muted" role="status">{{ settings_count }} {{ 'résultats' if settings_search else 'pages de réglages' }}{% if settings_search %} sur {{ settings_total }}{% endif %}</p>
+    {% if settings_groups %}<nav class="hm-chips" aria-label="Catégories de réglages">{% for g in settings_groups if not g.advanced %}<a class="hm-chip" href="#{{ g.id }}">{{ g.title }}</a>{% endfor %}{% if settings_groups|selectattr('advanced')|list %}<a class="hm-chip" href="#reglages-avances">Paramètres avancés</a>{% endif %}</nav>{% endif %}
+  </div>
+  {% if settings_groups %}
+  <div class="hm-dir-groups">{% for g in settings_groups if not g.advanced %}{{ category(g) }}{% endfor %}</div>
+  {% if settings_groups|selectattr('advanced')|list %}
+  <details class="now-card person-fold hm-dir-advanced" id="reglages-avances"{{ ' open' if settings_search }}>
+    <summary>Paramètres avancés <span class="now-muted">— affiner le comportement de chaque faculté et comprendre l'origine des valeurs</span></summary>
+    <div class="hm-dir-groups">{% for g in settings_groups if g.advanced %}{{ category(g) }}{% endfor %}</div>
+  </details>
+  {% endif %}
+  {% else %}<p class="hm-calm hm-quiet"><b>Aucun réglage ne correspond.</b> Essaie un terme plus court ou réinitialise la recherche.</p>{% endif %}
+</div>

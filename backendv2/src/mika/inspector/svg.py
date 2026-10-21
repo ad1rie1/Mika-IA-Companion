@@ -4,6 +4,12 @@ feuille de style (classes ``s1``…``s4``), jamais d'un attribut ``style``.
 
 Une échelle par graphe ; une info-bulle sans JavaScript (``<title>`` sur une
 zone par instant) ; une coupure de la ligne quand les mesures manquent.
+
+Une courbe a une hauteur fixe et suit la largeur de la page : son tracé s'étire
+en largeur seulement (``preserveAspectRatio="none"``, des traits d'épaisseur
+constante), et ses graduations, sa légende et ses points vivent hors de
+l'étirement (en pixels, ou placés en pourcentage). Leur taille ne dépend jamais
+de la largeur de l'écran — une courbe pleine page n'est plus une affiche.
 """
 
 from __future__ import annotations
@@ -15,8 +21,11 @@ from markupsafe import Markup, escape
 
 from mika.kernel.inspect import Chart, money_fr, num_fr, pct_fr
 
-W, H = 960, 240
-LEFT, RIGHT, TOP, BOTTOM = 52, 16, 30, 28
+#: le tracé : une largeur en unités (étirée), une hauteur en pixels, une marge en haut et en bas (un point au bord
+#: reste entier)
+W, H, PAD = 1000, 180, 10
+#: les graduations : la colonne des valeurs, la ligne des instants (en pixels)
+AXIS_W, AXIS_H = 56, 22
 SPARK_W, SPARK_H = 120, 30
 MAX_STAMPS = 240
 
@@ -76,6 +85,30 @@ def _segments(points: list[tuple[int, float]]) -> list[list[tuple[int, float]]]:
     return out
 
 
+def _spark(chart: Chart, series: list, x0: int, x1: int, y0: float, y1: float) -> Markup:
+    """Une petite tendance (une carte de chiffres) : sans graduation, étirée dans sa case."""
+
+    def x(at: int) -> float:
+        return 1 + (at - x0) / (x1 - x0) * (SPARK_W - 2)
+
+    def y(v: float) -> float:
+        v = min(max(v, y0), y1)
+        return 2 + (1 - (v - y0) / (y1 - y0)) * (SPARK_H - 4)
+
+    parts = [f'<svg class="chart chart-spark" viewBox="0 0 {SPARK_W} {SPARK_H}" role="img" '
+             f'aria-label="{escape(chart.title or "courbe")}" preserveAspectRatio="none">']
+    for i, s in enumerate(series):
+        slot = s.slot or i + 1
+        pts = sorted(s.points)
+        for seg in _segments(pts):
+            d = " ".join(f"{'M' if j == 0 else 'L'}{x(at):.1f},{y(v):.1f}" for j, (at, v) in enumerate(seg))
+            parts.append(f'<path class="line s{slot}" d="{d}"/>')
+        last_at, last_v = pts[-1]
+        parts.append(f'<circle class="dot s{slot}" cx="{x(last_at):.1f}" cy="{y(last_v):.1f}" r="2.5"/>')
+    parts.append("</svg>")
+    return Markup("".join(parts))
+
+
 def chart_svg(chart: Chart, when: Callable[[int], str], stamp: Callable[[int, int], str] | None = None) -> Markup:
     """``when`` : l'instant complet (info-bulles) ; ``stamp(instant, étendue)`` : une
     graduation courte (l'heure sur un jour, la date sur des semaines)."""
@@ -83,80 +116,78 @@ def chart_svg(chart: Chart, when: Callable[[int], str], stamp: Callable[[int, in
     if not series:
         return Markup("")
     x0, x1, y0, y1 = _bounds(chart)
-    spark = chart.kind == "spark"
-    w, h = (SPARK_W, SPARK_H) if spark else (W, H)
-    left, right, top, bottom = (1, 1, 2, 2) if spark else (LEFT, RIGHT, TOP, BOTTOM)
+    if chart.kind == "spark":
+        return _spark(chart, series, x0, x1, y0, y1)
+
+    def part(at: int) -> float:
+        return (at - x0) / (x1 - x0)
 
     def x(at: int) -> float:
-        return left + (at - x0) / (x1 - x0) * (w - left - right)
+        return part(at) * W
 
     def y(v: float) -> float:
         v = min(max(v, y0), y1)
-        return top + (1 - (v - y0) / (y1 - y0)) * (h - top - bottom)
+        return PAD + (1 - (v - y0) / (y1 - y0)) * (H - 2 * PAD)
 
     title = escape(chart.title or "courbe")
-    parts = [f'<svg class="chart chart-{escape(chart.kind)}" viewBox="0 0 {w} {h}" role="img" '
-             f'aria-label="{title}"' + (' preserveAspectRatio="none"' if spark else "") + ">"]
     short = stamp or (lambda at, span: when(at))
     ticks = 5
-    if not spark and all(float(v).is_integer() for s in series for _, v in s.points) and 0 < y1 - y0 <= 8:
+    if all(float(v).is_integer() for s in series for _, v in s.points) and 0 < y1 - y0 <= 8:
         ticks = int(y1 - y0) + 1
-    if not spark:
-        for i in range(ticks):
-            v = y0 + (y1 - y0) * i / max(1, ticks - 1)
-            yy = y(v)
-            parts.append(f'<line class="grid" x1="{left}" x2="{w - right}" y1="{yy:.1f}" y2="{yy:.1f}"/>')
-            parts.append(f'<text class="tick" x="{left - 6}" y="{yy + 3:.1f}" text-anchor="end">'
-                         f'{escape(_fmt(v, chart.unit))}</text>')
-        stamps_all = sorted({at for s in series for at, _ in s.points})
-        marks = stamps_all if (chart.kind == "bars" and len(stamps_all) <= 8 or
-                               len(stamps_all) == 1 and chart.since is None and chart.until is None) else \
-            [int(x0 + (x1 - x0) * i / 3) for i in range(4)]
-        for i, at in enumerate(marks):
-            anchor = "middle" if chart.kind == "bars" else "start" if i == 0 else "end" if i == len(marks) - 1 \
-                else "middle"
-            parts.append(f'<text class="tick" x="{x(at):.1f}" y="{h - 8}" text-anchor="{anchor}">'
-                         f'{escape(short(at, x1 - x0))}</text>')
-        if chart.zero is not None and y0 < chart.zero < y1:
-            parts.append(f'<line class="zero" x1="{left}" x2="{w - right}" y1="{y(chart.zero):.1f}" '
-                         f'y2="{y(chart.zero):.1f}"/>')
+    plot = [f'<svg class="chart-plot chart-{escape(chart.kind)}" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
+            f'width="100%" height="{H}" role="img" aria-label="{title}">']
+    yaxis = [f'<svg class="chart-yaxis" width="{AXIS_W}" height="{H}" aria-hidden="true">']
+    for i in range(ticks):
+        v = y0 + (y1 - y0) * i / max(1, ticks - 1)
+        yy = y(v)
+        plot.append(f'<line class="grid" x1="0" x2="{W}" y1="{yy:.1f}" y2="{yy:.1f}"/>')
+        yaxis.append(f'<text class="tick" x="{AXIS_W - 10}" y="{yy + 4:.1f}" text-anchor="end">'
+                     f'{escape(_fmt(v, chart.unit))}</text>')
+    yaxis.append("</svg>")
+    if chart.zero is not None and y0 < chart.zero < y1:
+        plot.append(f'<line class="zero" x1="0" x2="{W}" y1="{y(chart.zero):.1f}" y2="{y(chart.zero):.1f}"/>')
     for i, s in enumerate(series):
         slot = s.slot or i + 1
         pts = sorted(s.points)
         if chart.kind == "bars":
-            n = max(1, len(pts))
-            bw = max(2.0, min(24.0, (w - left - right) / n * 0.7))
+            bw = max(2.0, min(40.0, W / max(1, len(pts)) * 0.7))
             base = y(max(y0, 0.0) if y0 <= 0 <= y1 else y0)
             for at, v in pts:
                 top_y = y(v)
-                parts.append(f'<rect class="bar s{slot}" x="{x(at) - bw / 2:.1f}" y="{min(top_y, base):.1f}" '
-                             f'width="{bw:.1f}" height="{abs(base - top_y):.1f}" rx="2"/>')
+                plot.append(f'<rect class="bar s{slot}" x="{x(at) - bw / 2:.1f}" y="{min(top_y, base):.1f}" '
+                            f'width="{bw:.1f}" height="{abs(base - top_y):.1f}"/>')
             continue
         for seg in _segments(pts):
             d = " ".join(f"{'M' if j == 0 else 'L'}{x(at):.1f},{y(v):.1f}" for j, (at, v) in enumerate(seg))
-            parts.append(f'<path class="line s{slot}" d="{d}"/>')
+            plot.append(f'<path class="line s{slot}" d="{d}"/>')
         last_at, last_v = pts[-1]
-        parts.append(f'<circle class="dot s{slot}" cx="{x(last_at):.1f}" cy="{y(last_v):.1f}" '
-                     f'r="{2.5 if spark else 4}"/>')
-    if not spark:
-        if len(series) > 1:
-            lx = left
-            for i, s in enumerate(series):
-                slot = s.slot or i + 1
-                parts.append(f'<line class="line s{slot}" x1="{lx}" x2="{lx + 14}" y1="10" y2="10"/>')
-                label = escape(s.label)
-                parts.append(f'<text class="legend" x="{lx + 18}" y="14">{label}</text>')
-                lx += 26 + 7 * len(s.label)
-        stamps = sorted({at for s in series for at, _ in s.points})
-        if len(stamps) <= MAX_STAMPS:
-            by = [dict(s.points) for s in series]
-            for j, at in enumerate(stamps):
-                lo = x(stamps[j - 1]) if j else left
-                hi = x(stamps[j + 1]) if j + 1 < len(stamps) else w - right
-                a, b = (lo + x(at)) / 2 if j else left, (x(at) + hi) / 2 if j + 1 < len(stamps) else w - right
-                values = " · ".join(f"{s.label} {_fmt(d[at], chart.unit)}" for s, d in zip(series, by, strict=True)
-                                    if at in d)
-                parts.append(f'<rect class="hit" x="{a:.1f}" y="{top}" width="{max(1.0, b - a):.1f}" '
-                             f'height="{h - top - bottom}"><title>{escape(when(at))} — {escape(values)}</title></rect>')
-    parts.append("</svg>")
-    return Markup("".join(parts))
+        # un point : un trait nul aux bouts ronds, d'épaisseur constante — il reste rond quand le tracé s'étire
+        plot.append(f'<path class="dot s{slot}" d="M{x(last_at):.1f},{y(last_v):.1f}h0.01"/>')
+    stamps = sorted({at for s in series for at, _ in s.points})
+    if len(stamps) <= MAX_STAMPS:
+        by = [dict(s.points) for s in series]
+        for j, at in enumerate(stamps):
+            a = (x(stamps[j - 1]) + x(at)) / 2 if j else 0.0
+            b = (x(at) + x(stamps[j + 1])) / 2 if j + 1 < len(stamps) else float(W)
+            values = " · ".join(f"{s.label} {_fmt(d[at], chart.unit)}" for s, d in zip(series, by, strict=True)
+                                if at in d)
+            plot.append(f'<rect class="hit" x="{a:.1f}" y="0" width="{max(0.5, b - a):.1f}" height="{H}">'
+                        f'<title>{escape(when(at))} — {escape(values)}</title></rect>')
+    plot.append("</svg>")
+    marks = stamps if (chart.kind == "bars" and len(stamps) <= 8 or
+                       len(stamps) == 1 and chart.since is None and chart.until is None) else \
+        [int(x0 + (x1 - x0) * i / 3) for i in range(4)]
+    xaxis = [f'<svg class="chart-xaxis" width="100%" height="{AXIS_H}" aria-hidden="true">']
+    for i, at in enumerate(marks):
+        pct = part(at) * 100
+        anchor = "middle" if chart.kind == "bars" or 0 < i < len(marks) - 1 else "start" if i == 0 else "end"
+        xaxis.append(f'<text class="tick" x="{pct:.2f}%" y="15" text-anchor="{anchor}">'
+                     f'{escape(short(at, x1 - x0))}</text>')
+    xaxis.append("</svg>")
+    legend = ""
+    if len(series) > 1:
+        legend = '<ul class="chart-legend">' + "".join(
+            f'<li><span class="chart-key s{s.slot or i + 1}"></span>{escape(s.label)}</li>'
+            for i, s in enumerate(series)) + "</ul>"
+    return Markup(f'<div class="chart-frame">{legend}<div class="chart-body">{"".join(yaxis)}{"".join(plot)}'
+                  f'<span></span>{"".join(xaxis)}</div></div>')

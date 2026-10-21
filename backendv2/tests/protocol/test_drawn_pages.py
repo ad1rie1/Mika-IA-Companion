@@ -1,0 +1,80 @@
+"""Les onglets des destinations dessinés (``app/handmade/pages.py``, ADR 0121), à travers le vrai serveur : chacun
+garde les données et les filtres de sa faculté, sous une autre forme ; demandée en tableau, la liste revient à la
+console ; un dessin qui échoue rend la main aux blocs."""
+
+from __future__ import annotations
+
+import html
+
+import pytest
+
+from mika.app.handmade import pages
+from tests.fixtures.console_html import ConsoleHTML
+from tests.protocol.test_now_page import chat
+from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
+
+
+def drawn(client, url: str) -> str:
+    page = client.get(url)
+    assert page.status_code == 200, url
+    ConsoleHTML(page.text).check()
+    return html.unescape(page.text)
+
+
+def test_conversations_are_drawn(world):  # noqa: F811
+    client, _, _ = world
+    bootstrap(client)
+    chat(client, "salut ! je reviens d'un concert")
+    messages = drawn(client, "/inspecteur/fil/messages")
+    assert 'class="now-card person-chat"' in messages and "salut ! je reviens d'un concert" in messages
+    assert "/static/handmade/base.css" in messages and '<table class="tbl">' not in messages
+    assert "/inspecteur/fil" in messages  # l'onglet par défaut de la destination, dessiné aussi
+    assert 'class="now-card person-chat"' in drawn(client, "/inspecteur/fil")
+    table = drawn(client, "/inspecteur/fil/messages?vue_pg1=table")
+    assert '<table class="hm-table">' in table and "person-chat" not in table
+    judged = drawn(client, "/inspecteur/fil/jugees")
+    assert 'class="now-page person-tab"' in judged and "aucune réponse jugée" in judged
+    questions = drawn(client, "/inspecteur/fil/questions")
+    assert 'class="now-page person-tab"' in questions
+
+
+@pytest.mark.parametrize("where", sorted(pages.DRAWN))
+def test_every_drawn_tab_opens(world, where):  # noqa: F811
+    client, _, _ = world
+    bootstrap(client)
+    url = where.replace("*", "affect")  # « destination/préfixe-* » : un de ses onglets
+    page = client.get(f"/inspecteur/{url}", follow_redirects=False)
+    assert page.status_code == 200, where
+    ConsoleHTML(page.text).check()
+    assert 'class="now-page' in page.text, where  # le dessin, pas le repli sur les blocs
+
+
+def test_processes_put_what_fails_first_with_its_error(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    sched = live.kernel.scheduler
+    calm = drawn(client, "/inspecteur/systeme/processus")
+    assert "Tous ses processus passent" in calm and "Ce qui ne va pas" not in calm
+    name = sched.specs[0].name
+    sched.consecutive[name], sched.failures[name] = 4, 4
+    sched.last_error[name] = (live.kernel.mind.clock.now(), "RuntimeError('le relevé a cassé')")
+    page = drawn(client, "/inspecteur/systeme/processus")
+    trouble = page.index("Ce qui ne va pas")
+    assert "4 échecs d'affilée" in page and page.index("le relevé a cassé") > trouble
+    assert page.index("Par faculté") > page.index("le relevé a cassé")
+    assert page.count('class="now-card sys-faculty"') == len({s.owner for s in sched.specs})
+    assert "Historique des échecs" in page  # l'historique au journal reste celui de la console
+    table = drawn(client, "/inspecteur/systeme/processus?vue_pg1=table")
+    assert "sys-faculty" not in table and '<table class="hm-table">' in table
+
+
+def test_a_failing_drawing_gives_back_the_blocks(world, monkeypatch):  # noqa: F811
+    client, _, _ = world
+    bootstrap(client)
+
+    def broken(ui, items, query):
+        raise RuntimeError("dessin cassé")
+
+    monkeypatch.setattr(pages.DRAWN["fil/messages"], "draw", broken)
+    page = drawn(client, "/inspecteur/fil/messages")
+    assert "person-chat" not in page and 'class="now-card person-list' in page  # la liste de la faculté

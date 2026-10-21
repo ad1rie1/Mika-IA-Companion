@@ -133,6 +133,24 @@ class BodyStateMachineTest {
         assertEquals(BodyStateMachine.State.IDLE, m.state)
     }
 
+    @Test fun `une boucle passe de sa dernière image à la première sans s'y arrêter`() {
+        // l'atelier ferme ses boucles : la dernière image redit la première
+        val c = MotionClip.parse(
+            """{"name":"b","fps":10,"loop":true,"bones":["hips"],
+               "rest":{"hips":{"p":[0,0,0.8],"q":[1,0,0,0]}},
+               "frames":[[0,0,0.8,1,0,0,0],[0,0,0.9,1,0,0,0],[0,0,0.8,1,0,0,0]]}""",
+        )
+        assertEquals(0.2f, c.duration, 1e-6f)
+        val pose = Pose(arrayOf("hips"))
+        fun hipsAt(t: Float) = pose.also { c.sample(t, it) }.hips
+        val start = hipsAt(0.05f)
+        // un tour plus tard, la même pose : pas une image figée sur le raccord
+        val again = hipsAt(0.25f)
+        assertEquals(start.x, again.x, 1e-5f)
+        assertEquals(start.y, again.y, 1e-5f)
+        assertEquals(start.z, again.z, 1e-5f)
+    }
+
     @Test fun `le miroir échange gauche et droite et retourne les hanches`() {
         val c = MotionClip.parse(
             """{"name":"m","fps":30,"loop":true,"bones":["leftHand","rightHand"],

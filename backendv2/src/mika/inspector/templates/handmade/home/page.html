@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{# L'accueil (app/handmade/home.py) : ce qui t'attend, comment elle va, ce qu'elle a fait aujourd'hui. Le corps se
+   relit seul (handmade/live.js). #}
+{% block head %}
+<link rel="stylesheet" href="{{ PREFIX }}/static/handmade/now.css?v={{ ASSET_VERSION }}">
+<link rel="stylesheet" href="{{ PREFIX }}/static/handmade/home.css?v={{ ASSET_VERSION }}">
+<script src="{{ PREFIX }}/static/handmade/live.js?v={{ ASSET_VERSION }}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="now-page">
+  <header class="now-head">
+    <div>
+      <p class="now-kicker">{{ now.today|capitalize }}</p>
+      <h1>Vue d'ensemble</h1>
+      <p class="now-lede">Ce qui t'attend, comment elle va et ce qu'elle a fait aujourd'hui.</p>
+    </div>
+    <div class="now-head-side">
+      <p class="now-live" data-now-state role="status"><span class="now-live-dot" aria-hidden="true"></span><span data-now-state-text>À jour · {{ now.stamp }}</span></p>
+      <a class="btn quiet" href="{{ PREFIX }}/fil">Ouvrir les conversations →</a>
+    </div>
+  </header>
+  {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
+  <div class="now" data-now-live="{{ fragment }}">
+    {% include "handmade/home/body.html" %}
+  </div>
+</div>
+{% endblock %}

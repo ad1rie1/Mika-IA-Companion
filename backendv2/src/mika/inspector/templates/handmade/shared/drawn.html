@@ -1,0 +1,111 @@
+{# Les blocs d'une faculté dans le vocabulaire des pages dessinées (ADR 0121) : ``one(bloc)``, ``inner(blocs)`` (dans
+   un repli, le détail d'une ligne), ``sober(blocs)`` (ses listes en tableaux sobres). Une liste que rien n'a mise en
+   forme (``lists.shaped``) et qui n'a pas déclaré de rôles est un tableau sobre. Importées ``with context`` : elles lisent ``forms`` (les formulaires
+   que la console a préparés, par emplacement : leur jeton, leurs champs) et ``tables`` (« table » : des tableaux
+   sobres) du gabarit qui les appelle. Un bloc d'une sorte inconnue garde le rendu de la console. #}
+{% from "_cells.html" import cell %}
+{% from "_blocks.html" import render %}
+{% from "_forms.html" import action_form, action_button %}
+{% from "_navigation.html" import pager as pages, filters_form %}
+{% from "handmade/shared/list_macros.html" import entries %}
+{% macro inner(items) -%}{% for x in items %}{{ one(x, 1) }}{% endfor %}{%- endmacro %}
+{% macro sober(items) -%}{% for x in items %}{{ one(x, 0, False, True) }}{% endfor %}{%- endmacro %}
+{% macro one(b, depth=0, side=False, plain=False) -%}
+{% if b.t == "stats" %}
+  <section class="person-tiles"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<h2 class="now-subhead first">{{ b.title }}</h2>{% endif %}
+    <ul class="person-tiles-list">{% for s in b["items"] %}
+      <li class="{{ s.tone }}">{% if s.href %}<a href="{{ s.href }}">{% endif %}<span class="person-tile-label">{{ s.label }}</span><span class="person-tile-value">{{ cell(s.value) }}</span>{% if s.sub %}<span class="person-tile-sub">{{ s.sub }}</span>{% endif %}{% if s.href %}</a>{% endif %}{% if s.trend %}<span class="person-tile-trend">{{ s.trend }}</span>{% endif %}</li>
+    {% endfor %}</ul>
+  </section>
+{% elif b.t == "fields" %}
+  <section class="now-card"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<header class="now-card-head"><h2>{{ b.title }}</h2></header>{% endif %}
+    <dl class="person-fields">{% for p in b.pairs %}<div><dt{% if p.hint %} title="{{ p.hint }}"{% endif %}>{{ p.label }}</dt><dd>{{ cell(p.value) }}</dd></div>{% endfor %}</dl>
+  </section>
+{% elif b.t == "table" and (plain or tables == "table" or (not b.layout and "dense" not in b)) %}
+  {# un tableau sobre : la console exige qu'un tableau ait sa pagination (même d'une page) #}
+  <section class="now-card table-block hm-table-card" id="{{ b.id }}"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title or b.modes %}<header class="now-card-head">{% if b.title %}<h2>{{ b.title }}</h2>{% endif %}{% if b.count is not none %}<span class="person-count now-num" title="{{ b.count }} au total">{{ b.count }}</span>{% endif %}{% if b.modes %}<nav class="hm-modes" aria-label="Affichage : {{ b.title or 'tableau' }}">{% for m in b.modes %}<a href="{{ m.href }}"{{ ' aria-current=page' if m.on }}>{{ m.label }}</a>{% endfor %}</nav>{% endif %}</header>{% endif %}
+    {% if b.rows %}
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ b.title or 'Tableau' }}"><table class="hm-table">
+      <thead><tr>{% for c in b.columns %}<th scope="col"{% if c.hint %} title="{{ c.hint }}"{% endif %}{% if c.align %} class="{{ c.align }}"{% endif %}>{{ c.label }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for r in b.rows %}<tr class="{{ 't-' ~ r.tone if r.tone }}">{% for c in r.cells %}<td{% if b.columns[loop.index0] and b.columns[loop.index0].align %} class="{{ b.columns[loop.index0].align }}"{% endif %}>{% if loop.first and r.href and c.t != "link" %}<a href="{{ r.href }}">{{ cell(c) }}</a>{% else %}{{ cell(c) }}{% endif %}</td>{% endfor %}</tr>
+      {% if r.detail %}<tr class="hm-table-detail"><td colspan="{{ b.columns|length }}"><details><summary>Le détail</summary><div class="now">{{ inner(r.detail) }}</div></details></td></tr>{% endif %}{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="now-empty">{{ b.empty }}{{ '' if (b.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+    {% if b.caption %}<p class="person-tab-note">{{ b.caption }}</p>{% endif %}
+    <div class="hm-pager{{ ' single' if not b.pager }}">{{ pages(b.pager or b.raw_pager) }}</div>
+  </section>
+{% elif b.t == "table" %}
+  {{ entries(b, draw=inner) }}
+{% elif b.t == "timeline" %}
+  <section class="now-card"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<header class="now-card-head"><h2>{{ b.title }}</h2></header>{% endif %}
+    {% if b.entries %}
+    <ol class="now-feed person-timeline">{% for e in b.entries %}
+      <li class="tone-{{ e.tone or 'plain' }}"><time title="{{ e.at }}">{{ e.rel }}</time><div><p>{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.meta %} <span class="now-muted">· {{ e.meta }}</span>{% endif %}</p>{% if e.text %}<p class="person-timeline-text">{{ e.text }}</p>{% endif %}</div></li>
+    {% endfor %}</ol>
+    {% else %}<p class="now-empty">{{ b.empty }}{{ '' if (b.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+    {% if b.pager and (b.pager.prev or b.pager.next or b.pager.older or b.pager.newer) %}{{ pages(b.pager) }}{% endif %}
+  </section>
+{% elif b.t == "note" %}
+  <p class="person-tab-note {{ b.tone }}">{% if b.title %}<b>{{ b.title }}</b> {% endif %}{{ b.text }}</p>
+{% elif b.t == "prose" and b.reading %}
+  <article class="hm-reading"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.rich %}<p class="hm-reading-mode">Version HTML simplifiée · images distantes masquées</p>{% endif %}
+    <div class="{{ 'document-html' if b.rich else 'document-text' }}">{{ b.html }}</div>
+    {% if b.rich %}<details class="hm-subfold"><summary>Afficher la version texte</summary><div class="prose">{{ b.text }}</div></details>{% endif %}
+  </article>
+{% elif b.t == "prose" and not b.reading %}
+  <section class="now-card"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<header class="now-card-head"><h2>{{ b.title }}</h2></header>{% endif %}
+    <p class="person-self">{{ b.text }}</p>
+  </section>
+{% elif b.t == "chart" %}
+  <section class="now-card"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<header class="now-card-head"><h2>{{ b.title }}</h2></header>{% endif %}
+    {% if b.has %}{{ b.svg }}{% if b.table %}<details class="chart-values"><summary>Voir les valeurs</summary>{{ render([b.table]) }}</details>{% endif %}
+    {% else %}<p class="now-empty">{{ b.empty }}{{ '' if (b.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+  </section>
+{% elif b.t == "code" %}
+  <section class="hm-code-block{{ ' now-card' if not depth }}"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<h3 class="now-subhead first">{{ b.title }}</h3>{% endif %}
+    {% if b.lines %}<pre class="hm-code diff">{% for l in b.lines %}<span class="d-line{{ ' d-' ~ l.k if l.k }}">{{ l.text }}</span>{% endfor %}</pre>{% else %}<pre class="hm-code">{{ b.text }}</pre>{% endif %}
+  </section>
+{% elif b.t == "disclosure" and depth %}
+  <details class="hm-subfold"{{ ' open' if b.open }}><summary>{{ b.title }}</summary><div class="now">{% for x in b["items"] %}{{ one(x, depth + 1, False, plain) }}{% endfor %}</div></details>
+{% elif b.t == "disclosure" %}
+  <details class="now-card person-fold"{{ ' open' if b.open }}><summary>{{ b.title }}</summary><div class="now">{% for x in b["items"] %}{{ one(x, depth + 1, False, plain) }}{% endfor %}</div></details>
+{% elif b.t == "grid" %}
+  <div class="now-grid{{ ' two' if b.columns == 2 }}">{% for x in b["items"] %}<div class="now-stack">{{ one(x, depth, False, plain) }}</div>{% endfor %}</div>
+{% elif b.t == "section" %}
+  <section class="now"><header class="now-card-head"><h2>{{ b.title }}</h2>{% if b.description %}<p>{{ b.description }}</p>{% endif %}</header>{% for x in b["items"] %}{{ one(x, depth, False, plain) }}{% endfor %}</section>
+{% elif b.t == "workspace" %}
+  <div class="hm-workspace">
+    <details class="hm-workspace-side" data-responsive-menu="(max-width: 1000px)" open>
+      <summary>Parcourir{% for nav in b.sidebar if nav.t == 'nav' %}{% for item in nav['items'] if item.active %} · <span>{{ item.text }}</span>{% endfor %}{% endfor %}</summary>
+      <aside class="hm-workspace-nav" aria-label="Navigation de la vue">{% for x in b.sidebar %}{{ one(x, depth, True) }}{% endfor %}</aside>
+    </details>
+    <div class="hm-workspace-main now">{% for x in b["items"] %}{{ one(x, depth, False, plain) }}{% endfor %}</div>
+  </div>
+{% elif b.t == "nav" and side %}
+  <nav class="hm-sidenav" aria-label="{{ b.title or 'navigation' }}">
+    {% if b.title %}<p class="hm-sidenav-title">{{ b.title }}</p>{% endif %}
+    <ul>{% for i in b["items"] %}<li>{% if i.href %}<a class="{{ 'on ' if i.active }}{{ i.tone }}" href="{{ i.href }}"{% if i.active %} aria-current="page"{% endif %}><span>{{ i.text }}</span>{% if i.count %}<span class="hm-count">{{ i.count }}</span>{% endif %}</a>{% else %}<span class="hm-sidenav-muted">{{ i.text }}</span>{% endif %}</li>{% endfor %}</ul>
+  </nav>
+{% elif b.t == "nav" %}
+  <nav class="hm-chips" aria-label="{{ b.title or 'navigation' }}">
+    {% if b.title %}<span class="hm-chips-title">{{ b.title }}</span>{% endif %}
+    {% for i in b["items"] %}{% if i.href %}<a class="hm-chip {{ i.tone }}{{ ' on' if i.active }}" href="{{ i.href }}"{% if i.active %} aria-current="page"{% endif %}>{{ i.text }}{% if i.count %} <span class="hm-count">{{ i.count }}</span>{% endif %}</a>{% else %}<span class="hm-chip muted">{{ i.text }}</span>{% endif %}{% endfor %}
+  </nav>
+{% elif b.t == "toolbar" %}
+  <div class="toolbar hm-toolbar" role="group" aria-label="{{ b.title }}">{% for x in b["items"] %}{% if x.t == "disclosure" %}<details class="action-pop hm-more" data-exclusive><summary class="btn quiet">{{ x.title }}</summary><div class="action-panel">{% for y in x["items"] %}{{ one(y, depth + 1, False, plain) }}{% endfor %}</div></details>{% else %}{{ one(x, depth, False, plain) }}{% endif %}{% endfor %}</div>
+{% elif b.t == "action" %}
+  {% if b.presentation == "button" %}{{ action_button(forms.get(b.slot)) }}{% else %}{{ action_form(forms.get(b.slot), b.compact) }}{% endif %}
+{% elif b.t == "filters" %}
+  {{ filters_form(b.fields, b.keep, b.active, b.reset, b.title) }}
+{% else %}
+  {{ render([b], forms) }}
+{% endif %}
+{%- endmacro %}

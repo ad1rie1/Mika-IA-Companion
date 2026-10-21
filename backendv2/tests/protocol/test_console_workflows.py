@@ -84,11 +84,13 @@ def test_reading_pages_show_content_keep_details_and_search_names(world, tmp_pat
     shutil.copytree(STATIC, out / "static")
     messages = page(client, "/inspecteur/fil/messages?handle=Alice", out)
     assert "alice : un message" in messages and "bob : un message" not in messages
-    assert 'class="collection feed"' in messages and 'class="collection-body"' in messages
+    # la conversation est dessinée (ADR 0121) : le message entier, son numéro, et la même liste en tableau à un clic
+    assert 'class="now-card person-chat"' in messages and "Suite du message" in messages and "n° " in messages
+    assert 'href="?handle=Alice&amp;vue_pg1=table"' in messages or 'href="?handle=Alice&vue_pg1=table"' in messages
     table = page(client, "/inspecteur/fil/messages?handle=Alice&vue_pg1=table", out)
     assert "épisode" not in headers(table) and "texte" in headers(table)
     assert "alice : un message" in table and "bob : un message" not in table
-    assert "Informations complémentaires" in messages and "Suite du message" in messages
+    assert "Informations complémentaires" in table
     next_url = html.unescape(re.search(r'<a href="([^"]+)" rel="next">', messages).group(1))
     tail = page(client, "/inspecteur/fil/messages" + next_url, out)
     assert "Plus récents" in tail and "alice : un message" in tail
@@ -140,7 +142,7 @@ def test_empty_outbox_filter_does_not_show_successful_deliveries(world):  # noqa
     all_ = page(client, "/inspecteur/systeme/sorties")
     assert "parti" in all_
     failed = page(client, "/inspecteur/systeme/sorties?etat=failed")
-    assert "Aucun effet." in failed and "0 au total" in failed
+    assert "Aucun effet." in failed and "une parole à livrer" not in failed
     assert "État inconnu" in page(client, "/inspecteur/systeme/sorties?etat=inconnu")
 
 
@@ -209,6 +211,6 @@ def test_activity_keeps_open_work_pending_question_and_recent_failure_separate(w
     assert 'Une question attend une réponse' in body and 'Service momentanément indisponible' in body
     assert client.portal.call(lambda: kernel.mind.head) == before
     history = page(client, '/inspecteur/decisions/episodes?issue=failed')
-    assert 'class="collection list"' in history and 'Service momentanément indisponible' in history
+    assert 'person-list' in history and 'Service momentanément indisponible' in history  # dessinée (ADR 0121)
     table = page(client, '/inspecteur/decisions/episodes?issue=failed&vue_pg1=table')
-    assert 'class="collection list"' not in table and 'Service momentanément indisponible' in table
+    assert 'person-list' not in table and 'Service momentanément indisponible' in table

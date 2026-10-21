@@ -1,0 +1,57 @@
+{# Système › Processus, dessiné (app/handmade/system.py) : ce qui échoue, avec sa dernière erreur, puis une carte
+   par faculté, une ligne par processus. #}
+<div class="now-page person-tab sys">
+  <section class="now-card sys-summary" aria-label="Ses processus en un regard">
+    <div class="sys-summary-head">
+      <p class="sys-total"><span class="now-num">{{ total }}</span> processus de fond</p>
+      <a class="person-as-table" href="{{ as_table }}">Voir en tableau</a>
+    </div>
+    <svg class="sys-bar" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+      {% for c in counts %}<rect class="st-{{ c.key }}" x="{{ c.x }}" y="0" width="{{ c.w }}" height="100%"></rect>{% endfor %}
+    </svg>
+    <ul class="sys-legend">
+      {% for c in counts %}<li><span class="sys-dot st-{{ c.key }}" aria-hidden="true"></span><span class="now-num">{{ c.count }}</span> {{ c.label }}</li>{% endfor %}
+      {% if failures %}<li class="now-muted">{{ failures }} échec{{ 's' if failures > 1 }} depuis le démarrage</li>{% endif %}
+    </ul>
+  </section>
+
+  {% if trouble %}
+  <section class="now-card sys-trouble" aria-labelledby="sys-trouble-title">
+    <header class="now-card-head"><h2 id="sys-trouble-title">Ce qui ne va pas</h2><p>ses processus qui échouent ou que l'ordonnanceur retient — leur dernière erreur, et quand il réessaiera</p></header>
+    <ul class="sys-issues">
+      {% for r in trouble %}
+      <li class="st-{{ r.state }}">
+        <div class="person-entry-top">
+          <div class="person-entry-name"><p class="person-entry-title">{{ r.name }}</p><span class="now-tag {{ 'danger' if r.state == 'ko' else 'warn' }}">{% if r.consecutive %}{{ r.consecutive }} échec{{ 's' if r.consecutive > 1 }} d'affilée{% else %}{{ r.said }}{% endif %}</span></div>
+          <span class="person-entry-time">prochain essai {{ r.next }}</span>
+        </div>
+        {% if r.error %}<pre class="hm-error">{{ r.error }}</pre>{% endif %}
+        <p class="person-entry-facts"><span><span class="k">faculté</span> {{ r.faculty }}</span><span><span class="k">voie</span> {{ r.lane }}</span><span><span class="k">passages</span> {{ r.runs }}</span><span><span class="k">échecs</span> {{ r.failures }}</span><span><span class="k">dernier passage</span> {{ r.last }}</span>{% if r.error_at %}<span><span class="k">erreur</span> {{ r.error_at }}</span>{% endif %}<span><span class="k">nom technique</span> <code>{{ r.tech }}</code></span></p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="sys-fine"><span class="sys-dot st-ok" aria-hidden="true"></span>Tous ses processus passent : aucun n'échoue, aucun n'est retenu.</p>
+  {% endif %}
+
+  <section aria-labelledby="sys-all-title">
+    <h2 class="sys-section" id="sys-all-title">Par faculté</h2>
+    <div class="sys-columns">
+      {% for f in faculties %}
+      <section class="now-card sys-faculty" aria-label="{{ f.name }}">
+        <header class="sys-faculty-head"><h3>{{ f.name }}</h3><span class="now-muted">{{ f.rows|length }}{% if f.trouble %} · <span class="sys-warn">{{ f.trouble }} à voir</span>{% endif %}</span></header>
+        <ul class="sys-procs">
+          {% for r in f.rows %}
+          <li class="st-{{ r.state }}" title="{{ r.tech }} · voie {{ r.lane }} · {{ r.runs }} passage{{ 's' if r.runs != 1 }}{% if r.failures %} · {{ r.failures }} échec{{ 's' if r.failures > 1 }}{% endif %} · prochaine fois : {{ r.next }}">
+            <span class="sys-dot st-{{ r.state }}" aria-hidden="true"></span>
+            <span class="sys-proc-name">{{ r.name }}<span class="sr"> — {{ r.said }}</span></span>
+            <span class="sys-proc-when">{{ r.last }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endfor %}
+    </div>
+  </section>
+</div>

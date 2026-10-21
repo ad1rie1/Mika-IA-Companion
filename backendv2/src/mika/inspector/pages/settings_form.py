@@ -304,7 +304,7 @@ class SettingsForms:
         record = view.get("record")
         heading = (("Ajouter · " + record["label"]) if record["new"] else
                    "Modifier · " + (record["key"] or record["label"])) if record else ""
-        return Panel("settings.html", {"sections": [view], "action": page_url(page), "page_heading": heading})
+        return Panel("handmade/reglages/page.html", {"sections": [view], "action": page_url(page), "page_heading": heading})
 
     def _fields(self, s: SettingsSection, pg: SettingsPage) -> list[forms.FormField]:
         assert s.model is not None

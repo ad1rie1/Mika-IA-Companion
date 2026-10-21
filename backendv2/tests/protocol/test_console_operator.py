@@ -52,7 +52,8 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     bootstrap(client)
     converse(client, f"salut {HOSTILE}")
     thread = client.get(f"{BASE}/fil/messages").text
-    links = re.findall(r'data-href="(/inspecteur/parole/(\d+))"', thread)
+    # un lien « pourquoi ? » sous chacune de ses bulles (la conversation est dessinée, ADR 0121)
+    links = re.findall(r'href="(/inspecteur/parole/(\d+))"', thread)
     assert links, "chaque parole d'elle mène à son « pourquoi »"
     url, seq = links[0]
     r = client.get(url)
@@ -91,11 +92,11 @@ def test_episodes_name_people_and_the_filter_understands_a_name(world):  # noqa:
     assert towards.status_code == 200 and "Envers adrien" in html_of(towards)
     ConsoleHTML(towards.text).check()
     # depuis sa fiche : « que ferait-elle envers elle ? » (par sa clé), et chaque parole de ses échanges mène à
-    # son « pourquoi »
+    # son « pourquoi » (un lien sous sa bulle : l'onglet est dessiné, ADR 0121)
     fiche = client.get(f"{BASE}/fiche/person/user_1").text
     link = re.search(r'href="(/inspecteur/decisions/envers\?personne=[^"]+)"', fiche)
     assert link and "Envers adrien" in html_of(client.get(html.unescape(link.group(1))))
-    assert re.search(r'data-href="/inspecteur/parole/\d+"',
+    assert re.search(r'href="/inspecteur/parole/\d+"',
                      client.get(f"{BASE}/fiche/person/user_1?onglet=echanges").text)
 
 
@@ -151,7 +152,7 @@ def test_enter_never_fires_a_secondary_or_destructive_button(world):  # noqa: F8
     client, live, _ = world
     bootstrap(client)
     # approuver : Entrée dans la note ne décide rien, « Approuver » se confirme
-    page = templates.get_template("approvals.html").render(
+    page = templates.get_template("handmade/approbations/attente.html").render(
         items=[{"proposal": 3, "capability": "Envoyer un mail", "capability_key": "email.send", "summary": "Un mail",
                 "context": "", "args": "{}", "when": "maintenant", "preview": "", "seen": "", "blocked": ""}],
         csrf="x", PREFIX=BASE, pending_pager=None)

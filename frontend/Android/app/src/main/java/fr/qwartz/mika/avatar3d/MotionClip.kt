@@ -68,18 +68,23 @@ class MotionClip private constructor(
     val frameCount: Int get() = frames.size
     val duration: Float get() = (frames.size - 1).coerceAtLeast(1) / fps
 
-    /** La pose au temps `t` (secondes) : bouclée ou bornée, interpolée entre les deux images voisines. */
+    /**
+     * La pose au temps `t` (secondes) : bouclée ou bornée, interpolée entre les deux images voisines. Une boucle dure
+     * [duration] : l'atelier la ferme, sa dernière image redit la première (comme `atelierClip.ts`) — la rejouer
+     * figeait la pose une image à chaque tour.
+     */
     fun sample(t: Float, out: Pose, loop: Boolean = this.loop) {
         val n = frames.size
         var pos = t * fps
         if (loop) {
-            pos %= n.toFloat()
-            if (pos < 0) pos += n
+            val period = (n - 1).coerceAtLeast(1).toFloat()
+            pos %= period
+            if (pos < 0) pos += period
         } else {
             pos = pos.coerceIn(0f, (n - 1).toFloat())
         }
         val i = floor(pos).toInt().coerceIn(0, n - 1)
-        val j = if (loop) (i + 1) % n else (i + 1).coerceAtMost(n - 1)
+        val j = (i + 1).coerceAtMost(n - 1)
         val f = pos - i
         val a = frames[i]
         val b = frames[j]

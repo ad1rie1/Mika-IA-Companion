@@ -20,4 +20,4 @@ def test_the_console_exports_page_by_page(tmp_path):
             assert f'data-theme="{attr}"' in text, f.name
             assert "Cette vue a échoué" not in text and "Bloc inconnu" not in text, f.name
             ConsoleHTML(text).check()
-            assert "console.js" not in text and "../static/console.css" in text, f.name
+            assert "console.js" not in text and "live.js" not in text and "../static/console.css" in text, f.name

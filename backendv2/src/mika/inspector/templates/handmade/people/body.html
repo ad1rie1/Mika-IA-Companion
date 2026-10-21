@@ -1,0 +1,61 @@
+{# Le corps de Personnes : rendu dans la page, puis relu seul par handmade/live.js (le fragment). Une personne se
+   nomme par son nom, jamais par un pronom. Aucun style en ligne (CSP). #}
+{% from "handmade/macros.html" import bar, failed %}
+<span hidden data-now-stamp>{{ now.stamp }}</span>
+{% set P = now.people %}
+{% if P %}
+<section class="people-now" aria-label="En ce moment">
+  <div class="people-online">
+    <h2 class="now-eyebrow">En ligne{% if P.online %} · {{ P.online|length }}{% endif %}</h2>
+    {% if P.online %}
+    <ul class="people-faces">{% for p in P.online %}<li><a href="{{ p.href }}" title="{{ p.name }}{{ ' · écrit…' if p.composing }}"><span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}">{{ p.initial }}<span class="now-presence{{ ' typing' if p.composing }}"></span></span><span class="people-face-name">{{ p.name }}</span></a></li>{% endfor %}</ul>
+    {% else %}<p class="now-empty">Personne n'est connecté.</p>{% endif %}
+  </div>
+  <div class="people-missed">
+    <h2 class="now-eyebrow">Qui lui manque</h2>
+    {% if P.missed %}
+    <ul class="person-chips">{% for m in P.missed %}<li><a href="{{ m.href }}">{{ m.name }}</a> <span class="now-muted" title="son silence, en fois son rythme habituel">×{{ m.ratio }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="now-empty">Personne en ce moment.</p>{% endif %}
+  </div>
+</section>
+
+<form class="people-find" method="get" action="{{ base }}" role="search">
+  <label class="sr" for="people-q">Chercher une personne</label>
+  <input id="people-q" type="search" name="q" value="{{ P.q }}" placeholder="Chercher par nom ou par adresse…" autocomplete="off">
+  {% if P.level %}<input type="hidden" name="proximite" value="{{ P.level }}">{% endif %}
+  {% if P.only_online %}<input type="hidden" name="presence" value="en-ligne">{% endif %}
+  <button class="btn">Chercher</button>
+</form>
+<nav class="people-chips" aria-label="Filtrer">
+  {% for c in P.chips %}<a class="people-chip{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }} <span class="now-num">{{ c.count }}</span></a>{% endfor %}
+  <a class="people-chip online{{ ' on' if P.only_online }}" href="{{ P.online_href }}"{% if P.only_online %} aria-current="true"{% endif %}><span class="people-dot" aria-hidden="true"></span>En ligne <span class="now-num">{{ P.online|length }}</span></a>
+</nav>
+
+{% if P.cards %}
+<ul class="people-grid">
+  {% for p in P.cards %}
+  <li class="people-card{{ ' online' if p.online }}{{ ' composing' if p.composing }}">
+    <div class="people-card-head">
+      <span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence{{ ' typing' if p.composing }}"></span>{% endif %}</span>
+      <div class="people-card-id">
+        <p class="people-card-name">{% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}</p>
+        <p class="person-tags">{% if p.owner %}<span class="now-tag owner">propriétaire</span>{% endif %}<span class="now-tag{{ ' close' if p.close }}">{{ p.closeness or "de passage" }}</span></p>
+      </div>
+    </div>
+    <p class="people-card-felt">{% if p.felt %}<span class="now-dot sw-{{ p.felt.emotion }}" aria-hidden="true"></span>{{ p.felt.how }} {{ p.felt.word }} envers cette personne{% else %}<span class="now-muted">rien de particulier envers cette personne</span>{% endif %}</p>
+    {% if p.notes %}<ul class="now-notes">{% for x in p.notes %}<li class="{{ x.tone }}">{{ x.text }}</li>{% endfor %}</ul>{% endif %}
+    {% if p.summary %}<p class="people-card-summary">{{ p.summary }}</p>{% endif %}
+    <div class="people-card-foot">
+      <span class="people-bond" title="ce qui l'attache à cette personne">attachement {{ bar(p.bond_w, "bond") }} <span class="now-num">{{ p.bond }}</span></span>
+      <span class="now-muted">{% if p.rhythm %}{{ p.rhythm }} · {% endif %}{{ p.handles }} adresse{{ 's' if p.handles > 1 }}</span>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% if P.pages > 1 %}
+<nav class="people-pages" aria-label="Pagination">{% if P.prev %}<a href="{{ P.prev }}" rel="prev">← Précédentes</a>{% endif %}<span>page {{ P.page }} sur {{ P.pages }} · {{ P.count }} personne{{ 's' if P.count > 1 }}</span>{% if P.next %}<a href="{{ P.next }}" rel="next">Suivantes →</a>{% endif %}</nav>
+{% endif %}
+{% elif P.q %}<p class="now-empty">Personne ne correspond à « {{ P.q }} ».</p>
+{% elif P.total %}<p class="now-empty">Personne avec ce filtre.</p>
+{% else %}<p class="now-empty">Personne pour l'instant : elle n'a encore parlé à personne.</p>{% endif %}
+{% else %}{{ failed("les personnes") }}{% endif %}

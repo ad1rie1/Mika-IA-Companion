@@ -50,6 +50,8 @@ BOX = f"/inspecteur/{SECTION}/reception"
 ACCOUNTS = BOX
 SETTINGS = "/inspecteur/reglages/boites"
 PAGE = 25
+#: une boîte (réception, envoyés) se lit par douzaine : sa liste tient au-dessus du message ouvert
+BOX_PAGE = 12
 FOLD = 600
 #: au-delà, un identifiant ne tient plus dans une adresse de la console : une empreinte le remplace
 ID_MAX = 200

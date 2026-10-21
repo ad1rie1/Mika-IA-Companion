@@ -30,7 +30,7 @@ from mika.kernel.inspect import (
 )
 from mika.plugins.email import EMAIL, EmailParams, EmailState, name_of, params_of
 from mika.plugins.email.console.common import (
-    PAGE,
+    BOX_PAGE,
     SECTION,
     account_scope,
     add_account,
@@ -79,7 +79,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
         else marked if state == "remarques" else None
     exclude = marked if state == "pas_remarques" else tuple(k for k, m in s.mails.items() if m.read) \
         if state in ("non_lus", "importants") else ()
-    request = ctx.pager(size=PAGE)
+    request = ctx.pager(size=BOX_PAGE)
     result = port.messages_page(MailQuery(account=account, folder="" if folder == "*" else (folder or INBOX),
         text=query, sender=sender, seen=False if state in ("non_lus", "importants") else None,
         flagged=True if state == "suivis" else None, refs=refs, exclude=exclude), request.number, request.size)

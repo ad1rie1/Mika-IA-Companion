@@ -1,0 +1,9 @@
+{# Un onglet fait de listes simples, dessiné (app/handmade/lists.py, ``drawn``) : ses chiffres, ses faits, ses
+   listes en cartes, ses notes — les données de la faculté. #}
+{% from "handmade/shared/list_macros.html" import counts_line, entries, facts_card %}
+<div class="now-page person-tab">
+  {{ counts_line(counts) }}
+  {% for f in facts %}{{ facts_card(f) }}{% endfor %}
+  {% for s in sections %}{{ entries(s) }}{% endfor %}
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{% if n.title %}<b>{{ n.title }}</b> {% endif %}{{ n.text }}</p>{% endfor %}
+</div>

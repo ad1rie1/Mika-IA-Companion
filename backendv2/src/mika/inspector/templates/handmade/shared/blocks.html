@@ -1,0 +1,6 @@
+{# Un onglet dessiné bloc par bloc (app/handmade/blocks.py) : chaque bloc de la faculté par les macros des pages
+   dessinées (shared/drawn.html), avec les formulaires que la console a préparés (``forms``). #}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page person-tab">
+  {% for b in blocks %}{{ one(b) }}{% endfor %}
+</div>

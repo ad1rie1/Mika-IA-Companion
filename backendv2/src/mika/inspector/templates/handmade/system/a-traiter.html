@@ -1,0 +1,24 @@
+{# Système › Sorties : ce qui est à traiter (pages/system.py), dans le vocabulaire des pages dessinées (ADR 0121) —
+   chaque effet qui n'a pas pu partir, son erreur, ce qu'il faut vérifier ; le relancer, le marquer comme vu. #}
+{% from "_navigation.html" import pager %}
+{% if problems %}
+<section class="outbox-review now-card hm-outbox" aria-label="Effets à traiter">
+  <header class="now-card-head"><h2>À traiter</h2><span class="person-count now-num" title="{{ problem_total }} au total">{{ problem_total }}</span><p>Vérifie le résultat de chaque action. « Marquer comme vu » conserve la trace et retire son signalement.</p></header>
+  <ul class="hm-outbox-list" role="list">
+  {% for p in problems %}
+  <li class="st-{{ p.tone }}">
+    <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ PREFIX }}/evenement/{{ p.seq }}">{{ p.label }}</a></p><span class="now-tag {{ p.tone }}">{{ p.status }}</span></div><span class="person-entry-time">n° {{ p.seq }}</span></div>
+    {% if p.error %}<pre class="hm-error">{{ p.error }}</pre>{% endif %}
+    <p class="now-sub">{{ p.hint }}</p>
+    <form method="post" action="{{ PREFIX }}/systeme/sorties" class="outbox-actions">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
+      <input type="hidden" name="_retour" value="{{ back }}">
+      {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.label }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
+      <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
+    </form>
+  </li>
+  {% endfor %}
+  </ul>
+  {{ pager(problem_pager) }}
+</section>
+{% endif %}

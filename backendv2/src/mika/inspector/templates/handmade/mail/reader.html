@@ -1,0 +1,19 @@
+{# La liseuse du courrier (app/handmade/mail.py) : le message ouvert sous la liste — l'en-tête de sa fiche, puis son
+   onglet « Message » (ses actions, son texte, ses pièces), ses formulaires préparés à son nom. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% from "_cells.html" import cell %}
+<section class="now-card mail-reader" aria-labelledby="mail-reader-title">
+  {% if missing %}
+  <p class="now-empty" id="mail-reader-title">Ce message n'est plus là. <a href="{{ close }}">Fermer</a></p>
+  {% else %}
+  <header class="mail-reader-head">
+    <div class="mail-reader-title">
+      <h2 id="mail-reader-title">{{ head.title }}</h2>
+      <p class="now-sub">{{ head.subtitle }}{% for f in head.facts %} · <span class="now-muted">{{ f.label }}</span> {{ cell(f.value) }}{% endfor %}</p>
+      {% if head.badges %}<p class="person-entry-tags">{% for b in head.badges %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}</p>{% endif %}
+    </div>
+    <p class="mail-reader-links"><a href="{{ fiche }}">Ouvrir en grand →</a><a class="mail-close" href="{{ close }}" title="Fermer le message" aria-label="Fermer le message">✕</a></p>
+  </header>
+  <div class="now">{% for b in blocks %}{{ one(b) }}{% endfor %}</div>
+  {% endif %}
+</section>

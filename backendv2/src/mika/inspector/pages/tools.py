@@ -304,7 +304,7 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
                    "ok" if u.ok else "warn" if not u.executed else "danger"),
              Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))
         for u in uses), title="Ses derniers appels", empty=f"Aucun appel depuis {USAGE_DAYS} jours."))
-    return {"blocks": blocks, "crumbs": back, "panel": Panel("tool_intro.html", {
+    return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/shared/outil.html", {
         "page_heading": spec.name, "page_subtitle": spec.description,
         "tool_origin": label, "tool_tone": tone, "tool_family": ui.names.faculty(spec.bundle),  # la famille du catalogue (son lot)
         "tool_reserved": spec.owner_only,

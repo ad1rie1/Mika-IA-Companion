@@ -1,0 +1,40 @@
+{# L'onglet Échanges, dessiné (app/handmade/person/echanges.py) : une conversation, jour par jour. Les données sont
+   celles de la faculté du fil ; une cellule se rend par la macro commune de la console. #}
+{% from "_cells.html" import cell %}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page person-tab">
+  <div class="person-tab-bar">
+    {% if counts %}<ul class="person-counts">{% for c in counts %}<li><span class="now-num">{{ c.value }}</span> {{ c.label }}</li>{% endfor %}</ul>{% endif %}
+    <a class="person-as-table" href="{{ as_table }}">Voir en tableau</a>
+  </div>
+  <section class="now-card person-chat" aria-label="{{ 'La conversation avec ' ~ name if name else 'Ses messages' }}">
+    {% if days %}
+    {% for d in days %}
+    <h2 class="person-day"><span>{{ d.day }}</span></h2>
+    <ol class="person-thread">
+      {% for m in d.messages %}
+      <li class="{{ 'mine' if m.mine else 'theirs' }}{{ ' sw-' ~ m.emotion if m.emotion }}{{ ' muted' if m.muted }}">
+        {% if m.long %}<details class="person-bubble person-long"><summary>{{ m.short }} <span class="person-more">lire la suite</span></summary><p>{{ m.text }}</p></details>
+        {% else %}<p class="person-bubble">{{ m.text }}</p>{% endif %}
+        <p class="person-meta">
+          {%- if m.mine -%}
+            {% if m.who %}à {{ cell(m.who) }} · {% endif %}{% if m.emotion %}<span class="now-dot sw-{{ m.emotion }}" aria-hidden="true"></span>{{ m.word }} · {% endif %}{{ m.time }}{% if m.room %} · {{ m.room }}{% endif %}{% if m.why %} · <a href="{{ m.why }}">pourquoi ?</a>{% endif %}{% if m.episode %} · {{ cell(m.episode) }}{% endif %}
+          {%- else -%}
+            {% if m.who %}{{ cell(m.who) }} · {% endif %}{{ m.time }}{% if m.room %} · {{ m.room }}{% endif %}{% if m.answer %} · <span class="person-answer">{{ cell(m.answer) }}</span>{% endif %}
+          {%- endif -%}
+          {% if m.number %} · <span class="person-number">n° {{ cell(m.number) }}</span>{% endif %}
+        </p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endfor %}
+    {% else %}<p class="now-empty">{{ empty }}{{ '' if (empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+    {{ pages(pager) }}
+  </section>
+  {% if summaries %}
+  <section class="now-card" aria-labelledby="person-folded-title">
+    <header class="now-card-head"><h2 id="person-folded-title">Les débuts de fil repliés</h2><p>ce qu'elle garde en résumé des premiers messages d'un long fil</p></header>
+    <ul class="person-known">{% for s in summaries %}<li><p class="person-self">{{ s.text }}</p><p class="person-meta">avec {{ cell(s.who) }} · replié jusqu'au message {{ cell(s.upto) }}</p></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</div>

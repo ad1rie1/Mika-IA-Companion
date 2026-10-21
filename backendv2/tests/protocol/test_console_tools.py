@@ -97,7 +97,8 @@ def test_catalogue_cards_and_fiche_preserve_filters_and_table_choice(world):  # 
     client, _, _ = world
     bootstrap(client)
     response = client.get(f'{BASE}/tous?lot=email&origine=interne')
-    assert response.status_code == 200 and 'class="collection cards"' in response.text
+    # le catalogue est dessiné en cartes (ADR 0121)
+    assert response.status_code == 200 and 'class="now-card person-list' in response.text
     link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', response.text).group(1))
     assert parse_qs(urlsplit(link).query)['lot'] == ['email']
     detail = client.get(link)
@@ -106,7 +107,7 @@ def test_catalogue_cards_and_fiche_preserve_filters_and_table_choice(world):  # 
     crumb = re.search(r'<nav class="crumbs".*?</nav>', html.unescape(detail.text), re.S).group()
     assert f'{BASE}/tous?lot=email&origine=interne' in crumb
     table = client.get(f'{BASE}/tous?lot=email&origine=interne&vue_pg1=table')
-    assert 'class="collection cards"' not in table.text and 'class="tbl"' in table.text
+    assert 'person-list' not in table.text and 'class="hm-table"' in table.text
     table_link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', table.text).group(1))
     assert parse_qs(urlsplit(table_link).query)['vue_pg1'] == ['table']
     accented = client.get(f'{BASE}/tous?q=écrire').text

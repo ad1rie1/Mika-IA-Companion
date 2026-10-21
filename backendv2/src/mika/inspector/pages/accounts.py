@@ -73,7 +73,7 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
     messages = list(state.get("messages") or [])
     if creating:
         return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), ("Créer un compte", "")],
-                "panel": Panel("accounts.html", {"mode": "create", "action": URL, "page_heading": "Créer un compte",
+                "panel": Panel("handmade/reglages/compte.html", {"mode": "create", "action": URL, "page_heading": "Créer un compte",
                                                  "values": state.get("values") or {}})}
     if editing:
         found = next((a for a in accounts if str(a.id) == editing), None)
@@ -81,7 +81,7 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
             tokens = list(reversed(ui.deps.accounts.tokens(found.id)))
             apps, apps_pager = paginate(tokens, ctx.pager("page_apps", size=12))
             return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), (found.username, "")],
-                    "panel": Panel("accounts.html", {"mode": "edit", "action": URL, "account": found,
+                    "panel": Panel("handmade/reglages/compte.html", {"mode": "edit", "action": URL, "account": found,
                                                      "page_heading": f"Modifier · {found.username}",
                                                      "operators": sum(1 for a in accounts if a.operator and a.active),
                                                      "apps": [_app_row(ui, t) for t in apps], "apps_total": len(tokens),

@@ -1,0 +1,35 @@
+{# Courrier › Réception, Envoyés (app/handmade/mail.py) : l'espace de travail du plugin — ses comptes et ses
+   dossiers à côté, ses actions et ses filtres —, sa liste en lignes, et la liseuse du message ouvert dessous. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% from "_navigation.html" import pager as pages %}
+{% from "_cells.html" import cell %}
+<div class="now-page person-tab mail">
+<div class="hm-workspace">
+  <details class="hm-workspace-side" data-responsive-menu="(max-width: 1000px)" open>
+    <summary>Parcourir{% for nav in side if nav.t == 'nav' %}{% for item in nav['items'] if item.active %} · <span>{{ item.text }}</span>{% endfor %}{% endfor %}</summary>
+    <aside class="hm-workspace-nav" aria-label="Comptes et dossiers">{% for x in side %}{{ one(x, 0, True) }}{% endfor %}</aside>
+  </details>
+  <div class="hm-workspace-main now">
+    {% for x in before %}{{ one(x) }}{% endfor %}
+    <section class="now-card mail-list" id="{{ table.id }}" aria-label="{{ table.title }}">
+      <header class="now-card-head"><h2>{{ table.title }}</h2>{% if table.count is not none %}<span class="person-count now-num">{{ table.count }}</span>{% endif %}</header>
+      {% if lines %}
+      <ul class="mail-lines">
+        {% for m in lines %}
+        <li class="{{ 'unread' if m.unread }}{{ ' on' if m.on }}"><a href="{{ m.href }}"{% if m.on %} aria-current="true"{% endif %}>
+          <span class="mail-dot" aria-hidden="true"></span>
+          <span class="mail-who" title="{{ m.where }}">{{ m.who }}</span>
+          <span class="mail-what"><span class="mail-subject">{{ m.subject }}</span>{% if m.snippet %}<span class="mail-snippet"> — {{ m.snippet }}</span>{% endif %}</span>
+          <span class="mail-tags">{% for b in m.tags %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}</span>
+          <span class="mail-when">{% if m.when %}{{ cell(m.when) }}{% endif %}</span>
+        </a></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="now-empty">{{ table.empty }}{{ '' if (table.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+      {% set p = table.pager or {} %}
+      <div class="hm-pager{{ ' single' if not (p.prev or p.next or p.older or p.newer) }}">{{ pages(table.pager) }}</div>
+    </section>
+    {% if reader %}{{ reader }}{% elif lines %}<p class="mail-hint">Choisis un message pour le lire ici.</p>{% endif %}
+  </div>
+</div>
+</div>

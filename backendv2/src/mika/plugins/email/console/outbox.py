@@ -24,6 +24,7 @@ from mika.kernel.inspect import (
 )
 from mika.plugins.email import EMAIL, EmailState, name_of
 from mika.plugins.email.console.common import (
+    BOX_PAGE,
     NO_PORT,
     PAGE,
     SECTION,
@@ -58,7 +59,7 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if port is None:
         return [*blocks, Note(NO_PORT, tone="muted")]
     query = fold(ctx.value("q") or "")
-    request = ctx.pager(size=PAGE)
+    request = ctx.pager(size=BOX_PAGE)
     result = port.outgoing_page(MailQuery(account=account, text=query), request.number, request.size)
     page = result.items
     pager = Pager(number=result.number, size=result.size, total=result.total)

@@ -15,9 +15,10 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.catalog import Builtin
-from mika.inspector.ui import PREFIX, secure
+from mika.inspector.ui import PREFIX, Forms, secure, wants_table
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
+from mika.runtime.boundary import Failed, call
 
 #: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
 SEARCH_PAGE = 25
@@ -71,15 +72,47 @@ class Subjects:
             return RedirectResponse(fiche_url(kind, head.key) + ("?" + query if query else ""),
                                     status_code=303)
         tabs = self.ui.inspection.tabs(kind)
-        slug = request.query_params.get("onglet", "") or (head.default_tab if isinstance(head, Head) else "") \
-            or (tabs[0].name if tabs else "")
-        current = next((t for t in tabs if t.name == slug), tabs[0] if tabs else None)
+        asked = request.query_params.get("onglet", "")
+        # une vue d'ensemble dessinée à la main (ADR 0121) : le premier onglet, ouvert par défaut
+        overview = self.ui.deps.overviews.get(kind) if isinstance(head, Head) else None
+        shown = call(overview.render, self.ui, key, label=f"vue d'ensemble {kind}") \
+            if overview is not None and asked in ("", overview.slug) else None
+        if isinstance(shown, Failed):  # elle a échoué : la fiche retombe sur ses onglets (l'échec est au journal)
+            shown = None
+        drawn = call(overview.head, self.ui, key, label=f"en-tête {kind}") if overview is not None else None
+        if isinstance(drawn, Failed):  # l'en-tête de la faculté, alors
+            drawn = None
+        slug = asked or (head.default_tab if isinstance(head, Head) else "") or (tabs[0].name if tabs else "")
+        current = None if shown is not None else next((t for t in tabs if t.name == slug), tabs[0] if tabs else None)
         blocks: list[Any] = [head] if isinstance(head, Note) else []
         if current is not None:
             blocks += await self.ui.inspection.arun(current, request.query_params, self.ui.when_long, subject=key)
+        # un onglet que la vue d'ensemble dessine : les mêmes données, une autre forme (ses blocs sinon)
+        if overview is not None and current is not None and current.name in overview.tabs \
+                and not wants_table(request.query_params):
+            query = dict(request.query_params)
+            # ses formulaires préparés au nom de l'objet de la fiche, comme ceux d'une destination (ADR 0121)
+            forms = Forms(self.pages.slot_forms(request, render.blocks(blocks, self.ui.env(), query), key),
+                          lambda rendered, subject: self.pages.slot_forms(request, rendered, subject))
+            drawn_tab = call(overview.render_tab, self.ui, key, current.name, blocks, query, forms,
+                             label=f"onglet dessiné {kind}/{current.name}")
+            if isinstance(drawn_tab, tuple):  # ce qu'elle a dessiné, et ce qu'elle laisse à la console
+                shown, blocks = drawn_tab[0], list(drawn_tab[1])
+            elif drawn_tab is not None and not isinstance(drawn_tab, Failed):
+                shown, blocks = drawn_tab, []
         context = {k: v for k, v in request.query_params.items() if k not in ("onglet", "flash", "page", "taille")
                    and not is_page_param(k) and not k.startswith(("avant", "pg", "pile"))}
         tab_list, gear = self.tab_bar(request, kind, key, tabs, current, head, context)
+        tabs_more: list[dict[str, Any]] = []
+        if overview is not None:
+            tab_list.insert(0, {"title": overview.title, "href": fiche_url(kind, key),
+                                "on": shown is not None and current is None, "badge": 0})
+            # ce qu'elle résume : au bout de la barre, sous un seul menu
+            folded = [{"name": t.name, "title": t.title} for t in tabs if t.name in overview.folded]
+            tabs_more = [{"title": f["title"], "href": fiche_url(kind, key, f["name"]),
+                          "on": current is not None and current.name == f["name"]} for f in folded]
+            hidden = {fiche_url(kind, key, f["name"]) for f in folded}
+            tab_list = [t for t in tab_list if t["href"].split("&", 1)[0] not in hidden]
         actions = self.pages.head_actions(request, kind=kind, subject=key) \
             if not isinstance(head, Head) or (head.automatic_actions and
                 (not head.action_tabs or current is not None and current.name in head.action_tabs)) else []
@@ -107,8 +140,14 @@ class Subjects:
             crumbs=crumbs, tabs=tab_list, gear=gear, blocks=blocks,
             # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
             menu_path=crumbs[0][1] if crumbs else "",
-            view_description=current.description if current is not None else "",
+            view_description=overview.description if shown is not None and current is None else
+            "" if shown is not None else current.description if current is not None else "",
+            overview=shown, fiche_head=drawn,
+            fiche_styles=overview.styles if overview is not None and (shown or drawn) else (),
+            fiche_scripts=overview.scripts if overview is not None and shown is not None and current is None else (),
+            tabs_more=tabs_more, tabs_more_title=overview.folded_title if overview is not None else "",
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
+            console_blocks=current is not None and current.owner in self.ui.deps.plain_owners,
             keep=(("onglet", current.name),) if current is not None else ())
 
     @staticmethod

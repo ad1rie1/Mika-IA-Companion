@@ -1,0 +1,289 @@
+{# Le corps de « En ce moment » : rendu dans la page, puis relu seul par handmade/live.js (le fragment). Aucun style en
+   ligne (CSP) : les longueurs sont des attributs SVG, les couleurs des classes (sw-<émotion> pose --sw). #}
+{% from "handmade/macros.html" import bar, people, failed %}
+<span hidden data-now-stamp>{{ now.stamp }}</span>
+
+{# ── Son humeur ─────────────────────────────────────────────────────────── #}
+{% set m = now.mood %}
+{% if m %}
+<section class="now-hero sw-{{ m.emotion }}" aria-labelledby="now-mood-title">
+  <div class="now-hero-text">
+    <h2 class="now-eyebrow" id="now-mood-title">Son humeur</h2>
+    <p class="now-word">{{ m.word }}</p>
+    <p class="now-qualifier">
+      {% if m.rest %}Comme d'habitude : c'est son fond, elle est au repos.
+      {% else %}{{ m.qualifier|capitalize }} {{ m.word }}, elle qui est d'habitude <span class="now-inline-sw sw-{{ m.background_emotion }}">{{ m.background }}</span>.{% endif %}
+    </p>
+    {% if m.facets|length > 1 %}
+    <div class="now-facets">
+      <svg class="now-facets-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="Le mélange de ce qu'elle ressent">
+        {% for f in m.facets %}<rect class="sw-{{ f.emotion }}" x="{{ f.x }}" y="0" width="{{ f.w }}" height="10"/>{% endfor %}
+      </svg>
+      <ul class="now-facets-legend">{% for f in m.facets %}<li><span class="now-dot sw-{{ f.emotion }}" aria-hidden="true"></span>{{ f.word }} <span class="now-num">{{ f.share }}</span></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <blockquote class="now-voice">
+      <p>{{ m.line }}</p>
+      <footer>ce que son prompt lui en dit</footer>
+    </blockquote>
+    <ul class="now-chips">
+      {% if m.because %}<li>{{ m.because.text }} {{ people(m.because.who) }}</li>{% endif %}
+      {% if m.residue %}<li>{{ m.residue }}</li>{% endif %}
+      {% if m.overflow %}<li class="warn" title="au-delà de {{ m.overflow_floor }}, ce qu'elle ressent la pousse à parler">ça déborde ({{ m.overflow_pct }}) : elle pourrait écrire d'elle-même</li>{% endif %}
+      <li>estime d'elle-même <span class="now-num">{{ m.esteem }}</span></li>
+      <li><a href="{{ PREFIX }}/vie">Humeur en détail →</a></li>
+    </ul>
+  </div>
+  {% set P = m.plane %}
+  <figure class="now-plane">
+    <svg viewBox="0 0 {{ P.size }} {{ P.size }}" role="img" aria-label="Plan plaisir et éveil — {{ P.label }}">
+      <rect class="plane-bg" x="{{ P.pad }}" y="{{ P.pad }}" width="{{ P.far - P.pad }}" height="{{ P.far - P.pad }}" rx="16"/>
+      <line class="plane-axis" x1="{{ P.pad }}" x2="{{ P.far }}" y1="{{ P.mid }}" y2="{{ P.mid }}"/>
+      <line class="plane-axis" x1="{{ P.mid }}" x2="{{ P.mid }}" y1="{{ P.pad }}" y2="{{ P.far }}"/>
+      <text class="plane-word" x="{{ P.far - 6 }}" y="{{ P.mid - 6 }}" text-anchor="end">plaisant</text>
+      <text class="plane-word" x="{{ P.pad + 6 }}" y="{{ P.mid - 6 }}">déplaisant</text>
+      <text class="plane-word" x="{{ P.mid + 6 }}" y="{{ P.pad + 14 }}">agitée</text>
+      <text class="plane-word" x="{{ P.mid + 6 }}" y="{{ P.far - 7 }}">calme</text>
+      {% for l in P.landmarks %}<g class="plane-landmark sw-{{ l.emotion }}"><circle cx="{{ l.x }}" cy="{{ l.y }}" r="2.2"/><text x="{{ l.x }}" y="{{ l.y - 6 }}" text-anchor="middle">{{ l.word }}</text></g>{% endfor %}
+      {% for t in P.trail %}<path class="plane-trail t{{ t.step }}" d="{{ t.d }}"/>{% endfor %}
+      <line class="plane-vector" x1="{{ P.home.x }}" y1="{{ P.home.y }}" x2="{{ P.now.x }}" y2="{{ P.now.y }}"/>
+      <circle class="plane-home" cx="{{ P.home.x }}" cy="{{ P.home.y }}" r="5.5"><title>son repos à cette heure</title></circle>
+      <circle class="plane-halo" cx="{{ P.now.x }}" cy="{{ P.now.y }}" r="15"/>
+      <circle class="plane-now" cx="{{ P.now.x }}" cy="{{ P.now.y }}" r="7"><title>maintenant : {{ m.word }}</title></circle>
+    </svg>
+    <figcaption><span class="plane-key now-key-now"></span>maintenant <span class="plane-key now-key-home"></span>son repos <span class="plane-key now-key-trail"></span>ses dernières 24 h</figcaption>
+  </figure>
+</section>
+{% else %}
+<section class="now-hero">{{ failed("son humeur") }}</section>
+{% endif %}
+
+{# ── Ses dernières 24 heures ─────────────────────────────────────────────── #}
+<section class="now-card now-day" aria-labelledby="now-day-title">
+  <header class="now-card-head">
+    <h2 id="now-day-title">Ses dernières 24 heures</h2>
+    <p>Un seul axe pour tout : on voit ce qui a précédé quoi. Survole une colonne pour ses valeurs ; un point mène à l'épisode.</p>
+  </header>
+  {% set L = now.day.lanes if now.day else none %}
+  {% if L %}
+  <div class="now-lanes-wrap" tabindex="0" role="region" aria-label="Ses dernières 24 heures, couloir par couloir">
+    <div class="now-lanes">
+      <svg class="lane-names" width="96" height="{{ L.labels_h }}" aria-hidden="true">
+        {% for r in L.rows %}<text x="84" y="{{ r.mid + 4 }}" text-anchor="end">{{ r.label }}</text>{% endfor %}
+        <text x="84" y="{{ L.moments_mid + 4 }}" text-anchor="end">{{ L.moments }}</text>
+      </svg>
+      <div class="lane-stack">
+        {# les courbes : étirées en largeur seulement (les traits gardent leur épaisseur, voir handmade/now.css) #}
+        <svg class="lane-plot" viewBox="0 0 {{ L.w }} {{ L.plot_h }}" preserveAspectRatio="none" width="100%" height="{{ L.plot_h }}" role="img" aria-label="Humeur, énergie, sommeil et besoins, sur les dernières 24 heures">
+          <defs>
+            <clipPath id="now-above"><rect x="0" y="{{ L.mood_top }}" width="{{ L.w }}" height="{{ L.zero - L.mood_top }}"/></clipPath>
+            <clipPath id="now-below"><rect x="0" y="{{ L.zero }}" width="{{ L.w }}" height="{{ L.mood_bottom - L.zero }}"/></clipPath>
+          </defs>
+          {% for r in L.rows %}<rect class="lane-bg" x="0" y="{{ r.top }}" width="{{ L.w }}" height="{{ r.bottom - r.top }}" rx="5"/>{% endfor %}
+          {% for t in L.ticks %}<line class="lane-tick{{ ' midnight' if t.midnight }}" x1="{{ t.x }}" x2="{{ t.x }}" y1="0" y2="{{ L.plot_h }}"/>{% endfor %}
+          <line class="lane-zero" x1="0" x2="{{ L.w }}" y1="{{ L.zero }}" y2="{{ L.zero }}"/>
+          {% if L.mood_area %}<path class="mood-area pos" clip-path="url(#now-above)" d="{{ L.mood_area }}"/><path class="mood-area neg" clip-path="url(#now-below)" d="{{ L.mood_area }}"/>{% endif %}
+          {% if L.mood_line %}<path class="mood-line" d="{{ L.mood_line }}"/>{% endif %}
+          {% if L.energy_area %}<path class="energy-area" d="{{ L.energy_area }}"/>{% endif %}
+          {% if L.energy_line %}<path class="energy-line" d="{{ L.energy_line }}"/>{% endif %}
+          {% for b in L.sleep.bands %}<rect class="sleep-band" x="{{ b.x }}" y="{{ L.sleep.top }}" width="{{ b.w }}" height="{{ L.sleep.h }}" rx="4"><title>{{ b.title }}</title></rect>{% endfor %}
+          {% for n in L.needs %}{% if n.d %}<path class="need-line n-{{ n.key }}" d="{{ n.d }}"/>{% endif %}{% endfor %}
+          {% for c in L.columns %}<rect class="lane-hit" x="{{ c.x }}" y="0" width="{{ c.w }}" height="{{ L.plot_h }}"><title>{{ c.title }}</title></rect>{% endfor %}
+          <line class="lane-now" x1="{{ L.w }}" x2="{{ L.w }}" y1="0" y2="{{ L.plot_h }}"/>
+        </svg>
+        {# ce qu'elle a fait : des points, placés en pourcentage (ils restent ronds) #}
+        <svg class="lane-moments" width="100%" height="{{ L.moments_h }}" role="img" aria-label="Ses paroles, ses initiatives et ses pensées, sur les dernières 24 heures">
+          <rect class="lane-bg" x="0" y="0" width="100%" height="{{ L.moments_h }}" rx="6"/>
+          {% for t in L.ticks %}<line class="lane-tick{{ ' midnight' if t.midnight }}" x1="{{ t.pct }}%" x2="{{ t.pct }}%" y1="0" y2="{{ L.moments_h }}"/>{% endfor %}
+          <line class="lane-now" x1="100%" x2="100%" y1="0" y2="{{ L.moments_h }}"/>
+          {% for k in L.marks %}<a href="{{ k.href }}"><circle class="mark mark-{{ k.kind }}" cx="{{ k.pct }}%" cy="{{ L.moments_h / 2 }}" r="{{ k.r }}"><title>{{ k.title }}</title></circle></a>{% endfor %}
+        </svg>
+        <svg class="lane-hours" width="100%" height="20" aria-hidden="true">
+          {% for t in L.ticks %}<text class="{{ 'midnight' if t.midnight }}" x="{{ t.pct }}%" y="14" text-anchor="{{ t.anchor }}">{{ t.label }}</text>{% endfor %}
+        </svg>
+      </div>
+    </div>
+  </div>
+  {% if not L.measured %}<p class="now-lanes-note">Les courbes se rempliront : une mesure toutes les dix minutes, quand elle tourne.</p>
+  {% elif L.late %}<p class="now-lanes-note">Courbes {{ L.late }}.</p>{% endif %}
+  <ul class="now-legend" aria-label="Légende">
+    <li><span class="now-key key-pos"></span>plus agréable que neutre</li>
+    <li><span class="now-key key-neg"></span>moins agréable</li>
+    <li><span class="now-key key-sleep"></span>endormie</li>
+    <li><span class="now-key key-social"></span>compagnie</li>
+    <li><span class="now-key key-expression"></span>s'exprimer</li>
+    <li><span class="now-key key-curiosity"></span>apprendre</li>
+    <li><span class="now-key key-reply"></span>réponse</li>
+    <li><span class="now-key key-initiative"></span>initiative</li>
+    <li><span class="now-key key-thought"></span>pensée</li>
+    <li><span class="now-key key-failed"></span>échec</li>
+  </ul>
+  {% else %}{{ failed("sa journée") }}{% endif %}
+</section>
+
+{# ── Corps, besoins, tête ─────────────────────────────────────────────────── #}
+<div class="now-grid">
+  <section class="now-card" aria-labelledby="now-body-title">
+    <header class="now-card-head"><h2 id="now-body-title">Son corps</h2><a class="now-more" href="{{ PREFIX }}/vie/rythme">Rythme →</a></header>
+    {% set b = now.body %}
+    {% if b %}
+    <p class="now-state{{ ' asleep' if not b.awake }}">{{ b.state }}{% if b.since %} <span>depuis {{ b.since }}</span>{% endif %}</p>
+    {% if b.depth %}<p class="now-sub">{{ b.depth }}{% if b.woken %} · tirée du sommeil, elle répond puis se rendort{% endif %}</p>{% endif %}
+    <div class="now-meter">
+      <div class="now-meter-head"><span>Énergie</span><span class="now-num">{{ b.energy }}</span></div>
+      {{ bar(b.energy_w, "energy") }}
+    </div>
+    <dl class="now-facts">
+      <div><dt>Où</dt><dd>{{ b.where }}{% if b.where_since %} <span class="now-muted">· {{ b.where_since }}</span>{% endif %}</dd></div>
+      <div><dt>Fait</dt><dd>{% if b.activity %}{{ b.activity.label }} <span class="now-muted">· depuis {{ b.activity.since }}{% if b.activity.until %}, jusqu'à {{ b.activity.until }}{% endif %}</span>{% else %}<span class="now-muted">rien de particulier</span>{% endif %}</dd></div>
+      <div><dt>Moment</dt><dd>le {{ b.phase }}</dd></div>
+      <div><dt>Nuit</dt><dd>{% if b.night %}{{ b.night.slept }} <span class="now-muted">· {{ b.night.from }}–{{ b.night.to }}{% for n in b.night.notes %} · {{ n }}{% endfor %}</span>{% else %}<span class="now-muted">pas de nuit récente à dire</span>{% endif %}</dd></div>
+    </dl>
+    {% else %}{{ failed("son corps") }}{% endif %}
+  </section>
+
+  <section class="now-card" aria-labelledby="now-needs-title">
+    <header class="now-card-head"><h2 id="now-needs-title">Ses besoins</h2><a class="now-more" href="{{ PREFIX }}/vie/needs">Détail →</a></header>
+    {% set n = now.needs %}
+    {% if n %}
+    <ul class="now-needs">
+      {% for r in n.rows %}
+      <li class="{{ 'dominant' if r.dominant }}">
+        <div class="now-meter-head"><span>{{ r.label }}{% if r.dominant %} <span class="now-tag">le plus fort</span>{% endif %}</span><span class="now-num">{{ r.pct }}{% if r.trend %} <span class="now-trend {{ r.trend }}" title="sur la dernière heure">{{ {'monte': '↗', 'baisse': '↘', 'stable': '→'}[r.trend] }}</span>{% endif %}</span></div>
+        {{ bar(r.w, "need n-" ~ r.key) }}
+      </li>
+      {% endfor %}
+    </ul>
+    <ul class="now-lines">
+      {% if n.felt %}<li class="warn">Ressent {{ n.felt.how }} {{ n.felt.what }} <span class="now-muted">· {{ n.felt.when }}</span></li>{% endif %}
+      <li>{% if n.heard %}On lui a parlé {{ n.heard }}{% else %}<span class="now-muted">Personne ne lui a encore parlé</span>{% endif %}</li>
+      {% if n.idle %}<li class="now-muted">Rien ne s'est passé depuis {{ n.idle }}</li>{% endif %}
+    </ul>
+    {% else %}{{ failed("ses besoins") }}{% endif %}
+  </section>
+
+  <section class="now-card now-mind" aria-labelledby="now-mind-title">
+    <header class="now-card-head"><h2 id="now-mind-title">Dans sa tête</h2><a class="now-more" href="{{ PREFIX }}/pensees">Pensées →</a></header>
+    {% set t = now.mind %}
+    {% if t %}
+    {% if t.awaited %}
+    <div class="now-awaited sw-{{ t.awaited.emotion }}">
+      <p class="now-awaited-head">Elle attend {{ t.awaited.how }}{% if t.awaited.when %} · <span>{{ t.awaited.when }}</span>{% endif %}</p>
+      <p>{{ t.awaited.what }}</p>
+      {% if t.awaited.about %}<p class="now-muted">pour {{ people(t.awaited.about) }}</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if t.thoughts %}
+    <ul class="now-thoughts">
+      {% for x in t.thoughts %}
+      <li class="sw-{{ x.emotion }}">
+        <p>{{ x.text }}</p>
+        <p class="now-thought-meta"><span class="now-dot sw-{{ x.emotion }}" aria-hidden="true"></span>{{ x.word }} · <span class="now-num">{{ x.pct }}</span>{% if x.about %} · {{ people(x.about) }}{% endif %} · {{ x.born }}{% if x.origin %} · <span title="d'où elle vient">{{ x.origin }}</span>{% endif %}</p>
+        {{ bar(x.w, "thought") }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% elif not t.awaited and not t.dream %}
+    <p class="now-empty">L'esprit tranquille : aucune pensée ne la travaille.</p>
+    {% endif %}
+    {% if t.dream %}
+    <div class="now-dream sw-{{ t.dream.emotion }}">
+      <p class="now-dream-head">Elle s'est réveillée avec ce rêve{% if t.dream.masked %} <span class="now-tag">ne se raconte plus</span>{% endif %}</p>
+      <p class="now-dream-text">{{ t.dream.text }}</p>
+    </div>
+    {% endif %}
+    {% else %}{{ failed("ses pensées") }}{% endif %}
+  </section>
+</div>
+
+{# ── Les gens ─────────────────────────────────────────────────────────────── #}
+<section class="now-card" aria-labelledby="now-people-title">
+  <header class="now-card-head">
+    <h2 id="now-people-title">Les gens</h2>
+    {% if now.people %}<p>{% if now.people.online %}{{ now.people.online }} en ligne · {% endif %}qui est là, ce qu'elle ressent envers chacun, ce qui attend une réponse</p>{% endif %}
+    <a class="now-more" href="{{ PREFIX }}/personnes">Toutes les personnes →</a>
+  </header>
+  {% set g = now.people %}
+  {% if g and g.rows %}
+  <ul class="now-people">
+    {% for p in g.rows %}
+    <li class="now-person{{ ' online' if p.online }}{{ ' composing' if p.composing }}">
+      <span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence"></span>{% endif %}</span>
+      <div class="now-person-main">
+        <p class="now-person-head">{% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}{% if p.owner %}<span class="now-tag owner">propriétaire</span>{% endif %}<span class="now-tag{{ ' close' if p.close }}">{{ p.closeness }}</span></p>
+        <p class="now-person-felt">{% if p.felt %}<span class="now-dot sw-{{ p.felt.emotion }}" aria-hidden="true"></span>{{ p.felt.how }} {{ p.felt.word }} envers cette personne{% else %}<span class="now-muted">rien de particulier envers cette personne</span>{% endif %}</p>
+        {% if p.notes %}<ul class="now-notes">{% for x in p.notes %}<li class="{{ x.tone }}">{{ x.text }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+      <div class="now-bond" title="ce qui l'attache à cette personne (0 à 100 %)">
+        <span class="now-bond-label">attachement</span>
+        {{ bar(p.bond_w, "bond") }}
+        <span class="now-num">{{ p.bond }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if g.more %}<p class="now-muted now-after">et {{ g.more }} autre{{ 's' if g.more > 1 }} de son entourage</p>{% endif %}
+  {% elif g %}<p class="now-empty">Personne encore : elle n'a parlé à personne.</p>
+  {% else %}{{ failed("ses liens") }}{% endif %}
+</section>
+
+{# ── Sa journée, ce qu'elle entreprend ────────────────────────────────────── #}
+<div class="now-grid two">
+  <section class="now-card" aria-labelledby="now-feed-title">
+    <header class="now-card-head"><h2 id="now-feed-title">Le fil de sa journée</h2><a class="now-more" href="{{ PREFIX }}/decisions/episodes">Tous les épisodes →</a></header>
+    {% if now.day %}
+    {% if now.day.feed %}
+    <ol class="now-feed">
+      {% for x in now.day.feed %}
+      <li class="tone-{{ x.tone or 'plain' }}">
+        <time>{{ x.time }}</time>
+        <div><p>{% if x.href %}<a href="{{ x.href }}">{{ x.text }}</a>{% else %}{{ x.text }}{% endif %}</p>{% if x.quote %}<q>{{ x.quote }}</q>{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">Rien encore dans les dernières 24 heures.</p>{% endif %}
+    {% else %}{{ failed("sa journée") }}{% endif %}
+  </section>
+
+  <div class="now-stack">
+  <section class="now-card" aria-labelledby="now-work-title">
+    <header class="now-card-head"><h2 id="now-work-title">Ce qu'elle entreprend</h2><a class="now-more" href="{{ PREFIX }}/buts">Buts →</a></header>
+    {% set w = now.pursuits %}
+    {% if w %}
+    <p class="now-sub">
+      {% if w.initiatives %}{{ w.initiatives }} initiative{{ 's' if w.initiatives > 1 }} aujourd'hui{% else %}Aucune initiative aujourd'hui{% endif %}{% if w.last_initiative %} · la dernière {{ w.last_initiative }}{% endif %}{% if w.holding %} · <span class="warn">se retient de prendre la parole jusqu'à {{ w.holding }}</span>{% endif %}
+    </p>
+    {% if w.goals %}
+    <ul class="now-goals">
+      {% for g in w.goals %}
+      <li>
+        <p class="now-goal-head"><a href="{{ g.href }}">{{ g.title }}</a></p>
+        <p class="now-goal-meta"><span class="now-tag">{{ g.kind }}</span> {{ g.status }}{% if g.progress %} · <span class="now-num">{{ g.progress }}</span>{% endif %}{% if g.blocked %} · <span class="danger">{{ g.blocked }} bloquée{{ 's' if g.blocked > 1 }}</span>{% endif %}{% if g.next %} · {{ g.next }}{% endif %}</p>
+        {% if g.progress %}{{ bar(g.w, "goal") }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Aucun but en cours.</p>{% endif %}
+    <h3 class="now-subhead">Ce qui vient</h3>
+    {% if w.upcoming %}
+    <ul class="now-upcoming">
+      {% for u in w.upcoming %}
+      <li><time>{{ u.when }}</time><div><p>{{ u.text }}</p><p class="now-muted">{% if u.world %}dans le monde{% elif u.about %}pour {{ people(u.about) }}{% endif %}{% if u.ongoing %} · en cours{% endif %}</p></div></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Rien d'annoncé pour les jours qui viennent.</p>{% endif %}
+    {% else %}{{ failed("ce qu'elle entreprend") }}{% endif %}
+  </section>
+
+  <section class="now-card" aria-labelledby="now-today-title">
+    <header class="now-card-head"><h2 id="now-today-title">Aujourd'hui, en chiffres</h2><p>depuis minuit</p></header>
+    {% if now.day %}
+    <ul class="now-today">
+      {% for x in now.day.today %}
+      <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="now-today-value now-num">{{ x.value }}</span><span class="now-today-label">{{ x.label }}{% if x.sub %} · {{ x.sub }}{% endif %}</span>{% if x.href %}</a>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ failed("sa journée") }}{% endif %}
+  </section>
+  </div>
+</div>

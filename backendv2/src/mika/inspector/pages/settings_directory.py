@@ -40,7 +40,7 @@ async def directory(ui: Any, request: Request) -> dict[str, Any]:
         group["items"].append({"title": page.title, "description": description,
                                "href": page.href or f"{PREFIX}/reglages/{page.slug}"})
     return {"filters": (Param("q", "Rechercher un réglage", placeholder="ex. voix, modèle, boîte, mémoire"),),
-            "panel": Panel("settings_directory.html", {
+            "panel": Panel("handmade/reglages/annuaire.html", {
                 "settings_groups": list(groups.values()), "settings_count": count, "settings_total": total,
                 "settings_search": bool(terms),
             })}

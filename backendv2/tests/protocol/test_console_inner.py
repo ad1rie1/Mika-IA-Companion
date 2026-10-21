@@ -25,12 +25,13 @@ def test_memory_reads_keep_privacy_status_source_filters_and_no_side_effects(wor
     before, calls = kernel.mind.head, len(backend.calls)
     url = "/inspecteur/memoire/souvenirs?person=adrien"
     body = page(client, url)
-    assert 'class="collection list"' in body and "secret" in body and "actif" in body
+    # la liste est dessinée (ADR 0121) : chaque souvenir garde son secret et son statut
+    assert 'class="now-card person-list' in body and "secret" in body and "actif" in body
     assert f'/inspecteur/evenement/{remembered}' in body and f'/inspecteur/evenement/{source}' in body
     assert '<script>secret</script>' not in client.get(url).text
     assert 'name="person"' in body and "adrien" in body
     table = page(client, url + "&vue_pg1=table")
-    assert 'class="collection list"' not in table and "Lancement" in table
+    assert 'person-list' not in table and "Lancement" in table
     assert "Lancement" not in page(client, url + "&q=inexistant")
     assert kernel.mind.head == before and len(backend.calls) == calls
 
@@ -46,7 +47,7 @@ def test_retry_is_bound_to_its_passage_and_requires_a_valid_explicit_post(world)
         attempts=3, failure_code="provider_error", detail=Content.of("Détail <script>indisponible</script>"))], "memory")
     before, calls = kernel.mind.head, len(backend.calls)
     body = page(client, "/inspecteur/memoire/consolidation")
-    assert 'class="collection cards"' in body and "à examiner" in body and "Détail du passage" in body
+    assert 'class="now-card person-list' in body and "à examiner" in body and "Détail du passage" in body
     raw = client.get("/inspecteur/memoire/consolidation").text
     assert "<script>indisponible</script>" not in raw
     form = re.search(r'<form[^>]+action="/inspecteur/action/memory.reprendre".*?</form>', raw, re.S).group()
@@ -74,9 +75,10 @@ def test_thoughts_distinguish_live_content_from_history_and_keep_cursor_return(w
         intensity=intensity, origin="exchange", about=("user_1",))
         for text, intensity in (("Idée encore présente", 0.8), ("Idée qui s’est dissipée", 0.001))], "attention")
     body = page(client, "/inspecteur/pensees/pensees")
-    live = body.split('<details class="card"><summary><b>Historique des pensées')[0]
+    # la page est dessinée (ADR 0121) : l'historique est un repli à part, sous les pensées vivantes
+    live = body.split('<details class="now-card person-fold"><summary>Historique des pensées')[0]
     assert "Idée encore présente" in live and "Idée qui s’est dissipée" not in live
-    assert '<details class="card"><summary><b>Historique des pensées' in body
+    assert '<details class="now-card person-fold"><summary>Historique des pensées' in body
     assert "Idée qui s’est dissipée" in body
     older = page(client, "/inspecteur/pensees/pensees?avant=1&pile=0,90")
-    assert '<details class="card" open><summary><b>Historique des pensées' in older and "Plus récents" in older
+    assert '<details class="now-card person-fold" open><summary>Historique des pensées' in older and "Plus récents" in older

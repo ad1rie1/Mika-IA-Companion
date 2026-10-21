@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "16"
+ASSET_VERSION = "19"
 
 log = logging.getLogger("mika.console")
 
@@ -112,6 +112,83 @@ class InspectorDeps:
     #: les clients du monde (``/ws/world``, ADR 0051) : ``overview()`` dit qui est connecté, qui tient le bail
     #: d'hôte, ce qui manque au moteur (Système › Le monde, côté écrans)
     world: Any = None
+    #: les vues d'ensemble dessinées à la main, par type d'objet (ADR 0121) : le premier onglet de sa fiche, ouvert
+    #: par défaut (voir ``Overview``)
+    overviews: Mapping[str, Any] = field(default_factory=dict)
+    #: les onglets des destinations dessinés à la main, par « destination/onglet » (ADR 0121, voir ``Drawn``)
+    drawn: Mapping[str, Any] = field(default_factory=dict)
+    #: les propriétaires dont les vues gardent le rendu de la console, bloc par bloc (leur interface est un contrat :
+    #: les apps de la Forge) ; les autres pages se dessinent dans le vocabulaire des pages dessinées
+    plain_owners: frozenset[str] = frozenset()
+
+
+def wants_table(query: Mapping[str, str]) -> bool:
+    """La page demande une liste en tableau (``vue_<table>=table``) : un onglet dessiné rend alors la main aux blocs
+    de sa faculté, et à leur tableau (ADR 0121)."""
+    return any(k.startswith("vue_") and v == "table" for k, v in query.items())
+
+
+class Forms(dict[str, Any]):
+    """Les formulaires que la console a préparés pour les actions d'un onglet, par emplacement (leur jeton, leurs
+    champs, leur retour) ; ``of(blocs rendus, sujet)`` prépare ceux d'autres blocs pour un objet — une fiche que
+    l'onglet ouvre dans la page (un message dans la liseuse du courrier)."""
+
+    def __init__(self, page: Mapping[str, Any], of: Callable[[Sequence[Any], str], dict[str, Any]]) -> None:
+        super().__init__(page)
+        self.of = of
+
+
+class Drawn:
+    """Un onglet d'une destination, dessiné par la composition (ADR 0121) : les mêmes données que sa faculté (ses
+    blocs), une autre forme. ``render`` reçoit aussi les formulaires que la console a préparés pour les actions de
+    ces blocs (``forms`` : ``Forms``) ; il rend son HTML (déjà échappé), un couple (HTML, blocs
+    que la console rend après), ou ``None`` : ses blocs, tels quels. ``styles`` et ``scripts`` : ce que ses gabarits
+    demandent (sous ``static/``). ``last`` : son HTML vient après les blocs et le panneau de la console (un onglet
+    qui ne redessine que sa liste, sous les chiffres et les boutons qui restent à la console). ``panel`` : la console
+    garde le panneau de l'onglet ; faux, le dessin dit ce qu'il disait."""
+
+    styles: tuple[str, ...] = ()
+    scripts: tuple[str, ...] = ()
+    last: bool = False
+    panel: bool = True
+
+    def render(self, ui: UI, blocks: Sequence[Any], query: Mapping[str, str],
+               forms: Mapping[str, Any] | None = None) -> Any:
+        raise NotImplementedError
+
+
+class Overview:
+    """Ce qu'une vue d'ensemble offre à la fiche d'un type d'objet (ADR 0121) : la composition la dessine à la main
+    en croisant les facultés ; la console n'en sait que l'onglet (``slug``, ``title``, ``description``). ``render``
+    rend son HTML, déjà échappé (un gabarit de la console), ou ``None`` : la fiche retombe sur ses onglets. ``head``
+    dessine l'en-tête de la fiche sur tous ses onglets (son titre principal compris) — la console y ajoute ses
+    actions ; ``None`` : l'en-tête de la faculté qui déclare l'objet."""
+
+    slug = "ensemble"
+    title = "Vue d'ensemble"
+    description = ""
+    #: les feuilles et les scripts de la console (sous ``static/``) que ses gabarits demandent
+    styles: tuple[str, ...] = ()
+    scripts: tuple[str, ...] = ()
+    #: les onglets des facultés que la vue d'ensemble résume : rangés au bout de la barre, sous ``folded_title``
+    folded: tuple[str, ...] = ()
+    folded_title = "Le détail"
+    #: les onglets des facultés qu'elle dessine (``render_tab``) : leurs données restent celles de la faculté
+    tabs: tuple[str, ...] = ()
+
+    def render(self, ui: UI, key: str) -> Any:
+        raise NotImplementedError
+
+    def head(self, ui: UI, key: str) -> Any:
+        return None
+
+    def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
+                   forms: Mapping[str, Any] | None = None) -> Any:
+        """Un onglet d'une faculté, dessiné : ``blocks`` sont ceux que la faculté a rendus (ses lignes, ses
+        cellules, sa pagination), ``query`` les paramètres de la page, ``forms`` les formulaires que la console a
+        préparés pour leurs actions (``Forms``). ``None`` : ses blocs, tels quels ; un couple (HTML, blocs) : ce
+        qu'elle a dessiné, puis des blocs que la console rend après."""
+        return None
 
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),

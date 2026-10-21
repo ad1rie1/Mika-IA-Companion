@@ -1,0 +1,27 @@
+{# Les enregistrements d'un réglage (des fournisseurs, des boîtes, des réveils…), dans le vocabulaire des pages
+   dessinées (ADR 0121) : une carte, une entrée par enregistrement — son nom, ses champs, modifier ou retirer. #}
+{% from "_navigation.html" import pager %}
+{% macro records(r, csrf, section, action) -%}
+<section class="now-card person-list records" aria-label="{{ r.label }}">
+  <header class="now-card-head"><h2>{{ r.label }}</h2><span class="person-count now-num" title="{{ r.total }} au total">{{ r.total }}</span>
+    {% if r.help %}<p>{{ r.help }}</p>{% endif %}<a class="btn small hm-add" href="{{ r.add }}">＋ Ajouter</a></header>
+  <div class="settings-records person-entries" role="list" aria-label="{{ r.label }}">
+  {% for row in r.rows %}
+    <article class="settings-record" role="listitem" data-href="{{ row.edit }}">
+      <h3 class="person-entry-title"><a href="{{ row.edit }}">{{ row.key if r.keyed else row.cells|first or 'Entrée ' ~ loop.index }}</a></h3>
+      <p class="person-entry-facts">{% for c in row.cells %}<span><span class="k">{{ r.columns[loop.index0] }}</span> {{ c }}</span>{% endfor %}</p>
+      <div class="person-entry-more">
+        <a href="{{ row.edit }}">Modifier →</a>
+        <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_section" value="{{ section }}">
+          <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
+          <button class="btn quiet small danger">retirer</button>
+        </form>
+      </div>
+    </article>
+  {% else %}<p class="now-empty" role="listitem">Aucune entrée configurée. Utilise « Ajouter » pour commencer.</p>{% endfor %}
+  </div>
+  {% set pp = r.pager or {} %}
+  {% if pp.prev or pp.next or pp.older or pp.newer %}{{ pager(r.pager) }}{% endif %}
+</section>
+{%- endmacro %}

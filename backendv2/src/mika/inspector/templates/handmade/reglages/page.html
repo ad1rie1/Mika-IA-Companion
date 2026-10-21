@@ -1,9 +1,12 @@
+{# Une page de réglages (pages/reglages.py), dans le vocabulaire des pages dessinées (ADR 0121) : ses faits en ligne,
+   ses enregistrements en cartes, son formulaire en carte (ses groupes, ses options avancées repliées), ses commandes,
+   son document entier. Champs, noms et boutons : ceux de la console. #}
 {% from "_forms.html" import field %}
-{% from "_blocks.html" import render %}
-{% from "_settings_records.html" import records %}
+{% from "handmade/shared/drawn.html" import sober with context %}
+{% from "handmade/reglages/enregistrements.html" import records %}
 {% macro groups(list) -%}
 {% for g in list %}
-<fieldset class="group">
+<fieldset class="group hm-group">
   {% if g.title %}<legend>{{ g.title }}</legend>{% endif %}
   {% for f in g.fields %}
     {% if f.kind == "mapping" %}
@@ -22,30 +25,30 @@
 {% macro fields_block(form) -%}
 {{ groups(form.groups) }}
 {% if form.advanced %}
-<details class="advanced"{{ ' open' if form.open }}>
-  <summary>Options avancées <span class="muted">— rarement utiles : les valeurs par défaut conviennent presque toujours</span></summary>
+<details class="advanced hm-subfold"{{ ' open' if form.open }}>
+  <summary>Options avancées <span class="now-muted">— rarement utiles : les valeurs par défaut conviennent presque toujours</span></summary>
   {{ groups(form.advanced) }}
 </details>
 {% endif %}
 {%- endmacro %}
-<div class="settings stack">
+<div class="settings stack now-page">
 {% for s in sections %}
 <section class="settings-section stack" id="section-{{ s.key }}">
-  {% if s.facts %}<div class="stats compact">{% for k, v in s.facts %}<div class="stat"><span class="label">{{ k }}</span><span class="value small">{{ v }}</span></div>{% endfor %}</div>{% endif %}
+  {% if s.facts %}<p class="person-entry-facts hm-settings-facts">{% for k, v in s.facts %}<span><span class="k">{{ k }}</span> {{ v }}</span>{% endfor %}</p>{% endif %}
   {% for m in s.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
 
   {% if s.record %}{% set rec = s.record %}
-  <form method="post" action="{{ action }}" class="form card record-form" id="enregistrement">
+  <form method="post" action="{{ action }}" class="form now-card hm-form record-form" id="enregistrement">
     {# Entrée enregistre, jamais « charger la liste » (le premier bouton d'un formulaire est son défaut) #}
     <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
-    <h3>{{ 'Ajouter' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h3>
+    <h2 class="hm-form-title">{{ 'Ajouter' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h2>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
     {% if rec.back %}<input type="hidden" name="_retour" value="{{ rec.back }}">{% endif %}
     {% if rec.stash %}<input type="hidden" name="_reserve" value="{{ rec.stash }}">{% endif %}
     {% for e in rec.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {% if rec.keyed %}
-    <fieldset class="group"><legend>Nom</legend>
+    <fieldset class="group hm-group"><legend>Nom</legend>
     <div class="field{{ ' has-error' if rec.name_error }}"><label for="rec-{{ s.key }}-nom">Nom</label>
       <input id="rec-{{ s.key }}-nom" name="_cle" value="{{ rec.name }}" required maxlength="60" autocomplete="off">
       <span class="help">Le nom sous lequel les autres réglages le désignent (lettres, chiffres, tirets).</span>
@@ -63,22 +66,22 @@
   {% endfor %}
 
   {% if s.form %}
-  {% if s.preview %}<div class="stack">{{ render(s.preview, {}) }}</div>{% endif %}
-  <form method="post" action="{{ action }}" class="form">
+  {% if s.preview %}<div class="now">{{ sober(s.preview) }}</div>{% endif %}
+  <form method="post" action="{{ action }}" class="form now-card hm-form">
     <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     {% if s.form.stash %}<input type="hidden" name="_reserve" value="{{ s.form.stash }}">{% endif %}
     {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {{ fields_block(s.form) }}
-    {% if s.form.preview %}<p class="caption">« Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>{% endif %}
+    {% if s.form.preview %}<p class="person-tab-note">« Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>{% endif %}
     <div class="form-actions"><button class="btn">Enregistrer</button>{% if s.form.preview %}
       <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>{% endif %}</div>
   </form>
   {% endif %}
 
   {% if s.commands %}
-  <div class="card commands-card">
-    <h3>Commandes</h3>
+  <div class="now-card hm-commands">
+    <header class="now-card-head"><h2>Commandes</h2></header>
     <div class="commands">
     {% for c in s.commands %}
       <form method="post" action="{{ action }}" class="inline"{% if c.confirm %} data-confirm="{{ c.confirm }}"{% endif %}>
@@ -88,13 +91,13 @@
       </form>
     {% endfor %}
     </div>
-    {% for c in s.commands if c.confirm %}<p class="help">{{ c.title }} : {{ c.confirm }}</p>{% endfor %}
+    {% for c in s.commands if c.confirm %}<p class="now-sub">{{ c.title }} : {{ c.confirm }}</p>{% endfor %}
   </div>
   {% endif %}
 
   {% if s.yaml %}
-  <form method="post" action="{{ action }}" class="form card">
-    <h3>Le document entier (YAML, sans secret)</h3>
+  <form method="post" action="{{ action }}" class="form now-card hm-form">
+    <h2 class="hm-form-title">Le document entier (YAML, sans secret)</h2>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     <input type="hidden" name="_yaml" value="1">
     <div class="field"><label for="yaml-{{ s.key }}">Document</label>
@@ -104,7 +107,7 @@
   </form>
   {% endif %}
 
-  {% if s.blocks %}<div class="stack">{{ render(s.blocks, {}) }}</div>{% endif %}
+  {% if s.blocks %}<div class="now">{{ sober(s.blocks) }}</div>{% endif %}
   {% endif %}
 </section>
 {% endfor %}

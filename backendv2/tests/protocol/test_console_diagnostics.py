@@ -29,13 +29,14 @@ def test_processes_put_current_failures_first_and_keep_the_full_error_in_details
     monkeypatch.setitem(sched.consecutive, broken, 4)
     monkeypatch.setitem(sched.last_error, broken, (live.kernel.mind.clock.now(), "RuntimeError('incident précis')"))
     body = page(client, "/inspecteur/systeme/processus")
-    assert 'class="collection list"' in body and "4 échec(s) d’affilée" in body
-    first = body.split('class="collection-heading"')[1].split('class="collection-heading"')[0]
-    assert "4 échec(s) d’affilée" in first
-    assert "incident précis" in body and broken in body
-    assert '<details class="card"><summary><b>Historique des échecs' in body
+    # la page est dessinée (ADR 0121) : ce qui échoue en tête, son erreur en clair, avant la carte de chaque faculté
+    assert 'class="now-card sys-trouble"' in body
+    first = body.split('class="now-card sys-trouble"')[1].split("Par faculté")[0]
+    assert "4 échecs d'affilée" in first
+    assert "incident précis" in first and broken in first
+    assert '<details class="now-card person-fold"><summary>Historique des échecs' in body  # dessiné aussi
     older = page(client, "/inspecteur/systeme/processus?avant=1&pile=0,90")
-    assert '<details class="card" open><summary><b>Historique des échecs' in older and "Plus récents" in older
+    assert '<details class="now-card person-fold" open><summary>Historique des échecs' in older and "Plus récents" in older
 
 
 def test_anomalies_have_one_clear_empty_state_and_do_not_hide_an_existing_incident(world, monkeypatch):  # noqa: F811
@@ -48,7 +49,7 @@ def test_anomalies_have_one_clear_empty_state_and_do_not_hide_an_existing_incide
     monkeypatch.setattr(live.kernel.mind, "anomalies", ["Erreur de réduction à examiner"])
     body = page(client, "/inspecteur/systeme/anomalies")
     assert "Aucune anomalie enregistrée depuis le démarrage" not in body
-    assert "Erreur de réduction à examiner" in body and 'class="collection list"' in body
+    assert "Erreur de réduction à examiner" in body and 'class="now-card person-list' in body  # dessinée, ADR 0121
 
 
 def test_health_prioritizes_failed_checks_keeps_details_and_links_without_actions(world, monkeypatch):  # noqa: F811
@@ -65,9 +66,10 @@ def test_health_prioritizes_failed_checks_keeps_details_and_links_without_action
     body = page(client, "/inspecteur/systeme/sante")
     assert "Une panne demande ton attention" in body and "Relevé à" in body
     assert body.index("Une boucle arrêtée") < body.index("Envoi non livré") < body.index("Journal sain")
-    assert '<details class="card"><summary><b>Contrôles sans problème (1)' in body
+    # dessinée (ADR 0121) : une tuile par contrôle, celui qui va bien après les autres
+    assert body.count('<li class="sys-check tone-') == 3 and '<li class="sys-check tone-ok">' in body
     assert 'href="/inspecteur/systeme/sorties"' in body and 'href="/inspecteur/systeme/processus"' in body
-    assert "Détail du contrôle" in body and "Erreur de livraison" in body
+    assert "<summary>Le détail</summary>" in body and "Erreur de livraison" in body
     assert "<script>alert(1)</script>" not in client.get("/inspecteur/systeme/sante").text
     assert "Sonde publique" in body and "Projections et performances" in body
     assert live.kernel.mind.head == before
@@ -82,10 +84,10 @@ def test_health_distinguishes_all_clear_from_checks_not_available(world, monkeyp
     body = page(client, "/inspecteur/systeme/sante")
     if phase == "ready":
         assert "Tous les contrôles sont au vert" in body
-        assert '<details class="card" open><summary><b>Contrôles sans problème (1)' in body
+        assert '<li class="sys-check tone-ok">' in body and "Journal sain" in body  # sa tuile (ADR 0121)
     else:
         assert "Démarrage en cours" in body and "Les contrôles complets seront disponibles" in body
-        assert "Tous les contrôles sont au vert" not in body and 'class="health-counts"' not in body
+        assert "Tous les contrôles sont au vert" not in body and 'class="sys-health-counts"' not in body
 
 
 def test_episode_summary_reads_cause_and_latest_speeches_without_losing_full_history(world):  # noqa: F811
@@ -115,11 +117,11 @@ def test_episode_summary_reads_cause_and_latest_speeches_without_losing_full_his
     assert re.search(r'onglet=resume" aria-current="page"', body)
     speeches = page(client, url + "?onglet=dit")
     assert all(f"Parole de diagnostic {n}" in speeches for n in range(5))
-    assert 'class="collection feed"' in speeches
+    assert 'class="now-card person-list' in speeches  # les blocs d'une page sont dessinés (ADR 0121)
     journal = page(client, url + "?onglet=deroule")
-    assert 'class="collection list"' in journal and "7 au total" in journal
+    assert 'class="now-card person-list' in journal and "7 au total" in journal
     table = page(client, url + "?onglet=deroule&vue_pg1=table")
-    assert 'class="collection list"' not in table and "7 au total" in table
+    assert 'person-list' not in table and 'class="hm-table"' in table and "7 au total" in table
     assert kernel.mind.head == before and len(backend.calls) == calls
 
 

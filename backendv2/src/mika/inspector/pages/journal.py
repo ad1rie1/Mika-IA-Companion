@@ -385,7 +385,7 @@ def replay_panel(ui: Any, corr: str, back: str) -> Panel | None:
                   "On ne sait pas où cet épisode a été servi : son prompt n'est peut-être jamais sorti de cette machine.")
         warning = (f"{origin} Le rejouer avec un service hébergé l'enverra au dehors — et il mêle les personnes (le fil "
                    "partagé, ce qu'elle sait des autres).")
-    return Panel("replay.html", {"replay": {"episode": corr, "back": back, "choices": choices, "warning": warning,
+    return Panel("handmade/shared/rejouer.html", {"replay": {"episode": corr, "back": back, "choices": choices, "warning": warning,
                                             "blocked": replay_blocked(trace_of(ui, corr))}, "panel_after": True})
 
 

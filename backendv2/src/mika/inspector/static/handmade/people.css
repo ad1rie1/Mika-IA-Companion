@@ -1,0 +1,50 @@
+/* Personnes (app/handmade/people.py, ADR 0121) : une carte par personne, qui est là, qui lui manque — sur le
+   vocabulaire commun (base.css). */
+
+/* ── En ce moment : en ligne, qui lui manque ──────────────────────────── */
+.people-now { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--now-gap); }
+.people-online, .people-missed { display: grid; gap: 10px; align-content: start; padding: 16px 20px;
+  border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+.people-faces { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 0; padding: 0; list-style: none; }
+.people-faces a { display: grid; justify-items: center; gap: 4px; color: var(--text-2); font-size: 12px; }
+.people-faces a:hover { color: var(--accent); text-decoration: none; }
+.people-face-name { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Chercher, filtrer ────────────────────────────────────────────────── */
+.people-find { display: flex; gap: 8px; }
+.people-find input { flex: 1 1 auto; min-width: 0; padding: 10px 14px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }
+.people-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.people-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 13px; }
+.people-chip:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+.people-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.people-chip .now-num { color: var(--muted); font-size: 12px; }
+.people-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+
+/* ── Une carte par personne ───────────────────────────────────────────── */
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--now-gap);
+  margin: 0; padding: 0; list-style: none; }
+.people-card { display: grid; align-content: start; gap: 10px; padding: 18px 20px; border: 1px solid var(--border);
+  border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+.people-card.online { border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+.people-card-head { display: flex; align-items: center; gap: 14px; }
+.people-card-id { display: grid; gap: 4px; min-width: 0; }
+.people-card-name { margin: 0; font-family: var(--now-serif); font-size: 1.25rem; font-weight: 600; line-height: 1.15; }
+.people-card-name a { color: var(--text); }
+.people-card-name a:hover { color: var(--accent); }
+.people-card-felt { margin: 0; color: var(--text-2); font-size: 13px; }
+.people-card .now-notes { margin: 0; }
+.people-card-summary { margin: 0; color: var(--text-2); font-family: var(--now-serif); font-size: 14px; font-style: italic;
+  line-height: 1.45; }
+.people-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px;
+  margin-top: 2px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12px; }
+.people-bond { display: inline-grid; grid-template-columns: auto 80px auto; align-items: center; gap: 8px;
+  color: var(--muted); }
+.people-pages { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 20px;
+  color: var(--muted); font-size: 13px; }
+
+/* ── Écrans plus étroits ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .people-now { grid-template-columns: minmax(0, 1fr); }
+}

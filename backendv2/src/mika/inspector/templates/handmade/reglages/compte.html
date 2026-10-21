@@ -1,9 +1,11 @@
+{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : le créer, le modifier (qui
+   c'est, ses droits, son mot de passe), ses applications connectées. Champs, noms et boutons : ceux de la console. #}
 {% from "_navigation.html" import pager %}
 {% if mode == "create" %}
-<form method="post" action="{{ action }}" class="form card record-form">
-  <h3>Créer un compte</h3>
+<form method="post" action="{{ action }}" class="form now-card hm-form record-form">
+  <h2 class="hm-form-title">Créer un compte</h2>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="create">
-  <fieldset class="group">
+  <fieldset class="group hm-group">
     <legend>Le compte</legend>
     <div class="field"><label for="acc-username">Identifiant</label>
       <input id="acc-username" name="username" value="{{ values.username or '' }}" required autocomplete="off" maxlength="60">
@@ -20,25 +22,25 @@
   <div class="form-actions"><button class="btn">Créer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
 {% elif mode == "edit" %}
-<div class="stack">
-<form method="post" action="{{ action }}" class="form card record-form">
-  <h3>{{ account.username }} <span class="muted">· {{ account.handle }}</span></h3>
+<div class="now">
+<form method="post" action="{{ action }}" class="form now-card hm-form record-form">
+  <h2 class="hm-form-title">{{ account.username }} <span class="now-muted">· {{ account.handle }}</span></h2>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="update">
   <input type="hidden" name="account" value="{{ account.id }}">
-  <fieldset class="group">
+  <fieldset class="group hm-group">
     <legend>Qui c'est</legend>
     <div class="field"><label for="acc-edit-full-name">Nom affiché (prénom, nom)</label>
       <input id="acc-edit-full-name" name="full_name" value="{{ account.full_name }}" maxlength="80">
       <span class="help">Le nom sous lequel elle connaît cette personne, partout dans la console et dans ce qu'elle dit (vide : l'identifiant, « {{ account.username }} »).</span></div>
   </fieldset>
-  <fieldset class="group">
+  <fieldset class="group hm-group">
     <legend>Droits</legend>
     <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if account.operator }}> Opérateur</label>
       <span class="help">Ouvre la console et décide de ce qui sort de la machine.{% if account.operator and operators <= 1 %} C'est le dernier opérateur actif : il ne peut pas perdre ce droit.{% endif %}</span></div>
     <div class="field"><label class="check"><input type="checkbox" name="active"{{ ' checked' if account.active }}> Actif</label>
       <span class="help">Décoché : le compte ne peut plus se connecter et ses sessions sont fermées. Ce qu'elle sait de la personne reste.</span></div>
   </fieldset>
-  <fieldset class="group">
+  <fieldset class="group hm-group">
     <legend>Mot de passe</legend>
     <div class="field"><label for="acc-new-password">Nouveau mot de passe</label>
       <input id="acc-new-password" name="password" type="password" autocomplete="new-password" placeholder="vide : inchangé">
@@ -46,26 +48,29 @@
   </fieldset>
   <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
-<section class="table-block">
-  <div class="block-head"><h3 class="block-title">Applications connectées</h3><span class="block-count">{{ apps_total }} au total</span></div>
-  <p class="muted">Le téléphone et les moteurs de jeu se connectent par un jeton de ce compte. Révoquer ferme ses connexions ; un téléphone révoqué ne reçoit plus rien, et elle ne peut plus écrire à cette personne quand elle est absente. Changer le mot de passe révoque les jetons obtenus par connexion.</p>
-  <div class="collection cards" role="list" aria-label="Applications connectées">
+<section class="now-card person-list" aria-label="Applications connectées">
+  <header class="now-card-head"><h2>Applications connectées</h2><span class="person-count now-num" title="{{ apps_total }} au total">{{ apps_total }}</span>
+    <p>Le téléphone et les moteurs de jeu se connectent par un jeton de ce compte. Révoquer ferme ses connexions ; un téléphone révoqué ne reçoit plus rien, et elle ne peut plus écrire à cette personne quand elle est absente. Changer le mot de passe révoque les jetons obtenus par connexion.</p></header>
+  <ul class="person-entries dense" aria-label="Applications connectées">
     {% for app in apps %}
-      <article class="collection-item" role="listitem"><div class="collection-heading"><h4>{{ app.label }}</h4>
-        {% if app.revoked %}<span class="badge muted">révoqué</span>{% else %}<span class="badge ok">actif</span>{% endif %}</div>
-        <dl class="collection-fields"><div><dt>Sorte</dt><dd>{{ app.kind }}</dd></div><div><dt>Obtenu par</dt><dd>{{ app.source }}</dd></div>
-          <div><dt>Créé</dt><dd>{{ app.created }}</dd></div><div><dt>Dernier usage</dt><dd>{{ app.last_used }}</dd></div></dl>
-        {% if not app.revoked %}<div class="collection-footer">
+    <li class="{{ 't-muted' if app.revoked }}">
+      <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ app.label }}</p><p class="person-entry-tags">{% if app.revoked %}<span class="now-tag">révoqué</span>{% else %}<span class="now-tag ok">actif</span>{% endif %}</p></div><span class="person-entry-time">dernier usage {{ app.last_used }}</span></div>
+      <div class="person-entry-foot">
+        <p class="person-entry-facts"><span><span class="k">sorte</span> {{ app.kind }}</span><span><span class="k">obtenu par</span> {{ app.source }}</span><span><span class="k">créé</span> {{ app.created }}</span></p>
+        {% if not app.revoked %}<div class="person-entry-more">
           <form method="post" action="{{ action }}" class="inline" data-confirm="Révoquer « {{ app.label }} » ? Ses connexions se ferment.">
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="revoke_token">
             <input type="hidden" name="account" value="{{ account.id }}"><input type="hidden" name="token" value="{{ app.id }}">
             <button class="btn quiet small danger">révoquer</button>
-          </form></div>{% endif %}</article>
+          </form></div>{% endif %}
+      </div>
+    </li>
     {% else %}
-      <div class="empty-state" role="listitem"><b>Aucune application connectée.</b>Le téléphone en ajoute une à sa première connexion.</div>
+    <li><p class="now-empty">Aucune application connectée. Le téléphone en ajoute une à sa première connexion.</p></li>
     {% endfor %}
-  </div>
-  {{ pager(apps_pager) }}
+  </ul>
+  {% set pp = apps_pager or {} %}
+  {% if pp.prev or pp.next or pp.older or pp.newer %}{{ pager(apps_pager) }}{% endif %}
 </section>
 </div>
 {% endif %}

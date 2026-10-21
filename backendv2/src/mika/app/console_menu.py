@@ -17,6 +17,7 @@ MENU = (
         MenuLink("Historique des autorisations", "approbations/historique"),
     )),
     MenuGroup("Elle", "heart", (
+        MenuLink("En ce moment", "maintenant"),
         MenuLink("Émotions et besoins", "vie"),
         MenuLink("Sommeil et rythme", "vie/rythme"),
         MenuLink("Pensées et attention", "pensees"),

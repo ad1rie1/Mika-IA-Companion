@@ -1,3 +1,6 @@
+{# Les paramètres internes d'une faculté (pages/reglages.py), dans le vocabulaire des pages dessinées (ADR 0121) :
+   un groupe en carte, une ligne par paramètre — sa valeur, d'où elle vient, ses bornes ; surcharger, revenir au
+   tempérament. Champs, noms et boutons : ceux de la console. #}
 {% from "_forms.html" import field %}
 {% for m in panel_messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
 <form method="post" action="{{ action }}" class="form params-form">
@@ -17,19 +20,19 @@
         {% else %}<div class="field"><span class="label">{{ it.label }}</span><span class="value-ro">{{ it.value }}</span>{% if it.help %}<span class="help">{{ it.help }}</span>{% endif %}</div>{% endif %}
       </div>
       <div class="param-meta">
-        <span class="badge {{ it.tone }}" title="{{ it.source_label }}">{{ it.source }}</span>
+        <span class="now-tag {{ it.tone }}" title="{{ it.source_label }}">{{ it.source }}</span>
         {% if it.drivers %}<span>piloté par <b>{{ it.drivers }}</b></span>{% endif %}
         {% if it.bounds %}<span>bornes {{ it.bounds }}</span>{% endif %}
         {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
         {% if it.pending %}<span class="t-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
-        <details class="param-origin"><summary>Clé du paramètre</summary><code>{{ it.path }}</code></details>
+        <details class="param-origin hm-subfold"><summary>Clé du paramètre</summary><code>{{ it.path }}</code></details>
         {% if it.overridden %}<button class="btn quiet small" form="params-reset-{{ owner }}" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
       </div>
     </div>
     {% endfor %}
   </fieldset>
   {% endfor %}
-  <p class="caption">Une valeur changée devient une surcharge (bornée, journalisée avec ton nom) ; une valeur égale à celle du tempérament la retire. « Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>
+  <p class="person-tab-note">Une valeur changée devient une surcharge (bornée, journalisée avec ton nom) ; une valeur égale à celle du tempérament la retire. « Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>
   <div class="form-actions">
     <button class="btn">Enregistrer</button>
     <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>

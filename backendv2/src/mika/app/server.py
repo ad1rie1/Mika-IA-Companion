@@ -64,6 +64,11 @@ from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
+from mika.app.handmade.home import HomePage
+from mika.app.handmade.now import NowPage
+from mika.app.handmade.pages import DRAWN
+from mika.app.handmade.people import PeoplePage
+from mika.app.handmade.person import PersonOverview
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
@@ -487,6 +492,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             await kernel.stop(release)
             datadir.release(data)
 
+    # la vue d'ensemble d'une personne, dessinée à la main (ADR 0121) : le premier onglet de sa fiche
+    person_overview = PersonOverview()
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
         InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
@@ -496,14 +503,22 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,
                       parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
-                      backups=lambda: backup.overview(data), relay=live.relay, world=world_hub),
+                      backups=lambda: backup.overview(data), relay=live.relay, world=world_hub,
+                      overviews={"person": person_overview}, drawn=DRAWN,
+                      plain_owners=frozenset({"forge"})),
         cookie_secure=web.cookie_secure)
+    # les pages dessinées à la main dans le cadre de la console, qui croisent ses facultés (ADR 0121) : l'accueil ;
+    # elle, en ce moment ; les gens qu'elle connaît
+    home_page = HomePage(console_pages.ui)
+    now_page, people_page = NowPage(console_pages.ui), PeoplePage(console_pages.ui)
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages))
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
-                      extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(), *inspector,
-                                    relay, console_mcp, world_hub.route()],
+                      extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
+                                    *home_page.routes(), *now_page.routes(), *people_page.routes(),
+                                    *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp,
+                                    world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
                       phone=phone), live

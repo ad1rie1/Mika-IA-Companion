@@ -450,7 +450,7 @@ async def sorties(ui: Any, request: Request) -> Any:
                     select(o.key, o.seq, o.effect, o.status, o.last_error).where(o.status.in_(selected_problems))
                     .order_by(o.seq.desc(), o.key).limit(problem_page.size).offset(problem_page.offset))] \
         if selected_problems else []
-    panel = Panel("outbox.html", {"problems": problems, "back": back,
+    panel = Panel("handmade/system/a-traiter.html", {"problems": problems, "back": back,
                                   "problem_total": problem_total, "problem_pager": render._pager(problem_page, request.query_params),
                                   "panel_after_blocks": 3 if invalid else 2})
     return {"panel": panel, "blocks": [

@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0120, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0121, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -695,6 +695,26 @@ ordre.
     offre « Rejouer avec… » un autre fournisseur. L'avis de l'opératrice y figure (« Ton avis ») ; Fil › « Ses
     réponses jugées » les liste (ADR 0113).
   - La constellation (`/inspecteur/constellation`) montre sa mémoire en points, et ce qui la parcourt en direct.
+  - Des pages dessinées à la main (ADR 0121, `app/handmade/`, gabarits `templates/handmade/`, feuilles
+    `static/handmade/`) croisent ses facultés : « En ce moment » (`/inspecteur/maintenant`, `handmade/now.py` : humeur et
+    plan plaisir × éveil, ses 24 heures sur un seul axe, corps, besoins, pensées, les gens, sa journée), Personnes
+    (`/inspecteur/personnes`, `handmade/people.py` : une carte par personne, qui est là, qui lui manque ; ses onglets
+    sous « Le détail ») et la fiche d'une
+    personne — son en-tête et ses onglets dessinés un par un sur les données de leur faculté, ce que la vue d'ensemble
+    résume rangé sous « Le détail » — avec sa vue d'ensemble pour premier onglet (`handmade/person/`, reçue
+    par `InspectorDeps.overviews` : ce qu'elle ressent, leur histoire en six mois de jours, ce qu'elle sait d'elle, ce
+    qui reste en suspens, leurs derniers mots). Une question qui traverse les facultés a sa page faite à la main dans `app/` ; le reste reste
+    déclaré. Un graphe de la console a une hauteur fixe et s'étire en largeur seulement (`inspector/svg.py`).
+  - Toute la console est dessinée (ADR 0121). L'accueil (`/inspecteur/`, `handmade/home.py` : ce qui t'attend, une
+    ligne par page où décider ; comment elle va ; qui est là ; la journée). Les onglets des destinations, sur les
+    données de leur faculté (`InspectorDeps.drawn`, `inspector.ui.Drawn`, la table `app/handmade/pages.py::DRAWN`) :
+    bloc par bloc (`Blocks`), ou avec une forme à eux (Conversations ; Système › Processus, Santé, Sorties ; Courrier
+    › Réception et Envoyés en boîte aux lettres, douze par page, la liseuse sous la liste, `?lire=`). Les formulaires
+    sont ceux que la console prépare (`Forms`, avec leur jeton ; `forms.of(blocs, sujet)` pour un objet ouvert dans
+    la page). Les autres pages passent par les mêmes macros (`handmade/shared/drawn.html`, via `page.html`) et les
+    panneaux (réglages, paramètres, comptes, demandes en attente…) sont écrits dans le même vocabulaire ;
+    `handmade/base.css` est chargée partout. Seules les vues de la Forge gardent le rendu de la console
+    (`InspectorDeps.plain_owners`) : ses apps déclarent leur interface par un contrat.
   - `/mcp/console` sert les mêmes lectures à un agent, en lecture seule, en boucle locale, avec le jeton de
     `mika mcp token`.
   - `/` mène à la console, qui crée le premier compte opérateur.
@@ -821,7 +841,7 @@ Tout le reste se déclare par décorateurs.
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
-| Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
+| Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | Voix et genèse | 0070, 0071, 0112, 0114, 0115 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |

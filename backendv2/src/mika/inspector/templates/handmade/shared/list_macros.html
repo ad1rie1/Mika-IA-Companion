@@ -1,0 +1,47 @@
+{# Une liste d'une faculté en carte (app/handmade/lists.py) : une entrée par élément — son texte, ses
+   étiquettes, une ligne de faits, son lien, son détail repliable — et sa pagination. Les cellules se rendent par la
+   macro commune de la console, le détail par ses blocs. #}
+{% from "_cells.html" import cell %}
+{% from "_blocks.html" import render %}
+{% from "_navigation.html" import pager as pages %}
+{% macro counts_line(counts) -%}
+{% if counts %}<ul class="person-counts">{% for c in counts %}<li title="{{ c.sub }}"><span class="now-num">{{ c.value }}</span> {{ c.label }}</li>{% endfor %}</ul>{% endif %}
+{%- endmacro %}
+{% macro entries(s, empty="", draw=None) -%}
+<section class="now-card person-list{{ ' kind-' ~ s.kind if s.kind }}"{% if s.id %} id="{{ s.id }}"{% endif %}{% if s.title %} aria-label="{{ s.title }}"{% endif %}>
+  {% if s.title or s.modes %}<header class="now-card-head">{% if s.title %}<h2>{{ s.title }}</h2>{% endif %}{% if s.count is not none %}<span class="person-count now-num" title="{{ s.count }} au total">{{ s.count }}</span>{% endif %}{% if s.modes %}<nav class="hm-modes" aria-label="Affichage : {{ s.title or 'liste' }}">{% for m in s.modes %}<a href="{{ m.href }}"{{ ' aria-current=page' if m.on }}>{{ m.label }}</a>{% endfor %}</nav>{% endif %}</header>{% endif %}
+  {% if s.rows %}
+  <ul class="person-entries{{ ' tiles' if s.tiles }}{{ ' dense' if s.dense and not s.tiles }}">
+    {% for r in s.rows %}
+    {%- set tags -%}{% if r.badges %}<p class="person-entry-tags">{% for b in r.badges %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}</p>{% endif %}{%- endset %}
+    {%- set dense_top = s.dense and r.heading and not r.heading.secondary %}
+    {%- set dense_side = s.dense and r.heading and r.heading.secondary %}
+    <li class="{{ 't-' ~ r.tone if r.tone }}">
+      {% if r.heading or r.time %}<div class="person-entry-top">{% if r.heading %}<div class="person-entry-name"><p class="person-entry-title">{{ cell(r.heading) }}</p>{% if dense_top %}{{ tags }}{% endif %}</div>{% endif %}{% if dense_side and r.badges %}<div class="person-entry-side">{{ tags }}{% endif %}{% if r.time %}<span class="person-entry-time">{% if r.time_said %}{{ r.time_said }} {% endif %}{{ cell(r.time) }}</span>{% endif %}{% if dense_side and r.badges %}</div>{% endif %}</div>{% endif %}
+      {% if not dense_top and not dense_side %}{{ tags }}{% endif %}
+      {% for b in r.body %}<div class="person-entry-text">{{ cell(b.value) }}</div>{% endfor %}
+      {% if r.fields or (r.href and not r.linked) or r.detail %}
+      <div class="person-entry-foot">
+      {% if r.fields %}<p class="person-entry-facts">{% for f in r.fields %}<span{% if f.hint %} title="{{ f.hint }}"{% endif %}><span class="k">{{ f.label }}</span> {{ cell(f.value) }}</span>{% endfor %}</p>{% endif %}
+      {% if (r.href and not r.linked) or r.detail %}
+      <div class="person-entry-more">
+        {% if r.href and not r.linked %}<a href="{{ r.href }}">{{ s.link_label or "Ouvrir" }} →</a>{% endif %}
+        {% if r.detail %}<details class="person-entry-detail"{{ ' open' if r.open }}><summary>Le détail</summary><div class="stack">{{ draw(r.detail) if draw else render(r.detail) }}</div></details>{% endif %}
+      </div>
+      {% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="now-empty">{{ (empty or s.empty) }}{{ '' if ((empty or s.empty)|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+  {% set p = s.pager or {} %}{% if p.prev or p.next or p.older or p.newer %}{{ pages(s.pager) }}{% endif %}
+  {% if s.caption and s.rows %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ s.caption }}</p></details>{% endif %}
+</section>
+{%- endmacro %}
+{% macro facts_card(f) -%}
+<section class="now-card person-facts-card" aria-label="{{ f.title or 'En bref' }}">
+  {% if f.title %}<header class="now-card-head"><h2>{{ f.title }}</h2></header>{% endif %}
+  <p class="person-entry-facts">{% for p in f.pairs %}<span>{% if p.label %}<span class="k">{{ p.label }}</span> {% endif %}{{ cell(p.value) }}</span>{% endfor %}</p>
+</section>
+{%- endmacro %}

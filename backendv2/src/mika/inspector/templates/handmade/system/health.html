@@ -1,0 +1,36 @@
+{# Système › Santé, dessinée (app/handmade/system.py) : le verdict, les dix contrôles en tuiles — ce qui ne va pas
+   d'abord, chacun avec son constat, son détail et la page de son diagnostic —, puis les replis techniques. #}
+<div class="now-page person-tab sys">
+  <section class="now-card sys-health tone-{{ tone }}" aria-labelledby="sys-health-title">
+    <div class="sys-health-main">
+      <p class="now-eyebrow">Bilan de santé</p>
+      <h2 id="sys-health-title">{{ title }}</h2>
+      <p class="now-sub">{% if not ready %}Les contrôles complets seront disponibles lorsque {{ her }} sera prête.{% elif problems %}Commence par {{ 'le point signalé' if problems == 1 else 'les ' ~ problems ~ ' points signalés' }} : chaque tuile dit son constat et mène à son diagnostic.{% else %}Aucun problème sur les {{ checks|length }} contrôles.{% endif %}</p>
+      <p class="sys-health-stamp">Relevé à {{ snapshot }} · <a href="{{ PREFIX }}/systeme/sante">Actualiser</a></p>
+    </div>
+    {% if ready %}
+    <ul class="sys-health-counts">
+      <li class="ok"><span class="now-num">{{ healthy }}</span> sans problème</li>
+      <li class="{{ 'warn' if problems }}"><span class="now-num">{{ problems }}</span> à examiner</li>
+      <li class="{{ 'danger' if failed }}"><span class="now-num">{{ failed }}</span> en panne</li>
+    </ul>
+    {% endif %}
+  </section>
+
+  <ul class="sys-checks" aria-label="Les contrôles de santé">
+    {% for c in checks %}
+    <li class="sys-check tone-{{ c.tone }}">
+      <div class="sys-check-head"><span class="sys-dot" aria-hidden="true"></span><h3>{{ c.name }}</h3><span class="now-tag {{ c.tone }}">{{ c.state }}</span></div>
+      <p class="sys-check-summary">{{ c.summary }}</p>
+      {% if c.detail or c.href %}
+      <div class="sys-check-more">
+        {% if c.href %}<a href="{{ c.href }}">Ouvrir le diagnostic →</a>{% endif %}
+        {% if c.detail %}<details><summary>Le détail</summary><pre class="hm-error">{{ c.detail }}</pre></details>{% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {{ folds }}
+</div>
