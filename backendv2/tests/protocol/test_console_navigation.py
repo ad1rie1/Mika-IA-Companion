@@ -65,7 +65,8 @@ def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
 @pytest.mark.parametrize(('path', 'group', 'label'), [
     ('sens/dessins', 'Connexions extérieures', 'Dessins'),
     ('sens/camera', 'Connexions extérieures', 'Caméra'),
-    ('outils/texte', 'Outils', 'Régler ses outils'),
+    ('outils/expose', 'Outils', 'Prêter à un agent'),
+    ('outils/tous?outil=email_read', 'Outils', 'Ce qu'),
     ('courrier/brouillons', 'À valider', 'Brouillons de courrier'),
     ('courrier/reception', 'Relations & échanges', 'Courrier'),
     ('vie/rythme', 'Mika', 'Sommeil et rythme'),

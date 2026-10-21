@@ -47,9 +47,10 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("projets", "Projets", "▦", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
                     "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
                     subjects=("project",)),
-        Destination("outils", "Ses outils", "✋", "Tout ce qu'elle peut faire : ses outils à elle (lus ici, définis "
-                    "dans le code), ceux de ses apps et des services extérieurs — pour qui, quand, et ce qu'elle en lit.",
-                    builtin=("outils.tous", "outils.qui", "outils.texte", "outils.expose"), subjects=("serveur",)),
+        Destination("outils", "Ses outils", "✋", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
+                    "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
+                    builtin=("outils.tous", "outils.expose"), order=("tous", "serveurs", "expose"),
+                    subjects=("serveur",)),
         Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire sortir de la machine, et ce "
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
@@ -315,6 +316,14 @@ EVENT_LABELS: dict[str, str] = {
     "memory.relayed_read": "Des messages du téléphone relus",
 }
 
+#: Les familles d'outils (leurs lots) qui ne se nomment pas comme leur faculté ; « préfixe.* » : les lots qu'une
+#: source ajoute (un par serveur MCP branché, un par app), nommés par ce qui suit le préfixe.
+BUNDLE_LABELS: dict[str, str] = {
+    "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle", "workshop": "L'atelier d'un projet",
+    "forge": "La Forge (écrire ses apps)", "forge_signals": "Ce que ses apps lui signalent",
+    "mcp.*": "Service « {} »", "forge_apps.*": "Son app « {} »",
+}
+
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
-                processes=PROCESS_LABELS, events=EVENT_LABELS)
+                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS)

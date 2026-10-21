@@ -12,6 +12,9 @@ rien pour dire ok ça non, ça oui ». Il veut un tableau dans l'onglet qui mont
 - **le MCP** : les deux. Gérer la console en MCP depuis la page (son jeton, ce qu'elle sert), et déclarer des points
   qui prêtent certains de ses outils à un agent (un nom, un jeton, une liste d'outils, lecture seule ou non).
 
+> La console de ce qui suit (points 2, 3 et 5) a été redessinée le jour même : ADR 0123. Les règles, la console
+> en MCP et les points de prêt n'ont pas changé.
+
 **Décision.**
 
 1. *Les règles d'un opérateur passent par la seule porte d'offre* (`runtime/tools.py`).

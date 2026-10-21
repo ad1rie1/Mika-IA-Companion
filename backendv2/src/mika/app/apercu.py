@@ -40,7 +40,6 @@ from mika.app.console import NAVIGATION
 from mika.app.server import build
 from mika.contracts import runtime as rt
 from mika.inspector.pages.journal import EPISODE_TABS
-from mika.inspector.pages.tools import TOOLS_PAGE
 from mika.kernel.events import Content, Origin
 from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
@@ -226,7 +225,6 @@ def export(out: Path) -> list[str]:
                 urls.append(f"/inspecteur/reglages/comptes?compte={account.id}")
                 client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))
             urls += [f"/inspecteur/outils/tous?outil={quote(name, safe='')}" for name in sorted(live.kernel.registry.tools)]
-            urls += [f"/inspecteur/outils/tous?page={page}" for page in range(2, (len(live.kernel.registry.tools) - 1) // TOOLS_PAGE + 2)]
             ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 20))
             for episode in ended:
                 corr = quote(episode.correlation, safe="")

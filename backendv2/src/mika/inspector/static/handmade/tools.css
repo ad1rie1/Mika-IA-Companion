@@ -1,55 +1,94 @@
-/* Outils › Qui reçoit quoi (app/handmade/tools.py) : une grille lots × situations, une couleur par état. */
-.offers-intro { display: grid; gap: 10px; font-size: 14px; }
-.offers-intro p { margin: 0; }
-.offers-legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; padding: 0; list-style: none; }
-.offers-legend li { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
+/* Outils › Ce qu'elle peut faire (inspector/pages/tools.py, ADR 0122) : ses familles d'outils en lignes, leurs outils
+   dessous, les situations en colonnes ; chaque ligne a les mêmes colonnes, pour que tout s'aligne sans tableau. */
+.can { display: grid; gap: 18px; }
+.can-intro { display: grid; gap: 10px; font-size: 14px; }
+.can-intro p { margin: 0; }
+.can-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; padding: 0; list-style: none; }
+.can-legend li { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
+.can-facts { color: var(--text-2); font-size: 13px; }
+.can-warn { color: var(--danger); }
+.can-scope { margin: 0 0 10px; color: var(--text-2); font-size: 13px; }
 
-.offers-card { padding: 8px 0 4px; }
-.offers-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-.offers-grid th, .offers-grid td { padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.offers-grid tbody tr:last-child > * { border-bottom: 0; }
-.offers-grid tbody tr:hover > * { background: var(--surface-2); }
-.offers-grid th.offers-lot-head { padding-left: 20px; text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; vertical-align: bottom; }
-.offers-moment { padding-top: 10px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; text-align: center;
-  border-left: 1px solid var(--border); }
-.offers-situation { color: var(--muted); font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; }
-.offers-grid td { text-align: center; }
-.offers-grid th.offers-lot { padding-left: 20px; text-align: left; font-weight: 400; white-space: nowrap; }
-.offers-lot a { display: block; color: var(--text); font-weight: 600; text-decoration: none; }
-.offers-lot a:hover { color: var(--accent); }
-.offers-lot span { color: var(--muted); font-size: 11.5px; }
-.offers-lot code { font-size: 11px; }
+.can-card { padding: 10px 0 0; }
+.can-wrap { overflow-x: auto; }
+.can-grid { --name: minmax(250px, 1fr); --col: 78px; min-width: calc(250px + var(--cols) * var(--col)); font-size: 13px; }
+.can-row { display: grid; grid-template-columns: var(--name) repeat(var(--cols), var(--col)); align-items: center; }
+.can-row > * { padding: 7px 6px; }
+.can-name { padding-left: 20px; min-width: 0; }
+.can-head > * { color: var(--muted); font-size: 12px; font-weight: 600; text-align: center; }
+.can-head .can-name { text-align: left; }
+.can-moments > * { padding-bottom: 0; }
+.can-moment { color: var(--text); font-family: var(--now-serif); font-size: 13px; border-left: 1px solid var(--border); }
+/* le nombre de situations (celles que la composition connaît) et la largeur d'un groupe : pas de style en ligne */
+.can-cols-1 { --cols: 1; } .can-cols-2 { --cols: 2; } .can-cols-3 { --cols: 3; } .can-cols-4 { --cols: 4; } .can-cols-5 { --cols: 5; } .can-cols-6 { --cols: 6; } .can-cols-7 { --cols: 7; } .can-cols-8 { --cols: 8; }
+.can-span-1 { grid-column: span 1; } .can-span-2 { grid-column: span 2; } .can-span-3 { grid-column: span 3; } .can-span-4 { grid-column: span 4; } .can-span-5 { grid-column: span 5; } .can-span-6 { grid-column: span 6; } .can-span-7 { grid-column: span 7; } .can-span-8 { grid-column: span 8; }
+.can-sits { border-bottom: 1px solid var(--border); }
+.can-sit { align-self: end; line-height: 1.25; }
+.can-start { border-left: 1px solid var(--border); }
 
-/* une case : en main (plein), à la demande (cerclé), pas offert (vide) */
-.offer { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 34px; height: 26px; padding: 0 6px;
-  border-radius: 8px; font-size: 15px; line-height: 1; text-decoration: none; }
-.offer-hand { background: var(--ok-bg); color: var(--ok); }
-.offer-ask { background: var(--info-bg); color: var(--info); }
-.offer-none { color: var(--border-strong); }
-.offer-none::before { content: "–"; }
-.offers-legend .offer-none { border: 1px dashed var(--border-strong); }
-.offers-legend .offer { min-width: 26px; height: 22px; }
-a.offer:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
-.offer-part { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.offers-grid .offers-start { border-left: 1px solid var(--border); }
+/* une famille : une ligne qui s'ouvre sur ses outils */
+.can-family { border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.can-family > summary { cursor: pointer; list-style: none; }
+.can-family > summary::-webkit-details-marker { display: none; }
+.can-family > summary:hover > * { background: var(--surface-2); }
+.can-family > summary .can-name { display: flex; align-items: baseline; gap: 8px; }
+.can-family > summary .can-name::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .12s; }
+.can-family[open] > summary .can-name::before { transform: rotate(90deg); }
+.can-family[open] > summary { background: var(--surface-2); }
+.can-count { color: var(--muted); font-size: 11.5px; font-weight: 400; }
 
-/* Outils › Régler ses outils (inspector/pages/tools.py, ADR 0122) : un tableau par famille, une règle par outil. */
-.rules-card { padding-bottom: 14px; }
-.rules-note { margin: -6px 0 12px; color: var(--text-2); font-size: 13px; }
-.rules-table .rules-family th { padding-top: 16px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px;
-  font-weight: 600; text-transform: none; letter-spacing: 0; text-align: left; }
-.rules-table .rules-family code { margin-left: 6px; color: var(--muted); font-family: var(--mono, monospace); font-size: 11px; font-weight: 400; }
-.rules-name { display: inline-block; color: var(--text); text-decoration: none; }
-.rules-name:hover { color: var(--accent); }
-.rules-what { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
-.rules-table .rules-code, .rules-table .rules-choice { width: 1%; white-space: nowrap; }
-.rules-table select { min-width: 150px; }
-.rules-set .rules-choice select { border-color: var(--accent); }
-.rules-off td:first-child { opacity: .55; }
-.rules-off .rules-name code { text-decoration: line-through; }
-.rules-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+/* la case d'une famille : tous ses outils, une partie, retirée, pas prévue */
+.can-sum, .can-mark { display: flex; align-items: center; justify-content: center; height: 26px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.can-sum { margin: 3px 6px; padding: 0 !important; }
+.can-mark { min-width: 30px; height: 22px; padding: 0 6px; }
+.can-on { background: var(--ok-bg); color: var(--ok); }
+.can-part { background: color-mix(in srgb, var(--ok-bg) 55%, transparent); color: var(--ok); }
+.can-ask { background: var(--info-bg); color: var(--info); }
+.can-off { background: var(--warn-bg); color: var(--warn); }
+.can-none { color: var(--border-strong); font-weight: 400; }
+.can-sum.has-off { box-shadow: inset 0 0 0 2px var(--warn); }
 
-/* Outils › Ce qu'elle expose (inspector/pages/tools.py, ADR 0122) : le relais, la console en MCP, ses points de prêt. */
+/* un outil : ce qu'il fait, son nom, une case par situation */
+.can-tool { border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+.can-tool .can-name { padding-left: 38px; }
+.can-tool .can-name a { display: block; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.can-tool .can-name a:hover { color: var(--accent); }
+.can-id { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+.can-id code { font-size: 11px; }
+.can-cell { display: flex; align-items: center; justify-content: center; align-self: stretch; }
+.can-cell.can-on, .can-cell.can-ask, .can-cell.can-off { background: none; }
+.can-cell.can-off { background: color-mix(in srgb, var(--warn-bg) 70%, transparent); }
+.can-cell.can-ask input { accent-color: var(--info); }
+.can-cell input { width: 17px; height: 17px; margin: 0; accent-color: var(--ok); cursor: pointer; }
+.can-cell.can-fixed { color: var(--ok); font-weight: 600; }
+
+.can-actions { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  margin-top: 4px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface);
+  border-radius: 0 0 var(--radius) var(--radius); }
+.can-prompts > summary, .can-prompt > summary { cursor: pointer; }
+.can-prompts > summary { font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.can-prompts > p { margin: 8px 0 10px; font-size: 13px; }
+.can-prompt { margin-top: 8px; font-size: 13px; }
+.can-prompt > summary { color: var(--text-2); }
+.can-prompt pre { margin: 8px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; border-radius: 8px;
+  background: var(--sunken); font-size: 12.5px; white-space: pre-wrap; }
+
+/* la fiche d'un outil : où elle peut s'en servir, situation par situation */
+.can-where { display: grid; gap: 6px; }
+.can-where-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.can-where-list li { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: center;
+  gap: 12px; padding: 7px 10px; border-radius: 8px; font-size: 13.5px; }
+.can-where-list li:nth-child(odd) { background: var(--surface-2); }
+.can-where-list select { width: 100%; }
+.can-where-no { color: var(--muted); }
+.can-where-off .can-where-sit { color: var(--warn); }
+.can-where .can-actions { position: static; padding: 12px 0 0; border: 0; }
+@media (max-width: 640px) {
+  .can-where-list li { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* Outils › Prêter à un agent (inspector/pages/tools.py, ADR 0122) : la console en lecture, ses points de prêt, le relais. */
 .expose { display: grid; gap: 18px; }
 .expose-facts { display: grid; gap: 8px; margin: 0 0 14px; }
 .expose-facts > div { display: grid; grid-template-columns: minmax(120px, 160px) 1fr; gap: 12px; font-size: 13.5px; }
@@ -80,6 +119,13 @@ a.offer:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, tran
 .expose-field input { max-width: 320px; }
 .expose-mode { display: grid; gap: 8px; }
 .expose-mode label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+.expose-more { margin-top: 14px; font-size: 13px; }
+.expose-more > summary, .expose-relay > summary { color: var(--text-2); cursor: pointer; }
+.expose-relay > summary { font-family: var(--now-serif); font-size: 14px; font-weight: 600; color: var(--text); }
+.expose-relay > p { margin: 10px 0 12px; font-size: 13px; }
 @media (max-width: 640px) {
   .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* Outils › Venus d'ailleurs (app/handmade/tools.py) : ce qu'on y fait, en boutons, au-dessus des services. */
+.elsewhere-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 18px; }

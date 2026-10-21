@@ -57,12 +57,9 @@ MENU = (
         MenuLink("Échéances", "decisions/echeances"),
     )),
     MenuGroup("Outils", "tools", (
-        MenuLink("Catalogue des outils", "outils"),
-        MenuLink("Qui reçoit quoi", "outils/qui"),
-        MenuLink("Régler ses outils", "outils/texte"),
-        MenuLink("Ce qu'elle expose", "outils/expose"),
-        MenuLink("Services MCP", "outils/serveurs", ("reglages/serveurs-mcp",)),
-        MenuLink("Outils de ses apps", "outils/outils_apps"),
+        MenuLink("Ce qu'elle peut faire", "outils"),
+        MenuLink("Venus d'ailleurs", "outils/serveurs", ("reglages/serveurs-mcp",)),
+        MenuLink("Prêter à un agent", "outils/expose"),
         MenuLink("Apps forgées", "apps"),
     )),
     MenuGroup("Connexions extérieures", "plug", (

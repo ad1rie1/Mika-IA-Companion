@@ -41,7 +41,10 @@
       "Bash(awk 'NR>=300 && NR<=345' persona/voix.yaml)",
       "ClaudeInChromeDomain(127.0.0.1:8011)",
       "mcp__claude-in-chrome__tabs_context_mcp",
-      "ClaudeInChromeDomain(localhost:3000)"
+      "ClaudeInChromeDomain(localhost:3000)",
+      "ClaudeInChromeDomain(127.0.0.1:8001)",
+      "ClaudeInChromeDomain(127.0.0.1:8077)",
+      "ClaudeInChromeDomain(127.0.0.1:8078)"
     ]
   }
 }

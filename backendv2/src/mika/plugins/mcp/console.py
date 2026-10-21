@@ -61,7 +61,7 @@ def edit_server(name: str, back: str = LIST) -> Ref:
 
 
 def add_server(back: str = LIST) -> Ref:
-    return Ref("local", SETTINGS, "Brancher un serveur",
+    return Ref("local", SETTINGS, "Brancher un service",
                (("section", "mcp"), ("enregistrement", "servers"), ("cle", ""), ("nouveau", "1"), ("retour", back)))
 
 
@@ -82,9 +82,10 @@ def _attention(s: McpState, frame: Frame | None = None) -> tuple[int, str] | Non
     return review + broken, "danger" if broken else "warn"
 
 
-@MCP.inspect("serveurs", title="Services MCP", section="outils", order=40, badge=_attention,
-             description="Les serveurs MCP dont elle peut utiliser les outils : leur état, ce qu'ils proposent, ce "
-                         "qui attend ton regard. Les connexions se règlent dans Configuration.")
+@MCP.inspect("serveurs", title="Venus d'ailleurs", section="outils", order=40, badge=_attention,
+             description="Les outils qui ne viennent pas d'elle : ceux des services que tu branches (des serveurs "
+                         "MCP), puis ceux que ses apps lui donnent. Un outil d'un service ne sert qu'une fois que tu "
+                         "l'as approuvé sur la fiche du service.")
 def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mcp")
     if port is None:
@@ -103,13 +104,14 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         href=_fiche(st.name), tone="danger" if st.state == "panne" else "",
                         detail=((Note(st.detail, tone="warn"),) if st.detail else ())
                         + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
-    return [Fields((("nouveau serveur", add_server()),
-                    ("tous les réglages", Ref("local", SETTINGS, "Réglages › Plugins › Outils extérieurs")))),
-            Table(("serveur", Column("où", "fit"), "à quoi il sert, pour elle", Column("état", "fit"),
-                   Column("servis / proposés", "num"), Column("à revoir", "num"), Column("joint", "fit")),
-                  tuple(rows), title="Serveurs", empty="Aucun serveur branché : « Brancher un serveur ».",
-                  caption="Un outil n'est servi qu'une fois approuvé sur la fiche de son serveur ; un outil que le "
-                          "serveur change est suspendu jusqu'à ton nouvel accord.")]
+    # deux liens seuls : la console dessinée en fait des boutons (``app/handmade/tools.py::Elsewhere``)
+    return [Fields((("un nouveau service", add_server()),
+                    ("leurs réglages", Ref("local", SETTINGS, "Leurs réglages")))),
+            Table(("service", Column("où", "fit"), "à quoi il lui sert", Column("état", "fit"),
+                   Column("outils servis / proposés", "num"), Column("à revoir", "num"), Column("joint", "fit")),
+                  tuple(rows), title="Les services branchés", empty="Aucun service branché : « Brancher un service ».",
+                  caption="Un outil n'est servi qu'une fois approuvé sur la fiche de son service ; un outil que le "
+                          "service change est suspendu jusqu'à ton nouvel accord.")]
 
 
 @MCP.subject("serveur", label="Serveur extérieur", plural="Serveurs extérieurs", icon="⇄")
@@ -126,7 +128,7 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
     return Head(key=key, title=key, subtitle=st.purpose, badges=tuple(badges),
                 facts=(("réglages", edit_server(key, _fiche_url(key))),
                        ("joint", ctx.when(st.last_ok_at) if st.last_ok_at else "jamais")),
-                back=Ref("local", LIST, "Services MCP"))
+                back=Ref("local", LIST, "Venus d'ailleurs"))
 
 
 @MCP.search("serveur")
@@ -338,4 +340,4 @@ def _vital(s: McpState, frame: Frame) -> Vital | None:
     broken = [x.name for x in s.servers if x.state == "panne"]
     text = f"{len(broken)} en panne" if broken else f"{n} à revoir"
     return Vital(text, tone, hint=", ".join(broken) or "des outils attendent ton regard",
-                 href=Ref("local", LIST, "Services MCP"))
+                 href=Ref("local", LIST, "Venus d'ailleurs"))

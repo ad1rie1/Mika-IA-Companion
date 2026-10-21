@@ -59,7 +59,10 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               ("courrier", "comptes"): "reglages/boites",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
               ("reglages", "canaux"): "reglages/depots", ("reglages", "sens"): "reglages/boites",
-              ("reglages", "parametres"): "reglages/comportement"}
+              ("reglages", "parametres"): "reglages/comportement",
+              # le bloc Outils redessiné : la grille dit qui reçoit quoi et s'y règle ; ses apps, sous les services
+              ("outils", "qui"): "outils/tous", ("outils", "texte"): "outils/tous",
+              ("outils", "outils_apps"): "outils/serveurs"}
 
 
 #: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
@@ -423,11 +426,11 @@ class Pages:
         return await outbox_post(self.ui, request)
 
     async def tool_rules(self, request: Request) -> Response:
-        """Outils › Régler ses outils : les règles d'une situation (ADR 0122)."""
+        """Outils › Ce qu'elle peut faire : ses outils réglés, depuis la grille ou la fiche d'un outil (ADR 0122)."""
         return await rules_post(self.ui, request)
 
     async def expose(self, request: Request) -> Response:
-        """Outils › Ce qu'elle expose : la console en MCP, ses points de prêt (ADR 0122)."""
+        """Outils › Prêter à un agent : la console en MCP, ses points de prêt (ADR 0122)."""
         return await expose_post(self.ui, request)
 
     async def why(self, request: Request) -> Response:

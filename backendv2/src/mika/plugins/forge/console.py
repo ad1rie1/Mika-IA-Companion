@@ -378,10 +378,10 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-@FORGE.inspect("outils_apps", title="Outils de ses apps", section="outils", order=50,
-               description="Les outils que ses apps déclarent : chacun est un outil à elle (« app_outil »), avec un "
-                           "outil « app_pages » pour lire leurs pages (ADR 0104). Ils se règlent dans la Forge (l'app, "
-                           "sa promotion), pas ici.")
+@FORGE.inspect("outils_apps", title="Les outils de ses apps", hidden=True,
+               description="Ce que ses apps lui donnent à faire : les outils qu'une app déclare, et de quoi lire ses "
+                           "pages si elle en a (ADR 0104). La console les montre sous les services branchés (Outils › "
+                           "Venus d'ailleurs) ; ils se règlent sur la fiche de l'app (sa promotion).")
 def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("forge")
     if port is None:
@@ -389,7 +389,7 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
     rows = []
     for info in sorted(port.apps(), key=lambda i: i.name):
         app = s.apps.get(info.name)
-        if not info.tools:
+        if not info.tools and not info.views:
             continue
         if app is None or not app.enabled or app.broken:
             state, tone = ("en panne", "danger") if app is not None and app.broken else ("arrêtée", "muted")
@@ -397,15 +397,19 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
             state, tone = "en conversation (devant qui s'occupe d'elle) et au travail", "ok"
         else:
             state, tone = "au travail ; en conversation une fois promue (elle a des secrets)", "info"
-        for tool in info.tools:
-            rows.append(Row((_fiche(info.name), Text(f"{info.name}_{tool.name}", "mono"),
-                             Text(_clip(tool.description, 300)), Text(said_args(tool.args) or "aucun", "mono"),
+        given = [(f"{info.name}_{tool.name}", _clip(tool.description, 300), said_args(tool.args) or "aucun")
+                 for tool in info.tools]
+        if info.views:
+            given.append((f"{info.name}_pages", f"Lire ses pages : {', '.join(v.label for v in info.views)}.",
+                          "view, params"))
+        for name, what, args in given:
+            rows.append(Row((_fiche(info.name), Text(name, "mono"), Text(what), Text(args, "mono"),
                              Badge(state, tone)),
                             href=_fiche(info.name) if APP_NAME.match(info.name) else None))
     return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "arguments", "quand il sert"), tuple(rows),
-                  title="Les outils de ses apps", empty="Aucune de ses apps ne déclare d'outil.",
-                  caption="Une app qui a des secrets ne sert en conversation qu'une fois promue ; l'opérateur la "
-                          "promeut depuis sa fiche.")]
+                  title="Les outils de ses apps", empty="Aucune de ses apps ne lui donne d'outil.",
+                  caption="Une app qui a des secrets ne sert en conversation qu'une fois promue ; tu la promeus "
+                          "depuis sa fiche (Apps forgées).")]
 
 
 @FORGE.inspect("app", title="App forgée", hidden=True, params=[("app", "app")])

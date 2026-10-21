@@ -1,6 +1,7 @@
-{# Outils › Ce qu'elle expose (inspector/pages/tools.py, ADR 0122) : ce qu'elle sert elle-même en MCP — le relais du
-   moteur Claude Code (lu), la console en lecture pour un agent (son jeton, ce qu'elle sert), et ses points de prêt
-   (déclarer, régler, renouveler le jeton, retirer). Un jeton neuf se montre une seule fois, ici. #}
+{# Outils › Prêter à un agent (inspector/pages/tools.py, ADR 0122) : ce qu'un agent extérieur peut voir ou faire — la
+   console en lecture (son jeton, ce qu'elle montre), ses points de prêt (déclarer, régler, renouveler le jeton,
+   retirer) ; et, replié en bas, le relais par lequel le moteur Claude Code tient ses outils (rien à régler). Un jeton
+   neuf se montre une seule fois, ici. #}
 <div class="now-page person-tab expose">
 {% if shown %}
 <section class="now-card expose-shown" aria-label="{{ shown.title }}">
@@ -12,21 +13,11 @@
 </section>
 {% endif %}
 
-<section class="now-card" aria-labelledby="expose-relay">
-  <header class="now-card-head"><h2 id="expose-relay">Le relais du moteur Claude Code</h2><p>Les outils de l'épisode en cours, prêtés à la CLI que le moteur lance — et à elle seule. Rien à régler ici : il s'ouvre et se ferme avec chaque épisode.</p></header>
-  <dl class="expose-facts">
-    <div><dt>Adresse</dt><dd><code>/mcp/relais/&lt;session&gt;/mika · …/plus</code></dd></div>
-    <div><dt>Ce qu'il sert</dt><dd>en main sous « mika », à la demande sous « mika_plus », exécutés par la boucle du runtime avec toutes ses gardes</dd></div>
-    <div><dt>Accès</dt><dd>cette machine seulement, un jeton par épisode ; une session fermée répond 404</dd></div>
-    <div><dt>Sessions ouvertes</dt><dd>{{ relay_sessions }}</dd></div>
-  </dl>
-</section>
-
 <section class="now-card" aria-labelledby="expose-console">
   <header class="now-card-head">
-    <h2 id="expose-console">La console en MCP</h2>
+    <h2 id="expose-console">La console, en lecture</h2>
     <span class="now-tag {{ 'ok' if console_token else '' }}">{{ 'ouverte' if console_token else 'fermée' }}</span>
-    <p>La console en lecture pour un agent de sa propriétaire (son Claude Code, par exemple) : aucune action, aucune page à formulaires, aucun secret. Cette machine seulement, derrière un jeton.</p>
+    <p>Un agent (ton Claude Code, par exemple) lit la console comme toi, par MCP : ses pages, ses fiches, « pourquoi a-t-elle dit ça ? ». Il ne peut rien changer et ne voit aucun secret. Fermée tant qu'il n'y a pas de jeton.</p>
   </header>
   <dl class="expose-facts">
     <div><dt>Adresse</dt><dd><code>{{ console_address }}</code></dd></div>
@@ -41,24 +32,33 @@
     <button class="btn" name="faire" value="console_jeton">Créer un jeton</button>
     {% endif %}
   </form>
-  <form method="post" action="{{ action }}" class="expose-served">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <fieldset>
-      <legend>Ce qu'elle sert</legend>
-      <div class="expose-checks">
-        {% for p in parts %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}</span></label>{% endfor %}
-      </div>
-    </fieldset>
-    <fieldset>
-      <legend>Les pages de la console</legend>
-      <div class="expose-checks expose-checks-pages">
-        {% for p in served_pages %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}{% if not p.default %} <span class="now-muted">· en plus</span>{% endif %}</span></label>{% endfor %}
-      </div>
-    </fieldset>
-    <div class="expose-actions"><button class="btn" name="faire" value="console_servir">Enregistrer ce qu'elle sert</button></div>
-  </form>
+  <details class="expose-more">
+    <summary>Ce qu'elle lui montre</summary>
+    <form method="post" action="{{ action }}" class="expose-served">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <fieldset>
+        <legend>Ce qu'il peut lire</legend>
+        <div class="expose-checks">
+          {% for p in parts %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}</span></label>{% endfor %}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Les pages de la console, montrées d'office</legend>
+        <div class="expose-checks expose-checks-pages">
+          {% for p in served_pages if p.default %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}</span></label>{% endfor %}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>D'autres pages, si tu veux</legend>
+        <div class="expose-checks expose-checks-pages">
+          {% for p in served_pages if not p.default %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}</span></label>{% endfor %}
+        </div>
+      </fieldset>
+      <div class="expose-actions"><button class="btn" name="faire" value="console_servir">Enregistrer ce qu'elle montre</button></div>
+    </form>
+  </details>
   <details class="expose-tools">
-    <summary>Ses outils de lecture ({{ console_tools|length }})</summary>
+    <summary>Les outils de lecture que l'agent reçoit ({{ console_tools|length }})</summary>
     <ul class="expose-list" role="list">{% for t in console_tools %}<li><code>{{ t.name }}</code><span>{{ t.description }}</span></li>{% endfor %}</ul>
     <p class="now-muted">Aussi en ligne de commande : <code>mika mcp token</code> (un jeton neuf, et la ligne <code>claude mcp add</code>).</p>
   </details>
@@ -68,7 +68,7 @@
   <header class="now-card-head">
     <h2 id="expose-lent">Ses outils prêtés</h2>
     <span class="person-count now-num" title="{{ points|length }} points">{{ points|length }}</span>
-    <p>Un point prête quelques-uns de ses outils à un agent, sous <code>{{ lent_address }}/&lt;nom&gt;</code>. L'agent agit avec les droits de l'opératrice qui a déclaré le point, comme si elle le lui demandait en tête-à-tête — jamais au-delà de ce que le code lui offre en conversation. Cette machine seulement, un jeton par point.</p>
+    <p>Un point de prêt donne à un agent quelques-uns de ses outils, que tu choisis (chercher dans sa mémoire, par exemple). L'agent s'en sert avec tes droits, comme si tu le lui demandais en tête-à-tête, jamais au-delà. Chaque point a son adresse (<code>{{ lent_address }}/&lt;nom&gt;</code>) et son jeton.</p>
   </header>
   {% if points %}
   <ul class="expose-points" role="list">
@@ -135,4 +135,14 @@
   {% endif %}
 </form>
 {% endif %}
+<details class="now-card expose-relay" aria-labelledby="expose-relay">
+  <summary id="expose-relay">Et quand elle répond par Claude Code ?</summary>
+  <p class="now-muted">Le moteur Claude Code reçoit ses outils le temps d'une réponse, par un relais qui s'ouvre et se ferme tout seul avec chaque épisode. Rien à régler ici : c'est la boucle d'outils habituelle, avec toutes ses gardes.</p>
+  <dl class="expose-facts">
+    <div><dt>Adresse</dt><dd><code>/mcp/relais/&lt;session&gt;/mika · …/plus</code></dd></div>
+    <div><dt>Ce qu'il sert</dt><dd>sous « mika », ce qu'elle a sous la main ; sous « mika_plus », ce qu'elle va chercher</dd></div>
+    <div><dt>Accès</dt><dd>cette machine seulement, un jeton par épisode ; une session fermée répond 404</dd></div>
+    <div><dt>Sessions ouvertes</dt><dd>{{ relay_sessions }}</dd></div>
+  </dl>
+</details>
 </div>

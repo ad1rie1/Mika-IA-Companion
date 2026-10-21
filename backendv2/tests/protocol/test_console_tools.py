@@ -1,23 +1,25 @@
-"""« Ses outils » (ADR 0064) : la console lit ce que le moteur exécute.
+"""« Ses outils » (ADR 0064, 0122) : la console lit ce que le moteur exécute.
 
-Chaque outil du registre a sa ligne et sa fiche ; la matrice « qui reçoit quoi » est calculée par la porte d'offre
-du pipeline — le récit « pourquoi pas » dit la même chose qu'elle, situation par situation ; un outil défini dans le
-code ne se règle pas sur sa fiche (aucun formulaire de plus qu'une page sans action) ; « Régler ses outils » porte le
-texte que son prompt porte vraiment, et y range ses outils situation par situation (ADR 0122) — sans jamais en
-donner un que le code n'offre pas."""
+« Ce qu'elle peut faire » est une grille : chaque outil du registre y a sa ligne, sous sa famille, et sa fiche ; ce
+qu'elle dit est calculé par la porte d'offre du pipeline — le récit « pourquoi pas » dit la même chose qu'elle,
+situation par situation. On y décoche un outil pour le lui retirer dans une situation, et sa fiche le règle plus
+finement — sans jamais lui donner un outil que le code n'offre pas. Elle porte aussi le texte que son prompt porte
+vraiment."""
 
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 from mika.contracts import runtime as rt
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages import tools as page
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.console_html import ConsoleHTML
-from tests.protocol.test_inspector_pages import every_page, html_of
+from tests.protocol.test_inspector_pages import html_of
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 ACTING = phrase("runtime.tools.acting")
@@ -25,33 +27,38 @@ ACTING = phrase("runtime.tools.acting")
 BASE = "/inspecteur/outils"
 
 
-def _forms(text: str) -> int:
-    return len(re.findall(r"<form\b", text))
+def _shown(body: str) -> set[str]:
+    """Les outils que la grille montre (chacun y laisse son nom dans un champ caché)."""
+    return set(re.findall(r'name="vu" value="([a-zA-Z0-9_]+)"', body))
 
 
-def test_every_tool_is_listed_with_its_fiche_and_none_can_be_set_here(world):  # noqa: F811
+def _checked(body: str, tool: str) -> list[str]:
+    """Les cases cochées d'un outil dans la grille : « situation:outil »."""
+    return re.findall(rf'name="o" value="([a-z]+:{tool})" checked', body)
+
+
+def test_every_tool_is_in_the_grid_with_its_fiche(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     registry = live.kernel.registry
     # La découverte MCP peut ajouter des outils pendant la lecture des pages.
     specs = dict(registry.tools)
     dynamic = {name for name in specs if registry.is_dynamic(name)}
-    listed = every_page(client, f"{BASE}/tous")
-    missing = [n for n in specs if n not in listed]
+    grid = client.get(f"{BASE}/tous")
+    ConsoleHTML(grid.text).check()
+    missing = [n for n in specs if n not in _shown(grid.text)]
     assert missing == [], missing
-    plain = _forms(client.get(f"{BASE}/qui").text)  # une page sans action : ses seuls formulaires sont ceux du cadre
     for name, spec in specs.items():
         r = client.get(f"{BASE}/tous", params={"outil": name})
         text = html_of(r)
-        editable = "sur la fiche de son serveur" if name in dynamic else "non — défini dans le code"
-        assert r.status_code == 200 and name in text and editable in text, name
+        assert r.status_code == 200 and name in text and "Où elle peut s'en servir" in text, name
+        assert ("il vient d'un service ou d'une app" in text) == (name in dynamic), name
         assert registry.bundles[spec.bundle] in text, name
-        assert _forms(r.text) == plain, f"{name} : un outil du code ne se règle pas ici"
         ConsoleHTML(r.text).check()
     assert "Aucun outil ne s'appelle" in html_of(client.get(f"{BASE}/tous", params={"outil": "rien_du_tout"}))
 
 
-def test_the_matrix_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: F811
+def test_the_grid_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: F811
     client, live, _ = world
     kernel = live.kernel
     ui = SimpleNamespace(kernel=kernel)
@@ -69,60 +76,76 @@ def test_the_matrix_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa
     assert "email_read" not in offers["compte"] and "email_read" not in offers["salon"]
     assert "draw" in offers["compte"] and "draw" not in offers["inconnue"] and "draw" not in offers["salon"]
     assert not any(spec.owner_only for spec in offers["salon"].values())
-    # et la page le rend : le lot du courrier, en tête-à-tête avec sa propriétaire
+    # et la grille le rend : sa boîte cochée pour sa propriétaire, un tiret en salon — et pourquoi
     bootstrap(client)
-    text = html_of(client.get(f"{BASE}/qui"))
-    assert "email" in text and ("●" in text or "○" in text)
+    body = client.get(f"{BASE}/tous").text
+    assert "proprietaire:email_read" in _checked(body, "email_read")
+    assert 'value="salon:email_read"' not in body
+    assert "Elle répond dans un salon, devant plusieurs personnes : réservé à sa propriétaire" in html.unescape(body)
 
 
 def test_what_she_reads_is_her_prompt(world):  # noqa: F811
     client, _live, _ = world
     bootstrap(client)
-    spoken = html_of(client.get(f"{BASE}/texte", params={"situation": "proprietaire"}))
-    assert ACTING[:40] in spoken and "En main" in spoken
-    # un pas de travail : personne ne lit sa parole, la règle de ses mains n'y est pas
-    silent = html_of(client.get(f"{BASE}/texte", params={"situation": "pas"}))
-    assert ACTING[:40] not in silent
+    body = html_of(client.get(f"{BASE}/tous"))
+    prompts = dict(re.findall(r'<details class="can-prompt"><summary>(.*?)</summary><pre>(.*?)</pre>', body, re.S))
+    assert ACTING[:40] in prompts["Elle répond à sa propriétaire, en privé"]
+    # un pas sur un but : personne ne lit sa parole, la règle de ses mains n'y est pas
+    assert ACTING[:40] not in prompts["Elle avance seule sur un de ses buts"]
 
 
-def _rule(client, situation: str, **rules: str):
-    data = {"csrf": client.cookies.get("csrftoken"), "situation": situation,
-            **{f"r.{name}": rule for name, rule in rules.items()}}
+def _grid(client, tools: list[str], checked: list[str]):
+    data = {"csrf": client.cookies.get("csrftoken"), "vu": tools, "o": checked}
     return client.post(f"{BASE}/regler", data=data, follow_redirects=False)
 
 
-def test_an_operator_rules_her_tools_situation_by_situation(world):  # noqa: F811
-    """Retiré, le pipeline ne l'offre plus dans cette situation, et la console le dit partout (sa fiche, la grille) ;
-    ailleurs, rien ne change. Une règle sur un outil que le code n'offre pas ici est ignorée. Tout remettre efface."""
+def _fiche(client, tool: str, **rules: str):
+    data = {"csrf": client.cookies.get("csrftoken"), "outil": tool, **{f"r.{s}": r for s, r in rules.items()}}
+    return client.post(f"{BASE}/regler", data=data, follow_redirects=False)
+
+
+def test_an_operator_rules_her_tools_from_the_grid_and_the_fiche(world):  # noqa: F811
+    """Décoché dans la grille, le pipeline ne l'offre plus dans cette situation, et la console le dit (la grille, sa
+    fiche) ; ailleurs, rien ne change. Une grille filtrée ne touche que ce qu'elle montrait. La fiche le rend ;
+    une règle sur une situation où le code ne l'offre pas est ignorée. Tout remettre efface."""
     client, live, _ = world
     bootstrap(client)
     kernel = live.kernel
     ui = SimpleNamespace(kernel=kernel)
-    owner, room = (next(s for s in page.situations(ui) if s.key == key) for key in ("proprietaire", "salon"))
-    table = client.get(f"{BASE}/texte", params={"situation": "proprietaire"})
-    ConsoleHTML(table.text).check()
-    assert 'name="r.email_read"' in table.text and 'name="r.email_read"' not in \
-        client.get(f"{BASE}/texte", params={"situation": "salon"}).text  # le code ne l'offre pas en salon
-    saved = _rule(client, "proprietaire", email_read="off", memory_search="ask")
-    assert saved.status_code == 303 and "situation=proprietaire" in saved.headers["location"]
+    owner, room, step = (next(s for s in page.situations(ui) if s.key == key) for key in ("proprietaire", "salon", "pas"))
+    body = client.get(f"{BASE}/tous").text
+    ConsoleHTML(body).check()
+    ticked = _checked(body, "email_read")
+    assert "proprietaire:email_read" in ticked and "pas:email_read" in ticked
+    saved = _grid(client, ["email_read"], [c for c in ticked if c != "proprietaire:email_read"])
+    assert saved.status_code == 303 and saved.headers["location"].startswith(f"{BASE}/tous?")
     assert "email_read" not in page.offered_in(ui, owner)
     assert "email_read" not in kernel.runner._tools(kernel.runner.policies[owner.kind], owner.kind, owner.audience,
                                                     rules=kernel.runner.rules_of(owner.kind, owner.audience))
+    assert "email_read" in page.offered_in(ui, step)  # ses autres cases sont restées cochées
     assert page.offered_in(ui, room) == page.offered_in(ui, room, ruled=False)  # ailleurs, rien ne change
-    fiche = html_of(client.get(f"{BASE}/tous", params={"outil": "email_read"}))
-    assert "retiré par un opérateur" in fiche
     after = client.get(saved.headers["location"])
-    assert "email_read" in html_of(after) and "1 outil retiré" in html_of(after)
+    assert "proprietaire:email_read" not in _checked(after.text, "email_read")
+    assert "1 retiré par un opérateur" in html_of(after) and "email_read retiré" in html_of(after)
+    fiche = client.get(f"{BASE}/tous", params={"outil": "email_read"}).text
+    assert re.search(r'name="r\.proprietaire">.*?<option value="off" selected>', fiche, re.S)
     audit = client.portal.call(lambda: kernel.mind.store.latest([rt.OPERATED.name], 5))
     assert any("console.outils.regler" in a.data for a in audit)
-    # le code ne l'offre pas en salon : la règle est ignorée
-    _rule(client, "salon", email_read="hand")
+    # une grille filtrée (une autre famille) ne touche pas à ce qu'elle ne montrait pas
+    memory = _checked(body, "memory_search")
+    assert _grid(client, ["memory_search"], memory).status_code == 303
+    assert "email_read" not in page.offered_in(ui, owner)
+    # le code ne l'offre pas en salon : la règle est ignorée ; sa fiche le rend à sa propriétaire
+    _fiche(client, "email_read", salon="hand", proprietaire="")
     assert "email_read" not in live.settings.tool_rules_for("salon")
-    reset = client.post(f"{BASE}/regler", data={"csrf": client.cookies.get("csrftoken"), "situation": "proprietaire",
-                                                "faire": "remettre"}, follow_redirects=False)
+    assert "email_read" in page.offered_in(ui, owner)
+    _grid(client, ["email_read"], [c for c in ticked if c != "proprietaire:email_read"])
+    assert live.settings.tool_rules_for("proprietaire") == {"email_read": "off"}
+    reset = client.post(f"{BASE}/regler", data={"csrf": client.cookies.get("csrftoken"), "faire": "remettre"},
+                        follow_redirects=False)
     assert reset.status_code == 303 and live.settings.tool_rules_for("proprietaire") == {}
     assert "email_read" in page.offered_in(ui, owner)
-    refused = client.post(f"{BASE}/regler", data={"csrf": "faux", "situation": "proprietaire", "r.email_read": "off"},
+    refused = client.post(f"{BASE}/regler", data={"csrf": "faux", "vu": ["email_read"], "o": []},
                           follow_redirects=False)
     assert refused.status_code == 303 and live.settings.tool_rules_for("proprietaire") == {}
 
@@ -135,32 +158,28 @@ def test_what_mika_serves_is_said(world):  # noqa: F811
     assert "mika mcp token" in text and "/mcp/relais" in text
 
 
-def test_catalogue_cards_and_fiche_preserve_filters_and_table_choice(world):  # noqa: F811
-    import html
-    from urllib.parse import parse_qs, urlsplit
-
+def test_the_grid_keeps_its_search_and_family_on_the_fiche(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
-    response = client.get(f'{BASE}/tous?lot=email&origine=interne')
-    # le catalogue est dessiné en cartes (ADR 0121)
-    assert response.status_code == 200 and 'class="now-card person-list' in response.text
+    response = client.get(f"{BASE}/tous?lot=email")
+    ConsoleHTML(response.text).check()
+    # une seule famille, ouverte
+    assert 'class="can-family" open' in response.text and _shown(response.text) and \
+        all(n.startswith("email_") for n in _shown(response.text))
     link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', response.text).group(1))
-    assert parse_qs(urlsplit(link).query)['lot'] == ['email']
+    assert parse_qs(urlsplit(link).query)["lot"] == ["email"]
     detail = client.get(link)
     ConsoleHTML(detail.text).check()
-    assert '<h1>email_read</h1>' in detail.text and 'Arguments et règles d’utilisation' in detail.text
+    assert "<h1>email_read</h1>" in detail.text and "Arguments et règles d’utilisation" in detail.text
     crumb = re.search(r'<nav class="crumbs".*?</nav>', html.unescape(detail.text), re.S).group()
-    assert f'{BASE}/tous?lot=email&origine=interne' in crumb
-    table = client.get(f'{BASE}/tous?lot=email&origine=interne&vue_pg1=table')
-    assert 'person-list' not in table.text and 'class="hm-table"' in table.text
-    table_link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', table.text).group(1))
-    assert parse_qs(urlsplit(table_link).query)['vue_pg1'] == ['table']
-    accented = client.get(f'{BASE}/tous?q=écrire').text
-    unaccented = client.get(f'{BASE}/tous?q=ecrire').text
-    def names_in(body):
-        return set(re.findall(r'outil=([a-zA-Z0-9_]+)', body))
-    assert names_in(accented) and names_in(accented) == names_in(unaccented)
-    assert 'Aucun outil ne correspond' in client.get(f'{BASE}/tous?q=aucun-resultat').text
+    assert f"{BASE}/tous?lot=email" in crumb
+    accented = _shown(client.get(f"{BASE}/tous?q=écrire").text)
+    assert accented and accented == _shown(client.get(f"{BASE}/tous?q=ecrire").text)
+    assert "Aucun outil ne correspond" in client.get(f"{BASE}/tous?q=aucun-resultat").text
+    # les anciennes pages mènent ici
+    for old, new in (("qui", "tous"), ("texte", "tous"), ("outils_apps", "serveurs")):
+        moved = client.get(f"{BASE}/{old}", follow_redirects=False)
+        assert moved.status_code == 301 and moved.headers["location"] == f"{BASE}/{new}", old
 
 
 def _expose(client, what: str, **fields):

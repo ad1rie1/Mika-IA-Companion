@@ -1,0 +1,3 @@
+{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons, au-dessus des services
+   branchés — le premier en avant. #}
+<div class="toolbar hm-toolbar elsewhere-actions" role="group" aria-label="Ses services">{% for text, href in links %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}</div>

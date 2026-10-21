@@ -109,14 +109,16 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
     assert night.index("Une soirée au bureau") < night.index("Un toit où chaque note")  # son journal, puis ses rêves
 
 
-def test_who_gets_what_is_a_grid_of_lots_and_situations(world):  # noqa: F811
-    """Outils › Qui reçoit quoi : ses lots en lignes, les situations en colonnes rangées par ce qui se passe ; une
-    case dit en main, à la demande ou pas offert, et mène au catalogue sur ce lot, dans cette situation."""
+def test_what_she_can_do_is_a_grid_of_families_and_situations(world):  # noqa: F811
+    """Outils › Ce qu'elle peut faire : ses familles en lignes (leurs outils dessous), les situations en colonnes
+    rangées par ce qui se passe ; une famille dit, situation par situation, si tous ses outils lui sont offerts, une
+    partie ou aucun ; un outil a une case à cocher là où le code l'offre, un tiret ailleurs."""
     client, _, _ = world
     bootstrap(client)
-    page = drawn(client, "/inspecteur/outils/qui")
-    head = page.split("<thead>")[1].split("</thead>")[0]
-    assert head.index("Elle répond") < head.index("Elle prend la parole") < head.index("Personne n'écoute")
-    memory = page.split('href="/inspecteur/outils/tous?lot=memory"')[1].split("</tr>")[0]
-    assert '<a class="offer offer-hand" href="/inspecteur/outils/tous?lot=memory&pour=proprietaire"' in memory
-    assert page.count('class="offer offer-') > 20 and "pas offert" in page
+    page = drawn(client, "/inspecteur/outils/tous")
+    head = page.split('class="can-row can-head can-moments"')[1].split("</div>")[0]
+    assert head.index("Elle répond à") < head.index("D'elle-même") < head.index("Elle travaille seule")
+    memory = page.split("<b>Mémoire</b>")[1].split("</summary>")[0]
+    assert 'class="can-sum can-on can-start"' in memory  # sa mémoire, toute à elle quand elle répond
+    assert page.count('<details class="can-family"') > 10 and page.count('type="checkbox" name="o"') > 50
+    assert 'class="can-cell can-none' in page and "<b>workshop</b>" not in page  # chaque famille a son nom

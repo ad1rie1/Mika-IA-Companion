@@ -202,6 +202,15 @@ class Names:
     def faculty(self, owner: str) -> str:
         return self.labels.faculties.get(owner, owner)
 
+    def bundle(self, key: str) -> str:
+        """Une famille d'outils (un lot) : son nom à elle, celui des lots de sa source (« mcp.* »), ou celui de sa
+        faculté."""
+        if key in self.labels.bundles:
+            return self.labels.bundles[key]
+        head, dot, rest = key.partition(".")
+        pattern = self.labels.bundles.get(f"{head}.*") if dot else None
+        return pattern.format(rest) if pattern else self.faculty(key)
+
     def section(self, key: str) -> str:
         """Une section du prompt : ce qu'elle lui montre."""
         if key in self.labels.sections:

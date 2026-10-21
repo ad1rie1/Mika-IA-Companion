@@ -17,7 +17,7 @@ class Blocks(Drawn):
     """Un onglet dessiné bloc par bloc : des tuiles, des faits, des listes, un fil, ses formulaires (ceux que la
     console a préparés, avec leur jeton).
     ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation) ; ``styles`` :
-    la feuille de son panneau, s'il en a un (Régler ses outils)."""
+    la feuille de son panneau, s'il en a un (Prêter à un agent)."""
 
     def __init__(self, tables: str = "cards", *styles: str) -> None:
         self.tables = tables
@@ -26,7 +26,7 @@ class Blocks(Drawn):
     def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:
         drawn = blocks.page(ui, items, query, tables=self.tables, forms=forms)
-        # rien à dessiner, mais un panneau qui a sa feuille (Ce qu'elle expose) : dessiné quand même, pour la charger
+        # rien à dessiner, mais un panneau qui a sa feuille (Prêter à un agent) : dessiné quand même, pour la charger
         return Markup("") if drawn is None and self.styles else drawn
 
 
@@ -73,9 +73,8 @@ DRAWN: dict[str, Drawn] = {
     **{f"buts/{t}": CARDS for t in ("vivants", "clos")},
     **{f"projets/{t}": CARDS for t in ("tous", "toutes_executions", "toutes_decisions")},
     # Outils, puis Connexions extérieures
-    **{f"outils/{t}": CARDS for t in ("tous", "serveurs", "outils_apps")},
-    **{f"outils/{t}": Blocks("cards", "handmade/tools.css") for t in ("texte", "expose")},
-    "outils/qui": Shaped(tools.who_gets_what, "handmade/tools.css"),
+    "outils/tous": tools.Catalogue(), "outils/serveurs": tools.Elsewhere(),
+    "outils/expose": Blocks("cards", "handmade/tools.css"),
     **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils", "positions", "messages")},
     "reveils/reveils": CARDS, "apps/apps": CARDS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)

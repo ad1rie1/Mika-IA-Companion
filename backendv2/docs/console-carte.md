@@ -137,30 +137,36 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 - **Ses choix**, **Épisodes** (filtres sorte/issue/cible, pagination juste),
   **Échéances**.
 
-### Ses outils (ADR 0064)
-- **Catalogue des outils** : une ligne par outil du registre (origine interne ou
-  extérieure, lot et sa phrase, ce qu'il fait, à qui il est offert, appels des
-  14 derniers jours) ; `?outil=<nom>` ouvre sa fiche (arguments lus du schéma,
-  condition d'offre, règle vérifiée à l'exécution, qui le reçoit et pourquoi
-  pas, derniers appels vers leur épisode). Un outil défini dans le code ne se
-  règle pas sur sa fiche : sa place se règle dans « Régler ses outils ».
-- **Qui reçoit quoi** : lots × situations types (propriétaire, compte,
-  inconnue, salon, initiative, pas, projet, tâche) — en main, à la demande, pas
-  offert —, calculé par la porte d'offre du pipeline (`runtime.tools.offer`),
-  règles des opérateurs comprises.
-- **Régler ses outils** (ADR 0122, `?situation=`, `?lot=`) : par situation et
-  par famille, chaque outil que le code y offre, sa place selon le code, et un
-  choix — comme le code, en main, à la demande, retiré (restreindre seulement ;
-  un outil qui clôt une boucle ne se règle pas). Dessous, le texte exact que son
-  prompt porte sur ses outils.
-- **Ce qu'elle expose** (ADR 0122) : le relais MCP du moteur Claude Code (lu) ;
-  la console en MCP — créer, renouveler ou fermer son jeton (montré une seule
-  fois, avec sa ligne `claude mcp add`), choisir ce qu'elle sert (ses pages,
+### Ses outils (ADR 0064, 0122, 0123)
+- **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses
+  familles d'outils en lignes, chacune s'ouvre sur ses outils (ce qu'il fait,
+  son nom, ses appels des 14 derniers jours) ; les situations en colonnes, par
+  ce qui se passe (elle répond à sa propriétaire, un compte, une inconnue, un
+  salon ; d'elle-même, à sa propriétaire ; seule sur un but, un projet, un
+  brouillon). Une case cochée : elle peut s'en servir là ; la décocher le lui
+  retire (restreindre seulement) ; un tiret : pas prévu, et pourquoi au survol.
+  Dessous, replié, le texte exact que son prompt porte sur ses outils.
+  `?outil=<nom>` ouvre sa fiche : où elle peut s'en servir, réglable par
+  situation (comme prévu, retiré ; sous la main ou à chercher quand le
+  fournisseur diffère), ses derniers appels vers leur épisode, ses arguments
+  lus du schéma, sa condition d'offre et la règle vérifiée à l'exécution.
+- **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les
+  services branchés (état, outils servis / proposés, à revoir — badge et
+  vitale), puis les outils que ses apps lui donnent (la vue de la Forge,
+  dessinée dessous). La fiche d'un serveur : *État* (ce qui a été déclaré, ce
+  qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la
+  connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé,
+  « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé
+  est suspendu), *Appels*.
+- **Prêter à un agent** (`outils/expose`) : la console en lecture — créer,
+  renouveler ou fermer son jeton (montré une seule fois, avec sa ligne
+  `claude mcp add`), choisir ce qu'elle montre (ses pages d'office et d'autres,
   ses vues, ses fiches, « pourquoi ») ; ses outils prêtés — des points
   `/mcp/pret/<nom>` à déclarer (`?nouveau`), régler (`?pret=<nom>` : lecture
   seule ou non, ses outils), renouveler et retirer, avec ce que chacun sert et
-  ses derniers appels.
-- Ajoutés par les plugins : **Outils de ses apps** (Forge) ; **Services MCP** (MCP : état, servis / proposés, à revoir — badge et vitale), et la fiche d'un serveur : *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé est suspendu), *Appels*.
+  ses derniers appels ; replié en bas, le relais MCP du moteur Claude Code (lu).
+- Les anciennes pages mènent ici : `outils/qui`, `outils/texte` → `outils/tous` ;
+  `outils/outils_apps` → `outils/serveurs`.
 
 ### Approbations
 - **Actions à autoriser** : une carte par demande (ce qui partira, contexte, arguments),

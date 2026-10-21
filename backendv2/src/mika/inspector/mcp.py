@@ -51,7 +51,7 @@ PAGES = ("accueil.a_traiter", "systeme.sante", "systeme.processus", "systeme.ano
 #: jamais une page à formulaires ni de réglages
 SERVABLE = (*PAGES, "accueil.maintenant", "accueil.aujourdhui", "decisions.maintenant", "decisions.en_cours",
             "decisions.echeances", "systeme.passerelle", "systeme.monde", "systeme.stockage", "systeme.operations",
-            "outils.tous", "outils.qui")
+            "outils.tous")
 #: ce qu'elle sert au-delà des pages : les vues que déclarent ses facultés (outil « vue »), les fiches d'objets et la
 #: recherche (« chercher », « fiche »), « pourquoi a-t-elle dit ça ? » (« pourquoi »)
 VIEWS, SUBJECTS, WHY = "vues", "fiches", "pourquoi"

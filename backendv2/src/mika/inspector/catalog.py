@@ -190,6 +190,9 @@ class Labels:
     processes: Mapping[str, str] = field(default_factory=dict)
     #: type d'événement d'une faculté → ce qui s'est passé (« Un souvenir retenu »)
     events: Mapping[str, str] = field(default_factory=dict)
+    #: lot d'outils → sa famille pour un opérateur, quand ce n'est pas le nom de sa faculté (« L'atelier d'un
+    #: projet ») ; « préfixe.* » nomme les lots qu'une source ajoute, par ce qui suit le préfixe (« Service « {} » »)
+    bundles: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

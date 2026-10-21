@@ -1,17 +1,19 @@
-"""Ses outils : tout ce qu'elle peut faire, d'où ça vient, pour qui et quand (ADR 0064).
+"""Ses outils : ce qu'elle peut faire et avec qui, ce que tu prêtes à un agent (ADR 0064, 0122).
 
 L'écran lit ce que le moteur exécute : le registre (ses outils, et ceux que des
 sources dynamiques y ajoutent) et la porte d'offre du pipeline
 (``runtime.tools.offer``), appliquée à des audiences de synthèse — jamais une
-recopie de ses règles. Un outil défini dans le code se lit sur sa fiche ; un
-opérateur ne règle que sa place, situation par situation (« Régler ses outils »,
-ADR 0122) : le retirer, le mettre en main ou à la demande, jamais l'offrir là où
-le code ne l'offre pas.
+recopie de ses règles. « Ce qu'elle peut faire » est une grille : ses familles
+d'outils en lignes, leurs outils dessous, les situations en colonnes. Un
+opérateur y décoche un outil pour le lui retirer dans une situation ; sa fiche
+le règle plus finement (sous la main ou à chercher, quand le fournisseur sait
+différer). Jamais une règle ne l'offre là où le code ne l'offre pas.
 """
 
 from __future__ import annotations
 
 import inspect
+import re
 import secrets as _secrets
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -23,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.inspector import mcp as console_mcp
-from mika.inspector import names, render
+from mika.inspector import names
 from mika.inspector.catalog import Panel
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages.tabs import TABS
@@ -34,17 +36,13 @@ from mika.kernel.faculty import ToolSpec
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import (
     Badge,
-    Code,
     Column,
     Disclosure,
     Fields,
     Note,
-    Pager,
     Param,
     Ref,
     Row,
-    Stat,
-    Stats,
     Table,
     Text,
     When,
@@ -73,14 +71,21 @@ from mika.vocab.privacy import EVERYTHING, ChannelTrust
 
 #: ce qui est compté comme récent (les traces d'épisode ne gardent pas plus)
 USAGE_DAYS = 14
+#: la liste que lit la console en MCP, par pages (la grille, elle, tient en une page)
 TOOLS_PAGE = 24
 BASE = f"{PREFIX}/outils"
-#: le contexte du catalogue qu'une fiche garde pour y revenir (plus le choix « Tableau », ``is_table_choice``)
-CATALOG_PARAMS = ("q", "lot", "pour", "origine", "page")
-#: ce qu'un opérateur choisit pour un outil dans une situation (ADR 0122) ; « » : ce que dit le code
-CHOICES = (("", "Comme le code"), (HAND, "En main"), (ASK, "À la demande"), (OFF, "Retiré"))
-#: le préfixe des champs du formulaire « Régler ses outils » : « r.<outil> »
+#: ce que la fiche d'un outil garde de la grille pour y revenir (plus le choix « Tableau », ``is_table_choice``)
+CATALOG_PARAMS = ("q", "lot", "page")
+#: la règle d'un outil sur sa fiche, situation par situation : « r.<situation> » ; « » : ce que prévoit le code
 RULE_FIELD = "r."
+#: dans la grille, la case d'un outil dans une situation (« <situation>:<outil> », cochée s'il y est offert), et les
+#: outils que la grille montrait (une recherche en cache : ceux-là seuls changent)
+CELL_FIELD, SEEN_FIELD = "o", "vu"
+#: ce qu'a fait une règle, dans le message qui suit l'enregistrement
+DONE = {None: "rendu comme prévu", OFF: "retiré", HAND: "mis sous la main", ASK: "mis à chercher"}
+#: les situations rangées par ce qui se passe, en tête de la grille ; les autres : elle travaille seule
+MOMENTS = {Kind.REPLY: "Elle répond à…", Kind.INITIATIVE: "D'elle-même"}
+ALONE = "Elle travaille seule sur…"
 #: les adresses de ce qu'elle expose en MCP (``inspector.mcp``, ``app/lending.py``), et la machine qui les sert
 CONSOLE_ADDRESS, LENT_ADDRESS, LOCAL_ORIGIN = console_mcp.PREFIX, "/mcp/pret", "http://127.0.0.1:8001"
 #: ce que la console en MCP sert au-delà de ses pages, en mots
@@ -92,7 +97,7 @@ SERVED_PARTS = ((console_mcp.VIEWS, "Les vues de ses facultés (ses souvenirs, s
 @dataclass(frozen=True, slots=True)
 class Situation:
     """Une audience type et la sorte d'épisode où elle se trouve : de quoi demander à la porte d'offre ce
-    qu'elle y aurait en main."""
+    qu'elle y aurait en main. ``short`` : son nom sous l'en-tête de la grille (« Elle répond à… » « un salon »)."""
 
     key: str
     short: str
@@ -116,19 +121,19 @@ _NOBODY = Audience(persons=(), channel="internal", public=False, level=int(EVERY
                    untied_level=int(EVERYTHING.untied_level))
 
 SITUATIONS: tuple[Situation, ...] = (
-    Situation("proprietaire", "propriétaire", "Sa propriétaire, en privé", Kind.REPLY,
+    Situation("proprietaire", "sa propriétaire", "Elle répond à sa propriétaire, en privé", Kind.REPLY,
               _person("proprietaire", trust=ChannelTrust.AUTHENTICATED.value, owner=True)),
-    Situation("compte", "compte", "Une personne qui a un compte, en tête-à-tête", Kind.REPLY,
+    Situation("compte", "un compte", "Elle répond à une personne qui a un compte, en tête-à-tête", Kind.REPLY,
               _person("compte", trust=ChannelTrust.AUTHENTICATED.value)),
-    Situation("inconnue", "inconnue", "Une inconnue, en tête-à-tête (une adresse sans compte)", Kind.REPLY,
+    Situation("inconnue", "une inconnue", "Elle répond à une inconnue (une adresse sans compte)", Kind.REPLY,
               _person("inconnue", trust=ChannelTrust.ACCOUNT.value, channel="external")),
-    Situation("salon", "salon", "Dans un salon (plusieurs personnes)", Kind.REPLY,
+    Situation("salon", "un salon", "Elle répond dans un salon, devant plusieurs personnes", Kind.REPLY,
               _person("salon", trust=ChannelTrust.PUBLIC.value, public=True, room="salon")),
-    Situation("initiative", "initiative", "Quand elle prend la parole, vers sa propriétaire", Kind.INITIATIVE,
+    Situation("initiative", "à sa propriétaire", "Elle écrit d'elle-même à sa propriétaire", Kind.INITIATIVE,
               _person("initiative", trust=ChannelTrust.AUTHENTICATED.value, owner=True)),
-    Situation("pas", "pas", "Un pas sur un but (personne n'écoute)", Kind.STEP, _NOBODY),
-    Situation("projet", "projet", "Une exécution de projet (personne n'écoute)", Kind.WORK, _NOBODY),
-    Situation("tache", "tâche", "Une tâche silencieuse (préparer un brouillon de mail)", Kind.TASK, _NOBODY),
+    Situation("pas", "un but", "Elle avance seule sur un de ses buts", Kind.STEP, _NOBODY),
+    Situation("projet", "un projet", "Elle travaille seule sur un projet", Kind.WORK, _NOBODY),
+    Situation("tache", "un brouillon", "Elle prépare seule un brouillon de mail", Kind.TASK, _NOBODY),
 )
 
 
@@ -161,13 +166,13 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
     """Pourquoi la porte ne l'offre pas ici, en mots (vide : elle l'offre). Un test vérifie que ce récit et la
     porte disent la même chose, situation par situation."""
     if s.kind not in spec.episodes:
-        return "pas dans cette sorte d'épisode"
+        return "pas prévu dans cette situation"
     if not admitted(policy.tool_bundles, spec.bundle):
-        return "son lot n'y est pas offert"
+        return "sa famille n'est pas prévue dans cette situation"
     if spec.min_level is not None and s.audience.level < spec.min_level:
-        return "niveau de confiance insuffisant"
+        return "il faut plus de confiance"
     if spec.owner_only and not s.audience.owner:
-        return "réservé à ses propriétaires"
+        return "réservé à sa propriétaire"
     if spec.when is not None:
         try:
             ok = spec.when(s.audience) is True
@@ -191,8 +196,8 @@ def condition(spec: ToolSpec) -> str:
 def origin(ui: Any, spec: ToolSpec) -> tuple[str, str]:
     """(libellé, ton) d'où vient un outil : défini dans le code, ou ajouté par une source dynamique."""
     if ui.kernel.registry.is_dynamic(spec.name):
-        return "extérieur", "info"
-    return "interne", "muted"
+        return "venu d'ailleurs", "info"
+    return "dans son code", "muted"
 
 
 def _usage(ui: Any) -> Mapping[str, Any]:
@@ -200,11 +205,6 @@ def _usage(ui: Any) -> Mapping[str, Any]:
     if traces is None:
         return {}
     return traces.tool_usage(ui.now() - USAGE_DAYS * DAY)
-
-
-def _who(ui: Any, spec: ToolSpec, offers: Mapping[str, Mapping[str, ToolSpec]]) -> str:
-    shorts = [s.short for s in situations(ui) if spec.name in offers.get(s.key, {})]
-    return " · ".join(shorts) or "nulle part"
 
 
 def _kinds(spec: ToolSpec) -> str:
@@ -220,134 +220,205 @@ def _fold(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
 
 
-def _bundle_choices(ui: Any) -> tuple[tuple[str, str], ...]:
-    bundles = sorted({s.bundle for s in ui.kernel.registry.tools.values()})
-    return tuple((b, ui.names.faculty(b)) for b in bundles)
+def _lead(text: str, limit: int = 150) -> str:
+    """Ce qu'il fait, en une phrase : la première de sa description, coupée à un mot."""
+    first = re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0]
+    return first if len(first) <= limit else first[:limit].rsplit(" ", 1)[0] + "…"
 
 
 def _params(ui: Any) -> tuple[Param, ...]:
-    return (Param("q", "Rechercher", "search", placeholder="un nom ou ce qu'il fait"),
-            Param("lot", "Famille", "select", _bundle_choices(ui)),
-            Param("pour", "Disponible pour", "select", tuple((s.key, s.label) for s in situations(ui))),
-            Param("origine", "Origine", "select", (("interne", "Interne"), ("exterieur", "Extérieur"))))
+    return (Param("q", "Chercher un outil", "search", placeholder="un nom, ce qu'il fait…"),)
 
 
-@TABS.tab("outils.tous", title="Catalogue des outils",
-          description="Trouver un outil, comprendre ce qu'il fait et vérifier dans quelles situations elle peut l'utiliser.")
+def _prompt(ui: Any, s: Situation) -> str:
+    """Ce que son prompt dit de ses outils dans cette situation, mot pour mot."""
+    policy = ui.kernel.runner.policies[s.kind]
+    offered = list(offered_in(ui, s).values())
+    return "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
+                                     catalogue(offered, in_hand(ui, policy), ui.kernel.registry.bundles,
+                                               rules(ui, s)))))
+
+
+def _summary(s: Situation, cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """La case d'une famille dans une situation : tous ses outils, une partie, aucun — et ce qu'un opérateur a
+    retiré."""
+    total = len(cells)
+    usable = sum(1 for c in cells if c["state"] in ("on", "ask", "fixed"))
+    off = sum(1 for c in cells if c["state"] == "off")
+    asked = usable > 0 and all(c["state"] == "ask" for c in cells if c["state"] in ("on", "ask", "fixed"))
+    removed = f", {off} retiré{'s' if off > 1 else ''} par un opérateur" if off else ""
+    if usable == total:
+        state, text, title = "on", "✓", f"{s.label} : tous ses outils"
+    elif usable:
+        state, text, title = "part", f"{usable}/{total}", f"{s.label} : {usable} de ses {total} outils{removed}"
+    elif off:
+        state, text, title = "off", "✕", f"{s.label} : retiré par un opérateur"
+    else:
+        state, text, title = "none", "—", f"{s.label} : pas prévu"
+    return {"state": state, "text": text, "title": title, "ask": asked, "off": bool(off) and usable > 0}
+
+
+def can_do(ui: Any, query: str = "", lot: str = "") -> dict[str, Any]:
+    """La grille « Ce qu'elle peut faire » : ses familles d'outils en lignes (leurs outils dessous), les situations
+    en colonnes. Une case dit ce que la porte d'offre lui donne : offert (coché ; à chercher, si le fournisseur
+    diffère), retiré par un opérateur (décoché), pas prévu par le code (un tiret, et pourquoi) ; un outil qui clôt
+    sa boucle ne se retire pas. ``query`` : une recherche ; ``lot`` : une seule famille."""
+    registry, policies = ui.kernel.registry, ui.kernel.runner.policies
+    sits = situations(ui)
+    by_code = {s.key: offered_in(ui, s, ruled=False) for s in sits}
+    ruled = {s.key: rules(ui, s) for s in sits}
+    cores = {s.key: in_hand(ui, policies[s.kind]) for s in sits}
+    usage = _usage(ui)
+    terms = _fold(query).split()
+    specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
+             if (not lot or spec.bundle == lot)
+             and all(t in _fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for t in terms)]
+    keep = {k: v for k, v in (("q", query), ("lot", lot)) if v}
+    where: dict[str, str] = {}
+    families: dict[str, list[dict[str, Any]]] = {}
+    for spec in specs:
+        cells: list[dict[str, Any]] = []
+        for s in sits:
+            rule = rule_of(spec, ruled[s.key])
+            if spec.name not in by_code[s.key]:
+                cell: dict[str, Any] = {"state": "none", "why": why_not(spec, policies[s.kind], s)}
+            elif spec.ends_loop:
+                cell = {"state": "fixed"}
+            elif rule == OFF:
+                cell = {"state": "off"}
+            else:
+                cell = {"state": "ask" if deferred(spec, cores[s.key], ruled[s.key]) else "on", "set": bool(rule)}
+            cells.append({**cell, "situation": s.label, "value": f"{s.key}:{spec.name}"})
+        where[spec.name] = "; ".join(s.label for s, c in zip(sits, cells, strict=True)
+                                     if c["state"] not in ("none", "off")) or "nulle part"
+        used = usage.get(spec.name)
+        families.setdefault(spec.bundle, []).append({
+            "name": spec.name, "lead": _lead(spec.description), "description": spec.description, "cells": cells,
+            "href": f"{BASE}/tous?" + urlencode({**keep, "outil": spec.name}),
+            "calls": used.calls if used else 0, "failures": used.failures if used else 0})
+    rows = []
+    for bundle, tools in families.items():
+        summary = [_summary(s, [t["cells"][i] for t in tools]) for i, s in enumerate(sits)]
+        rows.append({"bundle": bundle, "label": ui.names.bundle(bundle), "tools": tools, "cells": summary,
+                     "open": bool(terms or lot), "external": any(registry.is_dynamic(t["name"]) for t in tools)})
+    rows.sort(key=lambda r: _fold(r["label"]))
+    groups: list[dict[str, Any]] = []
+    starts = set()  # la première colonne de chaque groupe : un filet la sépare de la précédente
+    for i, s in enumerate(sits):
+        label = MOMENTS.get(s.kind, ALONE)
+        if not groups or groups[-1]["label"] != label:
+            groups.append({"label": label, "count": 0})
+            starts.add(i)
+        groups[-1]["count"] += 1
+    removed = sum(1 for s in sits for name, r in ruled[s.key].items()
+                  if r == OFF and name in by_code[s.key] and not by_code[s.key][name].ends_loop)
+    return {
+        "situations": sits, "groups": groups, "starts": starts, "rows": rows, "specs": specs, "where": where,
+        "query": query, "lot": lot, "lot_label": ui.names.bundle(lot) if lot else "",
+        "total": len(registry.tools), "families": len({x.bundle for x in registry.tools.values()}),
+        "shown": len(specs), "removed": removed, "ruled": sum(len(r) for r in ruled.values()),
+        "failures": sum(u.failures for n, u in usage.items() if n in registry.tools),
+        "any_ask": any(c["state"] == "ask" for r in rows for t in r["tools"] for c in t["cells"]),
+        "prompts": [{"label": s.label, "text": _prompt(ui, s)} for s in sits],
+        "action": f"{BASE}/regler", "cell_field": CELL_FIELD, "seen_field": SEEN_FIELD,
+    }
+
+
+@TABS.tab("outils.tous", title="Ce qu'elle peut faire",
+          description="Ses outils famille par famille, et les situations où elle peut s'en servir. Décoche une case "
+                      "pour lui retirer un outil dans cette situation ; un outil ouvre sa fiche.")
 async def all_tools(ui: Any, request: Request) -> Any:
     name = str(request.query_params.get("outil", "") or "")
     if name:
         return _fiche(ui, request, name)
-    registry = ui.kernel.registry
     params = _params(ui)
     values, notes = read_params(params, request.query_params)
-    offers = {s.key: offered_in(ui, s) for s in situations(ui)}
+    grid = can_do(ui, str(values.get("q") or ""), str(request.query_params.get("lot", "") or ""))
+    # la même chose en liste, pour qui lit sans panneau (la console en MCP) : la grille est le panneau
     usage = _usage(ui)
-    query = _fold(str(values.get("q") or ""))
-    specs = sorted(registry.tools.values(), key=lambda s: (s.bundle, s.name))
-    if values.get("lot"):
-        specs = [s for s in specs if s.bundle == values["lot"]]
-    if values.get("pour"):
-        specs = [s for s in specs if s.name in offers.get(values["pour"], {})]
-    if values.get("origine"):
-        dynamic = values["origine"] == "exterieur"
-        specs = [s for s in specs if registry.is_dynamic(s.name) == dynamic]
-    if query:
-        specs = [s for s in specs if all(term in _fold(f"{s.name} {s.description} {s.bundle} "
-                         f"{ui.names.faculty(s.bundle)} {registry.bundles.get(s.bundle, '')}") for term in query.split())]
     ctx = ui.inspection.context(request.query_params)
-    page, pager = paginate(specs, ctx.pager(size=TOOLS_PAGE))
+    page, pager = paginate(grid["specs"], ctx.pager(size=TOOLS_PAGE))
     rows = []
     for s in page:
-        label, tone = origin(ui, s)
         used = usage.get(s.name)
         calls = Text(num_fr(used.calls), "num", "danger" if used.failures * 2 > used.calls else "",
                      hint=f"{used.failures} en échec") if used else Text("0", "num", "muted")
-        rows.append(Row((Text(s.name, "mono"), Badge(label, tone),
-                         Text(ui.names.faculty(s.bundle), hint=registry.bundles.get(s.bundle, "")),
-                         Text(s.description, clamp=220), Text(_who(ui, s, offers)), Text(_kinds(s), "muted"),
-                         calls), href=_tool_ref(s.name, context=request.query_params)))
-    total = len(registry.tools)
-    dynamic = sum(1 for n in registry.tools if registry.is_dynamic(n))
-    used_now = sum(1 for n in registry.tools if n in usage)
-    failing = sum(u.failures for n, u in usage.items() if n in registry.tools)
+        rows.append(Row((Text(s.name, "mono"), Text(ui.names.bundle(s.bundle)), Text(s.description, clamp=220),
+                         Text(grid["where"][s.name]), calls), href=_tool_ref(s.name, context=request.query_params)))
     blocks: list[Any] = [
-        Stats((Stat("Outils", total, f"{total - dynamic} internes · {dynamic} extérieurs"),
-               Stat("Familles", len({s.bundle for s in registry.tools.values()})),
-               Stat(f"Appelés en {USAGE_DAYS} jours", used_now, "outils différents"),
-               Stat("Appels en échec", failing, f"sur {USAGE_DAYS} jours", "warn" if failing else "")),
-              title="Catalogue complet"),
         *[Note(n, "warn") for n in notes],
-        Table((Column("Outil", "fit", role="title"), Column("Origine", "fit", role="badge"), Column("Famille", "fit"), Column("Ce qu'il fait", role="body"),
-               Column("Disponible pour", hint="les situations où la porte d'offre le lui donne", detail=True),
-               Column("Épisodes", detail=True), Column(f"Appels sur {USAGE_DAYS} j", "num")),
-              tuple(rows), title="Ses outils", empty="Aucun outil ne correspond.", pager=pager,
-              layout="cards", link_label="Comprendre cet outil",
-              caption="Interne : défini dans le code, il se lit ici et ne se règle pas. Extérieur : branché depuis "
-                      "un serveur, il se règle sur la fiche de son serveur."),
+        Table((Column("Outil", "fit", role="title"), Column("Famille", "fit"), Column("Ce qu'il fait", role="body"),
+               Column("Où elle peut s'en servir"), Column(f"Appels sur {USAGE_DAYS} j", "num")),
+              tuple(rows), title="Ses outils", empty="Aucun outil ne correspond.", pager=pager),
     ]
-    return {"blocks": blocks, "filters": params}
+    return {"blocks": blocks, "filters": params, "panel": Panel("handmade/outils/peut.html", grid)}
 
 
 def _fiche(ui: Any, request: Request, name: str) -> Any:
     registry = ui.kernel.registry
     context = {k: v for k, v in request.query_params.items() if k in CATALOG_PARAMS or is_table_choice(k, v)}
-    back = [("Retour aux outils", f"{BASE}/tous" + ("?" + urlencode(context) if context else ""))]
+    back = [("Ce qu'elle peut faire", f"{BASE}/tous" + ("?" + urlencode(context) if context else ""))]
     spec = registry.tools.get(name)
     if spec is None:
         return {"blocks": [Note(f"Aucun outil ne s'appelle « {name} ».", "warn")], "crumbs": back}
     label, tone = origin(ui, spec)
     policies = ui.kernel.runner.policies
-    reserved = ("à ses propriétaires (et quand elle travaille, personne n'écoutant)" if spec.owner_only else "non")
+    where = []
+    for s in situations(ui):
+        policy, ruled = policies[s.kind], rules(ui, s)
+        if spec.name not in offered_in(ui, s, ruled=False):
+            where.append({"key": s.key, "label": s.label, "state": "none", "why": why_not(spec, policy, s)})
+            continue
+        core = in_hand(ui, policy)
+        rule = rule_of(spec, ruled)
+        planned = f" ({'à chercher' if deferred(spec, core) else 'sous la main'})" if core is not None else ""
+        choices = [("", f"Oui, comme prévu{planned}")]
+        if core is not None:
+            choices += [(HAND, "Oui, toujours sous la main"), (ASK, "Oui, à chercher quand il lui faut")]
+        choices.append((OFF, "Non, retiré"))
+        where.append({"key": s.key, "label": s.label, "locked": spec.ends_loop, "rule": rule or "",
+                      "state": "off" if rule == OFF else ("ask" if deferred(spec, core, ruled) else "on"),
+                      "choices": choices, "field": f"{RULE_FIELD}{s.key}"})
+    reserved = ("à sa propriétaire (et quand elle travaille, personne n'écoutant)" if spec.owner_only else "non")
+    dynamic = registry.is_dynamic(spec.name)
     pairs: list[tuple[str, Any]] = [
         ("nom", Text(spec.name, "mono")),
-        ("origine", Badge(label, tone)),
+        ("d'où il vient", Badge(label, tone)),
         ("faculté", ui.names.faculty(spec.owner)),
-        ("lot", Text(spec.bundle, secondary=registry.bundles.get(spec.bundle, ""))),
+        ("famille", Text(ui.names.bundle(spec.bundle), secondary=registry.bundles.get(spec.bundle, ""))),
         ("ce qu'il fait", Text(spec.description)),
-        ("épisodes", _kinds(spec)),
+        ("sortes d'épisodes", _kinds(spec)),
         ("réservé", reserved),
         ("condition d'offre", condition(spec) or "—"),
         ("vérifié à l'exécution", spec.rule or "—"),
         ("appels par épisode", str(spec.max_calls_per_episode) if spec.max_calls_per_episode else "sans plafond"),
         ("conclut la boucle", "oui" if spec.ends_loop else "non"),
-        ("modifiable", "non — défini dans le code (sa place se règle dans « Régler ses outils »)"
-         if not registry.is_dynamic(spec.name) else "sur la fiche de son serveur"),
+        ("ce qui se règle", "où elle s'en sert (plus haut) ; il vient d'un service ou d'une app, qui se règle sur sa "
+                            "fiche (Venus d'ailleurs)" if dynamic else
+                            "où elle s'en sert (plus haut) ; son code, non"),
     ]
     argument_table = Table(("argument", Column("type", "fit"), Column("requis", "fit"), "ce que c'est",
-                         Column("contraintes", "fit")), tuple(arguments(schema_of(spec))),
-                        title="Ses arguments", empty="Aucun argument.")
-    blocks: list[Any] = []
-    rows = []
-    for s in situations(ui):
-        policy = policies[s.kind]
-        ruled = rules(ui, s)
-        reason = why_not(spec, policy, s, ruled)
-        core = in_hand(ui, policy)
-        if reason:
-            rows.append(Row((s.label, Badge("non", "muted"), Text(reason, "muted"))))
-        else:
-            hand = not deferred(spec, core, ruled)
-            rows.append(Row((s.label, Badge("en main" if hand else "à la demande", "ok" if hand else "info"),
-                             Text("placé par un opérateur", "muted") if rule_of(spec, ruled) else "")))
-    blocks.append(Table((Column("Situation", role="title"), Column("Disponible", "fit", role="badge"), "Pourquoi pas"), tuple(rows),
-                        title="Qui le reçoit",
-                        layout="list",
-                        caption="Lu de la porte d'offre du pipeline, avec les règles des opérateurs (Régler ses "
-                                "outils). Un pas ou une exécution qui a choisi ses lots les a tous en main."))
+                            Column("contraintes", "fit")), tuple(arguments(schema_of(spec))),
+                           title="Ses arguments", empty="Aucun argument.")
     traces = getattr(ui.kernel, "traces", None)
     uses = traces.tool_uses(spec.name, 20) if traces is not None else []
-    blocks.append(Disclosure("Arguments et règles d’utilisation", (argument_table, Fields(tuple(pairs), title="Règles et provenance", columns=2))))
-    blocks.append(Table((Column("quand", "fit"), Column("épisode", "fit"), Column("issue", "fit"), ""), tuple(
-        Row((When(u.at), names.kind(u.kind),
-             Badge("réussi" if u.ok else ("refusé" if not u.executed else "échec"),
-                   "ok" if u.ok else "warn" if not u.executed else "danger"),
-             Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))
-        for u in uses), title="Ses derniers appels", empty=f"Aucun appel depuis {USAGE_DAYS} jours."))
+    blocks: list[Any] = [
+        Table((Column("quand", "fit"), Column("épisode", "fit"), Column("issue", "fit"), ""), tuple(
+            Row((When(u.at), names.kind(u.kind),
+                 Badge("réussi" if u.ok else ("refusé" if not u.executed else "échec"),
+                       "ok" if u.ok else "warn" if not u.executed else "danger"),
+                 Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))
+            for u in uses), title="Ses derniers appels", empty=f"Aucun appel depuis {USAGE_DAYS} jours."),
+        Disclosure("Arguments et règles d’utilisation", (argument_table, Fields(tuple(pairs), title="Règles et provenance",
+                                                                               columns=2))),
+    ]
     return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/shared/outil.html", {
         "page_heading": spec.name, "page_subtitle": spec.description,
-        "tool_origin": label, "tool_tone": tone, "tool_family": ui.names.faculty(spec.bundle),  # la famille du catalogue (son lot)
-        "tool_reserved": spec.owner_only,
+        "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
+        "tool_family": ui.names.bundle(spec.bundle), "tool_reserved": spec.owner_only,
+        "where": where, "editable": any(w["state"] != "none" and not w.get("locked") for w in where),
+        "fine": any(len(w.get("choices", ())) > 2 for w in where),
+        "context": context, "action": f"{BASE}/regler",
     })}
 
 
@@ -400,150 +471,87 @@ def arguments(schema: Mapping[str, Any]) -> list[Row]:
     return rows
 
 
-def _cell(offered: Sequence[ToolSpec], total: int, hand: bool) -> Text:
-    if not offered:
-        return Text("—", "muted")
-    mark = "●" if hand else "○"
-    count = "" if len(offered) == total else f" {len(offered)}/{total}"
-    return Text(mark + count, tone="ok" if hand else "", hint=", ".join(sorted(s.name for s in offered)))
+def _grid_changes(ui: Any, lists: Mapping[str, Sequence[Any]]) -> dict[str, dict[str, str | None]]:
+    """Ce que la grille change : un outil montré (``vu``) et décoché est retiré ; recoché, il revient (sa place
+    choisie sur sa fiche reste). Seuls comptent les outils que le code offre ici et qui ne closent pas la boucle."""
+    seen = {str(x) for x in lists.get(SEEN_FIELD, [])}
+    on = {str(x) for x in lists.get(CELL_FIELD, [])}
+    changes: dict[str, dict[str, str | None]] = {}
+    for s in situations(ui):
+        ruled = rules(ui, s)
+        for name, spec in offered_in(ui, s, ruled=False).items():
+            if name not in seen or spec.ends_loop:
+                continue
+            kept, off = f"{s.key}:{name}" in on, rule_of(spec, ruled) == OFF
+            if kept == off:
+                changes.setdefault(s.key, {})[name] = None if kept else OFF
+    return changes
 
 
-@TABS.tab("outils.qui", title="Qui reçoit quoi",
-          description="Chaque lot d'outils, situation par situation : en main, à la demande, ou pas offert. Calculé "
-                      "par la porte d'offre du pipeline, sur des audiences types.")
-async def who_gets_what(ui: Any, request: Request) -> list[Any]:
-    registry = ui.kernel.registry
-    policies = ui.kernel.runner.policies
-    sits = situations(ui)
-    offers = {s.key: offered_in(ui, s) for s in sits}
-    hands = {s.key: in_hand(ui, policies[s.kind]) for s in sits}
-    ruled = {s.key: rules(ui, s) for s in sits}
-    by_bundle: dict[str, list[ToolSpec]] = {}
-    for spec in registry.tools.values():
-        by_bundle.setdefault(spec.bundle, []).append(spec)
-    rows = []
-    for bundle, specs in sorted(by_bundle.items()):
-        cells: list[Any] = [Text(bundle, hint=registry.bundles.get(bundle, ""), secondary=registry.bundles.get(
-            bundle, ""))]
-        for s in sits:
-            got = [x for x in specs if x.name in offers[s.key]]
-            cells.append(_cell(got, len(specs), any(not deferred(x, hands[s.key], ruled[s.key]) for x in got)))
-        rows.append(Row(tuple(cells)))
-    columns = ("lot", *[Column(s.short, "fit", hint=s.label) for s in sits])
-    return [Table(columns, tuple(rows), title="Lots × situations",
-                  caption="● en main · ○ à la demande (elle le cherche quand elle en a besoin) · — pas offert. "
-                          "« 2/5 » : une partie du lot seulement (des outils réservés, ou une condition). Un pas ou "
-                          "une exécution qui a choisi ses lots les a tous en main ; un fournisseur qui ne sait pas "
-                          "différer reçoit tout en main.")]
-
-
-@TABS.tab("outils.texte", title="Régler ses outils",
-          description="Situation par situation : les outils que le code lui offre, ceux qu'un opérateur retire ou "
-                      "range autrement (en main, à la demande), et le texte exact que son prompt en porte.")
-async def what_she_reads(ui: Any, request: Request) -> Any:
-    sits = situations(ui)
-    choices = tuple((s.key, s.label) for s in sits)
-    s = next((x for x in sits if x.key == request.query_params.get("situation")), sits[0] if sits else None)
-    families = sorted({spec.bundle for spec in offered_in(ui, s, ruled=False).values()} if s else set())
-    params = (Param("situation", "Situation", "select", choices, default=sits[0].key if sits else ""),
-              Param("lot", "Famille", "select", tuple((b, ui.names.faculty(b)) for b in families)))
-    values, notes = read_params(params, request.query_params)
-    if s is None:
-        return {"blocks": [Note("Aucune sorte d'épisode n'appelle de modèle.", "muted")], "filters": params}
-    policy = ui.kernel.runner.policies[s.kind]
-    ruled = rules(ui, s)
-    offered = list(offered_in(ui, s).values())
-    core = in_hand(ui, policy)
-    text = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
-                                     catalogue(offered, core, ui.kernel.registry.bundles, ruled))))
-    blocks: list[Any] = [*[Note(n, "warn") for n in notes]]
-    if policy.role is not None and core is None and policy.core_bundles is not None:
-        blocks.append(Note("Le fournisseur de ce rôle ne sait pas différer des outils : il les reçoit tous en "
-                           "main, et son prompt ne parle pas d'outils à chercher.", "info"))
-    blocks.append(Code(text or "(rien : aucun outil offert, ou tous en main sans règle à dire)",
-                       title=f"Ce que son prompt dit de ses outils — {s.label}"))
-    return {"blocks": blocks, "filters": params,
-            "panel": Panel("handmade/outils/regler.html", rule_table(ui, s, core, ruled, str(values.get("lot") or "")))}
-
-
-def rule_table(ui: Any, s: Situation, core: frozenset[str] | None, ruled: Mapping[str, str],
-               lot: str = "") -> dict[str, Any]:
-    """Le tableau « Régler ses outils » d'une situation : chaque outil que le code y offre, par famille, sa place
-    selon le code, et la règle d'un opérateur (aucune sur un outil qui clôt la boucle)."""
-    by_code = offered_in(ui, s, ruled=False)
-    families: dict[str, list[dict[str, Any]]] = {}
-    for spec in sorted(by_code.values(), key=lambda x: x.name):
-        if lot and spec.bundle != lot:
+def _fiche_changes(ui: Any, name: str, data: Mapping[str, Any]) -> dict[str, dict[str, str | None]]:
+    """Ce que la fiche d'un outil change, situation par situation (« r.<situation> ») : ce que prévoit le code
+    n'est pas une règle ; tout en main (un fournisseur qui ne diffère pas), seul « retiré » en est une."""
+    spec = ui.kernel.registry.tools.get(name)
+    changes: dict[str, dict[str, str | None]] = {}
+    if spec is None or spec.ends_loop:
+        return changes
+    for s in situations(ui):
+        chosen = str(data.get(f"{RULE_FIELD}{s.key}", "\0"))
+        if chosen not in ("", *RULES) or name not in offered_in(ui, s, ruled=False):
             continue
-        rule = rule_of(spec, ruled) or ""
-        code_ask = deferred(spec, core)
-        now = "off" if rule == OFF else ("ask" if deferred(spec, core, ruled) else "hand")
-        families.setdefault(spec.bundle, []).append({
-            "name": spec.name, "description": spec.description, "rule": rule, "now": now,
-            "code": "à la demande" if code_ask else "en main", "locked": spec.ends_loop,
-            "href": f"{BASE}/tous?" + urlencode({"outil": spec.name}),
-        })
-    groups = [{"bundle": b, "label": ui.names.faculty(b), "rows": rows}
-              for b, rows in sorted(families.items(), key=lambda kv: ui.names.faculty(kv[0]).casefold())]
-    total = sum(len(g["rows"]) for g in groups)
-    # tout est en main (un fournisseur qui ne sait pas différer, un pas qui a choisi ses lots) : seul « retiré » compte
-    choices = CHOICES if core is not None else tuple(c for c in CHOICES if c[0] in ("", OFF))
-    keep = {"situation": s.key, **({"lot": lot} if lot else {})}
-    return {
-        "situation": s, "groups": groups, "choices": choices, "flat": core is None, "lot": lot,
-        "total": total, "ruled": sum(1 for r in ruled.values() if r), "off": sum(1 for r in ruled.values() if r == OFF),
-        "back": f"{BASE}/texte?" + urlencode(keep), "action": f"{BASE}/regler",
-        "pager": render._pager(Pager(size=max(1, total), total=total), {}),
-    }
+        core = in_hand(ui, ui.kernel.runner.policies[s.kind])
+        code = ASK if deferred(spec, core) else HAND
+        changes[s.key] = {name: None if chosen in ("", code) or (core is None and chosen != OFF) else chosen}
+    return changes
 
 
 async def rules_post(ui: Any, request: Request) -> Response:
-    """« Régler ses outils » : les règles d'une situation, enregistrées (``Settings.save_tool_rules``) et auditées.
-    Un champ par outil (``r.<outil>``) : vide, l'outil reprend ce que dit le code ; un outil que le code n'offre pas
-    dans cette situation, ou qui clôt la boucle, est ignoré — une règle ne fait que restreindre. « Tout remettre
-    comme le code » efface les règles de la situation."""
-    data = await ui.form(request)
+    """Ses outils réglés (``Settings.save_tool_rules``), audités situation par situation. Depuis la grille : ses
+    cases ; depuis la fiche d'un outil (``outil``) : sa place dans chaque situation ; « Tout remettre comme prévu »
+    efface toutes les règles. Un outil que le code n'offre pas dans une situation, ou qui clôt la boucle, est
+    ignoré : une règle ne fait que restreindre."""
+    got = await ui.form_lists(request)
     account = ui.operator(request)
     token = _secrets.token_urlsafe(9)
-    key = str((data or {}).get("situation", ""))
-    lot = str((data or {}).get("lot", ""))
-    s = next((x for x in situations(ui) if x.key == key), None)
+    data, lists = got if got is not None else ({}, {})
+    tool = str(data.get("outil", ""))
+    keep = {k: str(data[k]) for k in ("q", "lot") if data.get(k)}
+    back = {**keep, **({"outil": tool} if tool else {})}
     settings = getattr(ui.deps, "settings", None)
-    back = f"{BASE}/texte?" + urlencode({"situation": key, **({"lot": lot} if lot else {})})
-    if data is None or account is None:
+    if got is None or account is None:
         ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
-    elif s is None or settings is None:
-        ui.flash(token, "warn", "Cette situation n'existe pas : rien n'a été enregistré.")
+    elif settings is None:
+        ui.flash(token, "warn", "Les réglages ne sont pas joignables : rien n'a été enregistré.")
     else:
-        before = dict(rules(ui, s))
-        core = in_hand(ui, ui.kernel.runner.policies[s.kind])
-        allowed = {n: spec for n, spec in offered_in(ui, s, ruled=False).items() if not spec.ends_loop}
-        changes: dict[str, str | None] = {}
+        sits = {s.key: s for s in situations(ui)}
         if data.get("faire") == "remettre":
-            changes = dict.fromkeys(before)
+            changes = {k: dict.fromkeys(rules(ui, s)) for k, s in sits.items()}
+        elif tool:
+            changes = _fiche_changes(ui, tool, data)
         else:
-            for field_, value in data.items():
-                name, chosen = field_.removeprefix(RULE_FIELD), str(value)
-                if not field_.startswith(RULE_FIELD) or name not in allowed or chosen not in ("", *RULES):
-                    continue
-                code = ASK if deferred(allowed[name], core) else HAND
-                # ce que dit déjà le code n'est pas une règle ; tout en main, seul « retiré » en est une
-                changes[name] = None if chosen in ("", code) or (core is None and chosen != OFF) else chosen
-        kept = await settings.save_tool_rules(s.key, changes)
-        changed = sorted(n for n in {*before, *kept} if before.get(n) != kept.get(n))
-        if changed:
-            await ops.audit(ui.kernel, "console.outils.regler", by=account.handle, subject_kind="situation",
-                            subject=s.key)
-            ui.flash(token, "ok", f"{s.label} : {', '.join(changed)} — vaut dès son prochain épisode.")
+            changes = _grid_changes(ui, lists)
+        done: list[str] = []
+        for key, wanted in changes.items():
+            before = dict(rules(ui, sits[key]))
+            kept = await settings.save_tool_rules(key, wanted)
+            moved = sorted(n for n in {*before, *kept} if before.get(n) != kept.get(n))
+            if moved:
+                await ops.audit(ui.kernel, "console.outils.regler", by=account.handle, subject_kind="situation",
+                                subject=key)
+                said = sits[key].label[0].lower() + sits[key].label[1:]
+                done += [f"{n} {DONE[kept.get(n)]} ({said})" for n in moved]
+        if done:
+            more = f", et {len(done) - 6} autres" if len(done) > 6 else ""
+            ui.flash(token, "ok", "; ".join(done[:6]) + more + ". Vaut dès son prochain épisode.")
         else:
             ui.flash(token, "info", "Rien n'a changé.")
-    return secure(RedirectResponse(f"{back}&flash={token}", status_code=303))
+    return secure(RedirectResponse(f"{BASE}/tous?" + urlencode({**back, "flash": token}), status_code=303))
 
 
-@TABS.tab("outils.expose", title="Ce qu'elle expose",
-          description="Ce qu'elle sert elle-même en MCP : ses outils au moteur Claude Code le temps d'un épisode, la "
-                      "console en lecture pour un agent de sa propriétaire, et les points qui prêtent certains de ses "
-                      "outils à un agent.")
+@TABS.tab("outils.expose", title="Prêter à un agent",
+          description="Ce que tu laisses voir ou faire à un agent (ton Claude Code, par exemple) : la console en "
+                      "lecture, et des points qui lui prêtent quelques-uns de ses outils. Rien ne s'ouvre sans jeton, "
+                      "et seulement depuis cette machine.")
 async def exposed(ui: Any, request: Request) -> Any:
     relay, settings, lending = ui.deps.relay, ui.deps.settings, getattr(ui.deps, "lending", None)
     account = ui.operator(request)
@@ -606,7 +614,7 @@ def _command(name: str, address: str, token: str) -> str:
 
 
 async def expose_post(ui: Any, request: Request) -> Response:
-    """Ce qu'elle expose : le jeton de la console en MCP et ce qu'elle sert ; ses points de prêt — déclarés,
+    """Prêter à un agent : le jeton de la console en MCP et ce qu'elle sert ; ses points de prêt — déclarés,
     réglés, leur jeton, retirés. Tout est audité ; un jeton neuf se montre une seule fois, à qui l'a créé."""
     got = await ui.form_lists(request)
     account = ui.operator(request)

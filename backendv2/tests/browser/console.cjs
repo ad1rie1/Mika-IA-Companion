@@ -347,9 +347,9 @@ test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et l
   assert.equal(await page.locator('[data-nav-group="Relations & échanges"]').evaluate(el => el.open), true);
 });
 
-test('outils : ouvrir une fiche au clavier puis retrouver son catalogue filtré', async t => {
+test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', async t => {
   const page = await open(t, { file: 'outils_tous_lot_email.html', javaScriptEnabled: false });
-  const tool = page.locator('.collection-heading a[href*="outil=email_read"]').first();
+  const tool = page.locator('.can-tool a[href*="outil=email_read"]').first();
   await tool.focus();
   await page.keyboard.press('Enter');
   assert.equal(await page.locator('h1').textContent(), 'email_read');
@@ -357,9 +357,9 @@ test('outils : ouvrir une fiche au clavier puis retrouver son catalogue filtré'
   assert.equal(await rules.evaluate(el => el.open), false);
   await rules.locator('summary').click();
   assert.equal(await rules.getByRole('heading', { name: 'Ses arguments', exact: true }).isVisible(), true);
-  await page.getByRole('link', { name: 'Retour aux outils', exact: true }).click();
-  assert.equal(await page.locator('main select[name=lot]').inputValue(), 'email');
-  assert.ok(await page.locator('.collection.cards .collection-item').count() > 0);
+  await page.locator('nav.crumbs a', { hasText: "Ce qu'elle peut faire" }).click();
+  assert.equal(await page.locator('form.can-card input[name=lot]').inputValue(), 'email');
+  assert.ok(await page.locator('.can-family[open] .can-tool').count() > 0);
 });
 
 test('activité et sorties : relevé daté, erreurs prioritaires et relances adaptées', async t => {
