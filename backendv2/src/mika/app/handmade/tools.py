@@ -3,7 +3,8 @@
 Une grille : ses lots d'outils en lignes (leur nom de famille, combien d'outils), les situations en colonnes,
 rangées par ce qui se passe (elle répond à quelqu'un, elle prend la parole, personne n'écoute) ; chaque case dit
 si le lot est en main, à la demande ou pas offert, et s'il ne l'est qu'en partie. Une case ouvre le catalogue sur
-ce lot dans cette situation. Lu à la porte d'offre du pipeline, comme l'onglet de la console.
+ce lot dans cette situation. Lu à la porte d'offre du pipeline, avec les règles des opérateurs (Régler ses outils,
+ADR 0122), comme l'onglet de la console.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from mika.inspector import render
 from mika.inspector.pages import tools as catalog
 from mika.inspector.ui import PREFIX, UI, env
 from mika.kernel.inspect import Pager
+from mika.runtime.tools import deferred
 from mika.vocab.episodes import Kind
 
 #: les situations rangées par ce qui se passe, dans l'ordre de la grille
@@ -43,6 +45,7 @@ def who_gets_what(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Ma
     situations = catalog.situations(ui)
     offers = {s.key: catalog.offered_in(ui, s) for s in situations}
     hands = {s.key: catalog.in_hand(ui, policies[s.kind]) for s in situations}
+    ruled = {s.key: catalog.rules(ui, s) for s in situations}
     order = {kind: i for i, (kind, _) in enumerate(MOMENTS)}
     situations.sort(key=lambda s: order.get(s.kind, len(MOMENTS)))
     groups: list[dict[str, Any]] = []
@@ -61,9 +64,8 @@ def who_gets_what(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Ma
         cells = []
         for s in situations:
             got = [x for x in specs if x.name in offers[s.key]]
-            core = hands[s.key]
             state = "none" if not got else \
-                "hand" if core is None or bundle in core or any(x.in_hand for x in got) else "ask"
+                "hand" if any(not deferred(x, hands[s.key], ruled[s.key]) for x in got) else "ask"
             cells.append({
                 "state": state, "said": STATES[state], "count": len(got), "total": len(specs),
                 "partial": bool(got) and len(got) < len(specs), "situation": s.label,

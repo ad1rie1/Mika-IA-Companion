@@ -48,7 +48,9 @@ from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
 from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
+from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
+from mika.vocab.privacy import ChannelTrust
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Commit, Mind
@@ -126,6 +128,19 @@ class ToolContext:
         return commit
 
 
+class ReadOnly(PermissionError):
+    """Un outil a voulu écrire dans sa vie par un contexte en lecture seule."""
+
+
+@dataclass(slots=True)
+class ReadingContext(ToolContext):
+    """Le contexte d'un outil prêté en lecture seule (ADR 0122) : il lit, mais n'écrit rien dans sa vie — ni
+    événement, ni effet proposé ; une écriture lève ``ReadOnly``, et l'appel est refusé."""
+
+    async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str, guard: Guard | None = None) -> Commit:
+        raise ReadOnly(phrase("runtime.tools.refused.read_only"))
+
+
 @dataclass(frozen=True, slots=True)
 class ToolRecord:
     """Un appel d'outil tel qu'il s'est passé : ce que le modèle a demandé, ce
@@ -182,12 +197,53 @@ class LoopResult:
         return list(dict.fromkeys(cid for cid, _ in self.exchanges))
 
 
+#: ce qu'un opérateur décide d'un outil dans une situation (ADR 0122) : le retirer, le mettre en main, le laisser à
+#: la demande. Il ne fait que restreindre : un outil que la porte n'offre pas ne s'offre pas par une règle, et un
+#: outil qui clôt la boucle (``ends_loop`` : rendre compte d'un pas) ne se règle pas.
+OFF, HAND, ASK = "off", "hand", "ask"
+RULES = (OFF, HAND, ASK)
+#: les situations où une règle s'applique (les mêmes que la console : « qui reçoit quoi »)
+SITUATIONS = ("proprietaire", "compte", "inconnue", "salon", "initiative", "pas", "projet", "tache")
+
+
+def situation_of(kind: str, audience: Audience) -> str | None:
+    """La situation d'un épisode, pour ses règles d'outils : à qui elle répond (sa propriétaire, une personne qui a
+    un compte, une inconnue, un salon), quand elle prend la parole, quand personne n'écoute (un pas sur un but, une
+    exécution de projet, une tâche). ``None`` : une sorte d'épisode qu'aucune règle ne touche (un réveil, un
+    murmure)."""
+    if kind == Kind.REPLY:
+        if audience.public:
+            return "salon"
+        if audience.owner:
+            return "proprietaire"
+        return "compte" if audience.trust == ChannelTrust.AUTHENTICATED.value else "inconnue"
+    return {Kind.INITIATIVE: "initiative", Kind.STEP: "pas", Kind.WORK: "projet", Kind.JOB: "projet",
+            Kind.TASK: "tache"}.get(kind)
+
+
+def rule_of(spec: ToolSpec, rules: Mapping[str, str] | None) -> str | None:
+    """La règle d'un opérateur pour cet outil, s'il y en a une qui compte (aucune sur un outil qui clôt la boucle)."""
+    return None if rules is None or spec.ends_loop else rules.get(spec.name)
+
+
+def deferred(spec: ToolSpec, core: frozenset[str] | None, rules: Mapping[str, str] | None = None) -> bool:
+    """Cet outil offert est-il à la demande ? Pas quand tout est en main (``core`` vide de sens : ``None``) ; sinon la
+    règle de l'opérateur s'il y en a une, et à défaut son lot ou l'outil lui-même (``in_hand``)."""
+    if core is None:
+        return False
+    rule = rule_of(spec, rules)
+    if rule in (HAND, ASK):
+        return rule == ASK
+    return spec.bundle not in core and not spec.in_hand
+
+
 def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audience: Audience,
-          only: Any = None) -> dict[str, ToolSpec]:
+          only: Any = None, rules: Mapping[str, str] | None = None) -> dict[str, ToolSpec]:
     """Les outils offerts : les lots de la politique — restreints, quand le
     candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
     lot est offert entier ou pas du tout, moins les outils réservés à ses
-    propriétaires quand quelqu'un d'autre écoute (``owner_only``).
+    propriétaires quand quelqu'un d'autre écoute (``owner_only``), et moins ceux
+    qu'un opérateur a retirés dans cette situation (``rules`` : ``OFF``).
 
     La seule porte : le pipeline l'applique à chaque épisode, la console à des
     audiences de synthèse (« qui reçoit quoi ») — jamais une recopie."""
@@ -197,6 +253,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
     out = {}
     for name, spec in tools.items():
         if kind not in spec.episodes or not admitted(bundles, spec.bundle):
+            continue
+        if rule_of(spec, rules) == OFF:
             continue
         if spec.min_level is not None and audience.level < spec.min_level:
             continue
@@ -227,12 +285,14 @@ def defers_tools(gateway: Any, role: str) -> bool:
     return True if isinstance(got, Failed) else bool(got)
 
 
-def declare(specs: Sequence[ToolSpec], core: frozenset[str] | None = None) -> tuple[ToolDecl, ...]:
+def declare(specs: Sequence[ToolSpec], core: frozenset[str] | None = None,
+            rules: Mapping[str, str] | None = None) -> tuple[ToolDecl, ...]:
     """Déclarations triées par nom : un préfixe stable pour le cache. Un outil
-    dont le lot n'est pas « en main » (``core``) est déclaré à la demande."""
+    dont le lot n'est pas « en main » (``core``) est déclaré à la demande, sauf
+    règle d'un opérateur (``deferred``)."""
     return tuple(
         ToolDecl(s.name, s.description, dict(s.schema) if s.schema is not None else s.args.model_json_schema(),
-                 deferred=core is not None and s.bundle not in core and not s.in_hand)
+                 deferred=deferred(s, core, rules))
         for s in sorted(specs, key=lambda s: s.name)
     )
 
@@ -299,7 +359,8 @@ def unquoted(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:
 ENDED_BY_TOOL = "tool_end"
 
 
-def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str]) -> str:
+def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str],
+              rules: Mapping[str, str] | None = None) -> str:
     """Les lots offerts mais pas en main, une ligne chacun : ce qu'elle peut
     aller chercher. Vide quand tout est en main. Stable d'un tour à l'autre
     (trié), donc à sa place dans le préfixe en cache."""
@@ -307,7 +368,7 @@ def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described:
         return ""
     away: dict[str, list[str]] = {}
     for s in specs:
-        if s.bundle not in core and not s.in_hand:
+        if deferred(s, core, rules):
             away.setdefault(s.bundle, []).append(s.name)
     if not away:
         return ""
@@ -338,6 +399,29 @@ async def run_tool_loop(
                            watch=watch)
     finally:
         release(gateway, request.call_id)
+
+
+def checked_args(spec: ToolSpec, raw: Mapping[str, Any]) -> tuple[Any, str]:
+    """Les arguments d'un appel, vérifiés comme la boucle les vérifie : ``(arguments, "")``, ou ``(None, le refus)``
+    à rendre au modèle (ou à l'agent d'un point de prêt, ADR 0122)."""
+    if RAW_ARGS_KEY in raw:
+        return None, phrase("runtime.tools.refused.not_json")
+    given = unquoted(spec, dict(raw))
+    try:
+        args = spec.args.model_validate(given)
+    except ValidationError as exc:
+        return None, phrase("runtime.tools.refused.invalid", errors=exc.errors(include_url=False))
+    wrong = schema_problems(spec.schema, given) if spec.schema is not None else []
+    if wrong:
+        return None, phrase("runtime.tools.refused.wrong", problems=" ; ".join(wrong))
+    return args, ""
+
+
+def lendable(offered: Mapping[str, ToolSpec]) -> dict[str, ToolSpec]:
+    """Ce qu'un point MCP peut prêter à un agent (ADR 0122) : ce que la porte lui offre en conversation, moins ce
+    qui clôt une boucle. Un outil ne dit pas s'il écrit : la lecture seule se tient à l'exécution
+    (``ReadingContext``)."""
+    return {n: s for n, s in offered.items() if not s.ends_loop}
 
 
 def release(gateway: Any, call_id: str) -> None:
@@ -393,19 +477,9 @@ async def _loop(
             if limit is not None and counts.get(call.name, 0) >= limit:
                 outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.capped", name=call.name), result))
                 continue
-            if RAW_ARGS_KEY in call.args:
-                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.not_json"), result))
-                continue
-            given = unquoted(spec, dict(call.args))
-            try:
-                args = spec.args.model_validate(given)
-            except ValidationError as exc:
-                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.invalid",
-                                                     errors=exc.errors(include_url=False)), result))
-                continue
-            wrong = schema_problems(spec.schema, given) if spec.schema is not None else []
-            if wrong:
-                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.wrong", problems=" ; ".join(wrong)), result))
+            args, refused = checked_args(spec, call.args)
+            if refused:
+                outputs.append(await _refuse(watch, call, refused, result))
                 continue
             counts[call.name] = counts.get(call.name, 0) + 1
             ctx = make_context(spec, call.id)

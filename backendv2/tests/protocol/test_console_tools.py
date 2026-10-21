@@ -2,14 +2,17 @@
 
 Chaque outil du registre a sa ligne et sa fiche ; la matrice « qui reçoit quoi » est calculée par la porte d'offre
 du pipeline — le récit « pourquoi pas » dit la même chose qu'elle, situation par situation ; un outil défini dans le
-code ne se règle pas ici (aucun formulaire de plus qu'une page sans action) ; « Ce qu'elle lit » est le texte que
-son prompt porte vraiment."""
+code ne se règle pas sur sa fiche (aucun formulaire de plus qu'une page sans action) ; « Régler ses outils » porte le
+texte que son prompt porte vraiment, et y range ses outils situation par situation (ADR 0122) — sans jamais en
+donner un que le code n'offre pas."""
 
 from __future__ import annotations
 
+import hashlib
 import re
 from types import SimpleNamespace
 
+from mika.contracts import runtime as rt
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages import tools as page
 from mika.vocab.phrasebook import phrase
@@ -59,7 +62,7 @@ def test_the_matrix_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa
         # la console et le pipeline passent par la même porte
         assert offered == kernel.runner._tools(policy, s.kind, s.audience), s.key
         for name, spec in kernel.registry.tools.items():
-            assert (page.why_not(spec, policy, s) == "") == (name in offered), (s.key, name)
+            assert (page.why_not(spec, policy, s, page.rules(ui, s)) == "") == (name in offered), (s.key, name)
         offers[s.key] = offered
     # cibles d'intention : sa boîte, pour sa propriétaire en privé seulement ; ses dessins, pour qui a un compte
     assert "email_read" in offers["proprietaire"]
@@ -80,6 +83,48 @@ def test_what_she_reads_is_her_prompt(world):  # noqa: F811
     # un pas de travail : personne ne lit sa parole, la règle de ses mains n'y est pas
     silent = html_of(client.get(f"{BASE}/texte", params={"situation": "pas"}))
     assert ACTING[:40] not in silent
+
+
+def _rule(client, situation: str, **rules: str):
+    data = {"csrf": client.cookies.get("csrftoken"), "situation": situation,
+            **{f"r.{name}": rule for name, rule in rules.items()}}
+    return client.post(f"{BASE}/regler", data=data, follow_redirects=False)
+
+
+def test_an_operator_rules_her_tools_situation_by_situation(world):  # noqa: F811
+    """Retiré, le pipeline ne l'offre plus dans cette situation, et la console le dit partout (sa fiche, la grille) ;
+    ailleurs, rien ne change. Une règle sur un outil que le code n'offre pas ici est ignorée. Tout remettre efface."""
+    client, live, _ = world
+    bootstrap(client)
+    kernel = live.kernel
+    ui = SimpleNamespace(kernel=kernel)
+    owner, room = (next(s for s in page.situations(ui) if s.key == key) for key in ("proprietaire", "salon"))
+    table = client.get(f"{BASE}/texte", params={"situation": "proprietaire"})
+    ConsoleHTML(table.text).check()
+    assert 'name="r.email_read"' in table.text and 'name="r.email_read"' not in \
+        client.get(f"{BASE}/texte", params={"situation": "salon"}).text  # le code ne l'offre pas en salon
+    saved = _rule(client, "proprietaire", email_read="off", memory_search="ask")
+    assert saved.status_code == 303 and "situation=proprietaire" in saved.headers["location"]
+    assert "email_read" not in page.offered_in(ui, owner)
+    assert "email_read" not in kernel.runner._tools(kernel.runner.policies[owner.kind], owner.kind, owner.audience,
+                                                    rules=kernel.runner.rules_of(owner.kind, owner.audience))
+    assert page.offered_in(ui, room) == page.offered_in(ui, room, ruled=False)  # ailleurs, rien ne change
+    fiche = html_of(client.get(f"{BASE}/tous", params={"outil": "email_read"}))
+    assert "retiré par un opérateur" in fiche
+    after = client.get(saved.headers["location"])
+    assert "email_read" in html_of(after) and "1 outil retiré" in html_of(after)
+    audit = client.portal.call(lambda: kernel.mind.store.latest([rt.OPERATED.name], 5))
+    assert any("console.outils.regler" in a.data for a in audit)
+    # le code ne l'offre pas en salon : la règle est ignorée
+    _rule(client, "salon", email_read="hand")
+    assert "email_read" not in live.settings.tool_rules_for("salon")
+    reset = client.post(f"{BASE}/regler", data={"csrf": client.cookies.get("csrftoken"), "situation": "proprietaire",
+                                                "faire": "remettre"}, follow_redirects=False)
+    assert reset.status_code == 303 and live.settings.tool_rules_for("proprietaire") == {}
+    assert "email_read" in page.offered_in(ui, owner)
+    refused = client.post(f"{BASE}/regler", data={"csrf": "faux", "situation": "proprietaire", "r.email_read": "off"},
+                          follow_redirects=False)
+    assert refused.status_code == 303 and live.settings.tool_rules_for("proprietaire") == {}
 
 
 def test_what_mika_serves_is_said(world):  # noqa: F811
@@ -116,3 +161,54 @@ def test_catalogue_cards_and_fiche_preserve_filters_and_table_choice(world):  # 
         return set(re.findall(r'outil=([a-zA-Z0-9_]+)', body))
     assert names_in(accented) and names_in(accented) == names_in(unaccented)
     assert 'Aucun outil ne correspond' in client.get(f'{BASE}/tous?q=aucun-resultat').text
+
+
+def _expose(client, what: str, **fields):
+    data = {"csrf": client.cookies.get("csrftoken"), "faire": what, **fields}
+    return client.post(f"{BASE}/exposer", data=data, follow_redirects=False)
+
+
+def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
+    """La console en MCP : un jeton créé ici se montre une seule fois (la ligne ``claude mcp add`` comprise), ce
+    qu'elle sert se choisit ; un point de prêt se déclare (son jeton montré une fois, seule l'empreinte gardée),
+    se règle — jamais au-delà de ce que la porte offre —, se renouvelle et se retire. Tout est audité."""
+    client, live, _ = world
+    bootstrap(client)
+    settings = live.settings
+
+    def read(what, *args):  # lu dans la boucle de l'application
+        return client.portal.call(getattr(settings, what), *args)
+    page = client.get(f"{BASE}/expose")
+    ConsoleHTML(page.text).check()
+    made = _expose(client, "console_jeton")
+    assert made.status_code == 303 and "montrer=" in made.headers["location"]
+    token = read("console_mcp_token")
+    shown = client.get(made.headers["location"])
+    ConsoleHTML(shown.text).check()
+    assert token and token in shown.text and "claude mcp add --transport http mika" in html_of(shown)
+    assert token not in client.get(made.headers["location"]).text  # une seule fois
+    served = _expose(client, "console_servir", servi=["systeme.sante", "vues"])
+    assert served.status_code == 303 and read("console_mcp_served") == ("systeme.sante", "vues")
+    assert _expose(client, "console_fermer").status_code == 303 and not read("console_mcp_token")
+    declared = _expose(client, "pret_declarer", nom="agent", ecrit="non",
+                       outil=["memory_search", "report_step", "outil_qui_n_existe_pas"])
+    assert declared.status_code == 303
+    entry = read("lent")["agent"]
+    assert entry["tools"] == ["memory_search"] and not entry["writes"]  # rien au-delà de ce qu'elle peut prêter
+    reveal = client.get(declared.headers["location"])
+    ConsoleHTML(reveal.text).check()
+    secret = re.search(r"mlp_[A-Za-z0-9_\-]+", reveal.text).group()
+    assert hashlib.sha256(secret.encode()).hexdigest() == entry["digest"] and secret not in str(read("lent"))
+    assert "/mcp/pret/agent" in html_of(reveal) and 'name="outil" value="memory_search" checked' in reveal.text
+    again = _expose(client, "pret_declarer", nom="agent", ecrit="non")
+    assert "un point s'appelle déjà « agent »" in html_of(client.get(again.headers["location"]))
+    renewed = _expose(client, "pret_jeton", nom="agent")
+    assert read("lent")["agent"]["digest"] != entry["digest"] and "montrer=" in renewed.headers["location"]
+    assert _expose(client, "pret_supprimer", nom="agent").status_code == 303 and "agent" not in read("lent")
+    audit = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
+    actions = " ".join(a.data for a in audit)
+    for action in ("console.mcp.jeton", "console.mcp.servir", "console.mcp.fermer", "console.mcp.pret.declarer",
+                   "console.mcp.pret.jeton", "console.mcp.pret.retirer"):
+        assert action in actions, action
+    refused = client.post(f"{BASE}/exposer", data={"csrf": "faux", "faire": "console_jeton"}, follow_redirects=False)
+    assert refused.status_code == 303 and not read("console_mcp_token")

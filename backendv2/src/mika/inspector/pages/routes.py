@@ -27,6 +27,7 @@ from mika.inspector.pages.journal import (
 )
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
+from mika.inspector.pages.tools import expose_post, rules_post
 from mika.inspector.pages.why import silence_page, why_page
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, Forms, secure, wants_table
 from mika.kernel.faculty import InspectSpec
@@ -421,6 +422,14 @@ class Pages:
         """Système › Sorties : relancer un effet en échec, ou le marquer comme vu."""
         return await outbox_post(self.ui, request)
 
+    async def tool_rules(self, request: Request) -> Response:
+        """Outils › Régler ses outils : les règles d'une situation (ADR 0122)."""
+        return await rules_post(self.ui, request)
+
+    async def expose(self, request: Request) -> Response:
+        """Outils › Ce qu'elle expose : la console en MCP, ses points de prêt (ADR 0122)."""
+        return await expose_post(self.ui, request)
+
     async def why(self, request: Request) -> Response:
         """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée — et, pour un message reçu resté sans
         réponse, « Pourquoi n'a-t-elle pas répondu ? »."""
@@ -644,6 +653,8 @@ class Pages:
             Route(PREFIX + "/parole/{seq:str}", g(self.why)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
+            Route(PREFIX + "/outils/regler", g(self.tool_rules), methods=["POST"]),
+            Route(PREFIX + "/outils/exposer", g(self.expose), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),
         ]

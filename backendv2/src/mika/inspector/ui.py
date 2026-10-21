@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "21"
+ASSET_VERSION = "22"
 
 log = logging.getLogger("mika.console")
 
@@ -109,6 +109,8 @@ class InspectorDeps:
     labels: Labels | None = None
     #: le relais MCP du moteur Claude Code (« Ce que Mika expose » : ses sessions ouvertes)
     relay: Any = None
+    #: ses outils prêtés à un agent (``app/lending.py``, ADR 0122) : ce que chaque point sert, ses derniers appels
+    lending: Any = None
     #: les clients du monde (``/ws/world``, ADR 0051) : ``overview()`` dit qui est connecté, qui tient le bail
     #: d'hôte, ce qui manque au moteur (Système › Écrans du monde)
     world: Any = None
@@ -215,6 +217,8 @@ class UI:
         self._tz: tuple[int, ZoneInfo] | None = None
         #: les messages d'après une action, lus une fois (clé : le jeton du formulaire)
         self._flash: dict[str, tuple[str, str]] = {}
+        #: un secret neuf (un jeton) montré à la page d'après, une seule fois : (pour quel compte, quoi), par clé
+        self._reveals: dict[str, tuple[str, dict[str, str]]] = {}
         #: la connexion à la console : le même étranglement que /auth/login (identifiant et IP), plus
         #: un plafond par IP (qui essaierait cent identifiants)
         self.login_throttle = LoginThrottle(LOGIN_FAILURES, LOGIN_WINDOW_S)
@@ -239,6 +243,20 @@ class UI:
 
     def pop_flash(self, key: str) -> tuple[str, str] | None:
         return self._flash.pop(key, None) if key else None
+
+    def reveal(self, handle: str, shown: dict[str, str]) -> str:
+        """Un jeton neuf à montrer une seule fois, à l'opératrice qui l'a créé : la clé qui le retrouve (jamais le
+        jeton dans une adresse)."""
+        key = secrets.token_urlsafe(12)
+        self._reveals[key] = (handle, shown)
+        while len(self._reveals) > 50:
+            self._reveals.pop(next(iter(self._reveals)))
+        return key
+
+    def pop_reveal(self, key: str, handle: str) -> dict[str, str] | None:
+        """Ce que ``reveal`` a gardé, une fois, pour cette même opératrice."""
+        got = self._reveals.pop(key, None) if key else None
+        return got[1] if got is not None and got[0] == handle else None
 
     # ── temps ──
     @property

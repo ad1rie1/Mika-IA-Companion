@@ -7,6 +7,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from markupsafe import Markup
+
 from mika.app.handmade import blocks, conversations, mail, nights, system, tools
 from mika.inspector.ui import UI, Drawn
 
@@ -14,14 +16,18 @@ from mika.inspector.ui import UI, Drawn
 class Blocks(Drawn):
     """Un onglet dessiné bloc par bloc : des tuiles, des faits, des listes, un fil, ses formulaires (ceux que la
     console a préparés, avec leur jeton).
-    ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation)."""
+    ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation) ; ``styles`` :
+    la feuille de son panneau, s'il en a un (Régler ses outils)."""
 
-    def __init__(self, tables: str = "cards") -> None:
+    def __init__(self, tables: str = "cards", *styles: str) -> None:
         self.tables = tables
+        self.styles = styles
 
     def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:
-        return blocks.page(ui, items, query, tables=self.tables, forms=forms)
+        drawn = blocks.page(ui, items, query, tables=self.tables, forms=forms)
+        # rien à dessiner, mais un panneau qui a sa feuille (Ce qu'elle expose) : dessiné quand même, pour la charger
+        return Markup("") if drawn is None and self.styles else drawn
 
 
 class Shaped(Drawn):
@@ -66,8 +72,9 @@ DRAWN: dict[str, Drawn] = {
                                           "echeances")},
     **{f"buts/{t}": CARDS for t in ("vivants", "clos")},
     **{f"projets/{t}": CARDS for t in ("tous", "toutes_executions", "toutes_decisions")},
-    # Outils & connexions
-    **{f"outils/{t}": CARDS for t in ("tous", "texte", "expose", "serveurs", "outils_apps")},
+    # Outils, puis Connexions extérieures
+    **{f"outils/{t}": CARDS for t in ("tous", "serveurs", "outils_apps")},
+    **{f"outils/{t}": Blocks("cards", "handmade/tools.css") for t in ("texte", "expose")},
     "outils/qui": Shaped(tools.who_gets_what, "handmade/tools.css"),
     **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils", "positions", "messages")},
     "reveils/reveils": CARDS, "apps/apps": CARDS,

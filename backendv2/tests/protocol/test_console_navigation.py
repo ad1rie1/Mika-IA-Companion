@@ -19,7 +19,7 @@ def test_operator_menu_links_open_real_pages(world):  # noqa: F811
     page = client.get('/inspecteur/')
     ConsoleHTML(page.text).check()
     menu = primary_nav(page.text)
-    assert menu.count('data-nav-group=') == 7  # et l'accueil, directement accessible
+    assert menu.count('data-nav-group=') == 8  # et l'accueil, directement accessible
     for group in MENU:
         for link in group.items:
             url = '/inspecteur/' + link.target
@@ -63,8 +63,9 @@ def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
 
 
 @pytest.mark.parametrize(('path', 'group', 'label'), [
-    ('sens/dessins', 'Outils & connexions', 'Dessins'),
-    ('sens/camera', 'Outils & connexions', 'Caméra'),
+    ('sens/dessins', 'Connexions extérieures', 'Dessins'),
+    ('sens/camera', 'Connexions extérieures', 'Caméra'),
+    ('outils/texte', 'Outils', 'Régler ses outils'),
     ('courrier/brouillons', 'À valider', 'Brouillons de courrier'),
     ('courrier/reception', 'Relations & échanges', 'Courrier'),
     ('vie/rythme', 'Mika', 'Sommeil et rythme'),

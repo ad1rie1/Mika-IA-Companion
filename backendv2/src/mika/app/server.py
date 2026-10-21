@@ -69,6 +69,8 @@ from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN
 from mika.app.handmade.people import PeoplePage
 from mika.app.handmade.person import PersonOverview
+from mika.app.lending import PREFIX as LENT_PREFIX
+from mika.app.lending import Lending
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
@@ -392,7 +394,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     mcp = world["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": hub, "activity": hub, "vectors": vectors, **world}, **deps))
+                                     ports={"delivery": hub, "activity": hub, "vectors": vectors, **world},
+                                     tool_rules=settings.tool_rules_for, **deps))
 
     reconfiguring: set[asyncio.Task[None]] = set()
 
@@ -494,6 +497,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     # la vue d'ensemble d'une personne, dessinée à la main (ADR 0121) : le premier onglet de sa fiche
     person_overview = PersonOverview()
+    lending = Lending(kernel, settings.lent)  # ses outils prêtés à un agent (ADR 0122)
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
         InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
@@ -503,7 +507,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,
                       parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
-                      backups=lambda: backup.overview(data), relay=live.relay, world=world_hub,
+                      backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
                       overviews={"person": person_overview}, drawn=DRAWN,
                       plain_owners=frozenset({"forge"})),
         cookie_secure=web.cookie_secure)
@@ -513,11 +517,13 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     now_page, people_page = NowPage(console_pages.ui), PeoplePage(console_pages.ui)
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
-    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages))
+    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages,
+                                                            settings.console_mcp_served))
+    lent = Mount(LENT_PREFIX, app=lending.app())
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
-                                    *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp,
+                                    *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp, lent,
                                     world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,

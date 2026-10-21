@@ -8,10 +8,13 @@ fichier ``secret.key`` créé au premier démarrage à côté des bases (droits
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 import secrets
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +29,11 @@ from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
+from mika.inspector import mcp as console_mcp
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
+from mika.runtime.tools import RULES as TOOL_RULES
+from mika.runtime.tools import SITUATIONS as TOOL_SITUATIONS
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal
@@ -46,8 +52,14 @@ PUSH_KEY = "push"
 #: … ou, à défaut d'une clé collée dans la console, ce fichier du dossier de données (à côté de ``secret.key``)
 PUSH_KEY_FILE = "firebase-service-account.json"
 SENSORS_KEY = "sensors"
-#: le jeton du point MCP de la console (le Claude Code d'une opératrice), scellé
+#: le point MCP de la console (le Claude Code d'une opératrice) : son jeton, scellé, et ce qu'il sert (ADR 0122)
 CONSOLE_MCP_KEY = "console_mcp"
+#: les points MCP qui prêtent ses outils à un agent (ADR 0122) : par nom, l'empreinte de leur jeton, leurs outils
+LENT_KEY = "mcp_lent"
+#: le nom d'un point de prêt : son adresse (``/mcp/pret/<nom>``)
+LENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+#: ce qui commence le jeton d'un point de prêt (ce qu'on en montre ensuite : son début)
+LENT_PREFIX = "mlp_"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
 FORGE_CONFIG_KEY = "forge_config"
@@ -60,6 +72,8 @@ WAKEUP_KEYS_KEY = "wakeup_keys"
 #: Teams (ADR 0069) : ce qu'un opérateur règle ; la clé de l'extension à part, dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
 TEAMS_KEYS_KEY = "teams_key"
+#: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
+TOOL_RULES_KEY = "tool_rules"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
@@ -133,6 +147,8 @@ class Settings:
         #: lus depuis les fils de la Forge : tenus en mémoire (une connexion SQLite
         #: appartient à son fil)
         self._forge: dict[str, dict[str, Any]] = {}
+        #: lues à chaque épisode : tenues en mémoire, relues à l'ouverture
+        self._tool_rules: dict[str, dict[str, str]] = {}
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -142,6 +158,9 @@ class Settings:
         await self.store.run_mind(create)
         data = self._get(FORGE_CONFIG_KEY) or {}
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
+        rules = self._get(TOOL_RULES_KEY) or {}
+        self._tool_rules = {str(s): {str(t): str(r) for t, r in v.items() if r in TOOL_RULES}
+                            for s, v in rules.items() if s in TOOL_SITUATIONS and isinstance(v, dict)}
 
     def _get(self, key: str) -> Any:
         try:
@@ -433,8 +452,93 @@ class Settings:
     async def new_console_mcp_token(self) -> str:
         """Un jeton neuf pour ``/mcp/console`` (l'ancien ne vaut plus) ; montré une fois."""
         token = secrets.token_urlsafe(32)
-        await self._put(CONSOLE_MCP_KEY, {"token_sealed": self.box.seal(token)})
+        await self._put(CONSOLE_MCP_KEY, {**dict(self._get(CONSOLE_MCP_KEY) or {}), "token_sealed": self.box.seal(token)})
         return token
+
+    async def revoke_console_mcp_token(self) -> bool:
+        """Le point de la console fermé (404) ; faux s'il n'avait pas de jeton. Ce qu'il sert reste choisi."""
+        data = dict(self._get(CONSOLE_MCP_KEY) or {})
+        if not data.pop("token_sealed", ""):
+            return False
+        await self._put(CONSOLE_MCP_KEY, data)
+        return True
+
+    def console_mcp_served(self) -> tuple[str, ...] | None:
+        """Ce que sert la console en MCP (``inspector.mcp`` : des pages de ``SERVABLE`` et des ``PARTS``) ;
+        ``None`` : ce qu'elle sert d'office."""
+        got = dict(self._get(CONSOLE_MCP_KEY) or {}).get("served")
+        return tuple(str(k) for k in got) if isinstance(got, list) else None
+
+    async def save_console_mcp_served(self, served: Sequence[str] | None) -> None:
+        unknown = [k for k in served or () if k not in (*console_mcp.SERVABLE, *console_mcp.PARTS)]
+        if unknown:
+            raise ValueError(f"la console ne sert pas « {unknown[0]} »")
+        data = dict(self._get(CONSOLE_MCP_KEY) or {})
+        if served is None:
+            data.pop("served", None)
+        else:
+            data["served"] = sorted(set(served))
+        await self._put(CONSOLE_MCP_KEY, data)
+
+    # ── Ses outils prêtés à un agent (``/mcp/pret/<nom>``, ADR 0122) ──
+    def lent(self) -> dict[str, dict[str, Any]]:
+        """Nom → ``{digest, hint, token_at, token_by, tools, writes, by, created_at}`` : jamais le jeton en clair.
+        ``by`` : l'opératrice qui l'a déclaré — l'agent agit avec ses droits à elle, en tête-à-tête."""
+        return {str(n): dict(e) for n, e in dict(self._get(LENT_KEY) or {}).items() if isinstance(e, dict)}
+
+    async def save_lent(self, name: str, *, tools: Sequence[str], writes: bool, by: str, at: int) -> None:
+        """Un point de prêt déclaré ou réglé (ses outils, s'il peut écrire) ; son jeton ne change pas."""
+        if not LENT_NAME.fullmatch(name):
+            raise ValueError("un nom de point : des minuscules, des chiffres et des tirets (40 au plus)")
+        entries = self.lent()
+        entry = entries.get(name) or {"digest": "", "hint": "", "by": by[:80], "created_at": int(at)}
+        entries[name] = {**entry, "tools": sorted({str(t) for t in tools}), "writes": bool(writes)}
+        await self._put(LENT_KEY, entries)
+
+    async def new_lent_token(self, name: str, *, by: str, at: int) -> str:
+        """Un jeton neuf pour ce point (l'ancien ne vaut plus) ; montré une fois, seule son empreinte est gardée."""
+        entries = self.lent()
+        if name not in entries:
+            raise ValueError("point inconnu : déclare-le d'abord")
+        token = LENT_PREFIX + secrets.token_urlsafe(32)
+        entries[name] = {**entries[name], "digest": hashlib.sha256(token.encode()).hexdigest(),
+                         "hint": token[:len(LENT_PREFIX) + 4], "token_by": by[:80], "token_at": int(at)}
+        await self._put(LENT_KEY, entries)
+        return token
+
+    async def remove_lent(self, name: str) -> bool:
+        entries = self.lent()
+        if entries.pop(name, None) is None:
+            return False
+        await self._put(LENT_KEY, entries)
+        return True
+
+    # ── Ses outils, situation par situation (ADR 0122) ──
+    def tool_rules(self) -> dict[str, dict[str, str]]:
+        """Les règles d'outils d'un opérateur : par situation, « outil → off, hand ou ask »."""
+        return {s: dict(r) for s, r in self._tool_rules.items()}
+
+    def tool_rules_for(self, situation: str) -> dict[str, str]:
+        """Les règles d'une situation (``runtime.tools.situation_of``) : ce que lit le pipeline à chaque épisode."""
+        return self._tool_rules.get(situation, {})
+
+    async def save_tool_rules(self, situation: str, rules: Mapping[str, str | None]) -> dict[str, str]:
+        """Les règles d'une situation, mises à jour : une règle ``None`` rend l'outil à ce que dit le code."""
+        if situation not in TOOL_SITUATIONS:
+            raise ValueError(f"situation inconnue : {situation}")
+        kept = dict(self._tool_rules.get(situation, {}))
+        for tool, rule in rules.items():
+            if rule is None:
+                kept.pop(tool, None)
+            elif rule in TOOL_RULES:
+                kept[tool] = rule
+            else:
+                raise ValueError(f"règle inconnue : {rule}")
+        everything = {**self._tool_rules, situation: kept}
+        everything = {s: r for s, r in everything.items() if r}
+        await self._put(TOOL_RULES_KEY, everything)
+        self._tool_rules = everything
+        return kept
 
     # ── Persona, surcharges avancées (l'inspecteur ; le fichier YAML reste le défaut) ──
     def persona_yaml(self) -> str | None:

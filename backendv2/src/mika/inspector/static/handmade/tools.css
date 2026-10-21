@@ -32,3 +32,54 @@
 a.offer:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 .offer-part { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .offers-grid .offers-start { border-left: 1px solid var(--border); }
+
+/* Outils › Régler ses outils (inspector/pages/tools.py, ADR 0122) : un tableau par famille, une règle par outil. */
+.rules-card { padding-bottom: 14px; }
+.rules-note { margin: -6px 0 12px; color: var(--text-2); font-size: 13px; }
+.rules-table .rules-family th { padding-top: 16px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px;
+  font-weight: 600; text-transform: none; letter-spacing: 0; text-align: left; }
+.rules-table .rules-family code { margin-left: 6px; color: var(--muted); font-family: var(--mono, monospace); font-size: 11px; font-weight: 400; }
+.rules-name { display: inline-block; color: var(--text); text-decoration: none; }
+.rules-name:hover { color: var(--accent); }
+.rules-what { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
+.rules-table .rules-code, .rules-table .rules-choice { width: 1%; white-space: nowrap; }
+.rules-table select { min-width: 150px; }
+.rules-set .rules-choice select { border-color: var(--accent); }
+.rules-off td:first-child { opacity: .55; }
+.rules-off .rules-name code { text-decoration: line-through; }
+.rules-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+
+/* Outils › Ce qu'elle expose (inspector/pages/tools.py, ADR 0122) : le relais, la console en MCP, ses points de prêt. */
+.expose { display: grid; gap: 18px; }
+.expose-facts { display: grid; gap: 8px; margin: 0 0 14px; }
+.expose-facts > div { display: grid; grid-template-columns: minmax(120px, 160px) 1fr; gap: 12px; font-size: 13.5px; }
+.expose-facts dt { color: var(--muted); }
+.expose-facts dd { margin: 0; }
+.expose-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 0; }
+.expose-served { margin-top: 18px; display: grid; gap: 14px; }
+.expose fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.expose legend { margin-bottom: 8px; padding: 0; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; }
+.expose legend code { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.expose-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
+.expose-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.expose-check input { margin-top: 2px; }
+.expose-tools { margin-top: 14px; font-size: 13px; }
+.expose-tools summary { color: var(--text-2); cursor: pointer; }
+.expose-list { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
+.expose-list li { display: grid; grid-template-columns: minmax(120px, 180px) 1fr; gap: 12px; }
+.expose-list span { color: var(--muted); }
+.expose-shown { border-color: var(--accent); }
+.expose-label { margin: 10px 0 4px; color: var(--text-2); font-size: 13px; }
+.expose-code { margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px; background: var(--sunken); font-size: 12.5px; white-space: pre-wrap; word-break: break-all; }
+.expose-points { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.expose-points li { padding: 10px 12px; border-radius: 10px; }
+.expose-points li.on { background: var(--accent-soft); }
+.expose-points .now-sub, .expose-points .now-muted { margin: 4px 0 0; font-size: 12.5px; }
+.expose-editor { display: grid; gap: 16px; }
+.expose-field { display: grid; gap: 6px; margin: 0; font-size: 13px; }
+.expose-field input { max-width: 320px; }
+.expose-mode { display: grid; gap: 8px; }
+.expose-mode label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+@media (max-width: 640px) {
+  .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
+}

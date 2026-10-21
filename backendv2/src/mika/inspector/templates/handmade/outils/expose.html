@@ -1,0 +1,138 @@
+{# Outils › Ce qu'elle expose (inspector/pages/tools.py, ADR 0122) : ce qu'elle sert elle-même en MCP — le relais du
+   moteur Claude Code (lu), la console en lecture pour un agent (son jeton, ce qu'elle sert), et ses points de prêt
+   (déclarer, régler, renouveler le jeton, retirer). Un jeton neuf se montre une seule fois, ici. #}
+<div class="now-page person-tab expose">
+{% if shown %}
+<section class="now-card expose-shown" aria-label="{{ shown.title }}">
+  <header class="now-card-head"><h2>{{ shown.title }}</h2><p>Montré une seule fois : copie-le maintenant. La console n'en garde que l'empreinte.</p></header>
+  <p class="expose-label">La ligne à lancer dans ton terminal (Claude Code) :</p>
+  <pre class="expose-code">{{ shown.command }}</pre>
+  <p class="expose-label">Le jeton seul :</p>
+  <pre class="expose-code">{{ shown.token }}</pre>
+</section>
+{% endif %}
+
+<section class="now-card" aria-labelledby="expose-relay">
+  <header class="now-card-head"><h2 id="expose-relay">Le relais du moteur Claude Code</h2><p>Les outils de l'épisode en cours, prêtés à la CLI que le moteur lance — et à elle seule. Rien à régler ici : il s'ouvre et se ferme avec chaque épisode.</p></header>
+  <dl class="expose-facts">
+    <div><dt>Adresse</dt><dd><code>/mcp/relais/&lt;session&gt;/mika · …/plus</code></dd></div>
+    <div><dt>Ce qu'il sert</dt><dd>en main sous « mika », à la demande sous « mika_plus », exécutés par la boucle du runtime avec toutes ses gardes</dd></div>
+    <div><dt>Accès</dt><dd>cette machine seulement, un jeton par épisode ; une session fermée répond 404</dd></div>
+    <div><dt>Sessions ouvertes</dt><dd>{{ relay_sessions }}</dd></div>
+  </dl>
+</section>
+
+<section class="now-card" aria-labelledby="expose-console">
+  <header class="now-card-head">
+    <h2 id="expose-console">La console en MCP</h2>
+    <span class="now-tag {{ 'ok' if console_token else '' }}">{{ 'ouverte' if console_token else 'fermée' }}</span>
+    <p>La console en lecture pour un agent de sa propriétaire (son Claude Code, par exemple) : aucune action, aucune page à formulaires, aucun secret. Cette machine seulement, derrière un jeton.</p>
+  </header>
+  <dl class="expose-facts">
+    <div><dt>Adresse</dt><dd><code>{{ console_address }}</code></dd></div>
+    <div><dt>Jeton</dt><dd>{% if console_token %}défini{% else %}aucun : sans jeton, l'adresse répond 404{% endif %}</dd></div>
+  </dl>
+  <form method="post" action="{{ action }}" class="expose-actions">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if console_token %}
+    <button class="btn" name="faire" value="console_jeton" data-confirm="Un jeton neuf pour la console en MCP : l'ancien ne vaudra plus. Continuer ?">Renouveler le jeton</button>
+    <button class="btn quiet" name="faire" value="console_fermer" data-confirm="Fermer la console en MCP ? Son jeton ne vaudra plus, son adresse répondra 404.">Fermer</button>
+    {% else %}
+    <button class="btn" name="faire" value="console_jeton">Créer un jeton</button>
+    {% endif %}
+  </form>
+  <form method="post" action="{{ action }}" class="expose-served">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend>Ce qu'elle sert</legend>
+      <div class="expose-checks">
+        {% for p in parts %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}</span></label>{% endfor %}
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Les pages de la console</legend>
+      <div class="expose-checks expose-checks-pages">
+        {% for p in served_pages %}<label class="expose-check" for="servi-{{ p.key }}"><input type="checkbox" id="servi-{{ p.key }}" name="servi" value="{{ p.key }}"{{ ' checked' if p.on }}><span>{{ p.title }}{% if not p.default %} <span class="now-muted">· en plus</span>{% endif %}</span></label>{% endfor %}
+      </div>
+    </fieldset>
+    <div class="expose-actions"><button class="btn" name="faire" value="console_servir">Enregistrer ce qu'elle sert</button></div>
+  </form>
+  <details class="expose-tools">
+    <summary>Ses outils de lecture ({{ console_tools|length }})</summary>
+    <ul class="expose-list" role="list">{% for t in console_tools %}<li><code>{{ t.name }}</code><span>{{ t.description }}</span></li>{% endfor %}</ul>
+    <p class="now-muted">Aussi en ligne de commande : <code>mika mcp token</code> (un jeton neuf, et la ligne <code>claude mcp add</code>).</p>
+  </details>
+</section>
+
+<section class="now-card" aria-labelledby="expose-lent">
+  <header class="now-card-head">
+    <h2 id="expose-lent">Ses outils prêtés</h2>
+    <span class="person-count now-num" title="{{ points|length }} points">{{ points|length }}</span>
+    <p>Un point prête quelques-uns de ses outils à un agent, sous <code>{{ lent_address }}/&lt;nom&gt;</code>. L'agent agit avec les droits de l'opératrice qui a déclaré le point, comme si elle le lui demandait en tête-à-tête — jamais au-delà de ce que le code lui offre en conversation. Cette machine seulement, un jeton par point.</p>
+  </header>
+  {% if points %}
+  <ul class="expose-points" role="list">
+    {% for p in points %}
+    <li class="{{ 'on' if editing and editing.name == p.name }}">
+      <div class="person-entry-top">
+        <div class="person-entry-name"><p class="person-entry-title"><a href="{{ p.href }}">{{ p.name }}</a></p><span class="now-tag {{ 'warn' if p.writes else 'info' }}">{{ 'peut écrire' if p.writes else 'lecture seule' }}</span>{% if not p.hint %}<span class="now-tag">sans jeton</span>{% endif %}</div>
+        <span class="person-entry-time"><code>{{ p.address }}</code></span>
+      </div>
+      <p class="now-sub">{{ p.served|length }} outil{{ 's' if p.served|length > 1 }} servi{{ 's' if p.served|length > 1 }}{% if p.served|length < p.tools|length %} sur {{ p.tools|length }} prêtés (les autres ne lui sont plus offerts){% endif %}{% if p.served %} : {{ p.served|join(', ') }}{% endif %}</p>
+      <p class="now-muted">Déclaré par {{ p.by }}{% if p.at %} · {{ p.at }}{% endif %}{% if p.hint %} · jeton {{ p.hint }}…{% if p.token_at %} du {{ p.token_at }}{% endif %}{% endif %}{% if p.last %} · dernier appel {{ p.last.at }} ({{ p.last.tool }}{{ '' if p.last.ok else ', échec' }}){% endif %}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="now-muted">Aucun point pour l'instant.</p>
+  {% endif %}
+  {% if not editing or not editing.new %}<p class="expose-actions"><a class="btn" href="?nouveau=1">Déclarer un point</a></p>{% endif %}
+</section>
+
+{% if editing %}
+<form method="post" action="{{ action }}" class="now-card expose-editor" aria-labelledby="expose-edit">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <header class="now-card-head">
+    <h2 id="expose-edit">{{ 'Déclarer un point' if editing.new else 'Le point « ' ~ editing.name ~ ' »' }}</h2>
+    <p>Choisis ce qu'il prête : ce que la porte offre en conversation à {{ editing.by }}, en tête-à-tête. Un outil qui ne lui serait plus offert n'est plus servi.</p>
+  </header>
+  {% if editing.new %}
+  <p class="expose-field"><label for="expose-name">Son nom (son adresse : <code>{{ lent_address }}/&lt;nom&gt;</code>)</label><input id="expose-name" name="nom" required pattern="[a-z0-9][a-z0-9\-]{0,39}" maxlength="40" placeholder="mon-agent" autocomplete="off"></p>
+  {% else %}
+  <input type="hidden" name="nom" value="{{ editing.name }}">
+  {% endif %}
+  <fieldset class="expose-mode">
+    <legend>Ce qu'il peut faire</legend>
+    <label for="mode-lire"><input type="radio" id="mode-lire" name="ecrit" value="non"{{ ' checked' if not editing.writes }}><span><b>Lecture seule</b> — rien ne s'écrit dans sa vie : un outil qui voudrait écrire (un souvenir, une promesse, un envoi) est refusé</span></label>
+    <label for="mode-ecrire"><input type="radio" id="mode-ecrire" name="ecrit" value="oui"{{ ' checked' if editing.writes }}><span><b>Peut écrire</b> — ses outils agissent comme en conversation : ce qui sort de la machine passe toujours par son accord</span></label>
+  </fieldset>
+  {% if editing.gone %}<p class="rules-note">Prêtés, mais plus offerts : {{ editing.gone|join(', ') }} (enregistrer les retire).</p>{% endif %}
+  {% for g in editing.families %}
+  <fieldset class="expose-family">
+    <legend>{{ g.label }} <code>{{ g.bundle }}</code></legend>
+    <div class="expose-checks">
+      {% for t in g.tools %}<label class="expose-check" for="outil-{{ t.name }}"><input type="checkbox" id="outil-{{ t.name }}" name="outil" value="{{ t.name }}"{{ ' checked' if t.on }}><span><code>{{ t.name }}</code> <span class="now-muted">{{ t.description|truncate(120) }}</span></span></label>{% endfor %}
+    </div>
+  </fieldset>
+  {% else %}
+  <p class="now-muted">La porte ne lui offre aucun outil en conversation.</p>
+  {% endfor %}
+  <div class="expose-actions">
+    {% if editing.new %}
+    <button class="btn" name="faire" value="pret_declarer">Déclarer et créer son jeton</button>
+    <a class="btn quiet" href="?">Annuler</a>
+    {% else %}
+    <button class="btn" name="faire" value="pret_regler">Enregistrer</button>
+    <button class="btn quiet" name="faire" value="pret_jeton" formnovalidate data-confirm="Un jeton neuf pour « {{ editing.name }} » : l'ancien ne vaudra plus. Continuer ?">Nouveau jeton</button>
+    <button class="btn quiet danger" name="faire" value="pret_supprimer" formnovalidate data-confirm="Retirer le point « {{ editing.name }} » ? Son adresse répondra 404.">Retirer le point</button>
+    {% endif %}
+  </div>
+  {% if editing.recent %}
+  <details class="expose-tools">
+    <summary>Ses derniers appels ({{ editing.recent|length }})</summary>
+    <ul class="expose-list" role="list">{% for c in editing.recent %}<li><code>{{ c.tool }}</code><span>{{ c.at }}{{ '' if c.ok else ' · échec' }}</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</form>
+{% endif %}
+</div>

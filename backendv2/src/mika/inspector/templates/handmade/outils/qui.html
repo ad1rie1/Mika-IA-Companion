@@ -9,7 +9,7 @@
       <li><span class="offer offer-ask" aria-hidden="true">○</span><span><b>à la demande</b> — elle sait qu'il existe, et va le chercher quand elle en a besoin</span></li>
       <li><span class="offer offer-none" aria-hidden="true"></span><span><b>pas offert</b> — elle ne peut pas s'en servir ici</span></li>
     </ul>
-    <p class="now-muted">« 2/5 » : une partie du lot seulement (des outils réservés, ou une condition). Survole une case pour voir ses outils ; clique pour les ouvrir dans le catalogue.</p>
+    <p class="now-muted">« 2/5 » : une partie du lot seulement (des outils réservés, une condition, ou retirés par un opérateur). Survole une case pour voir ses outils ; clique pour les ouvrir dans le catalogue. Pour en retirer un ou changer sa place, situation par situation : <a href="{{ PREFIX }}/outils/texte">Régler ses outils</a>.</p>
     {% if everything %}<p class="now-muted">Tout ce qui est offert est en main pour : {{ everything|join(', ')|lower }} (un pas ou une exécution choisit ses lots ; un fournisseur qui ne sait pas différer reçoit tout).</p>{% endif %}
   </section>
 

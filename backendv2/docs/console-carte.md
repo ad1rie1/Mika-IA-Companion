@@ -143,14 +143,23 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
   14 derniers jours) ; `?outil=<nom>` ouvre sa fiche (arguments lus du schéma,
   condition d'offre, règle vérifiée à l'exécution, qui le reçoit et pourquoi
   pas, derniers appels vers leur épisode). Un outil défini dans le code ne se
-  règle pas ici : aucun formulaire.
+  règle pas sur sa fiche : sa place se règle dans « Régler ses outils ».
 - **Qui reçoit quoi** : lots × situations types (propriétaire, compte,
   inconnue, salon, initiative, pas, projet, tâche) — en main, à la demande, pas
-  offert —, calculé par la porte d'offre du pipeline (`runtime.tools.offer`).
-- **Ce que son prompt en dit** : le texte exact de la règle de ses mains et du catalogue
-  pour une situation, et ses outils en main / à la demande.
-- **Ce qu'elle expose** : le relais MCP du moteur Claude Code et la console en
-  MCP (ses outils, son jeton).
+  offert —, calculé par la porte d'offre du pipeline (`runtime.tools.offer`),
+  règles des opérateurs comprises.
+- **Régler ses outils** (ADR 0122, `?situation=`, `?lot=`) : par situation et
+  par famille, chaque outil que le code y offre, sa place selon le code, et un
+  choix — comme le code, en main, à la demande, retiré (restreindre seulement ;
+  un outil qui clôt une boucle ne se règle pas). Dessous, le texte exact que son
+  prompt porte sur ses outils.
+- **Ce qu'elle expose** (ADR 0122) : le relais MCP du moteur Claude Code (lu) ;
+  la console en MCP — créer, renouveler ou fermer son jeton (montré une seule
+  fois, avec sa ligne `claude mcp add`), choisir ce qu'elle sert (ses pages,
+  ses vues, ses fiches, « pourquoi ») ; ses outils prêtés — des points
+  `/mcp/pret/<nom>` à déclarer (`?nouveau`), régler (`?pret=<nom>` : lecture
+  seule ou non, ses outils), renouveler et retirer, avec ce que chacun sert et
+  ses derniers appels.
 - Ajoutés par les plugins : **Outils de ses apps** (Forge) ; **Services MCP** (MCP : état, servis / proposés, à revoir — badge et vitale), et la fiche d'un serveur : *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé est suspendu), *Appels*.
 
 ### Approbations
@@ -495,8 +504,10 @@ d'une validation locale sur données fictives, pas d'un déploiement du serveur.
 ### Menu opérateur et accueil
 
 Le menu visible est maintenant défini dans `app/console_menu.py` : **Accueil,
-À valider, sa rubrique, Relations & échanges, Activité, Outils & connexions,
-Réglages, Système**. Sa rubrique porte son nom, lu dans sa persona au rendu
+À valider, sa rubrique, Relations & échanges, Activité, Outils, Connexions
+extérieures, Réglages, Système**. Outils garde la destination « Ses outils » entière (les services MCP et ce
+qu'elle expose sont de ses onglets) et ses apps ; Connexions extérieures, les flux et capteurs, les réveils par API
+et les dépôts Git. Sa rubrique porte son nom, lu dans sa persona au rendu
 (`MenuGroup.her`, ADR 0070) : « Mika » pour la persona livrée. `app/console.py` reste le registre des destinations : les liens
 existants, les fiches, les vues des facultés et les formulaires gardent leurs
 adresses. `InspectorDeps.menu` transmet cette présentation à l'inspecteur.

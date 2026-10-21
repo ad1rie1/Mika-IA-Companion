@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0121, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0122, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -267,6 +267,10 @@ kernel                      machinerie générique, sans un mot du domaine
   - Les lots d'outils hors du socle d'un épisode sont « à la demande » : le modèle les cherche, guidé par un catalogue
     d'une ligne par lot. Exception : Ollama et les compatibles OpenAI ne savent pas différer (`defers_tools=False`) et
     reçoivent tout. Un outil peut clore la boucle quand il réussit (`ToolSpec.ends_loop`).
+  - Un opérateur règle ses outils par outil et par situation (ADR 0122, Outils › Régler ses outils) : retirer,
+    mettre en main ou à la demande, jamais offrir ce que le code n'offre pas. La seule porte les applique
+    (`tools.offer(rules=)`, `deferred`, `situation_of`) ; le pipeline les lit à chaque épisode
+    (`KernelDeps.tool_rules`). Un outil qui clôt la boucle ne se règle pas.
 - **Passerelle d'images** (`adapters/imaging/`, ADR 0061)
   - Même forme que la passerelle LLM (fournisseurs, rôles, créneaux), mais **avec** une chaîne de replis entre
     fournisseurs.
@@ -716,7 +720,13 @@ ordre.
     `handmade/base.css` est chargée partout. Seules les vues de la Forge gardent le rendu de la console
     (`InspectorDeps.plain_owners`) : ses apps déclarent leur interface par un contrat.
   - `/mcp/console` sert les mêmes lectures à un agent, en lecture seule, en boucle locale, avec le jeton de
-    `mika mcp token`.
+    `mika mcp token` ou d'Outils › Ce qu'elle expose, qui choisit aussi ce qu'elle sert (ses pages parmi
+    `inspector/mcp.py::SERVABLE`, ses vues, ses fiches, « pourquoi », ADR 0122).
+  - Ses outils prêtés (ADR 0122, `app/lending.py`) : des points `/mcp/pret/<nom>` déclarés dans Ce qu'elle expose
+    prêtent à un agent des outils choisis parmi ce que la porte offre en conversation à l'opératrice qui les a
+    déclarés, avec ses droits à elle. Un appel est une séance sans modèle (`pret:<nom>:…`, `checked_args`) ; en
+    lecture seule, toute écriture est refusée (`ReadingContext`). Boucle locale, un jeton par point (empreinte
+    seule), 60 appels par minute.
   - `/` mène à la console, qui crée le premier compte opérateur.
 - **Santé** (`/health`, public) : des noms et des états seulement. 503 tant qu'elle n'est pas prête ; « dégradé » quand
   le fournisseur qui la fait répondre échoue ou qu'aucun ne sert `reply`.
@@ -841,7 +851,7 @@ Tout le reste se déclare par décorateurs.
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
-| Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121 |
+| Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | Voix et genèse | 0070, 0071, 0112, 0114, 0115 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |

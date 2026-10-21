@@ -74,6 +74,7 @@ from mika.runtime.tools import (
     defers_tools,
     offer,
     run_tool_loop,
+    situation_of,
 )
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 from mika.vocab.episodes import Role
@@ -258,6 +259,7 @@ class EpisodeRunner:
         lease_margin_s: float = 30.0,
         ports: Mapping[str, Any] | None = None,
         traces: EpisodeTraces | None = None,
+        tool_rules: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self.mind = mind
         self.ports = dict(ports or {})
@@ -279,6 +281,9 @@ class EpisodeRunner:
         self.modes = dict(modes or {})
         self.composer = composer or Composer()
         self.budget = budget
+        #: les règles d'outils d'un opérateur, par situation (``tools.situation_of``, ADR 0122) : retirer un outil, le
+        #: mettre en main ou à la demande ; ``None`` : aucune
+        self.tool_rules = tool_rules
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
         #: ce que les facultés tirent d'un énoncé, journalisé juste après lui (``Bootstrap.interpret``) : ce que le
         #: modèle qui a répondu a lu de la personne (ADR 0093) ; ``None`` : personne n'interprète
@@ -407,8 +412,9 @@ class EpisodeRunner:
                 # ce qui part au modèle hors du composeur (persona, catalogue, outils) : le budget le réserve
                 persona = self.persona(frame, policy.persona_depth) if (
                     policy.role is not None and policy.voice and self.persona) else None
+                rules = self.rules_of(req.kind, audience)
                 tools = self._tools(policy, req.kind, audience,
-                                    req.selected.args.get("bundles") if req.selected is not None else None)
+                                    req.selected.args.get("bundles") if req.selected is not None else None, rules)
                 offered = list(tools.values())
                 core = _in_hand(policy, req)
                 if core is not None and policy.role is not None and not _defers(self.gateway, policy.role):
@@ -416,9 +422,9 @@ class EpisodeRunner:
                     core = None
                 # une parole que quelqu'un lira : ses outils sont ses mains (faire, pas annoncer ni inventer)
                 more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
-                                                 catalogue(offered, core, mind.registry.bundles),
+                                                 catalogue(offered, core, mind.registry.bundles, rules),
                                                  self._instruction(ep.mode))))
-                declared = declare(offered, core)
+                declared = declare(offered, core, rules)
                 provider_budget = getattr(self.gateway, "budget", None)
                 budget = self.budget or (provider_budget(policy.role, policy.max_tokens) if (
                     provider_budget is not None and policy.role is not None) else Budget(max_tokens=24_000))
@@ -717,9 +723,19 @@ class EpisodeRunner:
             out.append((spec, body))
         return out
 
-    def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None) -> dict[str, Any]:
+    def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None,
+               rules: Mapping[str, str] | None = None) -> dict[str, Any]:
         """Les outils offerts (``tools.offer``, la seule porte)."""
-        return offer(self.mind.registry.tools, policy, kind, audience, only)
+        return offer(self.mind.registry.tools, policy, kind, audience, only, rules)
+
+    def rules_of(self, kind: str, audience: Audience) -> Mapping[str, str] | None:
+        """Les règles d'outils d'un opérateur pour la situation de cet épisode ; une lecture qui échoue n'en
+        applique aucune (la panne est au journal)."""
+        situation = situation_of(kind, audience)
+        if situation is None or self.tool_rules is None:
+            return None
+        got = call(self.tool_rules, situation, label="règles d'outils")
+        return None if isinstance(got, Failed) else got
 
     async def _revise(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
                       make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None

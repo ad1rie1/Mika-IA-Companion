@@ -85,26 +85,27 @@ def test_a_failing_drawing_gives_back_the_blocks(world, monkeypatch):  # noqa: F
 
 def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
     """Pensées › Nuits : le journal en page de carnet, ce qu'elle en raconte, sa journée en cours ; puis une carte
-    par nuit — son journal et ses rêves ensemble, même écrits à part —, la plus récente d'abord."""
+    par nuit — son journal et ses rêves ensemble, même écrits à part —, la plus récente d'abord. Des journées à venir :
+    le journal qu'elle écrit pendant le test, sur l'horloge réelle (celui d'hier), ne passe pas devant."""
     client, live, _ = world
     bootstrap(client)
     voice = VoiceProvenance(call_id="nuit", persona_hash="fictive", role="journal", model="fake")
     append(client, live.kernel, [
-        self_.JOURNALED.draft(day="2026-10-18", voice=voice, text=Content.of("Une journée tranquille, à lire.")),
-        self_.DREAMT.draft(night="2026-10-19", voice=voice, kind=self_.PLEASANT, vividness=0.8,
+        self_.JOURNALED.draft(day="2027-10-17", voice=voice, text=Content.of("Une journée tranquille, à lire.")),
+        self_.DREAMT.draft(night="2027-10-18", voice=voice, kind=self_.PLEASANT, vividness=0.8,
                            text=Content.of("Un toit où chaque note allumait une fenêtre.")),
-        self_.JOURNALED.draft(day="2026-10-19", voice=voice, text=Content.of("Une soirée au bureau, sous la lampe."),
+        self_.JOURNALED.draft(day="2027-10-18", voice=voice, text=Content.of("Une soirée au bureau, sous la lampe."),
                               shareable=Content.of("Une soirée calme.")),
     ], "self")
     page = drawn(client, "/inspecteur/pensees/nuits")
     journal = page.split('class="now-card nights-journal"')[1].split("</article>")[0]
-    assert "Lundi 19 oct." in journal and "Une soirée au bureau, sous la lampe." in journal
+    assert "Lundi 18 oct." in journal and "Une soirée au bureau, sous la lampe." in journal
     assert "Une soirée calme." in journal  # ce qu'elle en raconte à n'importe qui
     assert "Sa journée en cours" in page
     nights = page.split('class="nights-list"')[1]
-    assert nights.index("Nuit du lundi 19 oct.") < nights.index("Nuit du dimanche 18 oct.")
-    assert nights.count("<h3>Nuit du lundi 19 oct.</h3>") == 1  # le journal et le rêve de cette nuit, ensemble
-    night = nights.partition("<h3>Nuit du lundi 19 oct.</h3>")[2].partition("Nuit du dimanche")[0]
+    assert nights.index("Nuit du lundi 18 oct.") < nights.index("Nuit du dimanche 17 oct.")
+    assert nights.count("<h3>Nuit du lundi 18 oct.</h3>") == 1  # le journal et le rêve de cette nuit, ensemble
+    night = nights.partition("<h3>Nuit du lundi 18 oct.</h3>")[2].partition("Nuit du dimanche")[0]
     assert night.index("Une soirée au bureau") < night.index("Un toit où chaque note")  # son journal, puis ses rêves
 
 

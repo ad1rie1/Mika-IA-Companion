@@ -56,14 +56,16 @@ MENU = (
         MenuLink("Épisodes", "decisions/episodes"),
         MenuLink("Échéances", "decisions/echeances"),
     )),
-    MenuGroup("Outils & connexions", "tools", (
+    MenuGroup("Outils", "tools", (
         MenuLink("Catalogue des outils", "outils"),
         MenuLink("Qui reçoit quoi", "outils/qui"),
-        MenuLink("Ce que son prompt en dit", "outils/texte"),
+        MenuLink("Régler ses outils", "outils/texte"),
         MenuLink("Ce qu'elle expose", "outils/expose"),
         MenuLink("Services MCP", "outils/serveurs", ("reglages/serveurs-mcp",)),
         MenuLink("Outils de ses apps", "outils/outils_apps"),
         MenuLink("Apps forgées", "apps"),
+    )),
+    MenuGroup("Connexions extérieures", "plug", (
         MenuLink("Flux RSS", "sens/flux", ("reglages/flux",)),
         MenuLink("Caméra", "sens/camera"),
         MenuLink("Dessins", "sens/dessins"),

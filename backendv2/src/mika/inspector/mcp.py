@@ -9,8 +9,11 @@ ferait-elle ? », « À traiter » — plus « pourquoi a-t-elle dit ça ? »
 (``pourquoi``). Jamais une page à formulaires (approbations, réglages,
 comptes), et aucune action d'opérateur ici (elles passent par la console, avec
 leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale
-seulement, derrière un jeton d'opérateur (``mika mcp token``) ; sans jeton
-défini, le point n'existe pas (404).
+seulement, derrière un jeton d'opérateur (``mika mcp token``, ou Outils › Ce
+qu'elle expose) ; sans jeton défini, le point n'existe pas (404). Ce qu'elle sert
+se choisit dans la console (``served`` : ses pages parmi ``SERVABLE``, ses vues,
+ses fiches, « pourquoi » — ADR 0122) ; ce qui n'est pas servi n'est ni listé ni
+lu.
 
 Rien ici ne nomme une faculté : les vues et leurs paramètres se découvrent par
 ``lister_vues`` (par exemple ``memory/souvenirs`` avec ``q`` pour chercher un
@@ -44,6 +47,17 @@ PARAMS = {"type": "object", "additionalProperties": {"type": "string"},
 #: ni secret par ce point
 PAGES = ("accueil.a_traiter", "systeme.sante", "systeme.processus", "systeme.anomalies", "systeme.sorties",
          "systeme.appels", "systeme.chronologie", "decisions.episodes", "decisions.selections", "decisions.envers")
+#: les pages qu'une opératrice peut lui faire servir (ADR 0122) : celles d'office, et d'autres pages de lecture —
+#: jamais une page à formulaires ni de réglages
+SERVABLE = (*PAGES, "accueil.maintenant", "accueil.aujourdhui", "decisions.maintenant", "decisions.en_cours",
+            "decisions.echeances", "systeme.passerelle", "systeme.monde", "systeme.stockage", "systeme.operations",
+            "outils.tous", "outils.qui")
+#: ce qu'elle sert au-delà des pages : les vues que déclarent ses facultés (outil « vue »), les fiches d'objets et la
+#: recherche (« chercher », « fiche »), « pourquoi a-t-elle dit ça ? » (« pourquoi »)
+VIEWS, SUBJECTS, WHY = "vues", "fiches", "pourquoi"
+PARTS = (VIEWS, SUBJECTS, WHY)
+#: ce qu'elle sert d'office (aucun choix enregistré)
+DEFAULT_SERVED = (*PAGES, *PARTS)
 
 TOOLS = (
     Tool("lister_vues", "Les vues de sa console (mémoire, esprit, liens, travail, exploitation…) : leur "
@@ -74,17 +88,29 @@ TOOLS = (
 
 class ConsoleHost:
     """Les outils de lecture, pour un noyau ; avec les pages de la console (``ConsolePages``), aussi celles de
-    ``PAGES`` et « pourquoi », lues par la même ``Inspection`` que la console."""
+    ``PAGES`` et « pourquoi », lues par la même ``Inspection`` que la console. ``served`` : ce qu'une opératrice
+    lui fait servir (``None`` : ce qu'elle sert d'office), relu à chaque requête."""
 
     name = "mika-console"
 
-    def __init__(self, kernel: Kernel, pages: ConsolePages | None = None) -> None:
+    def __init__(self, kernel: Kernel, pages: ConsolePages | None = None,
+                 served: Callable[[], Sequence[str] | None] | None = None) -> None:
         self.kernel = kernel
         self.pages = pages
         self.inspection = pages.ui.inspection if pages is not None else Inspection(kernel, sampler=kernel.series.read)
+        self.served = served
+
+    def serves(self) -> frozenset[str]:
+        """Ce qu'elle sert maintenant : ses pages (clés d'onglet) et ses parts (``PARTS``)."""
+        chosen = self.served() if self.served is not None else None
+        return frozenset(DEFAULT_SERVED if chosen is None else (k for k in chosen if k in (*SERVABLE, *PARTS)))
 
     def tools(self) -> Sequence[Tool]:
-        return TOOLS
+        on = self.serves()
+        hidden = {"pourquoi"} if WHY not in on else set()
+        if SUBJECTS not in on:
+            hidden |= {"chercher", "fiche"}
+        return tuple(t for t in TOOLS if t.name not in hidden)
 
     def when(self, t: int) -> str:
         frame = self.kernel.mind.frame()
@@ -96,6 +122,9 @@ class ConsoleHost:
     async def call(self, name: str, arguments: Mapping[str, Any]) -> Outcome:
         params = {str(k): str(v) for k, v in (arguments.get("params") or {}).items()} \
             if isinstance(arguments.get("params"), Mapping) else {}
+        on = self.serves()
+        if name not in {t.name for t in self.tools()}:
+            return Outcome(f"outil inconnu : {name}", is_error=True)
         if name == "lister_vues":
             return Outcome(self._catalogue(str(arguments.get("section") or "")))
         if name == "vue":
@@ -103,7 +132,7 @@ class ConsoleHost:
             tab = self._pages().get(f"{owner}.{view}")
             if tab is not None:
                 return await self._page(f"{owner}.{view}", tab.title, params)
-            spec = self.inspection.find(owner, view)
+            spec = self.inspection.find(owner, view) if VIEWS in on else None
             if spec is None or spec.subject:
                 return Outcome(f"vue inconnue : {arguments.get('cle')} (voir lister_vues)", is_error=True)
             return Outcome(f"# {spec.title}\n" + self.text(await self.inspection.arun(spec, params, self.when)))
@@ -117,10 +146,11 @@ class ConsoleHost:
         return Outcome(f"outil inconnu : {name}", is_error=True)
 
     def _pages(self) -> dict[str, Builtin]:
-        """Les pages de ``PAGES`` que cette console sert, par clé d'onglet (aucune sans ses pages)."""
+        """Les pages que cette console sert, par clé d'onglet (aucune sans ses pages)."""
         if self.pages is None:
             return {}
-        return {key: tab for key in PAGES if (tab := self.pages.tab(key)) is not None}
+        on = self.serves()
+        return {key: tab for key in SERVABLE if key in on and (tab := self.pages.tab(key)) is not None}
 
     async def _page(self, key: str, title: str, params: dict[str, str]) -> Outcome:
         """Une page de la console, en texte : ses blocs (jamais son panneau), puis ses filtres."""
@@ -153,13 +183,13 @@ class ConsoleHost:
                 continue
             lines.append(f"- {destination}/{slug} — {tab.title} [{destination}]"
                          + (f" : {tab.description}" if tab.description else ""))
-        for v in self.inspection.views():
+        for v in self.inspection.views() if VIEWS in self.serves() else ():
             if v.hidden or v.subject or (section and v.section != section):
                 continue
             params = ", ".join(p.name for p in v.typed)
             lines.append(f"- {v.owner}/{v.name} — {v.title} [{v.section or '—'}]" + (f" ; paramètres : {params}"
                                                                                        if params else ""))
-        if not section:
+        if not section and SUBJECTS in self.serves():
             lines.append("\nFiches (outil « fiche ») :")
             for kind, spec in sorted(self.kernel.registry.subjects.items()):
                 tabs = ", ".join(t.name for t in self.inspection.tabs(kind))
@@ -200,10 +230,12 @@ class ConsoleHost:
         return Outcome("\n".join(lines))
 
 
-def console_app(kernel: Kernel, token: Callable[[], str], pages: ConsolePages | None = None) -> Callable[..., Any]:
+def console_app(kernel: Kernel, token: Callable[[], str], pages: ConsolePages | None = None,
+                served: Callable[[], Sequence[str] | None] | None = None) -> Callable[..., Any]:
     """Le point MCP de la console : boucle locale, jeton d'opérateur ; sans jeton défini, 404. ``pages`` : celles
-    de la console (``inspector.app.assemble``), pour servir aussi ``PAGES`` et « pourquoi »."""
-    host = ConsoleHost(kernel, pages)
+    de la console (``inspector.app.assemble``), pour servir aussi ses pages et « pourquoi » ; ``served`` : ce qu'une
+    opératrice lui fait servir."""
+    host = ConsoleHost(kernel, pages, served)
 
     def resolve(scope: Mapping[str, Any]) -> Any:
         if not loopback(scope):

@@ -6135,6 +6135,8 @@ runtime:
       wrong: "arguments refusés : {problems}"
       # {error} : l'erreur levée par l'outil (technique)
       failed: "l'outil a échoué : {error}"
+      # un point MCP qui prête ses outils en lecture seule (ADR 0122) : l'outil a voulu écrire dans sa vie
+      read_only: "refusé : ce point est en lecture seule, et cet outil écrit dans sa vie (un souvenir, une promesse, un envoi)"
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # CE QU'ON LUI ENVOIE (adapters/preprocess) : une pièce jointe (une image, un message vocal, un fichier) devient un

@@ -139,7 +139,7 @@ La constellation (ADR 0103) avait déjà montré l'autre voie : une page faite �
   tous ses onglets, dans leur ordre, sous leur nom (Humeur, Postures, Besoins, Sommeil et rythme… ; les sept onglets
   des décisions ; ceux des outils et des flux et capteurs ; les quatorze pages de Système). Un onglet porte le nom
   de son lien, et un nom qui ne disait pas ce que montre la page a changé (« Table de l'arbitre », « Ce qu'elle
-  remarque », « Règles de divulgation », « Ce que son prompt en dit »). Deux exceptions : « À valider », des
+  remarque », « Règles de divulgation », « Ce que son prompt en dit » — devenu « Régler ses outils », ADR 0122). Deux exceptions : « À valider », des
   raccourcis nommés par la tâche, et « Réglages », une sélection dans l'annuaire de ses cinquante pages.
 - **Rangées dans des dossiers** : le code dans `app/handmade/` (ce qu'elles partagent dans `__init__.py` ; `home.py`,
   `now.py`, `people.py`, `person/` ; `lists.py` et `blocks.py`, les listes et les blocs en cartes ;
