@@ -59,7 +59,7 @@ def test_reader_displays_html_safely_and_replies_from_the_original_account(world
     assert "FIN DU MESSAGE LONG" in page
     assert '<a href="https://example.test/projet"' in page
     assert 'src="https://tracker.example.test' not in page and "window.mailExecuted" not in page
-    assert 'class="hm-reading"' in page  # un document à lire (ADR 0121)
+    assert 'class="hm-reading' in page  # un document à lire (ADR 0121)
     assert "maquettes.pdf" in page and "150 Ko" in page
     assert "/inspecteur/courrier/reception?compte=pro&dossier=INBOX" in page
     # Submit the actual displayed reply form into the fake mail port.

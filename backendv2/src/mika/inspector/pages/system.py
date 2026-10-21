@@ -98,7 +98,7 @@ async def sante(ui: Any, request: Request) -> Any:
     return health_page(ui)
 
 
-@TABS.tab("systeme.appels", title="Coûts et appels", group="Surveillance",
+@TABS.tab("systeme.appels", title="Appels et coûts", group="Surveillance",
           description="Chaque appel de modèle : combien, par qui, pour combien, combien de temps, avec quelle part "
                       "de cache (30 jours gardés).")
 async def appels(ui: Any, request: Request) -> list[Any]:
@@ -174,7 +174,7 @@ TIMELINE_PARAMS = (Param("type", "type d'événement", placeholder="memory., epi
                    Param("correlation", "corrélation", placeholder="un épisode, une action"))
 
 
-@TABS.tab("systeme.chronologie", title="Chronologie", group="Journaux",
+@TABS.tab("systeme.chronologie", title="Journal d’événements", group="Journaux",
           description="Le journal d'événements, du plus récent : tout ce qui lui est arrivé, filtrable par type ou "
                       "par épisode.")
 async def chronologie(ui: Any, request: Request) -> Any:
@@ -243,7 +243,7 @@ def _correlation_cell(corr: str, episodes: set[str]) -> Any:
     return Ref("local", "/inspecteur/systeme/chronologie", label, (("correlation", corr),))
 
 
-@TABS.tab("systeme.etat", title="État et faits", group="Anatomie",
+@TABS.tab("systeme.etat", title="Diagnostic avancé", group="Anatomie",
           description="Les faits que les facultés se partagent, lus maintenant, et l'état brut de chaque tranche.")
 async def etat(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
@@ -279,7 +279,7 @@ def fact_values(kernel: Any, frame: Any) -> dict[str, str]:
 
 
 def facts_diff(kernel: Any, before: Any, after: Any) -> Table:
-    """Les faits non familiaux dont la valeur change d'un cadre à l'autre (la lecture d'« État et faits », en
+    """Les faits non familiaux dont la valeur change d'un cadre à l'autre (la lecture du « Diagnostic avancé », en
     différence) : deux cadres du même instant, l'un avec les paramètres en vigueur, l'autre avec d'autres."""
     old, new = fact_values(kernel, before), fact_values(kernel, after)
     providers = kernel.registry.providers
@@ -288,7 +288,7 @@ def facts_diff(kernel: Any, before: Any, after: Any) -> Table:
                  for name in old if old[name] != new.get(name))
     return Table(("fait", "fourni par", Column("sens", detail=True), "avant", "après"), rows,
                  title="Ce qu'elle se dirait", empty="Aucun fait partagé entre ses facultés ne change à cet instant.",
-                 caption="Les faits que ses facultés se partagent (Système › État et faits), lus au même instant "
+                 caption="Les faits que ses facultés se partagent (Système › Diagnostic avancé), lus au même instant "
                          "avec les paramètres en vigueur, puis avec les valeurs tapées.")
 
 
@@ -329,7 +329,7 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
     return out
 
 
-@TABS.tab("systeme.operations", title="Opérations", group="Journaux",
+@TABS.tab("systeme.operations", title="Actions des opérateurs", group="Journaux",
           description="Ce que les opérateurs ont fait depuis la console : l'action, qui, sur quoi, l'issue (jamais "
                       "un contenu).")
 async def operations(ui: Any, request: Request) -> list[Any]:
@@ -414,7 +414,7 @@ async def anomalies(ui: Any, request: Request) -> list[Any]:
     return anomaly_blocks(ui)
 
 
-@TABS.tab("systeme.sorties", title="Sorties", group="Surveillance",
+@TABS.tab("systeme.sorties", title="File de sortie", group="Surveillance",
           badge=lambda ui: _outbox_problems(ui),
           description="La file de sortie : chaque effet visible (une réponse livrée, un mail envoyé) part après son "
                       "écriture au journal. Ce qui attend, ce qui n'a pas pu partir, ce qui n'a trouvé personne pour "
@@ -532,7 +532,7 @@ async def outbox_post(ui: Any, request: Request) -> Response:
     return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
 
 
-@TABS.tab("systeme.passerelle", title="Modèles en service", group="Surveillance",
+@TABS.tab("systeme.passerelle", title="Moteur des modèles", group="Surveillance",
           description="La passerelle des modèles telle qu'elle tourne : pour chaque fournisseur, ses créneaux "
                       "(occupés, en attente), son quota ; pour chaque rôle, qui le sert vraiment.")
 async def passerelle(ui: Any, request: Request) -> list[Any]:
@@ -574,7 +574,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
 WORLD_ROLES = {"viewer": "écran", "host": "hôte", "creator": "créateur"}
 
 
-@TABS.tab("systeme.monde", title="Le monde, côté écrans", group="Surveillance",
+@TABS.tab("systeme.monde", title="Écrans du monde", group="Surveillance",
           badge=lambda ui: len(_world_warnings(ui.deps.world.overview())) if ui.deps.world is not None else 0,
           description="Les clients du monde (/ws/world) : qui est connecté, avec quel moteur et quels rôles, qui "
                       "tient le bail d'hôte (le moteur qui joue ses actions), et ce que chaque hôte a dit lui manquer "
@@ -643,7 +643,7 @@ def _world_warnings(view: dict[str, Any]) -> list[tuple[dict[str, Any], list[str
     return [(r, lacks) for r in view["loaded"] if r["session"] in connected and (lacks := _world_lacks(r, view["rev"]))]
 
 
-@TABS.tab("systeme.stockage", title="Stockage", group="Surveillance",
+@TABS.tab("systeme.stockage", title="Stockage et sauvegardes", group="Surveillance",
           description="Ses bases (sa vie dans mind.db, les projections jetables dans views.db), le dernier instantané "
                       "et ce que garde le journal. Les sauvegardes se font par « mika backup ».")
 async def stockage(ui: Any, request: Request) -> list[Any]:

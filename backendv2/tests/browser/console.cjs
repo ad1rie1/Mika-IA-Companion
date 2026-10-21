@@ -391,7 +391,7 @@ test('santé : problèmes prioritaires, contrôles repliables et diagnostic acce
   const outbox = page.locator('.collection.cards .collection-item').filter({ has: page.getByRole('heading', { name: 'File de sortie', exact: true }) });
   await outbox.getByRole('link', { name: 'Ouvrir le diagnostic →', exact: true }).focus();
   await page.keyboard.press('Enter');
-  assert.equal(await page.locator('h1').textContent(), 'Sorties');
+  assert.equal(await page.locator('h1').textContent(), 'File de sortie');
 });
 
 test('épisode : résumé de l’échec, déroulé, données complètes puis retour au résumé', async t => {

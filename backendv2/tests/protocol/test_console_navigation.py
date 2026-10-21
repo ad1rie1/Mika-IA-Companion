@@ -29,6 +29,34 @@ def test_operator_menu_links_open_real_pages(world):  # noqa: F811
             ConsoleHTML(response.text).check()
 
 
+def tab_order(page, destination):
+    """Les onglets d'une destination dans l'ordre où sa page les montre (sa barre d'onglets, ou son sous-menu)."""
+    order = []
+    for nav in re.findall(r'<nav class="(?:tabs|submenu)"[^>]*>.*?</nav>', html.unescape(page), re.S):
+        for slug in re.findall(rf'href="/inspecteur/{destination}/([^"?#]+)"', nav):
+            if slug not in order:
+                order.append(slug)
+    return order
+
+
+def test_menu_links_follow_the_tab_order_of_their_destination(world):  # noqa: F811
+    """Le menu et la barre d'onglets ne se contredisent pas : dans une rubrique, les liens qui mènent à la même
+    destination suivent l'ordre de ses onglets (le lien vers la destination elle-même : son premier onglet)."""
+    client, _, _ = world
+    bootstrap(client)
+    for group in MENU:
+        by_destination = {}
+        for link in group.items:
+            destination, _, slug = link.target.partition('/')
+            by_destination.setdefault(destination, []).append(slug)
+        for destination, slugs in by_destination.items():
+            if len(slugs) < 2:
+                continue
+            order = tab_order(client.get(f'/inspecteur/{destination}').text, destination)
+            ranks = [order.index(slug or order[0]) for slug in slugs]
+            assert ranks == sorted(ranks), (group.title, destination, slugs, order)
+
+
 @pytest.mark.parametrize(('path', 'group', 'label'), [
     ('sens/dessins', 'Activité', 'Dessins'),
     ('sens/camera', 'Outils & connexions', 'Caméra'),

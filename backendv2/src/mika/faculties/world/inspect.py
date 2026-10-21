@@ -70,7 +70,7 @@ def _remarks(s: WorldState, frame: Frame, ctx: InspectContext) -> list[tuple[Any
     return rows
 
 
-@WORLD.inspect("monde", title="Son monde", section="vie", order=45,
+@WORLD.inspect("monde", title="Monde et corps", section="vie", order=45,
                description="Où elle est, ce qu'elle fait, ce qu'elle tient, ce qui est en route, où sont les choses, "
                            "et ce qu'elle a remarqué des éditions de son monde.")
 def _world_view(s: WorldState, frame: Frame, ctx: InspectContext) -> list[Block]:

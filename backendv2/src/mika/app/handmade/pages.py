@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from mika.app.handmade import blocks, conversations, mail, system
+from mika.app.handmade import blocks, conversations, mail, nights, system
 from mika.inspector.ui import UI, Drawn
 
 
@@ -47,7 +47,8 @@ TABLES = Blocks("table")
 DRAWN: dict[str, Drawn] = {
     # Elle : humeur et corps, pensées et nuits, mémoire
     **{f"vie/{t}": CARDS for t in ("humeur", "postures", "needs", "rythme", "monde", "soi", "devenir")},
-    **{f"pensees/{t}": CARDS for t in ("pensees", "remarque", "attentes", "nuits")},
+    **{f"pensees/{t}": CARDS for t in ("pensees", "remarque", "attentes")},
+    "pensees/nuits": Shaped(nights.nights, "handmade/nights.css"),
     **{f"memoire/{t}": CARDS for t in ("souvenirs", "croyances", "recues", "place", "promesses", "moments",
                                         "voir-venir", "consolidation")},
     # Relations & échanges : le détail des personnes, identités, conversations, courrier, Teams

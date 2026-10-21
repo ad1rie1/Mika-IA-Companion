@@ -54,7 +54,7 @@ from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
 
-VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("body", "rythme"): "Rythme",
+VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("body", "rythme"): "Sommeil et rythme",
          ("needs", "needs"): "Besoins", ("agency", "initiatives"): "Initiatives", ("goals", "vivants"): "Buts vivants",
          ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé",
          ("goals", "politique"): "Cadre et réglages", ("goals", "decisions"): "Décisions",

@@ -190,14 +190,14 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | Surveillance | Santé | contrôles, projections, quarantaine, vues lentes |
 | | Processus | passages, échecs, dernière erreur, en cours |
 | | Anomalies *(nouveau)* | échecs d'évaluation, traces du journal (supplanté, oubli…), échecs de processus gardés au journal |
-| | Sorties *(nouveau)* | la file de sortie : en attente, échouées, orphelines, essais, dernière erreur |
-| | Modèles en service *(nouveau)* | par fournisseur : créneaux occupés / total, quota ; par rôle : qui sert vraiment |
-| | Le monde, côté écrans *(nouveau)* | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
-| | Coûts et appels | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |
-| | Stockage *(nouveau)* | taille des bases, dernier instantané ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification, les archives gardées |
-| Journaux | Chronologie | le journal, filtrable, paginé dans les deux sens |
-| | Opérations | ce que les opérateurs ont fait |
-| Anatomie | État et faits · Contributions · Toutes les vues | le mécanisme |
+| | File de sortie *(nouveau)* | la file de sortie : en attente, échouées, orphelines, essais, dernière erreur |
+| | Moteur des modèles *(nouveau)* | par fournisseur : créneaux occupés / total, quota ; par rôle : qui sert vraiment |
+| | Écrans du monde *(nouveau)* | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
+| | Appels et coûts | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |
+| | Stockage et sauvegardes *(nouveau)* | taille des bases, dernier instantané ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification, les archives gardées |
+| Journaux | Journal d’événements | le journal, filtrable, paginé dans les deux sens |
+| | Actions des opérateurs | ce que les opérateurs ont fait |
+| Anatomie | Diagnostic avancé · Contributions · Toutes les vues | le mécanisme |
 | Outils | Simulations | les rapports |
 
 ## Étape 3 — les formes

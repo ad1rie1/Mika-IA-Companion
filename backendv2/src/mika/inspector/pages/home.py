@@ -124,7 +124,7 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     tone, text = backup_state(ui)
     if tone in ("warn", "danger"):
         cards.append(Stat("Sauvegarde", "à faire" if tone == "warn" else "en échec", text, tone,
-                          _local("/inspecteur/systeme/stockage", "Stockage")))
+                          _local("/inspecteur/systeme/stockage", "Stockage et sauvegardes")))
     if cards:
         out.append(Stats(tuple(cards)))
     for c in report.checks:

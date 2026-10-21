@@ -1,0 +1,39 @@
+/* Pensées › Nuits (app/handmade/nights.py) : son journal en page de carnet, sa journée en cours, ses nuits. */
+
+/* le journal : une page qu'on lit, en serif, une ligne de texte aérée */
+.nights-journal { display: grid; gap: 16px; padding: 28px 32px; }
+.nights-journal-head { display: grid; gap: 4px; }
+.nights-journal-head h2 { margin: 0; font-family: var(--now-serif); font-size: clamp(1.5rem, 2.2vw, 1.9rem); font-weight: 600; }
+.nights-page { max-width: 68ch; color: var(--text); font-family: var(--now-serif); font-size: 16.5px; line-height: 1.8;
+  white-space: pre-line; overflow-wrap: anywhere; }
+.nights-page::first-letter { text-transform: uppercase; }
+.nights-told { display: grid; gap: 6px; max-width: 68ch; padding: 14px 18px; border-left: 3px solid var(--accent-soft);
+  border-radius: 0 12px 12px 0; background: var(--surface-2); }
+.nights-told p:last-child { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.6; }
+
+/* sa journée en cours */
+.nights-today-text { margin: 0; max-width: 74ch; color: var(--text-2); font-size: 14px; line-height: 1.65; white-space: pre-line; }
+
+/* ses nuits : une carte par nuit, son journal puis ses rêves */
+.nights-list { display: grid; gap: 12px; }
+.nights-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.nights-list-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.3rem; font-weight: 600; }
+.nights-list-head p { margin: 0; font-size: 12.5px; }
+.nights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); align-items: start; gap: var(--now-gap); }
+.nights-night { display: grid; gap: 10px; min-width: 0; }
+.nights-night-head h3 { margin: 0; font-family: var(--now-serif); font-size: 1.1rem; font-weight: 600; }
+.nights-entries { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.nights-entries > li { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.nights-entries > li:first-child { padding-top: 0; border-top: 0; }
+.nights-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 12.5px; }
+.nights-awake { color: var(--muted); }
+.nights-awake.on { color: var(--accent); font-weight: 600; }
+.nights-entry-text { color: var(--text); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.nights-entries > li.dream .nights-entry-text { font-family: var(--now-serif); font-style: italic; color: var(--text-2); }
+.nights-entry-text .more > summary { color: var(--text-2); cursor: pointer; }
+.nights-entry-text .more > summary:hover { color: var(--accent); }
+.nights-entry-text .more[open] > summary { display: none; }
+.nights-entries .hm-subfold { padding-top: 0; border-top: 0; }
+.nights-entries .hm-subfold > summary { color: var(--muted); font-size: 12px; font-weight: 400; }
+@media (max-width: 700px) { .nights-grid { grid-template-columns: 1fr; } .nights-journal { padding: 20px; } }
+.nights-entry-text .more > summary { font-size: inherit; }

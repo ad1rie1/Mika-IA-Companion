@@ -470,3 +470,13 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-tool-intro p { margin: 0; }
 .hm-login { display: grid; gap: 16px; }
 .hm-login-title { margin: 0; font-family: var(--now-serif); font-size: 1.9rem; font-weight: 600; }
+
+/* un texte à lire (un journal, un message, un document) : son titre, puis le texte tel qu'il a été écrit */
+.hm-reading { font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.hm-reading .now-card-head { margin-bottom: 10px; }
+.hm-reading .document-text { max-width: 74ch; white-space: pre-wrap; }
+.hm-reading-mode { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+
+/* une carte dans le détail d'une ligne ou dans un repli de second rang : une section, pas une carte de plus */
+.hm-subfold .now-card, .person-entry-detail .now-card, .hm-table-detail .now-card { padding: 0; border: 0; border-radius: 0;
+  background: none; box-shadow: none; }

@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "19"
+ASSET_VERSION = "20"
 
 log = logging.getLogger("mika.console")
 
@@ -110,7 +110,7 @@ class InspectorDeps:
     #: le relais MCP du moteur Claude Code (« Ce que Mika expose » : ses sessions ouvertes)
     relay: Any = None
     #: les clients du monde (``/ws/world``, ADR 0051) : ``overview()`` dit qui est connecté, qui tient le bail
-    #: d'hôte, ce qui manque au moteur (Système › Le monde, côté écrans)
+    #: d'hôte, ce qui manque au moteur (Système › Écrans du monde)
     world: Any = None
     #: les vues d'ensemble dessinées à la main, par type d'objet (ADR 0121) : le premier onglet de sa fiche, ouvert
     #: par défaut (voir ``Overview``)

@@ -52,7 +52,8 @@
 {% elif b.t == "note" %}
   <p class="person-tab-note {{ b.tone }}">{% if b.title %}<b>{{ b.title }}</b> {% endif %}{{ b.text }}</p>
 {% elif b.t == "prose" and b.reading %}
-  <article class="hm-reading"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+  <article class="hm-reading{{ ' now-card' if not depth }}"{% if b.title %} aria-label="{{ b.title }}"{% endif %}>
+    {% if b.title %}<header class="now-card-head"><h2>{{ b.title }}</h2></header>{% endif %}
     {% if b.rich %}<p class="hm-reading-mode">Version HTML simplifiée · images distantes masquées</p>{% endif %}
     <div class="{{ 'document-html' if b.rich else 'document-text' }}">{{ b.html }}</div>
     {% if b.rich %}<details class="hm-subfold"><summary>Afficher la version texte</summary><div class="prose">{{ b.text }}</div></details>{% endif %}

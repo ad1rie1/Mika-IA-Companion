@@ -1,0 +1,52 @@
+{# Pensées › Nuits (app/handmade/nights.py) : son journal en page de carnet, ce qu'elle en raconte à n'importe qui,
+   sa journée en cours ; puis une carte par nuit, son journal et ses rêves ensemble. #}
+{% from "_cells.html" import cell %}
+{% from "_navigation.html" import pager as pages %}
+{% from "handmade/shared/drawn.html" import inner with context %}
+<div class="now-page person-tab nights">
+  {% if journal %}
+  <article class="now-card nights-journal" aria-labelledby="nights-journal-title">
+    <header class="nights-journal-head">
+      <p class="now-eyebrow">Son journal</p>
+      <h2 id="nights-journal-title">{{ journal.day|capitalize }}</h2>
+    </header>
+    <div class="nights-page">{{ journal.text }}</div>
+    {% if told %}
+    <aside class="nights-told" aria-label="Ce qu'elle en raconte à n'importe qui">
+      <p class="now-eyebrow">Ce qu'elle en raconte à n'importe qui</p>
+      <p>{{ told.text }}</p>
+    </aside>
+    {% endif %}
+  </article>
+  {% endif %}
+
+  {% if today %}
+  <section class="now-card nights-today" aria-labelledby="nights-today-title">
+    <header class="now-card-head"><h2 id="nights-today-title">Sa journée en cours</h2><p>{{ today.day }} · ce qu'elle pourra en raconter demain, d'après les faits</p></header>
+    <p class="nights-today-text">{{ today.text }}</p>
+  </section>
+  {% endif %}
+
+  <section class="nights-list" aria-labelledby="nights-list-title">
+    <header class="nights-list-head"><h2 id="nights-list-title">Ses nuits</h2>{% if history.count %}<span class="person-count now-num" title="{{ history.count }} au total">{{ history.count }}</span>{% endif %}<p class="now-muted">un journal par journée vécue, deux rêves au plus par nuit</p></header>
+    {% if groups %}
+    <div class="nights-grid">
+      {% for g in groups %}
+      <article class="now-card nights-night" aria-label="Nuit du {{ g.label }}">
+        <header class="nights-night-head"><h3>Nuit du {{ g.label }}</h3></header>
+        <ul class="nights-entries">
+          {% for e in g.entries %}
+          <li class="{{ 'journal' if e.journal else 'dream' }}">
+            <p class="nights-entry-head"><span class="now-tag {{ e.kind.tone }}">{{ e.kind.text }}</span>{% if e.remembered %}<span class="nights-awake{{ ' on' if e.awake }}">{{ e.remembered }}</span>{% endif %}{% if e.about %}<span class="now-muted">{{ cell(e.about) }}</span>{% endif %}</p>
+            {% if e.text %}<div class="nights-entry-text">{{ cell(e.text) }}</div>{% endif %}
+            {% if e.detail %}<details class="hm-subfold"><summary>Le détail</summary><div class="now">{{ inner(e.detail) }}</div></details>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}<p class="now-empty">{{ history.empty }}{{ '' if (history.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+    {% set p = history.pager or {} %}{% if p.prev or p.next or p.older or p.newer %}{{ pages(history.pager) }}{% endif %}
+  </section>
+</div>

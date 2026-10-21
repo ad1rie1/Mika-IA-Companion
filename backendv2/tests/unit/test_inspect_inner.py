@@ -61,7 +61,7 @@ INNER = {
     ("memory", "consolidation"): ("Consolidation", "memoire", 40),
     ("attention", "pensees"): ("Pensées", "pensees", 10), ("attention", "remarque"): ("Remarqué", "pensees", 20),
     ("attention", "attentes"): ("Attentes", "pensees", 30),
-    ("self", "soi"): ("Estime et récit", "vie", 50), ("self", "nuits"): ("Nuits", "pensees", 40),
+    ("self", "soi"): ("Estime et récit", "vie", 50), ("self", "nuits"): ("Journal et rêves", "pensees", 40),
 }
 #: les onglets de la fiche d'une personne (lus avec une clé de personne)
 TABS = {("memory", "memoire"): ("Mémoire", 50), ("attention", "pensees_personne"): ("Pensées", 80)}

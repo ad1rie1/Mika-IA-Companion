@@ -115,7 +115,7 @@ La constellation (ADR 0103) avait déjà montré l'autre voie : une page faite �
     `Drawn.panel` faux : il dit ce que disait le panneau), **Courrier › Réception et Envoyés** (`mail.py` : une
     boîte aux lettres — une ligne par message, douze par page, et sous la liste une liseuse, `?lire=<clé>` : l'onglet
     « Message » de la fiche du mail, ses actions préparées à son nom, ses listes numérotées à part) ;
-  - **sous ce que garde la console** (`Drawn.last`) : **Système › Sorties** — ses chiffres, ses états et son panneau
+  - **sous ce que garde la console** (`Drawn.last`) : **Système › File de sortie** — ses chiffres, ses états et son panneau
     « à traiter », la liste des effets en lignes (l'état ordinaire, « parti » du premier coup, se tait).
 - **L'accueil est dessiné à la main** (`/inspecteur/`, `app/handmade/home.py`, gabarits `handmade/home/`) : ce qui
   attend l'opératrice (l'onglet « À traiter » en lignes, une par page où décider : la plus grave, la plus précise),
@@ -129,6 +129,11 @@ La constellation (ADR 0103) avait déjà montré l'autre voie : une page faite �
   noms et les boutons restent ceux de la console ; `handmade/base.css` est chargée partout (ses classes ne touchent
   qu'elles). **Seules les vues de la Forge gardent le rendu de la console** (`InspectorDeps.plain_owners`) : ses apps
   déclarent leur interface par un contrat.
+- **Le menu et les onglets disent la même chose** : une page porte le nom de son lien dans le menu
+  (`app/console_menu.py` : « Sommeil et rythme », « Monde et corps », « Journal et rêves », « File de sortie »,
+  « Moteur des modèles », « Écrans du monde », « Appels et coûts », « Stockage et sauvegardes », « Journal
+  d’événements », « Actions des opérateurs », « Diagnostic avancé »), et dans une rubrique, les liens qui mènent à
+  la même destination suivent l'ordre de ses onglets (`test_console_navigation.py`).
 - **Rangées dans des dossiers** : le code dans `app/handmade/` (ce qu'elles partagent dans `__init__.py` ; `home.py`,
   `now.py`, `people.py`, `person/` ; `lists.py` et `blocks.py`, les listes et les blocs en cartes ;
   `conversations.py`, `system.py`, `mail.py` ; `pages.py`, la table des onglets dessinés), les gabarits dans

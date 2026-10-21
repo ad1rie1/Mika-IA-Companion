@@ -36,8 +36,5 @@
 .mail-close { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted);
   text-decoration: none; }
 .mail-close:hover { background: var(--sunken); color: var(--text); }
-.hm-reading { padding: 4px 2px; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
-.hm-reading-mode { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
-.hm-reading .document-text { white-space: pre-wrap; }
 .mail-reader .now-card { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
 .mail-reader .now-card-head h2 { font-size: 1.05rem; }

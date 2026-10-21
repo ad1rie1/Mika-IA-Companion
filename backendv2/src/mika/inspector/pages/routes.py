@@ -448,7 +448,7 @@ class Pages:
                                     blocks=[Note("Aucun événement à ce numéro.", "warn")])
         title, blocks = got
         return self.render_page(request, title=title, active="systeme",
-                                crumbs=[("Chronologie", f"{PREFIX}/systeme/chronologie")], blocks=blocks)
+                                crumbs=[("Journal d’événements", f"{PREFIX}/systeme/chronologie")], blocks=blocks)
 
     # ── vitaux, connexion ──
     async def vitals(self, request: Request) -> Response:

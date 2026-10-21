@@ -208,7 +208,7 @@ def _nights(s: BodyState, frame: Frame) -> Table:
                          "comment s'est passée la dernière (« bien dormi ? »).")
 
 
-@BODY.inspect("rythme", title="Rythme", section="vie", order=40,
+@BODY.inspect("rythme", title="Sommeil et rythme", section="vie", order=40,
               description="Son sommeil, son énergie, sa pression de sommeil et son rythme circadien.")
 def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _p(frame)

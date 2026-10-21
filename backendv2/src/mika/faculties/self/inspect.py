@@ -447,7 +447,7 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
                  empty="plus rien avant" if before else "pas encore de nuit racontée", pager=pager, layout="list")
 
 
-@SELF.inspect("nuits", title="Nuits", section="pensees", order=40,
+@SELF.inspect("nuits", title="Journal et rêves", section="pensees", order=40,
               description="Le journal qu'elle écrit la nuit, un par journée vécue, ce qu'elle en raconte à n'importe "
                           "qui (rendu d'après les faits, sans modèle), et ses rêves (deux par nuit au plus) : ce qui "
                           "revient au réveil peut se dire le matin.")

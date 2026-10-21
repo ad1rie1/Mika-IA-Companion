@@ -2,6 +2,9 @@
 
 Les routes et les fiches gardent leurs adresses. Un même ancien espace peut
 alimenter plusieurs rubriques : dessins dans Activité, caméra dans Outils.
+Dans une rubrique, les liens vers une même destination suivent l'ordre de ses
+onglets (test_console_navigation.py) : le menu et la barre d'onglets ne se
+contredisent pas.
 """
 
 from mika.inspector.catalog import MenuGroup, MenuLink
@@ -20,12 +23,12 @@ MENU = (
         MenuLink("En ce moment", "maintenant"),
         MenuLink("Émotions et besoins", "vie"),
         MenuLink("Sommeil et rythme", "vie/rythme"),
+        MenuLink("Monde et corps", "vie/monde"),
+        MenuLink("Estime et récit", "vie/soi"),
         MenuLink("Pensées et attention", "pensees"),
+        MenuLink("Journal et rêves", "pensees/nuits"),
         MenuLink("Mémoire", "memoire"),
         MenuLink("Constellation", "constellation"),
-        MenuLink("Journal et rêves", "pensees/nuits"),
-        MenuLink("Estime et récit", "vie/soi"),
-        MenuLink("Monde et corps", "vie/monde"),
     ), her=True),
     MenuGroup("Relations & échanges", "people", (
         MenuLink("Personnes", "personnes"),
@@ -37,8 +40,8 @@ MENU = (
     MenuGroup("Activité", "activity", (
         MenuLink("Projets", "projets"),
         MenuLink("Buts et rappels", "buts"),
-        MenuLink("En cours", "decisions/en_cours"),
         MenuLink("Décisions et initiatives", "decisions"),
+        MenuLink("En cours", "decisions/en_cours"),
         MenuLink("Échéances", "decisions/echeances"),
         MenuLink("Dessins", "sens/dessins"),
     )),
@@ -55,15 +58,15 @@ MENU = (
     )),
     MenuGroup("Réglages", "settings", (
         MenuLink("Tous les réglages", "reglages/apercu", ("reglages",)),
+        MenuLink("Modèles de texte", "reglages/fournisseurs", ("reglages/roles",)),
+        MenuLink("Modèles d’image", "reglages/images-fournisseurs", ("reglages/images-roles",)),
         MenuLink("Personnalité", "reglages/identite",
                  ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document", "reglages/profil",
                   "reglages/temperament")),
-        MenuLink("Modèles de texte", "reglages/fournisseurs", ("reglages/roles",)),
-        MenuLink("Modèles d’image", "reglages/images-fournisseurs", ("reglages/images-roles",)),
-        MenuLink("Transcription", "reglages/transcription"),
-        MenuLink("Comptes opérateurs", "reglages/comptes"),
-        MenuLink("Paramètres avancés", "reglages/comportement"),
         MenuLink("Configuration des plugins", "reglages/plugins"),
+        MenuLink("Transcription", "reglages/transcription"),
+        MenuLink("Paramètres avancés", "reglages/comportement"),
+        MenuLink("Comptes opérateurs", "reglages/comptes"),
         MenuLink("Historique des réglages", "reglages/journal"),
     )),
     MenuGroup("Système", "system", (
