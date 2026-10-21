@@ -153,7 +153,9 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les
   services branchés (état, outils servis / proposés, à revoir — badge et
   vitale), puis les outils que ses apps lui donnent (la vue de la Forge,
-  dessinée dessous). La fiche d'un serveur : *État* (ce qui a été déclaré, ce
+  dessinée dessous). La fiche d'un serveur : *En bref* (dessinée : son état, ses
+  outils servis, à revoir, ses appels ; ce qu'elle en lit ; ses outils ; pour qui
+  et quand ; le côté technique replié), puis, sous « Le détail », *État* (ce qui a été déclaré, ce
   qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la
   connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé,
   « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé

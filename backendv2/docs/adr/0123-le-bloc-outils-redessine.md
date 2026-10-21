@@ -51,6 +51,18 @@ réécrire), il choisit la première.
    La composition y dessine dessous la vue de la Forge qui liste les outils de ses apps
    (`app/handmade/tools.py::Elsewhere`). Cette vue n'a plus d'onglet (`hidden`). Elle compte aussi l'outil qui lit
    les pages d'une app.
+   - La page est dessinée (`handmade/outils/ailleurs.html`) : « Brancher un service » et « Leurs réglages » en
+     boutons, puis une carte par service (son état, à quoi il lui sert, ses outils servis sur ceux proposés, ce qui
+     attend ton regard) et une carte par app, sous son titre (ses outils, quand elle s'en sert). Le dessin lit les
+     tableaux des deux plugins par le nom de leurs colonnes ; un tableau qu'il ne reconnaît pas reste tel quel.
+   - La fiche d'un service (`fiche/serveur/<nom>`) s'ouvre sur « En bref », dessinée à la main
+     (`app/handmade/servers.py::ServerOverview`, gabarit `handmade/outils/serveur.html`, lue au port MCP). On y voit
+     d'abord quatre tuiles (son état, ses outils servis, ceux à revoir, ses appels), puis ce qu'elle en lit, ses
+     outils et ce que tu en as décidé, et le côté technique replié. « Pour qui, quand » est un tableau, situation
+     par situation, calculé par la porte de « Ce qu'elle peut faire » (ses outils, combien, sous la main ou à
+     chercher ; sinon pourquoi pas). Son en-tête est dessiné aussi, sur tous ses onglets : son nom, à quoi il lui
+     sert, ses étiquettes et « Modifier ses réglages » en bouton, à côté de « Tester la connexion ». L'onglet « État » du plugin,
+     qu'elle résume, passe sous « Le détail » ; « Ses outils » (pour les régler) et « Appels » restent.
 7. *« Prêter à un agent »* (ex-« Ce qu'elle expose ») commence par ce qui se décide : la console en lecture (son
    jeton, puis, replié, ce qu'elle montre : d'office, et en plus), puis les points de prêt. Le relais du moteur Claude
    Code est replié en bas.

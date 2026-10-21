@@ -1,0 +1,72 @@
+{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123) : s'il marche et ce qui attend ton
+   regard, ce qu'elle en lit, ses outils et ce que tu en as décidé, pour qui et quand ; le côté technique replié. #}
+<div class="now-page server">
+  {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
+
+  <ul class="person-tiles-list server-tiles" aria-label="En ce moment">
+    <li class="{{ state_tone }}"><span class="person-tile-label">État</span><span class="person-tile-value">{{ state }}</span>{% if joined %}<span class="person-tile-sub">joint {{ joined }}</span>{% endif %}</li>
+    <li><a href="{{ tools_tab }}"><span class="person-tile-label">Outils servis</span><span class="person-tile-value">{{ served }} sur {{ live }}</span><span class="person-tile-sub">approuvés et offerts</span></a></li>
+    <li class="{{ 'warn' if review }}"><a href="{{ tools_tab }}"><span class="person-tile-label">À revoir</span><span class="person-tile-value">{{ review }}</span><span class="person-tile-sub">nouveaux ou changés</span></a></li>
+    <li class="{{ 'danger' if failures }}"><a href="{{ calls_tab }}"><span class="person-tile-label">Appels</span><span class="person-tile-value">{{ calls }}</span><span class="person-tile-sub">{{ failures }} en échec</span></a></li>
+  </ul>
+
+  <section class="now-card" aria-labelledby="server-read">
+    <header class="now-card-head">
+      <h2 id="server-read">Ce qu'elle en lit</h2>
+      <p>Ce que tu as écrit pour elle : c'est ce qu'elle lit pour décider de s'en servir. <a href="{{ settings }}">Le changer</a></p>
+    </header>
+    <dl class="server-read">
+      <div><dt>À quoi il lui sert</dt><dd>{{ purpose or '—' }}</dd></div>
+      <div><dt>Quand s'en servir</dt><dd>{{ when_to_use or '—' }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="now-card" aria-labelledby="server-tools">
+    <header class="now-card-head">
+      <h2 id="server-tools">Ses outils</h2>
+      <span class="person-count now-num">{{ tools|length }}</span>
+      <p>Ce qu'il propose, et ce que tu en as décidé. Un outil ne lui sert qu'approuvé ; s'il change, il est suspendu jusqu'à ton nouvel accord. <a href="{{ tools_tab }}">Les régler</a></p>
+    </header>
+    {% if tools %}
+    <ul class="server-tools" role="list">
+      {% for t in tools %}<li><div class="server-tool-top"><code>{{ t.name }}</code><span class="now-tag {{ t.tone }}">{{ t.state }}</span></div>{% if t.what %}<p>{{ t.what }}</p>{% endif %}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge.</p>
+    {% endif %}
+  </section>
+
+  <section class="now-card" aria-labelledby="server-who">
+    <header class="now-card-head">
+      <h2 id="server-who">Pour qui, quand</h2>
+      <p>Situation par situation, si elle peut se servir de ce service : ce que donnent ses réglages et ceux de ses outils. <a href="{{ settings }}">Le changer</a></p>
+    </header>
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Pour qui, quand">
+      <table class="server-who">
+        <thead><tr><th scope="col">Situation</th><th scope="col">Elle peut s'en servir</th><th scope="col">Comment, ou pourquoi pas</th></tr></thead>
+        {% for g in situations %}
+        <tbody>
+          <tr class="server-who-moment"><th scope="rowgroup" colspan="3">{{ g.moment }}</th></tr>
+          {% for r in g.rows %}
+          <tr class="{{ 'yes' if r.yes else 'no' }}">
+            <th scope="row" title="{{ r.title }}">{{ r.label }}</th>
+            <td><span class="now-tag {{ 'ok' if r.yes }}">{{ '✓ ' if r.yes }}{{ r.said }}</span></td>
+            <td>{{ r.how }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <details class="now-card server-tech">
+    <summary>Côté technique</summary>
+    <dl class="server-facts">
+      <div><dt>{{ 'lancé ici par' if local else 'son adresse' }}</dt><dd><code class="server-address">{{ address or '—' }}</code></dd></div>
+      {% for label, value in technical %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+    </dl>
+    {% if log %}<p class="server-tech-title">La fin de sa sortie d'erreur, quand il est tombé (secrets masqués)</p><pre class="server-log">{{ log|join('\n') }}</pre>{% endif %}
+    {% if instructions %}<p class="server-tech-title">Ce que le serveur dit de lui-même (elle ne le lit jamais)</p><p class="server-said">{{ instructions }}</p>{% endif %}
+  </details>
+</div>

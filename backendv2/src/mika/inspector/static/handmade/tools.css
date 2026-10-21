@@ -127,5 +127,74 @@
   .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
 }
 
-/* Outils › Venus d'ailleurs (app/handmade/tools.py) : ce qu'on y fait, en boutons, au-dessus des services. */
-.elsewhere-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 18px; }
+/* Outils › Venus d'ailleurs (app/handmade/tools.py) : ce qu'on y fait, en boutons ; une carte par service, par app. */
+.elsewhere { display: grid; gap: 18px; }
+.elsewhere-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.elsewhere-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.elsewhere-item { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; }
+.elsewhere-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.elsewhere-name { margin: 0; font-size: 15px; font-weight: 600; }
+.elsewhere-name a { color: var(--text); text-decoration: none; }
+.elsewhere-name a:hover { color: var(--accent); }
+.elsewhere-what { margin: 0; color: var(--text); font-size: 13.5px; }
+.elsewhere-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.elsewhere-facts b { color: var(--text); }
+.elsewhere-alert { margin: 2px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); color: var(--warn);
+  font-size: 13px; }
+.elsewhere-alert a { color: inherit; font-weight: 600; }
+.elsewhere-tools { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.elsewhere-tools li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--border); }
+.elsewhere-id { color: var(--muted); font-size: 11.5px; }
+.elsewhere-id code { font-size: 11px; }
+.elsewhere-open { margin: 2px 0 0; font-size: 13px; }
+
+/* La fiche d'un service branché, « En bref » (app/handmade/servers.py) : ses tuiles, ce qu'elle en lit, ses outils. */
+.server { display: grid; gap: 18px; }
+.server-alert { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; }
+.server-alert.warn { background: var(--warn-bg); color: var(--warn); }
+.server-alert.danger { background: var(--danger-bg); color: var(--danger); }
+.server-alert a { color: inherit; font-weight: 600; }
+.person-tiles-list.server-tiles li.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.server-read { display: grid; gap: 14px; margin: 0; }
+.server-read dt { margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.server-read dd { margin: 0; font-size: 14px; line-height: 1.5; }
+.server-tools { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.server-tools li { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.server-tool-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.server-tool-top code { font-size: 13px; font-weight: 600; }
+.server-tools p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
+.server-facts { display: grid; gap: 8px; margin: 0; }
+.server-facts > div { display: grid; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
+.server-facts dt { color: var(--muted); }
+.server-facts dd { margin: 0; }
+.server-address { font-size: 12px; overflow-wrap: anywhere; }
+.server-who { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.server-who th, .server-who td { padding: 7px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  text-align: left; vertical-align: middle; }
+.server-who thead th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.server-who tbody th[scope="row"] { padding-left: 24px; font-weight: 400; white-space: nowrap; }
+.server-who-moment th { padding-top: 14px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; }
+.server-who tr.no td, .server-who tr.no th[scope="row"] { color: var(--muted); }
+.server-who td:nth-child(2) { width: 1%; white-space: nowrap; }
+.server-tech > summary { cursor: pointer; font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.server-tech .server-facts { margin-top: 12px; }
+.server-tech-title { margin: 14px 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.server-log { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; border-radius: 8px; background: var(--sunken);
+  font-size: 12px; white-space: pre-wrap; }
+.server-said { margin: 0; font-size: 13px; white-space: pre-line; }
+@media (max-width: 640px) {
+  .server-facts > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* L'en-tête de la fiche d'un service branché (handmade/outils/serveur_tete.html) */
+.fiche-head { align-items: flex-start; gap: 18px 24px; margin-bottom: 22px; }
+.fiche-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.fiche-head-side .action-bar { margin: 0; }
+.server-head { display: grid; flex: 1 1 520px; gap: 8px; min-width: 0; }
+.server-head h1 { margin: 0; }
+.server-head-what { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
+.server-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 4px; }
+.server-head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+@media (max-width: 640px) {
+  .fiche-head-side { justify-content: flex-start; }
+}

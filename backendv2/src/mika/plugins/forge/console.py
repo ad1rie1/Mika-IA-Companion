@@ -392,19 +392,20 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
         if not info.tools and not info.views:
             continue
         if app is None or not app.enabled or app.broken:
-            state, tone = ("en panne", "danger") if app is not None and app.broken else ("arrêtée", "muted")
+            state, tone = ("en panne : elle ne s'en sert pas", "danger") if app is not None and app.broken else \
+                ("arrêtée : elle ne s'en sert pas", "muted")
         elif app.promoted or not has_secrets(ctx.ports, info):
-            state, tone = "en conversation (devant qui s'occupe d'elle) et au travail", "ok"
+            state, tone = "avec sa propriétaire et quand elle travaille", "ok"
         else:
-            state, tone = "au travail ; en conversation une fois promue (elle a des secrets)", "info"
+            state, tone = "quand elle travaille ; avec sa propriétaire une fois promue (elle a des secrets)", "info"
         given = [(f"{info.name}_{tool.name}", _clip(tool.description, 300), said_args(tool.args) or "aucun")
                  for tool in info.tools]
         if info.views:
             given.append((f"{info.name}_pages", f"Lire ses pages : {', '.join(v.label for v in info.views)}.",
                           "view, params"))
         for name, what, args in given:
-            rows.append(Row((_fiche(info.name), Text(name, "mono"), Text(what), Text(args, "mono"),
-                             Badge(state, tone)),
+            rows.append(Row((_fiche(info.name, info.title or info.name), Text(name, "mono"), Text(what),
+                             Text(args, "mono"), Badge(state, tone)),
                             href=_fiche(info.name) if APP_NAME.match(info.name) else None))
     return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "arguments", "quand il sert"), tuple(rows),
                   title="Les outils de ses apps", empty="Aucune de ses apps ne lui donne d'outil.",

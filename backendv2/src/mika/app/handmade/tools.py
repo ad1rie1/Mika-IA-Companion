@@ -16,7 +16,7 @@ from markupsafe import Markup
 from mika.app.handmade import blocks
 from mika.inspector import render
 from mika.inspector.ui import UI, Drawn, env
-from mika.kernel.inspect import Fields, Ref
+from mika.kernel.inspect import Badge, Column, Fields, Note, Ref, Row, Table, Text, When
 
 #: la vue de la Forge que « Venus d'ailleurs » montre sous les services : (propriétaire, nom)
 APP_TOOLS = ("forge", "outils_apps")
@@ -36,8 +36,9 @@ class Catalogue(Drawn):
 
 
 class Elsewhere(Drawn):
-    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service, leurs réglages) en boutons, les services
-    branchés (les blocs de l'onglet), puis les outils de ses apps."""
+    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service, leurs réglages) en boutons, une carte par
+    service branché (l'onglet du plugin MCP), une carte par app et les outils qu'elle lui donne (la vue de la Forge).
+    Lus dans leurs tableaux, par le nom de leurs colonnes ; un tableau qu'il ne reconnaît pas reste tel quel."""
 
     styles = ("handmade/tools.css",)
 
@@ -45,9 +46,21 @@ class Elsewhere(Drawn):
                forms: Mapping[str, Any] | None = None) -> Any:
         links, rest = _buttons(items)
         spec = ui.inspection.find(*APP_TOOLS)
-        apps = ui.inspection.run(spec, {}, ui.when) if spec is not None else []
-        head = Markup(env.get_template("handmade/outils/ailleurs.html").render(links=links)) if links else Markup("")
-        return head + (blocks.page(ui, [*rest, *apps], query, forms=forms) or Markup(""))
+        rest += ui.inspection.run(spec, {}, ui.when) if spec is not None else []
+        shown = render.Env(when=ui.when, now=ui.now())
+        services = _table(rest, SERVED)
+        apps = _table(rest, GIVEN)
+        others = [b for b in rest if b is not services and b is not apps]
+        html = Markup(env.get_template("handmade/outils/ailleurs.html").render(
+            links=links, services=_services(services, shown) if services is not None else None,
+            apps=_apps(apps) if apps is not None else None,
+            services_empty=services.empty if services is not None else "", apps_empty=apps.empty if apps is not None else "",
+            services_caption=services.caption if services is not None else ""))
+        return html + (blocks.page(ui, others, query, forms=forms) or Markup(""))
+
+
+#: les colonnes qui font reconnaître les tableaux de la page : les services branchés, les outils de ses apps
+SERVED, GIVEN = "outils servis / proposés", "quand il sert"
 
 
 def _buttons(items: Sequence[Any]) -> tuple[list[tuple[str, str]], list[Any]]:
@@ -59,3 +72,63 @@ def _buttons(items: Sequence[Any]) -> tuple[list[tuple[str, str]], list[Any]]:
         if all(href for _t, href in links):
             return links, list(items[1:])
     return [], list(items)
+
+
+def _labels(table: Table) -> dict[str, int]:
+    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
+
+
+def _table(items: Sequence[Any], column: str) -> Table | None:
+    return next((b for b in items if isinstance(b, Table) and column in _labels(b)), None)
+
+
+def _reader(table: Table) -> Any:
+    at = _labels(table)
+
+    def cell(row: Row, label: str) -> Any:
+        i = at.get(label)
+        return row.cells[i] if i is not None and i < len(row.cells) else None
+    return cell
+
+
+def _text(value: Any) -> str:
+    if isinstance(value, Text | Badge | Ref):
+        return value.text
+    return "" if value in (None, "—") else str(value)
+
+
+def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
+    """Une carte par service : son nom, son état, à quoi il lui sert, ses outils servis, ce qui attend ton
+    regard, et sa fiche."""
+    cell = _reader(table)
+    out = []
+    for raw in table.rows:
+        row = raw if isinstance(raw, Row) else Row(tuple(raw))
+        state, served, review = cell(row, "état"), _text(cell(row, SERVED)), _text(cell(row, "à revoir"))
+        given, _, offered = served.partition("/")
+        joined = cell(row, "joint")
+        notes = [d.text for d in row.detail if isinstance(d, Note)]
+        out.append({
+            "name": _text(cell(row, "service")), "href": render.href(row.href) if row.href else "",
+            "state": _text(state), "tone": state.tone if isinstance(state, Badge) else "",
+            "purpose": _text(cell(row, "à quoi il lui sert")), "where": _text(cell(row, "où")),
+            "served": given.strip(), "offered": offered.strip(), "review": int(review) if review.isdigit() else 0,
+            "joined": render.cell(joined, shown)["text"] if isinstance(joined, When) else _text(joined),
+            "notes": notes,
+        })
+    return out
+
+
+def _apps(table: Table) -> list[dict[str, Any]]:
+    """Une carte par app : son titre, quand elle sert, et chacun des outils qu'elle lui donne."""
+    cell = _reader(table)
+    apps: dict[str, dict[str, Any]] = {}
+    for raw in table.rows:
+        row = raw if isinstance(raw, Row) else Row(tuple(raw))
+        name, state = cell(row, "app"), cell(row, GIVEN)
+        app = apps.setdefault(_text(name), {
+            "title": _text(name), "href": render.href(name) if isinstance(name, Ref) else "",
+            "state": _text(state), "tone": state.tone if isinstance(state, Badge) else "", "tools": []})
+        app["tools"].append({"name": _text(cell(row, "outil")), "what": _text(cell(row, "ce qu'il fait")),
+                             "args": _text(cell(row, "arguments"))})
+    return list(apps.values())

@@ -84,8 +84,7 @@ def _attention(s: McpState, frame: Frame | None = None) -> tuple[int, str] | Non
 
 @MCP.inspect("serveurs", title="Venus d'ailleurs", section="outils", order=40, badge=_attention,
              description="Les outils qui ne viennent pas d'elle : ceux des services que tu branches (des serveurs "
-                         "MCP), puis ceux que ses apps lui donnent. Un outil d'un service ne sert qu'une fois que tu "
-                         "l'as approuvé sur la fiche du service.")
+                         "MCP), puis ceux que ses apps lui donnent.")
 def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mcp")
     if port is None:
@@ -125,9 +124,8 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
     review = len(st.new) + len(st.changed)
     if review:
         badges.append(Badge(f"{review} outil(s) à revoir", "warn"))
-    return Head(key=key, title=key, subtitle=st.purpose, badges=tuple(badges),
-                facts=(("réglages", edit_server(key, _fiche_url(key))),
-                       ("joint", ctx.when(st.last_ok_at) if st.last_ok_at else "jamais")),
+    return Head(key=key, title=key, subtitle=st.purpose[:1].upper() + st.purpose[1:], badges=tuple(badges),
+                facts=(("réglages", edit_server(key, _fiche_url(key))),),
                 back=Ref("local", LIST, "Venus d'ailleurs"))
 
 
@@ -180,7 +178,8 @@ def _tab_state(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-def _tool_state(st: Any, remote: str) -> tuple[str, str]:
+def tool_state(st: Any, remote: str) -> tuple[str, str]:
+    """Où en est un outil d'un serveur : ce que l'opérateur en a décidé, et s'il a changé depuis (son mot, son ton)."""
     live = {t.remote: t for t in st.live}
     review = st.reviews.get(remote)
     tool = live.get(remote)
@@ -228,7 +227,7 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     live = {t.remote: t for t in st.live}
     for remote in remotes:
         tool, review = live.get(remote), st.reviews.get(remote)
-        word, tone = _tool_state(st, remote)
+        word, tone = tool_state(st, remote)
         current = review.description if review is not None else ""
         said = tool.description if tool is not None else (review.server_description if review else "")
         detail: list[Any] = [

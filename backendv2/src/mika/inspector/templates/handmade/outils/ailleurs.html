@@ -1,3 +1,67 @@
-{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons, au-dessus des services
-   branchés — le premier en avant. #}
-<div class="toolbar hm-toolbar elsewhere-actions" role="group" aria-label="Ses services">{% for text, href in links %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}</div>
+{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons ; une carte par service
+   branché (son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard) ; une carte par app et les
+   outils qu'elle lui donne. #}
+<div class="now-page elsewhere">
+  {% if links %}<div class="toolbar hm-toolbar elsewhere-actions" role="group" aria-label="Ses services">{% for text, href in links %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}</div>{% endif %}
+
+  {% if services is not none %}
+  <section class="now-card" aria-labelledby="elsewhere-services">
+    <header class="now-card-head">
+      <h2 id="elsewhere-services">Les services branchés</h2>
+      <span class="person-count now-num">{{ services|length }}</span>
+      <p>Des serveurs MCP qui lui prêtent leurs outils. Un outil ne lui sert qu'une fois que tu l'as approuvé sur la fiche du service ; s'il change, il est suspendu jusqu'à ton nouvel accord.</p>
+    </header>
+    {% if services %}
+    <ul class="elsewhere-list" role="list">
+      {% for s in services %}
+      <li class="elsewhere-item">
+        <div class="elsewhere-top">
+          <p class="elsewhere-name">{% if s.href %}<a href="{{ s.href }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</p>
+          <span class="now-tag {{ s.tone }}">{{ s.state }}</span>
+        </div>
+        {% if s.purpose %}<p class="elsewhere-what">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</p>{% endif %}
+        <p class="elsewhere-facts">
+          <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
+          {% if s.where %}<span>{{ s.where }}</span>{% endif %}
+          {% if s.joined %}<span>joint {{ s.joined }}</span>{% endif %}
+        </p>
+        {% if s.review %}<p class="elsewhere-alert">{{ s.review }} outil{{ 's' if s.review > 1 }} à revoir : nouveau{{ 'x' if s.review > 1 }} ou changé{{ 's' if s.review > 1 }} depuis ton accord. <a href="{{ s.href }}">Les regarder</a></p>{% endif %}
+        {% for n in s.notes %}<p class="elsewhere-alert">{{ n }}</p>{% endfor %}
+        {% if s.href %}<p class="elsewhere-open"><a href="{{ s.href }}">Ouvrir sa fiche →</a></p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="now-muted">{{ services_empty }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if apps is not none %}
+  <section class="now-card" aria-labelledby="elsewhere-apps">
+    <header class="now-card-head">
+      <h2 id="elsewhere-apps">Les outils de ses apps</h2>
+      <span class="person-count now-num">{{ apps|length }}</span>
+      <p>Les apps qu'elle s'est écrites lui donnent des outils : ce qu'une app déclare, et de quoi lire ses pages. Une app qui a des secrets ne lui sert avec toi qu'une fois promue, depuis sa fiche.</p>
+    </header>
+    {% if apps %}
+    <ul class="elsewhere-list" role="list">
+      {% for a in apps %}
+      <li class="elsewhere-item">
+        <div class="elsewhere-top">
+          <p class="elsewhere-name">{% if a.href %}<a href="{{ a.href }}">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</p>
+          <span class="now-tag {{ a.tone }}">{{ a.state }}</span>
+        </div>
+        <ul class="elsewhere-tools" role="list">
+          {% for t in a.tools %}<li><span class="elsewhere-what">{{ t.what[:1]|upper }}{{ t.what[1:] }}</span><span class="elsewhere-id"><code>{{ t.name }}</code>{% if t.args and t.args != 'aucun' %} · arguments <code>{{ t.args }}</code>{% endif %}</span></li>{% endfor %}
+        </ul>
+        {% if a.href %}<p class="elsewhere-open"><a href="{{ a.href }}">Ouvrir l'app →</a></p>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="now-muted">{{ apps_empty }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>

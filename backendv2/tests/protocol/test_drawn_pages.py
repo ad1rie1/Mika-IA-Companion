@@ -122,3 +122,15 @@ def test_what_she_can_do_is_a_grid_of_families_and_situations(world):  # noqa: F
     assert 'class="can-sum can-on can-start"' in memory  # sa mémoire, toute à elle quand elle répond
     assert page.count('<details class="can-family"') > 10 and page.count('type="checkbox" name="o"') > 50
     assert 'class="can-cell can-none' in page and "<b>workshop</b>" not in page  # chaque famille a son nom
+
+
+def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
+    """Outils › Venus d'ailleurs : brancher un service et leurs réglages en boutons ; une carte par service branché,
+    une par app — pas les listes génériques de la console."""
+    client, _, _ = world
+    bootstrap(client)
+    page = drawn(client, "/inspecteur/outils/serveurs")
+    actions = page.split('class="toolbar hm-toolbar elsewhere-actions"')[1].split("</div>")[0]
+    assert "Brancher un service" in actions and "Leurs réglages" in actions
+    assert "Les services branchés" in page and "Les outils de ses apps" in page
+    assert "Comprendre cette liste" not in page and "un nouveau service" not in page

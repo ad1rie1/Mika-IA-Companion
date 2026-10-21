@@ -225,6 +225,11 @@ def export(out: Path) -> list[str]:
                 urls.append(f"/inspecteur/reglages/comptes?compte={account.id}")
                 client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))
             urls += [f"/inspecteur/outils/tous?outil={quote(name, safe='')}" for name in sorted(live.kernel.registry.tools)]
+            mcp = live.kernel.ports.get("mcp")  # la fiche de chaque service branché, et ses onglets
+            for st in (mcp.statuses() if mcp is not None else ()):
+                base = f"/inspecteur/fiche/serveur/{quote(st.name, safe='')}"
+                urls += [base, *(f"{base}?onglet={v.name}" for v in live.kernel.registry.inspectors
+                                 if v.subject == "serveur")]
             ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 20))
             for episode in ended:
                 corr = quote(episode.correlation, safe="")

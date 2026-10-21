@@ -44,7 +44,10 @@
       "ClaudeInChromeDomain(localhost:3000)",
       "ClaudeInChromeDomain(127.0.0.1:8001)",
       "ClaudeInChromeDomain(127.0.0.1:8077)",
-      "ClaudeInChromeDomain(127.0.0.1:8078)"
+      "ClaudeInChromeDomain(127.0.0.1:8078)",
+      "ClaudeInChromeDomain(127.0.0.1:8079)",
+      "ClaudeInChromeDomain(127.0.0.1:8080)",
+      "ClaudeInChromeDomain(127.0.0.1:8081)"
     ]
   }
 }

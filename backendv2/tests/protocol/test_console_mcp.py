@@ -65,7 +65,10 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert client.portal.call(live.settings.mcp).servers["meteo"].token == TOKEN
     # sa fiche : le tester charge ce qu'il propose ; rien n'est servi avant l'accord
     fiche = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
-    assert "la météo et les prévisions d'une ville" in fiche and TOKEN not in fiche
+    assert "La météo et les prévisions d'une ville" in fiche and TOKEN not in fiche
+    # dessinée : « En bref » d'abord (ce qu'elle en lit, ses outils, pour qui), l'onglet « État » sous « Le détail »
+    assert all(part in fiche for part in ("En bref", "Ce qu'elle en lit", "Pour qui, quand", "Côté technique"))
+    assert "/inspecteur/fiche/serveur/meteo?onglet=etat" in fiche
     tested = submit(client, fiche, "mcp.tester")
     assert tested.status_code == 200 and "faux 1.2" in html_of(tested)
     tools_tab = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
