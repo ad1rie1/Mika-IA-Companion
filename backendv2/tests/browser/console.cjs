@@ -191,19 +191,19 @@ test('menu mobile : clavier, focus contenu, Échap et raccourci de recherche', a
 });
 
 test('rubriques mémorisées, page courante ouverte et sous-menu filtrable sans accents', async t => {
-  const page = await open(t, { file: 'reglages_fournisseurs.html' });
+  const page = await open(t, { file: 'systeme_stockage.html' });
   const group = page.locator('[data-nav-group="Mika"]');
   await group.locator('summary').click();
   await page.waitForFunction(() => sessionStorage.getItem('mika.console.nav.Mika') === 'true');
   await page.reload();
   assert.equal(await group.evaluate(el => el.open), true);
-  assert.equal(await page.locator('[data-nav-group="Réglages"]').evaluate(el => el.open), true);
+  assert.equal(await page.locator('[data-nav-group="Système"]').evaluate(el => el.open), true);
   assert.equal(await page.locator('.submenu-shell').evaluate(el => el.open), false);
   await page.locator('.submenu-toggle').click();
   const initial = await page.locator('.submenu-group').evaluateAll(els => els.map(el => el.open));
-  await page.locator('#q-menu').fill('memoire');
+  await page.locator('#q-menu').fill('evenements');
   assert.ok(await page.locator('.submenu-item:visible').count() > 0);
-  assert.match((await page.locator('.submenu-item:visible').allTextContents()).join(' '), /Mémoire/);
+  assert.match((await page.locator('.submenu-item:visible').allTextContents()).join(' '), /événements/);
   await page.locator('#q-menu').fill('aucune-page-de-ce-nom');
   assert.equal(await page.locator('[data-menu-empty]').isVisible(), true);
   await page.locator('#q-menu').fill('');
@@ -364,10 +364,10 @@ test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', a
 
 test('activité et sorties : relevé daté, erreurs prioritaires et relances adaptées', async t => {
   const page = await open(t, { file: 'decisions_en_cours.html' });
-  assert.equal(await page.getByRole('link', { name: 'Actualiser cet écran', exact: true }).isVisible(), true);
-  assert.match(await page.locator('main').textContent(), /Relevé à/);
-  assert.equal(await page.getByRole('heading', { name: 'Le travail en cours', exact: true }).isVisible(), true);
-  assert.equal(await page.getByRole('heading', { name: 'Les derniers résultats', exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole('link', { name: 'Actualiser', exact: true }).isVisible(), true);
+  assert.match(await page.locator('main').textContent(), /Relevé /);
+  assert.equal(await page.getByRole('heading', { name: 'En ce moment', exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole('heading', { name: "Ce qu'elle vient de faire", exact: true }).isVisible(), true);
   await page.getByRole('link', { name: 'Sorties à vérifier', exact: true }).click();
   const cards = page.locator('.outbox-problem');
   assert.equal(await cards.count(), 3);

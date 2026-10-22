@@ -92,6 +92,10 @@ class Lanes:
     def pending(self, lane: str) -> int:
         return self._queues[lane].qsize() + len(self._parked[lane])
 
+    def busy(self, lane: str) -> int:
+        """Combien d'épisodes cette voie exécute en ce moment (au plus sa capacité)."""
+        return self._busy.get(lane, 0)
+
     def full(self, kind: str) -> bool:
         """Une demande de ce type serait-elle refusée faute de place ?"""
         return self.pending(self.lane_of(kind)) >= self.max_pending

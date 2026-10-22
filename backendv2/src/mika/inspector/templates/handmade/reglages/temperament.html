@@ -1,0 +1,62 @@
+{# Réglages › Tempérament, son haut (app/handmade/temperament.py, ADR 0100, 0121) : la forme de son caractère (la forme
+   en place et, proposée, celle d'un profil ; chaque sommet a sa bulle, au survol ou au clavier, une seule posée
+   par-dessus tout, que le script remplit), partir d'un profil
+   (changer le sélecteur montre la différence sur la figure, static/handmade/temperament.js ; « Pré-remplir » seul met
+   ses valeurs dans le formulaire, rien n'est enregistré), ses 18 profils et leur silhouette. #}
+<section class="now-card temper" aria-labelledby="temper-title">
+  <header class="now-card-head">
+    <h2 id="temper-title">La forme de son caractère</h2>
+    <p>Ses {{ figure.count }} curseurs, famille par famille, du centre (0) au bord (1) ; l'anneau en pointillé, c'est 0,5 : comme la plupart des gens. Survole un sommet pour sa valeur.</p>
+  </header>
+  <div class="temper-body">
+    <figure class="temper-fig" data-temper='{{ data|tojson }}'>
+      <svg class="temper-figure" viewBox="-300 -300 600 600" role="img" aria-label="La forme de son tempérament">
+        <defs>{% for f in figure.families %}<path id="{{ f.id }}" d="{{ f.path }}"/>{% endfor %}</defs>
+        {% for f in figure.families %}<path class="temper-sector{{ ' tinted' if f.tinted }}" d="{{ f.sector }}"/>{% endfor %}
+        {% for r in figure.rings %}<polygon class="temper-ring{{ ' middle' if r.middle }}" points="{{ r.points }}"/>{% endfor %}
+        {% for x, y in figure.spokes %}<line class="temper-spoke" x1="0" y1="0" x2="{{ x }}" y2="{{ y }}"/>{% endfor %}
+        {% for f in figure.families %}<path class="temper-bracket" d="{{ f.bracket }}"/>{% endfor %}
+        {% for l in figure.labels %}<text class="temper-label" transform="translate({{ l.x }} {{ l.y }}) rotate({{ l.turn }})" text-anchor="{{ l.anchor }}" dy="0.35em">{{ l.text }}</text>{% endfor %}
+        {% for f in figure.families %}<text class="temper-family"><textPath href="#{{ f.id }}" startOffset="50%" text-anchor="middle">{{ f.name }}</textPath></text>{% endfor %}
+        <polygon class="temper-before{{ ' is-off' if not figure.before }}" points="{{ figure.before }}"/>
+        <polygon class="temper-shape" points="{{ figure.shape }}"/>
+        {% for p in figure.points %}<g class="temper-point" tabindex="0" data-i="{{ loop.index0 }}" aria-label="{{ p.title }}"><circle class="temper-hit" cx="{{ p.x }}" cy="{{ p.y }}" r="9"/><circle class="temper-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="4"/></g>{% endfor %}
+        <g class="temper-tip" data-temper-tip aria-hidden="true"><rect rx="7"/><text><tspan class="temper-tip-head"></tspan><tspan></tspan></text></g>
+      </svg>
+      <figcaption class="temper-legend"{% if not proposing %} hidden{% endif %} data-temper-legend><span class="temper-key shape"></span><span><span data-temper-name>{{ chosen }}</span>, proposé</span><span class="temper-key before"></span><span>aujourd'hui</span></figcaption>
+    </figure>
+    <div class="temper-side">
+      <p class="temper-now"><span class="now-muted">Son profil</span> <b>{{ now or "ajusté à la main" }}</b><span data-temper-arrow{% if not proposing %} hidden{% endif %}> <span class="now-muted">→ proposé :</span> <b data-temper-name>{{ chosen }}</b></span></p>
+      <dl class="temper-choices">{% for name in figure.choices_named %}<dt>{{ name }}</dt><dd data-temper-choice="{{ loop.index0 }}">{{ figure.choices[loop.index0] }}</dd>{% endfor %}</dl>
+      <p class="temper-marked"><span class="now-muted">Ce qui la marque le plus :</span> <span data-temper-marked>{{ figure.marked or "aucun trait nettement marqué, elle est au milieu partout" }}</span>.</p>
+      <form method="get" action="{{ page }}" class="temper-pick">
+        <label for="temper-profil">Partir d'un profil</label>
+        <div class="temper-pick-row">
+          <select id="temper-profil" name="{{ param }}">{% if not now %}<option value=""{{ ' selected' if not selected }}>Ajusté à la main (ses valeurs à elle)</option>{% endif %}{% for k, text in choices %}<option value="{{ k }}"{{ ' selected' if k == selected }}>{{ text }}</option>{% endfor %}</select>
+          <button class="btn quiet" type="submit">Pré-remplir</button>
+        </div>
+        <p class="help">Changer de profil montre la différence sur la figure. « Pré-remplir » met ses valeurs dans les curseurs dessous, et ses précisions — son chronotype et tes précisions à toi gardés. Rien n'est enregistré : ajuste, regarde l'effet, puis enregistre.</p>
+        <p class="temper-hint" data-temper-hint hidden>La figure montre ce profil ; le formulaire, lui, n'a pas changé. « Pré-remplir » pour y mettre ses valeurs.</p>
+      </form>
+      {% if proposing %}<p class="temper-proposing">Le formulaire montre le profil « {{ chosen }} ». Rien n'est enregistré. <a href="{{ reset }}">Revenir à ses valeurs</a></p>{% endif %}
+    </div>
+  </div>
+  <details class="temper-profiles">
+    <summary>Ses {{ profiles|length }} profils</summary>
+    <ul class="temper-list" role="list">
+      {% for p in profiles %}
+      <li class="{{ 'on' if p.on }}{{ ' proposed' if p.proposed }}">
+        <svg class="temper-mini" viewBox="-24 -24 48 48" aria-hidden="true"><polygon class="temper-ring" points="{{ small_rings }}"/><polygon class="temper-shape" points="{{ p.shape }}"/></svg>
+        <div class="temper-item">
+          <p><b>{{ p.label }}</b>{% if p.on %} <span class="now-tag ok">le sien</span>{% endif %}{% if p.proposed %} <span class="now-tag info">proposé</span>{% endif %}</p>
+          <p class="temper-summary">{{ p.summary }}</p>
+          <p class="temper-sets">{{ p.sets }}</p>
+          {% for n in p.notes %}<p class="temper-sets temper-note">{{ n }}</p>{% endfor %}
+        </div>
+        {% if not p.on %}<a class="btn small quiet" href="{{ p.href }}">Partir de ce profil</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  <script src="{{ PREFIX }}/static/handmade/temperament.js?v={{ ASSET_VERSION }}" defer></script>
+</section>

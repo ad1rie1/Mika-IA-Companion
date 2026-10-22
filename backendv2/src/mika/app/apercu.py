@@ -192,9 +192,11 @@ def export(out: Path) -> list[str]:
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
                         urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors if v.section == d.key]
-                    elif d.layout == "menu":  # un sous-menu : chacune de ses pages
-                        page = client.get(base, follow_redirects=True).text
-                        urls += re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
+                    elif d.layout == "menu":  # un sous-menu : chacune de ses pages (les réglages : leur annuaire)
+                        page = client.get(f"{base}/apercu" if d.key == "reglages" else base, follow_redirects=True).text
+                        found = re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page) or \
+                            re.findall(rf'href="({re.escape(base)}/[\w-]+)"', page)
+                        urls += [u for u in dict.fromkeys(found) if u not in urls]
             inspection = Inspection(live.kernel)
             for kind in ("person", "handle"):
                 for obj in client.portal.call(lambda k=kind: inspection.search(k, "", 10)):
@@ -252,7 +254,7 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/courrier/reception?compte=perso&dossier=Archives",
                      "/inspecteur/courrier/reception?q=aucun-resultat",
                      "/inspecteur/reglages/apercu?q=modele", "/inspecteur/reglages/apercu?q=memoire",
-                     "/inspecteur/reglages/apercu?q=aucun-resultat",
+                     "/inspecteur/reglages/apercu?q=aucun-resultat", "/inspecteur/reglages/temperament?profil=anxieuse",
                      "/inspecteur/outils/tous?lot=email", "/inspecteur/outils/tous?lot=email&vue_pg1=table",
                      "/inspecteur/outils/tous?lot=email&outil=email_read", "/inspecteur/outils/tous?q=aucun-resultat",
                      "/inspecteur/systeme/sorties?etat=failed", "/inspecteur/systeme/sorties?etat=done",

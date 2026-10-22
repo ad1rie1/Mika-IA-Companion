@@ -154,7 +154,7 @@ temperament:
   optimism: 0.5
   sociability: 0.6
   curiosity: 0.8
-  perseverance: 0.5
+  perseverance: 0.7
   chronotype: 0.5
   background: happy
   negativity: 0.5
@@ -164,7 +164,7 @@ temperament:
   defense: ''
   impulsivity: 0.2
   introspection: 0.9
-  empathy: 0.5
+  empathy: 0.6
   shyness: 0.5
   attachment: 0.5
   stability: 0.5

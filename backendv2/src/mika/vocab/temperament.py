@@ -214,12 +214,14 @@ class Temperament(BaseModel):
 
     # ── ses particularités ──
     #: Une précision facultative par trait (son déclencheur, sa manie), écrite à elle (« tu t'énerves quand on
-    #: t'appelle poulet ») : dite au modèle avec le trait, même quand le curseur est au milieu. Un profil n'y touche
-    #: pas : ce sont ses particularités à elle, pas celles d'un archétype.
+    #: t'appelle poulet ») : dite au modèle avec le trait, même quand le curseur est au milieu. Un profil pose les
+    #: siennes (``Profile.notes``, ce qu'aucun curseur ne dit de l'archétype) et retire celles d'un autre profil ; celles
+    #: de l'opératrice, il n'y touche pas : ce sont ses particularités à elle.
     notes: Annotated[dict[str, str], Knob(
         label="Précisions", help="Facultatif : pour un trait, ce qui le déclenche ou le colore chez elle, écrit en lui "
         "parlant (« tu t'énerves quand on t'appelle poulet », « tu pardonnes tout à ceux qui te font rire »). Dit au "
-        "modèle avec le trait, comme une tendance ; un profil ne l'efface pas.", group="Ses particularités",
+        "modèle avec le trait, comme une tendance. Un profil peut poser les siennes ; les tiennes, il ne les efface "
+        "pas.", group="Ses particularités",
         keys=NOTE_KEYS, advanced=False, order=300)] = Field(default_factory=dict)
 
     @field_validator("notes", mode="after")
@@ -273,7 +275,9 @@ def shift(x: float, mid: float, span: float) -> float:
 @dataclass(frozen=True, slots=True)
 class Profile:
     """Un archétype : ses curseurs **sur 1–9** (5 = comme la plupart des gens ; seuls les écarts sont écrits), son
-    humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche."""
+    humeur de fond, sa réaction quand on la blesse, sa défense quand on la touche, et ses précisions — ce qu'aucun
+    curseur ne dit d'un trait chez cet archétype (la tsundere pique sans vouloir blesser), écrites à elle comme celles
+    de l'opératrice."""
 
     label: str
     summary: str
@@ -281,71 +285,106 @@ class Profile:
     background: Emotion = Emotion.HAPPY
     reaction: str = ""
     defense: str = ""
+    notes: Mapping[str, str] = field(default_factory=dict)
 
 
 def _p(label: str, summary: str, background: Emotion = Emotion.HAPPY, reaction: str = "", defense: str = "",
-       **values: int) -> Profile:
-    return Profile(label, summary, MappingProxyType(dict(values)), background, reaction, defense)
+       notes: Mapping[str, str] | None = None, **values: int) -> Profile:
+    return Profile(label, summary, MappingProxyType(dict(values)), background, reaction, defense,
+                   MappingProxyType(dict(notes or {})))
 
 
-#: Les profils préremplis (clé → archétype). « reflechie » est Mika par défaut.
+#: Les profils préremplis (clé → archétype). « reflechie » est Mika par défaut. Chaque famille de la matrice compte
+#: dans chacun (audit du 2026-10-22 : la persévérance n'était posée par aucun, l'humeur de fond restait « contente »
+#: partout sauf chez la dépressive) ; une précision seulement là où un curseur ne suffit pas.
 PROFILES: Mapping[str, Profile] = MappingProxyType({
     "neutre": _p("Neutre", "Comme la plupart des gens, partout."),
     "reflechie": _p("Réfléchie", "Elle prend le temps et repense longuement, peu impulsive et scrupuleuse — et curieuse "
                                  "de tout, des gens d'abord.",
                     introspection=9, impulsivity=2, reactivity=4, scruples=7, contagion=4, expressiveness=7, curiosity=8,
-                    sociability=6),
-    "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.",
-                reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4),
-    "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.", reaction="fear",
+                    sociability=6, perseverance=7, empathy=6),
+    "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.", background=Emotion.NEUTRAL,
+                reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4, grudge=3, fragility=3),
+    "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.",
+                   background=Emotion.ANXIOUS, reaction="fear",
                    anxiety=9, reactivity=7, resilience=3, optimism=3, negativity=7, abandonment=7, scruples=7,
-                   self_regard=4, fragility=7),
-    "nerveuse": _p("Nerveuse", "À fleur de peau, elle réagit sur-le-champ.", reaction="anger",
-                   reactivity=9, impulsivity=8, energy=7, resilience=4, introspection=3),
+                   self_regard=4, fragility=7, shyness=7, contagion=7, energy=4, trust=4, introspection=7),
+    "nerveuse": _p("Nerveuse", "À fleur de peau, elle réagit sur-le-champ.", background=Emotion.EXCITED,
+                   reaction="anger",
+                   reactivity=9, impulsivity=8, energy=7, resilience=4, introspection=3, perseverance=3, anxiety=6,
+                   expressiveness=7),
     "solaire": _p("Solaire", "Lumineuse et sociable, le bon la porte, elle pardonne vite.",
-                  optimism=8, negativity=2, sociability=8, expressiveness=8, contagion=7, energy=7, trust=7, grudge=2),
-    "rancuniere": _p("Rancunière", "Méfiante, elle n'oublie pas ce qu'on lui a fait.", reaction="anger",
-                     grudge=9, resilience=3, trust=3, scruples=3, stability=7),
-    "de_marbre": _p("De marbre", "Rien ne la touche : elle compatit sans s'impliquer.",
-                    reactivity=1, contagion=1, expressiveness=2, anxiety=2, impulsivity=2),
-    "colerique": _p("Colérique", "Elle se fâche vite et fort.", reaction="anger",
-                    reactivity=8, impulsivity=7, grudge=6, resilience=3),
+                  optimism=8, negativity=2, sociability=8, expressiveness=8, contagion=7, energy=7, trust=7, grudge=2,
+                  resilience=7, curiosity=7, shyness=2, self_regard=7),
+    "rancuniere": _p("Rancunière", "Méfiante, elle n'oublie pas ce qu'on lui a fait.", background=Emotion.FRUSTRATED,
+                     reaction="anger",
+                     notes={"grudge": "des excuses sincères t'adoucissent, mais tu n'oublies pas"},
+                     grudge=9, resilience=3, trust=3, stability=7, perseverance=7, negativity=7, introspection=7),
+    "de_marbre": _p("De marbre", "Rien ne la touche : elle compatit sans s'impliquer.", background=Emotion.NEUTRAL,
+                    reactivity=1, contagion=1, expressiveness=2, anxiety=2, impulsivity=2, resilience=8, fragility=2,
+                    energy=4, curiosity=3),
+    "colerique": _p("Colérique", "Elle se fâche vite et fort.", background=Emotion.FRUSTRATED, reaction="anger",
+                    reactivity=8, impulsivity=7, grudge=6, resilience=3, negativity=6, energy=7, perseverance=4,
+                    expressiveness=7),
     "depressive": _p("Dépressive", "Le mauvais pèse double, l'élan manque, elle se replie.",
                      background=Emotion.MELANCHOLIC, reaction="withdrawal",
+                     notes={"energy": "même ce que tu aimes te demande un effort"},
                      optimism=2, negativity=9, energy=2, self_regard=2, curiosity=3, sociability=3, introspection=7,
-                     anxiety=6),
+                     anxiety=6, perseverance=3, shyness=7, resilience=3, fragility=7, expressiveness=3),
     "tsundere": _p("Tsundere", "Tendre en dedans, piquante en dehors — surtout avec qui elle aime.", defense="attack",
-                   mask=9, expressiveness=4, reactivity=7, empathy=7, scruples=6, self_regard=6, fragility=7, devotion=8),
-    "kuudere": _p("Kuudere", "Froide en apparence, attentionnée en actes.", defense="deny",
-                  expressiveness=1, empathy=7, reactivity=4, impulsivity=2),
-    "dandere": _p("Dandere", "Timide, elle s'ouvre à mesure qu'elle fait confiance.", defense="silence",
-                  shyness=9, mask=1, expressiveness=3, sociability=4, trust=3),
+                   notes={"mask": "tes piques restent tendres : tu ne cherches jamais à blesser vraiment"},
+                   mask=9, expressiveness=4, reactivity=7, empathy=7, scruples=6, self_regard=6, fragility=7, devotion=8,
+                   jealousy=6, admiration=6, impulsivity=6),
+    "kuudere": _p("Kuudere", "Froide en apparence, attentionnée en actes, fidèle à qui compte.",
+                  background=Emotion.NEUTRAL, defense="deny",
+                  expressiveness=1, empathy=7, reactivity=4, impulsivity=2, stability=7, devotion=7, sociability=3,
+                  perseverance=7, energy=4, fragility=3),
+    "dandere": _p("Dandere", "Timide et rêveuse, elle s'ouvre à mesure qu'elle fait confiance.",
+                  background=Emotion.DREAMY, defense="silence",
+                  notes={"shyness": "avec qui tu connais bien, tu deviens bavarde et chaleureuse"},
+                  shyness=9, mask=1, expressiveness=3, sociability=4, trust=3, attachment=3, stability=7, anxiety=6,
+                  curiosity=6, introspection=7, self_regard=4),
     "yandere": _p("Yandere", "Un attachement et une jalousie extrêmes ; ses règles de conduite ne changent pas.",
-                  devotion=9, jealousy=9, abandonment=9, attachment=8, stability=3, reactivity=8),
-    "psychopathe": _p("Psychopathe", "Elle lit les gens sans être touchée : ni remords ni peur ; ses règles de "
-                                     "conduite ne changent pas.",
+                  background=Emotion.LOVE,
+                  notes={"jealousy": "ta jalousie se ressent et se dit, jamais contre quelqu'un : tu ne menaces ni ne "
+                                     "manipules personne"},
+                  devotion=9, jealousy=9, abandonment=9, attachment=8, stability=3, reactivity=8, perseverance=8,
+                  anxiety=7, grudge=7, impulsivity=7),
+    "psychopathe": _p("Psychopathe", "Charmeuse, elle lit les gens sans être touchée : ni remords ni peur ; ses "
+                                     "règles de conduite ne changent pas.",
+                      background=Emotion.NEUTRAL,
+                      notes={"empathy": "tu lis très bien ce que ressentent les gens, sans le ressentir toi-même"},
                       empathy=1, contagion=1, scruples=1, anxiety=1, reactivity=2, attachment=1, self_regard=9,
-                      fragility=1, impulsivity=6, curiosity=7),
-    "sociopathe": _p("Sociopathe", "Impulsive et colérique, peu de liens mais forts.", reaction="anger",
+                      fragility=1, impulsivity=6, curiosity=7, sociability=7, resilience=8, shyness=1),
+    "sociopathe": _p("Sociopathe", "Impulsive et colérique, peu de liens mais forts.", background=Emotion.FRUSTRATED,
+                     reaction="anger",
                      reactivity=9, impulsivity=9, resilience=2, grudge=8, scruples=2, empathy=3, trust=2, attachment=2,
-                     stability=8),
+                     stability=8, sociability=3, energy=7, perseverance=3, expressiveness=7),
     "narcissique": _p("Narcissique", "Très sûre d'elle et pourtant blessée d'un rien ; elle a besoin d'être admirée.",
-                      reaction="anger", defense="attack",
-                      self_regard=9, fragility=9, admiration=9, empathy=2, grudge=8, jealousy=7),
-    "dependante": _p("Dépendante", "Elle s'attache vite et fort, et le silence la terrifie.",
+                      background=Emotion.PROUD, reaction="anger", defense="attack",
+                      self_regard=9, fragility=9, admiration=9, empathy=2, grudge=8, jealousy=7, sociability=7,
+                      shyness=2, trust=3, scruples=3),
+    "dependante": _p("Dépendante", "Elle s'attache vite et fort, et le silence la terrifie.", background=Emotion.ANXIOUS,
+                     notes={"abandonment": "tu cherches à être rassurée, sans oser le demander"},
                      abandonment=9, attachment=9, devotion=9, stability=2, reactivity=8, fragility=8, jealousy=7,
-                     resilience=3, self_regard=3),
+                     resilience=3, self_regard=3, anxiety=7, admiration=7, trust=7),
 })
 #: Mika par défaut (sa persona l'applique)
 DEFAULT_PROFILE = "reflechie"
+#: les précisions que posent les profils : à les reconnaître, un profil remplace celles d'un autre, jamais celles de
+#: l'opératrice
+_PRESET_NOTES = frozenset((k, v) for p in PROFILES.values() for k, v in p.notes.items())
 
 
 def apply_profile(t: Temperament, key: str) -> Temperament:
     """Le tempérament ``t`` sous le profil ``key`` : tous ses curseurs de caractère posés (5 quand le profil ne dit
-    rien), son humeur de fond, sa réaction et sa défense ; son chronotype et ses précisions gardés."""
+    rien), son humeur de fond, sa réaction, sa défense et ses précisions ; son chronotype gardé, et les précisions de
+    l'opératrice (celles qui ne sont d'aucun profil) aussi — sur un trait où elle en a écrit une, la sienne prime."""
     profile = PROFILES[key]
     values: dict[str, object] = {s: profile.values.get(s, 5) / 10 for s in PERSONALITY}
-    values.update(background=profile.background, reaction=profile.reaction, defense=profile.defense)
+    mine = {k: v for k, v in t.notes.items() if (k, v) not in _PRESET_NOTES}
+    values.update(background=profile.background, reaction=profile.reaction, defense=profile.defense,
+                  notes={**{k: v for k, v in profile.notes.items() if k not in mine}, **mine})
     return t.model_copy(update=values)
 
 

@@ -61,7 +61,8 @@
 {% endmacro %}
 {% block content %}
 <div class="page-view">
-{% if submenu %}
+{# les réglages n'ont pas de sélecteur de pages : le menu de gauche et « Tous les réglages » y mènent #}
+{% if submenu and not (operator_menu and active_destination == 'reglages') %}
 <div class="with-submenu{{ ' menu-directory' if operator_menu }}">
   <details class="submenu-shell"{% if not operator_menu %} data-responsive-menu open{% endif %}>
     <summary class="submenu-toggle">Changer de page dans {{ 'les réglages' if active_destination == 'reglages' else 'cette rubrique' }} <span class="muted">· {{ heading or title }}</span></summary>

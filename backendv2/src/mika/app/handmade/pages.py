@@ -9,7 +9,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import blocks, conversations, mail, nights, senses, system, tools
+from mika.app.handmade import blocks, conversations, mail, nights, running, senses, system, tools
 from mika.inspector.ui import UI, Drawn
 
 
@@ -68,8 +68,9 @@ DRAWN: dict[str, Drawn] = {
     "courrier/envoyes": Shaped(mail.box, "handmade/mail.css", forms=True),
     **{f"courrier/{t}": CARDS for t in ("brouillons", "contacts")},
     # Activité : décisions, buts, projets, dessins
-    **{f"decisions/{t}": CARDS for t in ("maintenant", "envers", "en_cours", "initiatives", "selections", "episodes",
+    **{f"decisions/{t}": CARDS for t in ("maintenant", "envers", "initiatives", "selections", "episodes",
                                           "echeances")},
+    "decisions/en_cours": Shaped(running.running, "handmade/decisions.css"),
     **{f"buts/{t}": CARDS for t in ("vivants", "clos")},
     **{f"projets/{t}": CARDS for t in ("tous", "toutes_executions", "toutes_decisions")},
     # Outils, puis Connexions extérieures

@@ -62,7 +62,9 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               ("reglages", "parametres"): "reglages/comportement",
               # le bloc Outils redessiné : la grille dit qui reçoit quoi et s'y règle ; ses apps, sous les services
               ("outils", "qui"): "outils/tous", ("outils", "texte"): "outils/tous",
-              ("outils", "outils_apps"): "outils/serveurs"}
+              ("outils", "outils_apps"): "outils/serveurs",
+              # un profil n'est qu'un préréglage du tempérament : il se choisit en haut de sa page
+              ("reglages", "profil"): "reglages/temperament"}
 
 
 #: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
@@ -308,7 +310,7 @@ class Pages:
             crumbs = [(d.label, dest_url(d.key))] + ([(group, "")] if group else []) + list(got.get("crumbs") or [])
             description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
             # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles).
-            # Le répertoire complet demeure disponible dans le sélecteur repliable.
+            # Le répertoire complet : le sélecteur repliable (Système) ; pour les réglages, « Tous les réglages ».
             family = next(((link.target, *link.also) for group in self.ui.deps.menu for link in group.items
                            if f"{d.key}/{slug}" in (link.target, *link.also)), ())
             related = [t for t in tab_list if t["href"].removeprefix(PREFIX + "/") in family]

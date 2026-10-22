@@ -78,6 +78,36 @@ class Usage:
         return self.cache_read / total if total else 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class Profile:
+    """Ce qu'un fournisseur a fait depuis un instant : le tout, rôle par rôle, et ses temps de réponse (sur ses
+    appels réussis : médiane et 95 % — un appel sur vingt a été plus lent), l'attente d'un créneau, son dernier
+    échec."""
+
+    total: Usage
+    by_role: tuple[Usage, ...]
+    median_s: float
+    slow_s: float
+    wait_avg_s: float
+    last_failure_at: int = 0
+    last_failure_role: str = ""
+
+
+def _usage(key: str, rows: list[tuple[Any, ...]]) -> Usage:
+    """Un agrégat de lignes (rôle, issue, entrée, sortie, cache lu, cache écrit, coût, durée)."""
+    n = len(rows)
+    return Usage(key, n, sum(1 for r in rows if r[1] != "ok"), sum(r[2] for r in rows), sum(r[3] for r in rows),
+                 sum(r[4] for r in rows), sum(r[5] for r in rows), float(sum(r[6] or 0.0 for r in rows)),
+                 sum(r[7] for r in rows) / n / 1e6 if n else 0.0)
+
+
+def _quantile(values: list[int], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(q * (len(ordered) - 1) + 0.5))] / 1e6
+
+
 class CallLog:
     def __init__(self, store: Any, *, keep_days: int = KEEP_DAYS) -> None:
         self.store = store
@@ -199,6 +229,28 @@ class CallLog:
             a[7] += lat
         return [Usage(k, int(a[0]), int(a[1]), int(a[2]), int(a[3]), int(a[4]), int(a[5]), float(a[6]),
                       a[7] / a[0] / 1e6 if a[0] else 0.0) for k, a in sorted(acc.items())]
+
+
+    def profile(self, backend: str, since: int) -> Profile | None:
+        """Ce que ce fournisseur a fait depuis ``since`` (``None`` : aucun appel, ou le registre n'est pas ouvert)."""
+        if not self._ready:
+            return None
+        rows = self.store.query_views(
+            select(CallRow.role, CallRow.outcome, CallRow.input_tokens, CallRow.output_tokens, CallRow.cache_read,
+                   CallRow.cache_write, CallRow.cost_usd, CallRow.latency_us, CallRow.wait_us, CallRow.at)
+            .where(CallRow.backend == backend, CallRow.at >= since).order_by(CallRow.at))
+        rows = [tuple(r) for r in rows]
+        if not rows:
+            return None
+        roles: dict[str, list[tuple[Any, ...]]] = {}
+        for r in rows:
+            roles.setdefault(r[0], []).append(r)
+        by_role = sorted((_usage(k, v) for k, v in roles.items()), key=lambda u: -u.calls)
+        answered = [r[7] for r in rows if r[1] == "ok"] or [r[7] for r in rows]
+        failed = [r for r in rows if r[1] != "ok"]
+        return Profile(_usage(backend, rows), tuple(by_role), _quantile(answered, 0.5), _quantile(answered, 0.95),
+                       sum(r[8] for r in rows) / len(rows) / 1e6, failed[-1][9] if failed else 0,
+                       failed[-1][0] if failed else "")
 
 
 def _trace(row: tuple[Any, ...]) -> LLMTrace:

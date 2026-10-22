@@ -7,11 +7,40 @@
     {% if r.help %}<p>{{ r.help }}</p>{% endif %}<a class="btn small hm-add" href="{{ r.add }}">＋ Ajouter</a></header>
   <div class="settings-records person-entries" role="list" aria-label="{{ r.label }}">
   {% for row in r.rows %}
-    <article class="settings-record" role="listitem" data-href="{{ row.edit }}">
+    <article class="settings-record{{ ' described' if row.card }}" role="listitem" data-href="{{ row.edit }}">
+      {% if row.card %}{% set c = row.card %}
+      <div class="record-top">
+        <h3 class="person-entry-title"><a href="{{ row.edit }}">{{ row.key }}</a></h3>
+        <p class="record-tags">{% for text, tone in c.tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</p>
+      </div>
+      {% if c.lead %}<p class="record-lead"><span class="record-lead-label">{{ c.lead_label }}</span><code>{{ c.lead }}</code></p>{% endif %}
+      {% if c.facts %}<dl class="record-facts">{% for label, value in c.facts %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>{% endif %}
+      {% if c.activity %}<p class="record-activity {{ c.activity_tone }}">{{ c.activity }}</p>{% endif %}
+      {% if c.detail %}{% set d = c.detail %}
+      <details class="record-detail">
+        <summary class="btn small quiet">Détail : consommation et temps de réponse</summary>
+        <div class="record-detail-body">
+          <div class="record-grid record-periods" role="table" aria-label="Sa consommation et ses temps de réponse">
+            <div class="record-grid-row head" role="row"><span role="columnheader"></span><span role="columnheader">24 dernières heures</span><span role="columnheader">7 derniers jours</span></div>
+            {% for label, day, week in d.rows %}<div class="record-grid-row" role="row"><span role="rowheader">{{ label }}</span><span role="cell">{{ day }}</span><span role="cell">{{ week }}</span></div>{% endfor %}
+          </div>
+          {% if d.roles %}
+          <p class="record-detail-title">Rôle par rôle, sur 7 jours</p>
+          <div class="record-grid record-roles" role="table" aria-label="Rôle par rôle, sur 7 jours">
+            <div class="record-grid-row head" role="row"><span role="columnheader">Rôle</span><span role="columnheader">Appels</span><span role="columnheader">En échec</span><span role="columnheader">Temps moyen</span><span role="columnheader">Jetons lus / écrits</span><span role="columnheader">Coût</span></div>
+            {% for r in d.roles %}<div class="record-grid-row" role="row"><span role="rowheader">{{ r.role }}</span><span role="cell">{{ r.calls }}</span><span role="cell">{{ r.failures }}</span><span role="cell">{{ r.avg }}</span><span role="cell">{{ r.tokens }}</span><span role="cell">{{ r.cost }}</span></div>{% endfor %}
+          </div>
+          {% endif %}
+          <p class="now-muted">{{ d.failure }} <a href="{{ d.href }}">Tous ses appels, dans Système › Appels et coûts →</a></p>
+        </div>
+      </details>
+      {% endif %}
+      {% else %}
       <h3 class="person-entry-title"><a href="{{ row.edit }}">{{ row.key if r.keyed else row.cells|first or 'Entrée ' ~ loop.index }}</a></h3>
       <p class="person-entry-facts">{% for c in row.cells %}<span><span class="k">{{ r.columns[loop.index0] }}</span> {{ c }}</span>{% endfor %}</p>
+      {% endif %}
       <div class="person-entry-more">
-        <a href="{{ row.edit }}">Modifier →</a>
+        <a class="btn small" href="{{ row.edit }}">Modifier</a>
         <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_section" value="{{ section }}">
           <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">

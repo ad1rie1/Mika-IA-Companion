@@ -205,10 +205,12 @@ def test_activity_keeps_open_work_pending_question_and_recent_failure_separate(w
     client.portal.call(seed)
     before = client.portal.call(lambda: kernel.mind.head)
     body = page(client, '/inspecteur/decisions/en_cours')
-    assert 'Relevé à' in body and 'Actualiser cet écran' in body
-    assert 'Le travail en cours' in body and 'Les attentes' in body and 'Les derniers résultats' in body
+    # dessinée (ADR 0121) : ce qu'elle fait, ce qui attend, ce qu'elle vient de faire
+    assert 'Relevé ' in body and 'Actualiser' in body and 'Sorties à vérifier' in body
+    assert 'En ce moment' in body and 'Ce qui attend' in body and "Ce qu'elle vient de faire" in body
+    assert 'Elle répond à' in body and 'Suivre cet épisode' in body
     assert '/inspecteur/episode/activity-open' in body and '/inspecteur/episode/activity-failed' in body
-    assert 'Une question attend une réponse' in body and 'Service momentanément indisponible' in body
+    assert 'Toutes les questions sans réponse' in body and 'Service momentanément indisponible' in body
     assert client.portal.call(lambda: kernel.mind.head) == before
     history = page(client, '/inspecteur/decisions/episodes?issue=failed')
     assert 'person-list' in history and 'Service momentanément indisponible' in history  # dessinée (ADR 0121)

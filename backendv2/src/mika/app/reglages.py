@@ -21,13 +21,15 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from mika.adapters.imaging.config import ImagingConfig
 from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
 from mika.adapters.imaging.models import list_image_models
-from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
+from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
 from mika.app import persona as persona_file
+from mika.app.handmade import ago
+from mika.app.handmade import temperament as temper
 from mika.app.settings import PUSH_KEY_FILE, push_key_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
 from mika.contracts import projects as projects_c
@@ -37,22 +39,16 @@ from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.inspector.pages.reglages import effect
 from mika.kernel import forms
+from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
 from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.runtime.params import Parameters
-from mika.vocab.affect import FR
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 from mika.vocab.temperament import (
-    DEFENSES,
-    PERSONALITY,
-    PROFILES,
-    REACTIONS,
     Temperament,
-    apply_profile,
-    profile_of,
 )
 
 if TYPE_CHECKING:
@@ -171,40 +167,6 @@ class PushSettings(BaseModel):
 
 
 #: les profils que la console propose d'appliquer (ADR 0100) ; « ajusté » : aucun profil exact (on a réglé à la main)
-_PROFILE_CHOICES = (("", "Ajusté à la main (aucun profil exact)"),
-                    *((key, f"{p.label} — {p.summary}") for key, p in PROFILES.items()))
-
-
-class ProfileChoice(BaseModel):
-    """Le profil de personnalité à appliquer : il pose tous les curseurs de caractère d'un coup (son chronotype
-    gardé), qu'on ajuste ensuite dans Tempérament."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    profile: Annotated[str, Knob(
-        label="Profil", help="Un archétype : tous ses curseurs de caractère d'un coup, son humeur de fond, sa réaction "
-        "quand on la blesse et sa défense quand on la touche. Son chronotype ne change pas. Ses règles de conduite non "
-        "plus (discrétion, ne pas harceler, jamais de manipulation) : un profil règle ce qu'elle ressent et comment "
-        "elle l'exprime, jamais ce qu'elle s'autorise.", choices=_PROFILE_CHOICES, advanced=False, order=10)] = ""
-
-
-def _profile_rows() -> tuple[Any, ...]:
-    """Chaque profil : ce qu'il pose (les écarts au milieu, sur 1–9)."""
-    labels = {f.path: f.label for f in forms.describe(Temperament)}
-    reactions, defenses = dict(REACTIONS), dict(DEFENSES)
-    rows = []
-    for p in PROFILES.values():
-        moved = [f"{labels.get(s, s)} {p.values[s]}" for s in PERSONALITY if s in p.values]
-        if p.reaction:
-            moved.append(f"blessée : {reactions[p.reaction]}")
-        if p.defense:
-            moved.append(f"touchée : {defenses[p.defense]}")
-        if p.background is not Temperament().background:
-            moved.append(f"humeur de fond : {FR[p.background]}")
-        rows.append((Text(p.label), Text(p.summary, clamp=300), Text(" · ".join(moved) or "5 partout", clamp=500)))
-    return tuple(rows)
-
-
 def _dump(doc: PersonaDoc) -> str:
     return yaml.safe_dump(doc.model_dump(mode="json"), allow_unicode=True, sort_keys=False, width=100)
 
@@ -212,6 +174,27 @@ def _dump(doc: PersonaDoc) -> str:
 def parameters(live: Live) -> Parameters:
     return Parameters(live.kernel, temperament=lambda: live.persona().temperament, overrides=live.settings.overrides,
                       save_overrides=live.settings.save_overrides, inputs=live.inputs, apply=live.reconfigure)
+
+
+def _count(n: int) -> str:
+    """Un nombre, ses milliers séparés : « 24 000 »."""
+    return f"{n:,}".replace(",", " ")
+
+
+def _seconds(s: float) -> str:
+    """Une durée de réponse : « 2,3 s », « 1,5 min »."""
+    if not s:
+        return "—"
+    if s < 0.1:
+        return "moins de 0,1 s"
+    return f"{s:.1f} s".replace(".", ",") if s < 60 else f"{s / 60:.1f} min".replace(".", ",")
+
+
+def _cost(usd: float) -> str:
+    """Un coût : « 1,24 $ », « moins de 0,01 $ », rien quand c'est gratuit ou non compté."""
+    if not usd:
+        return "—"
+    return f"{usd:.2f} $".replace(".", ",") if usd >= 0.01 else "moins de 0,01 $"
 
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
@@ -330,6 +313,80 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("Répondre", f"servi par « {serving} »" if serving else "aucun modèle : chaque tour échoue "
                  "proprement"), ("Fournisseurs", str(len(cfg.backends))), ("Rôles routés", str(len(cfg.routes)))]
 
+    def describe_backend(key: str, spec: BackendSpec) -> dict[str, Any]:
+        """La carte d'un fournisseur : son type, s'il la fait parler, sa connexion, son modèle, les rôles qui le
+        désignent, ses bornes en mots, et ce qu'il a fait ces dernières 24 h (le registre des appels)."""
+        cfg = settings.llm()
+        serves = [ROLE_LABELS.get(r, r) for r, name in cfg.routes.items() if name == key]
+        speaks = live.gateway.configured and live.gateway.serving(REPLY) == key
+        tags = [(KIND_LABELS.get(spec.kind, spec.kind), "info")]
+        if speaks:
+            tags.append(("la fait parler", "ok"))
+        if spec.kind == "claude_code":
+            tags.append(("clé d'API définie", "ok") if spec.auth == "cle_api" and spec.api_key else
+                        ("clé d'API manquante", "warn") if spec.auth == "cle_api" else ("son login (abonnement)", ""))
+        elif spec.kind != "ollama":
+            tags.append(("clé d'API définie", "ok") if spec.api_key else ("clé d'API manquante", "warn"))
+        if not serves:
+            said = "aucun rôle ne le désigne" + (" ; ceux qui n'ont pas de fournisseur y retombent" if speaks else "")
+        else:
+            said = ", ".join(serves[:6]) + (f" et {len(serves) - 6} autres" if len(serves) > 6 else "")
+        facts = [("Sert", f"{len(serves)} rôle{'s' if len(serves) > 1 else ''} : {said}" if serves else said),
+                 ("Contexte", f"{spec.context_tokens:,} jetons".replace(",", " ") if spec.context_tokens
+                  else "celui du modèle"),
+                 ("Réponse au plus", f"{spec.max_output_tokens:,} jetons".replace(",", " ") if spec.max_output_tokens
+                  else "ce que prévoit son type"),
+                 ("Appels en même temps", str(spec.slots) if spec.slots else "selon son type (1 en local, 4 hébergé)")]
+        where = spec.base_url or spec.host
+        if where:
+            facts.append(("Adresse", where))
+        calls = live.calls
+        now = live.kernel.mind.clock.now()
+        day = calls.profile(key, now - DAY) if calls else None
+        week = calls.profile(key, now - 7 * DAY) if calls else None
+        last = next((tr for tr in calls.recent(50) if tr.backend == key), None) if calls else None
+        if day is None:
+            activity, tone = "Aucun appel ces dernières 24 h.", ""
+        else:
+            used = day.total
+            activity = (f"{used.calls} appel{'s' if used.calls > 1 else ''} ces dernières 24 h"
+                        + (f", {used.failures} en échec" if used.failures else ", tous réussis")
+                        + f" · {_seconds(used.latency_avg_s)} en moyenne")
+            tone = "warn" if used.failures else "ok"
+        if last is not None:
+            activity += f" · dernier appel {ago(now, last.at)} ({'réussi' if last.outcome == 'ok' else 'en échec'})"
+        return {"tags": tags, "lead": spec.model or "aucun modèle choisi", "lead_label": "Modèle", "facts": facts,
+                "activity": activity, "activity_tone": tone, "detail": _detail(day, week, now)}
+
+    def _detail(day: Any, week: Any, now: int) -> dict[str, Any] | None:
+        """Le détail d'un fournisseur : sa consommation et ses temps de réponse, sur 24 h et sur 7 jours, puis rôle
+        par rôle sur 7 jours."""
+        if week is None:
+            return None
+
+        def period(prof: Any) -> list[str]:
+            if prof is None:
+                return ["0", "—", "—", "—", "—", "—", "—", "—", "—", "—"]
+            u = prof.total
+            share = f" ({u.failures * 100 // u.calls} %)" if u.failures else ""
+            return [_count(u.calls), f"{_count(u.failures)}{share}", _seconds(u.latency_avg_s),
+                    _seconds(prof.median_s), _seconds(prof.slow_s), _seconds(prof.wait_avg_s),
+                    _count(u.input_tokens), _count(u.output_tokens),
+                    f"{round(u.cache_ratio * 100)} %" if u.cache_read or u.cache_write else "—", _cost(u.cost_usd)]
+
+        labels = ("Appels", "En échec", "Temps de réponse moyen", "Temps médian", "Les plus lents (95 %)",
+                  "Attente d'un créneau", "Jetons lus", "Jetons écrits", "Lus depuis le cache", "Coût")
+        day_cells, week_cells = period(day), period(week)
+        failure = (f"Dernier échec {ago(now, week.last_failure_at)}, pour « "
+                   f"{ROLE_LABELS.get(week.last_failure_role, week.last_failure_role)} ».") \
+            if week.last_failure_at else "Aucun échec ces 7 derniers jours."
+        return {"rows": [(label, day_cells[i], week_cells[i]) for i, label in enumerate(labels)],
+                "roles": [{"role": ROLE_LABELS.get(u.key, u.key), "calls": _count(u.calls),
+                           "failures": _count(u.failures), "avg": _seconds(u.latency_avg_s),
+                           "tokens": f"{_count(u.input_tokens)} / {_count(u.output_tokens)}", "cost": _cost(u.cost_usd)}
+                          for u in week.by_role],
+                "failure": failure, "href": "/inspecteur/systeme/appels"}
+
     def who_replies() -> list[Any]:
         """Qui la fait parler : le premier fournisseur déclaré sert « répondre » d'office — la page le dit,
         pour qu'il n'y ait pas de seconde étape à deviner."""
@@ -364,27 +421,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def temperament_effect(ui: Any, t: Temperament) -> list[Any]:
         """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
         return effect(ui, params.preview_temperament(t))
-
-    async def save_profile(choice: ProfileChoice, by: str) -> list[str]:
-        """Appliquer un profil (ADR 0100) : tous ses curseurs de caractère posés dans le tempérament de sa persona,
-        journalisés comme tout réglage (le passé ne se réécrit pas)."""
-        if not choice.profile:
-            return ["Choisis un profil : « ajusté » veut dire qu'on a réglé ses curseurs à la main (Tempérament)."]
-        return await save_temperament(apply_profile(live.persona().temperament, choice.profile), by)
-
-    def profile_effect(ui: Any, choice: ProfileChoice) -> list[Any]:
-        """« Voir l'effet » d'un profil : le tempérament qu'il poserait, chaque faculté rederivée."""
-        if not choice.profile:
-            return []
-        return effect(ui, params.preview_temperament(apply_profile(live.persona().temperament, choice.profile)))
-
-    def profile_facts() -> list[tuple[str, str]]:
-        key = profile_of(live.persona().temperament)
-        return [("Profil actuel", PROFILES[key].label if key else "ajusté à la main")]
-
-    def profiles_block() -> list[Any]:
-        return [Table((Column("profil", "fit"), Column("en deux mots"), "ce qu'il pose (sur 1–9, 5 au milieu)"),
-                      _profile_rows(), title="Les profils")]
 
     async def back_to_file(by: str) -> tuple[str, str]:
         if settings.persona_yaml() is None:
@@ -624,6 +660,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         SettingsSection("modeles", "Modèles", "intelligence", LLMConfig, settings.llm, save_llm,
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
+                        describe={"backends": describe_backend},
                         pages=(
                             SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, extra=who_replies,
                                          description=(
@@ -685,19 +722,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "
                                              "coup), le retour au fichier, et l'historique de ses révisions.")),
                         )),
-        SettingsSection("profil", "Profil de personnalité", "personnage", ProfileChoice,
-                        lambda: ProfileChoice(profile=profile_of(live.persona().temperament)), save_profile, order=105,
-                        description="Des archétypes préremplis (réfléchie, anxieuse, tsundere…) : chacun pose tous les "
-                                    "curseurs du tempérament d'un coup, qu'on ajuste ensuite (ADR 0100).",
-                        facts=profile_facts, blocks=profiles_block, preview=profile_effect,
-                        pages=(SettingsPage("profil", "Profil", blocks=True, description=(
-                            "Un profil pose tous les curseurs de caractère du tempérament (son chronotype gardé), "
-                            "son humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. On "
-                            "l'ajuste ensuite curseur par curseur dans Tempérament ; le profil devient alors « ajusté ». "
-                            "La console ne va jamais tout à fait à 0 ni à 1. Ses règles de conduite ne dépendent "
-                            "d'aucun profil.")),)),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
+                        head=lambda query: temper.head(live.persona().temperament, query),
+                        prefill=lambda query: temper.prefill(live.persona().temperament, query),
                         description="Sa matrice de personnalité : des curseurs rangés en familles, une humeur de "
                                     "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
                                     "ses paramètres (Comportement), et ce qui s'écarte du milieu se dit au modèle "
@@ -708,8 +736,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "une humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. "
                             "Chaque faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
                             "curseur, mesuré en le poussant à ses deux bouts. Un trait à 0,3 ou moins, à 0,7 ou "
-                            "plus, se dit aussi au modèle (« TON TEMPÉRAMENT »). Un profil (Profil de "
-                            "personnalité) les pose tous d'un coup.")),)),
+                            "plus, se dit aussi au modèle (« TON TEMPÉRAMENT »). Un profil les pose tous d'un "
+                            "coup : choisis-le en haut, le formulaire s'ouvre sur ses valeurs, rien n'est enregistré "
+                            "avant « Enregistrer ».")),)),
         SettingsSection("notifications", "Notifications du téléphone", "canaux", PushSettings,
                         lambda: _tolerant(PushSettings, service_account=settings.push()), save_push, order=20,
                         description="Ce qu'elle écrit à quelqu'un dont l'application est fermée part par Firebase, "

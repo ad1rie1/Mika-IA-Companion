@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.vocab import temperament as T
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 CANARY_KEY = "sk-ant-api-CANARI-7f3e"
@@ -57,7 +58,11 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     r = post(client, url, backend("claude", kind="claude", model="claude-sonnet-5", api_key=CANARY_KEY))
     assert r.status_code == 200 and "« claude » enregistré" in html_of(r)
     assert CANARY_KEY not in r.text and "défini" in html_of(r)
-    assert 'class="settings-record"' in r.text and "Contexte (jetons)" in html_of(r)
+    # sa carte le dit en mots : son type, sa clé, son modèle, ce qu'il sert, ses appels
+    card = html_of(r).split('class="settings-record described"')[1].split("</article>")[0]
+    for part in ("Claude, par l'API", "clé d'API définie", "claude-sonnet-5", "Sert", "Contexte",
+                 "Aucun appel ces dernières 24 h"):
+        assert part in card, part
     # une borne dépassée : refus au champ, rien n'est gardé
     bad = post(client, url, {**backend("claude", slots="99"), "_ancienne": "claude"})
     assert bad.status_code == 400 and "doit être entre 0 et 32" in html_of(bad)
@@ -158,6 +163,38 @@ def test_temperament_sliders_rederive_the_parameters(world):  # noqa: F811
                              "background": "curious", "reactivity": "1,5"})
     # la console s'arrête à 0,1 et 0,9 (ADR 0100) : jamais tout à fait 0 ni 1
     assert out.status_code == 400 and "doit être entre 0,1 et 0,9" in html_of(out)
+
+
+def test_a_profile_prefills_the_temperament_and_saves_nothing(world):  # noqa: F811
+    """Un profil n'est qu'un préréglage du tempérament : il se choisit en haut de sa page (l'ancienne page Profil y
+    mène). ``?profil=`` ouvre le formulaire sur ses valeurs, son chronotype gardé, sans rien enregistrer ; la forme
+    de son caractère montre la proposée et celle d'aujourd'hui, et chacun des 18 profils a sa silhouette."""
+    client, live, _ = world
+    bootstrap(client)
+    url = f"{BASE}/temperament"
+
+    def slider(body: str, name: str) -> str:
+        return re.search(rf'<input type="range" name="{name}"[^>]*value="([0-9.]+)"', body).group(1)
+
+    def temperament():
+        return client.portal.call(lambda: live.kernel.mind.frame().get(self_c.PERSONA)).temperament
+
+    page = client.get(url).text
+    shown = html.unescape(page)
+    assert "La forme de son caractère" in shown and 'class="temper-figure"' in page
+    assert "Son profil" in shown and shown.count('<svg class="temper-mini"') == 18
+    assert shown.count('class="temper-point"') == len(T.SLIDERS)  # tous ses curseurs, famille par famille
+    assert "Quand on la blesse" in shown and T.PROFILES["tsundere"].notes["mask"] in shown  # ses choix, leurs précisions
+    assert 'class="temper-before"' not in page  # rien de proposé : une seule forme
+    before = temperament()
+    proposed = client.get(url, params={"profil": "anxieuse"}).text
+    assert float(slider(proposed, "anxiety")) == 0.9 and float(slider(proposed, "optimism")) == 0.3
+    assert float(slider(proposed, "chronotype")) == before.chronotype  # son chronotype, gardé
+    assert 'class="temper-before"' in proposed and "Rien n'est enregistré" in html.unescape(proposed)
+    assert temperament() == before  # rien d'enregistré
+    assert float(slider(client.get(url, params={"profil": "inconnu"}).text, "anxiety")) == before.anxiety
+    moved = client.get(f"{BASE}/profil", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"].endswith("/reglages/temperament")
 
 
 def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  # noqa: F811

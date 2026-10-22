@@ -1,0 +1,76 @@
+{# Activité › En cours (app/handmade/running.py, ADR 0121) : ce qu'elle fait maintenant, ce qui attend, ce qu'elle vient
+   de faire. Une cellule (un nom, un but) se rend par la macro commune de la console. #}
+{% from "_cells.html" import cell %}
+<div class="now-page running">
+  <section class="now-card running-now" aria-labelledby="running-now">
+    <header class="now-card-head">
+      <h2 id="running-now">En ce moment</h2>
+      <p>Relevé {{ stamp }} · <a href="{{ PREFIX }}/decisions/en_cours">Actualiser</a> · <a href="{{ PREFIX }}/systeme/sorties">Sorties à vérifier</a></p>
+    </header>
+    {% if doing %}
+    <ul class="running-doing" role="list">
+      {% for d in doing %}
+      <li class="{{ 'late' if d.late }}">
+        <p class="running-say">Elle {{ d.verb }}{% if d.who %} {{ cell(d.who) }}{% endif %}<span class="running-since">depuis {{ d.since }}</span>{% if d.late %}<span class="now-tag warn">plus long que d'habitude</span>{% endif %}</p>
+        <p class="running-meta">{{ d.kind|capitalize }}{% if d.reply %} · en réponse au <a href="{{ d.reply }}">message n° {{ d.reply_n }}</a>{% endif %} · <a href="{{ d.href }}">Suivre cet épisode →</a></p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="running-say idle">Elle ne fait rien de particulier.{% if idle_last %} <span class="running-since">Dernier épisode : {{ idle_last.kind }}{% if idle_last.who %} {{ cell(idle_last.who) }}{% endif %}, {{ idle_since }}.</span>{% endif %}</p>
+    {% endif %}
+    {% if processes %}<p class="running-background"><span class="now-muted">En arrière-plan :</span> {{ processes|join(', ') }} · <a href="{{ PREFIX }}/systeme/processus">les processus</a></p>{% endif %}
+  </section>
+
+  <section class="now-card" aria-labelledby="running-waits">
+    <header class="now-card-head"><h2 id="running-waits">Ce qui attend</h2><p>Ce qui fait la queue, ce qui attend une réponse ou ton accord.</p></header>
+    <ul class="running-ways" role="list">
+      {% for w in ways %}
+      <li>
+        <span class="running-way">{{ w.name|capitalize }}</span>
+        <span class="running-slots" aria-label="{{ w.busy }} sur {{ w.cap }} places occupées">{% for i in range(w.cap) %}<span class="running-slot{{ ' on' if i < w.busy }}"></span>{% endfor %}</span>
+        <span class="now-muted">{{ w.busy }} sur {{ w.cap }} en cours{% if w.waiting %} · <b class="running-queued">{{ w.waiting }} en file</b>{% else %} · rien en file{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="running-lists">
+      <div>
+        <h3>Questions sans réponse</h3>
+        {% if questions %}
+        <ul class="running-list" role="list">{% for q in questions %}<li>{% if q.who %}{{ cell(q.who) }}{% else %}quelqu'un{% endif %}{% if q.room %} <span class="now-muted">dans {{ q.room }}</span>{% endif %} · <span class="now-muted">{{ q.since }}{% if q.attempts %}, {{ q.attempts }} essai{{ 's' if q.attempts > 1 }}{% endif %}</span> · <a href="{{ q.href }}">le message</a></li>{% endfor %}</ul>
+        <p class="running-more"><a href="{{ PREFIX }}/fil/questions">Toutes les questions sans réponse →</a></p>
+        {% else %}<p class="now-muted">Aucune : elle a répondu à tout le monde.</p>{% endif %}
+      </div>
+      <div>
+        <h3>Actions à autoriser</h3>
+        {% if approvals %}<p><b>{{ approvals }}</b> action{{ 's' if approvals > 1 }} attend{{ 'ent' if approvals > 1 }} ton accord. <a href="{{ PREFIX }}/approbations/en_attente">Les voir →</a></p>
+        {% else %}<p class="now-muted">Aucune.</p>{% endif %}
+      </div>
+      <div>
+        <h3>Ressources réservées</h3>
+        {% if leases %}
+        <ul class="running-list" role="list">{% for l in leases %}<li>{{ l.what }} · <span class="now-muted">jusqu'à {{ l.until }}</span> · <a href="{{ l.href }}">l'épisode qui la tient</a></li>{% endfor %}</ul>
+        {% else %}<p class="now-muted">Aucune : un épisode réserve la parole avec quelqu'un, ou un atelier, le temps de finir.</p>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="now-card" aria-labelledby="running-recent">
+    <header class="now-card-head">
+      <h2 id="running-recent">Ce qu'elle vient de faire</h2>
+      <p>Ses derniers épisodes, du plus récent. <a href="{{ PREFIX }}/decisions/episodes">Tout l'historique →</a></p>
+    </header>
+    {% if recent %}
+    <ol class="running-recent" role="list">
+      {% for r in recent %}
+      <li>
+        <span class="running-ago" title="{{ r.when }}">{{ r.ago }}</span>
+        <span class="running-what"><b>{{ r.kind|capitalize }}</b>{% if r.who %} · {{ cell(r.who) }}{% endif %}{% if r.detail %}<span class="now-muted"> — {{ r.detail }}</span>{% endif %}</span>
+        <span class="now-tag {{ r.tone }}">{{ r.outcome }}</span>
+        <a class="running-open" href="{{ r.href }}">Comprendre →</a>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-muted">Aucun épisode terminé pour l'instant.</p>{% endif %}
+  </section>
+</div>

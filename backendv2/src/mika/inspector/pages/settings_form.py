@@ -47,6 +47,7 @@ from mika.kernel import forms
 from mika.kernel.clock import US
 from mika.kernel.inspect import Pager
 from mika.runtime import operations
+from mika.runtime.boundary import Failed, call
 
 SECTION = "_section"
 LOAD = "_charger"
@@ -323,10 +324,16 @@ class SettingsForms:
                                "blocks": render.blocks([*(s.blocks() if s.blocks and pg.blocks else ()),
                                                         *(pg.extra() if pg.extra else ())], env, query),
                                "preview": render.blocks(state.preview, env, query) if state.preview else []}
+        drawn = call(s.head, query, label=f"en-tête {s.key}") if s.head is not None else None
+        out["head"] = None if isinstance(drawn, Failed) else drawn
         if s.model is None:
             return out
         fields = self._fields(s, pg) if pg.form else []
-        flat = forms.flatten(current) if isinstance(current, BaseModel) else _defaults(fields)
+        # des valeurs proposées par l'adresse (un profil) : le formulaire s'ouvre sur elles, rien n'est enregistré
+        proposed = call(s.prefill, query, label=f"proposition {s.key}") if s.prefill is not None and editing is None \
+            else None
+        shown = proposed if isinstance(proposed, BaseModel) else current
+        flat = forms.flatten(shown) if isinstance(shown, BaseModel) else _defaults(fields)
         given = {**flat, **state.values}
         if editing is not None:
             out["record"] = self._record_view(s, current, editing, state, loaded, page)
@@ -394,8 +401,10 @@ class SettingsForms:
             refs = [label for _p, label in forms.references(s.model, section_flat, f.path, key)] if keyed else []
             confirm = f"Retirer « {key} » ?" + (f" Ce qui le désigne ne le pourra plus : {', '.join(refs)}."
                                                  if refs else "")
+            describe = s.describe.get(f.path)
+            card = call(describe, key, entry, label=f"carte {s.key}.{f.path}") if describe is not None else None
             rows.append({"key": key, "cells": cells, "edit": page_url(page, enregistrement=f.path, cle=key),
-                         "confirm": confirm[:600]})
+                         "confirm": confirm[:600], "card": None if isinstance(card, Failed) else card})
         return {"path": f.path, "label": f.label, "help": f.help, "keyed": keyed,
                 "columns": [i.label for i in shown] + [i.label for i in secrets_], "rows": rows,
                 "total": len(items),

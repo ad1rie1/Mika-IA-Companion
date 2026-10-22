@@ -63,9 +63,11 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
             assert r.status_code == 200 and d.label in html_of(r), (d.key, r.status_code)
             ConsoleHTML(r.text).check()
             slugs = [k.split(".", 1)[1] for k in d.builtin] + [v.name for v in views if v.section == d.key]
-            if d.layout == "menu":  # un sous-menu : chacune de ses pages
-                slugs = [u.rsplit("/", 1)[1] for u in re.findall(rf'class="submenu-item[^"]*" href="({base}/[\w-]+)"',
-                                                                 html_of(r))]
+            if d.layout == "menu":  # un sous-menu : chacune de ses pages (les réglages : leur annuaire)
+                listing = html_of(client.get(f"{base}/apercu")) if d.key == "reglages" else html_of(r)
+                found = re.findall(rf'class="submenu-item[^"]*" href="({base}/[\w-]+)"', listing) or \
+                    re.findall(rf'href="({base}/[\w-]+)"', listing)
+                slugs = list(dict.fromkeys(u.rsplit("/", 1)[1] for u in found))
                 assert len(slugs) >= 5, (d.key, slugs)
             for slug in slugs if d.layout != "stack" else ():
                 r = client.get(f"{base}/{slug}", follow_redirects=True)

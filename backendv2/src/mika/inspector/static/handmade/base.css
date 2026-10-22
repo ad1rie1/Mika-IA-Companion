@@ -26,6 +26,9 @@
 .now-tag.owner { background: var(--accent-soft); color: var(--accent); }
 .now-page .warn { color: var(--warn); }
 .now-page .danger { color: var(--danger); }
+/* sauf un bouton : plein, son texte se lit sur le rouge ; discret, il reste rouge sur fond clair */
+.now-page .btn.danger { color: var(--on-danger); }
+.now-page .btn.quiet.danger { color: var(--danger); }
 .now-tag.live { background: var(--accent-soft); color: var(--accent); }
 .now-tag.secret { background: var(--danger-bg); color: var(--danger); }
 a.now-tag:hover { color: var(--accent); text-decoration: none; }
@@ -447,6 +450,37 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .records .settings-record:first-child { padding-top: 2px; border-top: 0; }
 .records .settings-record h3 { margin: 0; }
 .records .person-entry-more form { display: inline; }
+.records .person-entry-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+/* une entrée décrite en mots (SettingsSection.describe : un fournisseur…) */
+.records .settings-record.described { gap: 8px; padding: 16px 0; }
+.record-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.record-top h3 { font-size: 16px; }
+.record-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.record-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0; }
+.record-lead-label { color: var(--muted); font-size: 12.5px; }
+.record-lead code { font-size: 15px; font-weight: 600; }
+.record-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 24px; margin: 0; }
+.record-facts > div { display: grid; gap: 1px; font-size: 13.5px; }
+.record-facts dt { color: var(--muted); font-size: 12px; }
+.record-facts dd { margin: 0; }
+.record-activity { margin: 0; padding: 7px 10px; border-radius: 8px; background: var(--sunken); color: var(--text-2); font-size: 13px; }
+.record-activity.ok { background: var(--ok-bg); color: var(--ok); }
+.record-activity.warn { background: var(--warn-bg); color: var(--warn); }
+.record-detail > summary { width: fit-content; list-style: none; cursor: pointer; }
+.record-detail > summary::-webkit-details-marker { display: none; }
+.record-detail[open] > summary { background: var(--accent-soft); color: var(--accent); }
+.record-detail-body { display: grid; gap: 12px; margin-top: 10px; padding: 12px 14px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface); }
+.record-detail-body p { margin: 0; font-size: 13px; }
+.record-detail-title { color: var(--text); font-weight: 600; }
+.record-grid { display: grid; overflow-x: auto; font-size: 13px; }
+.record-grid-row { display: grid; gap: 12px; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.record-grid-row:last-child { border-bottom: 0; }
+.record-grid-row.head { color: var(--muted); font-size: 12px; font-weight: 600; }
+.record-grid-row [role="rowheader"] { color: var(--text-2); }
+.record-periods .record-grid-row { grid-template-columns: minmax(170px, 1.4fr) 1fr 1fr; }
+.record-roles .record-grid-row { grid-template-columns: minmax(140px, 1.6fr) repeat(3, minmax(70px, .7fr)) minmax(120px, 1fr) minmax(70px, .7fr); min-width: 620px; }
+.record-grid-row [role="cell"] { font-variant-numeric: tabular-nums; }
 .hm-commands .commands { display: flex; flex-wrap: wrap; gap: 8px; }
 .hm-modes { display: inline-flex; margin-left: auto; padding: 2px; border: 1px solid var(--border); border-radius: 10px; font-size: 12.5px; }
 .hm-modes a { padding: 3px 10px; border-radius: 8px; color: var(--text-2); text-decoration: none; }
@@ -488,4 +522,74 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .fiche-head-side .action-bar { margin: 0; }
 @media (max-width: 700px) {
   .fiche-head-side { justify-content: flex-start; }
+}
+
+/* Réglages › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.
+   La forme proposée : pleine, dans l'accent (validé contre le fond, clair et sombre) ; celle d'aujourd'hui : grise, en
+   pointillé — la seconde marque qui les distingue sans la couleur. */
+:root { --temper-mark: #6544ce; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --temper-mark: #8f6fe3; } }
+:root[data-theme="dark"] { --temper-mark: #8f6fe3; }
+.temper { display: grid; gap: 14px; }
+.temper-body { display: grid; grid-template-columns: minmax(300px, 600px) minmax(0, 1fr); align-items: center; gap: 18px 32px; }
+.temper-fig { margin: 0; }
+.temper-figure { display: block; width: 100%; height: auto; overflow: visible; }
+.temper-ring { fill: none; stroke: color-mix(in srgb, var(--border) 80%, transparent); stroke-width: 1; }
+.temper-ring.middle { stroke: var(--border-strong); stroke-dasharray: 3 3; }
+.temper-spoke { stroke: color-mix(in srgb, var(--border) 70%, transparent); stroke-width: 1; }
+.temper-shape { fill: color-mix(in srgb, var(--temper-mark) 18%, transparent); stroke: var(--temper-mark); stroke-width: 2;
+  stroke-linejoin: round; }
+.temper-before { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.temper-dot { fill: var(--temper-mark); stroke: var(--surface); stroke-width: 2; }
+.temper-hit { fill: transparent; cursor: help; }
+.temper-point { outline: none; }
+.temper-point.is-on .temper-dot, .temper-point:focus .temper-dot { r: 6; }
+.temper-point:focus-visible .temper-dot { stroke: var(--text); }
+.temper-before.is-off { display: none; }
+/* la bulle d'un sommet : au survol ou au clavier, tout de suite */
+.temper-tip { opacity: 0; pointer-events: none; transition: opacity .1s; }
+.temper-tip.on { opacity: 1; }
+.temper-tip rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1; }
+.temper-tip text { fill: var(--text-2); font-size: 11.5px; }
+.temper-tip .temper-tip-head { fill: var(--text); font-weight: 600; }
+.temper-legend[hidden], .temper-hint[hidden] { display: none; }
+.temper-hint { padding: 7px 10px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 12.5px; }
+.temper-label { fill: var(--text-2); font-size: 12.5px; }
+.temper-sector { fill: none; }
+.temper-sector.tinted { fill: color-mix(in srgb, var(--text) 4%, transparent); }
+.temper-bracket { fill: none; stroke: var(--border-strong); stroke-width: 1.5; stroke-linecap: round; }
+.temper-choices { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
+.temper-choices dt { color: var(--muted); }
+.temper-choices dd { margin: 0; font-weight: 600; }
+.temper-family { fill: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.temper-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; color: var(--text-2); font-size: 12.5px; }
+.temper-key { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--temper-mark); }
+.temper-key.before { border-top: 2px dashed var(--muted); margin-left: 8px; }
+.temper-side { display: grid; gap: 12px; align-content: start; font-size: 13.5px; }
+.temper-side p { margin: 0; }
+.temper-now { font-size: 15px; }
+.temper-pick { display: grid; gap: 6px; }
+.temper-pick label { font-weight: 600; }
+.temper-pick-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.temper-pick-row select { flex: 1 1 260px; max-width: 520px; }
+.temper-pick .help { color: var(--muted); font-size: 12.5px; }
+.temper-proposing { padding: 8px 12px; border-radius: 8px; background: var(--info-bg); color: var(--info); }
+.temper-proposing a { color: inherit; font-weight: 600; }
+.temper-profiles > summary { cursor: pointer; color: var(--text-2); font-weight: 600; }
+.temper-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 14px; margin: 12px 0 0;
+  padding: 0; list-style: none; }
+.temper-list li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.temper-list li.on { border-color: color-mix(in srgb, var(--temper-mark) 45%, var(--border)); }
+.temper-list li.proposed { background: var(--info-bg); }
+.temper-mini { width: 52px; height: 52px; }
+.temper-mini .temper-shape { stroke-width: 1.5; }
+.temper-item p { margin: 0; font-size: 13px; }
+.temper-summary { color: var(--text-2); }
+.temper-sets { margin-top: 2px !important; color: var(--muted); font-size: 11.5px !important; }
+.temper-note { font-style: italic; }
+@media (max-width: 900px) {
+  .temper-body { grid-template-columns: 1fr; }
+  .temper-list li { grid-template-columns: 44px minmax(0, 1fr); }
+  .temper-list li .btn { grid-column: 2; justify-self: start; }
 }

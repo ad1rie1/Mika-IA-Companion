@@ -147,7 +147,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
   padding: 12px 18px; border: 2px solid var(--accent); border-radius: var(--radius-sm); }
 .skip-link:focus { top: 12px; }
 .eyebrow { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
-.view-description { color: var(--text-2); max-width: 85ch; }
+.view-description { color: var(--text-2); max-width: 120ch; }
 .chart-values { margin-top: 12px; }
 .chart-values > summary { cursor: pointer; color: var(--accent); padding: 6px 0; }
 .chart-values .table-block { margin-top: 10px; }
@@ -239,7 +239,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   margin-bottom: 24px; }
 .page-title { min-width: 0; }
-.page-head p { margin: 6px 0 0; color: var(--text-2); max-width: 72ch; }
+.page-head p { margin: 6px 0 0; color: var(--text-2); max-width: 120ch; }
 .page-head .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
 .head-facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-top: 10px; font-size: 13px; }
@@ -505,6 +505,10 @@ details.advanced > summary .muted { font-weight: 400; font-size: 12.5px; }
 .settings .group > legend { grid-column: 1 / -1; }
 .settings .group .field:has(textarea), .settings .group .field.mapping, .settings .group .field:has(.slider) {
   grid-column: 1 / -1; }
+/* un champ seul dans son groupe prend toute la largeur ; son aide garde une longueur de ligne lisible */
+.settings .group:not(:has(.field ~ .field)) > .field, .form-grid:not(:has(.field ~ .field)) > .field { grid-column: 1 / -1; }
+.settings .group:not(:has(.field ~ .field)) > .field select { max-width: 520px; }
+.settings .field .help { max-width: 110ch; }
 .field.mapping .mapping-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 8px 16px; margin-top: 6px; }
 .records h3, .record-form h3 { margin: 0 0 6px; font-size: 15px; }

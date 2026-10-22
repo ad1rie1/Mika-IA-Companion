@@ -38,6 +38,9 @@ Kind = Literal["claude", "claude_code", "openai", "ollama", "ollama_cloud"]
 _KINDS = (("claude", "Claude (Anthropic)"), ("claude_code", "Claude Code (la CLI, son login)"),
           ("openai", "Compatible OpenAI"), ("ollama", "Ollama (local)"), ("ollama_cloud", "Ollama Cloud"))
 _AUTHS = (("abonnement", "le login de la CLI (abonnement)"), ("cle_api", "une clé d'API Console"))
+#: le nom d'un type de fournisseur, pour un opérateur (« Ollama Cloud »)
+KIND_LABELS = {"claude": "Claude, par l'API", "claude_code": "Claude Code (la CLI)", "openai": "Compatible OpenAI",
+               "ollama": "Ollama, sur cette machine", "ollama_cloud": "Ollama Cloud"}
 
 
 class BackendSpec(BaseModel):

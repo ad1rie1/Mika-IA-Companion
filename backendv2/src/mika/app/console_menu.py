@@ -77,7 +77,7 @@ MENU = (
         MenuLink("Modèles de texte", "reglages/fournisseurs", ("reglages/roles",)),
         MenuLink("Modèles d’image", "reglages/images-fournisseurs", ("reglages/images-roles",)),
         MenuLink("Personnalité", "reglages/identite",
-                 ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document", "reglages/profil",
+                 ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document",
                   "reglages/temperament")),
         MenuLink("Configuration des plugins", "reglages/plugins"),
         MenuLink("Transcription", "reglages/transcription"),

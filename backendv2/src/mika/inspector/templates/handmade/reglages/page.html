@@ -65,6 +65,7 @@
   {{ records(r, s.csrf, s.key, action) }}
   {% endfor %}
 
+  {% if s.head %}{{ s.head }}{% endif %}
   {% if s.form %}
   {% if s.preview %}<div class="now">{{ sober(s.preview) }}</div>{% endif %}
   <form method="post" action="{{ action }}" class="form now-card hm-form">
@@ -91,7 +92,7 @@
       </form>
     {% endfor %}
     </div>
-    {% for c in s.commands if c.confirm %}<p class="now-sub">{{ c.title }} : {{ c.confirm }}</p>{% endfor %}
+    {% for c in s.commands if c.confirm %}<p class="now-sub">{{ c.title }} : {{ c.confirm[:1]|lower }}{{ c.confirm[1:] }}</p>{% endfor %}
   </div>
   {% endif %}
 

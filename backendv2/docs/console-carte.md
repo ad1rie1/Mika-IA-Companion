@@ -158,8 +158,12 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 - **Que ferait-elle ?** *(nouveau)* : pour une personne, ses lignes, ce qui la
   pousse, ce qui la retient, dans combien de temps elle agirait en moyenne ; la
   fiche d'une personne y mène.
-- **En cours** *(nouveau)* : épisodes ouverts (sorte, cible, depuis), files
-  d'attente par voie, baux tenus.
+- **En cours** (dessinée : `app/handmade/running.py`) : une phrase sur ce
+  qu'elle fait (« elle répond à Adrien depuis 12 s », ou rien et son dernier
+  épisode), ce qui tourne en arrière-plan ; ce qui attend (chaque voie, ses
+  places occupées et sa file, les questions sans réponse, les actions à
+  autoriser, les ressources réservées) ; ses huit derniers épisodes, chacun vers
+  sa page.
 - **Initiatives** : budget du jour, période réfractaire, ignorées.
 - **Ses choix**, **Épisodes** (filtres sorte/issue/cible, pagination juste),
   **Échéances**.
@@ -204,6 +208,14 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
   numéro), paginé.
 
 ### Configuration (sous-menu)
+Les pages de réglages n'ont pas de sélecteur de pages en tête : le menu de gauche et
+« Tous les réglages » (son annuaire) y mènent. Une liste d'entrées (des fournisseurs…) peut
+se décrire en mots (`SettingsSection.describe`) : un fournisseur dit son type, s'il la fait
+parler, sa clé, son modèle, les rôles qui le désignent, ses bornes en mots et ses appels des
+dernières 24 h ; son bouton « Détail » déplie sa consommation et ses temps de réponse sur 24 h et
+sur 7 jours (appels, échecs, temps moyen, médian, les plus lents, attente d'un créneau, jetons lus
+et écrits, part lue depuis le cache, coût), puis rôle par rôle (`CallLog.profile`).
+
 | Rubrique | Sous-page | Contenu |
 |---|---|---|
 | Intelligence | Fournisseurs | liste paginée ; chaque fournisseur a sa page : type, modèle (**sélecteur** chargé chez le fournisseur, même pour un fournisseur pas encore enregistré), connexion, clé ; options avancées repliées (URL, hôte, commande, créneaux, température…) ; budgets de contexte et de sortie propres au fournisseur ; échec journalisé sans basculement |
@@ -213,7 +225,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Ton et parole | ton, façons de parler, salutations (le ton de ses bonjours, jamais recopiées) |
 | | Caractère | traits, manies, fragilités, valeurs, centres d'intérêt |
 | | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
-| | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur ; **Voir l'effet** (comme pour une faculté) |
+| | Tempérament | en tête, **la forme de son caractère** (treize axes : les curseurs qui distinguent ses profils et son élan — curiosité, persévérance, énergie ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots) et **partir d'un profil** (changer le sélecteur dessine la différence sur la figure sans rien remplir, `static/handmade/temperament.js` ; « Pré-remplir », `?profil=<clé>`, ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette). Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ce que pilote chaque curseur ; **Voir l'effet**. L'ancienne page Profil y mène (`app/handmade/temperament.py`, `SettingsSection.prefill`, `head`) |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |

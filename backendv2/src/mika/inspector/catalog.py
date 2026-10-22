@@ -162,6 +162,15 @@ class SettingsSection:
     #: les listes dont le nom d'une entrée ne change plus une fois créée (ailleurs, des données le
     #: portent : les mails rangés d'une boîte) — renommer est refusé, en le disant
     fixed_names: tuple[str, ...] = ()
+    #: la carte d'une entrée de liste, dite en mots plutôt qu'en champs bruts (chemin de la liste →
+    #: ``fn(clé, entrée) -> {tags, lead, lead_label, facts, activity, activity_tone}``,
+    #: ``handmade/reglages/enregistrements.html``) ; une description en panne retombe sur ses champs
+    describe: Mapping[str, Callable[[str, Any], Mapping[str, Any]]] = field(default_factory=dict)
+    #: d'autres valeurs que celles en place, proposées par l'adresse (``fn(paramètres) -> valeur | None`` : un profil
+    #: de tempérament, ``?profil=…``) : le formulaire s'ouvre sur elles, rien n'est enregistré
+    prefill: Callable[[Mapping[str, str]], Any] | None = None
+    #: un dessin de la composition (ADR 0121), au-dessus du formulaire : ``fn(paramètres) -> HTML`` (déjà échappé)
+    head: Callable[[Mapping[str, str]], Any] | None = None
     #: « Voir l'effet » : ``preview(ui, valeur validée)`` → des blocs, rien d'écrit (absent : pas de bouton)
     preview: Callable[[Any, Any], Sequence[Any]] | None = None
 

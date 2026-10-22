@@ -3,7 +3,8 @@
 - chaque curseur pilote un paramètre d'une faculté (et se dit au modèle) ; sa réaction et sa défense aussi ;
 - au milieu, chaque dérivation redonne exactement la valeur d'avant la matrice : une vie existante ne change pas ;
 - les profils posent tous les curseurs de caractère (jamais tout à fait 0 ni 1), gardent le chronotype, se
-  reconnaissent ; Mika est livrée « Réfléchie » ;
+  reconnaissent ; leurs précisions vont et viennent avec eux, celles de l'opératrice restent ; Mika est livrée
+  « Réfléchie » ;
 - son tempérament se dit au modèle trait par trait, chacun avec sa mesure (« 90 % ») et sa phrase ;
 - une cible par famille : la rancune dure, les scrupules font naître le remords, l'anxiété fait revenir les pensées,
   l'empathie inquiète, l'impulsivité fait déborder et reprendre la parole plus tôt, le biais négatif fait peser le
@@ -211,6 +212,25 @@ def test_a_note_follows_its_trait_and_never_replaces_it():
     with pytest.raises(ValueError):
         T.Temperament(notes={"grudge": "x" * (T.NOTE_MAX + 1)})
     assert T.Temperament(notes={"grudge": "   "}).notes == {}
+
+
+def test_a_profile_brings_its_notes_and_never_touches_hers():
+    """Un profil pose ses précisions (ce qu'aucun curseur ne dit de l'archétype : la tsundere pique sans vouloir
+    blesser) et retire celles d'un autre profil ; celles de l'opératrice restent, et sur un même trait la sienne prime.
+    Elles se disent avec leur trait, comme les siennes."""
+    mine = "tu pardonnes tout à ceux qui te font rire"
+    tsundere = T.apply_profile(T.Temperament(notes={"grudge": mine}), "tsundere")
+    assert tsundere.notes == {**T.PROFILES["tsundere"].notes, "grudge": mine}
+    assert T.profile_of(tsundere) == "tsundere"
+    assert _line(tsundere, "mask").endswith(phrase("self.temperament.precisely",
+                                                   note=T.PROFILES["tsundere"].notes["mask"]))
+    calm = T.apply_profile(tsundere, "calme")
+    assert calm.notes == {"grudge": mine}  # la précision de la tsundere part avec elle
+    rancuniere = T.apply_profile(calm, "rancuniere")
+    assert "grudge" in T.PROFILES["rancuniere"].notes and rancuniere.notes == {"grudge": mine}
+    assert T.profile_of(rancuniere) == "rancuniere"
+    for p in T.PROFILES.values():  # écrites comme celles de l'opératrice : la validation les garde telles quelles
+        assert T.Temperament(notes=dict(p.notes)).notes == dict(p.notes)
 
 
 # ── une cible par famille ─────────────────────────────────────────────────
