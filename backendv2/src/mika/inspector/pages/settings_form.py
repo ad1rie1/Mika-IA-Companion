@@ -169,6 +169,12 @@ def _with_choices(f: forms.FormField, choices: Sequence[tuple[str, str]], value:
     return dataclasses.replace(f, kind="select", choices=pairs)
 
 
+def _entry_name(entry: Any) -> str:
+    """Le nom d'une entrée de liste, si elle en porte un."""
+    name = entry.get("name") if isinstance(entry, Mapping) else getattr(entry, "name", "")
+    return str(name).strip() if isinstance(name, str) else ""
+
+
 def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str],
                   prefix: str) -> dict[str, Any]:
     item = f.item[0] if f.item else None
@@ -176,8 +182,10 @@ def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[
     keys = f.keys or tuple((k, k) for k in sorted(current))
     choices: tuple[tuple[str, str], ...] = item.choices if item is not None else ()
     if f.choices_from:
+        # une entrée qui a un nom se montre sous son nom (une autrice : « Mail pro »)
         source = given.get(f.choices_from)
-        choices = tuple((str(k), str(k)) for k in sorted(source)) if isinstance(source, Mapping) else ()
+        choices = tuple((str(k), _entry_name(source[k]) or str(k)) for k in sorted(source)) \
+            if isinstance(source, Mapping) else ()
     rows = []
     for key, label in keys:
         base = item or dataclasses.replace(f, kind="text", item=())
@@ -349,6 +357,10 @@ class SettingsForms:
                     out["records"].append(self._records_view(s, f, current, page, query))
                 continue
             if f.kind == "mapping":
+                if f.path in s.keys:
+                    known = call(s.keys[f.path], label=f"clés de {s.key}.{f.path}")
+                    if not isinstance(known, Failed):
+                        f = dataclasses.replace(f, keys=tuple(known))
                 placed.append((f, _mapping_view(f, given, state.errors, prefix)))
                 continue
             if f.path in s.choices:

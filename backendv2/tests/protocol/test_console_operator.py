@@ -316,7 +316,7 @@ def test_a_failed_delivery_can_be_retried_or_marked_seen(world):  # noqa: F811
     client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
     sorties = html_of(client.get(f"{BASE}/systeme/sorties"))
     assert "Marquer comme vu" in sorties and "délai dépassé" in sorties and "TimeoutError" not in sorties
-    assert '<span class="count">1</span>' in client.get(f"{BASE}/systeme/sorties").text
+    assert re.search(r'<span class="count"[^>]*>1</span>', client.get(f"{BASE}/systeme/sorties").text)
     seen = post(client, f"{BASE}/systeme/sorties", {"cle": key, "faire": "vu"})
     assert seen.status_code == 200 and "Marqué comme vu" in html_of(seen)
     assert client.portal.call(lambda: store.outbox_status(key)) == "seen"
@@ -351,7 +351,7 @@ def test_stale_and_interrupted_effects_are_named_filtered_and_to_handle(world): 
     page = html_of(client.get(f"{BASE}/systeme/sorties"))
     assert "Périmé (pas dit)" in page and "Interrompu (à vérifier)" in page
     assert "Stale" not in page and "Interrupted" not in page
-    assert '<span class="count">2</span>' in client.get(f"{BASE}/systeme/sorties").text  # « à traiter »
+    assert re.search(r'<span class="count"[^>]*>2</span>', client.get(f"{BASE}/systeme/sorties").text)  # « à traiter »
     assert "Marquer comme vu" in page and ">Relancer</button>" not in page  # on ne relance pas une parole périmée
     filtered = html_of(client.get(f"{BASE}/systeme/sorties?etat=stale"))
     assert "État inconnu" not in filtered and "périmé (pas dit)" in filtered
@@ -393,7 +393,7 @@ def test_outbox_action_cards_follow_filter_and_paginate_without_deciding(world):
     second = html_of(client.get(f'{BASE}/systeme/sorties?etat=failed&page_problemes=2'))
     for body in (first, second):
         ConsoleHTML(body).check()
-        assert body.index('class="outbox-review') < body.index('id="pg1"')
+        assert body.index('outbox-review') < body.index('id="out-recent"')  # à traiter, puis les derniers départs
     def shown(body):
         return set(re.findall(r'name="cle" value="([^\"]+)"', body))
     assert len(shown(first)) == 8 and len(shown(second)) == 1

@@ -10,10 +10,10 @@
     <article class="settings-record{{ ' described' if row.card }}" role="listitem" data-href="{{ row.edit }}">
       {% if row.card %}{% set c = row.card %}
       <div class="record-top">
-        <h3 class="person-entry-title"><a href="{{ row.edit }}">{{ row.key }}</a></h3>
+        <h3 class="person-entry-title"><a href="{{ row.edit }}">{{ c.title or row.key }}</a>{% if c.title and c.title != row.key %} <span class="mono now-muted">{{ row.key }}</span>{% endif %}</h3>
         <p class="record-tags">{% for text, tone in c.tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</p>
       </div>
-      {% if c.lead %}<p class="record-lead"><span class="record-lead-label">{{ c.lead_label }}</span><code>{{ c.lead }}</code></p>{% endif %}
+      {% if c.lead %}<p class="record-lead"><span class="record-lead-label">{{ c.lead_label }}</span>{% if c.lead_plain %}<span class="record-lead-text">{{ c.lead }}</span>{% else %}<code>{{ c.lead }}</code>{% endif %}</p>{% endif %}
       {% if c.facts %}<dl class="record-facts">{% for label, value in c.facts %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>{% endif %}
       {% if c.activity %}<p class="record-activity {{ c.activity_tone }}">{{ c.activity }}</p>{% endif %}
       {% if c.detail %}{% set d = c.detail %}

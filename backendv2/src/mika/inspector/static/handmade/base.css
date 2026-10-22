@@ -459,6 +459,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .record-lead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0; }
 .record-lead-label { color: var(--muted); font-size: 12.5px; }
 .record-lead code { font-size: 15px; font-weight: 600; }
+.record-lead-text { color: var(--text-2); font-size: 13.5px; }
 .record-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 24px; margin: 0; }
 .record-facts > div { display: grid; gap: 1px; font-size: 13.5px; }
 .record-facts dt { color: var(--muted); font-size: 12px; }
@@ -522,6 +523,24 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .fiche-head-side .action-bar { margin: 0; }
 @media (max-width: 700px) {
   .fiche-head-side { justify-content: flex-start; }
+}
+
+/* Réglages › Autrices (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux. */
+.authors-warn { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); }
+.authors-warn a { color: inherit; font-weight: 600; }
+.authors-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.authors-row { display: grid; grid-template-columns: minmax(160px, 1.1fr) minmax(130px, .8fr) minmax(0, 2.4fr); gap: 4px 16px;
+  align-items: baseline; padding: 9px 14px; border-top: 1px solid var(--border); font-size: 13.5px; }
+.authors-row:first-child { border-top: 0; }
+.authors-row.head { background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--muted); font-size: 12px;
+  font-weight: 600; }
+.authors-row a { font-weight: 600; }
+.authors-row.off .authors-flow { color: var(--text-2); }
+.authors-flow { font-weight: 600; }
+.authors-what { color: var(--text-2); }
+@media (max-width: 720px) {
+  .authors-row { grid-template-columns: 1fr; }
+  .authors-row.head { display: none; }
 }
 
 /* Réglages › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.

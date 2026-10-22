@@ -190,7 +190,7 @@ test('menu mobile : clavier, focus contenu, Échap et raccourci de recherche', a
   await page.waitForFunction(() => !document.querySelector('.sidebar').inert);
 });
 
-test('rubriques mémorisées, page courante ouverte et sous-menu filtrable sans accents', async t => {
+test('rubriques mémorisées, page courante ouverte, sans sélecteur de pages', async t => {
   const page = await open(t, { file: 'systeme_stockage.html' });
   const group = page.locator('[data-nav-group="Mika"]');
   await group.locator('summary').click();
@@ -198,16 +198,8 @@ test('rubriques mémorisées, page courante ouverte et sous-menu filtrable sans 
   await page.reload();
   assert.equal(await group.evaluate(el => el.open), true);
   assert.equal(await page.locator('[data-nav-group="Système"]').evaluate(el => el.open), true);
-  assert.equal(await page.locator('.submenu-shell').evaluate(el => el.open), false);
-  await page.locator('.submenu-toggle').click();
-  const initial = await page.locator('.submenu-group').evaluateAll(els => els.map(el => el.open));
-  await page.locator('#q-menu').fill('evenements');
-  assert.ok(await page.locator('.submenu-item:visible').count() > 0);
-  assert.match((await page.locator('.submenu-item:visible').allTextContents()).join(' '), /événements/);
-  await page.locator('#q-menu').fill('aucune-page-de-ce-nom');
-  assert.equal(await page.locator('[data-menu-empty]').isVisible(), true);
-  await page.locator('#q-menu').fill('');
-  assert.deepEqual(await page.locator('.submenu-group').evaluateAll(els => els.map(el => el.open)), initial);
+  // le menu de gauche suffit : plus de « Changer de page dans cette rubrique »
+  assert.equal(await page.locator('.submenu-shell').count(), 0);
 });
 
 test('sans JavaScript : le menu mobile et les rubriques restent consultables', async t => {

@@ -40,6 +40,7 @@ from mika.plugins.email import (
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import Draft, addresses, reply_recipients, reply_subject, to_fill
 from mika.ports.preprocess import cite, inert
+from mika.vocab import flows
 from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase
@@ -238,7 +239,10 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     subject = args.subject or (reply_subject(parent.subject) if parent is not None else "")
     if not to or not subject:
         return ToolResult(ok=False, content=phrase("email.tools.draft.incomplete"))
-    draft = port.save_draft(Draft(id="", account=info.key, to=to, subject=subject, body=args.body, cc=cc,
+    # récrit par l'autrice de sa boîte, s'il y en a une (ADR 0124) : ce qu'elle a écrit, dans les codes de ce flux
+    about = f"{inert(parent.sender, 120)} — {inert(parent.subject, 200)}\n{cite(parent.body, 2000)}" if parent else ""
+    body = await flows.written(ctx, flows.mail(info.key), args.body, about)
+    draft = port.save_draft(Draft(id="", account=info.key, to=to, subject=subject, body=body, cc=cc,
                                   reply_to=ref, quote=args.quote and parent is not None))
     shown = port.preview(draft.id)
     # un passage à compléter n'empêche pas de proposer (on le remplira) ; tout autre blocage, si

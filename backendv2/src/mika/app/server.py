@@ -80,6 +80,7 @@ from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c
+from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc, name_of
 from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
@@ -396,7 +397,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **world},
-                                     tool_rules=settings.tool_rules_for, **deps))
+                                     tool_rules=settings.tool_rules_for, authors=settings.author_for, **deps))
 
     reconfiguring: set[asyncio.Task[None]] = set()
 
@@ -421,6 +422,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams)
+    # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
+    # journal (lu à chaque épisode : jamais le YAML)
+    settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
     # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue à chaque envoi — collée dans la
     # console, sinon le fichier ``firebase-service-account.json`` du dossier de données
     push_sender = FcmSender(lambda: settings.push() or push_key_file(data))

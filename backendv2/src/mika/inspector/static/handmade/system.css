@@ -52,9 +52,10 @@
   color: var(--muted); font-size: 12.5px; }
 .sys-health-counts .now-num { color: var(--text); font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; }
 .sys-health-counts li.warn .now-num { color: var(--warn); } .sys-health-counts li.danger .now-num { color: var(--danger); }
-.sys-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: start; gap: 12px;
+/* les tuiles d'une rangée ont la même hauteur ; le lien et « Le détail » restent en bas, sur une ligne */
+.sys-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: stretch; gap: 12px;
   margin: 0; padding: 0; list-style: none; }
-.sys-check { display: grid; align-content: start; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px;
+.sys-check { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px;
   background: var(--surface); box-shadow: inset 3px 0 0 var(--st); }
 .sys-check.tone-ok { box-shadow: none; }
 .sys-check.tone-ok .now-tag { display: none; }
@@ -62,7 +63,99 @@
 .sys-check-head h3 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; }
 .sys-check-head .sys-dot { margin-right: 0; background: var(--st); }
 .sys-check-summary { margin: 0; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
-.sys-check-more { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; font-size: 12.5px; }
-.sys-check-more details { flex-basis: 100%; }
+.sys-check-more { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: auto 0 0; font-size: 12.5px; }
+.sys-check-more details[open] { flex-basis: 100%; }
 .sys-check-more summary { cursor: pointer; color: var(--muted); }
 .sys-check-more .hm-error { margin-top: 8px; }
+
+/* Ses projections (app/handmade/system.py::projections) : une jauge, une barre par projection, la quarantaine, les
+   vues lentes. Les couleurs d'état ne servent qu'à l'état, toujours avec ses mots. */
+.sys-proj { --pt: var(--ok); }
+.sys-proj .tone-warn { --pt: var(--warn); } .sys-proj .tone-danger { --pt: var(--danger); }
+.sys-proj-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: start; gap: 18px 28px; }
+.sys-gauge { margin: 0; display: grid; justify-items: center; gap: 4px; text-align: center; color: var(--text-2); font-size: 13px; }
+.sys-gauge.tone-ok { --pt: var(--ok); } .sys-gauge.tone-warn { --pt: var(--warn); } .sys-gauge.tone-danger { --pt: var(--danger); }
+.sys-gauge svg { width: 180px; height: auto; overflow: visible; }
+.sys-gauge-track, .sys-gauge-fill { fill: none; stroke-width: 10; stroke-linecap: round; }
+.sys-gauge-track { stroke: var(--sunken); }
+.sys-gauge-fill { stroke: var(--pt); }
+.sys-gauge-num { fill: var(--text); font-family: var(--now-serif); font-size: 22px; font-weight: 600; }
+.sys-gauge figcaption b { color: var(--text); }
+.sys-proj-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px 24px; margin: 0; padding: 0;
+  list-style: none; }
+.sys-proj-row { display: grid; gap: 5px; }
+.sys-proj-row p { margin: 0; }
+.sys-proj-name { display: grid; font-size: 13.5px; }
+.sys-proj-name .mono { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sys-proj-bar { display: block; width: 100%; height: 6px; clip-path: inset(0 round 999px); background: var(--sunken); }
+.sys-proj-bar rect { fill: var(--pt); }
+.sys-proj-meta { font-size: 12px; }
+.sys-proj-ok { color: var(--ok); font-weight: 600; }
+.sys-proj-more { display: grid; gap: 6px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sys-proj-more h3 { margin: 0; font-size: 14px; }
+.sys-proj-more > p { margin: 0; font-size: 12.5px; }
+.sys-proj-errors, .sys-slow { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.sys-slow li { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(120px, 2fr) auto; align-items: center; gap: 4px 14px; }
+.sys-slow-bar { display: block; width: 100%; height: 8px; clip-path: inset(0 round 999px); background: var(--sunken); }
+.sys-slow-bar .worst { fill: color-mix(in srgb, var(--warn) 70%, transparent); }
+.sys-slow-bar .last { fill: var(--text); }
+@media (max-width: 720px) {
+  .sys-proj-body { grid-template-columns: 1fr; }
+  .sys-slow li { grid-template-columns: 1fr; }
+}
+
+/* Système › File de sortie (app/handmade/system.py::outbox) : le chemin de ce qui part, ce qui est à traiter, ce qui
+   part par sorte (une barre empilée : parti, en route, à traiter, vu), les derniers départs. */
+.sys-out-hero { display: grid; gap: 18px; }
+.sys-out-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none;
+  counter-reset: none; }
+.sys-out-flow li { position: relative; display: grid; gap: 2px; padding: 10px 14px 10px 46px; border-radius: 12px;
+  background: var(--surface-2); font-size: 12.5px; }
+.sys-out-flow li b { color: var(--text); font-size: 14px; }
+.sys-out-flow li:not(:last-child)::after { content: "→"; position: absolute; top: 50%; right: -10px; z-index: 1;
+  color: var(--muted); transform: translate(50%, -50%); }
+.sys-out-step { position: absolute; top: 50%; left: 12px; display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 50%; background: var(--sunken); color: var(--text-2); font-weight: 700; transform: translateY(-50%); }
+.sys-out-flow li.busy .sys-out-step { background: var(--info-bg); color: var(--info); }
+.sys-out-flow li.done .sys-out-step { background: var(--ok-bg); color: var(--ok); }
+.sys-out-flow li.stuck { background: var(--danger-bg); }
+.sys-out-flow li.stuck .sys-out-step { background: var(--danger); color: var(--on-danger); }
+.sys-out-family { margin: 14px 0 6px; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.sys-out-kind-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.sys-out-kind-list li { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(120px, 1.4fr) 15rem;
+  align-items: center; gap: 4px 18px; padding: 8px 0; border-top: 1px solid var(--border); }
+.sys-out-kind-list li:first-child { border-top: 0; }
+.sys-out-kind-list p { margin: 0; }
+.sys-out-kind-name { display: grid; gap: 1px; font-size: 13.5px; }
+.sys-out-kind-name .now-muted { font-size: 12px; }
+.sys-out-kind-n { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12.5px; }
+.sys-out-kind-n .now-num { color: var(--text); font-size: 15px; }
+.sys-out-bar { display: block; width: 100%; height: 8px; clip-path: inset(0 round 999px); background: var(--sunken); }
+.seg-done { fill: color-mix(in srgb, var(--ok) 75%, transparent); background: color-mix(in srgb, var(--ok) 75%, transparent); }
+.seg-route { fill: var(--info); background: var(--info); }
+.seg-stuck { fill: var(--danger); background: var(--danger); }
+.seg-seen { fill: var(--border-strong); background: var(--border-strong); }
+.sys-out-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 12px 0 0; color: var(--text-2); font-size: 12px; }
+.sys-out-legend i { display: inline-block; width: 12px; height: 8px; margin-right: 6px; border-radius: 3px; vertical-align: 0; }
+.sys-out-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.sys-out-chips a { padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-2);
+  font-size: 12.5px; text-decoration: none; }
+.sys-out-chips a.on { border-color: var(--accent); background: var(--accent-bg, color-mix(in srgb, var(--accent) 12%, transparent));
+  color: var(--text); font-weight: 600; }
+.sys-out-chips a.danger { color: var(--danger); } .sys-out-chips a.warn { color: var(--warn); }
+.sys-out-chips .now-num { margin-left: 2px; font-weight: 600; }
+.sys-out-recent-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-out-recent-list li { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: baseline; gap: 4px 14px;
+  padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.sys-out-recent-list li:first-child { border-top: 0; }
+.sys-out-when { color: var(--muted); font-size: 12px; }
+.sys-out-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.sys-out-err { flex-basis: 100%; overflow: hidden; color: var(--text-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sys-out-ev { color: var(--muted); font-size: 12px; }
+@media (max-width: 900px) {
+  .sys-out-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sys-out-flow li::after { display: none; }
+  .sys-out-kind-list li { grid-template-columns: 1fr; }
+  .sys-out-recent-list li { grid-template-columns: 1fr auto; }
+  .sys-out-when { grid-column: 1 / -1; }
+}

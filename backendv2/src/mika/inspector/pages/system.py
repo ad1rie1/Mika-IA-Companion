@@ -416,9 +416,9 @@ async def anomalies(ui: Any, request: Request) -> list[Any]:
 
 @TABS.tab("systeme.sorties", title="File de sortie", group="Surveillance",
           badge=lambda ui: _outbox_problems(ui),
-          description="La file de sortie : chaque effet visible (une réponse livrée, un mail envoyé) part après son "
-                      "écriture au journal. Ce qui attend, ce qui n'a pas pu partir, ce qui n'a trouvé personne pour "
-                      "l'exécuter.")
+          description="Ce qui part d'elle vers les écrans et les services — ses messages, ce que montrent ses "
+                      "écrans, ses actions (un mail, une réponse Teams…) — après son écriture au journal. Ce qui n'a "
+                      "pas pu partir t'attend ici.")
 async def sorties(ui: Any, request: Request) -> Any:
     store = ui.kernel.mind.store
     o = JournalOutbox

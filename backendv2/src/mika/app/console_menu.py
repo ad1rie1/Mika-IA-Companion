@@ -78,7 +78,7 @@ MENU = (
         MenuLink("Modèles d’image", "reglages/images-fournisseurs", ("reglages/images-roles",)),
         MenuLink("Personnalité", "reglages/identite",
                  ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document",
-                  "reglages/temperament")),
+                  "reglages/temperament", "reglages/autrices")),
         MenuLink("Configuration des plugins", "reglages/plugins"),
         MenuLink("Transcription", "reglages/transcription"),
         MenuLink("Paramètres avancés", "reglages/comportement"),

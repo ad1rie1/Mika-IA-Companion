@@ -61,11 +61,11 @@
   {% endif %}
 
   {% if not s.record %}
+  {% if s.head %}{{ s.head }}{% endif %}
   {% for r in s.records %}
   {{ records(r, s.csrf, s.key, action) }}
   {% endfor %}
 
-  {% if s.head %}{{ s.head }}{% endif %}
   {% if s.form %}
   {% if s.preview %}<div class="now">{{ sober(s.preview) }}</div>{% endif %}
   <form method="post" action="{{ action }}" class="form now-card hm-form">

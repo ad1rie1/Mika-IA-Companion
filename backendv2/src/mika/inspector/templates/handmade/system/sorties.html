@@ -1,0 +1,78 @@
+{# Système › File de sortie, dessinée (app/handmade/system.py::outbox) : à quoi elle sert et le chemin de ce qui part
+   (du journal au départ), ce qui est à traiter (relancer, marquer comme vu), ce qui part par sorte, les derniers
+   départs (filtrés par état). #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page person-tab sys">
+  {% if unknown %}<div class="flash warn" role="status">État inconnu : affichage de tous les départs.</div>{% endif %}
+  <section class="now-card sys-health sys-out-hero tone-{{ tone }}" aria-labelledby="out-title">
+    <div class="sys-health-main">
+      <p class="now-eyebrow">Ce qui part d'elle</p>
+      <h2 id="out-title">{% if stuck_total %}{{ stuck_total }} départ{{ 's' if stuck_total > 1 }} à vérifier{% elif route %}{{ route }} en route, rien de bloqué{% else %}Tout ce qu'elle dit et fait est bien parti{% endif %}</h2>
+      <p class="now-sub">Quand elle parle, s'endort, bouge dans son monde, envoie un mail ou répond dans Teams, c'est d'abord écrit dans son journal, puis ça part d'ici vers les écrans et les services. Un départ qui échoue est réessayé tout seul ({{ attempts }} fois au plus, de {{ base_s }} s à {{ max_min }} min d'écart) ; une parole qui n'a pas pu partir en {{ stale_min }} min ne part plus. Tu n'as à t'en occuper que si quelque chose reste coincé.</p>
+    </div>
+    <ol class="sys-out-flow" aria-label="Le chemin de ce qui part">
+      <li><span class="sys-out-step" aria-hidden="true">1</span><b>Écrit au journal</b><span class="now-muted">rien ne part avant</span></li>
+      <li class="{{ 'busy' if route }}"><span class="sys-out-step" aria-hidden="true">2</span><b>{{ route }} en route</b><span class="now-muted">en attente ou en cours d'envoi</span></li>
+      <li class="done"><span class="sys-out-step" aria-hidden="true">3</span><b>{{ done }} parti{{ 's' if done > 1 }}</b><span class="now-muted">gardés 30 jours</span></li>
+      <li class="{{ 'stuck' if stuck_total }}"><span class="sys-out-step" aria-hidden="true">!</span><b>{{ stuck_total }} à traiter</b><span class="now-muted">{% if seen %}et {{ seen }} vu{{ 's' if seen > 1 }}, laissé{{ 's' if seen > 1 }}{% else %}coincés après leurs essais{% endif %}</span></li>
+    </ol>
+  </section>
+
+  {% if stuck %}
+  <section class="now-card outbox-review hm-outbox sys-out-stuck" aria-labelledby="out-stuck">
+    <header class="now-card-head"><h2 id="out-stuck">À traiter</h2><span class="person-count now-num">{{ chosen_total }}</span><p>Ce qui n'a pas pu partir, du plus récent. « Relancer » refait un essai tout de suite ; « Marquer comme vu » garde la trace et éteint le signalement.</p></header>
+    <ul class="hm-outbox-list" role="list">
+      {% for p in stuck %}
+      <li class="st-{{ p.tone }}">
+        <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ p.name }}</p><span class="now-tag {{ p.tone }}">{{ p.state }}</span></div><span class="person-entry-time">{{ p.when }} · <a href="{{ PREFIX }}/evenement/{{ p.seq }}">événement n° {{ p.seq }}</a></span></div>
+        <p class="now-sub">{{ p.hint }}</p>
+        {% if p.error %}<pre class="hm-error">{{ p.error }}</pre>{% endif %}
+        <form method="post" action="{{ PREFIX }}/systeme/sorties" class="outbox-actions">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
+          <input type="hidden" name="_retour" value="{{ back }}">
+          {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.name }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
+          <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if chosen_total > stuck|length %}{{ pages(stuck_pager) }}{% endif %}
+  </section>
+  {% endif %}
+
+  <section class="now-card sys-out-kinds" aria-labelledby="out-kinds">
+    <header class="now-card-head"><h2 id="out-kinds">Ce qui part, par sorte</h2><p>Ce que la file garde : les départs réussis des 30 derniers jours, et tout ce qui n'est pas parti.</p></header>
+    {% if families %}
+    {% for f in families %}
+    <h3 class="sys-out-family">{{ f.title }}</h3>
+    <ul class="sys-out-kind-list" role="list">
+      {% for r in f.rows %}
+      <li>
+        <p class="sys-out-kind-name"><b>{{ r.name }}</b><span class="now-muted">{{ r.what }}</span></p>
+        <svg class="sys-out-bar" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{{ r.bar }}">{% for g in r.segments %}<rect class="seg-{{ g.key }}" x="{{ g.x }}" width="{{ g.w }}" height="8"/>{% endfor %}</svg>
+        <p class="sys-out-kind-n"><b class="now-num">{{ r.total }}</b>{% if r.stuck %} <span class="now-tag danger">{{ r.stuck }} à traiter</span>{% endif %}<span class="now-muted">{{ ('dernier ' ~ r.last) if r.last else '' }}</span></p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+    <p class="sys-out-legend" aria-hidden="true"><span><i class="seg-done"></i>parti</span><span><i class="seg-route"></i>en route</span><span><i class="seg-stuck"></i>à traiter</span><span><i class="seg-seen"></i>vu, laissé</span></p>
+    {% else %}<p class="now-muted">La file est vide : rien n'est parti depuis 30 jours.</p>{% endif %}
+  </section>
+
+  <section class="now-card sys-out-recent" aria-labelledby="out-recent">
+    <header class="now-card-head"><h2 id="out-recent">Les derniers départs</h2><p>Du plus récent{% if filtered %}, « {{ filtered }} » seulement{% endif %}. Chacun mène à l'événement qui l'a fait partir.</p></header>
+    <nav class="sys-out-chips" aria-label="Filtrer par état">{% for c in chips %}<a class="{{ 'on' if c.on }} {{ c.tone or '' }}" href="{{ c.href }}"{% if c.on %} aria-current="page"{% endif %}>{{ c.label }} <span class="now-num">{{ c.n }}</span></a>{% endfor %}</nav>
+    {% if recent %}
+    <ol class="sys-out-recent-list" role="list">
+      {% for r in recent %}
+      <li class="tone-{{ r.tone }}">
+        <span class="sys-out-when">{{ r.when }}</span>
+        <span class="sys-out-what"><b>{{ r.name }}</b>{% if not r.plain %} <span class="now-tag {{ r.tone }}">{{ r.state }}</span>{% endif %}{% if r.attempts > 1 %} <span class="now-muted">· {{ r.attempts }} essais</span>{% endif %}{% if r.error and not r.plain %}<span class="sys-out-err">{{ r.error }}</span>{% endif %}</span>
+        <a class="sys-out-ev" href="{{ PREFIX }}/evenement/{{ r.seq }}" title="{{ r.tech }}">n° {{ r.seq }}</a>
+      </li>
+      {% endfor %}
+    </ol>
+    {{ pages(pager) }}
+    {% else %}<p class="now-muted">Rien {{ 'dans cet état' if filtered else 'dans la file' }}.</p>{% endif %}
+  </section>
+</div>

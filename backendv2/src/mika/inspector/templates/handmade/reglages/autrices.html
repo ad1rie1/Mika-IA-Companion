@@ -1,0 +1,20 @@
+{# Réglages › Autrices, son haut (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux — qui, ce
+   qu'elle récrit, ce qui l'en empêcherait. Les autrices et le flux de chacune se règlent dessous. #}
+<section class="now-card authors" aria-labelledby="authors-title">
+  <header class="now-card-head">
+    <h2 id="authors-title">Où elles écrivent</h2>
+    <p>Une autrice récrit ce qui part dans son flux, selon ses codes : le sens reste celui du premier jet, la forme change. {{ writing }} flux sur {{ rows|length }} en ont une ; les autres partent tels que le modèle les a écrits.{% if served %} Toutes écrivent avec « {{ served }} ».{% endif %}</p>
+  </header>
+  {% if not served %}<p class="authors-warn">Aucun modèle ne sert le rôle « rendre naturel » : aucune autrice n'écrit, tout part en premier jet. <a href="{{ roles }}">Le choisir dans Qui sert quoi →</a></p>{% endif %}
+  <div class="authors-grid" role="table" aria-label="Où écrit chaque autrice">
+    <div class="authors-row head" role="row"><span role="columnheader">Flux</span><span role="columnheader">Autrice</span><span role="columnheader">Ce qu'elle récrit</span></div>
+    {% for r in rows %}
+    <div class="authors-row{{ ' off' if not r.author }}" role="row">
+      <span role="rowheader" class="authors-flow">{{ r.label }}</span>
+      <span role="cell">{% if r.author %}<a href="{{ r.href }}">{{ r.author.name }}</a>{% else %}<span class="now-muted">aucune : le premier jet part</span>{% endif %}</span>
+      <span role="cell" class="authors-what">{{ r.what }}{% if r.note %} <span class="now-tag warn">{{ r.note }}</span>{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="person-tab-note">Pour changer qui écrit où : « Qui écrit où », plus bas. Le mode pro n'a jamais d'autrice ; un flux sans autrice part en premier jet.</p>
+</section>

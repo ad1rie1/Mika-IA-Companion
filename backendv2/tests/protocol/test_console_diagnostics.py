@@ -71,7 +71,9 @@ def test_health_prioritizes_failed_checks_keeps_details_and_links_without_action
     assert 'href="/inspecteur/systeme/sorties"' in body and 'href="/inspecteur/systeme/processus"' in body
     assert "<summary>Le détail</summary>" in body and "Erreur de livraison" in body
     assert "<script>alert(1)</script>" not in client.get("/inspecteur/systeme/sante").text
-    assert "Sonde publique" in body and "Projections et performances" in body
+    # ses projections, dessinées : une jauge (combien sont à jour), une ligne par projection
+    assert "Sonde publique" in body and "Ses projections" in body and 'class="sys-gauge' in body
+    assert body.count('class="sys-proj-row') == len(live.kernel.registry.projectors)
     assert live.kernel.mind.head == before
 
 

@@ -27,8 +27,10 @@ from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
+from mika.app import authors as authors_m
 from mika.app import persona as persona_file
 from mika.app.handmade import ago
+from mika.app.handmade import authors as drawn_authors
 from mika.app.handmade import temperament as temper
 from mika.app.settings import PUSH_KEY_FILE, push_key_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
@@ -418,6 +420,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     async def save_temperament(t: Temperament, by: str) -> list[str]:
         return await save_persona(live.persona().model_copy(update={"temperament": t}), by)
 
+    # ── ses autrices (ADR 0124) ──
+    def author_flows() -> list[tuple[str, str]]:
+        return authors_m.flow_list(settings.email())
+
+    def polish_served() -> str:
+        return live.gateway.serving(str(Role.POLISH)) if live.gateway.configured else ""
+
+    async def save_authors(cfg: authors_m.Authors, by: str) -> list[str]:
+        await settings.save_authors(cfg)
+        return []
+
     def temperament_effect(ui: Any, t: Temperament) -> list[Any]:
         """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
         return effect(ui, params.preview_temperament(t))
@@ -722,6 +735,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "
                                              "coup), le retour au fichier, et l'historique de ses révisions.")),
                         )),
+        SettingsSection("autrices", "Autrices", "personnage", authors_m.Authors, settings.authors, save_authors,
+                        order=120,
+                        head=lambda query: drawn_authors.head(settings.authors(), author_flows(),
+                                                              served=polish_served(),
+                                                              teams_on=settings.teams().enabled),
+                        describe={"authors": lambda key, entry: drawn_authors.describe(
+                            key, entry, settings.authors(), dict(author_flows()))},
+                        keys={"flows": author_flows},
+                        description="Qui récrit ce qui part, et où (ADR 0124) : une autrice par flux — le chat, chaque "
+                                    "boîte mail, Teams, le téléphone —, chacune avec ses codes d'écriture. Le sens "
+                                    "reste celui du premier jet, la forme change. Toutes écrivent par le modèle du "
+                                    "rôle « rendre naturel »."),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
                         head=lambda query: temper.head(live.persona().temperament, query),

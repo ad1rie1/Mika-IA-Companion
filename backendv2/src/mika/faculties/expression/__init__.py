@@ -44,7 +44,7 @@ from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, LAST, unlabel
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
-from mika.vocab import reading, voice
+from mika.vocab import flows, reading, voice
 from mika.vocab.affect import Declared, Emotion, parse_tag
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
@@ -593,10 +593,12 @@ _SPEAKER = re.compile(r"^\**([^:*\n]{1,24}?)\**\s*:\s*(.*)$")
 
 
 def polish(draft: str, messages: Sequence[Any], heard: str = "",
-           persona: Any = None) -> tuple[str, str, Callable[[str], str]] | None:
+           persona: Any = None, author: Any = None) -> tuple[str, str, Callable[[str], str]] | None:
     """La seconde passe sur sa réponse : (consigne, message, ce qu'on garde de la suite écrite) d'un appel où une
     autrice écrit la suite du fil à partir de son premier jet, ou ``None`` sans premier jet. ``persona`` : sa persona
-    rendue pour la conversation (``text``, ``name``, ``reference`` : un fil de référence pour le registre)."""
+    rendue pour la conversation (``text``, ``name``, ``reference`` : un fil de référence pour le registre) ;
+    ``author`` : l'autrice du chat (``vocab.flows.Author``, ADR 0124) — ses codes s'ajoutent au cadre, son exemple
+    prend la place du fil de référence."""
     text = _bubbles(draft)
     if not text:
         return None
@@ -619,12 +621,36 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "",
     other = [body for title in _other_titles() if (body := _section(state, title))]
     if other:
         system += "\n\n" + phrase("expression.polish.other", name=name, about="\n".join(other))
-    reference = (getattr(persona, "reference", "") or "").strip()
+    codes = (getattr(author, "codes", "") or "").strip()
+    if codes:
+        system += "\n\n" + phrase("expression.polish.codes", codes=codes)
+    reference = (getattr(author, "example", "") or "").strip() or (getattr(persona, "reference", "") or "").strip()
     if reference:
         system += "\n\n" + phrase("expression.polish.reference", thread=reference, name=name)
     message = phrase("expression.polish.message", thread="\n".join(lines), name=name,
                      draft=" / ".join(text.split("\n\n")))
     return system, message, lambda written: authored(written, name)
+
+
+def polish_draft(flow: str, draft: str, about: str, author: Any) -> tuple[str, str] | None:
+    """La passe d'une autrice sur un brouillon d'outil (ADR 0124) : (consigne, message) d'un appel qui le récrit dans
+    le genre de son flux (un courriel, un message Teams ou un SMS écrits à la place de la personne) et selon ses codes,
+    sans rien y ajouter ; ``None`` pour une forme qui ne se récrit pas ainsi (le chat a sa seconde passe) ou un
+    brouillon vide. ``about`` : ce à quoi il répond."""
+    form = flows.form_of(flow)
+    text = (draft or "").strip()
+    if form not in flows.DRAFTS or not text:
+        return None
+    parts = [phrase("expression.author.system", genre=phrase(f"expression.author.genre.{form}"))]
+    codes = (getattr(author, "codes", "") or "").strip()
+    if codes:
+        parts.append(phrase("expression.author.codes", codes=codes))
+    example = (getattr(author, "example", "") or "").strip()
+    if example:
+        parts.append(phrase("expression.author.example", example=example))
+    message = phrase("expression.author.message", about=(about or "").strip() or phrase("expression.author.opening"),
+                     draft=text)
+    return "\n\n".join(parts), message
 
 
 #: un message de quelques mots : une réponse à la même mesure

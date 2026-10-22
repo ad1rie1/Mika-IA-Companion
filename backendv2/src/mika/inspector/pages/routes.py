@@ -341,7 +341,7 @@ class Pages:
             return {}
         blocks, query = list(got["blocks"]), dict(request.query_params)
         forms = Forms(self.slot_forms(request, render.blocks(blocks, self.ui.env(), query), ""),
-                      lambda rendered, subject: self.slot_forms(request, rendered, subject))
+                      lambda rendered, subject: self.slot_forms(request, rendered, subject), self.ui.csrf(request))
         out = call(drawn.render, self.ui, blocks, query, forms, label=f"onglet dessiné {where}")
         if isinstance(out, tuple):
             html, rest = out[0], list(out[1])

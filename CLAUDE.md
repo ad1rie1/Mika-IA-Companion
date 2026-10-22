@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0123, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0124, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -228,6 +228,14 @@ kernel                      machinerie générique, sans un mot du domaine
     (`authored`). Ses émojis passent (la voix du client web les saute). Ses balises, ses outils et ce qu'elle sait
     restent ceux du premier jet. Elle ne se fait que si le rôle LLM `polish` a un modèle (sans repli) ; Opus y est le
     meilleur. La consigne d'une initiative n'est jamais une ligne du fil (`heard` est le message reçu, pas la consigne).
+  - **Ses autrices et leurs flux** (ADR 0124, Réglages › Autrices) : une autrice (`vocab.flows.Author` : un nom, ses
+    codes d'écriture, un exemple de la forme) par flux — `chat`, `courrier:<boîte>`, `teams`, `telephone`. Au chat,
+    ses codes s'ajoutent au cadre de la seconde passe ; sans autrice au chat, pas de seconde passe. Un brouillon
+    d'outil (`email_draft`, `teams_draft`, `phone_draft`) se fait récrire par `ctx.authored(flux, texte, à propos)`
+    (`_author_draft`, consigne `expression.author.*`, rôle `polish`) ; sans autrice, il part en premier jet. Le
+    réglage (`app/authors.py`, clé `authors`) est lu à chaque épisode (`KernelDeps.authors`). Rien d'enregistré,
+    chaque flux a son autrice livrée (« Message », « Mail pro » à chaque boîte, « Pro Teams », « SMS perso ») ;
+    enregistré, il fait foi, mais un champ vide d'une autrice livrée reprend son défaut (`filled`).
   - **Mode pro** (ADR 0116) : une opératrice demande un travail dans le chat (`chat.mode: "pro"`, gardé dans la
     perception), comme dans Claude Code. Un mode (`kernel.episode.EpisodeMode`, `app/composition.py::modes()`) plie la
     politique de `REPLY` : rôle `pro` (repli sur `reply`), persona en profondeur `pro` (sans portrait, voix de chat ni
@@ -855,7 +863,7 @@ Tout le reste se déclare par décorateurs.
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121–0123 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
-| Voix et genèse | 0070, 0071, 0112, 0114, 0115 |
+| Voix et genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |
 
 ## Les clients

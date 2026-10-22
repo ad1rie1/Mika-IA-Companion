@@ -133,11 +133,14 @@ def wants_table(query: Mapping[str, str]) -> bool:
 class Forms(dict[str, Any]):
     """Les formulaires que la console a préparés pour les actions d'un onglet, par emplacement (leur jeton, leurs
     champs, leur retour) ; ``of(blocs rendus, sujet)`` prépare ceux d'autres blocs pour un objet — une fiche que
-    l'onglet ouvre dans la page (un message dans la liseuse du courrier)."""
+    l'onglet ouvre dans la page (un message dans la liseuse du courrier). ``csrf`` : le jeton de la page, pour un
+    formulaire que le dessin écrit lui-même (relancer un effet de la file de sortie)."""
 
-    def __init__(self, page: Mapping[str, Any], of: Callable[[Sequence[Any], str], dict[str, Any]]) -> None:
+    def __init__(self, page: Mapping[str, Any], of: Callable[[Sequence[Any], str], dict[str, Any]],
+                 csrf: str = "") -> None:
         super().__init__(page)
         self.of = of
+        self.csrf = csrf
 
 
 class Drawn:

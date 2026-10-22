@@ -30,7 +30,8 @@ def test_operator_menu_links_open_real_pages(world):  # noqa: F811
 
 
 def tabs_of(page, destination):
-    """Les onglets d'une destination dans l'ordre où sa page les montre (sa barre d'onglets, ou son sous-menu) :
+    """Les onglets d'une destination dans l'ordre où sa page les montre (sa barre d'onglets, ou le sous-menu d'une
+    console sans menu d'opérateur) :
     ``(slug, titre)``."""
     tabs = []
     for nav in re.findall(r'<nav class="(?:tabs|submenu)"[^>]*>.*?</nav>', html.unescape(page), re.S):
@@ -58,6 +59,10 @@ def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
             if len(links) < 2:
                 continue
             tabs = tabs_of(client.get(f'/inspecteur/{destination}').text, destination)
+            if not tabs:
+                # une destination sans barre d'onglets (Système) : le menu de gauche est sa seule liste de pages,
+                # rien ne peut le contredire
+                continue
             shown = [(slug or tabs[0][0], label) for slug, label in links]
             assert shown == tabs, (group.label, destination, shown, tabs)
 

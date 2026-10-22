@@ -142,7 +142,8 @@ def test_empty_outbox_filter_does_not_show_successful_deliveries(world):  # noqa
     all_ = page(client, "/inspecteur/systeme/sorties")
     assert "parti" in all_
     failed = page(client, "/inspecteur/systeme/sorties?etat=failed")
-    assert "Aucun effet." in failed and "une parole à livrer" not in failed
+    # la liste des derniers départs, filtrée : vide, sans les messages partis (le résumé par sorte, lui, compte tout)
+    assert "Rien dans cet état" in failed and 'class="sys-out-recent-list"' not in failed
     assert "État inconnu" in page(client, "/inspecteur/systeme/sorties?etat=inconnu")
 
 

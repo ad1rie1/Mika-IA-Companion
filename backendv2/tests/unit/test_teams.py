@@ -108,11 +108,12 @@ def msg(clock, n: int, text: str, *, conv: str = DM, author: str = "Alice Martin
 
 
 def live(tmp_path, model, scenario, *, cfg: TeamsConfig | None = None, inputs: dict | None = None,
-         overrides=None, start=START):
+         overrides=None, start=START, **built):
+    """``built`` : ce que le noyau reçoit en plus (``build`` : la seconde passe, ses autrices…)."""
     cfg = cfg or TeamsConfig()
     clock = SimClock(start)
     store = TeamsStore(lambda: cfg, tmp_path / "teams.db", now=clock.now)
-    kernel, clock, llm, _ = build(tmp_path, model, clock=clock, ports={"teams": store})
+    kernel, clock, llm, _ = build(tmp_path, model, clock=clock, ports={"teams": store}, **built)
     desk = TeamsDesk(Settings(cfg), clock.now, store)
     desk.port = SimpleNamespace(kernel=kernel)
     teams_inputs = {"enabled": cfg.enabled, "mode": cfg.mode, "autodraft": cfg.enabled and cfg.autodraft,

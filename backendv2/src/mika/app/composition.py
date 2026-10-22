@@ -23,7 +23,7 @@ from mika.faculties.agency import brief as initiative_brief
 from mika.faculties.attachments import ATTACHMENTS
 from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
-from mika.faculties.expression import EXPRESSION, pro_style
+from mika.faculties.expression import EXPRESSION, polish_draft, pro_style
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.expression import polish as polish_reply
 from mika.faculties.expression import reannotate as reannotate_reply
@@ -236,6 +236,8 @@ def deps(**kw: Any) -> KernelDeps:
         # réponses et ses initiatives, pour qu'un message qu'elle lance sonne comme ses réponses (ADR 0115)
         "polishers": [polish_reply],
         "polished": sorted(CONVERSATIONAL),
+        # ses brouillons d'outils (un courriel, un message Teams, un SMS) récrits par l'autrice de leur flux (ADR 0124)
+        "draft_polishers": [polish_draft],
         # ce qui décrit la forme de sa réponse (une question, le passage faux) suit le message que l'autrice envoie
         "reannotators": [reannotate_reply],
         "modes": modes(),

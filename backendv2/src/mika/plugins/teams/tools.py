@@ -39,6 +39,7 @@ from mika.plugins.teams import (
 from mika.plugins.teams.voice import voice_text
 from mika.ports.preprocess import cite, inert
 from mika.ports.teams import DRAFT, SEND, Draft, person_handle, to_fill
+from mika.vocab import flows
 from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -155,7 +156,9 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     if under_way(frame.state("teams"), m.conversation):
         return ToolResult(ok=False, content="Une réponse est déjà en chemin dans cette conversation.")
     p = params_of(frame)
-    draft = port.save_draft(Draft(id="", conversation=m.conversation, body=args.body.strip(), reply_to=m.ref))
+    # récrite par l'autrice de Teams, s'il y en a une (ADR 0124)
+    body = await flows.written(ctx, flows.TEAMS, args.body.strip(), f"{inert(m.author, 80)} :\n{cite(m.text, 2000)}")
+    draft = port.save_draft(Draft(id="", conversation=m.conversation, body=body.strip(), reply_to=m.ref))
     shown = port.preview(draft.id, her=her(frame))
     # un passage à compléter n'empêche pas de proposer (la personne le remplira) ; tout autre blocage, si
     if shown is None or (shown.blocked and not to_fill(draft.body)):

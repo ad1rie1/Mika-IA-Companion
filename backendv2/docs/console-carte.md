@@ -208,8 +208,9 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
   numéro), paginé.
 
 ### Configuration (sous-menu)
-Les pages de réglages n'ont pas de sélecteur de pages en tête : le menu de gauche et
-« Tous les réglages » (son annuaire) y mènent. Une liste d'entrées (des fournisseurs…) peut
+Aucune page n'a de sélecteur de pages en tête (« Changer de page dans cette rubrique », retiré le
+2026-10-22) : le menu de gauche, les onglets et « Tous les réglages » (l'annuaire des réglages) y mènent ;
+il ne reste que dans une console sans menu d'opérateur, où il est la seule navigation. Une liste d'entrées (des fournisseurs…) peut
 se décrire en mots (`SettingsSection.describe`) : un fournisseur dit son type, s'il la fait
 parler, sa clé, son modèle, les rôles qui le désignent, ses bornes en mots et ses appels des
 dernières 24 h ; son bouton « Détail » déplie sa consommation et ses temps de réponse sur 24 h et
@@ -226,6 +227,7 @@ et écrits, part lue depuis le cache, coût), puis rôle par rôle (`CallLog.pro
 | | Caractère | traits, manies, fragilités, valeurs, centres d'intérêt |
 | | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
 | | Tempérament | en tête, **la forme de son caractère** (treize axes : les curseurs qui distinguent ses profils et son élan — curiosité, persévérance, énergie ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots) et **partir d'un profil** (changer le sélecteur dessine la différence sur la figure sans rien remplir, `static/handmade/temperament.js` ; « Pré-remplir », `?profil=<clé>`, ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette). Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ce que pilote chaque curseur ; **Voir l'effet**. L'ancienne page Profil y mène (`app/handmade/temperament.py`, `SettingsSection.prefill`, `head`) |
+| | Autrices | en tête, **où elles écrivent** : flux par flux (le chat, chaque boîte mail, Teams, le téléphone), l'autrice qui y écrit, ce qu'elle récrit et ce qui l'en empêcherait (aucun modèle au rôle « rendre naturel », Teams désactivé). Puis **ses autrices** en cartes, sous leur nom (où elles écrivent, leurs codes en bref ; ajouter, modifier, retirer), et **Qui écrit où**, une ligne par flux (`app/authors.py`, `app/handmade/authors.py`, `SettingsSection.keys`, ADR 0124) |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
@@ -243,10 +245,10 @@ et écrits, part lue depuis le cache, coût), puis rôle par rôle (`CallLog.pro
 ### Système (sous-menu)
 | Rubrique | Sous-page | Contenu |
 |---|---|---|
-| Surveillance | Santé | contrôles, projections, quarantaine, vues lentes |
+| Surveillance | Santé | le verdict ; les dix contrôles en tuiles alignées (une rangée, une hauteur ; le lien en bas) ; **ses projections** : une jauge en demi-cercle (combien sont à jour), une ligne par projection (son nom en clair, sa faculté, son niveau, une barre : où elle en est du journal), la quarantaine, les vues lentes en barres (la pire fois, un trait pour la dernière) ; la tuile Projections y mène (`app/handmade/system.py::projections`) |
 | | Processus | passages, échecs, dernière erreur, en cours |
 | | Anomalies *(nouveau)* | échecs d'évaluation, traces du journal (supplanté, oubli…), échecs de processus gardés au journal |
-| | File de sortie *(nouveau)* | la file de sortie : en attente, échouées, orphelines, essais, dernière erreur |
+| | File de sortie | dessinée (`app/handmade/system.py::outbox`, gabarit `handmade/system/sorties.html`) : à quoi elle sert et le chemin de ce qui part (écrit au journal → en route → parti, et ce qui est à traiter) ; **À traiter** (le filtre d'état le suit, 8 par page, Relancer / Marquer comme vu, l'erreur, ce qu'il faut vérifier) ; **ce qui part, par sorte**, en mots (ses messages, ce que montrent ses écrans, ce qu'elle fait au dehors — l'action nommée —, le ménage), une barre empilée parti / en route / à traiter / vu ; **les derniers départs**, filtrés par état, avec leur heure et leur événement |
 | | Moteur des modèles *(nouveau)* | par fournisseur : créneaux occupés / total, quota ; par rôle : qui sert vraiment |
 | | Écrans du monde *(nouveau)* | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
 | | Appels et coûts | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |

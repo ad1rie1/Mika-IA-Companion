@@ -84,11 +84,23 @@ class ToolContext:
     dedupe_scope: str | None = None
     #: ce qu'est l'appel dans l'épisode : ``outil:empreinte des arguments:occurrence`` (posé par la boucle)
     call_key: str | None = None
+    #: l'autrice de ses brouillons (ADR 0124, posée par le pipeline) : ``fn(flux, texte, à propos) -> texte`` ;
+    #: absente, un brouillon part tel que le modèle l'a écrit
+    authoring: Callable[[str, str, str], Awaitable[str]] | None = None
     _emitted: int = 0
 
     @property
     def state(self) -> Any:
         return self.frame.state(self.spec.owner)
+
+    async def authored(self, flow: str, text: str, about: str = "") -> str:
+        """Un brouillon que l'outil va poser (un courriel, un message Teams, un SMS) récrit par l'autrice de son flux
+        (``vocab.flows``) ; ``about`` : ce à quoi il répond. Tel quel sans autrice, sans modèle au rôle ``polish``, ou
+        si la passe échoue."""
+        if self.authoring is None or not text.strip():
+            return text
+        got = await acall(self.authoring, flow, text, about, label="autrice d'un brouillon")
+        return got if isinstance(got, str) and got.strip() else text
 
     async def emit(self, *drafts: Draft[Any], guard: Guard | None = None) -> Commit:
         """Écrire au nom de la faculté de l'outil. ``guard`` s'ajoute à la garde de l'épisode : ce que

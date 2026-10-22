@@ -82,7 +82,7 @@ DRAWN: dict[str, Drawn] = {
     "reveils/reveils": CARDS, "apps/apps": CARDS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)
     "systeme/processus": Shaped(system.processes, "handmade/system.css"),
-    "systeme/sorties": Shaped(system.outbox, last=True),
+    "systeme/sorties": Shaped(system.outbox, "handmade/system.css", panel=False, forms=True),
     "systeme/sante": Shaped(system.health, "handmade/system.css", panel=False),
     **{f"systeme/{t}": CARDS for t in ("anomalies", "chronologie", "monde", "contributions", "simulations")},
     **{f"systeme/{t}": TABLES for t in ("passerelle", "appels", "stockage", "operations", "vues", "etat")},

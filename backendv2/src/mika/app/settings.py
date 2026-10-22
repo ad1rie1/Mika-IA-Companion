@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +28,12 @@ from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
+from mika.app import authors as authors_m
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
+from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
 from mika.runtime.tools import SITUATIONS as TOOL_SITUATIONS
 
@@ -74,6 +76,8 @@ TEAMS_KEY = "teams"
 TEAMS_KEYS_KEY = "teams_key"
 #: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
 TOOL_RULES_KEY = "tool_rules"
+#: ses autrices et le flux de chacune (ADR 0124)
+AUTHORS_KEY = "authors"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
@@ -149,6 +153,11 @@ class Settings:
         self._forge: dict[str, dict[str, Any]] = {}
         #: lues à chaque épisode : tenues en mémoire, relues à l'ouverture
         self._tool_rules: dict[str, dict[str, str]] = {}
+        #: ses autrices enregistrées, lues à chaque épisode (et à chaque brouillon) : tenues en mémoire ; ``None`` :
+        #: rien d'enregistré (celles par défaut)
+        self._authors: authors_m.Authors | None = None
+        #: le fil de référence de sa persona (posé par le serveur) : l'exemple de « Message » quand le sien est vide
+        self.reference_thread: Callable[[], str] = lambda: ""
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -161,6 +170,7 @@ class Settings:
         rules = self._get(TOOL_RULES_KEY) or {}
         self._tool_rules = {str(s): {str(t): str(r) for t, r in v.items() if r in TOOL_RULES}
                             for s, v in rules.items() if s in TOOL_SITUATIONS and isinstance(v, dict)}
+        self._authors = self._read_authors()
 
     def _get(self, key: str) -> Any:
         try:
@@ -539,6 +549,34 @@ class Settings:
         await self._put(TOOL_RULES_KEY, everything)
         self._tool_rules = everything
         return kept
+
+    # ── Ses autrices et leurs flux (ADR 0124) ──
+    def _read_authors(self) -> authors_m.Authors | None:
+        stored = self._get(AUTHORS_KEY)
+        if stored is None:
+            return None
+        try:
+            return authors_m.Authors.model_validate(stored)
+        except ValueError:
+            log.warning("autrices illisibles : celles par défaut")
+            return None
+
+    def authors(self) -> authors_m.Authors:
+        """Ses autrices et le flux de chacune. Rien d'enregistré : les autrices livrées, chacune d'office sur son flux
+        (une par boîte mail) ; enregistrées, un champ vide d'une autrice livrée reprend son défaut."""
+        got = call(self.reference_thread, label="le fil de référence de sa persona")
+        reference = got if isinstance(got, str) else ""
+        if self._authors is None:
+            return authors_m.defaults(self.email().accounts, reference)
+        return authors_m.filled(self._authors, reference)
+
+    def author_for(self, flow: str) -> Any:
+        """L'autrice d'un flux (``vocab.flows.Author``), ou ``None`` : ce que lit le pipeline."""
+        return self.authors().author_for(flow)
+
+    async def save_authors(self, value: authors_m.Authors) -> None:
+        await self._put(AUTHORS_KEY, value.model_dump(mode="json"))
+        self._authors = value
 
     # ── Persona, surcharges avancées (l'inspecteur ; le fichier YAML reste le défaut) ──
     def persona_yaml(self) -> str | None:

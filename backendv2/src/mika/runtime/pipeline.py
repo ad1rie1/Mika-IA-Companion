@@ -77,7 +77,9 @@ from mika.runtime.tools import (
     situation_of,
 )
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
+from mika.vocab import flows
 from mika.vocab.episodes import Role
+from mika.vocab.flows import Author
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
@@ -99,19 +101,35 @@ Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
 #: que le modèle l'a lue) → une remarque à glisser en fin d'état interne pour qu'elle la réécrive une fois, ou ``None``.
 Reviewer = Callable[[str, Sequence[str], str, str], "str | None"]
 #: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, sa persona
-#: rendue) → (consigne, message, ce qu'on garde de ce que l'appel a écrit) d'un appel qui récrit sa réponse, ou
-#: ``None`` : rien à reprendre.
-Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None"],
+#: rendue, l'autrice du chat) → (consigne, message, ce qu'on garde de ce que l'appel a écrit) d'un appel qui récrit sa
+#: réponse, ou ``None`` : rien à reprendre.
+Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None", "Author | None"],
                     "tuple[str, str, Callable[[str], str]] | None"]
+#: La passe d'une autrice sur un brouillon d'outil (ADR 0124) : (son flux, le premier jet, ce à quoi il répond,
+#: l'autrice) → (consigne, message) d'un appel qui le récrit, ou ``None`` : cette forme ne se récrit pas.
+DraftPolisher = Callable[[str, str, str, Author], "tuple[str, str] | None"]
+#: l'autrice d'un flux (``vocab.flows``), ou ``None`` : aucune n'y écrit
+AuthorOf = Callable[[str], "Author | None"]
 #: Les annotations d'une parole récrite par la seconde passe : (son premier jet, ses annotations, le texte récrit) →
 #: celles du texte récrit (ce qui décrit la forme du texte — une question, un passage — suit le message envoyé).
 Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
 #: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
 #: dérivé : on garde le premier jet (l'autrice peut envoyer en plusieurs bulles ce qu'un « ah merde. » disait seul)
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
+#: … pour un brouillon (un courriel a sa formule d'appel et sa formule de politesse) : plus de marge
+_DRAFT_SLACK = 400
+#: sans réglage des autrices, le chat garde l'autrice d'avant elles : le cadre seul, ni codes ni exemple (ADR 0124)
+_CHAT_AUTHOR = Author(flows.CHAT, "")
+#: un brouillon que le modèle a mis entre trois accents graves
+_FENCED = re.compile(r"^```[\w-]*\n(.*)\n```$", re.S)
 #: ce qu'une passe de plus (relecture, seconde passe) laisse de l'échéance de l'épisode, en secondes, pour écrire la
 #: réponse : passé ce point, elle s'arrête et le premier jet part
 _PASS_SPARE_S = 5.0
+
+
+def _no_tools(spec: Any, call_id: str) -> ToolContext:
+    """Le contexte d'outil d'une passe qui n'en offre aucun : jamais demandé."""
+    raise RuntimeError("une passe sans outil n'appelle pas d'outil")
 
 
 def is_silence(text: str) -> bool:
@@ -260,6 +278,8 @@ class EpisodeRunner:
         ports: Mapping[str, Any] | None = None,
         traces: EpisodeTraces | None = None,
         tool_rules: Callable[[str], Mapping[str, str]] | None = None,
+        authors: AuthorOf | None = None,
+        draft_polishers: Sequence[DraftPolisher] = (),
     ) -> None:
         self.mind = mind
         self.ports = dict(ports or {})
@@ -277,6 +297,11 @@ class EpisodeRunner:
         self.polished = frozenset(polished)
         #: ce qui recalcule les annotations d'une parole récrite par la seconde passe (``Reannotator``)
         self.reannotators = list(reannotators)
+        #: l'autrice de chaque flux (ADR 0124) ; ``None`` : le chat garde son autrice d'avant elles, un brouillon n'en a
+        #: pas
+        self.authors = authors
+        #: ce qui écrit la passe d'une autrice sur un brouillon d'outil (``DraftPolisher``)
+        self.draft_polishers = list(draft_polishers)
         #: les façons de répondre qu'un message peut demander, par nom (``EpisodeRequest.mode``)
         self.modes = dict(modes or {})
         self.composer = composer or Composer()
@@ -462,10 +487,13 @@ class EpisodeRunner:
                 ep.seen.update(_request(llm_req))
                 self._record(ep, settled=False)
 
+                def author_draft(flow: str, text: str, about: str) -> Awaitable[str]:
+                    return self._author_draft(ep, eid, llm_req, flow, text, about)
+
                 def make_ctx(spec: Any, call_id: str) -> ToolContext:
                     return ToolContext(mind, spec, call_id, eid, Frame(mind.root, mind.clock.now(),
                                        mind.registry, audience, episode), guard=None, ports=self.ports,
-                                       dedupe_scope=scope)
+                                       dedupe_scope=scope, authoring=author_draft)
 
                 assert self.gateway is not None, "pas de passerelle LLM"
                 gateway = self.gateway
@@ -786,9 +814,19 @@ class EpisodeRunner:
             return Failed(exc)
 
     def _authored(self, kind: str) -> bool:
-        """Sa parole de cette sorte passe par l'autrice : un polisseur, cette sorte, et un modèle au rôle ``polish``."""
+        """Sa parole de cette sorte passe par l'autrice : un polisseur, cette sorte, une autrice au chat, et un modèle
+        au rôle ``polish``."""
         serving = getattr(self.gateway, "serving", None)
-        return bool(self.polishers) and kind in self.polished and callable(serving) and bool(serving(str(Role.POLISH)))
+        return (bool(self.polishers) and kind in self.polished and callable(serving)
+                and bool(serving(str(Role.POLISH))) and self._author(flows.CHAT) is not None)
+
+    def _author(self, flow: str) -> Author | None:
+        """L'autrice d'un flux (``authors``). Sans réglage des autrices, le chat garde la sienne d'avant elles (le
+        cadre seul) et un brouillon n'en a pas."""
+        if self.authors is None:
+            return _CHAT_AUTHOR if flow == flows.CHAT else None
+        got = call(self.authors, flow, label="l'autrice d'un flux")
+        return got if isinstance(got, Author) else None
 
     async def _polish(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
                       make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None) -> str:
@@ -801,9 +839,12 @@ class EpisodeRunner:
         if gateway is None or not callable(serving) or not serving(str(Role.POLISH)):
             return text
         name = persona.name if persona is not None else ""
+        author = self._author(flows.CHAT)
+        if author is None:
+            return text
         asked = None
         for polisher in self.polishers:
-            got = call(polisher, text, llm_req.messages, heard, persona, label="seconde passe sur la réponse")
+            got = call(polisher, text, llm_req.messages, heard, persona, author, label="seconde passe sur la réponse")
             if isinstance(got, tuple):
                 asked = got
                 break
@@ -825,8 +866,44 @@ class EpisodeRunner:
         polished = polished.strip()
         if not polished or is_silence(polished) or len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
             return text
-        ep.seen["naturel"] = {"premier_jet": text}
+        ep.seen["naturel"] = {"premier_jet": text, "autrice": author.key}
         return polished
+
+    async def _author_draft(self, ep: _Live, eid: str, llm_req: LLMRequest, flow: str, text: str, about: str) -> str:
+        """Un brouillon d'outil (un courriel, un message Teams, un SMS à la place de la personne) récrit par l'autrice
+        de son flux (ADR 0124), comme la seconde passe de sa parole : par le modèle du rôle ``polish`` seulement, sans
+        outil, en un tour. Pas d'autrice, pas de modèle, une panne, rien rendu, un silence, ou un texte qui dérive en
+        longueur : le premier jet est posé tel quel."""
+        gateway = self.gateway
+        serving = getattr(gateway, "serving", None)
+        author = self._author(flow)
+        if gateway is None or author is None or not callable(serving) or not serving(str(Role.POLISH)):
+            return text
+        asked = None
+        for polisher in self.draft_polishers:
+            got = call(polisher, flow, text, about, author, label="autrice d'un brouillon")
+            if isinstance(got, tuple):
+                asked = got
+                break
+        if asked is None:
+            return text
+        system, message = asked
+        done = ep.seen.setdefault("autrice", [])
+        req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#autrice{len(done)}", system_stable=system,
+                         messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
+                         priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "autrice", "flux": flow})
+        again = await self._extra_pass(
+            ep, lambda: run_tool_loop(gateway, req, {}, _no_tools, max_turns=1, clock=self.mind.clock.now),
+            label="autrice d'un brouillon : appel du modèle")
+        if isinstance(again, Failed):
+            return text
+        written = again.text.strip()
+        fenced = _FENCED.match(written)
+        written = fenced.group(1).strip() if fenced else written
+        if not written or is_silence(written) or len(written) > len(text) * _POLISH_GROWTH + _DRAFT_SLACK:
+            return text
+        done.append({"flux": flow, "autrice": author.key, "premier_jet": text})
+        return written
 
     def _reannotate(self, draft: str, annotations: Mapping[str, str], text: str) -> dict[str, str]:
         """Les annotations du texte récrit (``reannotators``) ; une panne garde celles qu'on avait."""

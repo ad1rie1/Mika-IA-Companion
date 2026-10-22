@@ -367,3 +367,26 @@ def test_phone_notifications_take_a_firebase_key_sealed_and_never_shown(world): 
     assert "mika-notif" in page and "collée ici" in page and "PRIVATE KEY" not in page
     post(client, url, {"_section": "notifications", "_champs": ["service_account"], "service_account": ""})
     assert client.portal.call(live.settings.push) == key  # vide : inchangée
+
+
+def test_her_authors_say_where_each_writes_and_a_flow_is_given_one(world):  # noqa: F811
+    """Réglages › Autrices (ADR 0124) : en tête, où chacune écrit, flux par flux ; ses autrices en cartes, sous leur
+    nom ; « Qui écrit où », une ligne par flux. Rien d'enregistré, chaque flux a son autrice livrée ; enregistré, le
+    réglage fait foi et se lit aussitôt par le noyau ; retirer une autrice libère son flux."""
+    client, live, _ = world
+    bootstrap(client)
+    url = f"{BASE}/autrices"
+    page = html_of(client.get(url))
+    assert "Où elles écrivent" in page and "Qui écrit où" in page
+    assert "Mail pro" in page and "Pro Teams" in page and "teams-pro" in page
+    assert 'name="flows.chat"' in page and 'name="flows.teams"' in page and 'name="flows.telephone"' in page
+    assert "Aucun modèle ne sert le rôle « rendre naturel »" in page  # le monde de test n'en a pas
+    assert "SMS perso" in page and live.settings.author_for("telephone").name == "SMS perso"  # d'office
+    assert live.settings.author_for("teams").codes  # ses champs, remplis
+    r = post(client, url, {"_section": "autrices", "_champs": ["flows"], "flows.chat": "message",
+                           "flows.teams": "teams-pro"})
+    assert r.status_code == 200, html_of(r)[:400]
+    assert live.settings.author_for("teams").name == "Pro Teams"
+    assert live.settings.author_for("chat").key == "message" and live.settings.author_for("telephone") is None
+    gone = post(client, url, {"_section": "autrices", "_supprimer": "authors", "_cle": "teams-pro"})
+    assert gone.status_code == 200 and live.settings.author_for("teams") is None

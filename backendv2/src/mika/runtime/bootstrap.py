@@ -89,6 +89,8 @@ class KernelDeps:
     polished: Sequence[str] = ()
     #: les annotations d'une parole récrite par la seconde passe (``pipeline.Reannotator``)
     reannotators: Sequence[Any] = ()
+    #: la passe d'une autrice sur un brouillon d'outil (``pipeline.DraftPolisher``, ADR 0124)
+    draft_polishers: Sequence[Any] = ()
     #: les façons de répondre qu'un message peut demander (``kernel.episode.EpisodeMode``, par nom : le mode pro)
     modes: Mapping[str, EpisodeMode] = field(default_factory=dict)
     budget: Budget | None = None
@@ -112,6 +114,9 @@ class KernelDeps:
     #: les règles d'outils d'un opérateur, par situation (ADR 0122) : ``tool_rules(situation)`` rend « outil → off,
     #: hand ou ask » ; ``None`` : aucune règle, ses outils sont ceux du code
     tool_rules: Callable[[str], Mapping[str, str]] | None = None
+    #: l'autrice de chaque flux (``vocab.flows``, ADR 0124) : ``fn(flux) -> Author | None`` ; absente, le chat garde son
+    #: autrice d'avant elles et un brouillon n'en a pas
+    authors: Callable[[str], Any] | None = None
     #: l'échéance d'un passage de processus qui n'en déclare pas
     process_deadline_s: float = 900.0
 
@@ -174,7 +179,8 @@ class Kernel:
             audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
             polishers=deps.polishers, polished=deps.polished, reannotators=deps.reannotators, modes=deps.modes,
             budget=deps.budget, ports=ports,
-            traces=self.traces, tool_rules=deps.tool_rules,
+            traces=self.traces, tool_rules=deps.tool_rules, authors=deps.authors,
+            draft_polishers=deps.draft_polishers,
         )
         self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)

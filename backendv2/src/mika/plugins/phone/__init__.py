@@ -39,6 +39,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.phone import COPIED, FAILED, IGNORED, OTHER, RESULTS, SENT
 from mika.ports.preprocess import cite, inert
+from mika.vocab import flows
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.people import clean_display_name, fold
 from mika.vocab.phrasebook import family, phrase
@@ -364,7 +365,9 @@ async def phone_draft(args: DraftArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("phone.tools.draft.under_way"))
     texts = _texts(ctx, [x for x in s.messages.values() if x.thread == m.thread and x.person == person])
     to_key, to_name = recipient_of(s, texts, m.thread, person)
-    body = args.body.strip()
+    # récrite par l'autrice du téléphone, s'il y en a une (ADR 0124) : ce à quoi elle répond, cité
+    said = f"{inert(texts.get(m.name_ref) or '', 60)} :\n{cite(texts.get(m.text_ref) or '', 2000)}"
+    body = (await flows.written(ctx, flows.PHONE, args.body.strip(), said)).strip()
     commit = await ctx.emit(c.DRAFTED.draft(handle=m.handle, person=person, thread=m.thread, source=m.source,
                                             reply_to=m.seq, to=to_key, body=Content.of(body, level=LEVEL)))
     draft = commit.seqs[-1]

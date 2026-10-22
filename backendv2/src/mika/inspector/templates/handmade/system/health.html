@@ -1,5 +1,7 @@
 {# Système › Santé, dessinée (app/handmade/system.py) : le verdict, les dix contrôles en tuiles — ce qui ne va pas
-   d'abord, chacun avec son constat, son détail et la page de son diagnostic —, puis les replis techniques. #}
+   d'abord, chacun avec son constat, son détail et la page de son diagnostic —, ses projections (une jauge : combien
+   sont à jour ; une ligne par projection, où elle en est du journal ; la quarantaine ; les vues lentes), puis les
+   replis techniques. #}
 <div class="now-page person-tab sys">
   <section class="now-card sys-health tone-{{ tone }}" aria-labelledby="sys-health-title">
     <div class="sys-health-main">
@@ -31,6 +33,55 @@
     </li>
     {% endfor %}
   </ul>
+
+  {% set p = proj %}
+  <section class="now-card sys-proj" id="sys-projections" aria-labelledby="sys-proj-title">
+    <header class="now-card-head">
+      <h2 id="sys-proj-title">Ses projections</h2>
+      <p>Les tables que sa mémoire et la console lisent, tenues à jour depuis le journal ({{ p.head }} événements). Une projection « dans la transaction » s'écrit avec l'événement et ne prend jamais de retard ; une différée rattrape le journal en fond.</p>
+    </header>
+    <div class="sys-proj-body">
+      <figure class="sys-gauge tone-{{ p.tone }}">
+        <svg viewBox="0 0 120 66" role="img" aria-label="{{ p.up }} projections à jour sur {{ p.total }}">
+          <path class="sys-gauge-track" d="M10,60 A50,50 0 0 1 110,60"/>
+          {% if p.arc %}<path class="sys-gauge-fill" d="{{ p.arc }}"/>{% endif %}
+          <text class="sys-gauge-num" x="60" y="54" text-anchor="middle">{{ p.up }}/{{ p.total }}</text>
+        </svg>
+        <figcaption><b>{{ 'toutes à jour' if p.up == p.total else (p.total - p.up) ~ ' en retard' }}</b>{% if p.behind %}<br>{{ p.behind }} événement{{ 's' if p.behind > 1 }} à rattraper{% endif %}{% if p.quarantine %}<br>{{ p.quarantine|length }} en quarantaine{% endif %}<br><span class="now-muted">{% if not p.deferred %}toutes dans la transaction{% elif p.deferred == p.total %}toutes différées{% else %}{{ p.deferred }} différée{{ 's' if p.deferred > 1 }}, {{ p.total - p.deferred }} dans la transaction{% endif %}</span></figcaption>
+      </figure>
+      <ul class="sys-proj-list" role="list">
+        {% for r in p.rows %}
+        <li class="sys-proj-row tone-{{ r.tone }}">
+          <p class="sys-proj-name"><b>{{ r.name }}</b><span class="mono now-muted">{{ r.tech }} · v{{ r.version }}</span></p>
+          <svg class="sys-proj-bar" viewBox="0 0 100 6" preserveAspectRatio="none" role="img" aria-label="{{ r.state }} : {{ r.share }} % du journal"><rect width="{{ r.share }}" height="6"/></svg>
+          <p class="sys-proj-meta">{% if r.tone == 'ok' %}<span class="sys-proj-ok">à jour</span>{% else %}<span class="now-tag {{ r.tone }}">{{ r.state }}</span>{% endif %} <span class="now-muted">{{ r.faculty }} · {{ r.tier }}</span></p>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if p.quarantine %}
+    <div class="sys-proj-more">
+      <h3>En quarantaine</h3>
+      <p class="now-muted">Un événement qu'une projection n'a pas su appliquer : elle le met de côté et continue.</p>
+      <ul class="sys-proj-errors" role="list">{% for q in p.quarantine %}<li><b>{{ q.name }}</b> <span class="mono now-muted">{{ q.tech }}</span> · <a href="{{ q.href }}">événement n° {{ q.seq }}</a><pre class="hm-error">{{ q.error }}</pre></li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if p.views %}
+    <div class="sys-proj-more">
+      <h3>Vues lentes</h3>
+      <p class="now-muted">Les vues de la console qui ont mis plus de {{ p.slow_ms }} ms : la barre dit la pire fois, le trait la dernière.</p>
+      <ul class="sys-slow" role="list">
+        {% for v in p.views %}
+        <li>
+          <span class="mono">{{ v.name }}</span>
+          <svg class="sys-slow-bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><rect class="worst" width="{{ v.share }}" height="8"/><rect class="last" x="{{ [v.last_share - 0.6, 0]|max }}" width="1.2" height="8"/></svg>
+          <span class="now-muted">pire {{ v.worst }} ms · dernière {{ v.last }} ms · {{ v.runs }} passage{{ 's' if v.runs > 1 }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </section>
 
   {{ folds }}
 </div>

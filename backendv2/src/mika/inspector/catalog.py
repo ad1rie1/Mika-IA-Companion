@@ -159,6 +159,9 @@ class SettingsSection:
     #: il devient un sélecteur (les fuseaux horaires) — et ils sont appliqués à l'écriture, import
     #: YAML compris (une valeur hors liste est refusée, sauf celle déjà en place)
     choices: Mapping[str, Callable[[], Sequence[tuple[str, str]]]] = field(default_factory=dict)
+    #: les clés d'une correspondance connues au rendu (chemin → ``fn() -> [(clé, libellé)]``) : une ligne par clé,
+    #: quand elles dépendent d'autres réglages (les flux de ses autrices : une par boîte mail)
+    keys: Mapping[str, Callable[[], Sequence[tuple[str, str]]]] = field(default_factory=dict)
     #: les listes dont le nom d'une entrée ne change plus une fois créée (ailleurs, des données le
     #: portent : les mails rangés d'une boîte) — renommer est refusé, en le disant
     fixed_names: tuple[str, ...] = ()

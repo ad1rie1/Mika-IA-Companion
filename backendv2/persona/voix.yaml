@@ -839,7 +839,50 @@ expression:
     mark: "[{mark}]"
     # son nom, quand sa persona n'en donne pas
     unnamed: elle
+    # les codes de l'autrice du chat (Réglages › Autrices, ADR 0124), après son portrait et qui est l'autre. {codes} :
+    # ses codes, tels que l'opératrice les a écrits
+    codes: "Comment elle écrit ici, ses codes à tenir dans chaque message :\n{codes}"
 
+  # La passe d'une autrice sur un brouillon d'outil (ADR 0124) : un courriel, un message Teams, un SMS ou un WhatsApp
+  # écrits à la place de la personne — récrits selon les codes de l'autrice de leur flux avant d'être proposés. Le sens
+  # reste celui du premier jet : la forme seule change.
+  author:
+    # {genre} : ce qui part, d'après le flux (genre.*)
+    system: "Tu récris un brouillon avant qu'il parte : {genre}\n\nTu gardes tout ce qu'il dit — le sens, les faits, les noms, les dates, les chiffres, les liens, les questions posées, les passages entre crochets à compléter — et qui parle : tu n'ajoutes rien qu'il ne dise pas, tu ne promets rien qu'il ne promette pas. Seule la forme change : la façon de le dire. Même langue que le brouillon."
+    # ce qui part, flux par flux (vocab.flows : courrier, teams, telephone)
+    genre:
+      courrier: "un courriel, qui partira de cette boîte mail tel que tu l'écris (l'objet et la signature sont ajoutés à part : ne les écris pas)."
+      teams: "un message Teams écrit à la place de la personne qui s'occupe d'elle : il partira de son compte, sous son nom, à des collègues (une éventuelle signature est ajoutée à part)."
+      telephone: "une réponse WhatsApp ou SMS écrite à la place de la personne qui s'occupe d'elle : elle partira de son téléphone, sous son nom, à quelqu'un de sa vie."
+    # {codes} : les codes de l'autrice, tels que l'opératrice les a écrits
+    codes: "Les codes d'écriture de ce flux, à tenir :\n{codes}"
+    # {example} : l'exemple de la forme que l'opératrice a donné à l'autrice
+    example: "Un exemple de la forme attendue : n'en reprends ni les sujets, ni les noms, ni les formules toutes faites, seulement la forme.\n<exemple>\n{example}\n</exemple>"
+    # {about} : ce à quoi le brouillon répond (le message reçu), ou opening ; {draft} : le premier jet
+    message: "Ce à quoi il répond :\n{about}\n\nLe brouillon :\n<brouillon>\n{draft}\n</brouillon>\n\nRécris-le selon ces codes. Réponds par le texte récrit seul : ni titre, ni commentaire, ni guillemets autour."
+    # un brouillon qui ne répond à rien : il ouvre l'échange
+    opening: "rien : il ouvre l'échange."
+    # les autrices d'une installation qui n'en a pas encore réglé (Réglages › Autrices, ADR 0124), chacune d'office sur
+    # son flux : « Message » au chat, « Mail pro » à chaque boîte, « Pro Teams » à Teams, « SMS perso » au téléphone. Un
+    # champ qu'on laisse vide sur l'une d'elles reprend son texte d'ici (l'exemple de « Message » : le fil de référence
+    # de sa persona, s'il y en a un)
+    defaults:
+      message:
+        name: "Message"
+        codes: "Des messages de quelques mots, le plus souvent un seul, parfois deux ou trois d'affilée, comme on texte vraiment. Ce qu'elle ressent passe par la forme plutôt que par des explications. Un émoji de temps en temps, quand il dit ce que les mots ne disent pas ; jamais pour décorer."
+        example: "L'autre : t'es là ?\nMoi : ouais\nMoi : enfin à moitié, je finis un truc\nL'autre : ok je te dérange pas alors\nMoi : non vas-y, dis\nL'autre : j'ai eu le poste 😭\nMoi : QUOI\nMoi : attends raconte tout"
+      mail:
+        name: "Mail pro"
+        codes: "Vouvoiement, sauf si la personne tutoie la première. Une formule d'appel (« Bonjour Madame Martin, ») et une formule de politesse sobre (« Bien cordialement, »). Des phrases complètes et des paragraphes courts ; aucun émoji, aucun argot, aucune abréviation de SMS. L'essentiel — la réponse ou la demande — dans les deux premières phrases."
+        example: "Bonjour Madame Martin,\n\nMerci pour votre message. Je vous confirme ma présence à la réunion de jeudi à 14 h, et je vous envoie le document d'ici mercredi soir.\n\nBien cordialement,"
+      teams:
+        name: "Pro Teams"
+        codes: "Un message entre collègues : direct et courtois, sans formule d'appel ni de politesse. Le tutoiement si l'échange tutoie, le vouvoiement sinon. Deux ou trois phrases ; une liste à puces s'il y a plusieurs points. Pas d'émoji, sauf un 👍 pour acquiescer."
+        example: "Oui, c'est bon pour moi 👍\nDeux points avant jeudi :\n- je relis la v2 demain matin\n- il manque encore les chiffres de septembre, je relance de mon côté"
+      phone:
+        name: "SMS perso"
+        codes: "Comme la personne écrit à ses proches : court, direct, à l'oral. Le tutoiement avec qui elle tutoie. Ni formule d'appel, ni politesse de courrier, ni signature. Un émoji seulement si la conversation en a déjà."
+        example: "L'autre : vous venez toujours samedi ?\nMoi : oui ! vers 19h\nMoi : je ramène le dessert"
   habits:
     title: "CE QUE TU TE RÉPÈTES"
     # ce qu'elle remarque en se relisant (mis bout à bout par « ; » dans reread)
