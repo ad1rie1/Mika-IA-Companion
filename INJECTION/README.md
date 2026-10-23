@@ -9,7 +9,7 @@ Plan complet : `~/.claude/plans/stateful-imagining-turing.md`. Les mesures de l'
 `docs/mesures-etape-0.md`, donnent les plafonds et les pièges. On rejoue environ 100 000 messages par heure de calcul,
 et environ 1 million au plus sous la borne de 3 Go. Le reste passe en savoir d'archive.
 
-Côté moteur, la couture est décrite par `backendv2/docs/adr/0070-une-vie-importee.md` :
+Côté moteur, la couture est décrite par l'ADR 0070 de `backendv2/docs/decisions.md` :
 - une persona peut être `nature: incarnee`, et son nom vient d'elle partout ;
 - `mika.app.genesis` permet d'importer des souvenirs à la date du rejeu ;
 - le préréglage « avance rapide » coupe sa vie spontanée.

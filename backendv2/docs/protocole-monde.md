@@ -1,7 +1,7 @@
 # Le protocole du monde — `mika.world/1`
 
 Ce document est pour qui écrit un client du monde : le moteur de jeu (Unity), le client web en Three.js, un
-outil de création. La décision et ses raisons sont dans l'[ADR 0050](adr/0050-le-monde.md) ; les types font foi
+outil de création. La décision et ses raisons sont l'ADR 0050 de [`decisions.md`](decisions.md) ; les types font foi
 dans [`contracts/world.py`](../src/mika/contracts/world.py) (le monde) et
 [`adapters/world/protocol.py`](../src/mika/adapters/world/protocol.py) (les trames). Chaque exemple JSON de ce
 document est validé par les tests (`tests/protocol/test_world_wire.py`) : sa **forme** ne peut pas vieillir sans
@@ -166,7 +166,8 @@ python -m mika token revoke 1        # il ne vaut plus rien ; ses connexions se 
 ```
 
 Un jeton parle sous l'adresse de son compte (`user_1`, l'acteur `player:user_1`) : l'identité reste
-authentifiée, comme depuis le navigateur. Le même jeton ouvre `/ws` (la conversation), aux mêmes conditions.
+authentifiée, comme depuis le navigateur. Le même jeton ouvre `/ws` (la conversation), sans `Origin` aussi, mais
+par l'en-tête `Authorization` seulement : `/ws` n'a pas de `hello`.
 
 ```json client
 {"type": "hello", "protocol": "mika.world/1", "roles": ["viewer", "host"],
@@ -234,23 +235,29 @@ trame déjà en route : un client ignore ce dont le `seq` est déjà appliqué.
   envoie un quand l'état change sans action à rejouer — le réveil au bord du lit, ce qu'une édition réconcilie) ;
 - le bail attend : un opérateur qui demande `host` alors qu'il est pris reçoit `host` `granted: false`, puis
   `granted: true` dès que l'hôte le perd (silence, déconnexion) ; un hôte qui a perdu le bail le reprend par
-  son prochain `ping`, s'il est libre ;
-- pas encore : la `presence` de la personne qui entre, et son corps dans le monde (P4).
+  son prochain `ping`, s'il est libre.
 
-**Les erreurs de protocole** (`error`) : `bad_frame` (trame illisible : la phrase nomme le champ, et le `cmd`
-s'il y en a un ; non fatale — fatale si ce n'est pas un objet JSON en texte, fermeture 1003), `hello_expected`
-(la première trame, dans les 10 s ; fermeture 1008), `unauthorized` (pas d'identifiant valable, ou il a été
-révoqué ; fermeture 4401, le client ne réessaie pas sans nouvel identifiant), `rate_limited` (un `sync` ou un
-`ping` en trop ; une commande en trop reçoit son `result`), `too_slow` (fermeture 1013 : revenir par
-`hello.after`), `shutdown` (le noyau s'arrête, fermeture 1001). Une `Origin` inconnue est refusée avant
-l'ouverture (1008).
+**Les erreurs de protocole** (`error`) :
+
+- `bad_frame` : trame illisible ; la phrase nomme le champ, et le `cmd` s'il y en a un. Non fatale, sauf si ce
+  n'est pas un objet JSON en texte (fermeture 1003) ou si c'est le `hello` qui est illisible — un autre
+  `protocol`, un champ inconnu (fermeture 1008). Au-delà de 5 erreurs par seconde, une trame illisible est jetée
+  sans réponse.
+- `hello_expected` : la première trame, dans les 10 s ; fermeture 1008.
+- `unauthorized` : pas d'identifiant valable, ou il a été révoqué ; fermeture 4401, le client ne réessaie pas sans
+  nouvel identifiant.
+- `forbidden` : une `pose` sans le rôle `viewer`.
+- `rate_limited` : un `sync` ou un `ping` en trop (une commande en trop reçoit son `result`).
+- `too_slow` : fermeture 1013, revenir par `hello.after`.
+- `shutdown` : le noyau s'arrête, fermeture 1001 ; une connexion qui arrive pendant l'arrêt est refusée (1008).
+
+Une `Origin` inconnue est refusée avant l'ouverture (1008).
 
 ## 6. Mika agit
 
 Elle décide en conversation ou d'elle-même (« attends, je vais chercher mon livre »). Le noyau valide (le livre
 existe, il se porte, elle a une main libre, personne ne le tient), **planifie** les pas (se lever, marcher,
-prendre) avec leurs durées nominales, et diffuse (réserver ce qu'elle va prendre ou occuper attend les baux,
-pas encore faits : d'ici là, le noyau revalide en concluant) :
+prendre) avec leurs durées nominales, et diffuse (rien n'est réservé d'avance : le noyau revalide en concluant) :
 
 ```json serveur
 {"type": "intent", "seq": 1545, "intent": {"id": "i-1545", "actor": "mika",
@@ -292,14 +299,20 @@ pas encore faits : d'ici là, le noyau revalide en concluant) :
 
 - **Sans hôte**, l'action se termine comme prévu à `deadline` (`eta` plus une marge).
 - **Une nouvelle action interrompt la précédente** (`outcome: interrupted`) et repart d'où elle est. Endormie,
-  elle n'agit pas : ses outils refusent tout de suite (qu'une action attende son réveil, avec le refus `asleep`,
-  n'est pas encore fait) ; seul le réflexe du coucher la mène au lit.
+  elle n'agit pas : ses outils refusent tout de suite ; seul le réflexe du coucher la mène au lit.
+- Un `intent_end` en échec porte `reason`, le code du refus (§ 9).
 
-Les **réflexes** sont des actions du noyau (`cause.source: reflex`) : elle s'endort → elle va au lieu `sleep`
-et s'allonge ; elle se réveille → elle s'assied au bord ; elle travaille sur un projet → elle va au lieu
-`work`. Ils passent par les mêmes trames. Un réflexe naît **avec** ce qui le cause : l'`intent` du coucher
-porte le même `seq` que l'endormissement, et un client qui les reçoit ensemble la fait marcher jusqu'au lit
-les yeux ouverts, puis s'endormir allongée — il ne doit pas l'endormir avant la fin du trajet.
+Les **réflexes** sont des actions du noyau (`cause.source: reflex`), qui passent par les mêmes trames :
+
+- elle s'endort → elle va au lieu `sleep` et s'allonge ;
+- elle se met au travail (un pas sur un but, une exécution de projet) → elle va à l'objet posé à un lieu `work`
+  qui offre l'occupation `work`, et s'y installe ;
+- désœuvrée, quelques fois par jour → elle s'occupe d'un objet dont l'occupation nourrit ce qui lui manque.
+
+Un réflexe naît **avec** ce qui le cause : l'`intent` du coucher porte le même `seq` que l'endormissement, et un
+client qui les reçoit ensemble la fait marcher jusqu'au lit les yeux ouverts, puis s'endormir allongée — il ne
+doit pas l'endormir avant la fin du trajet. Le réveil, lui, n'est pas une action : un `snapshot` la montre assise
+au bord du lit.
 
 ## 7. Les joueuses agissent
 
@@ -368,9 +381,9 @@ fait (une tape sur la tête d'une proche ou d'une inconnue) :
 ```
 
 Il faut être dans le monde (sinon `unknown`) et dans la même pièce que celle qu'on vise (sinon `unreachable`).
-Un geste n'est pas un message : il ne lui fait jamais répondre à lui seul ; « AUTOUR DE TOI » le lui dit quelques
-minutes, et ce qu'elle en ressent revient aux écrans par la dérive de son humeur (la trame `emotion_update` du
-protocole de conversation).
+Un geste n'est pas un message : il ne lui fait jamais répondre à lui seul. Elle le remarque (un signal de son
+attention), son outil `world_look` lui montre les gestes des dernières minutes, et ce qu'elle en ressent revient
+aux écrans par la dérive de son humeur (la trame `emotion_update` du protocole de conversation).
 
 **Une demande** attend l'accord de l'autre : tendre un objet (`offer`, ou `act` `give`), en demander un
 (`ask`), un câlin, un « tope là », prendre la main, inviter à un lieu (`invite`) :
@@ -470,6 +483,19 @@ qui existe. Ajouter, retirer ou redéfinir autrement une pièce, un lieu ou un p
 
 ## 9. Refus et erreurs
 
+Chaque commande (une trame qui porte un `cmd`) reçoit un `result` :
+
+- `accepted`, avec le `seq` de l'événement qui l'applique ;
+- `refused`, avec `code` (ci-dessous) et `message` en français — sans `code` quand le noyau n'a pas pu traiter
+  la commande ;
+- `duplicate` : ce `cmd` a déjà été vu, voici son accusé d'origine (les 512 derniers sont gardés par connexion).
+
+Au plus 128 commandes attendent leur `result` sur une connexion ; au-delà, `rate_limited`.
+
+Les changements que portent `delta`, `intent_end` et `request_end` sont de cinq sortes : `actor_moved`,
+`actor_activity` (ce qu'un acteur est en train de faire), `object_moved`, `object_state` et `object_gone` (un
+objet consommé).
+
 | Code | Sens |
 |---|---|
 | `unknown` | cet identifiant n'existe pas, ou plus |
@@ -477,7 +503,7 @@ qui existe. Ajouter, retirer ou redéfinir autrement une pièce, un lieu ou un p
 | `hands_full` / `not_holding` / `not_portable` | les mains, ce qu'on tient, ce qui se porte |
 | `occupied` | le lieu est plein, la place est prise |
 | `held_by_other` | quelqu'un d'autre le tient : on demande |
-| `forbidden` | l'accès de l'objet ne le permet pas à cette personne |
+| `forbidden` | l'accès de l'objet ne le permet pas à cette personne, ou il manque le rôle `viewer` |
 | `wrong_state` / `wrong_posture` | déjà allumée, pas ouverte ; il faut être debout |
 | `asleep` | elle dort : ce qu'on lui demande attendra son réveil (réservé : pas encore émis) |
 | `stale` | décidé sur un état ou une révision qui a changé depuis |

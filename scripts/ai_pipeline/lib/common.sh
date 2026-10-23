@@ -298,7 +298,7 @@ Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
   et documentation en français.
 
 **Lis AVANT toute analyse : `backendv2/ARCHITECTURE.md`**, puis les ADR de
-`backendv2/docs/adr/` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
+`backendv2/docs/decisions.md` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
 en donne un résumé ; en cas de désaccord, le code et les ADR font foi.
 
 ## Ce qui fait foi dans backendv2 — ne le « corrige » jamais

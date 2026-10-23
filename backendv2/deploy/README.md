@@ -13,17 +13,22 @@ sudo install -d -o mika -g mika -m 0700 /var/lib/mika /var/backups/mika
 sudo git clone <dépôt> /opt/mika
 cd /opt/mika/backendv2
 sudo python3 -m venv .venv
-sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # documents : lire les PDF
-sudo dnf install bubblewrap        # ou apt install bubblewrap : la Forge et les ateliers en ont besoin
+sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # documents : lire les PDF ; + mariadb, plus bas
+sudo dnf install bubblewrap passt iproute git   # ou apt install bubblewrap passt iproute2 git
 ```
 
-Bubblewrap doit pouvoir créer des espaces de noms utilisateur sans être
-setuid (le cas sur Fedora ; sur Debian/Ubuntu, vérifier
-`kernel.unprivileged_userns_clone=1` et, sur Ubuntu 24.04+, le profil
-AppArmor de `bwrap`). Sans bubblewrap, rien de ce qui exécute du code ne
-tourne — il n'y a pas de repli.
+Ce qui exécute du code (la Forge, les ateliers de ses projets, les serveurs MCP
+lancés ici) tourne sous bubblewrap ; leur réseau, quand il est permis (la
+recherche web, une commande approuvée d'un atelier), passe par `pasta` (paquet
+`passt`) et `ip` ; les ateliers sont des dépôts `git`. **Aucun n'a de repli** :
+sans eux, ces fonctions échouent. Bubblewrap doit pouvoir créer des espaces de
+noms utilisateur sans être setuid (le cas sur Fedora ; sur Debian/Ubuntu,
+vérifier `kernel.unprivileged_userns_clone=1` et, sur Ubuntu 24.04+, le profil
+AppArmor de `bwrap`).
 
-`/etc/mika/mika.env` (facultatif, droits 0600) :
+`/etc/mika/mika.env` (facultatif, droits 0600) — une affectation `NOM=valeur`
+par ligne, les commentaires sur leur propre ligne (systemd ne coupe pas un
+commentaire en fin de ligne : il le garderait dans la valeur) :
 
 ```ini
 # La clé qui chiffre les secrets rangés dans mind.db (clés d'API, jeton
@@ -42,7 +47,34 @@ sudo systemctl enable --now mika.service mika-backup.timer
 ```
 
 Le serveur écoute sur `127.0.0.1:8001`. Pour l'ouvrir au réseau, place un
-mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
+mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host` : un autre
+hôte que la boucle locale, `0.0.0.0` ou `::` vide l'adresse du relais MCP, et
+les appels de Claude Code échouent.
+
+## Les commandes à la main
+
+Les unités chargent `/etc/mika/mika.env` ; une commande lancée à la main
+(`sudo -u mika … python -m mika`) ne le lit pas. Sur MariaDB, elle travaillerait
+alors sur des fichiers SQLite neufs ; avec `MIKA_SECRET_KEY`, elle créerait un
+nouveau `secret.key`. Lance-les donc sous l'utilisateur `mika`, **avec**
+l'environnement du service :
+
+```bash
+mika() {
+  sudo sh -c 'if [ -r /etc/mika/mika.env ]; then set -a; . /etc/mika/mika.env; set +a; fi
+    export HF_HOME=/var/lib/mika/cache/huggingface
+    cd /opt/mika/backendv2 && exec runuser -u mika -- .venv/bin/python -m mika --data /var/lib/mika "$@"' sh "$@"
+}
+mika --help
+```
+
+Les commandes qui écrivent les réglages (`account`, `token create`, `llm`,
+`mail`…) se lancent serveur arrêté. La suite de ce document suppose cette
+fonction.
+
+**Claude Code comme fournisseur** : la CLI `claude` installée pour
+l'utilisateur `mika`, puis `mika claude-code login` (le login de la CLI, jamais
+un jeton) et `mika claude-code check` (un appel d'essai).
 
 ## Ses bases sur MariaDB (ADR 0101)
 
@@ -95,7 +127,8 @@ sur Fedora, `/run/mysqld/mysqld.sock` sur Debian) :
 
 ```ini
 MIKA_DATABASE_URL=mariadb+pymysql://mika@localhost/?unix_socket=/var/lib/mysql/mysql.sock
-#MIKA_DATABASE_PREFIX=mika_     # le début du nom de ses bases (mika_mind, mika_views…)
+# le début du nom de ses bases (mika_mind, mika_views…)
+#MIKA_DATABASE_PREFIX=mika_
 ```
 
 Au démarrage, ses bases sont créées (`mika_mind`, `mika_views`, `mika_mail`,
@@ -111,7 +144,8 @@ sur le processeur : petit, mais faible en français. Un autre se choisit dans `/
 
 ```ini
 MIKA_EMBEDDINGS_MODEL=google/embeddinggemma-2
-MIKA_EMBEDDINGS_DEVICE=cuda      # cpu (défaut), cuda (la carte graphique), auto
+# cpu (défaut), cuda (la carte graphique), auto ; une valeur inconnue revient au processeur
+MIKA_EMBEDDINGS_DEVICE=cuda
 ```
 
 Au banc (`tools/banc_plongements`, 40 messages), le modèle par défaut retrouve le bon souvenir en tête 25 fois sur
@@ -161,7 +195,7 @@ Si Secure Boot est actif, le module du pilote doit être signé (une clé à enr
 
 ## Derrière un mandataire TLS
 
-Trois options de `serve`, à ajouter à `ExecStart` dans `mika.service` :
+Trois options de `serve` :
 
 - `--origin https://mika.example` (répétable) : l'origine du frontend servi en
   HTTPS. Elle **remplace** les origines de développement (`localhost:3000`…) :
@@ -171,16 +205,31 @@ Trois options de `serve`, à ajouter à `ExecStart` dans `mika.service` :
   connexions vise alors la vraie adresse. Implique `--cookie-secure`.
 - `--cookie-secure` : cookies de session et CSRF marqués `Secure`.
 
-```bash
+Pose-les par une surcharge, qu'une nouvelle copie de `mika.service` n'écrasera
+pas : `sudo systemctl edit mika`, puis
+
+```ini
+[Service]
+ExecStart=
 ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika serve --host 127.0.0.1 --port 8001 \
     --origin https://mika.example --behind-proxy
 ```
 
 Le mandataire **doit** transmettre l'adresse du client (`X-Forwarded-For`) et
 **ne jamais** relayer `/mcp/` : ces points (le relais de Claude Code, la console
-MCP) ne servent que la machine elle-même, et refusent toute requête qui porte
-un en-tête de mandataire — fermer le chemin chez le mandataire est la seconde
-porte. Caddy transmet l'adresse de lui-même :
+MCP, ses outils prêtés `/mcp/pret/<nom>`) ne servent que la machine elle-même,
+et refusent toute requête qui porte un en-tête de mandataire — fermer le chemin
+chez le mandataire est la seconde porte.
+
+Ce qui le dimensionne, c'est la console, pas les pings des clients (toutes les
+20 s) : un corps de requête d'au moins 5 Mo plus la marge du formulaire (un
+dépôt de fichier, `kernel/forms.py::UPLOAD_MAX`), et un délai de lecture
+au-dessus de son plus long appel synchrone, « Rejouer avec… » un autre
+fournisseur, borné à 300 s
+(`adapters/llm/gateway.py::DEFAULT_DEADLINES["background"]`). Une de ces bornes
+qui change fait changer ces réglages.
+
+Caddy transmet l'adresse de lui-même :
 
 ```
 mika.example {
@@ -202,53 +251,47 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_read_timeout 120s;                          # le client garde sa WebSocket par des pings
+    client_max_body_size 6m;                          # un dépôt de fichier dans la console
+    proxy_read_timeout 330s;                          # « Rejouer avec… », 300 s au plus
 }
 ```
+
+L'application Android (ADR 0062) est un client natif : elle n'a pas d'origine à
+déclarer (`--origin` ne la concerne pas), et passe `Authorization: Bearer …` et
+`X-Mika-Presence` à la mise à niveau de `/ws` ; Caddy et nginx les transmettent
+tels quels (ne les retire pas). Les fichiers qu'elle télécharge (`/files/…`)
+passent par le même mandataire. Fermée, elle ne garde rien d'ouvert : ses
+messages lui arrivent par Firebase (ADR 0077, plus bas).
 
 Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 `Bearer` sont masqués ; `httpx` ne parle qu'en avertissement.
 
-L'application Android (ADR 0062) est un client natif : elle n'a pas d'origine à
-déclarer (`--origin` ne la concerne pas), et passe `Authorization: Bearer …` et
-`X-Mika-Presence` à la mise à niveau de `/ws`. Caddy et nginx les transmettent tels
-quels (ne les retire pas). Ouverte, elle garde sa WebSocket par des pings toutes
-les 20 s : `proxy_read_timeout` doit rester au-dessus (120 s ci-dessus). Fermée, elle
-ne garde rien d'ouvert : ses messages lui arrivent par Firebase (ADR 0077, ci-dessous).
-Les fichiers qu'elle télécharge (`/files/…`) passent par le même mandataire. Ceux que
-Mika envoie sont gardés hors du journal, dans `partages/` du dossier de données
-(droits 0700/0600), et les pièces jointes qu'on lui envoie dans `pieces/` (ADR 0106,
-2 Gio par personne par défaut, Réglages › Comportement) : la sauvegarde les emporte
-et la restauration les remet.
-
 ## Premier démarrage
 
 1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou
-   `sudo -u mika .venv/bin/python -m mika --data /var/lib/mika account <nom> --operator`, le mot de passe
-   demandé sans écho).
-2. `http://localhost:8001/inspecteur/reglages/fournisseurs` (la console, **Réglages ›
-   Fournisseurs**) : ajoute un fournisseur (sa clé est chiffrée et jamais réaffichée ;
-   « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre » d'office.
-   Tant qu'aucun modèle n'est branché, `/health` dit `degraded` et elle ne peut
-   pas parler.
-3. Le reste se règle dans la console, **Réglages** : personnalité et tempérament
-   (avec ce que pilote chaque curseur), paramètres internes (lisibles ; une
-   surcharge seulement dans le bloc « avancé », bornée et journalisée), canaux
-   (dépôts git, notifications du téléphone), sens (courrier, flux, transcription,
-   appareils), comptes. Chaque
-   enregistrement laisse une ligne dans **Journal de configuration**.
-   On lui écrit par une application dédiée (le frontend web, le client Unity),
-   avec un compte : il n'y a pas de robot de messagerie (ADR 0060). Un client
-   natif s'authentifie par un jeton de son compte (`mika token create <compte>`).
-4. Ses boîtes aux lettres : **Courrier › Comptes** (ou Réglages › Sens ›
-   Courrier) — un enregistrement par boîte : serveurs IMAP/SMTP, dossiers
-   relevés, et sa voix (en son nom, en assistante, ou à ta place ; ton,
-   consignes, signature ; préparer des réponses d'elle-même). « Tester la
-   connexion » sur la fiche du compte. En ligne de commande, serveur arrêté :
-   `mika mail set --compte perso --address … --imap-host … --user … --password …
-   --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
-   `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans
-   ton accord (Courrier › Brouillons).
+   `mika account <nom> --operator`, serveur arrêté, le mot de passe demandé sans écho).
+2. **Réglages › Modèles de texte** (`/inspecteur/reglages/fournisseurs`) : ajoute un fournisseur (sa clé est
+   chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre »
+   d'office, et les autres rôles y retombent — sauf la seconde passe (`polish`, l'autrice qui récrit ses messages),
+   qui ne se fait que si un fournisseur lui est confié dans « Qui sert quoi ». Tant qu'aucun modèle ne sert
+   « répondre », `/health` dit `degraded` et elle ne peut pas parler.
+3. Le reste se règle dans **Réglages** (« Tous les réglages » les liste) : sa personnalité (identité, parole,
+   caractère, tempérament avec ce que pilote chaque curseur, ses autrices), la configuration des plugins (courrier,
+   flux, Teams, réveils…), la transcription, les comptes opérateurs, et les **paramètres avancés** : une page par
+   faculté, qui dit d'où vient chaque valeur, où une surcharge se pose, bornée et journalisée. Chaque
+   enregistrement laisse une ligne dans **Réglages › Historique des réglages**. On lui écrit par une application
+   dédiée (le frontend web, le client Unity, l'application Android), avec un compte : il n'y a pas de robot de
+   messagerie (ADR 0060). Un client natif s'authentifie par un jeton de son compte (`mika token create <compte>`).
+4. Ses boîtes aux lettres : **Réglages › Plugins › Boîtes aux lettres** (`/inspecteur/reglages/boites`) — un
+   enregistrement par boîte : serveurs IMAP/SMTP, dossiers relevés, et sa voix (en son nom, en assistante, ou à ta
+   place ; ton, consignes, signature ; préparer des réponses d'elle-même). « Tester la connexion » sur la fiche de
+   la boîte. En ligne de commande, serveur arrêté : `mika mail set --compte perso --address … --imap-host …
+   --user … --password … --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
+   `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Brouillons
+   de courrier).
+
+Les pièces jointes qu'on lui envoie prennent au plus 2 Gio par personne par défaut (Réglages › Paramètres avancés,
+page des pièces reçues, « Place par personne »).
 
 ## Notifications du téléphone (Firebase)
 
@@ -270,9 +313,8 @@ tout marche, mais l'application ne reçoit que ce qu'elle trouve en s'ouvrant.
      `firebase-service-account.json` :
      `sudo install -o mika -g mika -m 600 <fichier>.json /var/lib/mika/firebase-service-account.json`.
      Il est relu à chaque envoi (pas de redémarrage) et la sauvegarde l'emporte ;
-   - ou le coller tel quel dans la console de Mika, **Réglages › Canaux › Notifications
-     du téléphone** : chiffré (`secret.key` ou `MIKA_SECRET_KEY`), jamais réaffiché. Collé,
-     il passe devant le fichier.
+   - ou le coller tel quel dans la console de Mika, **Réglages › Tous les réglages › Canaux › Notifications du
+     téléphone** : chiffré (`secret.key` ou `MIKA_SECRET_KEY`), jamais réaffiché. Collé, il passe devant le fichier.
 
    La page dit d'où vient la clé, le projet, combien de téléphones sont notifiables, ce
    qui est parti et le dernier échec. Ne laisse jamais ce fichier dans le dépôt.
@@ -285,30 +327,26 @@ HTTPS sortant. Hors de chez toi, la notification arrive (elle passe par Google),
 répondre demande que le serveur soit joignable : une réponse écrite hors de portée
 attend dans la file d'envoi et part à la prochaine ouverture chez toi.
 
-Pour relire la console sans serveur (après une mise à jour, par exemple) :
-`.venv/bin/python -m mika console apercu --out /tmp/console` exporte chaque
-page, en clair et en sombre, d'une Mika neuve (modèle factice, rien ne sort de
-la machine) ; ouvrir `/tmp/console/index.html`.
-
 ## Surveiller
 
 `GET /health` est public et ne dit que des noms et des états :
 
 ```json
 {"status": "ok", "ready": true, "checks": {"journal": "ok", "slices": "ok", "loops": "ok",
- "projections": "ok", "processes": "ok", "outbox": "ok", "llm": "ok", "lanes": "ok"}}
+ "projections": "ok", "processes": "ok", "outbox": "ok", "llm": "ok", "lanes": "ok", "config": "ok",
+ "ports": "ok"}}
 ```
 
 | `status` | code | sens |
 |---|---|---|
 | `ok` | 200 | tout va bien |
-| `degraded` | 200 | elle répond, moins bien (pas de modèle, projection en retard, processus qui échoue, file de sortie bloquée) |
+| `degraded` | 200 | elle répond moins bien, ou plus du tout : aucun modèle ne sert « répondre », son fournisseur échoue, une projection est en retard, un processus échoue, la file de sortie est bloquée… |
 | `ko` | 200 | quelque chose est cassé et rien ne le réparera seul (tranche corrompue, boucle arrêtée) : regarder la console, redémarrer |
-| `starting`, `stopping` | 503 | pas prête |
+| `starting`, `stopping`, `stopped` | 503 | pas prête |
 
-Le détail de chaque contrôle est dans la console, **Système › Santé** ; les
-journaux dans `journalctl -u mika`. Les coûts et le taux de cache des appels
-de modèle sont dans **Système › Appels de modèle**.
+Le détail de chaque contrôle est dans la console, **Système › Santé générale** ;
+les journaux dans `journalctl -u mika`. Les coûts et le taux de cache des appels
+de modèle sont dans **Système › Appels et coûts**.
 
 ## Sauvegarder
 
@@ -316,31 +354,41 @@ Le minuteur fait une archive chaque nuit à 3 h 30 et garde les 14 dernières.
 À la main (sans risque serveur en marche) :
 
 ```bash
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika backup /var/backups/mika
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika verify /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz
+sudo systemctl start mika-backup.service           # la même sauvegarde, avec l'environnement du service
+mika verify /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz   # noté pour la console (« dernière vérification »)
 ```
 
 Une archive contient `mind.db` (sa vie : le journal, les contenus, les
-comptes, les réglages), les caches du courrier et des flux, ses apps forgées,
-ses ateliers et `secret.key`, avec un manifeste (sommes SHA-256, tête du
-journal, empreinte de l'état rejoué depuis la copie). `views.db` n'y est pas :
-projections et vecteurs se reconstruisent depuis le journal. Sur MariaDB, le
-dossier y est, et à côté une copie SQL de chaque base (`bases/` : `mind`,
-`mail`, `feeds`, `teams`, et celle de chaque app forgée) faite par
-`mariadb-dump` en un instantané cohérent ; la vérification recharge `mind`
-dans une base de travail et l'y rejoue. Les dossiers
-d'appel de Claude Code (prompts privés, jeton de session du relais) ne sont pas
-dans le dossier de données : ils vivent sous `XDG_RUNTIME_DIR` (`/run/mika` avec
-l'unité fournie), en `0700`, effacés en fin d'appel et purgés au démarrage —
-jamais archivés. Copie les archives ailleurs que sur la machine.
+comptes, les réglages), les caches du courrier, des flux et de Teams, ses apps
+forgées, ses ateliers, les fichiers qu'elle a envoyés (`partages/`) et les
+pièces jointes qu'on lui a envoyées (`pieces/`), `secret.key` quand la clé vient
+de ce fichier et `firebase-service-account.json` s'il est posé, avec un
+manifeste (sommes SHA-256, tête du journal, empreinte de l'état rejoué depuis la
+copie). `views.db` n'y est pas : projections et vecteurs se reconstruisent
+depuis le journal. Sur MariaDB, le dossier y est, et à côté une copie SQL de
+chaque base (`bases/` : `mind`, `mail`, `feeds`, `teams`, et celle de chaque app
+forgée) faite par `mariadb-dump` en un instantané cohérent ; la vérification
+recharge `mind` dans une base de travail et l'y rejoue. Les dossiers d'appel de
+Claude Code (prompts privés, jeton de session du relais) ne sont pas dans le
+dossier de données : ils vivent sous `XDG_RUNTIME_DIR` (`/run/mika` avec l'unité
+fournie), en `0700`, effacés en fin d'appel et purgés au démarrage — jamais
+archivés. Copie les archives ailleurs que sur la machine.
 
 ## Restaurer
 
+**Attention, avec ces chemins** : la restauration prépare l'archive à côté du
+dossier de données, puis échange les deux dossiers ; elle doit donc écrire dans
+`/var/lib`, ce que l'utilisateur `mika` ne peut pas. Telle quelle, la commande
+`restore` ci-dessous échoue sur un refus de permission, avant d'avoir rien
+touché. Sur fichiers SQLite, lance-la en root avec l'environnement chargé, puis
+rends le dossier à `mika` (`sudo chown -R mika:mika /var/lib/mika`). Sur
+MariaDB, root ne se connecte pas sous le compte `mika` (`unix_socket`) : il n'y
+a pas encore de chemin propre.
+
 ```bash
 sudo systemctl stop mika
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika restore \
-    /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz --force
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika replay --verify
+mika restore /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz --force
+mika replay --verify
 sudo systemctl start mika
 curl -s localhost:8001/health
 ```
@@ -350,14 +398,15 @@ dossier ; l'ancien dossier est mis de côté (`/var/lib/mika.avant-restauration-
 jamais effacé. Sur MariaDB, ses bases en service sont d'abord copiées dans
 `bases/` de ce dossier mis de côté, puis chaque copie de l'archive est rechargée
 à sa place ; `mika_views` est vidée. Une archive faite sur fichiers ne se
-restaure pas sur un serveur, ni l'inverse. Au démarrage, les vues se reconstruisent (le rappel est moins
-bon quelques minutes, le temps de réindexer les souvenirs).
+restaure pas sur un serveur, ni l'inverse. Au démarrage, les vues se
+reconstruisent (le rappel est moins bon quelques minutes, le temps de réindexer
+les souvenirs).
 
 ## Mettre à jour
 
 ```bash
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika backup /var/backups/mika
-cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents]"
+sudo systemctl start mika-backup.service
+cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # les extras de l'installation (+ mariadb)
 sudo systemctl restart mika
 ```
 
@@ -365,11 +414,16 @@ Une faculté dont la tranche change de version est reconstruite depuis le
 journal au démarrage ; une projection qui change de version est reconstruite
 à côté puis basculée. Rien à migrer à la main.
 
+Pour relire la console sans serveur après une mise à jour :
+`.venv/bin/python -m mika console apercu --out /tmp/console` exporte chaque
+page, en clair et en sombre, d'une Mika neuve (modèle factice, rien ne sort de
+la machine) ; ouvrir `/tmp/console/index.html`.
+
 ## Oublier quelqu'un
 
 ```bash
 sudo systemctl stop mika
-sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika forget user_12
+mika forget user_12
 sudo systemctl start mika
 ```
 

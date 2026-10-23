@@ -41,7 +41,7 @@ Un mot qui n'existe que d'un côté, une traduction française qui diverge d'un 
 <!-- AXE:documentation | ce que disent les README, ARCHITECTURE, ADR, CLAUDE.md et les docs face au code -->
 ### Axe « documentation »
 
-La doc face au code qu'elle décrit : `backendv2/README.md`, `backendv2/ARCHITECTURE.md`, `backendv2/docs/adr/`, `backendv2/docs/*.md`, `backendv2/deploy/README.md`, les `README.md` des clients, de l'extension, d'`INJECTION/` et de `scripts/`, et le `CLAUDE.md` racine.
+La doc face au code qu'elle décrit : `backendv2/README.md`, `backendv2/ARCHITECTURE.md`, `backendv2/docs/decisions.md` (les ADR), `backendv2/docs/*.md`, `backendv2/deploy/README.md`, les `README.md` des clients, de l'extension, d'`INJECTION/` et de `scripts/`, et le `CLAUDE.md` racine.
 
 Ce qui compte :
 - Une commande, une option, un port, un chemin, une variable d'environnement documentés qui n'existent plus, ou qui existent sous un autre nom.

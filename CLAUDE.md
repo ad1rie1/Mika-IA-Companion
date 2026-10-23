@@ -6,7 +6,8 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0124, d'autres arrivent) ;
+- `backendv2/docs/decisions.md` pour les décisions et leur pourquoi (les ADR 0001 à 0124, compilés en un seul
+  document ; une nouvelle décision s'y ajoute en entrée, au numéro suivant) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -849,7 +850,7 @@ Tout le reste se déclare par décorateurs.
   (`sudo -u mika … python -m mika`) ne lit pas `mika.env`. Avec MariaDB ou `MIKA_SECRET_KEY`, il faut le charger, sinon
   elle crée des fichiers SQLite ou un nouveau `secret.key`.
 
-### Carte des ADR (`backendv2/docs/adr/`)
+### Carte des ADR (`backendv2/docs/decisions.md`)
 
 | Thème | ADR |
 |---|---|

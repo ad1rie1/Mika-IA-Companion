@@ -1,10 +1,8 @@
 # Le protocole du chat — `/ws`
 
 Ce document est pour qui écrit un client de conversation : le frontend web, l'application Android
-(`frontend/Android/`), un client natif quelconque. Les décisions et leurs raisons sont dans les ADR
-[0038](adr/0038-les-bords.md), [0051](adr/0051-l-adaptateur-du-monde.md), [0056](adr/0056-le-fil-le-chat-et-ce-que-voit-la-personne.md)
-[0062](adr/0062-l-application-mobile-une-messagerie-et-des-fichiers.md) et
-[0077](adr/0077-le-telephone-ferme-ne-garde-rien-d-ouvert.md) ; le code fait foi dans
+(`frontend/Android/`), un client natif quelconque. Les décisions et leurs raisons sont les ADR 0038, 0051, 0056,
+0062 et 0077 de [`decisions.md`](decisions.md) ; le code fait foi dans
 [`adapters/web/app.py`](../src/mika/adapters/web/app.py) (routes, session), [`adapters/web/protocol.py`](../src/mika/adapters/web/protocol.py)
 (trames, limites) et [`adapters/web/hub.py`](../src/mika/adapters/web/hub.py) (qui reçoit quoi). Le monde 3D a son
 propre protocole : [`protocole-monde.md`](protocole-monde.md).
@@ -43,15 +41,15 @@ ignoré).
 
   Le jeton n'est montré qu'une fois : garde-le chiffré. Erreurs `{"error": "…"}` en français : 400 (champ manquant,
   `client` inconnu), 401 (identifiants invalides), 403 (une `Origin` : un navigateur), 429 avec `Retry-After`
-  (les échecs comptent avec ceux de `/auth/login` : 5 par nom et adresse, 20 par adresse, par minute). Un serveur
-  plus ancien répond 404.
+  (les échecs comptent avec ceux de `/auth/login` : 5 par nom et adresse, 20 par adresse, par minute).
 - `GET /auth/whoami` avec le jeton : les mêmes champs, plus `client` et `token_id` ; `authenticated: false` pour un
   jeton inconnu ou révoqué.
 - `DELETE /auth/token` avec le jeton : il ne vaut plus rien, ses connexions se ferment en 4401 → `{"ok": true}` ;
   401 pour un jeton déjà invalide.
-- Un jeton dure jusqu'à ce qu'on le rende, qu'un opérateur le révoque (Console › Comptes, ou
-  `mika token revoke <id>`), ou — pour un jeton obtenu par mot de passe — que le mot de passe change ou que le
-  compte soit désactivé. Au-delà de dix jetons obtenus par connexion, le moins récemment utilisé est révoqué.
+- Un jeton dure jusqu'à ce qu'on le rende ou qu'un opérateur le révoque (Console › Comptes, ou
+  `mika token revoke <id>`). Un compte désactivé rend muets tous ses jetons ; un jeton obtenu par mot de passe est en
+  plus révoqué quand le mot de passe change ou que le compte est désactivé. Au-delà de dix jetons obtenus par
+  connexion, le moins récemment utilisé est révoqué.
 - `mika token create <compte> --client mobile|screen --label …` en donne un sans mot de passe (serveur arrêté).
 - `POST /auth/push` avec un jeton `mobile` : où notifier le téléphone fermé (§ 5) —
 
@@ -81,28 +79,29 @@ ignoré).
 **Absente** (`away` : l'application en arrière-plan, qui ne fait que recevoir) : personne n'est annoncé, rien n'est
 envoyé de lui-même — ni fil, ni visage, ni panneau. Le client envoie **toujours** `sync` (son curseur, ou `0`). Ce
 qui est adressé à la personne arrive quand même (sa parole, les accusés, les rattrapages), sans voix. L'application
-Android n'ouvre plus une telle connexion que le temps d'envoyer une réponse écrite dans une notification : fermée,
-elle ne garde rien d'ouvert et reçoit par Firebase (§ 5, ADR 0077). Garder une connexion ouverte en arrière-plan
-coûte cher en batterie (un ping toutes les 20 s, et des essais sans fin quand le serveur est hors de portée).
+Android n'ouvre une telle connexion que le temps d'envoyer une réponse écrite dans une notification : fermée, elle
+ne garde rien d'ouvert, ce qui coûterait cher en batterie, et reçoit par Firebase (§ 5, ADR 0077).
 
 Fermetures :
 
 | Code | Sens | Que faire |
 |---|---|---|
 | 4401 | jeton ou session invalide, révoqué, ou droits changés | ne pas réessayer en boucle : `GET /auth/whoami` avec le jeton ; `authenticated: false` → écran de connexion ; `true` → se reconnecter |
-| 1008 / poignée de main 403 | origine refusée (un navigateur), ou pas d'authentification | terminal |
+| poignée de main refusée (HTTP 403) | origine inconnue (un navigateur), ou client natif sans jeton | terminal |
 | 1009 | trame trop grande | — |
 | autre | réseau | se reconnecter (attente 1 s × 1,5, plafonnée à 30 s, remise à zéro à l'ouverture) |
 
 Une connexion silencieuse peut être morte sans le dire (un portable en veille, un mandataire) : le client envoie
 `ping` toutes les 20 s et se reconnecte quand ses pings restent sans réponse — deux pongs manqués, soit 50 s sans
-**aucune** trame reçue au premier plan. Le client web juge sur le ping et non sur le silence (un ping parti depuis
-plus de 30 s sans qu'aucune trame l'ait suivi) : un onglet caché, que le navigateur ne réveille plus qu'une fois par
-minute et à qui rien n'arrive de lui-même, reçoit son `pong` et n'est pas coupé pour son seul silence. Un `pong` ne
-double pas une trame en cours de montée (un `chat` et ses fichiers, sur des données mobiles) : tant qu'il reste des
-octets à envoyer, ce silence ne prouve rien — le client web compte le délai du ping depuis le moment où son tampon
-s'est vidé, et l'application Android ne le compte qu'une fois sa montée achevée. Le serveur laisse de même environ
-cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
+**aucune** trame reçue au premier plan. Deux précautions :
+
+- juger sur le ping, pas sur le silence : un onglet caché, que le navigateur ne réveille plus qu'une fois par
+  minute, reçoit son `pong` et ne doit pas être coupé pour son seul silence (le client web coupe quand un ping est
+  parti depuis plus de 30 s sans qu'aucune trame l'ait suivi) ;
+- compter le délai du ping une fois la montée finie : tant qu'un `chat` et ses fichiers montent (sur des données
+  mobiles), le `pong` attend derrière eux et ce silence ne prouve rien.
+
+Le serveur laisse de même environ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 
 ## 3. Ce que le client envoie
 
@@ -138,8 +137,9 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 - `mode` (clé absente d'ordinaire) : `"pro"` demande une réponse de travail (ADR 0116, ci-dessous). Toute autre
   valeur vaut « absent ». Honoré seulement sur une connexion **authentifiée d'opératrice** ; ailleurs, le message est
   ordinaire, sans erreur. Un renvoi garde son `mode`.
-- Débit : 20 `chat` par 10 s ; `sync` et `identify` 12 par 10 s (au-delà, ignorés). Au plus 8 `chat` en attente
-  sur une connexion, comptés à la réception : au-delà, `overloaded` — les derniers d'une rafale, jamais les premiers.
+- Débits : 20 `chat` par 10 s ; 12 par 10 s pour `sync`, `read`, `where`, `approval` et `verdict` réunis (au-delà,
+  ignorées). Au plus 8 `chat` en attente sur une connexion, comptés à la réception : au-delà, `overloaded` — les
+  derniers d'une rafale, jamais les premiers.
 
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
 après 20 s (prendre une photo et revenir n'écrit rien). 6 écritures au journal par minute et par connexion au plus ;
@@ -158,11 +158,9 @@ le dernier état voulu s'applique dès que la fenêtre le permet.
 « Marquer comme lu » sur une notification) — une seule valeur, jamais l'heure où l'on est en ligne ni le temps passé
 à l'écran. Un client ne l'envoie que si la personne l'a permis (« Lui dire quand j'ai lu », activé par défaut) :
 coupé, rien ne part. Il envoie la dernière valeur à l'ouverture (après `sync`) et à chaque avance, jamais en file.
-Le serveur ignore une valeur qui n'avance pas ce qu'il sait déjà de ce compte, ou qui n'est pas dans son fil ; la
-trame compte dans le débit de `sync`, et s'écrit au journal 6 fois par minute et par connexion au plus (au-delà, la
-dernière valeur voulue s'applique dès que la fenêtre le permet). Mika sait alors si ce qu'elle a écrit d'elle-même
-a été vu : par messagerie, un message pas encore lu ne la fait pas se sentir ignorée (trois jours au plus), et le
-délai de réponse qu'elle attend court à partir de la lecture.
+Le serveur ignore une valeur qui n'avance pas ce qu'il sait déjà de ce compte, ou qui n'est pas dans son fil ; il
+l'écrit au journal 6 fois par minute et par connexion au plus (au-delà, la dernière valeur voulue s'applique dès que
+la fenêtre le permet). Mika sait alors si ce qu'elle a écrit d'elle-même a été vu.
 
 `where` (ADR 0119) : où est la personne, d'après son téléphone, si elle l'a permis (« Lui dire où je suis », coupé
 par défaut) et **seulement application au premier plan** — rien en arrière-plan, même connexion ouverte :
@@ -178,8 +176,7 @@ par défaut) et **seulement application au premier plan** — rien en arrière-p
   ignorée).
 - Le client envoie la dernière position à l'ouverture et à chaque déplacement, jamais en file. Le serveur ne réécrit
   pas une position qui n'a pas bougé (même lieu, moins de 50 m, moins de 10 min depuis la dernière écrite) ; 6
-  écritures au journal par minute et par connexion au plus (au-delà, la suivante passera). Compte dans le débit de
-  `sync`.
+  écritures au journal par minute et par connexion au plus (au-delà, la suivante passera).
 - `{"type": "where", "off": true}` : la personne ne le permet pas (ou plus) — sa dernière position s'efface (rien
   d'écrit s'il n'y en avait pas). Le client peut le redire à chaque ouverture tant que le réglage est coupé.
 - Mika ne la regarde qu'en tête-à-tête avec cette personne, pour elle seule ; chaque regard se voit dans le fil
@@ -189,15 +186,15 @@ par défaut) et **seulement application au premier plan** — rien en arrière-p
 seconde passe, sans son tempérament ni sa voix de chat, longue et structurée s'il le faut, en Markdown — et ses
 outils se voient en direct (trame `tool`, §4). Le dernier message d'une rafale décide du mode de la réponse.
 
-`identify` ne sert plus : une connexion authentifiée l'ignore, l'identité vient de la session ou du jeton.
+L'identité vient toujours de la session ou du jeton : il n'y a pas de trame pour se présenter.
 
 `approval` (ADR 0064) : `digest` est **celui de la carte affichée** — le serveur refuse un accord sur autre chose que
-ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte. Compte dans le débit de `sync` (12 par 10 s).
+ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte.
 
 `verdict` (ADR 0113) : son opératrice dit si une de ses réponses était adaptée (`ok`) ou non (`ko`), et, si elle veut,
 ce qu'elle aurait dû dire ou pourquoi (`comment`, 2 000 caractères au plus) ; un `verdict` vide retire l'avis. Le
-dernier avis vaut. Il passe par le chemin des actions de la console (`transcript.juger`, audité). Compte dans le
-débit de `sync`. Réponse : `verdict_result`.
+dernier avis vaut. Il passe par le chemin des actions de la console (`transcript.juger`, audité). Réponse :
+`verdict_result`.
 
 ## 4. Ce que le serveur envoie
 
@@ -211,7 +208,7 @@ débit de `sync`. Réponse : `verdict_result`.
 | `status` | Sens |
 |---|---|
 | `accepted` | reçu (y compris un renvoi) |
-| `rate_limited`, `overloaded` | non reçu : trop vite, ou trop de messages en attente sur cette connexion |
+| `rate_limited`, `overloaded` | non reçu : trop vite, ou trop de messages en attente (sur cette connexion, ou dans tout le serveur) |
 | `too_long`, `empty`, `attachments_rejected` | non reçu : le message lui-même (`rejected_attachments[].reason` : `too_many`, `too_large`, `invalid`) |
 | `no_reply` | **second** accusé d'un message reçu : la réponse ne viendra pas ; `reason` : `no_model`, `unreachable`, `timeout`, `too_late`, `error` (et, pour une opératrice, `detail` et `href`) |
 
@@ -234,10 +231,13 @@ répondre — réessaie ».
 - Une **ligne vide** dans `text` sépare deux bulles : sa réponse en plusieurs messages, comme quelqu'un qui écrit
   vraiment (ADR 0112). Le serveur garde **un** message (un `message_id`, une notification, un souvenir) ; le client
   montre ses bulles l'une après l'autre, « Mika écrit… » entre deux, au rythme de la frappe — à l'arrivée seulement :
-  dans l'historique, elles sont là toutes. Le web : `ui/bubbles.ts` ; Android : `BubbleContent.parts`, et sa voix les
-  dit l'une après l'autre (`SpeechTrack`). Ses fichiers vont sous la dernière.
-- Texte vide : elle a choisi de ne pas répondre — sauf `voice_reason: "asleep"` : elle dort, elle répondra à son
-  réveil (« Mika dort — elle te répondra à son réveil »).
+  dans l'historique, elles sont là toutes. Ses fichiers vont sous la dernière.
+- Texte vide : pas de parole à montrer (« Mika écrit… » cesse, la bulle de la personne reçoit son identifiant). Elle
+  a choisi de ne pas répondre ; sauf `voice_reason: "asleep"` (elle dort, elle répondra à son réveil), ou un second
+  `ack` `no_reply` qui suit : la réponse n'a pas pu venir.
+- `voice_reason` : pourquoi la voix parle ou se tait. Le serveur pose lui-même `silence` et `asleep` (une trame sans
+  texte), `other_tab` (un autre écran parle), `pro` (réponse de travail) et `error_fallback_muted` (texte de repli) ;
+  toute autre valeur est informative.
 - `voice_persona: "inner"` : une pensée à voix haute ; `message_id`, `user_message_id` et `client_msg_id` sont nuls,
   elle n'est pas dans le fil. À montrer seulement à l'écran regardé, **jamais en notification** (le serveur ne
   l'envoie d'ailleurs pas à une connexion absente).
@@ -251,7 +251,8 @@ répondre — réessaie ».
   montre juste avant sa réponse ; une sorte inconnue s'ignore ; une liste illisible ne fait jamais perdre le message.
 - `speak` n'est vrai que pour un seul écran regardé de la personne (celui qui a demandé, sinon le plus récemment
   actif) ; jamais pour une connexion absente.
-- `mode` : toujours présent, `"pro"` ou `""`. Une réponse pro (ADR 0116) : `speak` toujours faux, `voice_reason:
+- `mode` : présent sur une parole, `"pro"` ou `""` ; absent d'une trame sans texte ou de repli. Une réponse pro
+  (ADR 0116) : `speak` toujours faux, `voice_reason:
   "pro"` ; son texte peut porter du **Markdown** (blocs de code, `code`, gras, italique, listes, titres, liens) et
   forme **une seule bulle** — une ligne vide ne la coupe pas, pas de rythme de frappe.
 
@@ -341,16 +342,33 @@ notifiée, jamais gardée par le serveur — un client la garde **en mémoire se
 - `done` et la `speech` arrivent dans un ordre ou dans l'autre.
 - Un client qui ne connaît pas la trame l'ignore.
 
-**`emotion_update`** (son visage entre deux tours, seulement vers un écran regardé), **`inner_state_update`**
-(`{"inner_state": {…}}` : sommeil `sleep_phase`, `energy`, lieu `place`, ce qu'elle y fait `activity`
-(`{"name": "draw", "label": "dessiner", "since": …, "until": …}` en millisecondes, `until` nul : jusqu'à ce qu'elle
-s'arrête ; `null` : rien ; un client tait un nom qu'il ne connaît pas), sa dernière nuit `night`
-(`{"slept_h": 7.5, "broken": 1, "short": false}` : heures dormies à la demi-heure, fois où on l'a tirée du sommeil,
-nuit courte ; seulement du réveil jusqu'au milieu de sa journée, absente sinon — sans personne : une ligne sobre,
-« Nuit coupée une fois »), `circadian`, besoins `drives`, `estime`,
-`identity`, ce qui lui trotte dans la tête `ruminations`, `today_journal` (avec son `title`), `last_dream`,
-`self_narrative` ; `projects` pour une propriétaire ; `person_scope: false` = cette trame ne parle de personne, garde
-les sections personnelles), **`pong`**.
+**`emotion_update`** — son visage entre deux tours, seulement vers un écran regardé : `person_id`, `emotion`,
+`emotion_intensity`, `emotion_blend` (`[{"emotion", "weight"}]`) et `emotion_state`, comme dans `speech` :
+`{"person": {emotion, intensity}, "global": {emotion, intensity}, "message": {emotion, intensity, blend}}` (sa
+posture envers la personne, son humeur, le visage du message).
+
+**`inner_state_update`** — le panneau de sa vie intérieure, `{"inner_state": {…}}` :
+
+| Clé | Ce que c'est |
+|---|---|
+| `sleep_phase`, `energy`, `circadian` | son sommeil, son énergie, son rythme |
+| `place` | où elle est |
+| `activity` | ce qu'elle y fait : `{"name": "draw", "label": "dessiner", "since": …, "until": …}` en ms (`until` nul : jusqu'à ce qu'elle s'arrête) ; `null` : rien. Un client tait un nom qu'il ne connaît pas. |
+| `night` | sa dernière nuit, du réveil jusqu'au milieu de sa journée (absente sinon) : `{"slept_h": 7.5, "broken": 1, "short": false}` — heures dormies à la demi-heure, fois où on l'a tirée du sommeil, nuit courte |
+| `drives`, `estime` | ses besoins, son estime |
+| `ruminations` | ce qui lui trotte dans la tête |
+| `today_journal` (avec son `title`), `last_dream`, `self_narrative` | sa journée, son dernier rêve, son récit |
+| `identity` | qui elle a en face : `known_as`, `certainty`, `level`, `trust`, `pending_claims` |
+| `person_profile`, `pending_commitments` | ce qu'elle sait de la personne et ce qu'elle lui a promis, si sa fiche lui est ouverte |
+| `projects`, `pending_project_actions` | pour une propriétaire : ses projets, et les actions qui attendent son accord (`id`, `project_title`, `proposal`, `owner_label`, `kind_label`…) |
+| `person_scope` | `false` : cette trame ne parle de personne, garde les sections personnelles |
+
+Une action de projet se décide par `POST /api/projects/pending/<id>/approve` (ou `/reject`), corps
+`{"note": "…"}` facultatif, avec la session et l'en-tête CSRF, opératrice seulement : `{"ok": true, "status"}` ; 401
+sans compte, 403 pour qui n'est pas opératrice, 400 pour une autre décision, 404 pour une action inconnue ou déjà
+décidée, 409 (`status` : `changed`, `blocked`) quand ce qui partirait a changé — à décider alors depuis la console.
+
+**`pong`** — la réponse à `ping`, avec son `t`.
 
 ## 5. Notifier
 
@@ -453,7 +471,7 @@ haute portent `attachments: []`.
 `GET /files/<id>` avec le jeton (ou la session d'un navigateur) — seulement pour un fichier parti avec un de ses
 messages, dans le fil de ce compte : 200 en pièce jointe
 (`Content-Disposition: attachment; filename*=UTF-8''…`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`,
-`Content-Security-Policy: sandbox`) ; 404 pour un fichier inconnu **ou** qui n'est pas à toi (la même réponse) ; 410
+`Content-Security-Policy: sandbox; default-src 'none'`) ; 404 pour un fichier inconnu **ou** qui n'est pas à toi (la même réponse) ; 410
 pour un fichier retiré (ou dont les octets manquent) ; 401 sans compte (y compris un jeton posé à côté d'une
 `Origin`, sans cookie) ; 429 au-delà de 60 téléchargements par minute ; un identifiant mal formé, 404 avant même de
 regarder le compte. Le type n'est donné que
@@ -461,10 +479,6 @@ parmi des types sûrs (texte, Markdown, CSV, JSON, PNG, JPEG, WebP, GIF, PDF) ; 
 
 ## 7. Derrière un mandataire
 
-Le mandataire doit laisser passer `Authorization` et `X-Mika-Presence` à la mise à niveau WebSocket. La console
-passe par le même chemin, et ce sont ses bornes qui dimensionnent le mandataire, pas les pings du client (toutes les
-20 s, qu'un délai plus long tient aussi) : un corps de requête au moins égal à `kernel/forms.py::UPLOAD_MAX` (5 Mo, un
-dépôt de fichier) plus la marge du formulaire, et un délai de lecture au-dessus du plus long appel synchrone de la
-console, « Rejouer avec un autre modèle », borné par `adapters/llm/gateway.py::DEFAULT_DEADLINES["background"]`
-(300 s). Chez nginx : `client_max_body_size 6m` et `proxy_read_timeout 330s` ; voir
-[`deploy/README.md`](../deploy/README.md). Une de ces bornes qui change fait changer les deux documents.
+Le mandataire doit laisser passer `Authorization` et `X-Mika-Presence` à la mise à niveau WebSocket. Les pings du
+client (toutes les 20 s) tiennent dans n'importe quel délai de lecture ; ce qui dimensionne le mandataire, c'est la
+console : voir [`deploy/README.md`](../deploy/README.md).
