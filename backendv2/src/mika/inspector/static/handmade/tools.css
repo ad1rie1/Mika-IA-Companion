@@ -288,17 +288,32 @@
 .tools-review-choice { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }
 .tools-review-choice .plug-option { align-items: center; padding: 6px 12px; font-size: 13px; white-space: nowrap; }
 .tools-review-choice .plug-option input { margin-top: 0; }
-.tools-row-more summary { color: var(--accent); font-size: 12.5px; cursor: pointer; }
-.tools-row-more p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
 .tools-row-who { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 4px 0 0; color: var(--text-2); font-size: 12.5px; }
 .tools-rows { display: grid; margin: 0; padding: 0; list-style: none; }
-.tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.tools-row { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
 .tools-row-main { display: grid; flex: 1 1 320px; min-width: 0; }
 .tools-row-main code { font-size: 13px; font-weight: 600; }
 .tools-row-what { color: var(--text-2); font-size: 13px; }
 .tools-row-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.tools-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; }
+/* Un outil se règle sur sa ligne, dépliée (ADR 0130) : un seul envoi, ses exceptions repliées dedans */
+.tool-edit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; list-style: none; }
+summary.tool-edit-head { cursor: pointer; }
+summary.tool-edit-head::-webkit-details-marker { display: none; }
+.tool-edit-btn { flex: none; }
+.tool-edit[open] .tool-edit-btn { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.tool-edit-body { display: grid; gap: 14px; margin: 0 0 14px; padding: 16px 18px; border-radius: 12px; background: var(--sunken); }
+.tool-edit-full { margin: 0; color: var(--text-2); font-size: 13px; }
+.tool-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 18px; align-items: end; }
+.tool-edit-field { display: grid; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.tool-edit-label, .tool-edit-nature legend { padding: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.tool-edit-nature { display: flex; flex-wrap: wrap; gap: 6px; border-radius: 0; background: none; }
+.tool-edit-nature legend { width: 100%; margin-bottom: 4px; }
+.tool-edit-nature .plug-option { align-items: center; padding: 6px 14px; }
+.tool-edit-nature .plug-option input { margin-top: 0; }
+.tool-edit-body select, .tool-edit-body textarea { min-height: 40px; padding: 6px 10px; border: 1px solid var(--border-strong);
+  border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.tool-edit-rules > summary { color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; }
+.tool-edit-rules > p { margin: 6px 0 0; font-size: 12.5px; }
 /* Comment le joindre, comme Claude Code : le transport d'abord, puis ses seuls champs */
 .plug-transport { display: grid; gap: 6px; max-width: 560px; margin: 0 0 14px; padding: 0; border: 0; }
 .plug-transport legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }

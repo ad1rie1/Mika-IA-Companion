@@ -180,7 +180,7 @@ Les clés techniques sont dans « Détails techniques ».
   répondu ? » : la fin d'épisode qui l'a réglé et sa cause en mots (un silence choisi, ce qui l'a fait taire, trop
   tard, une panne), puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en échec.
 
-### Outils (ADR 0064, 0122, 0123, 0128, 0129)
+### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130)
 
 - **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses familles d'outils en lignes, chacune
   s'ouvre sur ses outils (ce qu'il fait, son nom, ses appels des 14 derniers jours) ; les situations en colonnes,
@@ -193,19 +193,19 @@ Les clés techniques sont dans « Détails techniques ».
   l'exécution.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
   proposés, à revoir, son genre et ses trois réglages — badge et vitale), puis les outils que ses apps lui donnent
-  (la vue de la Forge, dessous). La fiche d'un serveur : *En bref* (son état, ses outils servis, à revoir, ses
-  appels ; ce qu'elle en fait, en une phrase ; ce qu'elle en lit ; *qui peut quoi* — ses outils servis devant toi,
-  chaque personne que le service ouvre, les autres comptes, quand elle travaille seule, et ce qu'elle en garde ;
-  pour qui et quand ; le côté technique replié), *Ce qu'elle en fait* (dessiné : un genre en un clic, puis avec qui —
-  toi, les comptes, des personnes choisies —, quand, ce qu'elle fait seule, ce qu'elle en garde), *Ses outils*
-  (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce qui lit et ce
-  qui agit, chacun avec ce qu'il fait devant qui et où il s'écarte du service, « Régler l'outil » : activé, nature,
-  son accord, ce qu'elle en garde, ce qu'elle lit ; un outil changé est suspendu), *Par situation et par personne*
-  (dessiné, `?outil=` : pour un outil, une règle par situation et par personne nommée, dans ce que le service
-  permet, et « En clair »), *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé), puis, sous « Le
-  détail », *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —,
-  « Tester la connexion »). Une alerte dit ce que le genre ne dit pas : un service qui ne sert à personne, des outils
-  plus libres que lui.
+  (la vue de la Forge, dessous). La fiche d'un serveur a trois onglets (ADR 0130) : *En bref* (son état, ses outils
+  servis, à revoir, ses appels ; ses réglages en quatre réponses ; ce qu'elle en lit ; *qui peut quoi* — ses outils
+  servis devant toi, chaque personne que le service ouvre, les autres comptes, quand elle travaille seule, et ce
+  qu'elle en garde ; pour qui et quand ; le côté technique replié), *Réglages du service* (dessiné : un genre pour
+  aller vite, puis quatre questions — avec qui, quand, avant de se servir d'un outil elle…, ce qu'elle y lit elle…),
+  *Ses outils* (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce
+  qui lit et ce qui agit, chacun avec ce qu'il fait devant qui et où il s'écarte du service ; une ligne se déplie sur
+  son réglage, d'un seul envoi — servi, lit ou agit, avant de s'en servir, ce qu'elle en retient, ce qu'elle lit de
+  lui —, ses exceptions par situation et par personne repliées dedans ; `?outil=` l'ouvre ; un outil changé est
+  suspendu) ; sous « Le détail », *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais
+  lu par elle —, « Tester la connexion ») et *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé). La
+  connexion se règle par « Modifier la connexion ». Une alerte dit ce que le genre ne dit pas : un service qui ne
+  sert à personne, des outils plus libres que lui.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses

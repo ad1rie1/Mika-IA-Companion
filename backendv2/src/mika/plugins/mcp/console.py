@@ -2,10 +2,10 @@
 chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses appels.
 
 Les connexions (adresse, jeton, commande) se règlent dans Réglages › Plugins › Outils extérieurs ; un lien y mène et
-l'enregistrement ramène ici. Ce qui se décide ici (ADR 0128) : ce que le service fait d'elle (avec qui, quand, ce
+l'enregistrement ramène ici. Ce qui se décide ici (ADR 0128, 0130) : les réglages du service (avec qui, quand, ce
 qu'elle fait seule, ce qu'elle en garde — d'un coup par un genre) ; ce qu'il propose de neuf, regardé d'un coup (ADR
-0129) ; outil par outil, l'activer, sa nature, son accord et ce qu'elle en garde à lui, la description qu'elle lit, et
-ses règles par situation et par personne. « Qui peut quoi » se calcule par la règle du moteur (``level_of``), jamais
+0129) ; outil par outil, d'un seul envoi : l'activer, sa nature, son accord et ce qu'elle en garde à lui, la
+description qu'elle lit, et ses exceptions par situation et par personne. « Qui peut quoi » se calcule par la règle du moteur (``level_of``), jamais
 par une recopie. Ce que le serveur dit de lui-même et de ses outils est une donnée venue d'ailleurs : montrée à
 l'opérateur, jamais obéie.
 """
@@ -481,9 +481,7 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                 ("nature", review.nature if review is not None else ("lecture" if tool.read_only_hint else "action")),
                 ("seule", review.autonomy if review is not None else "service"),
                 ("garde", review.keep if review is not None else "service"),
-                ("description", current)), title="Régler cet outil", compact=True))
-        if review is not None:
-            detail.append(rules_ref(st.name, remote))
+                ("description", current), *rules_initial(review)), title="Enregistrer", compact=True))
         rules = len(review.situations) + len(review.people) if review is not None else 0
         rows.append(Row((Text(remote, "mono"), Text(said or "—", clamp=140), Badge(word, tone),
                          _words(NATURES, review.nature) if review else "—",
@@ -500,13 +498,12 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 
 def rules_ref(server: str, remote: str) -> Ref:
-    """La page d'un outil : ses règles par situation et par personne (ADR 0128)."""
-    return Ref("local", _fiche_url(server), "Par situation et par personne",
-               (("onglet", "regles"), ("outil", remote)))
+    """Un outil ouvert dans « Ses outils » : son réglage et ses exceptions (ADR 0130)."""
+    return Ref("local", _fiche_url(server), "Régler", (("onglet", "outils"), ("outil", remote)))
 
 
 def service_initial(st: Any) -> tuple[tuple[str, str], ...]:
-    """Ce que le formulaire « Ce qu'elle en fait » montre d'abord : les réglages du service."""
+    """Ce que le formulaire « Réglages du service » montre d'abord."""
     slots = [(f"qui{i + 1}", p) for i, p in enumerate(st.with_people[:PEOPLE_SLOTS])]
     return (("avec_toi", "1" if st.with_owner else ""), ("avec_les_comptes", "1" if st.with_accounts else ""), *slots,
             ("repond", "1" if "conversation" in st.episodes else ""),
@@ -514,16 +511,18 @@ def service_initial(st: Any) -> tuple[tuple[str, str], ...]:
             ("travaille", "1" if "travail" in st.episodes else ""), ("seule", st.autonomy), ("garde", st.keep))
 
 
-def rules_initial(remote: str, review: Any) -> tuple[tuple[str, str], ...]:
-    """Ce que le formulaire des règles d'un outil montre d'abord : ses règles, une personne par emplacement."""
+def rules_initial(review: Any) -> tuple[tuple[str, str], ...]:
+    """Les exceptions d'un outil telles que son formulaire les montre : une par situation, une personne par
+    emplacement."""
     named = list(review.people.items())[:PEOPLE_SLOTS] if review is not None else []
     rules = review.situations if review is not None else {}
-    return (("outil", remote), *((f"s_{k}", rules.get(k, AS_SERVICE)) for k, _ in TOOL_SITUATIONS),
+    return (*((f"s_{k}", rules.get(k, AS_SERVICE)) for k, _ in TOOL_SITUATIONS),
             *(pair for i, (who, level) in enumerate(named) for pair in ((f"p{i + 1}", who), (f"r{i + 1}", level))))
 
 
-@MCP.inspect("fait", title="Ce qu'elle en fait", subject="serveur", order=15,
-             description="Avec qui, quand, ce qu'elle fait seule et ce qu'elle en garde — d'un coup par un genre.")
+@MCP.inspect("fait", title="Réglages du service", subject="serveur", order=15,
+             description="Avec qui, quand, ce qu'elle fait avant de se servir d'un outil, ce qu'elle retient de ce "
+                         "qu'elle y lit — d'un coup par un genre.")
 def _tab_service(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mcp")
     st = port.status(ctx.subject) if port is not None else None
@@ -537,25 +536,6 @@ def _tab_service(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ActionSlot("mcp.genre", (("genre", genre_of(st)[0] or "pro"),), title="Choisir un genre"),
         ActionSlot("mcp.service", service_initial(st), title="Enregistrer"),
     ]
-
-
-@MCP.inspect("regles", title="Par situation et par personne", subject="serveur", order=25,
-             description="Un outil : avec qui il sert et l'accord qu'il demande, par situation et pour des personnes "
-                         "nommées — dans ce que son service permet.")
-def _tab_rules(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("mcp")
-    st = port.status(ctx.subject) if port is not None else None
-    if st is None:
-        return [Note("Ce serveur n'existe plus.", tone="muted")]
-    remote = str(ctx.params.get("outil", "") or "")
-    if remote not in st.reviews:
-        rows = tuple(Row((rules_ref(st.name, r), Text(v.description or v.server_description or "—", clamp=140),
-                          WORDS.get(v.autonomy, v.autonomy)))
-                     for r, v in st.reviews.items() if v.enabled)
-        return [Table(("outil", "ce qu'il fait", Column("seule", "fit")), rows, title="Choisis un outil",
-                      empty="Aucun outil servi : approuve-les d'abord dans « Ses outils ».")]
-    review = st.reviews[remote]
-    return [ActionSlot("mcp.regles", rules_initial(remote, review), title="Enregistrer")]
 
 
 #: l'issue d'un appel sur accord, son ton
@@ -627,15 +607,15 @@ class NoArgs(BaseModel):
     pass
 
 
-class ReviewArgs(BaseModel):
+class _ToolBase(BaseModel):
     outil: Annotated[str, Knob(label="Outil", widget="hidden")] = Field(min_length=1, max_length=128)
     actif: Annotated[bool, Knob(label="Activé", advanced=False,
                                 help="Coché : elle peut s'en servir, tel que le serveur le décrit maintenant.")] = False
     nature: Annotated[Literal["lecture", "action"], Knob(label="Nature", choices=NATURES, advanced=False)] = "lecture"
     seule: Annotated[Literal["service", "seule", "carte", "toi"], Knob(
         label="Ce qu'il fait seul", choices=TOOL_AUTONOMIES, advanced=False,
-        help="Seul, l'appel part aussitôt et ses arguments sortent de la machine. Une règle par situation ou par "
-             "personne passe avant (onglet « Par situation et par personne »).")] = "service"
+        help="Seul, l'appel part aussitôt et ses arguments sortent de la machine. Une exception par situation ou par "
+             "personne passe avant.")] = "service"
     garde: Annotated[Literal["service", "public", "perso", "prive", "rien"], Knob(
         label="Ce qu'elle en garde", choices=TOOL_KEEPS, advanced=False,
         help="Pour un outil qui ne vaut pas le reste du service : « rien » pour des données de tiers qu'elle n'a pas "
@@ -664,21 +644,6 @@ async def _test(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     if not ok and st is not None and st.detail:
         said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger", drafts=status_drafts(s, port))
-
-
-@MCP.action("regler", title="Régler l'outil", args=ReviewArgs, emits=[STATUS], subject="serveur", order=20,
-            inline=True, description="L'activer ou non, sa nature, l'accord qu'il demande, ce qu'elle en garde, ce "
-                                     "qu'elle lit.")
-async def _review(s: McpState, frame: Frame, args: ReviewArgs, ctx: Any) -> Done:
-    port = _port(ctx)
-    try:
-        await port.review(ctx.subject, args.outil, enabled=args.actif, nature=args.nature, autonomy=args.seule,
-                          description=args.description, by=ctx.by, keep=args.garde)
-    except ValueError as exc:
-        raise Refused(str(exc)) from None
-    word = "activé" if args.actif else "désactivé"
-    return Done(message=f"{args.outil} : {word}, {WORDS.get(args.seule, args.seule)}.",
-                drafts=status_drafts(s, port))
 
 
 class GenreArgs(BaseModel):
@@ -714,12 +679,9 @@ _SituationLevel = Literal["service", "seule", "carte", "toi", "non"]
 _PersonLevel = Literal["situation", "seule", "carte", "toi", "non"]
 
 
-class _RulesBase(BaseModel):
-    outil: Annotated[str, Knob(label="Outil", widget="hidden")] = Field(min_length=1, max_length=128)
-
-
-#: les règles d'un outil : une par situation, et une par personne nommée (un emplacement chacune)
-RulesArgs = create_model("RulesArgs", __base__=_RulesBase, **{
+#: un outil, d'un seul envoi (ADR 0130) : son réglage, puis ses exceptions — une par situation, une par personne
+#: nommée (un emplacement chacune)
+ToolArgs = create_model("ToolArgs", __base__=_ToolBase, **{
     **{f"s_{k}": (Annotated[_SituationLevel, Knob(label=label[:1].upper() + label[1:], choices=_SITUATION_LEVELS,
                                                   advanced=False)], AS_SERVICE) for k, label in TOOL_SITUATIONS},
     **{f"p{i}": (Annotated[str, Knob(label=f"Personne nommée {i}", advanced=False)], Field("", max_length=200))
@@ -747,7 +709,7 @@ async def _genre(s: McpState, frame: Frame, args: GenreArgs, ctx: Any) -> Done:
     return Done(message=f"{ctx.subject} : « {label} ».", drafts=status_drafts(s, port))
 
 
-@MCP.action("service", title="Ce qu'elle en fait", args=ServiceArgs, emits=[STATUS], subject="serveur", order=40,
+@MCP.action("service", title="Réglages du service", args=ServiceArgs, emits=[STATUS], subject="serveur", order=40,
             inline=True, description="Avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde.")
 async def _service(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
     port = _port(ctx)
@@ -762,9 +724,10 @@ async def _service(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
     return Done(message=sentence(st, frame) if st is not None else "Enregistré.", drafts=status_drafts(s, port))
 
 
-@MCP.action("regles", title="Ses règles", args=RulesArgs, emits=[STATUS], subject="serveur", order=50, inline=True,
-            description="Par situation et par personne nommée : non, seule, sur accord de la personne, avec ton accord.")
-async def _rules(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
+@MCP.action("regler", title="Régler l'outil", args=ToolArgs, emits=[STATUS], subject="serveur", order=20,
+            inline=True, description="L'activer ou non, sa nature, l'accord qu'il demande, ce qu'elle en garde, ce "
+                                     "qu'elle lit, et ses exceptions par situation et par personne.")
+async def _review(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
     port = _port(ctx)
     situations = {k: v for k, _ in TOOL_SITUATIONS if (v := getattr(args, f"s_{k}")) != AS_SERVICE}
     people: dict[str, str] = {}
@@ -773,11 +736,15 @@ async def _rules(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
         if who and level != AS_SITUATION:
             people.setdefault(who, level)
     try:
+        await port.review(ctx.subject, args.outil, enabled=args.actif, nature=args.nature, autonomy=args.seule,
+                          description=args.description, by=ctx.by, keep=args.garde)
         await port.rule(ctx.subject, args.outil, situations=situations, people=people, by=ctx.by)
     except ValueError as exc:
         raise Refused(str(exc)) from None
+    word = "servi" if args.actif else "coupé"
     n = len(situations) + len(people)
-    return Done(message=f"{args.outil} : {n} règle{'s' if n > 1 else ''}.", drafts=status_drafts(s, port))
+    rules = f", {n} exception{'s' if n > 1 else ''}" if n else ""
+    return Done(message=f"{args.outil} : {word}{rules}.", drafts=status_drafts(s, port))
 
 
 #: ce qu'on décide d'un outil nouveau ou changé (ADR 0129) : rien ne se sert sans un choix

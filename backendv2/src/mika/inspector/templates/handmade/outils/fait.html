@@ -1,7 +1,7 @@
-{# Un service branché › « Ce qu'elle en fait » (app/handmade/servers.py, ADR 0128, 0129) : la phrase (et ce qu'elle ne
-   dit pas : il ne sert à personne, des outils plus libres que lui), un genre en un clic, puis les trois réglages — avec
-   qui, ce qu'elle fait seule, ce qu'elle en garde. Les formulaires sont ceux des actions ``mcp.genre`` et
-   ``mcp.service`` (jeton, retour, audit), dessinés ici. #}
+{# Un service branché › « Réglages du service » (app/handmade/servers.py, ADR 0128, 0129, 0130) : la phrase (et ce
+   qu'elle ne dit pas : il ne sert à personne, des outils plus libres que lui), un genre pour aller vite, puis quatre
+   questions numérotées — avec qui, quand, avant un outil, ce qu'elle y lit. Les formulaires sont ceux des actions
+   ``mcp.genre`` et ``mcp.service`` (jeton, retour, audit), dessinés ici. #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -39,8 +39,8 @@
   {% if genre_form and not system %}
   <section class="now-card" aria-labelledby="service-genres">
     <header class="now-card-head">
-      <h2 id="service-genres">Quel genre de service ?</h2>
-      <p>Un genre règle d'un coup avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde : un clic l'applique aussitôt, à la place des réglages plus bas (ce que tu y as changé sans l'enregistrer est perdu). Tu ajustes ensuite, plus bas.</p>
+      <h2 id="service-genres">Pour aller vite : un genre</h2>
+      <p>Un genre répond d'un coup aux quatre questions plus bas. Un clic l'applique aussitôt (ce que tu as changé plus bas sans l'enregistrer est perdu) ; tu ajustes ensuite.</p>
     </header>
     <ul class="service-genres" role="list">
       {% for g in genres %}
@@ -65,8 +65,8 @@
     {{ plumbing(form) }}
     <section class="now-card" aria-labelledby="service-who">
       <header class="now-card-head">
-        <h2 id="service-who">Avec qui</h2>
-        <p>Le plafond du service : aucun de ses outils ne sert à plus de monde. Jamais dans un salon ni avec une inconnue.</p>
+        <h2 id="service-who">1. Avec qui ?</h2>
+        <p>Personne d'autre ne s'en sert, aucun outil, quoi qu'on règle plus loin. Jamais dans un salon ni avec une inconnue.</p>
       </header>
       {{ check("avec_toi", with_owner, "Toi", "sa propriétaire, et quand elle travaille pour toi") }}
       {{ check("avec_les_comptes", with_accounts, "Toutes les personnes qui ont un compte chez elle", "connectées à l'app ou au web, en tête-à-tête ; un compte de messagerie ne suffit pas") }}
@@ -85,28 +85,33 @@
         </div>
         <p class="now-muted">Seulement authentifiées : sur un moyen de communication non vérifié, la personne compte comme une inconnue. Ce qu'elle lit pour l'une d'elles reste sa confidence.</p>
       </fieldset>
-      <fieldset class="service-when">
-        <legend>Quand</legend>
+    </section>
+
+    <section class="now-card" aria-labelledby="service-when">
+      <header class="now-card-head">
+        <h2 id="service-when">2. Quand ?</h2>
+      </header>
+      <div class="service-when">
         {{ check("repond", "conversation" in episodes, "Quand elle répond", "") }}
         {{ check("parle", "initiative" in episodes, "Quand elle prend la parole d'elle-même", "") }}
         {{ check("travaille", "travail" in episodes, "Quand elle travaille seule", "un projet ou un but qui a pris ce service ; seulement avec toi") }}
-      </fieldset>
+      </div>
     </section>
 
     <section class="now-card" aria-labelledby="service-alone">
       <header class="now-card-head">
-        <h2 id="service-alone">Ce qu'elle fait seule</h2>
-        <p>Plus on va à droite, plus c'est serré. Un outil peut s'en écarter, dans un sens ou dans l'autre (son accord à lui, ou par situation et par personne) : sa ligne le dit dans « Ses outils ».</p>
+        <h2 id="service-alone">3. Avant de se servir d'un de ses outils, elle…</h2>
+        <p>De gauche à droite, de plus en plus prudente. Un outil peut faire autrement : c'est dit sur sa ligne, dans « Ses outils ».</p>
       </header>
-      {{ ladder("seule", autonomies, autonomy, "Ce qu'elle fait seule") }}
+      {{ ladder("seule", autonomies, autonomy, "Avant de se servir d'un de ses outils, elle…") }}
     </section>
 
     <section class="now-card" aria-labelledby="service-keep">
       <header class="now-card-head">
-        <h2 id="service-keep">Ce qu'elle en garde</h2>
-        <p>Ça vaut pour tout ce qui en sort : ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a rendu. À partir de maintenant : ce qu'elle a déjà gardé ne change pas. Un outil peut garder autrement (« Régler », dans « Ses outils »).</p>
+        <h2 id="service-keep">4. Ce qu'elle y lit, elle…</h2>
+        <p>Ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a rendu. À partir de maintenant : ce qu'elle a déjà gardé ne change pas. Un outil peut faire autrement (dans « Ses outils »).</p>
       </header>
-      {{ ladder("garde", keeps, keep, "Ce qu'elle en garde") }}
+      {{ ladder("garde", keeps, keep, "Ce qu'elle y lit, elle…") }}
     </section>
 
     <div class="form-actions-inline"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ form.back }}">Annuler</a></div>

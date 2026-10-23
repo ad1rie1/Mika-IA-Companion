@@ -1,18 +1,17 @@
-"""La fiche d'un service branché, dessinée (ADR 0121, 0123, 0128, 0129) : son premier onglet, « En bref », et trois
-onglets du plugin dessinés ici — « Ce qu'elle en fait », « Ses outils » et « Par situation et par personne ».
+"""La fiche d'un service branché, dessinée (ADR 0121, 0123, 0128, 0129, 0130) : trois onglets — « En bref », puis deux
+du plugin dessinés ici, « Réglages du service » et « Ses outils » ; « État » et « Appels » sous « Le détail ».
 
-S'il marche (et ce qui attend ton regard), ce qu'elle en fait en une phrase, ce qu'elle en lit pour décider de s'en
-servir, qui peut quoi outil par outil, pour qui et quand ; le côté technique replié. Lu au port MCP, comme les
-onglets du plugin, qui restent à un clic (« État » sous « Le détail », « Appels »). Ce qu'un outil fait devant
-quelqu'un se calcule par la règle du moteur (``level_of``) sur des personnes types (``console.faces``), jamais par
-une recopie.
+S'il marche (et ce qui attend ton regard), ses réglages en quatre réponses, ce qu'elle en lit pour décider de s'en
+servir, qui peut quoi outil par outil, pour qui et quand ; le côté technique replié. Un outil se règle sur sa ligne,
+d'un seul envoi, ses exceptions par situation et par personne repliées. Ce qu'un outil fait devant quelqu'un se
+calcule par la règle du moteur (``level_of``) sur des personnes types (``console.faces``), jamais par une recopie.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
 
@@ -32,13 +31,11 @@ from mika.plugins.mcp.console import (
     GENRES,
     PEOPLE_SLOTS,
     STATE_TONES,
-    WORDS,
     drift,
     edit_server,
     faces,
     genre_of,
     looser_tools,
-    name_of,
     rules_of,
     said_level,
     sentence,
@@ -46,21 +43,24 @@ from mika.plugins.mcp.console import (
     tool_state,
     who_said,
 )
-from mika.ports.mcp import (
-    AUTONOMIES,
-    KEEPS,
-    NATURES,
-    RULE_LEVELS,
-    STATES,
-    TOOL_SITUATIONS,
-    tool_autonomy,
-    tool_keep,
-)
+from mika.ports.mcp import AUTONOMIES, KEEPS, RULE_LEVELS, STATES, TOOL_SITUATIONS, tool_autonomy, tool_keep
 from mika.runtime.tools import deferred
 from mika.vocab.episodes import Kind
 from mika.vocab.people import ACCOUNT_PREFIX
 
 KIND = "serveur"
+#: « Avant de se servir d'un de ses outils, elle… » (ADR 0130) : ce qu'elle fait seule, en mots simples
+BEFORE = {"seule": ("ne demande pas", "l'appel part aussitôt"),
+          "lit": ("lit sans demander, demande avant d'agir", "lire ne change rien ; créer, envoyer, supprimer : un accord"),
+          "carte": ("demande à la personne en face", "une carte dans son chat ; quand elle travaille seule, la demande "
+                                                     "t'attend dans la console"),
+          "toi": ("te demande, à toi", "une carte dans ton chat si c'est toi en face ; sinon la demande t'attend dans "
+                                       "la console (« À valider »)")}
+#: « Ce qu'elle y lit, elle… » : ce qu'elle en garde, en mots simples
+KEPT = {"public": ("peut l'apprendre et le raconter", "ça devient ce qu'elle sait"),
+        "perso": ("s'en souvient", "comme de ce qu'on lui raconte"),
+        "prive": ("le garde comme une confidence", "elle en reparle avec la personne, jamais avec quelqu'un d'autre"),
+        "rien": ("l'oublie aussitôt", "elle s'en sert sur le moment, rien n'est gardé")}
 #: ce qu'elle pourra en redire plus tard à quelqu'un d'autre, par niveau gardé
 LATER = {"public": "elle peut le raconter", "perso": "en grande confiance, une anecdote peut échapper",
          "prive": "jamais", "rien": "rien n'est gardé"}
@@ -92,23 +92,22 @@ def _short(text: str, size: int = SHORT) -> tuple[str, str]:
     return cut + "…", text
 
 
-def _steps(choices: tuple[tuple[str, str], ...], later: dict[str, str] | None = None) -> list[dict[str, str]]:
-    """Une échelle de choix (« nom — ce que c'est »), pour un gabarit."""
-    out = []
-    for k, label in choices:
-        name, _, what = label.partition(" — ")
-        out.append({"key": k, "name": _capital(name), "what": what, "later": (later or {}).get(k, "")})
-    return out
+def _steps(choices: tuple[tuple[str, str], ...], words: dict[str, tuple[str, str]],
+           later: dict[str, str] | None = None) -> list[dict[str, str]]:
+    """Une échelle de choix en mots simples (ce qu'elle fait, ce que ça veut dire), pour un gabarit."""
+    return [{"key": k, "name": _capital(words[k][0]), "what": words[k][1], "later": (later or {}).get(k, "")}
+            for k, _ in choices]
 
 
 def genre_cards(current: str) -> list[dict[str, Any]]:
-    """Les genres de service, en cartes : leur nom, un exemple, et ce qu'ils règlent (avec qui, seule, ce qu'elle garde)."""
+    """Les genres de service, en cartes : leur nom, un exemple, et leurs réponses (avec qui, avant un outil, ce qu'elle
+    y lit)."""
     out = []
     for k, label, example, preset in GENRES:
         who = ("toi" if preset["with_owner"] else "une personne choisie") + (
             " et les comptes" if preset["with_accounts"] else " seul" if preset["with_owner"] else "")
         out.append({"key": k, "label": label, "example": _capital(example), "on": k == current, "who": f"Avec {who}",
-                    "alone": _capital(WORDS.get(preset["autonomy"], "")), "keep": f"Garde : {_word(KEEPS, preset['keep'])}"})
+                    "alone": _capital(BEFORE[preset["autonomy"]][0]), "keep": _capital(KEPT[preset["keep"]][0])})
     return out
 
 
@@ -131,9 +130,10 @@ def _people(ui: UI) -> list[dict[str, str]]:
     return sorted(out, key=lambda p: p["name"].casefold())
 
 
-def default_level(st: Any, review: Any) -> str:
-    """L'accord d'un outil hors de toute règle de situation ou de personne : le sien, sinon celui de son service."""
-    return tool_autonomy(st.autonomy, review.autonomy, review.nature)
+def _when(st: Any) -> str:
+    """Quand elle s'en sert, d'après les moments du service."""
+    return ", ".join(w for e, w in (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
+                                    ("travail", "quand elle travaille seule")) if e in st.episodes) or "jamais"
 
 
 def _talks(st: Any) -> str:
@@ -220,6 +220,64 @@ def _keep_of(st: Any, review: Any) -> dict[str, Any]:
     return {"word": _word(KEEPS, keep), "own": keep != st.keep}
 
 
+def _rule_words(where: str) -> dict[str, str]:
+    """Une exception, dans une situation : ce qu'elle fait. Devant toi, et sans personne en face, « carte » et « ton
+    accord » reviennent au même — c'est toi qui décides."""
+    if where == "compte":
+        return {"seule": "ne demande pas", "carte": "lui demande, à elle", "toi": "te demande, à toi (dans la console)",
+                "non": "ne s'en sert pas"}
+    asks = "te demande" if where == "proprietaire" else "te demande (dans la console)"
+    return {"seule": "ne demande pas", "carte": asks, "toi": asks, "non": "ne s'en sert pas"}
+
+
+def _rule_options(where: str, current: str, empty: tuple[str, str]) -> tuple[tuple[str, str], ...]:
+    """Les choix d'une exception : sans exception, puis ce qui a un sens dans cette situation (et la valeur actuelle)."""
+    words = _rule_words(where)
+    keep = [k for k, _ in RULE_LEVELS if where == "compte" or k != "carte" or current == "carte"]
+    return (empty, *((k, words[k]) for k in keep))
+
+
+def _editor(st: Any, review: Any, nature: str, form: Any, people: list[dict[str, str]]) -> dict[str, Any]:
+    """Le réglage d'un outil sur sa ligne (ADR 0130), d'un seul envoi : servi, lit ou agit, avant de s'en servir,
+    ce qu'elle en retient, ce qu'elle lit de lui — puis ses exceptions, par situation et par personne."""
+    base = tool_autonomy(st.autonomy, "service", nature)
+    own = review.autonomy if review is not None else "service"
+    level = tool_autonomy(st.autonomy, own, nature)
+    said = dict(review.situations) if review is not None else {}
+    situations = []
+    for k, label in TOOL_SITUATIONS:
+        hint = (_talks(st) or "jamais") if k == "proprietaire" else SITUATION_HINTS.get(k, "")
+        if k == "compte" and not st.with_accounts and st.with_people:
+            hint += " — seulement les personnes choisies du service"
+        value = said.get(k, AS_SERVICE)
+        situations.append({"path": f"s_{k}", "label": _capital(label), "hint": hint, "why": _closed(st, k),
+                           "value": value, "options": _rule_options(
+                               k, value, (AS_SERVICE, f"pas d'exception : {_rule_words(k)[level]}"))})
+    named = list(review.people.items())[:PEOPLE_SLOTS] if review is not None else []
+    slots = [{"person_path": f"p{i + 1}", "level_path": f"r{i + 1}", "person": who, "level": value,
+              "outside": not (st.with_accounts or who in st.with_people)} for i, (who, value) in enumerate(named)]
+    if len(slots) < PEOPLE_SLOTS:
+        n = len(slots) + 1
+        slots.append({"person_path": f"p{n}", "level_path": f"r{n}", "person": "", "level": AS_SITUATION,
+                      "outside": False})
+    words = _rule_words("compte")
+    return {
+        "form": form, "actif": review.enabled if review is not None else True, "nature": nature,
+        "before": ((AS_SERVICE, f"comme le service : {BEFORE[base][0]}"),
+                   *((k, BEFORE[k][0]) for k in ("seule", "carte", "toi"))), "own": own,
+        "kept": ((AS_SERVICE, f"comme le service : {KEPT[st.keep][0]}"), *((k, KEPT[k][0]) for k, _ in KEEPS)),
+        "keep": review.keep if review is not None else AS_SERVICE,
+        "description": review.description if review is not None else "",
+        "situations": situations, "slots": slots, "people": people, "people_keys": [p["key"] for p in people],
+        "person_options": ((AS_SITUATION, "comme sa situation"), *((k, words[k]) for k, _ in RULE_LEVELS)),
+        "rules": len(said) + len(named)}
+
+
+def _tool_url(server: str, remote: str) -> str:
+    """Un outil ouvert sur sa ligne, dans « Ses outils »."""
+    return fiche_url(KIND, server, "outils") + "&" + urlencode({"outil": remote}) + "#" + quote(f"outil-{remote}")
+
+
 def _alerts(st: Any, frame: Any, tools_tab: str, service_tab: str) -> list[dict[str, str]]:
     """Ce que son réglage ne dit pas de lui-même : il ne sert à personne, des outils plus libres que lui."""
     out = []
@@ -236,14 +294,14 @@ def _alerts(st: Any, frame: Any, tools_tab: str, service_tab: str) -> list[dict[
 
 
 class ServerOverview(Overview):
-    """« En bref » : le premier onglet de la fiche d'un service branché ; l'onglet « État » du plugin, qu'il
-    résume, passe au bout de la barre."""
+    """« En bref » : le premier onglet de la fiche d'un service branché ; « État », qu'il résume, et « Appels »
+    passent au bout de la barre, sous « Le détail »."""
 
     slug = "ensemble"
     title = "En bref"
-    description = "S'il marche, ce qu'elle en lit, qui peut quoi, pour qui et quand."
+    description = "S'il marche, ses réglages, ce qu'elle en lit, qui peut quoi, pour qui et quand."
     styles = ("handmade/tools.css",)
-    folded = ("etat",)
+    folded = ("etat", "appels")
 
     def head(self, ui: UI, key: str) -> Markup | None:
         """Son en-tête, sur tous ses onglets : son nom, à quoi il lui sert, où il en est, et ses réglages en bouton
@@ -267,11 +325,11 @@ class ServerOverview(Overview):
             name=st.name, purpose=_capital(st.purpose.strip()), tags=tags))
 
     def links(self, ui: UI, key: str) -> list[tuple[str, str]]:
-        """« Modifier ses réglages » (la connexion), à côté de « Tester la connexion »."""
+        """« Modifier la connexion » (comment le joindre), à côté de « Tester la connexion »."""
         port = ui.kernel.ports.get("mcp")
         if port is None or port.status(key) is None:
             return []
-        return [("Modifier ses réglages", render.href(edit_server(key, fiche_url(KIND, key))))]
+        return [("Modifier la connexion", render.href(edit_server(key, fiche_url(KIND, key))))]
 
     def render(self, ui: UI, key: str) -> Markup | None:
         port = ui.kernel.ports.get("mcp")
@@ -314,7 +372,7 @@ class ServerOverview(Overview):
             what, _ = _short(decided.description or decided.server_description or live[remote].description, 120)
             matrix.append({"name": remote, "what": what, "cells": _cells(st, decided, columns),
                            "keep": _keep_of(st, decided), "looser": bool(drift(st, decided, frame)[0]),
-                           "rules": fiche_url(KIND, key, "regles") + "&" + urlencode({"outil": remote})})
+                           "rules": _tool_url(key, remote)})
         states: dict[str, int] = {}
         for remote in [t.remote for t in st.live] + [r for r in st.reviews if r not in live]:
             word = tool_state(st, remote)[0]
@@ -334,8 +392,8 @@ class ServerOverview(Overview):
             joined=ago(st.last_ok_at), served=served, live=len(st.live), review=review,
             calls=st.calls, failures=st.failures, alerts=alerts, genre=genre_of(st)[1],
             sentence=sentence(st, frame), service_tab=service_tab,
-            who=_capital(who_said(st, frame)), alone=_capital(WORDS.get(st.autonomy, st.autonomy)),
-            keep=_capital(_word(KEEPS, st.keep)), keep_later=LATER.get(st.keep, ""),
+            who=_capital(who_said(st, frame)), when=_capital(_when(st)), alone=BEFORE[st.autonomy][0],
+            keep=KEPT[st.keep][0], keep_later=LATER.get(st.keep, ""),
             purpose=_capital(st.purpose.strip()), when_to_use=_capital(st.when_to_use.strip()),
             columns=[f.label for f in columns], matrix=matrix, states=sorted(states.items()), known=bool(st.live),
             matrix_pager=render._pager(Pager(size=max(1, len(matrix)), total=max(1, len(matrix))), {}),
@@ -344,29 +402,27 @@ class ServerOverview(Overview):
             local=st.kind == "local", address=st.address, settings=settings, tools_tab=tools_tab,
             calls_tab=fiche_url(KIND, key, "appels"), grid=grid))
 
-    tabs = ("fait", "regles", "outils")
+    tabs = ("fait", "outils")
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Any, query: Any, forms: Any = None) -> Any:
-        """« Ce qu'elle en fait », « Ses outils » et « Par situation et par personne », dessinés (ADR 0128, 0129) ;
-        sans outil choisi, la troisième garde la liste de la console."""
+        """« Réglages du service » et « Ses outils », dessinés (ADR 0128, 0129, 0130) ; ``?outil=`` ouvre un outil."""
         port = ui.kernel.ports.get("mcp")
         st = port.status(key) if port is not None else None
         if st is None:
             return None
         if tab == "fait":
             return self._service(ui, st, forms)
-        if tab == "regles":
-            return self._rules(ui, st, str(dict(query or {}).get("outil", "")), forms)
         if tab == "outils":
-            return self._tools(ui, st, forms)
+            return self._tools(ui, st, forms, str(dict(query or {}).get("outil", "")))
         return None
 
     @staticmethod
-    def _tools(ui: UI, st: Any, forms: Any) -> Markup:
+    def _tools(ui: UI, st: Any, forms: Any, wanted: str = "") -> Markup:
         frame = ui.kernel.mind.frame()
         live = {t.remote: t for t in st.live}
         remotes = [t.remote for t in st.live] + [r for r in st.reviews if r not in live]
         columns = faces(st, frame, _named(st))
+        people = _people(ui)
         # ce qui attend un regard : nouveau ou changé, avec ce que le serveur en dit — rien ne se sert sans un choix
         waiting = []
         for remote in (*st.new, *st.changed):
@@ -399,19 +455,18 @@ class ServerOverview(Overview):
                          if k.startswith("mcp.regler|") and f'"outil": {slot}' in k), None)
             looser, stricter = drift(st, review, frame) if served else ([], [])
             groups[nature].append({
-                "name": remote, "what": what, "full": full, "state": word, "tone": tone, "form": form,
+                "name": remote, "what": what, "full": full, "state": word, "tone": tone,
                 "cells": _cells(st, review, columns) if served else [],
                 "keep": _keep_of(st, review) if served else None,
                 "looser": ", ".join(looser), "stricter": ", ".join(stricter),
-                "rules": f"{n} règle{'s' if n > 1 else ''}" if n else "",
-                "rules_href": fiche_url(KIND, st.name, "regles") + "&" + urlencode({"outil": remote})
-                if review is not None and review.enabled else ""})
+                "rules": f"{n} exception{'s' if n > 1 else ''}" if n else "", "open": remote == wanted,
+                "edit": _editor(st, review, nature, form, people) if form is not None else None})
         notes = []
         if not st.live:
             notes.append({"tone": "warn", "text": "La liste de ses outils n'est pas connue : « Tester la connexion » "
                                                   "la charge."})
         return Markup(env.get_template("handmade/outils/outils.html").render(
-            alone=_capital(WORDS.get(st.autonomy, st.autonomy)), keep=_word(KEEPS, st.keep), genre=genre_of(st)[1],
+            alone=BEFORE[st.autonomy][0], keep=KEPT[st.keep][0], genre=genre_of(st)[1],
             service_tab=fiche_url(KIND, st.name, "fait"), waiting=waiting, decide_form=_form(forms, "mcp.revoir"),
             notes=notes, alerts=_alerts(st, frame, "", fiche_url(KIND, st.name, "fait")), groups=[
                 {"key": "lit", "title": "Ce qui lit", "hint": "rien ne change ailleurs", "tools": groups["lecture"],
@@ -434,57 +489,6 @@ class ServerOverview(Overview):
             sentence=sentence(st, frame), genre=_capital(genre), genres=genres, genre_form=_form(forms, "mcp.genre"),
             form=_form(forms, "mcp.service"), system=system, with_owner=st.with_owner,
             with_accounts=st.with_accounts, episodes=tuple(st.episodes), people=people,
-            people_keys=[p["key"] for p in people], people_slots=slots, autonomies=_steps(AUTONOMIES),
-            autonomy=st.autonomy, keeps=_steps(KEEPS, LATER), keep=st.keep,
+            people_keys=[p["key"] for p in people], people_slots=slots, autonomies=_steps(AUTONOMIES, BEFORE),
+            autonomy=st.autonomy, keeps=_steps(KEEPS, KEPT, LATER), keep=st.keep,
             alerts=_alerts(st, frame, fiche_url(KIND, st.name, "outils"), "")))
-
-    @staticmethod
-    def _rules(ui: UI, st: Any, remote: str, forms: Any) -> Markup | None:
-        review = st.reviews.get(remote)
-        if review is None:
-            return None
-        frame = ui.kernel.mind.frame()
-        base = default_level(st, review)
-        # sans règle de situation, l'outil suit son accord à lui s'il en a un, sinon son service
-        without = "comme son accord à lui" if review.autonomy != "service" else "comme le service"
-        situations, said = [], dict(review.situations)
-        for k, label in TOOL_SITUATIONS:
-            hint = (_talks(st) or "jamais") if k == "proprietaire" else SITUATION_HINTS.get(k, "")
-            if k == "compte" and not st.with_accounts and st.with_people:
-                hint += " — seulement les personnes choisies du service"
-            situations.append({"path": f"s_{k}", "label": _capital(label), "hint": hint, "why": _closed(st, k),
-                               "locked": bool(_closed(st, k)), "value": said.get(k, AS_SERVICE),
-                               "options": ((AS_SERVICE, f"{without} ({WORDS.get(base, base)})"), *RULE_LEVELS)})
-        compte = said.get("compte") or base
-        slots = [{"person_path": f"p{i + 1}", "level_path": f"r{i + 1}", "person": who, "level": level}
-                 for i, (who, level) in enumerate(list(review.people.items())[:PEOPLE_SLOTS])]
-        if len(slots) < PEOPLE_SLOTS:
-            n = len(slots) + 1
-            slots.append({"person_path": f"p{n}", "level_path": f"r{n}", "person": "", "level": AS_SITUATION})
-        people = _people(ui)
-        # en clair : la règle du moteur, devant chaque personne que le service ouvre
-        columns = faces(st, frame, tuple(review.people))
-        summary = [{"who": c["label"], "word": c["word"], "note": c["note"], "tone": c["tone"]}
-                   for c in _cells(st, review, columns)]
-        shown = {f.key for f in columns}
-        if "toi" not in shown:
-            summary.insert(0, {"who": "Toi", "word": "non", "note": _closed(st, "proprietaire"), "tone": "muted"})
-        for who in review.people:
-            if f"p:{who}" not in shown:
-                summary.append({"who": name_of(frame, who), "word": "non",
-                                "note": "hors du service : à ajouter dans « Ce qu'elle en fait »", "tone": "muted"})
-        if "travail" not in shown:
-            summary.append({"who": "Elle travaille seule", "word": "non", "note": _closed(st, "travail"),
-                            "tone": "muted"})
-        summary.append({"who": "Une inconnue, un salon", "word": "jamais", "note": "", "tone": "muted"})
-        keep = _keep_of(st, review)
-        summary.append({"who": "Ce qu'elle en garde", "word": keep["word"],
-                        "note": "le sien" if keep["own"] else "celui du service", "tone": ""})
-        return Markup(env.get_template("handmade/outils/regles.html").render(
-            remote=remote, what=_capital((review.description or review.server_description or "").strip()),
-            nature=_word(NATURES, review.nature), sentence=sentence(st, frame),
-            own=WORDS.get(review.autonomy, review.autonomy), service_tab=fiche_url(KIND, st.name, "fait"),
-            tools_tab=fiche_url(KIND, st.name, "outils"), form=_form(forms, "mcp.regles"), situations=situations,
-            people=people, people_keys=[p["key"] for p in people], people_slots=slots,
-            person_options=((AS_SITUATION, f"comme sa situation ({WORDS.get(compte, compte)})"), *RULE_LEVELS),
-            summary=summary))

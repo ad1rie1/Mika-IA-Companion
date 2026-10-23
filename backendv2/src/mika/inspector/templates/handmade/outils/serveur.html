@@ -1,5 +1,5 @@
-{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123, 0128, 0129) : s'il marche et ce qui
-   attend ton regard, ce qu'elle en fait en une phrase, ce qu'elle en lit, qui peut quoi outil par outil (la règle du
+{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123, 0128, 0129, 0130) : s'il marche et ce
+   qui attend ton regard, ses réglages en quatre réponses, ce qu'elle en lit, qui peut quoi outil par outil (la règle du
    moteur devant chaque personne que le service ouvre), pour qui et quand ; le côté technique replié. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page server">
@@ -14,15 +14,16 @@
 
   <section class="now-card service-said" aria-labelledby="server-does">
     <header class="now-card-head">
-      <h2 id="server-does">Ce qu'elle en fait</h2>
+      <h2 id="server-does">Réglages du service</h2>
       <span class="now-tag owner">{{ genre }}</span>
       <p><a href="{{ service_tab }}">Changer</a></p>
     </header>
     <p class="service-sentence">{{ sentence }}</p>
     <dl class="service-three">
-      <div><dt>Avec qui</dt><dd>{{ who }}</dd></div>
-      <div><dt>Ce qu'elle fait seule</dt><dd>{{ alone }}</dd></div>
-      <div><dt>Ce qu'elle en garde</dt><dd>{{ keep }}<span>Plus tard, à quelqu'un d'autre : {{ keep_later }}</span></dd></div>
+      <div><dt>1. Avec qui</dt><dd>{{ who }}</dd></div>
+      <div><dt>2. Quand</dt><dd>{{ when }}</dd></div>
+      <div><dt>3. Avant un outil, elle…</dt><dd>{{ alone }}</dd></div>
+      <div><dt>4. Ce qu'elle y lit, elle…</dt><dd>{{ keep }}<span>Plus tard, à quelqu'un d'autre : {{ keep_later }}</span></dd></div>
     </dl>
   </section>
 
@@ -61,7 +62,7 @@
     <div class="hm-pager single">{{ pages(matrix_pager) }}</div>
     <p class="now-muted server-matrix-legend">« te demande » : une carte dans ton chat quand c'est toi en face ; sans toi en face, la demande t'attend dans la console (« À valider »), un jour au plus. « lui demande » : une carte à la personne en face. La grille « Ce qu'elle peut faire » peut encore retirer un outil dans une situation : « Pour qui, quand », plus bas, en tient compte.</p>
     {% elif matrix %}
-    <p class="now-muted">Le service ne l'ouvre à personne, à aucun moment : « Ce qu'elle en fait ».</p>
+    <p class="now-muted">Le service ne l'ouvre à personne, à aucun moment : « Réglages du service ».</p>
     {% elif known %}
     <p class="now-muted">Aucun outil servi.</p>
     {% else %}
@@ -78,7 +79,7 @@
     <div class="server-who-actions">
       {% if grid %}<a class="btn" href="{{ grid }}">Régler outil par outil</a>{% endif %}
       <a class="btn quiet" href="{{ service_tab }}">Changer avec qui, et quand</a>
-      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir aussi aux comptes ou à des personnes choisies, ou à d'autres moments, c'est dans « Ce qu'elle en fait ».</p>
+      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir aussi aux comptes ou à des personnes choisies, ou à d'autres moments, c'est dans « Réglages du service ».</p>
     </div>
     <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Pour qui, quand">
       <table class="server-who">

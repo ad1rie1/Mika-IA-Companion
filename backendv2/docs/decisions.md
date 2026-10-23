@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
@@ -1064,7 +1064,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un serveur pro (factures, devis, tickets) ne doit servir qu'à sa propriétaire, et rien de ce qu'elle y lit ne doit ressortir ailleurs. Un serveur disait pour qui, jamais ce que valait ce qu'elle y lisait : sa mémoire le gardait au niveau de la question qu'on lui avait posée.
 
-*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129.*
+*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129, 0130.*
 
 ### 0129 — Ce qu'un service propose se regarde, et qui peut quoi se voit
 
@@ -1076,7 +1076,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sur un vrai serveur de 22 outils, un clic servait l'exécution de scripts chez un client avec les statistiques ; le serveur ne disait pas ce qui lisait ; quatre lectures se disaient « exception » sans rien changer, et le seraient restées sous « sous contrôle » ; l'écran recopiait la règle, et se trompait.
 
-*Révise 0128 (en partie).*
+*Révise 0128 (en partie). Révisée par 0130.*
+
+### 0130 — La fiche d'un service : trois onglets, quatre questions, un outil sur sa ligne
+
+- Trois onglets : « En bref », « Réglages du service », « Ses outils » ; « État » et « Appels » sous « Le détail ». La connexion (adresse, jeton, bornes) se règle à part : « Modifier la connexion ».
+- « Réglages du service » : un genre pour aller vite, puis quatre questions numérotées, en mots simples — avec qui ; quand ; avant de se servir d'un outil, elle… ; ce qu'elle y lit, elle….
+- Un outil se règle sur sa ligne, dépliée, d'un seul envoi (`mcp.regler`) : servi, lit ou agit, avant de s'en servir, ce qu'elle en retient, ce qu'elle lit de lui ; ses exceptions par situation et par personne repliées dedans. L'onglet « Par situation et par personne » et l'action `mcp.regles` sont retirés.
+- Une exception ne propose que ce qui a un sens dans sa situation : devant toi, ou sans personne en face, « carte » et « ton accord » reviennent au même.
+
+*Pourquoi :* « j'ai vraiment du mal à comprendre comment la conf des serveurs MCP est faite » : cinq endroits, « qui » réglé à quatre, et une exception rare présentée comme un onglet à part entière.
+
+*Révise 0128 (en partie), 0129 (en partie).*
 
 ## Les fournisseurs de modèles
 
