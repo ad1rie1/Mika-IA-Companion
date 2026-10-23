@@ -23,6 +23,7 @@ from mika.plugins.teams import (
     FAILED,
     GONE,
     KEEPER,
+    MODE_OF,
     PLACED,
     QUEUED,
     REFUSED,
@@ -33,6 +34,7 @@ from mika.plugins.teams import (
     for_owner,
     keeper_name,
     keepers,
+    mode_of,
     params_of,
     task_message,
 )
@@ -179,9 +181,13 @@ def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
 def _voice(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
     voice = got.get("voice")
-    if voice is None or not for_owner(frame) or not (task_message(frame) or _pending_work(s, frame)):
+    task = task_message(frame)
+    if voice is None or not for_owner(frame) or not (task or _pending_work(s, frame)):
         return None
-    return SectionBody(voice_text(voice, params_of(frame).mode))
+    p = params_of(frame)
+    seen = s.messages.get(task) if task else None
+    mode = mode_of(p, s, task, seen.conversation) if seen is not None else MODE_OF.get(p.sending.default.send, "")
+    return SectionBody(voice_text(voice, mode))
 
 
 @TEAMS.section("teams_task", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=90, floor_chars=TASK_FLOOR,

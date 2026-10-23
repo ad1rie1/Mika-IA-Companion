@@ -13,10 +13,10 @@
   {% for k, text in options %}<option value="{{ k }}"{{ ' selected' if k == current }}>{{ text }}</option>{% endfor %}
 </select>
 {%- endmacro %}
-{% set locked = system or not form %}
+{% set locked = not form %}
 <div class="now-page service">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
-  {% if system %}<p class="server-alert info">Un serveur du système : il suit les paramètres de son plugin et ne se règle pas ici.</p>{% endif %}
+  {% if system %}<p class="server-alert info">Un serveur du système : ses outils sont approuvés d'office et le reste suit les paramètres de son plugin ; ses accès, eux, se règlent ici.</p>{% endif %}
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}

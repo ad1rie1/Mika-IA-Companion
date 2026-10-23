@@ -32,6 +32,7 @@ from mika.plugins.teams import (
     her,
     keepers,
     latest,
+    mode_of,
     params_of,
     task_message,
     under_way,
@@ -126,7 +127,8 @@ async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     title = inert(port.title(m.conversation), 80) or "sans nom"
     text = "\n".join(_line(ctx.frame, x) for x in [*before, *after])
     out = f"{DATA}\nConversation « {title} » :\n{cite(text, 8000)}"
-    return out + f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n{voice_text(port.voice(), params_of(ctx.frame).mode)}"
+    mode = mode_of(params_of(ctx.frame), ctx.frame.state("teams"), m.ref, m.conversation, title, m.author)
+    return out + f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n{voice_text(port.voice(), mode)}"
 
 
 def _asker(ctx: Any) -> tuple[str, ...]:
@@ -164,29 +166,31 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     if shown is None or (shown.blocked and not to_fill(draft.body)):
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content=f"Cette réponse ne peut pas partir : {shown.blocked if shown else 'erreur'}.")
-    if shown.blocked and p.mode != "brouillon":
+    # comment elle partira : la règle d'envoi de sa conversation (ADR 0132)
+    mode = mode_of(p, frame.state("teams"), m.ref, m.conversation, shown.title, m.author)
+    if shown.blocked and mode != "brouillon":
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content="Elle ne peut pas partir avec des passages [À COMPLÉTER] : écris-la sans "
                                             "rien inventer, ou n'écris rien et dis ce qu'il manque.")
     who = keepers(frame)
-    payload: dict[str, Any] = {"draft": draft.id, "conversation": m.conversation, "message": m.ref, "mode": p.mode,
+    payload: dict[str, Any] = {"draft": draft.id, "conversation": m.conversation, "message": m.ref, "mode": mode,
                                "_apercu": shown.digest}
-    if p.mode == "validation":
+    if mode == "validation":
         payload[rt.EXPIRES] = frame.now + p.approval_within_us
         if handle := decider(frame):
             payload[rt.DECIDER] = handle  # sa carte d'accord, dans le chat
     title = inert(shown.title, 80) or "une conversation"
     wrote = inert(m.author, 80) or "quelqu'un"
     summary = (f"Répondre sur Teams à {wrote} (« {title} »), à la place de {who} — "
-               + MODE_WORDS[p.mode].replace("{who}", who))
+               + MODE_WORDS[mode].replace("{who}", who))
     about = tuple(dict.fromkeys((*_asker(ctx), *(h for h in (person_handle(m.author_id),) if h))))
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=p.mode == "validation",
+        summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=mode == "validation",
         context="teams", about=about))
     after = {"brouillon": f"Elle sera posée dans Teams : {who} l'enverra, la retouchera ou la laissera.",
              "validation": f"Elle partira quand {who} l'aura acceptée.",
-             "autonome": "Elle part dans Teams, sous son nom."}[p.mode]
+             "autonome": "Elle part dans Teams, sous son nom."}[mode]
     if shown.blocked:
         after += f" Il reste des passages [À COMPLÉTER] : {who} devra les remplir."
     return f"Réponse proposée. {after}\nCe qui partira, dans « {title} » :\n{shown.text[:3000]}"

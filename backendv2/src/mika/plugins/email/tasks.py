@@ -1,8 +1,8 @@
 """Préparer une réponse d'elle-même : une tâche silencieuse (``Kind.TASK``).
 
 Un mail remarqué qui attend une réponse (pas un envoi de masse, pas lu
-ailleurs, pas trop vieux), sur une boîte où on le lui a permis et d'un
-expéditeur qu'on n'a pas exclu, appelle une tâche : elle lit le mail et son
+ailleurs, pas trop vieux), dont la règle d'envoi (sa boîte, son expéditeur ;
+ADR 0132) dit de préparer une réponse, appelle une tâche : elle lit le mail et son
 fil, écrit un brouillon dans la voix de la boîte (``email_draft``), et il
 attend l'accord d'un opérateur. Au plus quelques-unes par jour ; une tâche
 qui n'a rien donné n'est pas retentée sans fin. Quand un opérateur le lui
@@ -21,14 +21,9 @@ from mika.kernel.state import FrozenDict
 from mika.plugins.email import EMAIL, WAITING, EmailState, account_of, keeper_name, keepers, params_of
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
+from mika.vocab.sending import mail_rule
 
 BUNDLES = "email,memory,identity"
-
-
-def _skipped(address: str, skip: tuple[str, ...]) -> bool:
-    address = address.lower()
-    domain = "@" + address.split("@")[-1] if "@" in address else ""
-    return any(s == address or (s.startswith("@") and s == domain) for s in skip)
 
 
 def _pending(s: EmailState, ref: str) -> bool:
@@ -53,16 +48,17 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
         out.append(_candidate(ref, ask.account or account_of(ref), p.asked_evidence,
                               phrase("email.task.asked", who=who[:1].upper() + who[1:], ref=ref)))
     budget = p.drafts_per_day - _today(s, frame.now)
-    if budget <= 0 or not p.autodraft:
+    rules, default = p.sending.rules, p.sending.default
+    if budget <= 0:
         return out
     for m in frame.get(c.UNREAD):
         if budget <= 0:
             break
         seen = s.mails.get(m.mail)
         account = m.account or account_of(m.mail)
-        if seen is None or not m.needs_reply or account not in p.autodraft or m.mail in s.asked:
+        if seen is None or not m.needs_reply or m.mail in s.asked or frame.now - m.at > p.draft_within_us:
             continue
-        if frame.now - m.at > p.draft_within_us or _skipped(seen.address, p.autodraft_skip):
+        if not mail_rule(rules, default, account, seen.address).prepare:
             continue
         if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max:
             continue

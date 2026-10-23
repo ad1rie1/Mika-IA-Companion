@@ -8,13 +8,14 @@ personne, pousse ce que le client reçoit (``POST /api/teams/inbox``) ; l'adapta
   une heuristique : son importance, et s'il pose une question **à laquelle elle peut aider**. Il devient un signal
   (``teams.noticed``) que l'attention dose et habitue.
 - **Préparer une réponse d'elle-même** (une tâche silencieuse, ``Kind.TASK``) : au dernier message d'une conversation
-  qui pose une telle question, s'il est récent, si la personne n'y a pas déjà répondu et si on ne l'a pas exclue.
+  qui pose une telle question, s'il est récent, si la personne n'y a pas déjà répondu et si sa règle d'envoi le veut
+  (« Envoyer à ta place », ``vocab.sending``, ADR 0132).
   Elle écrit **à la place** de la personne (le message part de son compte, sous son nom), avec le fil de la
   conversation et ses consignes — jamais avec sa mémoire, qui contient la vie de la personne et ce que d'autres lui
   ont confié.
-- **Partir** (capacité ``teams.send``) selon le mode réglé : *brouillon* (posé dans la zone de saisie, la personne
-  l'envoie ou pas — c'est son geste qui vaut accord), *validation* (sa carte d'accord, dans le chat et la console),
-  *autonome* (sans accord). La capacité ne fait que **mettre en file** ; l'extension relève la file et accuse
+- **Partir** (capacité ``teams.send``) selon la règle d'envoi de la conversation : *brouillon* (posé dans la zone de
+  saisie, la personne l'envoie ou pas — c'est son geste qui vaut accord), *ton accord* (sa carte, dans le chat et la
+  console), *seule* (sans accord). La capacité ne fait que **mettre en file** ; l'extension relève la file et accuse
   (``teams.settled``) : posé, parti (retouché ou non), pas servi, échoué. Parti, elle le sait (``teams.sent``).
 - **Lire** (outils) : ses conversations, un fil — réservé à ses propriétaires **en privé**, ou à elle quand elle
   travaille.
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -39,9 +40,9 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.ports.teams import MODES
 from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind, task_of
 from mika.vocab.people import clean_display_name
+from mika.vocab.sending import Sending, teams_rule
 
 BUNDLE = "teams"
 #: les messages remarqués qu'elle garde en tête (le texte, lui, est dans l'adaptateur)
@@ -74,16 +75,10 @@ class TeamsParams(BaseModel):
     enabled: Annotated[bool, Knob(
         label="Teams actif", group="Écrire", readonly=True,
         help="Réglé dans Réglages › Plugins › Teams : désactivé, elle ne prépare ni ne propose plus rien.")] = True
-    mode: Annotated[Literal["brouillon", "validation", "autonome"], Knob(
-        label="Ce qu'elle fait de ses réponses", group="Écrire", choices=MODES, readonly=True,
-        help="Réglé dans Réglages › Plugins › Teams.")] = "brouillon"
-    autodraft: Annotated[bool, Knob(
-        label="Préparer des réponses d'elle-même", group="Brouillons", readonly=True,
-        help="Réglé dans Réglages › Plugins › Teams.")] = False
-    skip: Annotated[tuple[str, ...], Knob(
-        label="Jamais pour", group="Brouillons", readonly=True,
-        help="Les conversations (un morceau de leur nom ou de leur identifiant) où elle ne prépare jamais de "
-             "réponse d'elle-même (réglé dans Réglages › Plugins › Teams).")] = ()
+    sending: Annotated[Sending, Knob(
+        label="Ce qu'elle envoie à ta place", group="Écrire", readonly=True,
+        help="Réglé dans Relations & échanges › Envoyer à ta place (ADR 0132) : des règles lues de haut en bas — "
+             "canal, destinataire, préparer d'elle-même, comment envoyer — puis la règle par défaut.")] = Sending()
     drafts_per_day: Annotated[int, Knob(
         label="Réponses d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -129,6 +124,9 @@ class Seen:
     summary_ref: str
     #: qui y a répondu (« toi » : la personne elle-même ; « elle » : sa réponse est partie)
     answered: str = ""
+    #: ce que sa règle d'envoi en disait au tri (ADR 0132) : préparer d'elle-même, comment une réponse partirait
+    prepare: bool = True
+    send: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +198,11 @@ class Settled(Payload):
     reason: str = ""
 
 
-TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams)
+#: ce qu'elle fait de ses réponses, ce qu'elle prépare d'elle-même et où jamais sont devenus ses règles d'envoi
+#: (ADR 0132) : leurs valeurs journalisées se lisent sans effet
+#: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``)
+TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=2,
+                retired_params=("mode", "autodraft", "skip"))
 TEAMS.declare(*c.ALL)
 TEAMS.bundle(BUNDLE, "les conversations Teams de la personne qui s'occupe de toi : les lister, relire un fil, "
                      "préparer une réponse à sa place")
@@ -210,6 +212,19 @@ SETTLED = TEAMS.event("settled", Settled)
 
 def params(p: TeamsParams | None) -> TeamsParams:
     return p if p is not None else TeamsParams()
+
+
+#: ce qu'une règle d'envoi fait d'une réponse Teams : son mode (posée dans la zone de saisie, après ton accord, seule)
+MODE_OF = {"brouillon": "brouillon", "accord": "validation", "seule": "autonome"}
+
+
+def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str, *about: str) -> str:
+    """Le mode d'une réponse à ce message (ADR 0132) : ce que sa règle en disait au tri, sinon la règle de sa
+    conversation (son identifiant, et ``about`` : son nom, qui écrit, quand on les a), sinon la règle par défaut."""
+    seen = s.messages.get(ref)
+    send = seen.send if seen is not None and seen.send else \
+        teams_rule(p.sending.rules, p.sending.default, conversation, *about).send
+    return MODE_OF.get(send, "validation")
 
 
 def params_of(frame: Frame) -> TeamsParams:
@@ -241,7 +256,7 @@ def _noticed(s: TeamsState, e, cx) -> TeamsState:
     at = d.sent_at or e.at
     seen = Seen(e.seq, d.conversation, d.author, d.author_id, d.where, d.importance, d.needs_reply,
                 d.mentions_me, at, d.summary.ref or "",
-                answered="toi" if s.replied.get(d.conversation, 0) >= at else "")
+                answered="toi" if s.replied.get(d.conversation, 0) >= at else "", prepare=d.prepare, send=d.send)
     return replace(s, messages=_pruned(s.messages.set(d.message, seen), KEEP, lambda kv: kv[1].seq))
 
 

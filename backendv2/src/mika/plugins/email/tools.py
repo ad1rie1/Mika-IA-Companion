@@ -45,6 +45,7 @@ from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.sending import mail_rule_for_all, mail_send
 
 EPISODES = [Kind.REPLY, *WORKING, Kind.TASK]
 BODY_SHOWN = 6000
@@ -251,16 +252,20 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("email.tools.draft.blocked",
                                                    why=shown.blocked if shown else phrase("email.tools.draft.error")))
     p = params_of(ctx.frame)
+    # sa règle d'envoi (ADR 0132) : il ne part seul que si chaque destinataire le permet, et jamais avec un passage
+    # à compléter
+    rule = mail_rule_for_all(p.sending.rules, p.sending.default, info.key, (a for _, a in addresses(f"{to},{cc}")))
+    needs_approval = mail_send(rule) != "seule" or bool(shown.blocked)
     about = tuple(dict.fromkeys((*_asker(ctx), *(c.address_handle(a) for _, a in addresses(to)[:3]))))
     what = f"Répondre à {inert(to, 200)}" if parent is not None else f"Écrire à {inert(to, 200)}"
     summary = f"{what} (boîte « {inert(info.name, 60)} », {voice_word(info.voice)}) : « {inert(subject, 200)} »"
     payload = {"draft": draft.id, "account": info.key, "mail": ref, "_apercu": shown.digest}
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=p.send_needs_approval,
+        summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=needs_approval,
         context="email", about=about))
     who = keepers(ctx.frame)
-    after = phrase("email.tools.draft.proposed", who=who) if p.send_needs_approval else \
+    after = phrase("email.tools.draft.proposed", who=who) if needs_approval else \
         phrase("email.tools.draft.queued")
     if shown.blocked:
         after += phrase("email.tools.draft.to_fill", who=who)

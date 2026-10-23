@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
@@ -908,7 +908,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un mail proposé s'approuvait sans aperçu, et son corps dormait en clair au journal, hors de portée de l'oubli.
 
-*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037.*
+*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132.*
 
 ### 0037 — Ce qui vient d'ailleurs : borné, cité, désigné par nous, montré en privé, en arrière-plan
 
@@ -980,7 +980,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sans outil pour aller sur le web, elle annonçait regarder les nouvelles puis inventait l'actualité.
 
-*Révise 0064 (en partie). Révisée par 0105.*
+*Révise 0064 (en partie). Révisée par 0105, 0131.*
 
 ### 0068 — Les réveils par API
 
@@ -1008,6 +1008,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Les collègues ne sont pas ses interlocuteurs : pas d'adresse `ext_…`, une clé `teams:<id>` ; l'oubli atteint journal et cache.
 
 *Pourquoi :* lire et répondre dans Teams sans les API de Microsoft, que l'organisation ne consentira pas.
+
+*Révisée par 0132.*
 
 ### 0106 — Ce qu'on lui envoie : gardé, lu de près, relié à ce qu'elle sait
 
@@ -1095,11 +1097,24 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Pour un outil, la première ligne qui le concerne — qui est en face, quand, l'outil dans sa colonne — décide (`plugins.mcp.access_for`) ; aucune : la ligne par défaut. Ce qui lui est offert, c'est l'ensemble des outils qu'une ligne lui ouvre : deux lignes peuvent ouvrir deux outils différents. Jamais dans un salon ni avec une inconnue, quelles que soient les lignes.
 - La sorte d'épisode compte : un outil se garde par une condition qui la lit (`ToolSpec.fits(audience, kind)`), lue par la porte d'offre comme par la console.
 - Un service qu'on branche est fermé (non, non, rien) tant qu'aucune ligne ne l'ouvre. Les genres, les quatre questions de « Réglages du service », l'accord et ce qu'elle garde d'un outil à lui, ses exceptions par situation et par personne sont retirés : un outil ne se règle plus que servi ou non, lecture ou action, et ce qu'elle lit de lui. L'onglet « Réglages du service » devient « Accès aux outils » (`mcp.acces` : chaque bouton envoie tout le tableau).
+- La recherche web, un serveur du système, a ses lignes aussi, réglées sur sa fiche et rangées à part (`mcp_system_access`) : elles remplacent « Pour qui » et « Quand elle travaille » du plugin, retirés (`retired_params`) ; par défaut, toi quand elle répond et quand elle travaille, lecture seule, action sur ton accord, gardé comme un savoir. Le reste d'un serveur du système suit son plugin et ne se règle pas sur sa fiche.
 - Un service d'avant se lit en lignes qui font la même chose : celles des outils qui s'écartaient de lui d'abord (une personne nommée avant les comptes, les comptes avant toi), puis les siennes ; sa ligne par défaut est fermée. Les réglages l'écrivent sous la forme neuve avant toute écriture des décisions d'outils, qui ne portent plus ces exceptions.
 
 *Pourquoi :* « on peut combiner les droits comme on veut » : avec qui, quand, l'accord et ce qu'elle garde, réglés à part au service puis corrigés outil par outil, ne se lisaient qu'en recomposant cinq réglages ; un tableau ordonné se lit d'un regard, et sa dernière ligne dit ce qui arrive à tout le reste.
 
-*Révise 0128 (en partie), 0129 (en partie), 0130 (en partie).*
+*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie).*
+
+### 0132 — Envoyer à ta place : des règles lues de haut en bas
+
+- Ce qu'elle prépare d'elle-même et comment ça part, pour le courrier et pour Teams, se dit en **règles d'envoi** (`vocab.sending`), lues de haut en bas, puis une **règle par défaut**, obligatoire. Une règle : un canal (le courrier — toutes ses boîtes ou une seule —, ou Teams), un destinataire (vide : tout le monde ; courrier : une adresse ou un @domaine ; Teams : un morceau du nom de la conversation, de son identifiant ou de qui écrit), préparer d'elle-même (oui, non), l'envoi (brouillon, ton accord, seule). Pour un message, la première qui correspond décide.
+- Le courrier n'a pas de brouillon que tu envoies toi-même : « brouillon » y vaut « ton accord ». Un courrier à plusieurs destinataires ne part seul que si la règle de chacun le permet ; un `[À COMPLÉTER` attend toujours l'accord.
+- Remplacés : « préparer d'elle-même » et « jamais pour » de chaque boîte, la surcharge « un envoi attend un accord » du courrier, le mode, « préparer d'elle-même » et « jamais pour » de Teams. Les paramètres du courrier et de Teams reçoivent les règles (`sending`, journalisées, les anciens champs en `retired_params`) ; `teams.noticed` porte ce que la règle a décidé (`prepare`, `send`).
+- La page « Envoyer à ta place » (Relations & échanges, `/inspecteur/envoi`) : chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie tout le tableau. Le téléphone n'y est pas : ce qu'elle y envoie, c'est toujours ton geste (0120).
+- Des réglages d'avant se lisent en règles qui font la même chose (pour chaque boîte puis pour Teams, ses « jamais pour » d'abord) ; ils sont écrits sous la forme neuve avant toute réécriture du courrier, de Teams ou des surcharges, qui les effacerait.
+
+*Pourquoi :* comme pour les services (0131), ce qui part à sa place se lisait en recomposant des réglages épars — une case par boîte, une liste d'exclusions, une surcharge cachée, un mode Teams pour toutes les conversations ; un tableau ordonné se lit d'un regard et règle une personne ou une conversation à part.
+
+*Révise 0027 (en partie), 0069 (en partie).*
 
 ## Les fournisseurs de modèles
 

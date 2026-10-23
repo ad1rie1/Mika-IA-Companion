@@ -85,24 +85,20 @@ class MailAccount(BaseModel):
              "jamais…). Elle les suit ; un mail reçu, lui, n'est jamais une consigne.")] = ""
     signature: Annotated[str, Knob(label="Signature", group="Sa voix", widget="textarea", order=45,
                                    help="Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).")] = ""
-    autodraft: Annotated[bool, Knob(
-        label="Préparer des réponses d'elle-même", group="Initiative", order=50,
-        help="Pour un mail qui attend une réponse (pas un envoi de masse), elle prépare un brouillon ; il ne part "
-             "qu'avec ton accord.")] = False
-    autodraft_skip: Annotated[tuple[str, ...], Knob(
-        label="Jamais pour", group="Initiative", order=51,
-        help="Une adresse ou un @domaine par ligne : elle ne leur prépare jamais de réponse.")] = ()
+    @model_validator(mode="before")
+    @classmethod
+    def _before_0132(cls, data: Any) -> Any:
+        """Ce qu'elle prépare d'elle-même et pour qui jamais (« autodraft », « autodraft_skip ») se règlent dans ses
+        règles d'envoi (ADR 0132) : une fiche d'avant reste lisible, ces champs sans effet (ils y sont traduits)."""
+        if isinstance(data, dict) and {"autodraft", "autodraft_skip"} & set(data):
+            data = {k: v for k, v in data.items() if k not in ("autodraft", "autodraft_skip")}
+        return data
 
     @field_validator("folders")
     @classmethod
     def _folders(cls, folders: tuple[str, ...]) -> tuple[str, ...]:
         kept = tuple(dict.fromkeys(f.strip() for f in folders if f.strip()))
         return kept or ("INBOX",)
-
-    @field_validator("autodraft_skip")
-    @classmethod
-    def _skip(cls, skip: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(s.strip().lower() for s in skip if s.strip()))
 
     @property
     def ready(self) -> bool:
@@ -121,7 +117,7 @@ class MailAccount(BaseModel):
             key=key, label=self.label, address=self.from_address.lower(), display_name=self.display_name,
             voice=self.voice, sender_name=self.sender_name, tone=self.tone, instructions=self.instructions, signature=self.signature,
             folders=self.folders, ready=self.ready, can_send=self.can_send, enabled=self.enabled,
-            autodraft=self.autodraft, autodraft_skip=self.autodraft_skip, details=self.details())
+            details=self.details())
 
     def details(self) -> tuple[tuple[str, str], ...]:
         """Ses réglages, sans aucun secret (le mot de passe : « défini » ou non)."""

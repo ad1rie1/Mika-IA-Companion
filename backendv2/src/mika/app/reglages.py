@@ -569,7 +569,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     # ── Teams (ADR 0069) ──
     async def save_teams(cfg: TeamsConfig, by: str) -> list[str]:
         await settings.save_teams(cfg)
-        # le mode, l'initiative et les exclusions sont lus par ses proposeurs : un réglage journalisé
+        # actif ou non est lu par ses proposeurs : un réglage journalisé
         problems = await live.reconfigure()
         if problems:
             log.warning("teams enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
@@ -581,7 +581,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         seen = "jamais" if store is None or not store.configured() else "oui"
         return [("Clé de l'extension", f"définie ({key.hint}…)" if key is not None else "aucune"),
                 ("Reçu de l'extension", seen),
-                ("Conversations et réponses", "Relations & échanges › Teams")]
+                ("Conversations et réponses", "Relations & échanges › Teams"),
+                ("Ce qu'elle prépare, comment ça part", "Relations & échanges › Envoyer à ta place")]
 
     async def new_teams_key(by: str) -> tuple[str, str]:
         if live.teams is None:

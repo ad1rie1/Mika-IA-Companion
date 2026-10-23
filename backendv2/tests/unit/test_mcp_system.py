@@ -44,9 +44,25 @@ def test_active_the_web_plugin_brings_its_server_into_the_mcp_client():
     assert [(a.who, a.when, a.read, a.act, a.keep) for a in srv.access] == [
         (WHO_OWNER, ("conversation", "travail"), "seule", "toi", "public")]
     assert (srv.default_read, srv.default_act) == ("non", "non")
-    shared = _system(web.WebParams(audience="comptes", in_work=False)).config(McpConfig()).servers["web"]
-    assert [(a.who, a.when) for a in shared.access] == [(WHO_OWNER, ("conversation",)),
-                                                        (WHO_ACCOUNTS, ("conversation",))]
+
+
+
+def test_its_access_rows_are_set_on_its_page_and_replace_the_plugins():
+    """ADR 0131 : « pour qui » et « quand elle travaille » du plugin sont devenus ses lignes d'accès, réglées sur sa
+    fiche et rangées à part ; illisibles, celles du plugin valent ; ses valeurs d'avant, journalisées, se lisent sans
+    effet."""
+    rows = [{"who": WHO_OWNER, "when": ["conversation"], "read": "seule", "act": "non", "keep": "public"},
+            {"who": WHO_ACCOUNTS, "read": "carte", "act": "non", "keep": "rien"}]
+    ruled = SystemServers(lambda: system_mcp.provided(lambda owner: web.WebParams() if owner == "web" else None),
+                          access=lambda: {"web": {"access": rows, "default_read": "non"}})
+    srv = ruled.config(McpConfig()).servers["web"]
+    assert [(a.who, a.when, a.read) for a in srv.access] == [(WHO_OWNER, ("conversation",), "seule"),
+                                                              (WHO_ACCOUNTS, (), "carte")]
+    assert srv.command == "python3" and srv.network == "isole"  # le reste suit son plugin
+    broken = SystemServers(lambda: system_mcp.provided(lambda owner: web.WebParams() if owner == "web" else None),
+                           access=lambda: {"web": {"access": [{"who": "salon"}]}})
+    assert broken.config(McpConfig()).servers["web"].access == system_mcp.WEB_ACCESS
+    assert web.WEB.retired_params == ("audience", "in_work")
 
 
 def test_disabled_it_is_gone():

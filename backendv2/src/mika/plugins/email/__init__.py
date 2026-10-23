@@ -52,6 +52,7 @@ from mika.ports.mail import split_ref
 from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind, task_of
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
+from mika.vocab.sending import Sending
 
 KEEP = 100
 BUNDLE = "email"
@@ -109,18 +110,10 @@ class EmailParams(BaseModel):
              "ou qui échoue compte comme un essai ; après autant d'essais, elle ne l'annonce plus d'elle-même (il "
              "reste dans ses mails). Une annonce devancée (on lui écrit pendant qu'elle compose), interrompue, ou "
              "dont elle s'est ravisée (« pas maintenant ») ne compte pas.")] = 2
-    #: ce qui sort de la machine attend un accord (une politique, pas un trait)
-    send_needs_approval: Annotated[bool, Knob(
-        label="Un envoi attend un accord", group="Envoyer",
-        help="Une politique, pas un trait : cochée, un brouillon qu'elle écrit ne part qu'une fois approuvé par un "
-             "opérateur (qui peut le retoucher) ; décochée, il part dès qu'elle le propose.")] = True
-    autodraft: Annotated[tuple[str, ...], Knob(
-        label="Comptes où elle prépare des réponses", group="Brouillons", readonly=True,
-        help="Réglé compte par compte (Réglages › Plugins › Boîtes aux lettres, « Préparer des réponses d'elle-même ») : "
-             "pour un mail qui attend une réponse, elle prépare un brouillon, qui attend ton accord.")] = ()
-    autodraft_skip: Annotated[tuple[str, ...], Knob(
-        label="Jamais pour", group="Brouillons", readonly=True,
-        help="Les adresses ou @domaines auxquels elle ne prépare jamais de réponse (réglés par compte).")] = ()
+    sending: Annotated[Sending, Knob(
+        label="Ce qu'elle envoie à ta place", group="Envoyer", readonly=True,
+        help="Réglé dans Relations & échanges › Envoyer à ta place (ADR 0132) : des règles lues de haut en bas — "
+             "canal, destinataire, préparer d'elle-même, comment envoyer — puis la règle par défaut.")] = Sending()
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -245,7 +238,10 @@ class PollAsked(Payload):
 
 #: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4)
+#: l'accord avant un envoi, ce qu'elle prépare d'elle-même et pour qui jamais sont devenus ses règles d'envoi (ADR
+#: 0132) : leurs valeurs journalisées se lisent sans effet
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4,
+                retired_params=("send_needs_approval", "autodraft", "autodraft_skip"))
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
 READ = EMAIL.event("read", MailRead)

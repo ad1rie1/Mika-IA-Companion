@@ -76,7 +76,7 @@ from mika.app.lending import Lending
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
-from mika.app.settings import SecretBox, Settings, push_key_file
+from mika.app.settings import SYSTEM_ACCESS_FIELDS, SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import attachments as attachments_c
@@ -275,14 +275,10 @@ class Live:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
-        accounts = self.settings.email().accounts
-        drafting = tuple(sorted(k for k, a in accounts.items() if a.autodraft and a.enabled))
-        if drafting:
-            out["email"] = {"autodraft": drafting,
-                            "autodraft_skip": tuple(sorted({s for k in drafting for s in accounts[k].autodraft_skip}))}
-        teams = self.settings.teams()
-        out["teams"] = {"enabled": teams.enabled, "mode": teams.mode, "autodraft": teams.enabled and teams.autodraft,
-                        "skip": teams.skip}
+        # ce qu'elle envoie à ta place (ADR 0132) : les mêmes règles pour le courrier et pour Teams
+        sending = self.settings.sending().model_dump(mode="json")
+        out["email"] = {"sending": sending}
+        out["teams"] = {"enabled": self.settings.teams().enabled, "sending": sending}
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -393,10 +389,18 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
-        lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)))
+        lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)), access=settings.mcp_system_access)
     async def settle_mcp(name: str, changes: Mapping[str, Any], create: bool = False) -> None:
         """Ce qu'un serveur de l'opérateur fait d'elle, réglé depuis sa fiche (ADR 0128) : sa fiche de réglages
         réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche."""
+        if not create and name in system.names():
+            # un serveur du système : ses accès seulement, rangés à part (ADR 0131) ; le reste suit son plugin
+            if set(changes) - set(SYSTEM_ACCESS_FIELDS):
+                raise ValueError("un serveur du système suit les paramètres de son plugin : seuls ses accès se "
+                                 "règlent ici")
+            McpServer.model_validate({**system.config(McpConfig()).servers[name].model_dump(), **changes})
+            await settings.save_mcp_system_access(name, changes)
+            return
         cfg = settings.mcp()
         servers = dict(cfg.servers)
         if create:

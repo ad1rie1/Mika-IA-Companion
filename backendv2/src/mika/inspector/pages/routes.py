@@ -25,6 +25,7 @@ from mika.inspector.pages.journal import (
     replay_blocks,
     replay_panel,
 )
+from mika.inspector.pages.sending import rules_post as sending_post
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.tools import expose_post, rules_post
@@ -404,6 +405,10 @@ class Pages:
         """Outils › Ce qu'elle peut faire : ses outils réglés, depuis la grille ou la fiche d'un outil (ADR 0122)."""
         return await rules_post(self.ui, request)
 
+    async def sending(self, request: Request) -> Response:
+        """Ses règles d'envoi, courrier et Teams (ADR 0132)."""
+        return await sending_post(self.ui, request)
+
     async def expose(self, request: Request) -> Response:
         """Outils › Prêter à un agent : la console en MCP, ses points de prêt (ADR 0122)."""
         return await expose_post(self.ui, request)
@@ -633,6 +638,7 @@ class Pages:
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
             Route(PREFIX + "/outils/regler", g(self.tool_rules), methods=["POST"]),
             Route(PREFIX + "/outils/exposer", g(self.expose), methods=["POST"]),
+            Route(PREFIX + "/envoi/regler", g(self.sending), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),
         ]

@@ -27,6 +27,7 @@ from mika.plugins.teams import (
     drafted,
     keeper_name,
     keepers,
+    mode_of,
     params_of,
     under_way,
 )
@@ -81,19 +82,20 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
         if under_way(s, ask.conversation) or s.attempts.get(ref, 0) >= p.draft_attempts_max:
             continue
         asker = keeper_name(frame, ask.by)
-        brief = BRIEF_ASKED.replace("{Who}", asker[:1].upper() + asker[1:]).replace("{fate}", fate(p.mode, who))
+        brief = BRIEF_ASKED.replace("{Who}", asker[:1].upper() + asker[1:]).replace(
+            "{fate}", fate(mode_of(p, s, ref, ask.conversation), who))
         out.append(_candidate(ref, ask.conversation, p.asked_evidence, brief))
     budget = p.drafts_per_day - _today(s, frame.now)
-    if budget <= 0 or not p.autodraft:
+    if budget <= 0:
         return out
     for ref, m in _waiting(s, frame, p):
         if budget <= 0:
             break
         if ref in s.asked or under_way(s, m.conversation) or drafted(s, ref):
             continue
-        if s.attempts.get(ref, 0) >= p.draft_attempts_max:
-            continue
-        brief = BRIEF_AUTO.replace("{who}", who).replace("{fate}", fate(p.mode, who))
+        if s.attempts.get(ref, 0) >= p.draft_attempts_max or not m.prepare:
+            continue  # sa règle d'envoi (ADR 0132) ne lui fait pas préparer de réponse ici
+        brief = BRIEF_AUTO.replace("{who}", who).replace("{fate}", fate(mode_of(p, s, ref, m.conversation), who))
         out.append(_candidate(ref, m.conversation, p.draft_evidence, brief))
         budget -= 1
     return out

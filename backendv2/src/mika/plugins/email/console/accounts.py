@@ -29,7 +29,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.kernel.operate import Done, Refused
-from mika.plugins.email import EMAIL, POLL_ASKED, EmailState
+from mika.plugins.email import EMAIL, POLL_ASKED, EmailState, params_of
 from mika.plugins.email.console.common import (
     NO_PORT,
     VOICE_LABEL,
@@ -40,6 +40,7 @@ from mika.plugins.email.console.common import (
 )
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import AccountInfo
+from mika.vocab.sending import mail_rule
 
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
 
@@ -57,6 +58,16 @@ def _fiche(key: str) -> str:
     return f"/inspecteur/fiche/compte/{key}"
 
 
+#: ses règles d'envoi (ADR 0132) : qui, quelle boîte, préparer d'elle-même, comment ça part
+SENDING_PAGE = "/inspecteur/envoi"
+
+
+def _prepares(frame: Frame, account: str) -> bool:
+    """Elle prépare d'elle-même des réponses depuis cette boîte, à tout le monde (sa règle sans destinataire)."""
+    p = params_of(frame)
+    return mail_rule(p.sending.rules, p.sending.default, account, "").prepare
+
+
 @EMAIL.inspect("comptes", title="Comptes", hidden=True, order=50,
                description="Ses boîtes aux lettres : leur état, leurs dossiers, comment elle y écrit.")
 def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -71,7 +82,7 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                          Badge(VOICE_LABEL.get(a.voice, a.voice), "info"), Text(", ".join(a.folders), "muted"),
                          _state(a, status.error), When(status.last_poll) if status.last_poll else "jamais",
                          Text(str(inbox.unseen), "num") if inbox is not None else "—",
-                         Badge("oui", "ok") if a.autodraft else "non"),
+                         Badge("oui", "ok") if _prepares(frame, a.key) else "non"),
                         href=Ref.subject("compte", a.key, a.name),
                         tone="danger" if status.error else ("warn" if not a.ready and a.enabled else ""),
                         detail=((Note(f"Dernière erreur : {status.error}", tone="danger"),) if status.error else ())
@@ -96,7 +107,7 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         return None
     status = port.status(key)
     badges = [_state(info, status.error), Badge(f"elle y écrit {VOICE_LABEL.get(info.voice, info.voice)}", "info")]
-    if info.autodraft:
+    if _prepares(frame, key):
         badges.append(Badge("prépare des réponses d'elle-même", "info"))
     facts: list[tuple[str, Any]] = [("réglages", edit_account(key, _fiche(key))),
                                     ("dernier relevé", ctx.when(status.last_poll) if status.last_poll else "jamais")]
@@ -151,8 +162,8 @@ def _tab_voice(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("elle y écrit", VOICE_LABEL.get(info.voice, info.voice)),
         ("ton nom", info.display_name or "—"),
         ("son nom d'expéditrice", info.sender_name or self_c.name_of(frame.get(self_c.PERSONA))),
-        ("réponses préparées d'elle-même", "oui" if info.autodraft else "non"),
-        ("jamais pour", ", ".join(info.autodraft_skip) or "—"),
+        ("réponses préparées d'elle-même", "oui" if _prepares(frame, info.key) else "non"),
+        ("pour qui, et comment elles partent", Ref("local", SENDING_PAGE, "Envoyer à ta place")),
         ("modifier", edit_account(info.key, _fiche(info.key) + "?onglet=voix")),
     ]
     blocks: list[Block] = [Fields(tuple(pairs), title="Sa voix dans cette boîte", columns=2),

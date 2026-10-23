@@ -107,17 +107,24 @@ def msg(clock, n: int, text: str, *, conv: str = DM, author: str = "Alice Martin
             "time": (clock.now() - ago_us) // 1000, "text": text, "own": own, "mentions_me": mentions_me}
 
 
+#: le mode d'avant l'ADR 0132, en règle d'envoi
+SENDS = {"brouillon": "brouillon", "validation": "accord", "autonome": "seule"}
+
+
 def live(tmp_path, model, scenario, *, cfg: TeamsConfig | None = None, inputs: dict | None = None,
-         overrides=None, start=START, **built):
-    """``built`` : ce que le noyau reçoit en plus (``build`` : la seconde passe, ses autrices…)."""
+         overrides=None, start=START, mode: str = "brouillon", autodraft: bool = True, skip: tuple[str, ...] = (),
+         **built):
+    """``built`` : ce que le noyau reçoit en plus (``build`` : la seconde passe, ses autrices…) ; ``mode``,
+    ``autodraft``, ``skip`` : ses règles d'envoi de Teams (ADR 0132) — ses « jamais pour », puis tout le monde."""
     cfg = cfg or TeamsConfig()
     clock = SimClock(start)
     store = TeamsStore(lambda: cfg, tmp_path / "teams.db", now=clock.now)
     kernel, clock, llm, _ = build(tmp_path, model, clock=clock, ports={"teams": store}, **built)
     desk = TeamsDesk(Settings(cfg), clock.now, store)
     desk.port = SimpleNamespace(kernel=kernel)
-    teams_inputs = {"enabled": cfg.enabled, "mode": cfg.mode, "autodraft": cfg.enabled and cfg.autodraft,
-                    "skip": cfg.skip, **(inputs or {})}
+    rules = [{"canal": "teams", "dest": d, "prepare": False, "send": SENDS[mode]} for d in skip]
+    rules.append({"canal": "teams", "prepare": autodraft, "send": SENDS[mode]})
+    teams_inputs = {"enabled": cfg.enabled, "sending": {"rules": rules}, **(inputs or {})}
 
     # l'envie de rédiger au plus haut : la tâche part en quelques minutes, quel que soit le tirage de l'arbitre
     overrides = {**(overrides or {}), "teams": {"draft_evidence": 12.0, **(overrides or {}).get("teams", {})}}
@@ -231,7 +238,7 @@ def test_in_validation_mode_a_card_goes_to_her_and_nothing_leaves_without_it(tmp
         out["after"] = store.outbox(clock.now())
         return out
 
-    out = live(tmp_path, Model(), scenario, cfg=TeamsConfig(mode="validation"))
+    out = live(tmp_path, Model(), scenario, mode="validation")
     [proposal] = out["proposed"]
     args = json.loads(proposal.data.args_json)
     assert proposal.data.approval and args[rt.DECIDER] == "user_1" and args[rt.EXPIRES] > proposal.at
@@ -251,7 +258,7 @@ def test_without_an_answer_in_time_the_reply_does_not_leave(tmp_path):
         return (events(kernel, rt.EFFECT_RESOLVED), events(kernel, rt.EFFECT_EXECUTED), store.outbox(clock.now()),
                 kernel.mind.frame().state("teams"))
 
-    resolved, executed, outbox, state = live(tmp_path, Model(), scenario, cfg=TeamsConfig(mode="validation"))
+    resolved, executed, outbox, state = live(tmp_path, Model(), scenario, mode="validation")
     [r] = resolved
     assert not r.data.approved and r.data.by == "teams.delai"
     assert executed == [] and outbox == []
@@ -267,7 +274,7 @@ def test_autonomous_replies_are_sent_without_asking(tmp_path):
         await sleep(30 * MINUTE)
         return events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
 
-    proposed, outbox = live(tmp_path, Model(), scenario, cfg=TeamsConfig(mode="autonome"))
+    proposed, outbox = live(tmp_path, Model(), scenario, mode="autonome")
     [proposal] = proposed
     assert not proposal.data.approval
     [item] = outbox
@@ -282,10 +289,10 @@ def test_a_blank_never_leaves_alone_but_can_be_posted_for_the_owner_to_fill(tmp_
         await sleep(HOUR)
         return events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
 
-    proposed, outbox = live(tmp_path / "seule", blank, scenario, cfg=TeamsConfig(mode="autonome"))
+    proposed, outbox = live(tmp_path / "seule", blank, scenario, mode="autonome")
     assert proposed == [] and outbox == []
     # contre-exemple : posée dans Teams, la personne la complète avant de l'envoyer
-    proposed, outbox = live(tmp_path / "posee", blank, scenario, cfg=TeamsConfig(mode="brouillon"))
+    proposed, outbox = live(tmp_path / "posee", blank, scenario, mode="brouillon")
     [item] = outbox
     assert len(proposed) == 1 and "[À COMPLÉTER : la date]" in item.text
 
@@ -310,7 +317,7 @@ def test_she_prepares_replies_only_where_and_when_it_makes_sense(tmp_path):
         starts = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
         return [e.data.target for e in starts], events(kernel, teams_c.NOTICED)
 
-    targets, noticed = live(tmp_path, Model(), scenario, cfg=TeamsConfig(skip=("rh",)))
+    targets, noticed = live(tmp_path, Model(), scenario, skip=("rh",))
     assert set(targets) == {f"task:teams:{message_ref(DM, '1759000000001')}"}
     by_conv = {e.data.conversation: e.data for e in noticed}
     assert not by_conv[CHANNEL].needs_reply  # un canal où personne ne la mentionne : pas pour elle
@@ -331,7 +338,7 @@ def test_without_initiative_she_only_drafts_when_asked(tmp_path):
         task = [c for c in llm.calls if c.role == "step" and "teams_draft" in prompt_text(c)]
         return before, asked, task, store.outbox(clock.now())
 
-    before, asked, task, outbox = live(tmp_path, Model(), scenario, cfg=TeamsConfig(autodraft=False))
+    before, asked, task, outbox = live(tmp_path, Model(), scenario, autodraft=False)
     assert before == [] and asked.ok
     text = prompt_text(task[0])
     assert "CE QU'ON TE DEMANDE D'Y RÉPONDRE" in text and "Fais court." in text
@@ -407,7 +414,7 @@ def test_a_refused_reply_is_not_proposed_again(tmp_path):
         await sleep(HOUR)
         return events(kernel, rt.EFFECT_PROPOSED), kernel.mind.frame().state("teams")
 
-    proposed, state = live(tmp_path, Model(), scenario, cfg=TeamsConfig(mode="validation"))
+    proposed, state = live(tmp_path, Model(), scenario, mode="validation")
     assert len(proposed) == 1 and [d.state for d in state.drafts.values()] == ["refuse"]
 
 
@@ -439,7 +446,7 @@ def test_a_task_only_answers_the_message_it_was_given(tmp_path):
         await sleep(30 * MINUTE)
         return events(kernel, rt.EFFECT_PROPOSED)
 
-    assert live(tmp_path, Elsewhere(), scenario, cfg=TeamsConfig(mode="autonome")) == []
+    assert live(tmp_path, Elsewhere(), scenario, mode="autonome") == []
 
 
 def test_disabled_teams_proposes_nothing(tmp_path):
@@ -454,8 +461,7 @@ def test_disabled_teams_proposes_nothing(tmp_path):
         tasks = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
         return events(kernel, teams_c.NOTICED), tasks, events(kernel, rt.EFFECT_PROPOSED)
 
-    noticed, tasks, proposed = live(tmp_path, Model(), scenario, cfg=TeamsConfig(enabled=False),
-                                    inputs={"autodraft": True})
+    noticed, tasks, proposed = live(tmp_path, Model(), scenario, cfg=TeamsConfig(enabled=False))
     assert len(noticed) == 1 and tasks == [] and proposed == []
 
 

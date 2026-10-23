@@ -36,6 +36,7 @@ from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
 from mika.runtime.tools import SITUATIONS as TOOL_SITUATIONS
+from mika.vocab.sending import Sending, from_before
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal
@@ -68,11 +69,17 @@ FORGE_CONFIG_KEY = "forge_config"
 #: les serveurs MCP branchés (ADR 0064 ; jeton et variables secrètes scellés) et les décisions sur leurs outils
 MCP_KEY = "mcp"
 MCP_TOOLS_KEY = "mcp_tools"
+#: les lignes d'accès des serveurs du système (la recherche web), réglées sur leur fiche (ADR 0131)
+MCP_SYSTEM_ACCESS_KEY = "mcp_system_access"
+#: ce qu'on règle d'un serveur du système : ses accès seulement — le reste suit les paramètres de son plugin
+SYSTEM_ACCESS_FIELDS = ("access", "default_read", "default_act", "default_keep")
 #: les réveils par API (ADR 0068) ; leurs clés à part, dont seule l'empreinte est gardée
 WAKEUP_KEY = "wakeup"
 WAKEUP_KEYS_KEY = "wakeup_keys"
 #: Teams (ADR 0069) : ce qu'un opérateur règle ; la clé de l'extension à part, dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
+#: ce qu'elle envoie à ta place, courrier et Teams : ses règles (ADR 0132)
+SENDING_KEY = "envoi"
 TEAMS_KEYS_KEY = "teams_key"
 #: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
 TOOL_RULES_KEY = "tool_rules"
@@ -270,6 +277,7 @@ class Settings:
             return MailConfig()
 
     async def save_email(self, cfg: MailConfig) -> MailConfig:
+        await self._keep_sending()
         accounts = {}
         for name, account in cfg.accounts.items():
             spec = account.model_dump(mode="json")
@@ -344,6 +352,17 @@ class Settings:
             await self.save_mcp(self.mcp())
         await self._put(MCP_TOOLS_KEY, {s: {r: v.model_dump(mode="json", by_alias=True) for r, v in tools.items()}
                                         for s, tools in reviews.items()})
+
+    def mcp_system_access(self) -> dict[str, dict[str, Any]]:
+        """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut."""
+        raw = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
+        return {str(k): {f: v[f] for f in SYSTEM_ACCESS_FIELDS if f in v} for k, v in raw.items()
+                if isinstance(v, dict)}
+
+    async def save_mcp_system_access(self, server: str, fields: Mapping[str, Any]) -> None:
+        current = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
+        current[server] = {f: fields[f] for f in SYSTEM_ACCESS_FIELDS if f in fields}
+        await self._put(MCP_SYSTEM_ACCESS_KEY, current)
 
     def feeds(self) -> list[str]:
         return [str(u) for u in (self._get(FEEDS_KEY) or [])]
@@ -429,6 +448,39 @@ class Settings:
         return True
 
     # ── Teams (``/api/teams/…``, ADR 0069) ──
+    # ── Ce qu'elle envoie à ta place (ADR 0132) ──
+    def sending(self) -> Sending:
+        """Ses règles d'envoi. Rien d'enregistré : celles qui font ce que faisaient les réglages d'avant (préparer
+        d'elle-même et « jamais pour » de chaque boîte, l'accord avant un envoi de courrier, le mode de Teams)."""
+        raw = self._get(SENDING_KEY)
+        if isinstance(raw, dict):
+            try:
+                return Sending.model_validate(raw)
+            except ValueError:
+                log.warning("envoi : règles illisibles, la règle par défaut seule")
+                return Sending()
+        accounts = dict(dict(self._get(EMAIL_KEY) or {}).get("accounts") or {})
+        approval = self.overrides().get("email", {}).get("send_needs_approval", True)
+        teams = self._get(TEAMS_KEY)
+        return from_before({str(k): dict(v) for k, v in accounts.items() if isinstance(v, dict)}, bool(approval),
+                           dict(teams) if isinstance(teams, dict) else None)
+
+    async def save_sending(self, cfg: Sending) -> Sending:
+        cfg = Sending.model_validate(cfg.model_dump())
+        await self._put(SENDING_KEY, cfg.model_dump(mode="json"))
+        # « un envoi attend un accord », une surcharge du courrier d'avant, est désormais dans les règles : retirée
+        overrides = self.overrides()
+        if "send_needs_approval" in overrides.get("email", {}):
+            overrides["email"].pop("send_needs_approval")
+            await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
+        return cfg
+
+    async def _keep_sending(self) -> None:
+        """Les règles d'avant l'ADR 0132 se lisent dans les réglages du courrier et de Teams, que leur réécriture
+        efface : elles sont d'abord écrites sous la forme neuve."""
+        if not isinstance(self._get(SENDING_KEY), dict):
+            await self.save_sending(self.sending())
+
     def teams(self) -> TeamsConfig:
         """Ce qu'un opérateur a réglé de Teams ; illisible, les valeurs par défaut (jamais bloquant)."""
         try:
@@ -438,6 +490,7 @@ class Settings:
             return TeamsConfig()
 
     async def save_teams(self, cfg: TeamsConfig) -> TeamsConfig:
+        await self._keep_sending()
         cfg = TeamsConfig.model_validate(cfg.model_dump())
         await self._put(TEAMS_KEY, cfg.model_dump(mode="json"))
         return cfg
@@ -619,6 +672,7 @@ class Settings:
         return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict) and v}
 
     async def save_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
+        await self._keep_sending()  # « un envoi attend un accord » était une surcharge du courrier (ADR 0132)
         await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
 
     # ── Réglages des apps forgées (valeurs simples, surchargent le manifeste) ──

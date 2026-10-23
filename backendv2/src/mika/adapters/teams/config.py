@@ -3,12 +3,12 @@ ce qu'elle prépare d'elle-même. La clé de l'extension se génère à part (se
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from mika.kernel.forms import Knob
-from mika.ports.teams import MODES, Voice
+from mika.ports.teams import Voice
 
 #: ce qui, dans la signature, devient son nom (celui de sa persona : le code ne l'écrit jamais)
 HER = "{elle}"
@@ -22,11 +22,6 @@ class TeamsConfig(BaseModel):
     enabled: Annotated[bool, Knob(
         label="Actif", group="Teams", advanced=False, order=5,
         help="Décoché : l'extension est refusée (rien n'est reçu, rien ne part) ; ce qui est déjà reçu reste.")] = True
-    mode: Annotated[Literal["brouillon", "validation", "autonome"], Knob(
-        label="Ce qu'elle fait de ses réponses", group="Écrire", choices=MODES, advanced=False, order=10,
-        help="Brouillon : posé dans la zone de saisie de la conversation (une notification te le dit), c'est toi qui "
-             "l'envoies — ou pas. Après ton accord : une carte te le montre (dans le chat et dans la console), il "
-             "part quand tu l'acceptes. Autonome : il part sans te demander, sous ton nom.")] = "brouillon"
     display_name: Annotated[str, Knob(
         label="Ton nom", group="Écrire", advanced=False, order=20,
         help="Comme tes collègues te connaissent (vide : celui que Teams donne). Elle écrit à ta place, à la "
@@ -44,20 +39,16 @@ class TeamsConfig(BaseModel):
     signature: Annotated[str, Knob(label="La signature", group="Écrire", order=31,
                                    help="Le texte ajouté quand la case ci-dessus est cochée ; « {elle} » y devient "
                                         "son nom.")] = SIGNATURE
-    autodraft: Annotated[bool, Knob(
-        label="Préparer des réponses d'elle-même", group="Initiative", advanced=False, order=40,
-        help="Quand un message qu'on t'adresse pose une question sur laquelle elle peut aider, elle prépare une "
-             "réponse (selon le mode ci-dessus).")] = True
-    skip: Annotated[tuple[str, ...], Knob(
-        label="Jamais pour", group="Initiative", order=42,
-        help="Un morceau du nom d'une conversation (ou de son identifiant) par ligne : elle n'y prépare jamais de "
-             "réponse d'elle-même. Pour que l'extension n'envoie même pas une conversation, exclue-la dans "
-             "l'extension.")] = ()
 
-    @field_validator("skip")
+    @model_validator(mode="before")
     @classmethod
-    def _skip(cls, skip: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(s.strip().lower() for s in skip if s.strip()))
+    def _before_0132(cls, data: Any) -> Any:
+        """Ce qu'elle fait de ses réponses, ce qu'elle prépare d'elle-même et où jamais (« mode », « autodraft »,
+        « skip ») se règlent dans ses règles d'envoi (ADR 0132) : des réglages d'avant restent lisibles, ces champs
+        sans effet (ils y sont traduits)."""
+        if isinstance(data, dict) and {"mode", "autodraft", "skip"} & set(data):
+            data = {k: v for k, v in data.items() if k not in ("mode", "autodraft", "skip")}
+        return data
 
     def voice(self, fallback_name: str = "") -> Voice:
         return Voice(display_name=self.display_name.strip() or fallback_name, tone=self.tone,

@@ -31,8 +31,6 @@ SERVER = "web"
 REGIONS = (("fr-fr", "France"), ("be-fr", "Belgique"), ("ch-fr", "Suisse"), ("ca-fr", "Canada (français)"),
            ("wt-wt", "le monde entier"))
 SAFESEARCH = (("modere", "modéré"), ("strict", "strict"), ("non", "aucun"))
-AUDIENCES = (("proprietaire", "sa propriétaire seulement"), ("comptes", "aussi une personne authentifiée, en "
-                                                                         "tête-à-tête"))
 
 
 class WebParams(BaseModel):
@@ -41,14 +39,8 @@ class WebParams(BaseModel):
     enabled: Annotated[bool, Knob(
         label="Actif", group="Le plugin",
         help="Décoché : son serveur n'est plus lancé et ses outils ne lui sont plus offerts (elle le sait : sans "
-             "eux, elle ne cherche pas sur internet).")] = True
-    audience: Annotated[Literal["proprietaire", "comptes"], Knob(
-        label="Pour qui", group="Le plugin", choices=AUDIENCES,
-        help="Jamais dans un salon, quel que soit ce choix : ce qu'elle cherche part de la machine.")] = "proprietaire"
-    in_work: Annotated[bool, Knob(
-        label="Quand elle travaille", group="Le plugin",
-        help="Un pas sur un but ou une exécution de projet — seulement si le but ou le projet a pris ce lot "
-             "(« mcp.web »).")] = True
+             "eux, elle ne cherche pas sur internet). Qui peut s'en servir, et quand : sa fiche, Outils › Venus "
+             "d'ailleurs › web › « Accès aux outils » (ADR 0131).")] = True
     spacing_us: Annotated[int, Knob(
         label="Entre deux recherches, au moins", group="Ménager DuckDuckGo", lo=US, hi=MINUTE,
         help="DuckDuckGo demande de prouver qu'on est humain quand les recherches se suivent de trop près : "
@@ -96,7 +88,10 @@ class WebState:
     pass
 
 
-WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams)
+#: « pour qui » et « quand elle travaille » sont devenus les lignes d'accès de son serveur, réglées sur sa fiche (ADR
+#: 0131) : leurs valeurs journalisées se lisent sans effet
+WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams,
+              retired_params=("audience", "in_work"))
 
 
 def params(p: WebParams | None) -> WebParams:
@@ -123,8 +118,6 @@ class SystemServer:
     args: tuple[str, ...]
     env: tuple[str, ...]
     shared: tuple[str, ...]
-    audience: str
-    in_work: bool
     timeout_s: float
     max_calls: int
     max_result_chars: int
@@ -147,5 +140,5 @@ def system_server(p: WebParams | None) -> SystemServer | None:
         name=SERVER, purpose=phrase("web.purpose"), when_to_use=phrase("web.when_to_use"), command="python3",
         args=("-I", str(path)),
         env=tuple(f"{k}={v}" for k, v in sorted(st.env().items())), shared=(str(path.parent),),
-        audience=p.audience, in_work=p.in_work, timeout_s=p.call_timeout_us / US, max_calls=p.max_calls,
+        timeout_s=p.call_timeout_us / US, max_calls=p.max_calls,
         max_result_chars=p.max_result_chars, tools=tuple(server.tools(st)))

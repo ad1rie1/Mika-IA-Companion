@@ -7,8 +7,9 @@ comme un serveur local de l'opérateur, mais dont les outils sont **approuvés d
   fonction même du client (``live_tool``), sur ce que le plugin dit que son serveur proposera. Un serveur qui
   proposerait autre chose verrait l'outil suspendu, comme chez n'importe quel serveur. Un outil qui se dit en
   lecture seule part sans accord ; un autre attendrait celui de l'opérateur.
-- L'opérateur ne range rien pour eux (``saving`` retire leurs entrées avant d'écrire) : on les règle dans les
-  paramètres de leur plugin.
+- L'opérateur ne range rien de leurs outils (``saving`` retire leurs entrées avant d'écrire) : on les règle dans
+  les paramètres de leur plugin. Seules leurs lignes d'accès se règlent sur leur fiche (ADR 0131), rangées à part
+  (``access``) : elles remplacent celles que le plugin donne par défaut.
 - Si ce qui les donne échoue (des paramètres illisibles), il n'y en a aucun : rien d'offert plutôt qu'un outil
   faux.
 """
@@ -40,8 +41,10 @@ class Provided:
 
 
 class SystemServers:
-    def __init__(self, provide: Callable[[], Mapping[str, Provided]]) -> None:
+    def __init__(self, provide: Callable[[], Mapping[str, Provided]],
+                 access: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None) -> None:
         self._provide = provide
+        self._access = access
         self._said: set[str] = set()
 
     def current(self) -> dict[str, Provided]:
@@ -59,8 +62,28 @@ class SystemServers:
         for name in sorted(set(base.servers) & set(mine)):
             self._once(f"le serveur « {name} » de l'opérateur s'efface devant celui du système du même nom")
         servers = {k: v for k, v in base.servers.items() if k not in mine}
-        servers.update({k: p.spec for k, p in mine.items()})
+        ruled = self._ruled()
+        servers.update({k: self._with_access(k, p.spec, ruled.get(k)) for k, p in mine.items()})
         return McpConfig(servers=servers)
+
+    def _ruled(self) -> Mapping[str, Mapping[str, Any]]:
+        if self._access is None:
+            return {}
+        try:
+            return dict(self._access())
+        except Exception as exc:  # noqa: BLE001 — des accès illisibles : ceux que donne le plugin
+            self._once(f"accès des serveurs système illisibles ({type(exc).__name__}) : ceux du plugin valent")
+            return {}
+
+    def _with_access(self, name: str, spec: McpServer, ruled: Mapping[str, Any] | None) -> McpServer:
+        """Ses lignes d'accès réglées sur sa fiche, à la place de celles de son plugin (illisibles : celles-ci)."""
+        if not ruled:
+            return spec
+        try:
+            return McpServer.model_validate({**spec.model_dump(), **dict(ruled)})
+        except ValueError:
+            self._once(f"les accès réglés du serveur « {name} » sont illisibles : ceux de son plugin valent")
+            return spec
 
     def reviews(self, base: Reviews) -> Reviews:
         mine = self.current()

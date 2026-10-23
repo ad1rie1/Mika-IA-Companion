@@ -304,7 +304,7 @@ def test_real_mail_config():
     assert accounts.kind == "records"
     f = {i.path: i for i in accounts.item}
     assert f["password"].kind == "secret" and f["smtp_password"].kind == "secret"
-    assert f["imap_ssl"].kind == "bool" and f["autodraft"].kind == "bool"
+    assert f["imap_ssl"].kind == "bool" and f["save_sent"].kind == "bool"
     # bornés pour la console : modifiables
     assert not f["imap_port"].readonly and (f["since_days"].lo, f["since_days"].hi) == (1, 60)
     assert {v for v, _ in f["smtp_security"].choices} == {"starttls", "ssl", "none"}

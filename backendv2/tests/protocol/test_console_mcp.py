@@ -11,6 +11,7 @@ import html
 import re
 
 import httpx
+import pytest
 
 from mika.adapters.mcp.http import HttpTransport
 from tests.contract.test_mcp_client import TOKEN, URL, FakeServer
@@ -205,6 +206,25 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
                    a_quoi="Les mêmes, une seconde fois.", adresse="http://factures.lan/mcp")
     assert "un serveur s'appelle déjà « factures »" in html_of(again)
     client.portal.call(transport.aclose)
+
+
+def test_the_web_search_access_is_set_on_its_page_and_kept_apart(world):  # noqa: F811
+    """ADR 0131 : la recherche web, un serveur du système, a ses lignes d'accès réglées sur sa fiche — rangées à part,
+    elles remplacent celles de son plugin ; le reste (sa commande, sa cage) ne se règle pas ici."""
+    client, live, _ = world
+    bootstrap(client)
+    assert "web" in client.portal.call(live.mcp.statuses).__repr__()
+    rows = [{"who": "toi", "when": ["conversation"], "read": "seule", "act": "non", "keep": "public", "tools": []}]
+    client.portal.call(live.mcp.settle, "web", {"access": rows, "default_read": "non", "default_act": "non",
+                                                "default_keep": "rien"})
+    assert client.portal.call(live.settings.mcp_system_access)["web"]["access"] == rows
+    (row,) = client.portal.call(live.mcp.status, "web").access
+    assert (row.who, row.when, row.act) == ("toi", ("conversation",), "non")
+    with pytest.raises(ValueError):
+        client.portal.call(live.mcp.settle, "web", {"command": "sh"})
+    assert "web" not in client.portal.call(live.settings.mcp).servers  # pas rangé comme un serveur de l'opérateur
+    made = html_of(client.get("/inspecteur/fiche/serveur/web", params={"onglet": "fait"}))
+    assert "ses accès, eux, se règlent ici" in made and "+ Ajouter un accès aux outils" in made
 
 
 def test_a_card_reaches_only_its_person_and_only_she_decides_it(world):  # noqa: F811

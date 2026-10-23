@@ -350,7 +350,8 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
     if args.teams_cmd == "revoke":
         return {"ok": await desk.revoke_key("ligne de commande")}
     cfg, key = settings.teams(), desk.key_state()
-    return {"ok": True, "enabled": cfg.enabled, "mode": cfg.mode, "sign": cfg.sign, "autodraft": cfg.autodraft,
+    teams_rules = [r.model_dump() for r in settings.sending().rules if r.canal == "teams"]
+    return {"ok": True, "enabled": cfg.enabled, "sign": cfg.sign, "envoi": teams_rules,
             "key": f"{key.hint}…" if key is not None else None}
 
 

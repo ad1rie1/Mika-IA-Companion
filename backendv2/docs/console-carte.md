@@ -26,7 +26,7 @@ Trois règles tiennent toute la console :
 | **Accueil** | — | « Tout va bien ? Que dois-je faire ? » |
 | **À valider** | Actions à autoriser · Brouillons de courrier · Réponses Teams · Identités à confirmer · Noms à relier · Historique des autorisations | « Qu'est-ce qui attend ma décision ? » |
 | **Sa rubrique**, à son nom | En ce moment · Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient · Pensées · Ce qu'elle remarque · Attentes · Journal et rêves · Mémoire · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
-| **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
+| **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Envoyer à ta place · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
 | **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
@@ -106,7 +106,11 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   qu'elle propose sont distingués de ceux du serveur. Les boîtes se règlent dans Réglages › Plugins › Boîtes aux
   lettres.
 - **Teams** (ADR 0069) : Conversations, Réponses (ses réponses rédigées à la place de la personne et leur sort),
-  Extension (la clé, le mode).
+  Extension (la clé).
+- **Envoyer à ta place** (`/inspecteur/envoi`, `inspector/pages/sending.py`, ADR 0132) : ce qu'elle prépare d'elle-même
+  et comment ça part, courrier et Teams, en un tableau lu de haut en bas — canal, destinataire, préparer d'elle-même,
+  envoi (brouillon, ton accord, seule) —, puis la règle par défaut, obligatoire. « + Ajouter une règle », ↑ ↓ ✕ :
+  chaque bouton envoie tout le tableau. Le téléphone n'y est pas (son geste vaut accord).
 - **Identités et moyens de communication** : Moyens de communication, Identités à confirmer, Noms à relier (un nom
   dont on lui a parlé, porté par une personne qu'elle connaît : relié depuis sa fiche, ou écarté — jamais deviné,
   ADR 0048), Règles de divulgation.
@@ -272,8 +276,8 @@ rôle par rôle (`CallLog.profile`).
 | Canaux | Dépôts git | le jeton de ses dépôts distants (aussi : Connexions extérieures › Dépôts Git) |
 | | Notifications du téléphone | la clé Firebase (collée ici ou posée en fichier), d'où elle vient, les téléphones notifiables, ce qui est parti, le dernier échec (ADR 0077) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
-| | Boîtes aux lettres | chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
-| | Teams | la clé de l'extension, le mode de ses réponses (brouillon, accord, autonome), sa signature |
+| | Boîtes aux lettres | chaque boîte a sa page (la boîte, lire, envoyer, sa voix ; ce qu'elle prépare d'elle-même : « Envoyer à ta place ») |
+| | Teams | la clé de l'extension, son nom, son ton, sa signature (comment ses réponses partent : « Envoyer à ta place ») |
 | | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; en main ; bornes (qui peut quoi : sur sa fiche, « Accès aux outils »). Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128, 0131 |
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |

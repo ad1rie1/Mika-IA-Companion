@@ -62,6 +62,8 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
                     subjects=("conversation_teams", "reponse_teams")),
+        Destination("envoi", "Envoyer à ta place", "Ce qu'elle prépare d'elle-même et comment ça part, courrier "
+                    "et Teams : des règles lues de haut en bas (ADR 0132).", builtin=("envoi.regles",)),
     )),
     NavGroup("Connexions extérieures", (
         Destination("sens", "Connexions extérieures", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "

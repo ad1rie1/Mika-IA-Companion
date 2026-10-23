@@ -43,6 +43,7 @@ MENU = (
         MenuLink("Conversations", "fil"),
         MenuLink("Courrier", "courrier", ("reglages/boites",)),
         MenuLink("Teams", "teams", ("reglages/teams",)),
+        MenuLink("Envoyer à ta place", "envoi"),
         MenuLink("Identités et moyens de communication", "identites"),
     )),
     MenuGroup("Activité", "activity", (

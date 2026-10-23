@@ -283,8 +283,6 @@ class AccountInfo:
     ready: bool = False
     can_send: bool = False
     enabled: bool = True
-    autodraft: bool = False
-    autodraft_skip: tuple[str, ...] = ()
     #: ses réglages sans secret, pour les montrer (« lire » : « imap.x.fr:993, SSL, utilisateur u »)
     details: tuple[tuple[str, str], ...] = ()
 

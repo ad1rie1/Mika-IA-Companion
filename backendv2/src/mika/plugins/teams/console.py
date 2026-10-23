@@ -124,8 +124,8 @@ def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
                    href=Ref.subject("reponse_teams", d.draft, _clip(port.title(d.conversation), 60) or d.draft),
                    tone="warn" if d.state == WAITING else "")
 
-    mode = params_of(frame).mode
-    return [Note(f"Mode : {MODE_LABEL.get(mode, mode)} (Réglages › Plugins › Teams).", tone="info"),
+    return [Note("Ce qu'elle prépare d'elle-même et comment ses réponses partent, conversation par conversation : "
+                 "Relations & échanges › Envoyer à ta place.", tone="info"),
             Table((Column("conversation", role="title"), Column("réponse", role="body"), Column("pourquoi", "fit"), Column("proposée", "fit"),
                    Column("état", "fit", role="badge"), Column("retouche", "fit", role="badge")), tuple(row(d) for d in page),
                   title=f"Réponses ({len(drafts)})", pager=pager, empty="aucune réponse préparée", layout="cards",
@@ -143,7 +143,8 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("dernier envoi de l'extension", When(port.last_batch()) if port.configured() else "jamais"),
         ("ton nom dans Teams", owner_name or "pas encore vu"), ("ton identifiant Teams", owner_id or "pas encore vu"),
         ("messages remarqués (en tête)", len(s.messages)),
-        ("clé, mode, signature", Ref("local", "/inspecteur/reglages/teams", "Réglages › Plugins › Teams")),
+        ("clé, signature", Ref("local", "/inspecteur/reglages/teams", "Réglages › Plugins › Teams")),
+        ("ce qu'elle prépare, comment ça part", Ref("local", "/inspecteur/envoi", "Envoyer à ta place")),
     ]
     return [Fields(tuple(pairs), title="L'extension", columns=1),
             Note("L'extension (frontend/Extension) lit ce que Teams web reçoit dans ton navigateur et l'apporte ici ; "
