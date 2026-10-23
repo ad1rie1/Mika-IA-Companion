@@ -476,7 +476,7 @@ class Settings:
         return True
 
     def console_mcp_network(self) -> bool:
-        """Vrai : ``/mcp/console`` répond aussi au réseau, mandataire compris, jeton toujours exigé (ADR 0126)."""
+        """Vrai : ``/mcp/console`` répond aussi au réseau, mandataire compris, jeton toujours exigé (ADR 0127)."""
         return bool(dict(self._get(CONSOLE_MCP_KEY) or {}).get("network"))
 
     async def save_console_mcp_network(self, network: bool) -> None:

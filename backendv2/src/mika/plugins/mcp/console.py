@@ -41,6 +41,7 @@ from mika.ports.mcp import APPROVALS, AUDIENCES, EPISODES, NATURES, STATES
 SETTINGS = "/inspecteur/reglages/serveurs-mcp"
 LIST = "/inspecteur/outils/serveurs"
 NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
+FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche."
 STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "connecte": "ok", "erreur": "warn",
                "panne": "danger"}
 WORDS = {"lecture": "lecture", "action": "action", "aucun": "sans accord", "conversation": "accord dans la conversation",
@@ -313,6 +314,9 @@ def _port(ctx: Any) -> Any:
 async def _test(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     port = _port(ctx)
     ok, said = await port.test(ctx.subject)
+    st = port.status(ctx.subject)
+    if not ok and st is not None and st.detail:
+        said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger", drafts=status_drafts(s, port))
 
 

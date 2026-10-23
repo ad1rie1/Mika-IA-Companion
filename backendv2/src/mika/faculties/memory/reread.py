@@ -46,7 +46,7 @@ from mika.kernel.clock import DAY, local_date_of_night
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import PromptBudgetError, SectionBody
 from mika.ports.llm import LLMRequest, Message, ToolDecl
 from mika.ports.sql import json_field
 from mika.vocab import timespan
@@ -202,16 +202,40 @@ def source_label(source: str) -> str:
     return read_source(source) or source
 
 
-def readings(store: Any, p: MemoryParams) -> tuple[list[Lu], int]:
+def cut(text: str, limit: int) -> str:
+    """Un texte d'un seul tenant, coupé à ``limit`` caractères sur un mot (« … » au bout)."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    head = text[: max(1, limit - 1)]
+    return (head.rsplit(" ", 1)[0] if " " in head else head) + "…"
+
+
+def readings(store: Any, p: MemoryParams, limit: int | None = None) -> tuple[list[Lu], int]:
     """Ses lectures en attente (les plus anciennes d'abord), et jusqu'où elles vont : une lecture dont le texte a été
-    oublié depuis est relue sans rien en garder."""
+    oublié depuis est relue sans rien en garder. Le lot est borné en nombre (``limit``, à défaut
+    ``reread_max_readings``) **et en taille** : chaque extrait coupé à ``reread_excerpt_chars``, le tout à
+    ``reread_max_chars`` — au moins une lecture, le reste attend la nuit suivante. Sans la taille, trente pages lues
+    en entier dépassaient le contexte du modèle, et le même lot revenait échouer chaque nuit (ADR 0127)."""
     t = tb.readings()
     rows = store.query_mind(select(t.c.seq, t.c.source, t.c.title_ref, t.c.excerpt_ref, t.c.asked_by)
-                            .order_by(t.c.seq).limit(p.reread_max_readings))
+                            .order_by(t.c.seq).limit(limit or p.reread_max_readings))
     texts = store.content([r for row in rows for r in row[2:4] if r])
-    return ([Lu(int(seq), str(source), texts.get(title) or "", texts.get(excerpt) or "", str(asked or ""))
-             for seq, source, title, excerpt, asked in rows if texts.get(title)],
-            max((int(r[0]) for r in rows), default=0))
+    lus: list[Lu] = []
+    upto, spent = 0, 0
+    for seq, source, title, excerpt, asked in rows:
+        if not texts.get(title):
+            upto = int(seq)  # oubliée depuis : relue sans rien en garder
+            continue
+        lu = Lu(int(seq), str(source), cut(texts[title], p.reread_excerpt_chars),
+                cut(texts.get(excerpt) or "", p.reread_excerpt_chars), str(asked or ""))
+        size = len(lu.title) + len(lu.excerpt)
+        if lus and spent + size > p.reread_max_chars:
+            break
+        lus.append(lu)
+        spent += size
+        upto = int(seq)
+    return lus, upto
 
 
 def _persons(frame: Frame, keys: Sequence[str]) -> set[str]:
@@ -341,7 +365,7 @@ def render(frame: Frame, lus: Sequence[Lu], known: Sequence[tuple[int, str]], op
             out.append(phrase("memory.reread.render.reading_asked", n=n, source=source, title=lu.title) if lu.asked_by
                        else phrase("memory.reread.render.reading", n=n, source=source, title=lu.title))
             if lu.excerpt.strip():
-                out.append(phrase("memory.reread.render.excerpt", excerpt=" ".join(lu.excerpt.split())))
+                out.append(phrase("memory.reread.render.excerpt", excerpt=lu.excerpt))
     if known:
         out += ["", phrase("memory.reread.render.known")] + [f"[#{i}] {t}" for i, t in known]
     if opinions:
@@ -491,10 +515,14 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
 @MEMORY.process("memory.reread", wake_on=[*body_c.ALL, c.NIGHT_SORTED], lane="night", catch_up=CatchUp.ONCE,
                 max_quantum_s=3600)
 class Reread:
-    """Une relecture par nuit, après le tri de la mémoire : un appel au plus, aucun sans rien à relire."""
+    """Une relecture par nuit, après le tri de la mémoire : un appel, aucun sans rien à relire — sauf un lot trop
+    long pour le modèle, repris aussitôt deux fois plus court (ADR 0127)."""
 
     def __init__(self) -> None:
         self.failed: str = ""  # une nuit dont l'appel a échoué : elle réessaiera la suivante
+        #: un lot trop long pour le contexte du fournisseur (``PromptBudgetError``) : le suivant en prend moitié moins,
+        #: la même nuit — rejouer le même lot échouerait pareil chaque nuit (ADR 0127) ; 0 : le réglage
+        self.limit = 0
 
     def _night(self, state: MemoryState, frame: Frame) -> str | None:
         since = frame.get(body_c.ASLEEP_SINCE)
@@ -516,7 +544,7 @@ class Reread:
         if night is None or store is None:
             return
         p = params(frame.env.params_of("memory", frame.root))
-        lus, upto = readings(store, p)
+        lus, upto = readings(store, p, self.limit or None)
         paires = await pairs(frame, store, vectors, p)
         # ce qui est passé depuis longtemps sans nouvelles : elle ne saura pas (aucun appel)
         gone = [resolution(ev, c.UNKNOWN, "", (), f"{ctx.run_id}#expiré") for ev in expired(frame, store, p)]
@@ -537,6 +565,17 @@ class Reread:
                              lane="background", priority=3, meta={"night": night})
         try:
             response = await ctx.llm.call(request)
+        except PromptBudgetError:
+            if len(lus) > 1:  # trop long : moitié moins, tout de suite
+                self.limit = len(lus) // 2
+                log.warning("relecture de la nuit %s : trop longue pour le modèle, %d lectures au prochain essai",
+                            night, self.limit)
+                return
+            log.warning("relecture de la nuit %s : une seule lecture dépasse déjà le contexte du modèle", night)
+            self.failed = night
+            if gone:
+                await ctx.emit(*gone)
+            return
         except Exception as exc:  # noqa: BLE001 — une nuit manquée : la suivante relira
             log.warning("relecture de la nuit %s : %s", night, type(exc).__name__)
             self.failed = night
@@ -553,6 +592,7 @@ class Reread:
         rel = parse(raw)
         drafts = gone + await drafts_of(rel, frame, state, store, vectors, p, lus, known, opinions, paires, night,
                                         call_id, world)
+        self.limit = 0
         drafts.append(c.REREAD.draft(night=night, upto=upto, readings=len(lus), pairs=len(paires), call_id=call_id,
                                      model=response.model, dedupe_key=f"relecture:{night}"))
         await ctx.emit(*drafts)

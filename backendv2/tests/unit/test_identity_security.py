@@ -519,6 +519,7 @@ def test_trust_changing_actions_announce_their_outcome_and_are_guarded(tmp_path)
 
     out, specs = run(tmp_path, scenario)
     assert not out["link unconfirmed"].ok and "propriétaire" in out["link unconfirmed"].errors["confirmed"]
+    assert "propriétaire" not in out["link unconfirmed"].message  # dit sous la case, pas recopié en bandeau
     assert out["link"].ok and out["owner"]
     assert not out["doubt unconfirmed"].ok and "ne parlera plus" in out["doubt unconfirmed"].errors["confirmed"]
     assert out["still linked"]  # « J'en doute » délierait : rien sans « Je confirme »

@@ -54,11 +54,18 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # brancher : le jeton scellé, jamais réaffiché ; un nom mal formé refusé
     page = html_of(client.get(SETTINGS))
     assert "Outils extérieurs" in page
+    rule = "des minuscules, chiffres et _ (24 au plus), en commençant par une lettre"
+    assert f"Le nom sous lequel les autres réglages le désignent : {rule}." in \
+        html_of(client.get(SETTINGS, params={"enregistrement": "servers", "cle": "", "nouveau": "1"}))
+    # refusé au champ « Nom », une seule fois (ni recopié dans le bandeau, ni en tête de la carte)
     bad = post(client, SETTINGS, server("Météo", purpose="la météo d'une ville", url=URL))
-    assert bad.status_code == 400
-    r = post(client, SETTINGS, server("meteo", purpose="la météo et les prévisions d'une ville", transport="distant",
+    assert bad.status_code == 400 and f'<span class="error">Nom refusé : {rule}.</span>' in html_of(bad)
+    assert html_of(bad).count("Nom refusé") == 1 and "nom de serveur invalide" not in html_of(bad)
+    # seules les majuscules s'adaptent d'elles-mêmes : le nom se lit pareil
+    r = post(client, SETTINGS, server("Meteo", purpose="la météo et les prévisions d'une ville", transport="distant",
                                       url=URL, auth="bearer", token=TOKEN, in_conversation="1", enabled="1"))
     assert r.status_code == 200, html_of(r)[:2000]
+    assert "« meteo » enregistré. Le nom tapé, « Meteo », est passé en minuscules." in html_of(r)
     assert TOKEN not in r.text
     stored = client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings")
     assert TOKEN not in repr(stored)

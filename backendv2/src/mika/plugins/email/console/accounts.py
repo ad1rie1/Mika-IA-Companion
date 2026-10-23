@@ -41,6 +41,7 @@ from mika.plugins.email.console.common import (
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import AccountInfo
 
+FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
 
 def _state(info: AccountInfo, error: str) -> Badge:
     if not info.enabled:
@@ -182,6 +183,8 @@ async def _test(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Don
     if port is None or port.account(ctx.subject) is None:
         raise Refused("Compte inconnu.")
     ok, said = await port.test(ctx.subject)
+    if not ok and port.status(ctx.subject).error:
+        said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger")
 
 

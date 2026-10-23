@@ -352,7 +352,7 @@ attend dans la file d'envoi et part à la prochaine ouverture chez toi.
 | `status` | code | sens |
 |---|---|---|
 | `ok` | 200 | tout va bien |
-| `degraded` | 200 | elle répond moins bien, ou plus du tout : aucun modèle ne sert « répondre », son fournisseur échoue, une projection est en retard, un processus échoue, la file de sortie est bloquée… |
+| `degraded` | 200 | elle répond moins bien, ou plus du tout : aucun modèle ne sert « répondre », son fournisseur échoue, ses appels de fond sont retenus par le quota de l'abonnement (ADR 0127), une projection est en retard, un processus échoue, la file de sortie est bloquée… |
 | `ko` | 200 | quelque chose est cassé et rien ne le réparera seul (tranche corrompue, boucle arrêtée) : regarder la console, redémarrer |
 | `starting`, `stopping`, `stopped` | 503 | pas prête |
 

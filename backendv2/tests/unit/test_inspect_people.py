@@ -593,6 +593,7 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
     assert out["offered"] == {"user_1": True, ANON: True, "anon_1": False, "name:bob": False}
     assert not out["bad"].ok and "choix inconnu" in out["bad"].errors["closeness"]
     assert not out["same"].ok and "déjà déclarée" in out["same"].errors["closeness"]
+    assert "déjà déclarée" not in out["same"].message  # dit sous le champ, pas recopié en bandeau
     assert out["friend"].ok and out["level"] == social_c.FRIEND
     # une seule journée : leur histoire commence — mais c'est sa propriétaire, une amie d'office (ADR 0035)
     assert out["auto"].ok and out["lived"] == social_c.FRIEND

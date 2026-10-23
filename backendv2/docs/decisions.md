@@ -25,7 +25,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120 |
-| Les fournisseurs de modèles | 0026, 0072, 0073 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
@@ -368,7 +368,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* ce qu'elle lisait seule ne devenait jamais un savoir, et deux témoins aux mots différents ne se rencontraient jamais.
 
-*Révisée par 0110.*
+*Révisée par 0110, 0127.*
 
 ### 0086 — Voir venir, constater
 
@@ -1089,7 +1089,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* le repli masquait les pannes et échouait souvent faute de contexte ; un prénom oublié restait dans les enveloppes.
 
-*Révise 0001 (en partie), 0026 (en partie), 0038 (en partie). Révisée par 0101.*
+*Révise 0001 (en partie), 0026 (en partie), 0038 (en partie). Révisée par 0101, 0127.*
+
+### 0127 — Un quota retenu n'est pas une panne
+
+- Un appel de fond refusé d'avance pour garder la réserve d'un abonnement (`Held`, dont `QuotaHeld`) n'a rien tenté : l'épisode se règle en `preempted`, et un but ne le compte pas comme une panne. L'arbitre ne lance pas un épisode que le fournisseur de son rôle refuserait (veto `held`). Le dernier relevé du quota survit au redémarrage (`quota.json`, dans le dossier des appels).
+- La santé le dit : tant que des appels de fond sont retenus, `llm` est `degraded`, donc visible dans « À traiter ».
+- La relecture de la nuit borne son lot en taille (`reread_max_chars`, `reread_excerpt_chars`) ; un lot trop long pour le modèle est repris deux fois plus court, la même nuit.
+- Son journal ne raconte que sa journée : une pensée née après n'y entre pas. Travailler à son bureau dure le temps des séances, plus un moment si la dernière a travaillé (`work_linger_min`) ; une séance qui n'a rien fait l'arrête aussitôt. Un même acte sous un même titre s'y dit une fois, avec le compte. Les listes de buts de la console citent ce qui a fait naître une exploration.
+- Un tour de Claude Code qui finit sur des appels d'outils rend l'usage de ses messages.
+
+*Pourquoi :* le 2026-10-22, l'abonnement à 85 % sur sept jours, 39 séances refusées en zéro seconde ont clos six explorations « en échec, le modèle ne répond pas », et la santé restait verte. La relecture échouait chaque nuit depuis le 18 sur le même lot trop long. Son journal racontait des recherches jamais faites, avec des pensées du lendemain.
+
+*Révise 0050 (en partie), 0073 (en partie), 0085 (en partie).*
 
 ## Sa voix, sa persona, la genèse
 
@@ -1200,7 +1212,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* plusieurs personnes dans plusieurs pièces exigent un monde cohérent entre écrans, sans laisser décider la physique d'un moteur ni payer un appel par geste.
 
-*Révise 0049 (entièrement). Révisée par 0051.*
+*Révise 0049 (entièrement). Révisée par 0051, 0127.*
 
 ### 0051 — L'adaptateur du monde : `/ws/world`, les jetons, le bail
 

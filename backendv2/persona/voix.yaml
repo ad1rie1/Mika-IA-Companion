@@ -209,6 +209,8 @@ self:
         reminded: "tu as fait un rappel :"
         # une réflexion menée au bout (repenser à ce qu'on lui a confié) : pas un exploit
         reflected: "tu as pris le temps de repenser à"
+      # le même acte sous le même titre, plusieurs fois. {deed} : l'acte (le verbe et le titre), {n} : combien
+      times: "{deed} ({n} fois)"
       # ses rêveries : une seule mention. {title} : le titre de l'une d'elles
       mused_often: "Tu as aussi laissé ton esprit vagabonder, à plusieurs reprises (« {title} », entre autres) : des rêveries, rien de plus."
       mused_once: "Tu as aussi laissé ton esprit vagabonder un moment (« {title} ») : une rêverie, rien de plus."

@@ -51,7 +51,7 @@
     <fieldset class="group hm-group"><legend>Nom</legend>
     <div class="field{{ ' has-error' if rec.name_error }}"><label for="rec-{{ s.key }}-nom">Nom</label>
       <input id="rec-{{ s.key }}-nom" name="_cle" value="{{ rec.name }}" required maxlength="60" autocomplete="off">
-      <span class="help">Le nom sous lequel les autres réglages le désignent (lettres, chiffres, tirets).</span>
+      <span class="help">Le nom sous lequel les autres réglages le désignent : {{ rec.name_rule }}.</span>
       {% if rec.name_error %}<span class="error">{{ rec.name_error }}</span>{% endif %}</div>
     </fieldset>
     {% endif %}

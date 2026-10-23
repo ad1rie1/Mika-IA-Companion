@@ -206,6 +206,15 @@ class MemoryParams(BaseModel):
         label="Relecture : lectures relues par nuit", group="Ce qu'elle lit", lo=1, hi=100,
         help="La nuit, elle relit au plus tant de ses lectures (les plus anciennes d'abord) en un seul appel ; le "
              "reste attend la nuit suivante.")] = 30
+    reread_max_chars: Annotated[int, Knob(
+        label="Relecture : texte relu par nuit", group="Ce qu'elle lit", lo=2_000, hi=400_000, step=1_000,
+        help="Le texte de ses lectures (titres et extraits) qu'une nuit de relecture reprend au plus, en caractères : "
+             "au-delà, le reste attend la nuit suivante. Sans cette borne, trente pages lues en entier dépassaient le "
+             "contexte du modèle, et le même lot échouait chaque nuit (ADR 0127).")] = 60_000
+    reread_excerpt_chars: Annotated[int, Knob(
+        label="Relecture : extrait d'une lecture", group="Ce qu'elle lit", lo=200, hi=20_000, step=100,
+        help="Ce qu'elle relit au plus d'une seule lecture, en caractères : une page entière se coupe là (ADR 0127).")] \
+        = 3_000
     reread_max_items: Annotated[int, Knob(
         label="Relecture : ce qu'elle en garde au plus", group="Ce qu'elle lit", lo=1, hi=100,
         help="Ce qu'une relecture peut faire naître au plus (croyances, moments du monde, prévisions).")] = 30

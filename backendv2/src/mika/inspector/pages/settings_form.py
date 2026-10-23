@@ -459,7 +459,8 @@ class SettingsForms:
         label = next((f.label for f in forms.describe(s.model) if f.path == path), path)
         name = state.record_values.get(RECORD_KEY, key)
         return {"path": path, "label": label, "key": key, "keyed": keyed, "new": entry is None, "stash": state.stash,
-                "name": name, "name_error": state.record_errors.get(RECORD_KEY, ""), "groups": groups,
+                "name": name, "name_error": state.record_errors.get(RECORD_KEY, ""),
+                "name_rule": forms.record_names(s.model, path)[1], "groups": groups,
                 "advanced": advanced, "open": any(v.get("error") for f, v in placed if f.advanced),
                 "general": _placed([f.path for f in fields] + [RECORD_KEY], state.record_errors),
                 "back": state.back, "cancel": state.back or page_url(page)}
@@ -577,13 +578,20 @@ class SettingsForms:
             # fournisseur n'est interrogé que sur ce bouton, avec ce qui vient d'être tapé
             return await self._load_new(s, path, old, data, fields, flat, values, errors, wanted, now)
         errors = {**errors, **forms.within(fields, values)}
-        name = data.get(RECORD_KEY, old).strip()[:60] if keyed else old
+        typed = data.get(RECORD_KEY, old).strip()[:60] if keyed else old
+        rule, said = forms.record_names(s.model, path)
+        # une liste qui ne veut que des minuscules : « Intelligent_Networks » s'enregistre « intelligent_networks »
+        name = typed.lower() if typed != old and not rule.fullmatch(typed) and rule.fullmatch(typed.lower()) \
+            else typed
         collection = getattr(current, path)
         renamed = keyed and entry is not None and name != old
         if keyed and not name:
             errors[RECORD_KEY] = "Donne un nom."
+        elif keyed and name != old and not rule.fullmatch(name):
+            # la règle de cette liste, dite au champ : celle du modèle n'arriverait qu'en erreur générale
+            errors[RECORD_KEY] = f"Nom refusé : {said}."
         elif keyed and name != old and name in collection:
-            errors[RECORD_KEY] = "Ce nom existe déjà."
+            errors[RECORD_KEY] = f"Ce nom existe déjà : « {name} »."
         elif renamed and path in s.fixed_names:
             errors[RECORD_KEY] = (f"Le nom « {old} » ne change pas : des données rangées ailleurs le portent. "
                                   "Ajoute une entrée sous le nouveau nom, puis retire l'ancienne.")
@@ -614,12 +622,11 @@ class SettingsForms:
             more, followed = forms.rename_references(s.model, {**section_flat, path: updated}, path, old, name)
             changes.update(more)
         new, errors = forms.validate(s.model, current, changes)
-        if new is not None and keyed and name != old and not forms.RECORD_NAME.fullmatch(name):
-            # la règle commune des noms, après celle du modèle (qui dit mieux ce qu'il attend, s'il en a une)
-            new, errors = None, {RECORD_KEY: f"Nom refusé : {forms.RECORD_NAME_RULE}."}
         if new is None:
+            # ses erreurs s'affichent dans la carte (sous un champ, ou en tête si aucun ne les porte) : le
+            # bandeau ne les recopie pas
             state.record_errors = errors
-            state.messages = [("danger", " ; ".join(errors.values()) or "Refusé.")]
+            state.messages = [("danger", "Rien n'a été enregistré : corrige ce qui est signalé ci-dessous.")]
             return None, {s.key: self._hold(state, fields, token, now)}, 400
         subject = f"{s.key}/{path}/{name}"
         message = f"« {name} » enregistré." if keyed else "Enregistré."
@@ -627,6 +634,8 @@ class SettingsForms:
             message = f"« {old} » s'appelle désormais « {name} »" + (
                 f" ; ce qui le désignait suit : {', '.join(followed)}." if followed else
                 " ; rien d'autre ne le désignait.")
+        if name != typed:
+            message += f" Le nom tapé, « {typed} », est passé en minuscules."
         response, states, status = await self._commit(ui, s, new, by, page, subject, state, message,
                                                       back_to(data.get(BACK, "")))
         if response is None:

@@ -53,7 +53,11 @@ La CLI rend aussi l'usage de l'abonnement (``rate_limit_event``) : au-delà de
 ``quota_ceiling``, les appels de fond sont refusés (``QuotaHeld``) — la
 passerelle journalise alors le refus, et la conversation, elle,
 passe toujours. Une lecture dont la fenêtre est déjà réinitialisée
-(``resetsAt`` passé) ne compte plus.
+(``resetsAt`` passé) ne compte plus. Le dernier relevé est gardé dans le
+dossier des appels (``quota.json``) : un redémarrage ne l'oublie pas. Un
+refus est un ``Held`` (``holds()`` le dit d'avance) : l'arbitre ne lance pas
+un épisode de fond qui serait refusé, et un épisode refusé quand même se règle
+en ``preempted``, jamais en panne (ADR 0127).
 """
 
 from __future__ import annotations
@@ -76,7 +80,7 @@ from typing import Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool
 from mika.adapters.mcp.relay import Pending, Relay, RelaySession
-from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, ToolCall, Usage
 from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.llm.claude_code")
@@ -96,6 +100,9 @@ BATCH_WINDOW_S = 0.15
 LATE_CALL_S = 2.0
 READ_LIMIT = 16 * 1024 * 1024
 STDERR_KEPT = 4000
+#: le dernier relevé du quota de l'abonnement, dans le dossier des appels : un redémarrage ne l'oublie pas, sans
+#: quoi le premier appel de fond passait toujours, même l'abonnement entamé au-delà du plafond (ADR 0127)
+QUOTA_FILE = "quota.json"
 #: le plafond de sortie donné à la CLI ne descend pas sous ceci (un modèle qui réfléchit
 #: dépenserait un petit budget avant le premier mot)
 MIN_OUTPUT_TOKENS = 1024
@@ -204,8 +211,8 @@ class ClaudeCodeError(RuntimeError):
     """La CLI a échoué (non connectée, absente, erreur en cours de tour)."""
 
 
-class QuotaHeld(ClaudeCodeError):
-    """Appel de fond refusé : l'abonnement est trop entamé."""
+class QuotaHeld(ClaudeCodeError, Held):
+    """Appel de fond refusé : l'abonnement est trop entamé (un ``Held`` : rien n'a été tenté, ADR 0127)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +243,13 @@ class _Run:
     announced: list[tuple[str, str, Any]] = field(default_factory=list)
     #: ceux qui n'attendent plus rien de nous : déjà rendus au runtime, ou répondus par la CLI elle-même
     settled: set[str] = field(default_factory=set)
+    #: l'usage de chaque message du modèle (son identifiant → le plus haut relevé vu) et le message en cours d'écriture :
+    #: un tour qui finit sur des appels d'outils rend l'usage de ses messages — la boucle s'arrête souvent sur un
+    #: appel d'outil, avant le ``result`` de la CLI, et l'appel comptait zéro jeton (ADR 0127)
+    usage: dict[str, Usage] = field(default_factory=dict)
+    current: str = ""
+    #: les messages dont l'usage est déjà rendu
+    reported: set[str] = field(default_factory=set)
 
     def on_call(self, p: Pending) -> None:
         self.events.put_nowait(("call", p))
@@ -286,7 +300,7 @@ class ClaudeCodeBackend:
         self.tool_timeout_s = tool_timeout_s
         #: l'attente d'un tour de la CLI (entre deux appels d'outils, ou jusqu'à sa réponse)
         self.turn_timeout_s = turn_timeout_s
-        self.quota: dict[str, QuotaReading] = {}
+        self.quota: dict[str, QuotaReading] = self._load_quota()
         self._runs: dict[str, _Run] = {}
         self._purged = False
 
@@ -490,7 +504,7 @@ class ClaudeCodeBackend:
                 run.handed.update(p.id for p in batch)
                 self._arm_reaper(call_id, run)
                 return LLMResponse("".join(texts), tuple(ToolCall(p.id, p.name, p.args) for p in batch),
-                                   stop="tool_use", model=run.model or self.model)
+                                   stop="tool_use", usage=_unreported(run), model=run.model or self.model)
             else:
                 return self._ended(call_id, run, kind, value, texts)
 
@@ -551,8 +565,9 @@ class ClaudeCodeBackend:
         stop = {"max_tokens": "max_tokens", "refusal": "refusal"}.get(str(d.get("stop_reason") or ""), "end")
         models = list((d.get("modelUsage") or {}).keys())
         model = run.model or (models[0] if models else self.model)
-        return LLMResponse(answer(texts, str(d.get("result") or "")), stop=stop, usage=_usage(d.get("usage")),
-                           model=model)
+        # l'usage du ``result`` couvre toute la session : ce que les tours d'outils ont déjà rendu n'y est pas recompté
+        usage = _unreported(run) if run.usage else _usage(d.get("usage"))
+        return LLMResponse(answer(texts, str(d.get("result") or "")), stop=stop, usage=usage, model=model)
 
     # ── Lecture de la CLI ────────────────────────────────────────────────
 
@@ -600,6 +615,12 @@ class ClaudeCodeBackend:
         elif kind == "stream_event":
             event = d.get("event")
             phase = event.get("type") if isinstance(event, Mapping) else None
+            if not d.get("parent_tool_use_id") and isinstance(event, Mapping):
+                if phase == "message_start" and isinstance(event.get("message"), Mapping):
+                    run.current = str(event["message"].get("id") or "")
+                    _note_usage(run, run.current, event["message"].get("usage"))
+                elif phase == "message_delta":
+                    _note_usage(run, run.current, event.get("usage"))
             if phase in ("message_start", "message_stop") and not d.get("parent_tool_use_id"):
                 run.streaming = True
                 run.writing = phase == "message_start"
@@ -611,6 +632,8 @@ class ClaudeCodeBackend:
             message = d.get("message")
             message = message if isinstance(message, Mapping) else {}
             run.model = str(message.get("model") or run.model)
+            if not d.get("parent_tool_use_id"):
+                _note_usage(run, str(message.get("id") or ""), message.get("usage"))
             for block in message.get("content") or ():
                 if not isinstance(block, Mapping):
                     continue
@@ -653,12 +676,51 @@ class ClaudeCodeBackend:
                      for i, w in enumerate(windows)]
         else:
             return
+        noted = False
         for window, w in items:
             if not isinstance(w, Mapping) or not isinstance(w.get("utilization"), (int, float)):
                 continue
             resets = w.get("resetsAt")
             self.quota[window] = QuotaReading(window, float(w["utilization"]),
                                               int(resets) if isinstance(resets, (int, float)) else 0)
+            noted = True
+        if noted:
+            self._save_quota()
+
+    def _quota_path(self) -> Path:
+        return self.work_dir / QUOTA_FILE
+
+    def _load_quota(self) -> dict[str, QuotaReading]:
+        """Le relevé gardé au dernier démarrage (vide : aucun, illisible, ou un dossier tenu par un autre compte —
+        un relevé posé là par un autre ne règle pas nos appels). Une fenêtre déjà réinitialisée tombe à la lecture
+        (``_live_quota``)."""
+        if self.auth != "abonnement" or foreign_owner(self.work_dir) is not None:
+            return {}
+        try:
+            rows = json.loads(self._quota_path().read_text())
+        except (OSError, ValueError):
+            return {}
+        out: dict[str, QuotaReading] = {}
+        for r in rows if isinstance(rows, list) else ():
+            if isinstance(r, Mapping) and isinstance(r.get("window"), str) \
+                    and isinstance(r.get("utilization"), (int, float)) and isinstance(r.get("resets_at"), int):
+                out[r["window"]] = QuotaReading(r["window"], float(r["utilization"]), r["resets_at"])
+        return out
+
+    def _save_quota(self) -> None:
+        """Le relevé, gardé pour le prochain démarrage (privé, écrit d'un bloc) ; un échec d'écriture ne coûte que
+        ce souvenir-là."""
+        rows = [{"window": q.window, "utilization": q.utilization, "resets_at": q.resets_at}
+                for q in self.quota.values()]
+        try:
+            self._prepare_work_dir()
+            tmp = self._quota_path().with_suffix(".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(rows, f)
+            os.replace(tmp, self._quota_path())
+        except (OSError, ClaudeCodeError) as exc:
+            log.warning("Claude Code : relevé du quota non gardé (%s)", type(exc).__name__)
 
     def _live_quota(self, now: float | None = None) -> list[QuotaReading]:
         """Les lectures encore valables : une fenêtre réinitialisée (``resetsAt`` passé) ne compte plus."""
@@ -667,13 +729,20 @@ class ClaudeCodeBackend:
             del self.quota[key]
         return list(self.quota.values())
 
-    def _hold_for_quota(self, req: LLMRequest) -> None:
-        if self.auth != "abonnement" or self.quota_ceiling <= 0 or req.priority == 0:
-            return
+    def holds(self, priority: int) -> str:
+        """Un appel à cette priorité serait-il refusé d'avance (``QuotaHeld``) ? La raison en mots, « » : il
+        passerait. La conversation (priorité 0) passe toujours."""
+        if self.auth != "abonnement" or self.quota_ceiling <= 0 or priority == 0:
+            return ""
         worst = max(self._live_quota(), key=lambda q: q.utilization, default=None)
-        if worst is not None and worst.utilization >= self.quota_ceiling:
-            raise QuotaHeld(f"abonnement entamé à {worst.utilization:.0%} ({worst.window}) : "
-                            f"appel de fond refusé pour préserver la réserve")
+        if worst is None or worst.utilization < self.quota_ceiling:
+            return ""
+        return f"abonnement entamé à {worst.utilization:.0%} ({worst.window})"
+
+    def _hold_for_quota(self, req: LLMRequest) -> None:
+        reason = self.holds(req.priority)
+        if reason:
+            raise QuotaHeld(f"{reason} : appel de fond refusé pour préserver la réserve")
 
     def status(self) -> dict[str, Any]:
         return {"sessions": len(self._runs),
@@ -822,6 +891,24 @@ def _write_private(path: Path, text: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def _note_usage(run: _Run, message_id: str, u: Any) -> None:
+    """Un relevé d'usage d'un message du modèle (son début, sa fin, chaque bloc) : on garde le plus haut de chaque
+    compte — les relevés d'un même message ne se somment pas."""
+    if not message_id or not isinstance(u, Mapping):
+        return
+    got, seen = _usage(u), run.usage.get(message_id, Usage())
+    run.usage[message_id] = Usage(max(got.input_tokens, seen.input_tokens), max(got.output_tokens, seen.output_tokens),
+                                  max(got.cache_read, seen.cache_read), max(got.cache_write, seen.cache_write))
+
+
+def _unreported(run: _Run) -> Usage:
+    """L'usage des messages pas encore rendus, sommé (puis rendu)."""
+    fresh = [u for m, u in run.usage.items() if m not in run.reported]
+    run.reported.update(run.usage)
+    return Usage(sum(u.input_tokens for u in fresh), sum(u.output_tokens for u in fresh),
+                 sum(u.cache_read for u in fresh), sum(u.cache_write for u in fresh))
 
 
 def _usage(u: Any) -> Usage:

@@ -143,6 +143,16 @@ def _text(texts: Mapping[str, str], ref: str, empty: str = "—") -> str:
     return got if got is not None else FORGOTTEN
 
 
+def _subject(title: str, g: Goal | None, texts: Mapping[str, str]) -> str:
+    """Le titre d'un but, et — pour une exploration née d'un signal (un titre d'article…) — ce qui l'a fait naître,
+    cité : ses titres à elle sont tous « En savoir plus sur ce que j'ai remarqué dans mes flux », et la liste n'en
+    disait rien d'autre (ADR 0127)."""
+    if g is None or g.origin != c.FROM_SIGNAL or not g.details_ref or not texts.get(g.details_ref):
+        return title
+    cited = " ".join(texts[g.details_ref].split())
+    return f"{title} · « {cited[:117] + '…' if len(cited) > 120 else cited} »"
+
+
 def _said(content: Content | None, empty: str = "—") -> str:
     """Le texte d'un contenu relu au journal (``text`` à ``None`` : il a été oublié)."""
     if content is None:
@@ -316,12 +326,12 @@ def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     every = sorted((g for g in s.goals.values() if live(g, now)), key=lambda g: -g.id)
     chosen = _filtered(every, ctx)
     page, pager = paginate(chosen, ctx.pager(size=GOALS_PAGE, total=len(chosen)))
-    texts = _texts(ctx, (g.title_ref for g in page))
+    texts = _texts(ctx, (r for g in page for r in (g.title_ref, g.details_ref)))
     rows = []
     for g in page:
         nxt = next_step_at(g, s, frame) if g.kind != c.REMINDER else None
         rows.append(Row((
-            _link(g), _text(texts, g.title_ref, "(sans titre)"), _kind_fr(g),
+            _link(g), _subject(_text(texts, g.title_ref, "(sans titre)"), g, texts), _kind_fr(g),
             AUTHORITY_FR.get(g.authority, g.authority), _status(g, now), _desire(g, now, frame), _steps(g),
             ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—", _due(g),
             _person(frame, g.owner)), href=_link(g), tone="warn" if g.paused_at else ""))
@@ -373,6 +383,7 @@ def _closed_page(ctx: InspectContext, kind: str, authority: str) -> tuple[list[E
 def _closed_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     kind, authority = ctx.value("sorte") or "", ctx.value("autorite") or ""
     found, cursor, stopped = _closed_page(ctx, kind, authority)
+    texts = _texts(ctx, (g.details_ref for e in found if (g := s.goals.get(e.data.goal)) is not None))
     rows = []
     for e in found:
         d = e.data
@@ -380,7 +391,7 @@ def _closed_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
         link = _link(kept) if kept is not None else Ref("event", str(e.seq), f"#{d.goal}")
         result = _said(d.result, "") or d.reason or "—"
         rows.append(Row((
-            link, _said(d.title, "(sans titre)"), KIND_FR.get(d.kind, d.kind), AUTHORITY_FR.get(d.authority, d.authority),
+            link, _subject(_said(d.title, "(sans titre)"), kept, texts), KIND_FR.get(d.kind, d.kind), AUTHORITY_FR.get(d.authority, d.authority),
             Badge(STATUS_FR.get(d.status, d.status), STATUS_TONE.get(d.status, "")), When(e.at),
             Text(result, clamp=SUMMARY_CLAMP), _person(frame, d.owner)), href=link))
     older = (("avant", cursor),) if cursor else ()

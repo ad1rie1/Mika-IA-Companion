@@ -98,6 +98,10 @@ class Knob:
     subject: str = ""
     #: champ dict[str, X] : les clés attendues (valeur, libellé)
     keys: Pairs = ()
+    #: champ dict[str, Modèle] (des entrées nommées) : la règle de leurs noms quand elle est plus stricte que
+    #: ``RECORD_NAME`` (le nom entre dans une URL, dans le nom d'un outil), et ce qu'elle demande, en mots
+    key_pattern: re.Pattern[str] | None = None
+    key_rule: str = ""
     #: valeurs d'un dict : choisies parmi les clés d'un autre champ dict (chemin relatif au modèle)
     choices_from: str = ""
     #: affiché seulement si le champ ``chemin`` (relatif au modèle) vaut l'une de ces valeurs
@@ -111,6 +115,8 @@ class Knob:
     def __post_init__(self) -> None:
         if self.widget not in WIDGETS:
             raise ValueError(f"widget inconnu : « {self.widget} » (attendu : {', '.join(sorted(WIDGETS - {''}))})")
+        if self.key_pattern is not None and not self.key_rule:
+            raise ValueError("key_pattern sans key_rule : la console doit pouvoir dire la règle des noms")
 
 
 class Upload(BaseModel):
@@ -459,6 +465,16 @@ def record_model(model: type[BaseModel], path: str) -> tuple[type[BaseModel], bo
     annotation = _unwrap(info.annotation)[0]
     found = _record_model(annotation)
     return None if found is None else (found, get_origin(annotation) is dict)
+
+
+def record_names(model: type[BaseModel], path: str) -> tuple[re.Pattern[str], str]:
+    """La règle des noms des entrées d'un champ ``records`` de premier niveau, et ce qu'elle demande en
+    mots : celle de son ``Knob`` (``key_pattern``), sinon la commune (``RECORD_NAME``)."""
+    info = model.model_fields.get(path)
+    knob = _knob_of(_expand((*info.metadata, *_unwrap(info.annotation)[1]))) if info is not None else Knob()
+    if knob.key_pattern is None:
+        return RECORD_NAME, RECORD_NAME_RULE
+    return knob.key_pattern, knob.key_rule
 
 
 def _mapping_value(annotation: Any) -> Any:

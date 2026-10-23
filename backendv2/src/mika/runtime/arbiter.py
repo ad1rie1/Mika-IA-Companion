@@ -47,13 +47,18 @@ REEVALUATE_US = 300 * 1_000_000
 LAST_ROWS_KEPT = 256
 #: les derniers déclenchements et anomalies gardés en mémoire
 RECENT_KEPT = 512
+#: le veto d'une ligne dont le fournisseur refuserait l'appel d'avance (``LLMGateway.held``, ADR 0127)
+HELD = "held"
 
 
 class Arbiter:
     def __init__(self, registry_of: Callable[[], Registry], submit: Submit, *, seed: int | str = 0,
-                 reevaluate_us: int = REEVALUATE_US) -> None:
+                 reevaluate_us: int = REEVALUATE_US, held: Callable[[str], str] | None = None) -> None:
         self._registry_of = registry_of
         self._submit = submit
+        #: sorte d'épisode → la raison pour laquelle son fournisseur le refuserait d'avance (« » : il passerait) —
+        #: le quota d'un abonnement réservé à la conversation (ADR 0127)
+        self._held = held
         self._seed = seed
         self.reevaluate_us = reevaluate_us
         self.next_at: int | None = None
@@ -103,8 +108,18 @@ class Arbiter:
                     c = Candidate(c.kind, c.target, c.reason, clamped, c.args, c.resources, c.deadline, c.guards)
                 proposals.append((spec.owner, c))
 
+        held: dict[str, str] = {}
+
         def modulate(view: RowView) -> list[tuple[str, Modulation]]:
             out: list[tuple[str, Modulation]] = []
+            if self._held is not None:
+                # un épisode que son fournisseur refuserait d'avance ne se lance pas : il finirait en zéro seconde,
+                # sans rien faire, et un but le compterait (ADR 0127)
+                if view.kind not in held:
+                    got = call(self._held, view.kind, label="retenue des modèles")
+                    held[view.kind] = got if isinstance(got, str) else ""
+                if held[view.kind]:
+                    out.append(("kernel", Modulation(veto=HELD)))
             for spec in reg.modulators:
                 if view.kind not in spec.kinds:
                     continue

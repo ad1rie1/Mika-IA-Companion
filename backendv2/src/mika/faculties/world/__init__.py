@@ -41,6 +41,7 @@ from mika.contracts import world as w
 from mika.faculties.world import notice, plan
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import h64
+from mika.kernel.episode import Outcome as EpisodeOutcome
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult
 from mika.kernel.forms import Knob
@@ -82,6 +83,11 @@ class WorldParams(BaseModel):
         label="Une occupation sans fin prévue s'arrête d'elle-même après (min)", group="Corps", lo=15, hi=480,
         step=5, help="Dessiner, travailler à son bureau : sans autre geste de sa part, elle s'arrête au bout de ce "
                      "temps et reste où elle est (on ne dessine pas treize heures d'affilée).")] = 90
+    work_linger_min: Annotated[int, Knob(
+        label="Après une séance de travail, elle y reste encore (min)", group="Corps", lo=0, hi=120, step=5,
+        help="Une séance qui a travaillé (lu, noté, conclu) la laisse à son bureau, à y travailler encore ce temps, "
+             "puis elle s'arrête ; une séance qui n'a rien fait (refusée, en panne) l'arrête tout de suite "
+             "(ADR 0127).")] = 20
     occupy_per_day: Annotated[int, Knob(
         label="S'occuper d'elle-même, par jour", group="S'occuper seule", lo=0, hi=8,
         help="Désœuvrée (l'ennui, la solitude que ses besoins lui font sentir), elle s'occupe d'elle-même dans sa "
@@ -146,6 +152,10 @@ class WorldState:
     talked_at: int = 0
     #: quand elle s'est occupée d'elle-même, désœuvrée (les dernières 24 h, ADR 0098)
     occupied: tuple[int, ...] = ()
+    #: les séances de travail en cours (leurs épisodes) : à son bureau, elle travaille tant qu'il y en a une
+    working: tuple[str, ...] = ()
+    #: jusqu'à quand la dernière séance de travail la garde à son bureau : sa fin, plus un moment si elle a travaillé
+    worked_until: int = 0
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -157,7 +167,8 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
 #: change : reconstruite depuis elle, sinon un instantané garderait une définition sans
 #: v6 : elle s'installe à son bureau quand elle se met au travail (une règle de plus : reconstruite depuis la genèse)
 #: v7 : désœuvrée, elle s'occupe d'elle-même (``occupied``, ADR 0098)
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=7)
+#: v8 : elle travaille à son bureau le temps de ses séances (``working``, ``worked_until``, ADR 0127)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=8)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY
@@ -318,6 +329,8 @@ def _woke(s: WorldState, e: Any, cx: Any) -> WorldState:
 #: Les séances qui l'installent à son bureau : un pas sur un but, une exécution de projet dans son mode à elle (une
 #: exécution impersonnelle n'est pas elle).
 WORKING_KINDS = frozenset({Kind.STEP, Kind.WORK})
+#: les séances de travail en cours qu'on suit, au plus (une séance perdue sans fin ne retient pas son bureau à vie)
+WORKING_KEPT = 8
 
 
 @WORLD.reducer(rt.UTTERANCE)
@@ -338,6 +351,7 @@ def _to_work(s: WorldState, e: Any, cx: Any) -> WorldState:
     conversation pour aller à son bureau)."""
     if e.data.kind not in WORKING_KINDS:
         return s
+    s = replace(s, working=(*s.working, e.correlation)[-WORKING_KEPT:])
     me = s.actors.get(w.MIKA)
     if me is None or me.posture is w.Posture.LIE or _running(s) is not None:
         return s
@@ -358,6 +372,23 @@ def _to_work(s: WorldState, e: Any, cx: Any) -> WorldState:
         return s
     intent = plan.intent_of(w.MIKA, steps, e.at, t, w.Cause(source=w.Source.REFLEX, actor=w.MIKA), f"travail:{e.id}")
     return _start(s, intent, e.seq)
+
+
+#: les issues d'une séance qui a travaillé (conclu, ou travaillé sans conclure) — les autres n'ont rien fait
+WORKED = frozenset({EpisodeOutcome.DONE, EpisodeOutcome.ABSTAINED})
+
+
+@WORLD.reducer(rt.EPISODE_ENDED)
+def _work_done(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Une séance de travail finie : elle travaille encore un moment si la séance a travaillé
+    (``work_linger_min``), sinon elle s'arrête avec elle (``world.settle``) — assise à son bureau pour une séance
+    refusée en zéro seconde, elle y « travaillait » une heure et demie, et son journal racontait des recherches jamais
+    faites (2026-10-22, ADR 0127)."""
+    if e.correlation not in s.working:
+        return s
+    linger = params(cx.params).work_linger_min * MINUTE if e.data.outcome in WORKED else 0
+    return replace(s, working=tuple(c for c in s.working if c != e.correlation),
+                   worked_until=max(s.worked_until, e.at + linger))
 
 
 @WORLD.reducer(needs_c.FELT, reads=[body_c.SLEEP, needs_c.NEEDS])
@@ -828,15 +859,29 @@ def _gestures_line(s: WorldState, frame: Frame) -> tuple[str, int] | None:
 
 def wears_off(s: WorldState, p: WorldParams) -> int | None:
     """Quand son occupation sans fin prévue (dessiner, travailler) s'arrête d'elle-même : une personne dessine une
-    heure ou deux, puis s'arrête. ``None`` : rien de tel en cours."""
+    heure ou deux, puis s'arrête. Travailler à son bureau pour une séance s'arrête avec elle, plus un moment si elle a
+    travaillé : quand plus aucune n'est en cours (ADR 0127). ``None`` : rien de tel en cours."""
     me = s.actors.get(w.MIKA)
     a = me.activity if me is not None else None
     if a is None or a.until is not None:
         return None
-    return a.since + p.open_activity_min * MINUTE
+    natural = a.since + p.open_activity_min * MINUTE
+    if a.name == plan.WORK and not s.working and s.worked_until >= a.since:
+        return min(natural, s.worked_until)
+    return natural
 
 
-@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, w.AUTHORED],
+def _idle_work(s: WorldState, intent: w.Intent, changes: list[Any], now: int) -> list[Any]:
+    """Arrivée à son bureau pour une séance déjà finie sans rien faire (refusée, en panne) : elle s'assied, mais
+    ne se met pas à travailler pour rien (ADR 0127)."""
+    if not intent.id.startswith("travail:") or s.working or s.worked_until > now:
+        return changes
+    return [ch for ch in changes if not (isinstance(ch, w.ActorBusy) and ch.activity is not None
+                                         and ch.activity.name == plan.WORK)]
+
+
+@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
+                                         w.AUTHORED],
                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
@@ -858,6 +903,7 @@ class Settle:
                 continue
             s = ctx.state
             outcome, reason, changes = plan.conclude(s.definition, s.actors, s.objects, intent)
+            changes = _idle_work(s, intent, list(changes), now)
             noticed = setback(s, intent, outcome, reason)
             await ctx.emit(w.ENDED.draft(intent=intent.id, actor=intent.actor, outcome=outcome, reason=reason,
                                          changes=tuple(changes), dedupe_key=f"fin:{intent.id}"),

@@ -20,6 +20,7 @@ from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
 
 #: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
 LEGACY_ACCOUNT = "principal"
+ACCOUNT_KEY_RULE = "des minuscules, chiffres, - ou _ (40 au plus), en commençant par une lettre ou un chiffre"
 
 
 class MailAccount(BaseModel):
@@ -137,16 +138,15 @@ class MailConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     accounts: Annotated[dict[str, MailAccount], Knob(
-        label="Comptes", help="Chaque boîte qu'elle relève, avec sa façon d'y écrire. La clé est un nom court "
-                              "(minuscules, chiffres, - ou _).", advanced=False, order=10)] = \
-        Field(default_factory=dict)
+        label="Comptes", help=f"Chaque boîte qu'elle relève, avec sa façon d'y écrire. La clé est un nom court "
+                              f"({ACCOUNT_KEY_RULE}).", advanced=False, order=10,
+        key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE)] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _keys(self) -> MailConfig:
         bad = [k for k in self.accounts if not ACCOUNT_KEY.match(k)]
         if bad:
-            raise ValueError(f"nom de compte invalide : « {bad[0][:40]} » (minuscules, chiffres, - ou _, "
-                             "sans espace)")
+            raise ValueError(f"nom de compte invalide : « {bad[0][:40]} » ({ACCOUNT_KEY_RULE})")
         return self
 
     @property

@@ -227,7 +227,7 @@ class McpConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     servers: Annotated[dict[str, McpServer], Knob(
-        label="Serveurs", advanced=False, order=10,
+        label="Serveurs", advanced=False, order=10, key_pattern=SERVER_NAME, key_rule=SERVER_NAME_RULE,
         help=f"Chaque serveur MCP dont elle peut utiliser les outils. La clé est un nom court ({SERVER_NAME_RULE}) : "
              "il entre dans le nom de ses outils.")] = Field(default_factory=dict)
 

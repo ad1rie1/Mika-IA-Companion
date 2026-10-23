@@ -171,7 +171,7 @@ REASON_LABELS: dict[str, str] = {
     "service_answered": "Dire ce qu'un service extérieur a rendu", "app_news": "Dire ce qu'une app a trouvé", "app_alert": "Prévenir d'une urgence qu'une app a trouvée", "app_triage": "Lire la file de signaux d'une app",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
-    "rss_for": "Montrer à une amie un titre qui lui a fait penser à elle",
+    "rss_for": "Partager un titre qui lui a fait penser à cette personne",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
@@ -193,6 +193,8 @@ VETO_LABELS: dict[str, str] = {
     "awaiting_reply": "Elle attend sa réponse (elle a écrit en dernier)", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée", "hesitating": "Elle hésite encore (ses derniers essais ont fini en silence)",
     "composing": "La personne est en train de lui écrire",
     "not_reachable": "La personne n'est pas là, à une heure où elle n'écrit pas d'habitude",
+    # ADR 0127
+    "held": "Le quota de l'abonnement est réservé à la conversation",
 }
 
 #: Les processus de fond : ce qu'ils font.
@@ -288,7 +290,7 @@ EVENT_LABELS: dict[str, str] = {
     "projects.run_reported": "Une exécution rendue",
     "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
-    "rss.noticed": "Un article remarqué", "rss.thought_of": "Un article qui lui a fait penser à une amie",
+    "rss.noticed": "Un article remarqué", "rss.thought_of": "Un article qui lui a fait penser à quelqu'un",
     "camera.seen": "Ce que la caméra a vu",
     "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
     "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",

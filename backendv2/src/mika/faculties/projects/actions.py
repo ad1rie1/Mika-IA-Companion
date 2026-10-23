@@ -894,8 +894,10 @@ async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: Actio
             raise Refused(f"« {path} » existe déjà dans l'atelier : coche « Remplacer » pour l'écraser.",
                           {"replace": "le fichier existe déjà"})
         rel = await port.write_bytes(p.id, path, args.file.data)
-    except (OutsideWorkshop, WorkshopFull) as exc:
-        raise Refused(f"Refusé : {exc}", {"folder": str(exc)}) from None
+    except OutsideWorkshop as exc:  # dit sous « Dans le dossier » ; le bandeau ne le recopie pas
+        raise Refused("Le fichier n'a pas été déposé.", {"folder": str(exc)}) from None
+    except WorkshopFull as exc:  # rien à voir avec le dossier choisi : dit en bandeau seulement
+        raise Refused(f"Le fichier n'a pas été déposé : {exc}") from None
     except OSError as exc:  # un dossier pris pour un fichier, un disque plein : dit en français, jamais brut
         raise Refused(f"Le fichier n'a pas pu être écrit dans l'atelier ({exc.strerror or exc}).") from None
     # ce fichier seulement : le travail en cours d'une exécution reste à elle (elle l'enregistrera)

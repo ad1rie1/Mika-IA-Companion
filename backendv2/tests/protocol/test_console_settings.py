@@ -221,7 +221,7 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     assert CANARY_MAIL not in html_of(client.get("/inspecteur/courrier/comptes"))
     assert CANARY_MAIL not in html_of(client.get("/inspecteur/fiche/compte/perso"))
     bad = post(client, url, {**account, "_cle": "Mon Compte"})
-    assert bad.status_code == 400 and "nom de compte invalide" in html_of(bad)
+    assert bad.status_code == 400 and "Nom refusé : des minuscules, chiffres, - ou _" in html_of(bad)
     feeds = f"{BASE}/flux"
     refused = post(client, feeds, {"_section": "flux", "_champs": ["urls"], "urls": "https://a.fr/rss\nftp://b"})
     assert refused.status_code == 400 and "non http(s)" in html_of(refused)

@@ -338,6 +338,14 @@ class LiveGateway:
         except UnconfiguredRole:
             return ""
 
+    def held(self, role: str, priority: int = 1) -> str:
+        """Un appel de ce rôle serait-il refusé d'avance (``Gateway.held``) ? « » : il passerait."""
+        return self._inner.held(role, priority) if self._inner is not None else ""
+
+    def holding(self) -> list[tuple[str, str]]:
+        """Les fournisseurs qui refusent en ce moment leurs appels de fond (``Gateway.holding``)."""
+        return self._inner.holding() if self._inner is not None else []
+
     def failing(self, role: str, now: int, window_us: int) -> tuple[str, int, str] | None:
         """Le fournisseur de ce rôle ne répond plus : ses derniers appels (dans ``window_us``) ont tous échoué,
         sans un succès depuis. Rend ``(fournisseur, depuis quand, cause)`` — la cause en mots —, ou ``None``

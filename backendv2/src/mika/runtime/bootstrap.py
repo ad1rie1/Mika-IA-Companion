@@ -184,7 +184,7 @@ class Kernel:
         )
         self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
-        self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed)
+        self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed, held=self._held_kind)
         self.mind.subscribe(self.arbiter.invalidate)
         self.mind.subscribe(self._retry_replies)
         self._retries: set[asyncio.Task[None]] = set()
@@ -608,6 +608,16 @@ class Kernel:
         if latest not in self.mind.root.slices[RUNTIME.name].pending or not self.started:
             return
         await self._answer_turn(latest, f"reprise:{latest}")
+
+    def _held_kind(self, kind: str) -> str:
+        """Un épisode de cette sorte serait-il refusé d'avance par le fournisseur de son rôle (le quota d'un
+        abonnement réservé à la conversation) ? La raison, « » : il passerait. Une décision sans modèle, ou au
+        premier plan, passe toujours (ADR 0127)."""
+        policy = self.runner.policies.get(kind)
+        held = getattr(self.deps.gateway, "held", None)
+        if policy is None or policy.role is None or policy.priority == 0 or not callable(held):
+            return ""
+        return str(held(policy.role, policy.priority) or "")
 
     async def _submit_selected(self, row: Row, frame: Frame, selected: int | None = None) -> bool:
         """Lance l'épisode choisi ; ``True`` s'il est en file (un épisode viendra

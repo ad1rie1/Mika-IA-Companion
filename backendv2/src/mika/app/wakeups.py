@@ -186,7 +186,7 @@ class WakeupConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     endpoints: Annotated[dict[str, WakeEndpoint], Knob(
-        label="Réveils", advanced=False, order=10,
+        label="Réveils", advanced=False, order=10, key_pattern=NAME, key_rule=NAME_RULE,
         help=f"Chaque réveil a sa page. Son nom ({NAME_RULE}) est la fin de son URL : POST /api/wake/<nom>. Sa clé "
              "se génère sur sa fiche (Connexions extérieures › Réveils par API).")] = Field(default_factory=dict)
 

@@ -43,7 +43,7 @@ from mika.adapters.mcp.protocol import Tool
 from mika.adapters.mcp.relay import PREFIX, Relay
 from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
-from mika.ports.llm import LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, ToolDecl
+from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, ToolDecl
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_claude.py"
@@ -126,6 +126,20 @@ async def test_the_cli_calls_a_tool_and_the_runtime_executes_it(tmp_path, cli):
     assert loop.last.usage.cache_read == 100
     assert [t.outcome for t in gateway.traces] == ["ok", "ok"]  # un tour d'outils, puis la réponse
     assert len(relay) == 0 and be.status()["sessions"] == 0
+
+
+async def test_a_tool_turn_reports_the_usage_of_its_own_messages(tmp_path, cli):
+    """Une boucle qui s'arrête sur un appel d'outil ne voit jamais le ``result`` de la CLI : chaque tour rend
+    l'usage de ses messages, et la réponse finale ne recompte pas ce que les tours d'outils ont rendu (ADR 0127)."""
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        steps = [[["mika", "note_add", {"what": "pain"}]]]
+        loop, gateway = await loop_through(be, notes(seen), scenario(calls=steps, usage=True))
+    first, last = gateway.traces
+    assert (first.input_tokens, first.output_tokens, first.cache_read) == (5, 11, 40)
+    assert (last.input_tokens, last.output_tokens, last.cache_read) == (6, 12, 40)  # pas l'usage cumulé du result
+    assert loop.last.usage.output_tokens == 12
 
 
 async def test_calls_written_together_are_one_batch_even_when_the_model_writes_slowly(tmp_path, cli):
@@ -523,6 +537,26 @@ async def test_a_tool_loop_begun_elsewhere_is_never_restarted_in_a_fresh_cli(tmp
         with pytest.raises(ClaudeCodeError):
             await gateway.call(req)
     assert seen == [] and not be._runs
+
+
+async def test_a_held_call_is_a_held_and_its_reading_survives_a_restart(tmp_path, cli):
+    """Le refus est un ``Held`` (rien n'a été tenté), ``holds`` le dit d'avance, et le relevé est gardé : un
+    nouveau démarrage retient le fond dès le premier appel, sans attendre d'avoir relu le quota (ADR 0127)."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path, quota_ceiling=0.8)
+        await be.complete(LLMRequest(role="reply", call_id="h-1#0", system_stable=scenario(quota=0.93),
+                                     messages=(Message("user", "x"),), priority=0))
+        assert be.holds(2) == "abonnement entamé à 93% (five_hour)" and be.holds(0) == ""
+        again = backend(relay, base, cli, tmp_path, quota_ceiling=0.8)
+        assert again.status()["quota"] == {"five_hour": 0.93}
+        with pytest.raises(Held):
+            await again.complete(LLMRequest(role="journal", call_id="h-2#0", system_stable=scenario(),
+                                            messages=(Message("user", "x"),), priority=2, lane="background"))
+    gateway = Gateway({"cc": again}, {"journal": "cc", "reply": "cc"}, clock=ManualClock(0))
+    assert gateway.held("journal", 2) == "abonnement entamé à 93% (five_hour)" and gateway.held("reply", 0) == ""
+    assert gateway.holding() == [("cc", "abonnement entamé à 93% (five_hour)")]
+    assert gateway.held("inconnu") == ""
 
 
 async def test_a_quota_reading_whose_window_has_reset_holds_nothing(tmp_path, cli):

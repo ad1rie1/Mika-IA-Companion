@@ -109,6 +109,12 @@ class MissingPersona(ValueError):
     pass
 
 
+class Held(RuntimeError):
+    """Un appel de fond refusé d'avance pour garder la réserve de la conversation (le quota d'un abonnement entamé
+    au-delà de son plafond) : rien n'a été tenté, le fournisseur n'a pas manqué. Un épisode arrêté ainsi se règle en
+    ``preempted`` — le premier plan passe devant —, jamais en panne (ADR 0127)."""
+
+
 class LLMBackend(Protocol):
     """Un fournisseur. Facultatifs : ``resumes_tool_loops`` (faux : il ne sait pas
     reprendre une boucle d'outils commencée ailleurs — la passerelle ne bascule
@@ -137,3 +143,5 @@ class LLMGateway(Protocol):
     # (une étape qui ne se fait que si l'opératrice lui a donné un modèle : la seconde passe, ``Role.POLISH``).
     # facultatif (à appeler par ``getattr``) : ``defers_tools(role) -> bool`` — le fournisseur qui sert ce rôle
     # sait-il différer des outils (une recherche d'outils) ? Sans réponse : oui.
+    # facultatif (à appeler par ``getattr``) : ``held(role, priority) -> str`` — un appel de ce rôle à cette priorité
+    # serait-il refusé d'avance (``Held``) ? La raison en mots, « » : il passerait (ADR 0127).

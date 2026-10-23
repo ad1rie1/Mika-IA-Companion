@@ -22,6 +22,7 @@ from mika.faculties.memory.reread import Reread, _learned, _learned_section
 from mika.kernel.clock import DAY, HOUR, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
+from mika.kernel.prompt import PromptBudgetError
 from mika.plugins.mcp import ExternalArgs, _direct
 from mika.ports.vectors import VectorItem
 from mika.vocab.episodes import Kind
@@ -142,6 +143,48 @@ async def test_relecture_is_bounded():
     failing, process = LLM(fails=True), Reread()
     assert await night(db, failing, process=process) == [] and len(failing.calls) == 1
     assert await night(db, failing, process=process) == [] and len(failing.calls) == 1  # une panne : la nuit suivante
+    db.conn.close()
+
+
+async def test_relecture_is_bounded_in_size_too():
+    """Trente pages lues en entier dépassaient le contexte du modèle, et le même lot revenait échouer chaque nuit :
+    chaque extrait se coupe, le lot s'arrête à sa taille — au moins une lecture —, le reste attend (ADR 0127)."""
+    db = store()
+    for seq in range(1, 5):
+        read(db, seq, f"Page {seq}", f"comète{seq} " * 400)  # ~ 3 200 caractères chacune
+    llm = LLM()
+    out = await night(db, llm, p=MemoryParams(reread_excerpt_chars=500, reread_max_chars=1_200))
+    prompt = llm.calls[0].messages[0].content
+    assert prompt.count("comète1") < 100 and "comète2" in prompt and "comète3" not in prompt  # deux lectures coupées
+    assert of(out, mc.REREAD)[0].upto == 2
+    db.conn.close()
+
+
+class TooLong(LLM):
+    """Un modèle dont le contexte ne tient pas plus de ``fits`` lectures."""
+
+    def __init__(self, fits: int):
+        super().__init__()
+        self.fits = fits
+
+    async def call(self, request):
+        self.calls.append(request)
+        if request.messages[0].content.count("Article ") > self.fits:
+            raise PromptBudgetError("requête trop longue pour le contexte du fournisseur")
+        return NS(tool_calls=(NS(name="record_readings", args={}),), text="", model="haiku")
+
+
+async def test_a_batch_too_long_for_the_model_is_retried_half_as_long_the_same_night():
+    db = store()
+    for seq in range(1, 9):
+        read(db, seq, f"Article {seq}", "court")
+    llm, process = TooLong(fits=2), Reread()
+    for _ in range(3):  # 8 → 4 → 2 : chaque refus divise le lot, sans attendre la nuit suivante
+        out = await night(db, llm, process=process)
+        if out:
+            break
+    assert [m.messages[0].content.count("Article ") for m in llm.calls] == [8, 4, 2]
+    assert of(out, mc.REREAD)[0].upto == 2 and process.limit == 0
     db.conn.close()
 
 

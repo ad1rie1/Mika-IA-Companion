@@ -687,7 +687,7 @@ def _thoughts(s: RssState, frame: Frame, ctx: InspectContext, feed: str) -> Tabl
                Badge("dit", "ok") if who in s.told.get(k, FrozenDict()) else Badge("pas encore", "muted"),
                Ref("event", str(v.seq), f"#{v.seq}")) for k, who, v in page),
         title="Ce qui lui a fait penser à ses amies", pager=pager,
-        empty="aucun titre ne lui a fait penser à une amie" if not feed else "rien de ce flux",
+        empty="aucun titre ne lui a fait penser à quelqu'un" if not feed else "rien de ce flux",
         caption="Un titre qui touche ce qu'une amie ou une proche lui a dit aimer (sa fiche) : il passe en tête de ses "
                 "flux quand elle lui écrit d'elle-même, en privé — jamais devant une autre. « Dit » : elle le lui a "
                 "montré. Oublier la personne efface sa copie du titre.")

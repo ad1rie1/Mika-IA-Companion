@@ -14,14 +14,17 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace as NS
 
 from mika.contracts import body as body_c
 from mika.contracts import world as w
-from mika.faculties.world import _around
-from mika.kernel.clock import US
+from mika.faculties.world import WorldParams, _around, _idle_work, _work_done, genesis, wears_off
+from mika.kernel.clock import MINUTE, US
 from mika.kernel.codec import digest
 from mika.kernel.events import Origin
+from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, boot, build, connect, said
@@ -240,3 +243,37 @@ def test_ce_qu_elle_a_vecu_se_lit(tmp_path):
     (done,) = out["frame"].get(w.LIVED)
     assert (done.name, done.object_label) == ("draw", "ton bureau")
     assert done.until is not None and done.until - done.since >= 590 * US
+
+
+def test_travailler_a_son_bureau_dure_le_temps_de_ses_seances():
+    """Assise à son bureau pour une séance, elle travaille le temps des séances, et encore un moment si la dernière a
+    travaillé ; une séance qui n'a rien fait (refusée, en panne) l'arrête aussitôt — et arrivée pour elle, elle
+    s'assied sans s'y mettre. Une séance refusée en zéro seconde la laissait « travailler » une heure et demie, que son
+    journal racontait (2026-10-22, ADR 0127). Dessiner garde sa durée naturelle."""
+    t0, p = 1_000_000_000_000, WorldParams()
+    s = genesis()
+    cx = NS(params=p)
+
+    def doing(state, name):
+        me = state.actors[w.MIKA].model_copy(update={"activity": w.Activity(name=name, object="writing_desk", since=t0)})
+        return replace(state, actors=FrozenDict({**state.actors, w.MIKA: me}))
+
+    def ended(state, outcome, at):
+        return _work_done(state, NS(correlation="ep-1", at=at, data=NS(outcome=outcome)), cx)
+
+    working = replace(doing(s, "work"), working=("ep-1",))
+    assert wears_off(working, p) == t0 + p.open_activity_min * MINUTE  # une séance en cours
+    worked = ended(working, "done", t0 + 5 * MINUTE)
+    assert worked.working == () and wears_off(worked, p) == t0 + (5 + p.work_linger_min) * MINUTE  # un moment après
+    refused = ended(working, "preempted", t0 + 5 * MINUTE)
+    assert wears_off(refused, p) == t0 + 5 * MINUTE  # rien fait : elle s'arrête avec elle
+    assert _work_done(refused, NS(correlation="autre", at=t0, data=NS(outcome="done")), cx) is refused
+    assert wears_off(doing(refused, "draw"), p) == t0 + p.open_activity_min * MINUTE
+
+    busy = w.ActorBusy(actor=w.MIKA, activity=w.Activity(name="work", object="writing_desk", since=t0))
+    other = w.ActorBusy(actor=w.MIKA, activity=None)
+    later = t0 + 6 * MINUTE
+    assert _idle_work(refused, NS(id="travail:x"), [other, busy], later) == [other]
+    assert _idle_work(worked, NS(id="travail:x"), [other, busy], later) == [other, busy]
+    assert _idle_work(working, NS(id="travail:x"), [other, busy], later) == [other, busy]
+    assert _idle_work(refused, NS(id="occupation:x"), [other, busy], later) == [other, busy]

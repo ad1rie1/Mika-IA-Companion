@@ -232,6 +232,27 @@ class Gateway:
         except UnconfiguredRole:
             return ""
 
+    def held(self, role: str, priority: int = 1) -> str:
+        """Un appel de ce rôle à cette priorité serait-il refusé d'avance par son fournisseur (le quota d'un
+        abonnement, ``Held``) ? La raison en mots, « » : il passerait — ou personne ne sert ce rôle (l'appel
+        échouera de lui-même, ce n'est pas une retenue)."""
+        try:
+            backend = self.backends[self.resolve(role)]
+        except UnconfiguredRole:
+            return ""
+        holds = getattr(backend, "holds", None)
+        return str(holds(priority) or "") if callable(holds) else ""
+
+    def holding(self) -> list[tuple[str, str]]:
+        """Les fournisseurs qui refusent en ce moment leurs appels de fond : (fournisseur, raison)."""
+        out = []
+        for name, backend in sorted(self.backends.items()):
+            holds = getattr(backend, "holds", None)
+            reason = holds(1) if callable(holds) else ""
+            if reason:
+                out.append((name, str(reason)))
+        return out
+
     def resolve(self, role: str) -> str:
         seen = set()
         r: str | None = role

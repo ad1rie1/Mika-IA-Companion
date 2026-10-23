@@ -131,9 +131,15 @@ def main():
         threading.Thread(target=go, daemon=True).start()
         return done
 
-    results, n = [], 0
+    def usage(m, final=False):
+        """L'usage d'un message (``usage`` du scénario) : à son début (entrée, cache), puis à sa fin (sortie)."""
+        return {"input_tokens": 4 + m, "cache_read_input_tokens": 40} if not final else {"output_tokens": 10 + m}
+
+    results, n, m = [], 0, 0
     for batch in ([] if len(listed) < len(servers) else scenario.get("calls", [])):  # sans ses outils : rien à appeler
-        event("message_start", message={"model": "fake-cc"})
+        m += 1
+        event("message_start", message={"model": "fake-cc", **(
+            {"id": f"msg_{m}", "usage": usage(m)} if scenario.get("usage") else {})})
         out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": "Je regarde."}]}})
         futures, ids, previous = [], [], None
         for i, c in enumerate(batch):
@@ -146,7 +152,8 @@ def main():
             parallel = c[1] in readonly.get(c[0], ())
             futures.append(call(c, ids[-1], after=None if parallel else previous))
             previous = futures[-1]
-        event("message_delta", delta={"stop_reason": "tool_use"})
+        event("message_delta", delta={"stop_reason": "tool_use"},
+              **({"usage": usage(m, final=True)} if scenario.get("usage") else {}))
         event("message_stop")
         results += [f.result() for f in futures]
     if scenario.get("fail"):
@@ -173,9 +180,12 @@ def main():
                                          "flags": {k: os.environ.get(k, "") for k in (
                                              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_HARBOR_KITE")},
                                          "cwd": os.getcwd()})
-    event("message_start", message={"model": "fake-cc"})
+    m += 1
+    event("message_start", message={"model": "fake-cc", **(
+        {"id": f"msg_{m}", "usage": usage(m)} if scenario.get("usage") else {})})
     out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": text}]}})
-    event("message_delta", delta={"stop_reason": "end_turn"})
+    event("message_delta", delta={"stop_reason": "end_turn"},
+          **({"usage": usage(m, final=True)} if scenario.get("usage") else {}))
     event("message_stop")
     out({"type": "result", "subtype": "success", "is_error": False, "result": text, "stop_reason": "end_turn",
          "usage": {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 100,

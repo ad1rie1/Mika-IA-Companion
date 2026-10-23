@@ -611,7 +611,7 @@ def _editor(ui: Any, request: Request, entries: Mapping[str, Mapping[str, Any]],
 
 
 def _console_url(request: Request, network: bool) -> str:
-    """Où un agent joint la console : par l'adresse où on la lit si elle est ouverte au réseau (ADR 0126), sinon
+    """Où un agent joint la console : par l'adresse où on la lit si elle est ouverte au réseau (ADR 0127), sinon
     sur cette machine. La barre finale évite la redirection vers ``/mcp/console/``."""
     origin = f"{request.url.scheme}://{request.url.netloc}" if network else LOCAL_ORIGIN
     return f"{origin}{CONSOLE_ADDRESS}/"

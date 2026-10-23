@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import pytest
 
 from mika.contracts import affect as affect_c
+from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
@@ -57,6 +58,8 @@ class Script:
         self.journal = "J'ai parlé avec Alice de son chagrin, et avec Bob de cuisine."
         self.dream = "Je vole au-dessus d'un marché où Alice vend des nuages."
         self.tag = "[EMOTION:happy:0.5]"
+        #: combien d'appels du journal échouent encore (une panne passagère)
+        self.journal_fails = 0
 
     def __call__(self, req):
         if req.role == "extract":
@@ -64,6 +67,9 @@ class Script:
         if req.role in ("profile", "compact"):
             return LLMResponse("{}")
         if req.role == "journal":
+            if self.journal_fails:
+                self.journal_fails -= 1
+                raise RuntimeError("panne passagère")
             return LLMResponse(self.journal)
         if req.role == "dream":
             return LLMResponse(self.dream)
@@ -591,6 +597,51 @@ def test_her_journal_says_what_she_did_promised_and_how_her_mood_turned(tmp_path
     mood = next(line for line in tuesday.splitlines() if line.startswith("Ton humeur en parlant : "))
     evening = "Ton humeur en parlant : le matin, plutôt contente ; l'après-midi, plutôt contente ; le soir, plutôt triste"
     assert mood in (evening + ".", evening + " ; la nuit, plutôt triste.")
+
+
+def test_a_late_journal_tells_the_day_with_its_own_thoughts_and_counts_the_same_deed_once(tmp_path):
+    """Un journal écrit en retard, le lendemain matin (nuit manquée, serveur arrêté) : une pensée née ce matin-là
+    n'est pas « ce qui la travaillait » la veille ; trois explorations menées à bout sous un même titre se disent
+    une fois, avec le compte — la liste répétait six fois la même phrase (2026-10-22, ADR 0127)."""
+    script = Script()
+    kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 17, 0))
+    same = "En savoir plus sur ce que j'ai remarqué dans mes flux"
+
+    async def first():
+        await boot(kernel)
+        await (await kernel.perceive(said("user_1", "coucou"))).reply
+        await until(kernel, at_paris(2026, 9, 29, 10, 0))
+        await kernel.mind.append(_goal(1, same, goals_c.ACHIEVED) + _goal(2, same, goals_c.ACHIEVED)
+                                 + _goal(3, same, goals_c.ACHIEVED), emitter="goals", correlation="buts",
+                                 origin=Origin.GENESIS)
+        await until(kernel, at_paris(2026, 9, 29, 21, 0))
+        await kernel.stop()  # le serveur s'arrête avant la nuit…
+
+    run_virtual(clock, first)
+    clock.advance_to(at_paris(2026, 9, 30, 9, 0))  # … et redémarre le lendemain matin
+    script.journal_fails = 1  # le premier essai du matin échoue : elle réessaie une demi-heure plus tard
+    kernel2, _, llm2, _ = build(tmp_path, script, clock=clock)
+
+    async def second():
+        await boot(kernel2)
+        await asyncio.sleep(5 * MINUTE / US)
+        assert script.journal_fails == 0, "le premier essai a eu lieu, avant la pensée du matin"
+        # ce matin, entre deux essais du journal de la veille, elle lit autre chose
+        await kernel2.mind.append([attention_c.THOUGHT_BORN.draft(
+            text=Content.of("CANARI-MATIN la mort d'un écrivain", level=0), emotion="curious", intensity=0.9,
+            origin=attention_c.SIGNAL, about=(), sensitivity=0)], emitter="attention", correlation="pensée",
+            origin=Origin.GENESIS)
+        await asyncio.sleep(40 * MINUTE / US)
+        await kernel2.stop()
+
+    run_virtual(clock, second)
+    notes = [c.messages[-1].content for c in llm2.calls if c.role == "journal"]
+    *_, tuesday = (n for n in notes if n.startswith("Ta journée du mardi 29 septembre."))  # l'essai qui a réussi
+    morning = kernel2.mind.frame().get(attention_c.THOUGHTS)
+    assert any(t.born_at > at_paris(2026, 9, 30, 0, 0) for t in morning)  # vivante au moment du journal
+    assert "CANARI-MATIN" not in tuesday, tuesday
+    done = f"tu as mené à bout « {same} »"
+    assert f"{done} (3 fois)" in tuesday and tuesday.count(done) == 1, tuesday
 
 
 def test_a_dream_made_of_a_confidence_is_not_told_to_someone_else(tmp_path):

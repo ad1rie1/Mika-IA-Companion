@@ -61,7 +61,7 @@ from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import DONE, NOTE, Activity
-from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
+from mika.ports.llm import PREEMPTED, Held, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
 from mika.runtime.tools import (
@@ -356,7 +356,7 @@ class EpisodeRunner:
             got = await acall(self._run, ep, label=f"épisode {req.kind}")
             if isinstance(got, Failed):
                 # une exception imprévue : l'épisode est réglé quand même (jamais laissé ouvert)
-                await self._settle(ep, Outcome.FAILED, detail=_describe(got.error))
+                await self._settle(ep, _failed(got.error), detail=_describe(got.error))
         finally:
             self._live.pop(eid, None)
             mind.untrack(eid)
@@ -507,7 +507,7 @@ class EpisodeRunner:
                 )
                 ep.preemptible = False
                 if isinstance(loop, Failed):
-                    await self._settle(ep, Outcome.FAILED, detail=_describe(loop.error))
+                    await self._settle(ep, _failed(loop.error), detail=_describe(loop.error))
                     return
                 report.tools = loop.calls
                 text, annotations = self._parse(loop.text, persona.name if persona is not None else "",
@@ -1146,6 +1146,13 @@ def _reserved(persona: PersonaRender | None, more: str, tools: Sequence[ToolDecl
 
 def _describe(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"[:500]
+
+
+def _failed(error: BaseException) -> Outcome:
+    """L'issue d'un épisode arrêté par une erreur : un appel de fond refusé d'avance pour garder la réserve de la
+    conversation (``Held``, le quota d'un abonnement) n'a rien tenté — le premier plan est passé devant, comme une
+    préemption ; ce n'est pas une panne, qu'un but compterait jusqu'à se clore « en échec » (ADR 0127)."""
+    return Outcome.PREEMPTED if isinstance(error, Held) else Outcome.FAILED
 
 
 class _Preempted(Exception):

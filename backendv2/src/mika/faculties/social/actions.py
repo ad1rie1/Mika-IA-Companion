@@ -30,6 +30,8 @@ _RANK = {level: i for i, level in enumerate(c.CLOSENESS_LEVELS)}
 #: Ce que chaque proximité ouvre de ce que d'autres lui ont confié.
 OPENS = {c.FRIEND: "ce que d'autres lui ont dit de personnel pourra lui être raconté",
          c.CLOSE: "même les confidences d'autres personnes pourront lui être dites"}
+#: le bandeau d'une action à confirmer ; ce qu'elle changera s'écrit sous la case, pas deux fois
+TO_CONFIRM = "À confirmer : lis ce que cela change, puis coche « Je confirme »."
 
 
 class ClosenessArgs(BaseModel):
@@ -72,12 +74,12 @@ def _set_closeness(s: SocialState, frame: Frame, args: ClosenessArgs, ctx: Actio
     if current == level:
         said = "Sa proximité est déjà automatique." if not level else \
             f"Sa proximité est déjà déclarée : {CLOSENESS_FR[level]}."
-        raise Refused(said, {"closeness": said})
+        raise Refused("Rien à changer.", {"closeness": said})
     now = frame.get(c.CLOSENESS(person))
     if level and _RANK[level] > _RANK[now] and level in OPENS and not args.confirmed:
         name = frame.get(identity_c.IDENTITY(person)).name or person
         outcome = f"« {name} » passera de « {CLOSENESS_FR[now]} » à « {CLOSENESS_FR[level]} » : {OPENS[level]}."
-        raise Refused(f"À confirmer : {outcome}", {"confirmed": f"{outcome} Coche « Je confirme »."})
+        raise Refused(TO_CONFIRM, {"confirmed": f"{outcome} Coche « Je confirme »."})
     draft = c.CLOSENESS_SET.draft(person=person, closeness=level, by=ctx.by)
     message = ("Proximité rendue à leur histoire." if not level
                else f"Proximité déclarée : {CLOSENESS_FR[level]}.")

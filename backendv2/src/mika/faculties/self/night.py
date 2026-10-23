@@ -459,7 +459,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
         lines += [phrase("self.night.notes.kept")] + [f"- {clean_tokens(k.text)}" for k in souvenirs]
         # le journal dit qui il concerne : tous ceux dont il parle, pas seulement ceux qui lui ont parlé
         people |= {p for k in souvenirs for p in (*k.about, *k.told_by)}
-    thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.2][:3]
+    # ce qui la travaillait ce jour-là : une pensée née après (un journal écrit en retard, le lendemain matin) n'en
+    # est pas — elle racontait la veille avec ce qu'elle avait lu le matin même (2026-10-23, ADR 0127)
+    thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.2 and t.born_at < end][:3]
     thought_texts = store.content([t.text_ref for t in thoughts if t.text_ref])
     if thought_texts:
         lines += [phrase("self.night.notes.thoughts")] + [f"- {t}" for t in thought_texts.values()]
@@ -640,6 +642,11 @@ def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int, *, 
         verb = verbs.get(x.what) if x.what in (OPENED, DONE, BLOCKED, ABANDONED, REMINDED, REFLECTED) else None
         if verb:
             parts.append(f"{verb} « {_quote(title, 100)} »")
+    # le même acte sous le même titre (trois explorations de ses flux menées à bout) : une fois, avec le compte —
+    # sinon la liste répétait six fois la même phrase (2026-10-22, ADR 0127)
+    counts = Counter(parts)
+    parts = [part if counts[part] == 1 else phrase("self.night.deeds.times", deed=part, n=counts[part])
+             for part in dict.fromkeys(parts)]
     lines = [phrase("self.night.deeds.header", deeds=" ; ".join(parts[:6]))] if parts else []
     named = [t for t in mused if t]
     if named and len(mused) > 1:

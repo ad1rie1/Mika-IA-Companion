@@ -164,6 +164,14 @@ def _llm(kernel: Kernel) -> Check:
             return Check("llm", DEGRADED, f"le fournisseur « {backend} » ne répond pas ({cause}) depuis "
                                           f"{_span(now - since)} : ses réponses échouent",
                          (f"dernières réponses en échec depuis {_span(now - since)}",))
+    holding = getattr(gateway, "holding", None)
+    got = call(holding, label="retenue des modèles") if callable(holding) else []
+    if not isinstance(got, Failed) and got:
+        # elle répond, mais sa vie de fond est suspendue : travailler, rêver, relire la nuit (ADR 0127)
+        return Check("llm", DEGRADED, "appels de fond retenus : " + " ; ".join(f"« {n} », {why}" for n, why in got)
+                     + " — elle répond, mais ne travaille plus, ne rêve plus et ne relit plus ses lectures "
+                       "jusqu'à ce que le quota redescende",
+                     tuple(f"{n} : {why}, seule la conversation passe" for n, why in got))
     return Check("llm", OK, "modèles branchés")
 
 
