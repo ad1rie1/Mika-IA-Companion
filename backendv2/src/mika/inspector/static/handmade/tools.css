@@ -193,3 +193,109 @@
 .server-head-what { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
 .server-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 4px; }
 .server-head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+
+/* Un service branché, ce qu'elle en fait (ADR 0128) : handmade/outils/fait.html, regles.html, la carte de serveur.html */
+.service { display: grid; gap: 18px; }
+.service-said { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+.service-sentence { margin: 0; font-size: 16.5px; font-weight: 550; line-height: 1.5; max-width: 80ch; }
+.service-three { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0 0; }
+.service-three > div { padding: 10px 12px; border-radius: 10px; background: var(--surface); }
+.service-three dt { color: var(--muted); font-size: 12px; }
+.service-three dd { margin: 2px 0 0; font-weight: 600; }
+.service-three dd span { display: block; margin-top: 2px; color: var(--text-2); font-size: 12.5px; font-weight: 400; }
+.service-genres { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.service-genres form { height: 100%; margin: 0; }
+.service-genre { display: grid; gap: 6px; width: 100%; height: 100%; padding: 12px 14px; border: 2px solid var(--border);
+  border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.service-genre:hover { border-color: var(--border-strong); }
+.service-genre.on { border-color: var(--accent); background: var(--accent-soft); }
+.service-genre-name { font-weight: 650; }
+.service-genre-example { color: var(--muted); font-size: 12.5px; }
+.service-genre-lines { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 13px; }
+.service-form { display: grid; gap: 18px; }
+.service-check { display: flex; align-items: flex-start; gap: 10px; min-height: 36px; padding: 4px 0; cursor: pointer; }
+.service-check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+.service-check span { display: grid; }
+.service-check span span { color: var(--text-2); font-size: 12.5px; }
+.service-people, .service-when { margin: 10px 0 0; padding: 0; border: 0; }
+.service-people legend, .service-when legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: 13.5px; font-weight: 600; }
+.service-people-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.service-people select, .rule-row select { min-height: 40px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface); color: var(--text); font: inherit; }
+.service-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.service-ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.service-step { display: grid; gap: 4px; padding: 12px 14px; border: 2px solid var(--border); border-radius: 10px; cursor: pointer; }
+.service-step:has(input:checked), .service-step.on { border-color: var(--accent); background: var(--accent-soft); }
+.service-step input { position: absolute; opacity: 0; }
+.service-step:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.service-step-n { color: var(--muted); font-size: 12px; }
+.service-step-name { font-weight: 650; }
+.service-step-what { color: var(--text-2); font-size: 13px; }
+.service-step-later { padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 12px; }
+.service-tool-what { margin: 0; color: var(--text-2); }
+.service-ceiling { margin: 8px 0 0; font-size: 14px; }
+.rule-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.rule-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.rule-who { display: grid; flex: 1 1 300px; min-width: 0; }
+.rule-who label, .rule-label { font-weight: 600; }
+.rule-who span { color: var(--muted); font-size: 12.5px; }
+.rule-row select { flex: 0 1 320px; }
+.rule-select.on { border-color: var(--accent); background: var(--accent-soft); }
+.rule-row.locked .rule-who label, .rule-row.locked .rule-label { color: var(--muted); }
+.rule-locked { flex: 0 1 320px; padding: 8px 10px; border-radius: 8px; background: var(--sunken); color: var(--text-2); font-size: 13px; }
+.rule-clear { display: grid; gap: 6px; margin: 0; }
+.rule-clear > div { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 12px; }
+.rule-clear dt { font-weight: 600; }
+.rule-clear dd { margin: 0; }
+.server-tool-rules { font-size: 12.5px; }
+@media (max-width: 640px) {
+  .rule-clear > div { grid-template-columns: 1fr; gap: 0; }
+}
+.elsewhere-three { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--text-2); font-size: 13px; }
+/* Brancher un service (handmade/outils/brancher.html, ADR 0128) */
+.service-crumbs { color: var(--muted); font-size: 13px; }
+.plug-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+.plug-field { display: grid; flex: 2 1 320px; gap: 4px; }
+.plug-field.plug-short { flex: 1 1 200px; }
+.plug-field label { color: var(--text-2); font-size: 13px; font-weight: 600; }
+.plug-field input, .plug-field textarea { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--surface); color: var(--text); font: inherit; }
+.plug-genres { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.plug-genre { position: relative; }
+.plug-genre input { position: absolute; opacity: 0; }
+.plug-genre:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.plug-genre:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plug-where { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-bottom: 10px; }
+/* Ses outils, dessinés (handmade/outils/outils.html, ADR 0128) */
+.tools-default { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+.tools-default h2 { margin: 0; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; }
+.tools-default-said { margin: 4px 0 2px; font-size: 16px; font-weight: 600; }
+.tools-fresh { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 14px 18px;
+  border-radius: 12px; background: var(--warn-bg); color: var(--warn); }
+.tools-fresh p { margin: 0; }
+.tools-fresh form { margin: 0; }
+.tools-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.tools-row-main { display: grid; flex: 1 1 320px; min-width: 0; }
+.tools-row-main code { font-size: 13px; font-weight: 600; }
+.tools-row-what { color: var(--text-2); font-size: 13px; }
+.tools-row-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tools-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; }
+/* Comment le joindre, comme Claude Code : le transport d'abord, puis ses seuls champs */
+.plug-transport { display: grid; gap: 6px; max-width: 560px; margin: 0 0 14px; padding: 0; border: 0; }
+.plug-transport legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.plug-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; }
+.plug-option input { margin-top: 3px; accent-color: var(--accent); }
+.plug-option span { display: grid; }
+.plug-option span span { color: var(--text-2); font-size: 12.5px; }
+.plug-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.plug-local, .plug-remote { display: grid; gap: 12px; max-width: 720px; }
+.plug-connect:has(input[value="local"]:checked) .plug-remote { display: none; }
+.plug-connect:has(input[value="distant"]:checked) .plug-local { display: none; }
+.plug-stack { display: grid; gap: 14px; max-width: 720px; }
+.plug-name input { max-width: 360px; font-family: var(--mono); font-size: 14.5px; }
+.plug-field code { font-size: 12px; }
+.plug-title { margin: 0; font-family: var(--now-serif); font-size: 22px; font-weight: 650; }

@@ -30,6 +30,7 @@ def provided(params_of: Callable[[str], Any]) -> dict[str, Provided]:
 
 def spec(s: web.SystemServer) -> McpServer:
     return McpServer(purpose=s.purpose, when_to_use=s.when_to_use, enabled=True, transport="local", command=s.command,
-                     args=s.args, env=s.env, network="isole", shared=s.shared, audience=s.audience,  # type: ignore[arg-type]
-                     in_conversation=True, in_initiative=False, in_work=s.in_work, in_hand=False, learns=True,
+                     args=s.args, env=s.env, network="isole", shared=s.shared, with_owner=True,
+                     with_accounts=s.audience == "comptes", in_conversation=True, in_initiative=False,
+                     in_work=s.in_work, in_hand=False, keep="public",
                      timeout_s=s.timeout_s, max_calls=s.max_calls, max_result_chars=s.max_result_chars)

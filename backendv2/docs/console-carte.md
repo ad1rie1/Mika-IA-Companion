@@ -180,7 +180,7 @@ Les clés techniques sont dans « Détails techniques ».
   répondu ? » : la fin d'épisode qui l'a réglé et sa cause en mots (un silence choisi, ce qui l'a fait taire, trop
   tard, une panne), puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en échec.
 
-### Outils (ADR 0064, 0122, 0123)
+### Outils (ADR 0064, 0122, 0123, 0128)
 
 - **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses familles d'outils en lignes, chacune
   s'ouvre sur ses outils (ce qu'il fait, son nom, ses appels des 14 derniers jours) ; les situations en colonnes,
@@ -192,12 +192,16 @@ Les clés techniques sont dans « Détails techniques ».
   derniers appels vers leur épisode, ses arguments lus du schéma, sa condition d'offre et la règle vérifiée à
   l'exécution.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
-  proposés, à revoir — badge et vitale), puis les outils que ses apps lui donnent (la vue de la Forge, dessous). La
-  fiche d'un serveur : *En bref* (son état, ses outils servis, à revoir, ses appels ; ce qu'elle en lit ; ses
-  outils ; pour qui et quand ; le côté technique replié), puis, sous « Le détail », *État* (ce qui a été déclaré, ce
-  qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il
-  propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil
-  changé est suspendu), *Appels*.
+  proposés, à revoir, son genre et ses trois réglages — badge et vitale), puis les outils que ses apps lui donnent
+  (la vue de la Forge, dessous). La fiche d'un serveur : *En bref* (son état, ses outils servis, à revoir, ses
+  appels ; ce qu'elle en fait, en une phrase ; ce qu'elle en lit ; ses outils ; pour qui et quand ; le côté
+  technique replié), *Ce qu'elle en fait* (dessiné : un genre en un clic, puis avec qui — toi, les comptes, des
+  personnes choisies —, quand, ce qu'elle fait seule, ce qu'elle en garde), *Par situation et par personne*
+  (dessiné, `?outil=` : pour un outil, une règle par situation et par personne nommée, dans ce que le service
+  permet, et « En clair »), puis, sous « Le détail », *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit
+  de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur
+  en a décidé, « Servir les nouveaux » avec les réglages du service, « Régler l'outil » : activé, nature, son accord,
+  ce qu'elle lit ; un outil changé est suspendu), *Appels*.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
@@ -265,7 +269,7 @@ rôle par rôle (`CallLog.profile`).
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
 | | Teams | la clé de l'extension, le mode de ses réponses (brouillon, accord, autonome), sa signature |
-| | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; pour qui, quand, en main ; bornes. Nom fixe (il entre dans le nom de ses outils). ADR 0064 |
+| | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; avec qui (toi, les comptes, des personnes choisies), quand, en main ; ce qu'elle fait seule ; ce qu'elle en garde ; bornes. Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128 |
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |
 | | Appareils | jeton des appareils |

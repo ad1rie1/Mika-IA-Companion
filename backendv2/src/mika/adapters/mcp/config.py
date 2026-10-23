@@ -2,7 +2,8 @@
 secrets scellés), jamais dans le journal ; le hub la relit à chaque usage.
 
 Ce que l'opérateur dit d'abord, c'est **à quoi sert le serveur, pour elle** : la ligne de son catalogue. Puis
-comment le joindre (une adresse, ou une commande sur cette machine), pour qui, quand, et ses bornes.
+comment le joindre (une adresse, ou une commande sur cette machine), avec qui, quand, ce qu'elle fait seule, ce
+qu'elle en garde (ADR 0128), et ses bornes.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
-from mika.ports.mcp import AUDIENCES
+from mika.ports.mcp import AUTONOMIES, KEEPS, RULE_LEVELS, TOOL_SITUATIONS
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -71,6 +72,10 @@ class McpServer(BaseModel):
     header: Annotated[str, Knob(
         label="Nom de l'en-tête", group="Connexion", order=14, only=(("auth", ("entete",)),),
         help="Celui qui porte le jeton (X-API-Key…).")] = "X-API-Key"
+    secret_headers: Annotated[str, Knob(
+        label="En-têtes", group="Connexion", secret=True, order=15, only=_REMOTE,
+        help="« Nom: valeur », un par ligne ou séparés par « ; » (comme Claude Code). Chiffrés, jamais réaffichés ; "
+             "vide : inchangés.")] = ""
     ca_file: Annotated[str, Knob(
         label="Autorité de certification", group="Connexion", order=15, only=_REMOTE,
         help="Le chemin d'un certificat d'autorité (.pem) pour un serveur de ton réseau signé par ta propre "
@@ -94,24 +99,32 @@ class McpServer(BaseModel):
     shared: Annotated[tuple[str, ...], Knob(
         label="Dossiers partagés", group="Sur cette machine", order=25, only=_LOCAL,
         help="Un chemin absolu par ligne, en lecture seule ; « chemin:rw » pour qu'il puisse y écrire.")] = ()
-    audience: Annotated[Literal["proprietaire", "comptes"], Knob(
-        label="Pour qui", group="Qui et quand", choices=AUDIENCES, advanced=False, order=30,
-        help="Jamais dans un salon, quel que soit ce choix. Ce qu'elle met dans un appel part de la machine.")] = \
-        "proprietaire"
-    in_conversation: Annotated[bool, Knob(label="Quand elle répond", group="Qui et quand", advanced=False,
-                                          order=31)] = True
-    in_initiative: Annotated[bool, Knob(label="Quand elle prend la parole", group="Qui et quand", order=32)] = False
-    in_work: Annotated[bool, Knob(label="Quand elle travaille", group="Qui et quand", order=33,
+    with_owner: Annotated[bool, Knob(label="Avec toi", group="Avec qui", advanced=False, order=30,
+                                     help="Sa propriétaire, et quand elle travaille pour elle.")] = True
+    with_accounts: Annotated[bool, Knob(
+        label="Avec toute personne qui a un compte", group="Avec qui", advanced=False, order=31,
+        help="En tête-à-tête, authentifiée. Jamais dans un salon ni avec une inconnue, quel que soit ce choix. Ce "
+             "qu'elle met dans un appel part de la machine.")] = False
+    with_people: Annotated[tuple[str, ...], Knob(
+        label="Avec des personnes choisies", group="Avec qui", order=32,
+        help="Une clé de personne par ligne ; reconnue seulement authentifiée.")] = ()
+    in_conversation: Annotated[bool, Knob(label="Quand elle répond", group="Quand", advanced=False,
+                                          order=33)] = True
+    in_initiative: Annotated[bool, Knob(label="Quand elle prend la parole", group="Quand", order=34)] = False
+    in_work: Annotated[bool, Knob(label="Quand elle travaille", group="Quand", order=35,
                                   help="Un pas sur un but ou une exécution de projet — seulement si le but ou le "
-                                       "projet a pris ce lot.")] = False
-    in_hand: Annotated[bool, Knob(label="En main", group="Qui et quand", order=34,
+                                       "projet a pris ce lot, et seulement s'il est « avec toi ».")] = False
+    in_hand: Annotated[bool, Knob(label="En main", group="Quand", order=36,
                                   help="Décoché (conseillé) : ses outils sont à la demande, elle les cherche par ce "
                                        "qu'ils font quand elle en a besoin.")] = False
-    learns: Annotated[bool, Knob(label="Ce qu'elle y lit devient un savoir", group="Qui et quand", order=35,
-                                 help="Pour un serveur qui lit le monde public (une recherche, des pages) : ce que "
-                                      "ses outils de lecture lui rendent quand elle travaille est relu la nuit, et "
-                                      "peut devenir ce qu'elle sait et raconte à tous. Jamais pour un courrier, un "
-                                      "agenda, des notes.")] = False
+    autonomy: Annotated[Literal["seule", "lit", "carte", "toi"], Knob(
+        label="Ce qu'elle fait seule", group="Ce qu'elle fait seule", choices=AUTONOMIES, advanced=False, order=37,
+        help="Un outil peut avoir son accord à lui, et une règle par situation ou par personne.")] = "carte"
+    keep: Annotated[Literal["public", "perso", "prive", "rien"], Knob(
+        label="Ce qu'elle en garde", group="Ce qu'elle en garde", choices=KEEPS, advanced=False, order=38,
+        help="Pour tout ce qui en sort : ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a "
+             "rendu. « Ce qu'elle sait » seulement pour un serveur qui lit le monde public (une recherche, des "
+             "pages) : jamais pour un courrier, un agenda, des notes.")] = "prive"
     timeout_s: Annotated[float, Knob(label="Délai d'un appel", group="Bornes", lo=1, hi=300, unit="s",
                                      order=40)] = 30.0
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
@@ -120,6 +133,20 @@ class McpServer(BaseModel):
                                           order=42)] = 4000
     breaker: Annotated[int, Knob(label="Pannes d'affilée avant de le couper", group="Bornes", lo=1, hi=20,
                                  order=43)] = 3
+
+    @model_validator(mode="before")
+    @classmethod
+    def _before_0128(cls, data: Any) -> Any:
+        """Une fiche d'avant l'ADR 0128 reste lisible : « pour qui » devient « avec qui », « ce qu'elle y lit devient
+        un savoir » devient « ce qu'elle en garde : public » ; la prochaine sauvegarde l'écrit sous la forme neuve."""
+        if not isinstance(data, dict) or ("audience" not in data and "learns" not in data):
+            return data
+        data = dict(data)
+        if data.pop("audience", None) == "comptes":
+            data.setdefault("with_accounts", True)
+        if data.pop("learns", False):
+            data.setdefault("keep", "public")
+        return data
 
     @property
     def local(self) -> bool:
@@ -142,6 +169,8 @@ class McpServer(BaseModel):
                 out.append("un jeton")
             if self.auth == "entete" and not HEADER.fullmatch(self.header):
                 out.append("un nom d'en-tête (lettres, chiffres, -)")
+            out += [f"en-tête « {part.split(':')[0].strip()[:30]} » : Nom: valeur" for part in _header_lines(
+                self.secret_headers) if not HEADER.fullmatch(part.partition(":")[0].strip()) or ":" not in part]
         return out
 
     @property
@@ -149,11 +178,17 @@ class McpServer(BaseModel):
         return not self.problems()
 
     def headers(self) -> dict[str, str]:
+        """Les en-têtes de chaque requête : les siens (``secret_headers``), puis le jeton de son authentification."""
+        out = {}
+        for part in _header_lines(self.secret_headers):
+            name, sep, value = part.partition(":")
+            if sep and HEADER.fullmatch(name.strip()):
+                out[name.strip()] = value.strip()
         if self.auth == "bearer" and self.token:
-            return {"Authorization": f"Bearer {self.token}"}
-        if self.auth == "entete" and self.token:
-            return {self.header: self.token}
-        return {}
+            out["Authorization"] = f"Bearer {self.token}"
+        elif self.auth == "entete" and self.token:
+            out[self.header] = self.token
+        return out
 
     def secret_vars(self) -> dict[str, str]:
         out = {}
@@ -166,9 +201,14 @@ class McpServer(BaseModel):
 
     def connection(self) -> str:
         """Ce qui décide d'une connexion (une session ouverte avec d'autres réglages est fermée)."""
-        data = self.model_dump(include={"transport", "url", "auth", "token", "header", "ca_file", "command", "args",
-                                        "env", "secret_env", "network", "shared"})
+        data = self.model_dump(include={"transport", "url", "auth", "token", "header", "secret_headers", "ca_file",
+                                        "command", "args", "env", "secret_env", "network", "shared"})
         return hashlib.sha256(canonical_json(data).encode()).hexdigest()
+
+
+def _header_lines(raw: str) -> list[str]:
+    """Les en-têtes écrits « Nom: valeur », un par ligne ou séparés par « ; »."""
+    return [p.strip() for p in re.split(r"[;\n]", raw or "") if p.strip()]
 
 
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
@@ -250,13 +290,41 @@ class StoredReview(BaseModel):
     fingerprint: str
     enabled: bool = False
     nature: Literal["lecture", "action"] = "lecture"
-    approval: Literal["aucun", "conversation", "operateur"] = "conversation"
+    autonomy: Literal["service", "seule", "carte", "toi"] = "service"
+    #: ses règles par situation (``TOOL_SITUATIONS``) et par personne nommée (``RULE_LEVELS``) — ADR 0128
+    situations: dict[str, str] = Field(default_factory=dict)
+    people: dict[str, str] = Field(default_factory=dict)
     description: str = ""
     server_description: str = ""
     title: str = ""
     schema_: dict[str, Any] = Field(default_factory=dict, alias="schema")
     by: str = ""
     at: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _before_0128(cls, data: Any) -> Any:
+        """L'accord d'avant l'ADR 0128 (``approval``) devient l'accord de l'outil : « dans la conversation » était
+        l'accord par défaut, celui de son serveur aujourd'hui."""
+        if not isinstance(data, dict) or "approval" not in data or "autonomy" in data:
+            return data
+        data = dict(data)
+        data["autonomy"] = LEGACY_APPROVALS.get(str(data.pop("approval")), "service")
+        return data
+
+    @model_validator(mode="after")
+    def _rules(self) -> StoredReview:
+        situations = {k for k, _ in TOOL_SITUATIONS}
+        levels = {k for k, _ in RULE_LEVELS}
+        if any(k not in situations or v not in levels for k, v in self.situations.items()):
+            raise ValueError("règle de situation inconnue")
+        if any(not k or v not in levels for k, v in self.people.items()):
+            raise ValueError("règle de personne inconnue")
+        return self
+
+
+#: l'accord d'un outil d'avant l'ADR 0128 : ce qu'il devient
+LEGACY_APPROVALS = {"aucun": "seule", "conversation": "service", "operateur": "toi"}
 
 
 def valid_choice(value: str, choices: tuple[tuple[str, str], ...]) -> bool:

@@ -1,6 +1,7 @@
 """Les outils venus d'ailleurs (ADR 0064) : ce que la faculté « mcp » voit des serveurs MCP branchés.
 
-Un serveur est déclaré par l'opérateur (à quoi il sert pour elle, comment le joindre, pour qui, quand) ; ses outils
+Un serveur est déclaré par l'opérateur (à quoi il sert pour elle, comment le joindre, avec qui, quand, ce qu'elle
+fait seule et ce qu'elle en garde : ADR 0128) ; ses outils
 ne lui sont offerts que tels qu'ils ont été **approuvés** — l'empreinte d'un outil (nom, description, schéma,
 annotations) qui change le suspend jusqu'à une nouvelle approbation. Le port rend cet instantané approuvé
 (``offered``), l'état de chaque serveur, et exécute un appel ; il ne décide jamais à qui un outil est offert (c'est
@@ -16,13 +17,26 @@ from typing import Any, Protocol
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
            ("action", "action — ça change quelque chose ailleurs"))
-#: qui doit accepter un appel avant qu'il parte
-APPROVALS = (("aucun", "aucun — l'appel part dans la boucle, elle lit la réponse"),
-             ("conversation", "dans la conversation — la personne accepte une carte dans le chat"),
-             ("operateur", "de l'opérateur — dans À valider › Actions à autoriser"))
-#: à qui un serveur peut servir (jamais dans un salon : une règle, pas un réglage)
-AUDIENCES = (("proprietaire", "sa propriétaire seulement"),
-             ("comptes", "aussi une personne authentifiée, en tête-à-tête"))
+#: ce qu'elle fait seule d'un serveur (ADR 0128) : s'en servir sans demander ; lire seule et demander pour agir ;
+#: demander à chaque appel (une carte à la personne en face) ; ou à sa propriétaire, à chaque appel
+AUTONOMIES = (("seule", "seule — elle s'en sert sans demander"),
+              ("lit", "lit seule, demande pour agir — lire ne change rien ; créer, envoyer, supprimer : un accord"),
+              ("carte", "demande à chaque appel — une carte à la personne en face"),
+              ("toi", "te demande à chaque appel — même quand c'est quelqu'un d'autre, ou qu'elle travaille seule"))
+#: ce qu'un outil fait seul : comme son service, ou son accord à lui
+TOOL_AUTONOMIES = (("service", "comme le service"), ("seule", "seule"), ("carte", "demande à chaque appel"),
+                   ("toi", "te demande à chaque appel"))
+#: une règle d'outil dans une situation ou pour une personne : comme le service (ou sa situation), un accord, ou non
+RULE_LEVELS = (("seule", "oui, seule"), ("carte", "oui, sur accord de la personne"), ("toi", "oui, avec ton accord"),
+               ("non", "non"))
+#: les situations où un outil a une règle à lui (ADR 0128)
+TOOL_SITUATIONS = (("proprietaire", "toi"), ("compte", "une personne qui a un compte"),
+                   ("travail", "quand elle travaille seule"))
+#: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré
+KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"),
+         ("perso", "un souvenir — comme ce qu'on lui raconte"),
+         ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
+         ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
 #: les familles d'épisodes où un serveur peut servir
 EPISODES = (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
             ("travail", "quand elle travaille (si le but ou le projet a pris ce lot)"))
@@ -63,7 +77,11 @@ class ToolReview:
     fingerprint: str
     enabled: bool = False
     nature: str = "lecture"
-    approval: str = "conversation"
+    #: son accord à lui (``TOOL_AUTONOMIES``) : ``service`` suit son serveur
+    autonomy: str = "service"
+    #: ses règles par situation et par personne nommée (``RULE_LEVELS`` ; absente : comme le service, ou sa situation)
+    situations: Mapping[str, str] = field(default_factory=dict)
+    people: Mapping[str, str] = field(default_factory=dict)
     #: la description qu'elle lit (vide : celle du serveur, désamorcée)
     description: str = ""
     server_description: str = ""
@@ -84,8 +102,8 @@ class OfferedTool:
     description: str
     schema: Mapping[str, Any]
     nature: str
-    approval: str
-    audience: str
+    #: son accord quand aucune règle de situation ni de personne ne le change : ``seule``, ``carte`` ou ``toi``
+    autonomy: str
     episodes: frozenset[str]
     in_hand: bool
     max_calls: int
@@ -96,9 +114,18 @@ class OfferedTool:
     local: bool
     #: l'empreinte approuvée (un appel proposé l'épingle : s'il change avant l'accord, l'accord est refusé)
     fingerprint: str = ""
-    #: un outil de lecture d'un serveur dont l'opérateur a dit qu'il lit le monde public (``learns``) : ce qu'elle y lit
-    #: en travaillant se garde comme une lecture (ADR 0085)
+    #: un outil de lecture d'un serveur dont ce qu'elle lit est public (``keep``) : ce qu'elle y lit en travaillant se
+    #: garde comme une lecture (ADR 0085)
     reads_world: bool = False
+    #: avec qui (ADR 0128) : sa propriétaire, toute personne qui a un compte, des personnes nommées (leurs clés)
+    with_owner: bool = True
+    with_accounts: bool = False
+    with_people: tuple[str, ...] = ()
+    #: ses règles par situation et par personne, triées (``RULE_LEVELS``)
+    situations: tuple[tuple[str, str], ...] = ()
+    people: tuple[tuple[str, str], ...] = ()
+    #: ce qu'elle garde de ce qu'il rend (``KEEPS``)
+    keep: str = "perso"
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +140,11 @@ class ServerStatus:
     purpose: str = ""
     when_to_use: str = ""
     address: str = ""
-    audience: str = "proprietaire"
+    with_owner: bool = True
+    with_accounts: bool = False
+    with_people: tuple[str, ...] = ()
+    autonomy: str = "carte"
+    keep: str = "prive"
     episodes: tuple[str, ...] = ()
     in_hand: bool = False
     server_name: str = ""
@@ -173,8 +204,17 @@ class ExternalTools(Protocol):
 
     async def refresh(self, server: str | None = None) -> None: ...
 
-    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, approval: str,
+    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, autonomy: str,
                      description: str, by: str) -> ToolReview: ...
+
+    async def rule(self, server: str, remote: str, *, situations: Mapping[str, str], people: Mapping[str, str],
+                   by: str) -> ToolReview: ...
+
+    async def settle(self, server: str, changes: Mapping[str, Any]) -> None: ...
+
+    async def plug(self, server: str, changes: Mapping[str, Any]) -> None: ...
+
+    async def serve_new(self, server: str, *, by: str) -> list[str]: ...
 
     def on_change(self, fn: Callable[[], Awaitable[Any] | Any]) -> None: ...
 

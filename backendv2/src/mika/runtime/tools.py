@@ -201,6 +201,9 @@ class LoopResult:
     #: ce que ses outils réussis ont préparé pour partir avec le message (``ToolResult.attach``), sans doublon,
     #: dans l'ordre — des références opaques
     attachments: list[str] = field(default_factory=list)
+    #: ce que valent ses réponses réussies (``ToolResult.floor``, ``unkept``) : ce que l'énoncé emporte (ADR 0128)
+    floor: int = 0
+    unkept: bool = False
 
     @property
     def call_ids(self) -> list[str]:
@@ -520,8 +523,12 @@ async def _loop(
             for ref in tr.attach if tr.ok else ():
                 if ref and ref not in result.attachments:
                     result.attachments.append(ref)
-            result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), tr.ok,
-                                             _bounded(tr.content), elapsed))
+            if tr.ok:
+                result.floor = max(result.floor, tr.floor)
+                result.unkept = result.unkept or tr.unkept
+            # ce dont rien ne se garde ne se garde pas non plus en trace : ni ce qu'on a demandé, ni ce qu'il a rendu
+            result.records.append(ToolRecord(call.id, call.name, "{}" if tr.unkept else _args_json(call.args), tr.ok,
+                                             "" if tr.unkept else _bounded(tr.content), elapsed))
             outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
             await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
             ended = ended or (spec.ends_loop and tr.ok)

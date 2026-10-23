@@ -27,6 +27,7 @@ from mika.plugins.mcp import (
     EXPIRED,
     FAILED,
     FINAL,
+    FLOORS,
     MCP,
     PROVENANCE,
     REFUSED,
@@ -101,8 +102,12 @@ def _section(s: McpState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     texts = enrich.get("services") or {}
     lines = [line(r, texts) for r in reqs]
     told = tuple(f"{PROVENANCE}{r.proposal}" for r in reqs if r.status in FINAL)
+    # ce qu'un service a rendu vaut ce que son serveur en garde (ADR 0128) : le message qui le dit l'emporte
+    shown = [r for r in reqs if r.status == ANSWERED]
     return SectionBody(phrase("mcp.section.head") + "\n" + "\n".join(lines),
-                       level=int(Sensitivity.PERSONAL), witness=True, provenance=told)
+                       level=int(Sensitivity.PERSONAL), witness=True, provenance=told,
+                       floor=max((FLOORS.get(r.keep, 0) for r in shown), default=0),
+                       unkept=any(r.keep == "rien" for r in shown))
 
 
 def _untold(proposal: int) -> Guard:

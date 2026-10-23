@@ -96,6 +96,11 @@ class Utterance(Payload):
     about: tuple[str, ...] = ()
     #: le mode dans lequel elle a répondu (``pro``, ADR 0116) ; ``""`` : la conversation ordinaire
     mode: str = ""
+    #: ce que vaut ce qu'elle a lu pour l'écrire (ADR 0128), le plus haut de ses outils et de son prompt : ce qu'on
+    #: en tire ne se dit jamais en dessous de ``floor`` ; ``unkept`` : rien ne s'en garde (ni l'échange, ni ce qu'on
+    #: en tirerait). Zéro et faux dans un journal plus ancien.
+    floor: int = 0
+    unkept: bool = False
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:

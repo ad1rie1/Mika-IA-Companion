@@ -9,7 +9,7 @@
     <header class="now-card-head">
       <h2 id="elsewhere-services">Les services branchés</h2>
       <span class="person-count now-num">{{ services|length }}</span>
-      <p>Des serveurs MCP qui lui prêtent leurs outils. Un outil ne lui sert qu'une fois que tu l'as approuvé sur la fiche du service ; s'il change, il est suspendu jusqu'à ton nouvel accord.</p>
+      <p>Des serveurs MCP qui lui prêtent leurs outils. Chacun dit avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde. Un outil ne lui sert qu'une fois que tu l'as approuvé sur la fiche du service ; s'il change, il est suspendu jusqu'à ton nouvel accord.</p>
     </header>
     {% if services %}
     <ul class="elsewhere-list" role="list">
@@ -18,8 +18,10 @@
         <div class="elsewhere-top">
           <p class="elsewhere-name">{% if s.href %}<a href="{{ s.href }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</p>
           <span class="now-tag {{ s.tone }}">{{ s.state }}</span>
+          {% if s.genre %}<span class="now-tag owner">{{ s.genre }}</span>{% endif %}
         </div>
         {% if s.purpose %}<p class="elsewhere-what">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</p>{% endif %}
+        {% if s.who %}<p class="elsewhere-three"><span>Avec {{ s.who }}</span><span>{{ s.alone[:1]|upper }}{{ s.alone[1:] }}</span><span>Garde : {{ s.keep }}</span></p>{% endif %}
         <p class="elsewhere-facts">
           <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
           {% if s.where %}<span>{{ s.where }}</span>{% endif %}

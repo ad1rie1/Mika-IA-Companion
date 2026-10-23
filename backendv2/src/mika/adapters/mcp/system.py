@@ -91,6 +91,6 @@ def _approved(raw_tools: Sequence[Mapping[str, Any]]) -> dict[str, StoredReview]
         reading = tool.read_only_hint
         out[tool.remote] = StoredReview(
             fingerprint=tool.fingerprint, enabled=True, nature="lecture" if reading else "action",
-            approval="aucun" if reading else "operateur", server_description=tool.description, title=tool.title,
+            autonomy="seule" if reading else "toi", server_description=tool.description, title=tool.title,
             schema=dict(tool.schema), by=BY)
     return out

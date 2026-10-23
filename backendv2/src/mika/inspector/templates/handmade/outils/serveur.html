@@ -1,5 +1,6 @@
-{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123) : s'il marche et ce qui attend ton
-   regard, ce qu'elle en lit, ses outils et ce que tu en as décidé, pour qui et quand ; le côté technique replié. #}
+{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123, 0128) : s'il marche et ce qui attend
+   ton regard, ce qu'elle en fait en une phrase, ce qu'elle en lit, ses outils et ce que tu en as décidé, pour qui et
+   quand ; le côté technique replié. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page server">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
@@ -10,6 +11,20 @@
     <li class="{{ 'warn' if review }}"><a href="{{ tools_tab }}"><span class="person-tile-label">À revoir</span><span class="person-tile-value">{{ review }}</span><span class="person-tile-sub">nouveaux ou changés</span></a></li>
     <li class="{{ 'danger' if failures }}"><a href="{{ calls_tab }}"><span class="person-tile-label">Appels</span><span class="person-tile-value">{{ calls }}</span><span class="person-tile-sub">{{ failures }} en échec</span></a></li>
   </ul>
+
+  <section class="now-card service-said" aria-labelledby="server-does">
+    <header class="now-card-head">
+      <h2 id="server-does">Ce qu'elle en fait</h2>
+      <span class="now-tag owner">{{ genre }}</span>
+      <p><a href="{{ service_tab }}">Changer</a></p>
+    </header>
+    <p class="service-sentence">{{ sentence }}</p>
+    <dl class="service-three">
+      <div><dt>Avec qui</dt><dd>{{ who }}</dd></div>
+      <div><dt>Ce qu'elle fait seule</dt><dd>{{ alone }}</dd></div>
+      <div><dt>Ce qu'elle en garde</dt><dd>{{ keep }}<span>Plus tard, à quelqu'un d'autre : {{ keep_later }}</span></dd></div>
+    </dl>
+  </section>
 
   <section class="now-card" aria-labelledby="server-read">
     <header class="now-card-head">
@@ -30,7 +45,7 @@
     </header>
     {% if tools %}
     <ul class="server-tools" role="list">
-      {% for t in tools %}<li><div class="server-tool-top"><code>{{ t.name }}</code><span class="now-tag {{ t.tone }}">{{ t.state }}</span></div>{% if t.what %}<p>{{ t.what }}</p>{% endif %}</li>{% endfor %}
+      {% for t in tools %}<li><div class="server-tool-top"><code>{{ t.name }}</code><span class="now-tag {{ t.tone }}">{{ t.state }}</span></div>{% if t.what %}<p>{{ t.what }}</p>{% endif %}{% if t.rules %}<p class="server-tool-rules"><a href="{{ t.rules }}">Par situation et par personne</a></p>{% endif %}</li>{% endfor %}
     </ul>
     {% else %}
     <p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge.</p>
@@ -44,8 +59,8 @@
     </header>
     <div class="server-who-actions">
       {% if grid %}<a class="btn" href="{{ grid }}">Régler outil par outil</a>{% endif %}
-      <a class="btn quiet" href="{{ settings }}">Changer pour qui il est prévu</a>
-      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir aussi à une personne qui a un compte, ou à d'autres moments, c'est dans ses réglages.</p>
+      <a class="btn quiet" href="{{ service_tab }}">Changer avec qui, et quand</a>
+      <p class="now-muted">{% if grid %}La grille retire un outil dans une situation ; elle n'en ouvre pas. {% endif %}Pour l'ouvrir aussi aux comptes ou à des personnes choisies, ou à d'autres moments, c'est dans « Ce qu'elle en fait ».</p>
     </div>
     <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Pour qui, quand">
       <table class="server-who">

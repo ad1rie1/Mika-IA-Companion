@@ -1,10 +1,10 @@
-{# L'en-tête de la fiche d'un service branché (app/handmade/servers.py, ADR 0123), sur tous ses onglets : son nom, à
-   quoi il lui sert, où il en est, ses réglages en bouton ; la console y ajoute ses actions (« Tester la connexion »). #}
+{# L'en-tête de la fiche d'un service branché (app/handmade/servers.py, ADR 0123, 0128), sur tous ses onglets : son nom
+   et ses étiquettes sur une ligne, à quoi il lui sert dessous ; la console met à droite ses actions (« Tester la
+   connexion ») et ses liens (« Modifier ses réglages », ``ServerOverview.links``). #}
 <div class="server-head">
-  <h1>{{ name }}</h1>
-  {% if purpose %}<p class="server-head-what">{{ purpose }}</p>{% endif %}
   <div class="server-head-row">
+    <h1>{{ name }}</h1>
     <p class="server-head-tags">{% for text, tone in tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</p>
-    <a class="btn quiet" href="{{ settings }}">Modifier ses réglages</a>
   </div>
+  {% if purpose %}<p class="server-head-what">{{ purpose }}</p>{% endif %}
 </div>

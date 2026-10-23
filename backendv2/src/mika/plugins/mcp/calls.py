@@ -22,7 +22,8 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.guards import Guard
 from mika.kernel.operate import Preview
-from mika.plugins.mcp import ANSWER_KEPT, EXPIRER, MCP, WAITING, McpState, call_digest
+from mika.plugins.mcp import ANSWER_KEPT, ANSWER_LEVELS, EXPIRER, MCP, WAITING, McpState, call_digest
+from mika.ports.mcp import KEEPS
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
@@ -31,7 +32,8 @@ def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
     """Exactement ce qui partirait, et ce qui l'empêcherait de partir tel quel."""
     server, remote = str(args.get("server") or ""), str(args.get("remote") or "")
     shown = json.dumps(args.get("args") or {}, ensure_ascii=False, indent=1, sort_keys=True)
-    text = f"Service : {server}\nOutil : {remote}\nCe qui partira :\n{shown}"
+    keep = next((said.split(" — ")[0] for k, said in KEEPS if k == args.get("keep")), "")
+    text = f"Service : {server}\nOutil : {remote}\nCe qu'elle en gardera : {keep or '—'}\nCe qui partira :\n{shown}"
     digest = call_digest(args)
     port, frame_of = ports.get("mcp"), ports.get("frame")
     blocked = ""
@@ -74,7 +76,8 @@ async def _came_back(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
     if text is None:
         text = phrase("mcp.lost") if ev.data.ok else ev.data.result
     return [c.ANSWERED.draft(proposal=req.proposal, ok=ev.data.ok,
-                             text=Content.of(text[:ANSWER_KEPT], level=int(Sensitivity.PERSONAL)),
+                             text=Content.of(text[:ANSWER_KEPT],
+                                             level=ANSWER_LEVELS.get(req.keep, int(Sensitivity.PERSONAL))),
                              about=(req.target,) if req.target else (), dedupe_key=f"mcp-rendu:{req.proposal}")]
 
 

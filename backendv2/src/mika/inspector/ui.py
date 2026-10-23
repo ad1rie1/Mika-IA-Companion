@@ -182,6 +182,10 @@ class Overview:
     def head(self, ui: UI, key: str) -> Any:
         return None
 
+    def links(self, ui: UI, key: str) -> Sequence[tuple[str, str]]:
+        """Des liens (texte, adresse) posés avec les actions de l'en-tête, à droite : ses réglages, par exemple."""
+        return ()
+
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         """Un onglet d'une faculté, dessiné : ``blocks`` sont ceux que la faculté a rendus (ses lignes, ses

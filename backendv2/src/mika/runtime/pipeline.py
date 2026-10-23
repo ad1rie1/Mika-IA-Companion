@@ -578,6 +578,7 @@ class EpisodeRunner:
                         sections=trace.included, provenance=trace.provenance, answers=answers,
                         attachments=tuple(loop.attachments), about=req.about,
                         mode=req.mode if ep.mode is not None else "",
+                        floor=max(loop.floor, trace.floor), unkept=loop.unkept or trace.unkept,
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
                     guard=guard, holder=eid,

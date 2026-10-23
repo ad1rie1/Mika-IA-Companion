@@ -1,0 +1,57 @@
+{# Un service branché › « Ses outils » (app/handmade/servers.py, ADR 0128) : le réglage du service, qui vaut pour tous ;
+   les nouveaux, servis en un clic avec ce réglage ; puis ce qui lit et ce qui agit, un outil par ligne — son état, son
+   accord s'il fait exception, ses règles, et « Régler » replié (le formulaire de l'action ``mcp.regler``). #}
+{% from "_forms.html" import action_form %}
+<div class="now-page service">
+  <section class="now-card tools-default" aria-labelledby="tools-default">
+    <div>
+      <h2 id="tools-default">Par défaut, pour tous ses outils</h2>
+      <p class="tools-default-said">{{ alone }} · garde : {{ keep }}</p>
+      <p class="now-muted">Les réglages du service ({{ genre }}). Un outil n'a de réglage à lui que s'il fait exception.</p>
+    </div>
+    <a class="btn quiet" href="{{ service_tab }}">Changer</a>
+  </section>
+
+  {% if fresh %}
+  <section class="tools-fresh" aria-label="Nouveaux outils">
+    <p><b>{{ fresh|length }} outil{{ 's' if fresh|length > 1 }} nouveau{{ 'x' if fresh|length > 1 }}</b> : {% for f in fresh %}<code>{{ f }}</code>{{ ', ' if not loop.last }}{% endfor %}. {{ 'Ils sont coupés' if fresh|length > 1 else 'Il est coupé' }}.</p>
+    {% if serve_form %}{{ action_form(serve_form, True, True, True) }}{% endif %}
+  </section>
+  {% endif %}
+  {% for n in notes %}<p class="server-alert {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+
+  {% for g in groups %}
+  <section class="now-card" aria-labelledby="tools-{{ g.key }}">
+    <header class="now-card-head"><h2 id="tools-{{ g.key }}">{{ g.title }}</h2><span class="person-count now-num">{{ g.tools|length }}</span><p>{{ g.hint }}</p></header>
+    {% if g.tools %}
+    <ul class="tools-rows" role="list">
+      {% for t in g.tools %}
+      <li class="tools-row">
+        <div class="tools-row-main">
+          <code>{{ t.name }}</code>
+          {% if t.what %}<span class="tools-row-what">{{ t.what }}</span>{% endif %}
+        </div>
+        <div class="tools-row-tags">
+          <span class="now-tag {{ t.tone }}">{{ t.state }}</span>
+          {% if t.own %}<span class="now-tag owner">exception : {{ t.own }}</span>{% endif %}
+          {% if t.rules %}<a class="now-tag info" href="{{ t.rules_href }}">{{ t.rules }}</a>{% endif %}
+        </div>
+        <div class="tools-row-actions">
+          {% if t.rules_href %}<a href="{{ t.rules_href }}">Par situation et par personne</a>{% endif %}
+          {% if t.form %}
+          <details class="action-pop tools-pop" data-exclusive>
+            <summary class="btn quiet">Régler</summary>
+            <div class="action-panel"><h3>{{ t.name }}</h3>{{ action_form(t.form, True) }}</div>
+          </details>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="now-muted">{{ g.empty }}</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+  <p class="now-muted">Lire ou agir : deviné d'après ce que le serveur dit de l'outil ; « Régler » le corrige. Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
+</div>

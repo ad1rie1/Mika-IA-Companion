@@ -1,8 +1,8 @@
 """Les outils venus d'ailleurs dans sa boucle (ADR 0064), avec un faux port ``mcp`` dans un vrai noyau.
 
 Ce qui est vérifié : l'instantané approuvé devient des outils à elle (nom, lot décrit par ce que l'opérateur a écrit,
-schéma tel quel) ; la porte d'offre les donne selon le serveur — sa propriétaire seulement, ou aussi une personne
-authentifiée, jamais un salon ni une inconnue ; un appel mal formé est refusé avant de partir ; ce qui revient est
+schéma tel quel) ; la porte d'offre les donne selon le serveur — avec sa propriétaire seulement, ou aussi avec une
+personne authentifiée, jamais un salon ni une inconnue (ADR 0128) ; un appel mal formé est refusé avant de partir ; ce qui revient est
 cité comme une donnée ; la règle de ses mains lui dit que ses arguments sortent de la machine ; une offre qui
 change change ses outils ; un nom déjà pris n'écrase rien."""
 
@@ -31,7 +31,7 @@ SCHEMA = {"type": "object", "properties": {"ville": {"type": "string", "descript
 
 def offered_tool(**kw) -> OfferedTool:
     base = dict(server="meteo", remote="prevision", name=NAME, description="Les prévisions d'une ville.",
-                schema=SCHEMA, nature="lecture", approval="aucun", audience="proprietaire",
+                schema=SCHEMA, nature="lecture", autonomy="seule",
                 episodes=frozenset({"conversation"}), in_hand=False, max_calls=3, max_result_chars=4000,
                 purpose="la météo et les prévisions d'une ville", when_to_use="quand on parle d'une sortie",
                 local=False)
@@ -106,7 +106,7 @@ def test_an_approved_tool_becomes_hers_and_its_answer_is_cited(tmp_path):
         return spec, registry.bundles.get("mcp.meteo"), offers, report, kernel.traces.get(report.id), llm.calls
 
     spec, line, offers, report, trace, calls = live(tmp_path, scenario, port)
-    assert spec.bundle == "mcp.meteo" and spec.schema == SCHEMA and spec.outside and spec.owner_only
+    assert spec.bundle == "mcp.meteo" and spec.schema == SCHEMA and spec.outside and spec.when is not None
     assert line == "la météo et les prévisions d'une ville — quand on parle d'une sortie (un service extérieur)"
     assert offers == {"propriétaire": {NAME}, "compte": set(), "salon": set(), "inconnue": set()}
     # l'appel bien formé part, les deux autres sont refusés avant de partir (schéma : requis, inconnu)
@@ -125,7 +125,7 @@ def test_an_approved_tool_becomes_hers_and_its_answer_is_cited(tmp_path):
 
 
 def test_a_server_for_accounts_never_serves_a_room_nor_a_stranger(tmp_path):
-    port = FakePort(offered_tool(audience="comptes"))
+    port = FakePort(offered_tool(with_accounts=True))
 
     async def scenario(kernel, llm):
         return _offers(kernel)
@@ -135,7 +135,7 @@ def test_a_server_for_accounts_never_serves_a_room_nor_a_stranger(tmp_path):
 
 
 def test_her_tools_follow_the_offer(tmp_path):
-    port = FakePort(offered_tool(), offered_tool(remote="alerte", name="mcp_meteo_alerte", approval="conversation"),
+    port = FakePort(offered_tool(), offered_tool(remote="alerte", name="mcp_meteo_alerte", autonomy="carte"),
                     offered_tool(remote="intrus", name="memory_search"))
 
     async def scenario(kernel, llm):

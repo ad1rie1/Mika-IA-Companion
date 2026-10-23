@@ -422,7 +422,8 @@ class SettingsForms:
         if found is None:
             return None
         model, keyed = found
-        fields = forms.describe(model)
+        # ce qu'une autre page règle n'est pas montré ici (``exclude`` : « servers.keep »)
+        fields = tuple(f for f in forms.describe(model) if not _excluded(f"{path}.{f.path}", s.exclude))
         entry = _entry(current, path, key, keyed)
         flat = forms.flatten(entry) if entry is not None else _defaults(fields)
         given = {**flat, **state.record_values}
@@ -565,7 +566,7 @@ class SettingsForms:
         if found is None:
             return None, {s.key: State(messages=[("danger", "Liste inconnue.")])}, 400
         model, keyed = found
-        fields = forms.describe(model)
+        fields = tuple(f for f in forms.describe(model) if not _excluded(f"{path}.{f.path}", s.exclude))
         entry = _entry(current, path, old, keyed)
         flat = forms.flatten(entry) if entry is not None else _defaults(fields)
         token = data.get(STASH, "")

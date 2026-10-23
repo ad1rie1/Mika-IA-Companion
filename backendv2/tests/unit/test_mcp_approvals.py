@@ -1,11 +1,12 @@
-"""Les appels qui demandent un accord (ADR 0064), dans un vrai noyau avec un faux port ``mcp``.
+"""Les appels qui demandent un accord (ADR 0064, 0128), dans un vrai noyau avec un faux port ``mcp``.
 
-Dans la conversation : l'outil propose l'appel et rien ne part ; la carte n'existe que pour la personne de
-l'épisode, qui seule en décide, et seulement sur ce qui lui a été montré (l'empreinte) ; accepté, l'appel part, ce
-qu'il rend revient comme un contenu (effaçable, jamais le champ brut de l'effet) que son prompt suivant lui montre —
-une fois dit, il ne l'est plus ; un outil qui change avant l'accord bloque l'accord ; une carte sans réponse expire
-et elle le sait. De l'opérateur : pas de carte, la console décide. L'initiative due part vers la personne quand
-elle n'a pas écrit entre-temps."""
+Sur accord de la personne en face (``carte``) : l'outil propose l'appel et rien ne part ; la carte n'existe que pour
+la personne de l'épisode, qui seule en décide, et seulement sur ce qui lui a été montré (l'empreinte) ; accepté,
+l'appel part, ce qu'il rend revient comme un contenu (effaçable, jamais le champ brut de l'effet) que son prompt
+suivant lui montre — une fois dit, il ne l'est plus ; un outil qui change avant l'accord bloque l'accord ; une carte
+sans réponse expire et elle le sait. Sur l'accord de sa propriétaire (``toi``) : une carte quand c'est elle en face ;
+devant quelqu'un d'autre, pas de carte, la console décide. L'initiative due part vers la personne quand elle n'a pas
+écrit entre-temps."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from mika.contracts import mcp as c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.registry import ArbitrationPolicy
-from mika.plugins.mcp import ANSWERED, EXPIRED, prompt
+from mika.plugins.mcp import ANSWERED, EPISODES, EXPIRED, prompt
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build, connect, said
@@ -67,8 +68,8 @@ def live(tmp_path, scenario, port, respond=scripted):
     return run_virtual(clock, main)
 
 
-async def ask(kernel, text="quel temps à Lyon demain ?"):
-    perceived = await kernel.perceive(said("user_1", text, display_name="Adrien"))
+async def ask(kernel, text="quel temps à Lyon demain ?", who="user_1", name="Adrien"):
+    perceived = await kernel.perceive(said(who, text, display_name=name))
     report = await perceived.reply
     await kernel.traces.flush()
     return report
@@ -80,7 +81,7 @@ def pending(kernel):
 
 
 def test_in_the_conversation_only_she_decides_on_what_she_was_shown(tmp_path):
-    port = AnsweringPort(offered_tool(approval="conversation", fingerprint="f1"))
+    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
@@ -127,14 +128,14 @@ def test_in_the_conversation_only_she_decides_on_what_she_was_shown(tmp_path):
 
 
 def test_a_tool_changed_before_approval_blocks_it(tmp_path):
-    port = AnsweringPort(offered_tool(approval="conversation", fingerprint="f1"))
+    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
         await ask(kernel)
         (proposal,) = pending(kernel)
         digest = (await mind_port.approval_cards("user_1"))[0]["digest"]
-        port.tools = [offered_tool(approval="conversation", fingerprint="f2")]
+        port.tools = [offered_tool(autonomy="carte", fingerprint="f2")]
         kernel.refresh_tools()
         cards = await mind_port.approval_cards("user_1")
         return cards, await mind_port.decide_card("user_1", proposal, True, digest), port.calls
@@ -144,7 +145,7 @@ def test_a_tool_changed_before_approval_blocks_it(tmp_path):
 
 
 def test_a_card_left_unanswered_expires_and_she_is_told(tmp_path):
-    port = AnsweringPort(offered_tool(approval="conversation", fingerprint="f1"))
+    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         await ask(kernel)
@@ -161,25 +162,48 @@ def test_a_card_left_unanswered_expires_and_she_is_told(tmp_path):
     assert "expiré" in owed[0].args["brief:mcp"]
 
 
-def test_an_operator_approval_has_no_card_and_is_decided_in_the_console(tmp_path):
-    port = AnsweringPort(offered_tool(approval="operateur", fingerprint="f1"))
+def test_her_approval_asked_before_someone_else_has_no_card_and_is_decided_in_the_console(tmp_path):
+    """``toi`` devant une autre personne (Béa, un compte) : ni Béa ni sa propriétaire n'ont de carte, la console
+    décide (ADR 0128)."""
+    port = AnsweringPort(offered_tool(autonomy="toi", with_accounts=True, fingerprint="f1"))
+
+    async def scenario(kernel, llm):
+        mind_port = KernelPort(kernel)
+        await ask(kernel, who="user_2", name="Béa")
+        (proposal,) = pending(kernel)
+        args = pending(kernel)[proposal]
+        cards = await mind_port.approval_cards("user_1") + await mind_port.approval_cards("user_2")
+        shown = await mind_port.effect_preview(proposal)
+        status = await mind_port.resolve_effect(proposal, True, by="user_1", seen=shown.digest)
+        await asyncio.sleep(5)
+        return args, cards, status, port.calls
+
+    args, cards, status, calls = live(tmp_path, scenario, port)
+    assert rt.DECIDER not in args and args["approval"] == "operateur" and args["target"] == "user_2"
+    assert cards == [] and status == "approved" and calls == [("meteo", "prevision", {"ville": "Lyon"})]
+
+
+def test_her_approval_is_a_card_when_she_is_the_one_in_front(tmp_path):
+    """``toi`` devant sa propriétaire : la carte lui est montrée dans la conversation, et ce qu'elle en gardera y est
+    dit (ADR 0128)."""
+    port = AnsweringPort(offered_tool(autonomy="toi", keep="prive", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
         await ask(kernel)
         (proposal,) = pending(kernel)
-        cards = await mind_port.approval_cards("user_1")
-        shown = await mind_port.effect_preview(proposal)
-        status = await mind_port.resolve_effect(proposal, True, by="user_1", seen=shown.digest)
-        await asyncio.sleep(5)
-        return cards, status, port.calls
+        return pending(kernel)[proposal], await mind_port.approval_cards("user_1")
 
-    cards, status, calls = live(tmp_path, scenario, port)
-    assert cards == [] and status == "approved" and calls == [("meteo", "prevision", {"ville": "Lyon"})]
+    args, cards = live(tmp_path, scenario, port)
+    assert args[rt.DECIDER] == "user_1" and args["approval"] == "conversation" and args["keep"] == "prive"
+    assert len(cards) == 1 and "Ce qu'elle en gardera : une confidence" in cards[0]["text"]
 
 
-def test_a_conversation_approval_tool_is_offered_only_where_someone_can_accept(tmp_path):
-    port = AnsweringPort(offered_tool(approval="conversation", audience="comptes",
+def test_a_card_tool_serves_where_its_service_does_and_no_longer_only_in_reply(tmp_path):
+    """Avant l'ADR 0128, un outil « dans la conversation » n'était servi qu'en répondant. Désormais l'accord se
+    décide à l'appel (sans personne pour accepter, l'opérateur décide) : il sert dans tous les épisodes de son
+    service, avec les mêmes personnes — jamais un salon ni une inconnue."""
+    port = AnsweringPort(offered_tool(autonomy="carte", with_accounts=True,
                                       episodes=frozenset({"conversation", "initiative", "travail"})))
 
     async def scenario(kernel, llm):
@@ -189,4 +213,4 @@ def test_a_conversation_approval_tool_is_offered_only_where_someone_can_accept(t
 
     offers, episodes = live(tmp_path, scenario, port)
     assert offers == {"propriétaire": {NAME}, "compte": {NAME}, "salon": set(), "inconnue": set()}
-    assert episodes == frozenset({"REPLY"})  # en initiative ou en travail, personne pour accepter
+    assert episodes == EPISODES["conversation"] | EPISODES["initiative"] | EPISODES["travail"]

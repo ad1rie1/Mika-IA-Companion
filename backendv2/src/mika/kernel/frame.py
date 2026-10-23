@@ -38,6 +38,8 @@ class Audience:
     private_ok: bool = False
     certainty: float = 0.0
     name: str = ""
+    #: la personne qui écoute (sa clé, ce que ``persons`` rattache à une personne) ; vide : personne, ou inconnue
+    person: str = ""
     #: l'interlocuteur est l'un de ses propriétaires (ou personne n'écoute :
     #: elle travaille pour elle) — ouvre les outils ``owner_only``
     owner: bool = False

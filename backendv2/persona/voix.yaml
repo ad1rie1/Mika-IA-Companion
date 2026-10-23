@@ -2260,6 +2260,8 @@ memory:
       # ce qu'elle a raconté sans nommer personne (ADR 0091) : son texte ne se montre pas à la relecture — rien n'en
       # est à retenir, ni sur qui l'écoutait, ni sur elle
       veiled_said: "(elle a raconté quelque chose qu'elle sait d'une autre personne, sans la nommer : rien à en retenir)"
+      # un échange avec un service dont rien ne se garde (ADR 0128) : sa réplique, et la demande qu'elle suivait
+      unkept: "(un échange avec un service dont rien ne se garde : rien à en retenir)"
     # À qui une promesse est faite, et pour quel jour (le modèle voit qu'elle n'est due que ce jour-là). {label} :
     # son nom et son jeton ; {day} : memory.dates.day.
     due_day: "{label}, pour {day}"
@@ -6037,7 +6039,7 @@ mcp:
   # La description d'un outil quand le serveur n'en donne pas. {server} : le nom du serveur
   tool_fallback: un outil de {server}
 
-  # Les réponses d'un outil de service (plugins/mcp, _direct et _asker). {server} : « le nom du serveur »
+  # Les réponses d'un outil de service (plugins/mcp, _call et _ask). {server} : « le nom du serveur »
   tools:
     # un appel qui a échoué. {text} : ce que le service a répondu
     failed: (réponse de {server}, un service extérieur) {text}
@@ -6046,8 +6048,9 @@ mcp:
     nothing: "> (rien)"
     # après ce qu'une lecture du monde lui a rendu, en conversation (ADR 0110)
     read_aloud: "(Raconte-le comme quelqu'un qui vient de le lire : en quelques phrases, ce qui t'a frappée et ce que tu en penses. Pas la page, pas comment tu l'as trouvée, pas ce que tu n'as pas lu, sauf si on te le demande.)"
+    # un outil que son service ou une règle retire devant cette personne (ADR 0128)
+    closed: Cet outil ne te sert pas avec cette personne.
     # un appel qui attend un accord
-    nobody: Il faut quelqu'un en face pour accepter cet appel.
     # {who} : in_chat ou operator
     asked: "Demandé, rien n'est encore parti : l'appel partira quand {who}. Ce qu'il rendra te reviendra ensuite. Dis-le simplement, sans inventer la réponse."
     in_chat: la personne à qui tu parles l'accepte — une carte s'affiche dans votre conversation

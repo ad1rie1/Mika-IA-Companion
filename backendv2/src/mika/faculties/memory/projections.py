@@ -658,6 +658,8 @@ class Chunks:
             d = e.data
             if not d.visible or not d.target or d.reply_to is None or forgotten(d.text):
                 continue
+            if d.unkept:
+                continue  # nourri d'un service dont rien ne se garde (ADR 0128) : l'échange ne s'indexe pas
             # une réponse règle tout le tour (``answers`` : « salut », « t'as vu le match ? », « allo ? ») ; la
             # question n'est souvent pas le dernier message — l'échange les garde tous, dans l'ordre (un journal
             # d'avant le tour : ``reply_to`` seul)

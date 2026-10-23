@@ -289,7 +289,7 @@ class Settings:
 
     # ── Outils extérieurs (MCP, ADR 0064) ──
     #: les secrets d'un serveur MCP (scellés à part)
-    MCP_SECRETS = ("token", "secret_env")
+    MCP_SECRETS = ("token", "secret_env", "secret_headers")
 
     def mcp(self) -> McpConfig:
         """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""

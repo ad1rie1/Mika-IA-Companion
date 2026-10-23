@@ -3,7 +3,8 @@
 - actif, le plugin ``web`` ajoute son serveur à la configuration de l'opérateur, lancé dans sa cage, réseau isolé,
   ses réglages dans l'environnement ; désactivé, il n'y est plus ;
 - ses outils sont approuvés d'office, sur l'empreinte exacte de ce que le serveur proposera (la fonction même du
-  client) : en lecture, sans accord ; un outil qui ne se dit pas en lecture attendrait l'opérateur ;
+  client) : en lecture, seule ; un outil qui ne se dit pas en lecture attendrait l'accord de sa propriétaire ;
+- avec sa propriétaire seulement (par défaut), et ce qu'elle y lit est public : un savoir (ADR 0128) ;
 - l'opérateur ne range rien pour eux, et un serveur à lui du même nom s'efface ;
 - des paramètres illisibles : aucun serveur système, rien d'offert ;
 - le plugin est une faculté de la composition, avec ses paramètres dans la console.
@@ -37,7 +38,10 @@ def test_active_the_web_plugin_brings_its_server_into_the_mcp_client():
     assert srv.ready and srv.local and srv.network == "isole" and srv.command == "python3"
     assert srv.args == ("-I", str(web.server_path())) and srv.shared == (str(web.server_path().parent),)
     assert srv.in_conversation and srv.in_work and not srv.in_initiative and not srv.in_hand
-    assert srv.audience == "proprietaire" and "DuckDuckGo" in srv.purpose
+    assert srv.with_owner and not srv.with_accounts and srv.with_people == () and "DuckDuckGo" in srv.purpose
+    assert srv.keep == "public"  # ce qu'elle lit sur le web peut devenir un savoir (ADR 0085, 0128)
+    shared = _system(web.WebParams(audience="comptes")).config(McpConfig()).servers["web"]
+    assert shared.with_owner and shared.with_accounts
 
 
 def test_disabled_it_is_gone():
@@ -64,7 +68,7 @@ def test_its_tools_are_approved_on_what_the_server_will_say():
     assert set(reviews) == set(listed) == {"search", "read", "read_pages"}
     for name, review in reviews.items():
         assert review.fingerprint == listed[name].fingerprint  # l'empreinte que le client calculera
-        assert review.enabled and review.nature == "lecture" and review.approval == "aucun" and review.by == BY
+        assert review.enabled and review.nature == "lecture" and review.autonomy == "seule" and review.by == BY
     assert set(_system(web.WebParams(parallel_pages=1)).reviews({})["web"]) == {"search", "read"}
 
 
@@ -72,7 +76,7 @@ def test_a_tool_that_does_not_say_it_only_reads_waits_for_the_operator():
     raw = {"name": "envoyer", "description": "envoie", "inputSchema": {"type": "object"}}
     system = SystemServers(lambda: {"x": Provided(OPERATOR, (raw,))})
     review = system.reviews({})["x"]["envoyer"]
-    assert review.nature == "action" and review.approval == "operateur"
+    assert review.nature == "action" and review.autonomy == "toi"
 
 
 def test_the_operator_stores_nothing_for_it_and_its_name_wins():

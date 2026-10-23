@@ -4,14 +4,18 @@ Rien ici ne parle à un serveur : le port ``mcp`` le fait. La faculté dit ce qu
 nom, son lot (``mcp.<serveur>``, décrit par ce que l'opérateur a écrit : à quoi il sert, quand s'en servir), pour
 qui, quand — et ce qu'elle lit de sa réponse : une donnée venue d'ailleurs, désamorcée, citée, bornée.
 
-Deux sortes d'outils, selon l'accord que l'opérateur a choisi :
+Un outil sert selon son service et ses règles (ADR 0128) : avec qui (sa propriétaire, les comptes, des personnes
+nommées), et l'accord qu'il demande devant la personne en face, décidé à l'appel :
 
-- *sans accord* : l'appel part dans la boucle, elle lit la réponse aussitôt ;
-- *avec accord* (de la personne, dans la conversation ; ou de l'opérateur) : l'outil **propose** l'appel
-  (``mcp.call``, un effet) et rend la main — rien ne sort tant qu'on n'a pas accepté ce qui est montré. Exécuté,
-  ce que le service a rendu revient comme un contenu (``mcp.answered``) qu'elle dit à la personne : dans sa réponse
-  suivante si la personne a écrit, sinon par une initiative due (``calls``, ``prompt``). Refusé ou expiré, elle le
-  sait aussi.
+- *seule* : l'appel part dans la boucle, elle lit la réponse aussitôt ;
+- *sur accord* (``carte`` : de la personne en face ; ``toi`` : de sa propriétaire quand c'est elle en face ; sans
+  personne pour accepter, de l'opérateur) : l'outil **propose** l'appel (``mcp.call``, un effet) et rend la main —
+  rien ne sort tant qu'on n'a pas accepté ce qui est montré. Exécuté, ce que le service a rendu revient comme un
+  contenu (``mcp.answered``) qu'elle dit à la personne : dans sa réponse suivante si la personne a écrit, sinon par
+  une initiative due (``calls``, ``prompt``). Refusé ou expiré, elle le sait aussi.
+
+Ce qu'elle garde de ce qu'un service rend (``keep``) suit tout ce qui en sort : la réponse porte son plancher
+(``ToolResult.floor``, ``unkept``), et la mémoire le respecte.
 
 Elle relance de temps en temps les serveurs (ce qu'ils proposent a pu changer ; un serveur en panne a pu revenir) et
 journalise leur état quand il change (``mcp.status`` : des noms et des nombres, pour la console).
@@ -36,7 +40,7 @@ from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert
-from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 
@@ -53,7 +57,16 @@ EPISODES: Mapping[str, frozenset[str]] = {
 WATCH_EVERY = 15 * MINUTE
 FIRST_WATCH = MINUTE
 RULE = ("seulement tant que son serveur répond et que l'outil est celui qui a été approuvé ; ce qu'elle y met part "
-        "de la machine")
+        "de la machine ; selon qui lui parle, l'appel part aussitôt ou attend un accord")
+#: ce qu'on tire de ce qu'un service a rendu ne se dit jamais en dessous de ce plancher (ADR 0128) ; « rien » : rien
+#: ne s'en garde
+FLOORS = {"public": int(Sensitivity.NONE), "perso": int(Sensitivity.NONE), "prive": int(Sensitivity.CONFIDENCE),
+          "rien": int(Sensitivity.CONFIDENCE)}
+#: la sensibilité d'une réponse acceptée, journalisée pour qu'elle la dise
+ANSWER_LEVELS = {"public": int(Sensitivity.ANODYNE), "perso": int(Sensitivity.PERSONAL),
+                 "prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
+#: ce qu'un accord peut être (ADR 0128) : ``non`` retire l'outil
+NO, ALONE, CARD, OWNER_OK = "non", "seule", "carte", "toi"
 #: une carte d'accord dans la conversation vaut tant ; un accord de l'opérateur, tant
 CARD_TTL = 10 * MINUTE
 OPERATOR_TTL = DAY
@@ -103,6 +116,8 @@ class Request:
     request: str
     args_json: str = "{}"
     context: str = ""
+    #: ce qu'elle garde de ce que le service rendra (``keep`` de son serveur, au moment de la demande)
+    keep: str = ""
     status: str = WAITING
     by: str = ""
     done_at: int = 0
@@ -144,7 +159,8 @@ def _proposed(s: McpState, e: Any, cx: Any) -> McpState:
     req = Request(proposal=e.seq, server=str(args.get("server") or ""), remote=str(args.get("remote") or ""),
                   target=str(args.get("target") or ""), approval=str(args.get("approval") or ""), at=e.at,
                   expires=int(args.get(rt.EXPIRES) or 0), request=str(args.get("request") or ""),
-                  args_json=d.args_json, context=d.context, status=WAITING if d.approval else APPROVED)
+                  args_json=d.args_json, context=d.context, keep=str(args.get("keep") or ""),
+                  status=WAITING if d.approval else APPROVED)
     return replace(s, requests=_keep(s.requests.set(e.seq, req)))
 
 
@@ -225,14 +241,36 @@ class ExternalArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-def for_accounts(audience: Any) -> bool:
-    """En tête-à-tête, à sa propriétaire ou à une personne authentifiée — jamais dans un salon ; et quand elle
-    travaille (personne n'écoute)."""
+def situation(audience: Any) -> str | None:
+    """Où elle s'en servirait (ADR 0128) : avec sa propriétaire, avec une personne authentifiée en tête-à-tête, quand
+    elle travaille seule ; jamais dans un salon, avec une inconnue, ni sans personne."""
     if audience is None:
-        return False
+        return None
     if audience.trust == ChannelTrust.INTERNAL.value:
-        return True
-    return can_approve(audience)
+        return "travail"
+    if not audience.persons or audience.public or audience.room:
+        return None
+    if audience.owner:
+        return "proprietaire"
+    return "compte" if audience.trust == ChannelTrust.AUTHENTICATED.value else None
+
+
+def level_of(tool: Any, audience: Any) -> str:
+    """L'accord d'un outil devant cette audience : ``non`` s'il ne lui sert pas (hors de son service, ou une règle
+    l'a retiré), sinon ``seule``, ``carte`` ou ``toi``. Une personne nommée passe avant sa situation ; une règle ne
+    laisse personne de plus que le service."""
+    where = situation(audience)
+    if where is None:
+        return NO
+    person = (audience.person or "") if where == "compte" else ""
+    if where != "compte" and not tool.with_owner:
+        return NO
+    if where == "compte" and not (tool.with_accounts or (person and person in tool.with_people)):
+        return NO
+    named = dict(tool.people)
+    if person and person in named:
+        return named[person]
+    return dict(tool.situations).get(where) or tool.autonomy
 
 
 def can_approve(audience: Any) -> bool:
@@ -265,67 +303,89 @@ def call_digest(args: Mapping[str, Any]) -> str:
 CONSULTED_MAX = 2500
 
 
-def _direct(server: str, remote: str, limit: int, reads_world: bool = False) -> Any:
-    async def handler(args: ExternalArgs, ctx: Any) -> ToolResult:
-        port = ctx.ports.get("mcp")
-        if port is None:
-            return ToolResult(ok=False, content=phrase("mcp.unavailable"))
-        data = args.model_dump()
-        result = await port.call(server, remote, data)
-        if not result.ok:
-            return ToolResult(ok=False, content=phrase("mcp.tools.failed", server=label(server),
-                                                       text=inert(result.text, 600)))
-        ep = ctx.frame.episode
-        # ce qu'elle lit (une recherche, une page) se garde comme une lecture, relue la nuit (ADR 0085). En
-        # conversation, c'est lu pour quelqu'un (ADR 0110) : ce qu'on cherchait (les arguments) est à lui et ne se
-        # garde pas ; ce qu'elle a lu porte son nom, et la nuit n'en retient que les nouvelles et les faits publics
-        asked_by = (ep.target or "") if ep is not None and ep.kind in CONVERSATIONAL else ""
-        if reads_world and ep is not None and result.text and (ep.kind in WORKING or asked_by):
-            sought = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
-            await ctx.emit(c.CONSULTED.draft(
-                source=f"mcp:{server}"[:200], ref=f"{remote}:{call_digest({'server': server, 'remote': remote, 'args': data})}",
-                title=Content.of(inert(remote if asked_by else f"{remote} {sought}", 250),
-                                 level=int(Sensitivity.ANODYNE)),
-                excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
-                asked_by=asked_by[:200]))
-        # ce qu'elle lit pour quelqu'un se raconte : la consigne de son prompt ne suffisait pas (2026-10-14 : « c'est
-        # la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le début de la page »)
-        told = "\n" + phrase("mcp.tools.read_aloud") if reads_world and asked_by and result.text else ""
-        return ToolResult(content=phrase("mcp.tools.answered", server=label(server)) + "\n"
-                                  + (cite(result.text, limit) or phrase("mcp.tools.nothing")) + told)
+async def _call(t: Any, args: ExternalArgs, ctx: Any) -> ToolResult:
+    """L'appel part dans la boucle : elle lit la réponse aussitôt, avec ce qu'elle vaut (``keep``)."""
+    port = ctx.ports.get("mcp")
+    data = args.model_dump()
+    result = await port.call(t.server, t.remote, data)
+    if not result.ok:
+        return ToolResult(ok=False, content=phrase("mcp.tools.failed", server=label(t.server),
+                                                   text=inert(result.text, 600)))
+    ep = ctx.frame.episode
+    # ce qu'elle lit (une recherche, une page) se garde comme une lecture, relue la nuit (ADR 0085). En
+    # conversation, c'est lu pour quelqu'un (ADR 0110) : ce qu'on cherchait (les arguments) est à lui et ne se
+    # garde pas ; ce qu'elle a lu porte son nom, et la nuit n'en retient que les nouvelles et les faits publics
+    asked_by = (ep.target or "") if ep is not None and ep.kind in CONVERSATIONAL else ""
+    reads_world = getattr(t, "reads_world", False)
+    if reads_world and ep is not None and result.text and (ep.kind in WORKING or asked_by):
+        sought = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
+        await ctx.emit(c.CONSULTED.draft(
+            source=f"mcp:{t.server}"[:200],
+            ref=f"{t.remote}:{call_digest({'server': t.server, 'remote': t.remote, 'args': data})}",
+            title=Content.of(inert(t.remote if asked_by else f"{t.remote} {sought}", 250),
+                             level=int(Sensitivity.ANODYNE)),
+            excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
+            asked_by=asked_by[:200]))
+    # ce qu'elle lit pour quelqu'un se raconte : la consigne de son prompt ne suffisait pas (2026-10-14 : « c'est
+    # la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le début de la page »)
+    told = "\n" + phrase("mcp.tools.read_aloud") if reads_world and asked_by and result.text else ""
+    keep = getattr(t, "keep", "perso")
+    return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
+                              + (cite(result.text, t.max_result_chars) or phrase("mcp.tools.nothing")) + told,
+                      floor=FLOORS.get(keep, 0), unkept=keep == "rien")
 
-    return handler
+
+async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any) -> ToolResult:
+    """Un appel qui demande un accord : il propose l'appel (rien ne part) et le dit. La carte va à la personne en
+    face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
+    ep = ctx.frame.episode
+    audience = ctx.frame.audience
+    # au travail, la cible est un but ou un projet, pas une personne : rien à lui dire, l'opérateur décide
+    target = (ep.target if ep is not None else None) or ""
+    target = "" if is_work_target(target) else target
+    in_chat = bool(target) and can_approve(audience) and (level == CARD or bool(audience.owner))
+    data = args.model_dump()
+    payload: dict[str, Any] = {
+        "server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
+        "request": f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", "target": target,
+        "approval": "conversation" if in_chat else "operateur", "keep": getattr(t, "keep", "perso"),
+        rt.EXPIRES: ctx.frame.now + (CARD_TTL if in_chat else OPERATOR_TTL)}
+    if in_chat:
+        payload[rt.DECIDER] = target
+    payload["_apercu"] = call_digest(payload)
+    shown = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 300)
+    await ctx.propose(rt.EFFECT_PROPOSED.draft(
+        capability=c.CALL, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        summary=Content.of(f"Appeler « {inert(t.remote, 80)} » ({inert(t.server, 40)}) : {shown}"[:400],
+                           level=int(Sensitivity.PERSONAL)),
+        approval=True, context=f"mcp:{t.server}", about=(target,) if target else ()))
+    who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
+    return ToolResult(content=phrase("mcp.tools.asked", who=who))
 
 
-def _asker(t: Any) -> Any:
-    """Un outil qui demande un accord : il propose l'appel (rien ne part) et le dit."""
-    in_chat = t.approval == "conversation"
-
+def _handler(t: Any) -> Any:
     async def handler(args: ExternalArgs, ctx: Any) -> ToolResult:
         if ctx.ports.get("mcp") is None:
             return ToolResult(ok=False, content=phrase("mcp.unavailable"))
-        ep = ctx.frame.episode
-        target = (ep.target if ep is not None else None) or ""
-        if in_chat and not target:
-            return ToolResult(ok=False, content=phrase("mcp.tools.nobody"))
-        data = args.model_dump()
-        payload: dict[str, Any] = {
-            "server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
-            "request": f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", "target": target, "approval": t.approval,
-            rt.EXPIRES: ctx.frame.now + (CARD_TTL if in_chat else OPERATOR_TTL)}
-        if in_chat:
-            payload[rt.DECIDER] = target
-        payload["_apercu"] = call_digest(payload)
-        shown = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 300)
-        await ctx.propose(rt.EFFECT_PROPOSED.draft(
-            capability=c.CALL, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            summary=Content.of(f"Appeler « {inert(t.remote, 80)} » ({inert(t.server, 40)}) : {shown}"[:400],
-                               level=int(Sensitivity.PERSONAL)),
-            approval=True, context=f"mcp:{t.server}", about=(target,) if target else ()))
-        who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
-        return ToolResult(content=phrase("mcp.tools.asked", who=who))
+        level = level_of(t, ctx.frame.audience)
+        if level == NO:
+            return ToolResult(ok=False, content=phrase("mcp.tools.closed"))
+        if level == ALONE:
+            return await _call(t, args, ctx)
+        return await _ask(t, level, args, ctx)
 
     return handler
+
+
+def _gate(t: Any) -> Any:
+    def served(audience: Any) -> bool:
+        """Seulement avec qui son service le permet (sa propriétaire, les comptes, des personnes nommées et
+        authentifiées), sauf là où une règle de l'outil l'a retiré.
+
+        ADR 0128 : jamais dans un salon ni avec une inconnue."""
+        return level_of(t, audience) != NO
+
+    return served
 
 
 def specs_of(offered: Sequence[Any]) -> tuple[list[ToolSpec], dict[str, str]]:
@@ -334,23 +394,13 @@ def specs_of(offered: Sequence[Any]) -> tuple[list[ToolSpec], dict[str, str]]:
     bundles: dict[str, str] = {}
     for t in offered:
         episodes = frozenset().union(*(EPISODES.get(e, frozenset()) for e in t.episodes))
-        when = None if t.audience != "comptes" else for_accounts
-        if t.approval == "conversation":
-            episodes &= EPISODES["conversation"]  # quelqu'un en face pour accepter : en répondant seulement
-            when = can_approve
         if not episodes:
             continue
         bundle = f"{FAMILY}.{t.server}"
         bundles[bundle] = bundle_line(t)
-        handler = _direct(t.server, t.remote, t.max_result_chars, getattr(t, "reads_world", False)) \
-            if t.approval == "aucun" else _asker(t)
-        rule = RULE if t.approval == "aucun" else (
-            f"{RULE} ; l'appel ne part qu'après l'accord "
-            + ("de la personne, dans la conversation" if t.approval == "conversation" else "de l'opérateur"))
         tools.append(ToolSpec(
             MCP.name, t.name, inert(t.description, 1024) or phrase("mcp.tool_fallback", server=t.server), ExternalArgs,
-            handler, bundle,
-            episodes, max_calls_per_episode=t.max_calls, owner_only=t.audience != "comptes", when=when, rule=rule,
+            _handler(t), bundle, episodes, max_calls_per_episode=t.max_calls, when=_gate(t), rule=RULE,
             schema=dict(t.schema), in_hand=t.in_hand, outside=True))
     return tools, bundles
 

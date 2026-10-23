@@ -284,7 +284,9 @@ async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str,
         if args.mcp_cmd == "serveurs":
             return {"ok": True, "serveurs": [
                 {"nom": n, "ou": s.transport, "actif": s.enabled, "a_quoi": s.purpose,
-                 "adresse": s.url if not s.local else s.command, "pour": s.audience, "manque": s.problems()}
+                 "adresse": s.url if not s.local else s.command, "avec_toi": s.with_owner,
+                 "avec_les_comptes": s.with_accounts, "avec": list(s.with_people), "seule": s.autonomy,
+                 "garde": s.keep, "manque": s.problems()}
                 for n, s in sorted(settings.mcp().servers.items())]}
         ok, message = await hub.test(args.serveur)
         status = hub.status(args.serveur)

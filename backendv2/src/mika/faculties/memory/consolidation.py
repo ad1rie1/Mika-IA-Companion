@@ -353,11 +353,27 @@ class Consolidate:
                   if any(str(x).startswith(c.VEILED_PROVENANCE) for x in d.get("provenance") or ())}
         felt = {seq: declared.all for seq, d in said.items()
                 if (declared := Declared.decode(note(d, expression_c.EMOTION_ANNOTATION))) is not None}
-        if not lied and not veiled and not felt:
+        # ce qu'elle a lu à un service pour l'écrire (ADR 0128) : ce qu'il vaut s'étend à la demande qu'elle suivait
+        unkept: set[int] = set()
+        floors: dict[int, int] = {}
+        for seq, d in said.items():
+            floor = int(d.get("floor") or 0)
+            if not d.get("unkept") and not floor:
+                continue
+            for s in (seq, *(d.get("answers") or ()), d.get("reply_to")):
+                if not s:
+                    continue
+                if d.get("unkept"):
+                    unkept.add(int(s))
+                floors[int(s)] = max(floors.get(int(s), 0), floor)
+        if not lied and not veiled and not felt and not unkept and not floors:
             return conv
         return replace(conv, lines=tuple(
-            replace(ln, lie=ln.seq in lied, veiled=ln.seq in veiled, felt=felt.get(ln.seq, ()))
-            if ln.person is None and ln.seq in said else ln for ln in conv.lines))
+            replace(ln, lie=ln.seq in lied, veiled=ln.seq in veiled, felt=felt.get(ln.seq, ()),
+                    unkept=ln.seq in unkept, floor=floors.get(ln.seq, 0))
+            if ln.person is None and ln.seq in said
+            else replace(ln, unkept=ln.seq in unkept, floor=floors.get(ln.seq, 0))
+            if ln.seq in unkept or ln.seq in floors else ln for ln in conv.lines))
 
     @staticmethod
     def _near(conv: x.Conversation, rooms: Mapping[str, set[str]]) -> tuple[str, ...]:
@@ -644,7 +660,7 @@ class Consolidate:
             seqs = [s for s in cited if s in lines]
             if not seqs:
                 return any(ln.lie for ln in conv.lines)
-            return any((lines[s].lie or lines[s].veiled) and not lines[s].person for s in seqs)
+            return any((lines[s].lie or lines[s].veiled or lines[s].unkept) and not lines[s].person for s in seqs)
 
         def her_words(cited: Sequence[int]) -> list[str]:
             """Ses répliques citées : « garde ça pour toi », dit par elle, fait un secret même quand le modèle ne le
@@ -863,7 +879,7 @@ class Consolidate:
         drafts += self._constats(ex, frame, store, conv, people, passed or {}, p, provenance, call_id,
                                  upcoming={i: ev for i, ev in (moments or {}).items() if not ev.ongoing})
         drafts += self._foreseen(ex, frame, foreseen or {}, provenance, call_id)
-        return drafts
+        return floored(drafts, conv)
 
     @staticmethod
     def _moved(old: c.LifeEvent, at: int, frame: Frame, by: Sequence[str], sources: Sequence[int],
@@ -1853,3 +1869,30 @@ def window(rows: list[tuple[Any, ...]], awaiting: set[int]) -> list[tuple[Any, .
                 changed = True
                 break
     return [r for r in rows if r[0] <= upto]
+
+
+def floored(drafts: list[Draft[Any]], conv: x.Conversation) -> list[Draft[Any]]:
+    """Ce qu'une conversation tire d'un échange nourri par un service qui le garde en confidence (ADR 0128) : au moins
+    à ce niveau, et secret — il ne se redit qu'à la personne pour qui elle l'a lu. Un élément sans citation vient de
+    toute la conversation : il le suit aussi."""
+    floors = {ln.seq: ln.floor for ln in conv.lines if ln.floor}
+    if not floors:
+        return drafts
+    out: list[Draft[Any]] = []
+    for d in drafts:
+        data = d.data
+        fields = type(data).model_fields
+        floor = max((floors[s] for s in (getattr(data, "sources", ()) or ()) if s in floors), default=0)
+        if floor and "sensitivity" in fields:
+            # un renforcement sans sensibilité (``None`` : inchangée) prend celle du plancher
+            update: dict[str, Any] = {"sensitivity": max(int(data.sensitivity or 0), floor)}
+            if "secret" in fields and floor >= int(Sensitivity.CONFIDENCE):
+                update["secret"] = True
+                # la confidence de la personne pour qui elle a lu : elle le lui a confié, elle l'a entendu — sans
+                # quoi un élément sur un tiers deviendrait indicible même à elle
+                for key in ("told_by", "heard_by"):
+                    if key in fields:
+                        update[key] = tuple(sorted({*(getattr(data, key) or ()), *conv.persons}))
+            d = replace(d, data=data.model_copy(update=update))
+        out.append(d)
+    return out

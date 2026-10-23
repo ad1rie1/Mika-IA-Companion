@@ -41,6 +41,7 @@ from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
@@ -393,8 +394,23 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
         lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)))
+    async def settle_mcp(name: str, changes: Mapping[str, Any], create: bool = False) -> None:
+        """Ce qu'un serveur de l'opérateur fait d'elle, réglé depuis sa fiche (ADR 0128) : sa fiche de réglages
+        réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche."""
+        cfg = settings.mcp()
+        servers = dict(cfg.servers)
+        if create:
+            if name in servers or name in system.names():
+                raise ValueError(f"un serveur s'appelle déjà « {name} »")
+            servers[name] = McpServer.model_validate(dict(changes))
+        elif name not in servers:
+            raise ValueError("ce serveur ne se règle pas ici : un serveur du système suit les paramètres de son plugin")
+        else:
+            servers[name] = McpServer.model_validate({**servers[name].model_dump(), **changes})
+        await settings.save_mcp(McpConfig(servers=servers))
+
     mcp = world["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
-                                system.saving(settings.save_mcp_tools), local_root=data / "mcp")
+                                system.saving(settings.save_mcp_tools), local_root=data / "mcp", settle=settle_mcp)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **world},
                                      tool_rules=settings.tool_rules_for, authors=settings.author_for, **deps))

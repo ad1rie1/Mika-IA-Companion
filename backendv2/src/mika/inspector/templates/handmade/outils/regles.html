@@ -1,0 +1,81 @@
+{# Un service branché › « Par situation et par personne » (app/handmade/servers.py, ADR 0128) : pour un outil, la règle par
+   défaut de chaque situation, puis des personnes nommées qui passent avant leur situation ; « En clair » le redit. Le
+   service est le plafond : une situation qu'il ferme reste grisée. Le formulaire est celui de l'action ``mcp.regles``. #}
+{% macro plumbing(f) -%}
+<input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
+<input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
+{% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+{%- endmacro %}
+{% macro level_select(path, label_for, options, current) -%}
+<input type="hidden" name="_champs" value="{{ path }}">
+<select id="rule-{{ path }}" name="{{ path }}" class="rule-select{{ ' on' if current not in ('service', 'situation') }}">
+  {% for k, label in options %}<option value="{{ k }}"{{ ' selected' if k == current }}>{{ label }}</option>{% endfor %}
+</select>
+{%- endmacro %}
+<div class="now-page service">
+  <section class="now-card" aria-labelledby="rule-tool">
+    <header class="now-card-head">
+      <h2 id="rule-tool"><code>{{ remote }}</code></h2>
+      <span class="now-tag">{{ nature }}</span>
+    </header>
+    {% if what %}<p class="service-tool-what">{{ what }}</p>{% endif %}
+    <p class="service-ceiling"><b>Le plafond, le service :</b> {{ sentence }} <a href="{{ service_tab }}">Changer le service</a></p>
+    <p class="now-muted">Ici, on peut resserrer, jamais laisser plus de monde que le service. Son accord à lui (« {{ own }} ») se règle dans <a href="{{ tools_tab }}">Ses outils</a>.</p>
+  </section>
+
+  {% if form %}
+  <form method="post" action="{{ form.url }}" class="service-form">
+    {{ plumbing(form) }}
+    <section class="now-card" aria-labelledby="rule-situations">
+      <header class="now-card-head">
+        <h2 id="rule-situations">Par situation : la règle par défaut</h2>
+        <p>Elle vaut pour tous ceux qui ne sont pas nommés plus bas.</p>
+      </header>
+      <ul class="rule-rows" role="list">
+        {% for r in situations %}
+        <li class="rule-row{{ ' locked' if r.locked }}">
+          <div class="rule-who"><label for="rule-{{ r.path }}">{{ r.label }}</label><span>{{ r.hint }}</span></div>
+          {% if r.locked %}<span class="rule-locked">{{ r.why }}</span>
+          {% else %}{{ level_select(r.path, r.label, r.options, r.value) }}{% endif %}
+        </li>
+        {% endfor %}
+        <li class="rule-row locked"><div class="rule-who"><span class="rule-label">Une inconnue</span><span>un moyen de communication sans compte</span></div><span class="rule-locked">jamais</span></li>
+        <li class="rule-row locked"><div class="rule-who"><span class="rule-label">Un salon</span><span>devant plusieurs personnes</span></div><span class="rule-locked">jamais, quel que soit le réglage</span></li>
+      </ul>
+    </section>
+
+    <section class="now-card" aria-labelledby="rule-people">
+      <header class="now-card-head">
+        <h2 id="rule-people">Des personnes : avant leur situation</h2>
+        <p>Une personne nommée ici passe avant la règle de sa situation, dans ce que le service permet. Seulement authentifiée : sinon, c'est une inconnue.</p>
+      </header>
+      <ul class="rule-rows" role="list">
+        {% for slot in people_slots %}
+        <li class="rule-row">
+          <div class="rule-who">
+            <input type="hidden" name="_champs" value="{{ slot.person_path }}">
+            <label class="service-hidden" for="rule-{{ slot.person_path }}">Personne nommée {{ loop.index }}</label>
+            <select id="rule-{{ slot.person_path }}" name="{{ slot.person_path }}">
+              <option value="">{{ '+ nommer une personne' if not slot.person else '— retirer —' }}</option>
+              {% for p in people %}<option value="{{ p.key }}"{{ ' selected' if p.key == slot.person }}>{{ p.name }}</option>{% endfor %}
+              {% if slot.person and slot.person not in people_keys %}<option value="{{ slot.person }}" selected>{{ slot.person }}</option>{% endif %}
+            </select>
+          </div>
+          <label class="service-hidden" for="rule-{{ slot.level_path }}">Sa règle {{ loop.index }}</label>
+          {{ level_select(slot.level_path, "", person_options, slot.level) }}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="now-card service-said" aria-labelledby="rule-clear">
+      <header class="now-card-head"><h2 id="rule-clear">En clair</h2></header>
+      <dl class="rule-clear">
+        {% for who, what in summary %}<div><dt>{{ who }}</dt><dd>{{ what }}</dd></div>{% endfor %}
+      </dl>
+    </section>
+
+    <div class="form-actions-inline"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ tools_tab }}">Annuler</a></div>
+  </form>
+  {% endif %}
+</div>

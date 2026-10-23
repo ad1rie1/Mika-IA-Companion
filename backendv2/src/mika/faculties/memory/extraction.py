@@ -370,6 +370,11 @@ class Line:
     lie: bool = False  # une de ses répliques qu'elle a marquée mensonge : elle ne dit pas le vrai
     #: une de ses répliques qui racontait sans nom ce qu'elle sait de quelqu'un (ADR 0091) : son texte ne se relit pas
     veiled: bool = False
+    #: un échange avec un service dont rien ne se garde (ADR 0128) — sa réplique, et la demande qu'elle suivait : son
+    #: texte ne se relit pas
+    unkept: bool = False
+    #: ce que vaut ce qu'elle a lu pour cet échange (ADR 0128) : ce qu'on en tire ne se dit pas en dessous
+    floor: int = 0
     #: les pièces jointes que porte le message (ADR 0106)
     pieces: tuple[Piece, ...] = ()
     #: une de ses répliques : ce qu'elle a déclaré ressentir en l'écrivant (sa balise, ses facettes) — la relecture en
@@ -475,11 +480,12 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
             out.append(phrase("memory.extraction.render.day", day=day_words(day)))
         aside = phrase("memory.extraction.render.aside") if ln.aside else ""
         lie = phrase("memory.extraction.render.lie") if ln.lie else ""
-        text = phrase("memory.extraction.render.veiled_said") if ln.veiled else ln.text
-        felt = [(e, x) for e, x in ln.felt if e != A.Emotion.NEUTRAL.value] if not ln.veiled else []
+        text = (phrase("memory.extraction.render.veiled_said") if ln.veiled
+                else phrase("memory.extraction.render.unkept") if ln.unkept else ln.text)
+        felt = [(e, x) for e, x in ln.felt if e != A.Emotion.NEUTRAL.value] if not ln.veiled and not ln.unkept else []
         felt_said = phrase("memory.extraction.render.felt", what=facet_words(felt)) if felt else ""
         out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}{felt_said}"
-                   f"{pieces_words(ln.pieces)}")
+                   f"{'' if ln.unkept else pieces_words(ln.pieces)}")
     return "\n".join(out)
 
 

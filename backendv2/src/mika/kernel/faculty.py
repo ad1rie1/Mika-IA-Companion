@@ -64,6 +64,10 @@ class ToolResult(BaseModel):
     #: marche, un brouillon) ; faux, rien — quoi qu'en dise la règle de qui en juge (relire sa Forge, réactiver une
     #: app) ; rien : cette règle décide (ADR 0104)
     proof: bool | None = None
+    #: ce que vaut ce qu'il a rendu (ADR 0128) : ce qu'on tire du message qu'il nourrit ne se dit jamais en dessous de
+    #: cette sensibilité (``vocab.privacy.Sensitivity``) ; ``unkept`` : rien ne s'en garde, ni en mémoire ni en trace
+    floor: int = 0
+    unkept: bool = False
 
 
 def proving_tools(calls: Sequence[tuple[str, bool]], proofs: Sequence[bool | None],

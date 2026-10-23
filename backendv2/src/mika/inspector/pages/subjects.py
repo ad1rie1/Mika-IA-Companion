@@ -119,6 +119,9 @@ class Subjects:
         title = head.title if isinstance(head, Head) else key
         if spec.forgettable:
             actions.append(forget_form(self.ui, request, kind, key, title))
+        links = call(overview.links, self.ui, key, label=f"liens {kind}") if overview is not None else ()
+        if not isinstance(links, Failed):
+            actions += [{"page": href, "title": text} for text, href in links or ()]
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
         crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
             ([] if home and home.label == spec.plural else [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")])

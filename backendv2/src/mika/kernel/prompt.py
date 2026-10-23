@@ -165,6 +165,9 @@ class SectionBody:
     #: ce que le bloc raconte d'autrui sans nommer personne (ADR 0091) : les formes du nom qu'il tait. Il se mesure
     #: au niveau « sans nom » de l'audience, et il est retiré si l'un de ces noms paraît ailleurs dans le prompt
     veils: tuple[str, ...] = ()
+    #: ce que vaut ce qu'il montre (ADR 0128), comme ``ToolResult.floor`` et ``unkept`` : ce que l'énoncé emporte
+    floor: int = 0
+    unkept: bool = False
 
 
 def audible(body: SectionBody, audience_level: int, witness_level: int | None = None,
@@ -271,6 +274,9 @@ class ComposeTrace:
     sizes: tuple[tuple[str, int], ...] = ()
     #: ce qui part au modèle hors du composeur (persona, catalogue, outils), réservé au budget
     reserved: int = 0
+    #: ce que valent les sections rendues (``SectionBody.floor``, ``unkept``)
+    floor: int = 0
+    unkept: bool = False
 
 
 @dataclass(slots=True)
@@ -502,6 +508,8 @@ class Composer:
             history_turns=len(turns),
             provenance=tuple(p for b in rendered for p in b.body.provenance),
             sizes=tuple(sizes),
+            floor=max((b.body.floor for b in rendered), default=0),
+            unkept=any(b.body.unkept for b in rendered),
             reserved=max(0, reserved) + (len(prompt.chat_messages()) - 1) * budget.message_overhead,
         )
         return prompt, trace

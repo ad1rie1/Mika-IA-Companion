@@ -222,7 +222,7 @@ def audience_for(frame: Frame, req: Any) -> Audience:
     return Audience(
         persons=(target,), channel=channel, room=room, public=public, level=int(d.level),
         witness_level=int(d.witness_level), private_ok=d.own_file, trust=view.trust.value,
-        certainty=view.certainty, name=view.name,
+        certainty=view.certainty, name=view.name, person=str(frame.get(c.PERSON(target)) or target),
         owner=bool(frame.get(c.SPEAKS_AS_OWNER(target))) and not public, tied_level=int(d.tied_level), ties=ties,
         veiled_level=int(d.veiled_level), untied_level=int(d.untied_level),
     )

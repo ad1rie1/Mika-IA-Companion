@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
@@ -368,7 +368,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* ce qu'elle lisait seule ne devenait jamais un savoir, et deux témoins aux mots différents ne se rencontraient jamais.
 
-*Révisée par 0110, 0127.*
+*Révisée par 0110, 0127, 0128.*
 
 ### 0086 — Voir venir, constater
 
@@ -968,7 +968,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* rien ne permettait de lui brancher un serveur MCP, ni de voir au même endroit tout ce qu'elle peut faire.
 
-*Révisée par 0066.*
+*Révisée par 0066, 0128.*
 
 ### 0066 — Chercher sur le web : un plugin système qui apporte son serveur MCP
 
@@ -1053,6 +1053,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - `phone_draft` écrit à la place de la personne ; `phone.send` l'envoie scellé au téléphone par Firebase, où le geste de la personne vaut accord ; sans geste en 2 h, la proposition expire.
 
 *Pourquoi :* elle doit savoir et retenir ce qu'on écrit à sa propriétaire, et l'aider à répondre, sans enfreindre les conditions de WhatsApp.
+
+### 0128 — Un service dit avec qui, ce qu'elle fait seule, et ce qu'elle en garde
+
+- Un serveur MCP se règle sur trois axes : avec qui (sa propriétaire, toute personne qui a un compte, des personnes nommées ; jamais un salon ni une inconnue), ce qu'elle fait seule (`seule`, `lit` : seule pour lire et sur accord pour agir, `carte` : sur accord à chaque appel, `toi` : sur l'accord de sa propriétaire à chaque appel), ce qu'elle en garde (`public`, `perso`, `prive`, `rien`). La console les remplit d'un coup par un genre ; le genre ne se garde pas.
+- Un outil suit son service ; il peut avoir son accord à lui, et une règle par situation (`proprietaire`, `compte`, `travail`) et par personne nommée, qui passe avant sa situation. Ces règles ne laissent personne de plus que le service, et `non` retire l'outil ; la grille de l'ADR 0122 coupe avant elles. Une personne nommée n'est reconnue qu'authentifiée.
+- L'accord se décide à l'appel : `carte` montre une carte à la personne en face, `toi` à sa propriétaire quand c'est elle en face ; sans personne pour l'accepter, l'opérateur décide dans la console.
+- Ce qu'un outil a rendu porte son plancher (`ToolResult.floor`, `unkept`), comme une section de son prompt ; l'énoncé qu'ils ont nourri le garde (`Utterance.floor`, `unkept`). La relecture en fait une confidence de la personne pour qui elle a lu (`prive`) ; à `rien`, elle ne lit ni la réplique ni la demande qu'elle suivait, rien n'en est indexé, et la trace n'en garde pas le résultat. Seul `public` devient un savoir (ADR 0085).
+- La console : brancher en trois questions, « Ce qu'elle en fait » en une phrase, une page par outil pour ses situations et ses personnes ; la carte d'accord dit ce qu'elle en gardera.
+
+*Pourquoi :* un serveur pro (factures, devis, tickets) ne doit servir qu'à sa propriétaire, et rien de ce qu'elle y lit ne doit ressortir ailleurs. Un serveur disait pour qui, jamais ce que valait ce qu'elle y lisait : sa mémoire le gardait au niveau de la question qu'on lui avait posée.
+
+*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie).*
 
 ## Les fournisseurs de modèles
 
@@ -1439,7 +1451,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* la console montrait ses outils sous tous les angles sans permettre de rien décider.
 
-*Révisée par 0123, 0126.*
+*Révisée par 0123, 0126, 0128.*
 
 ### 0123 — Le bloc Outils, redessiné
 

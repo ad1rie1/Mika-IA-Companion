@@ -142,6 +142,16 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
                                       sensitivity=int(Sensitivity.ANODYNE if data.get("public") else Sensitivity.PERSONAL),
                                       secret=x.says_secret([text])))
         elif event.type == rt.UTTERANCE.name:
+            floor = int(data.get("floor") or 0)
+            if data.get("unkept") or floor:
+                # ce qu'elle a lu pour l'écrire (ADR 0128) : une confidence de la personne pour qui elle l'a lu
+                target = str(data.get("target") or "")
+                person = str(frame.get(identity_c.PERSON(target)) or target) if target else ""
+                who = (person,) if person else ()
+                strong = bool(data.get("unkept")) or floor >= int(Sensitivity.CONFIDENCE)
+                rules.append(c.Disclosure(about=who, told_by=who, heard_by=who,
+                                          sensitivity=max(floor, int(Sensitivity.CONFIDENCE) if strong else 0),
+                                          secret=strong))
             refs = [int(p[7:]) for p in data.get("provenance", ()) if p.startswith("memory:") and p[7:].isdigit()]
             refs += list(data.get("answers") or ())
             if data.get("reply_to"):
