@@ -9,8 +9,8 @@ ferait-elle ? », « À traiter » — plus « pourquoi a-t-elle dit ça ? »
 (``pourquoi``). Jamais une page à formulaires (approbations, réglages,
 comptes), et aucune action d'opérateur ici (elles passent par la console, avec
 leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale
-seulement, derrière un jeton d'opérateur (``mika mcp token``, ou Outils › Ce
-qu'elle expose) ; sans jeton défini, le point n'existe pas (404). Ce qu'elle sert
+seulement, derrière un jeton d'opérateur (``mika mcp token``, ou Outils › Prêter
+à un agent) ; sans jeton défini, le point n'existe pas (404). Ce qu'elle sert
 se choisit dans la console (``served`` : ses pages parmi ``SERVABLE``, ses vues,
 ses fiches, « pourquoi » — ADR 0122) ; ce qui n'est pas servi n'est ni listé ni
 lu.

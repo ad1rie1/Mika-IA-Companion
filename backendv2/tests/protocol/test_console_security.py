@@ -10,7 +10,6 @@ import re
 from pathlib import Path
 
 from mika.app.console import NAVIGATION
-from mika.inspector.pages import TABS
 from mika.runtime import inspection
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
@@ -20,16 +19,14 @@ PAYLOAD = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
 
 
 def pages(client, live) -> list[str]:
-    urls = []
+    urls = ["/inspecteur/"]  # l'accueil, dessiné à la main hors de la carte
     views = client.portal.call(inspection.views, live.kernel)
     for group in NAVIGATION:
         for d in group.items:
-            base = "/inspecteur/" if d.key == "accueil" else f"/inspecteur/{d.key}"
+            base = f"/inspecteur/{d.key}"
             urls.append(base)
             if d.layout == "tabs":
-                # les onglets à part (href) : leur propre page ; les réglages déclarés : leur onglet
-                urls += [TABS.items[k].href if k in TABS.items and TABS.items[k].href else f"{base}/{k.split('.', 1)[1]}"
-                         for k in d.builtin]
+                urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
                 urls += [f"{base}/{v.name}" for v in views if v.section == d.key]
     return urls
 

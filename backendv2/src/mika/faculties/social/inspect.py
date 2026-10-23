@@ -438,6 +438,6 @@ def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Table(("personne", "proximité", Column("rythme", detail=True), Column("silence ÷ rythme", hint="la moitié de la jauge : elle "
                                                          "lui manque"), "dernier message reçu",
                Column("initiatives sans réponse", "num", detail=True), "ce qu'elle en sait"), tuple(rows), pager=pager,
-              title="Liens", filters=("q", "proximite"),
+              title="Liens",
               empty="aucun lien ne correspond" if q or level else "aucun lien pour l'instant"),
     ]

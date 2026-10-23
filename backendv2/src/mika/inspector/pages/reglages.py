@@ -62,9 +62,6 @@ from mika.runtime.params import ParamsOverlay, Planned
 from mika.runtime.params import shown as params_shown
 
 FACULTY_PAGE = "comportement-"
-OVERVIEW_URL = f"{PREFIX}/reglages/comportement"
-#: l'ancienne adresse (``?faculte=``) redirige vers la page de la faculté
-PARAMS_URL = OVERVIEW_URL
 TONES = {"défaut": "muted", "tempérament": "info", "réglage": "ok", "surcharge": "warn"}
 SOURCES_FR = {"défaut": "valeur par défaut", "tempérament": "dérivée du tempérament",
               "réglage": "réglée ailleurs (canaux, courrier…)", "surcharge": "surchargée par un opérateur"}

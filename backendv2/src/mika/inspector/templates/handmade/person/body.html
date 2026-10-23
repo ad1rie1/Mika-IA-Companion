@@ -1,6 +1,6 @@
 {# Le corps de la page d'une personne : rendu dans la page, puis relu seul par handmade/live.js (le fragment). La personne
    se nomme toujours par son nom (jamais « il » ni « elle »). Aucun style en ligne (CSP). #}
-{% from "handmade/macros.html" import bar, people, failed %}
+{% from "handmade/shared/macros.html" import bar, people, failed %}
 <span hidden data-now-stamp>{{ now.stamp }}</span>
 {% set name = now.name %}
 
@@ -78,7 +78,7 @@
 <div class="now-grid two">
   {# ── Ce qu'elle sait ────────────────────────────────────────────────────── #}
   <section class="now-card" aria-labelledby="person-knows-title">
-    <header class="now-card-head"><h2 id="person-knows-title">Ce qu'elle sait {{ now.of }}</h2><a class="now-more" href="{{ p.fiche if p else '' }}?onglet=memoire">Toute sa mémoire →</a></header>
+    <header class="now-card-head"><h2 id="person-knows-title">Ce qu'elle sait {{ now.of }}</h2><a class="now-more" href="{{ now.fiche }}?onglet=memoire">Toute sa mémoire →</a></header>
     {% set K = now.knows %}
     {% if K %}
     {% if K.life %}
@@ -129,7 +129,7 @@
   <div class="now-stack">
     {# ── Ce qu'elle lit ──────────────────────────────────────────────────── #}
     <section class="now-card" aria-labelledby="person-reads-title">
-      <header class="now-card-head"><h2 id="person-reads-title">Ce qu'elle lit {{ now.of }}</h2><a class="now-more" href="{{ p.fiche if p else '' }}?onglet=devine">Ce qu'elle devine →</a></header>
+      <header class="now-card-head"><h2 id="person-reads-title">Ce qu'elle lit {{ now.of }}</h2><a class="now-more" href="{{ now.fiche }}?onglet=devine">Ce qu'elle devine →</a></header>
       {% set R = now.reads %}
       {% if R and R.observed %}
       <dl class="now-facts">

@@ -1,6 +1,6 @@
 {# Le corps de Personnes : rendu dans la page, puis relu seul par handmade/live.js (le fragment). Une personne se
    nomme par son nom, jamais par un pronom. Aucun style en ligne (CSP). #}
-{% from "handmade/macros.html" import bar, failed %}
+{% from "handmade/shared/macros.html" import bar, failed %}
 <span hidden data-now-stamp>{{ now.stamp }}</span>
 {% set P = now.people %}
 {% if P %}
@@ -23,18 +23,18 @@
   <label class="sr" for="people-q">Chercher une personne</label>
   <input id="people-q" type="search" name="q" value="{{ P.q }}" placeholder="Chercher par nom ou par moyen de communication…" autocomplete="off">
   {% if P.level %}<input type="hidden" name="proximite" value="{{ P.level }}">{% endif %}
-  {% if P.only_online %}<input type="hidden" name="presence" value="en-ligne">{% endif %}
+  {% if P.only_online %}<input type="hidden" name="presence" value="{{ P.online_key }}">{% endif %}
   <button class="btn">Chercher</button>
 </form>
-<nav class="people-chips" aria-label="Filtrer">
-  {% for c in P.chips %}<a class="people-chip{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }} <span class="now-num">{{ c.count }}</span></a>{% endfor %}
-  <a class="people-chip online{{ ' on' if P.only_online }}" href="{{ P.online_href }}"{% if P.only_online %} aria-current="true"{% endif %}><span class="people-dot" aria-hidden="true"></span>En ligne <span class="now-num">{{ P.online|length }}</span></a>
+<nav class="hm-chips" aria-label="Filtrer">
+  {% for c in P.chips %}<a class="hm-chip{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.label }} <span class="hm-count">{{ c.count }}</span></a>{% endfor %}
+  <a class="hm-chip{{ ' on' if P.only_online }}" href="{{ P.online_href }}"{% if P.only_online %} aria-current="true"{% endif %}><span class="people-dot" aria-hidden="true"></span>En ligne <span class="hm-count">{{ P.online|length }}</span></a>
 </nav>
 
 {% if P.cards %}
 <ul class="people-grid">
   {% for p in P.cards %}
-  <li class="people-card{{ ' online' if p.online }}{{ ' composing' if p.composing }}">
+  <li class="people-card{{ ' online' if p.online }}">
     <div class="people-card-head">
       <span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence{{ ' typing' if p.composing }}"></span>{% endif %}</span>
       <div class="people-card-id">

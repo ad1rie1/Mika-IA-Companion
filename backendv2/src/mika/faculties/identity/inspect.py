@@ -1027,7 +1027,6 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Table((Column("personne", role="title"), Column("moyens de communication", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
                Column("proximité", role="badge"), Column("propriétaire", role="badge"), "dernier message reçu", Column("vue pour la première fois", detail=True)),
               tuple(rows), title="Personnes", pager=pager, layout="cards",
-              filters=("q",),
               empty=f"personne ne correspond à « {ctx.value('q')} »" if q else "personne pour l'instant"),
     ]
 
@@ -1066,7 +1065,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
                Column("propriétaire", detail=True), "revendique", Column("divulgation en privé", detail=True),
                Column("divulgation en public", detail=True), Column("vue pour la première fois", detail=True),
                Column("clé", detail=True)),
-              tuple(rows), title="Moyens de communication", pager=pager, filters=("q", "confiance"),
+              tuple(rows), title="Moyens de communication", pager=pager,
               empty="aucun ne correspond" if q or trust else "aucun moyen de communication vu pour l'instant"),
     ]
 

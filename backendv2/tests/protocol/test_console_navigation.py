@@ -34,7 +34,7 @@ def tabs_of(page, destination):
     console sans menu d'opérateur) :
     ``(slug, titre)``."""
     tabs = []
-    for nav in re.findall(r'<nav class="(?:tabs|submenu)"[^>]*>.*?</nav>', html.unescape(page), re.S):
+    for nav in re.findall(r'<nav class="tabs"[^>]*>.*?</nav>', html.unescape(page), re.S):
         for slug, title in re.findall(rf'href="/inspecteur/{destination}/([^"?#]+)"[^>]*>(.*?)</a>', nav, re.S):
             tab = (slug, re.sub(r"<[^>]+>", "", title).strip())
             if tab[0] not in [t[0] for t in tabs]:

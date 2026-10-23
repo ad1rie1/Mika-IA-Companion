@@ -505,8 +505,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     lending = Lending(kernel, settings.lent)  # ses outils prêtés à un agent (ADR 0122)
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
-        InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
-                      port=port, calls=live.calls, reconfigure=live.reconfigure,
+        InspectorDeps(kernel, live.accounts, live.settings, gateway.traces, port=port, calls=live.calls,
                       after_decision=hub.refresh_panels,
                       reports=reports, navigation=NAVIGATION, menu=MENU,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,

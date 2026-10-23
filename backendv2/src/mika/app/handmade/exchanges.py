@@ -1,6 +1,7 @@
-"""L'onglet Échanges de la fiche d'une personne, dessiné (ADR 0121) : une conversation, jour par jour — la personne
-à gauche, elle à droite, de la couleur de ce qu'elle ressentait en écrivant. Sans personne (``key`` vide), toutes ses
-conversations : Conversations › Messages, chaque message avec qui l'a écrit ou à qui elle répondait.
+"""Ses échanges, dessinés (ADR 0121) : l'onglet Échanges de la fiche d'une personne, une conversation jour par jour —
+la personne à gauche, elle à droite, de la couleur de ce qu'elle ressentait en écrivant. Sans personne (``key`` vide),
+toutes ses conversations (Conversations › Messages) ou celles d'un moyen de communication (l'onglet Fil de sa fiche),
+chaque message avec qui l'a écrit ou à qui elle répondait.
 
 Les données restent celles de la faculté du fil (``transcript``, son onglet ``echanges``) : ses lignes disent déjà,
 pour chaque message reçu, s'il a eu sa réponse, s'il attend, ou pourquoi il est resté sans réponse ; pour chacune de
@@ -16,21 +17,16 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look, emotion
+from mika.app.handmade import Look, columns, emotion, reader
 from mika.contracts import identity as identity_c
 from mika.inspector import render
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import Badge, Column, Disclosure, Prose, Row, Stats, Swatch, Table, Text, When
+from mika.kernel.inspect import Badge, Disclosure, Prose, Row, Stats, Swatch, Table, Text, When
 from mika.vocab import affect as A
 
 #: un message plus long se replie (« lire la suite »)
 FOLD_CHARS = 700
-
-
-def _cells(table: Table) -> dict[str, int]:
-    """La place de chaque colonne de la faculté, par son libellé."""
-    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
 
 
 def _text(cell: Any) -> str:
@@ -40,20 +36,16 @@ def _text(cell: Any) -> str:
 
 
 def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
-    table = next((b for b in blocks if isinstance(b, Table) and "texte" in _cells(b)), None)
+    table = next((b for b in blocks if isinstance(b, Table) and "texte" in columns(b)), None)
     if table is None:
         return None
     look = Look.of(ui, DAY)
     shown = render.Env(when=ui.when_long, now=look.now)
-    at = _cells(table)
     # qui parle : sur la fiche d'une personne, utile seulement si elle a plusieurs adresses ; sur la page de toutes
     # les conversations (``key`` vide), toujours
     several = not key or len(look.frame.get(identity_c.HANDLES(key)) or ()) > 1
 
-    def cell(row: Row, label: str) -> Any:
-        i = at.get(label)
-        return row.cells[i] if i is not None and i < len(row.cells) else None
-
+    cell = reader(table)
     messages: list[dict[str, Any]] = []
     for raw in reversed(table.rows):  # la page va du plus récent au plus ancien : on la lit dans l'ordre
         row = raw if isinstance(raw, Row) else Row(tuple(raw))
@@ -96,6 +88,6 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
     got = render.block(table, shown, query)
     # la même liste en tableau, filtres gardés : la console la rend (``wants_table``)
     as_table = "?" + urlencode({**{k: v for k, v in query.items() if k != "flash"}, f"vue_{got['id']}": "table"})
-    return Markup(env.get_template("handmade/person/tabs/echanges.html").render(
+    return Markup(env.get_template("handmade/conversations/echanges.html").render(
         name=look.name(key) if key else "", days=days, counts=counts, summaries=summaries, pager=got.get("pager"),
         empty=table.empty, as_table=as_table))

@@ -184,18 +184,17 @@ def export(out: Path) -> list[str]:
                     break
                 time.sleep(0.1)
             client.post("/auth/login", json=operator, headers=token())
-            urls: list[str] = []
+            urls: list[str] = ["/inspecteur/"]  # l'accueil, dessiné à la main hors de la carte
             for group in NAVIGATION:
                 for d in group.items:
-                    base = "/inspecteur/" if d.key == "accueil" else f"/inspecteur/{d.key}"
+                    base = f"/inspecteur/{d.key}"
                     urls.append(base)
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
                         urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors if v.section == d.key]
-                    elif d.layout == "menu":  # un sous-menu : chacune de ses pages (les réglages : leur annuaire)
+                    elif d.layout == "menu":  # chacune de ses pages (les réglages : leur annuaire)
                         page = client.get(f"{base}/apercu" if d.key == "reglages" else base, follow_redirects=True).text
-                        found = re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page) or \
-                            re.findall(rf'href="({re.escape(base)}/[\w-]+)"', page)
+                        found = re.findall(rf'href="({re.escape(base)}/[\w-]+)"', page)
                         urls += [u for u in dict.fromkeys(found) if u not in urls]
             inspection = Inspection(live.kernel)
             for kind in ("person", "handle"):

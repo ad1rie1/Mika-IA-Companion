@@ -19,13 +19,11 @@ lecture qui échoue tait sa carte, jamais la page.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from statistics import median
 from typing import Any
-from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -33,7 +31,6 @@ from starlette.routing import Route
 
 from mika.app.handmade import (
     FAILED,
-    MONTHS,
     WEEKDAYS,
     Look,
     affect_params,
@@ -44,6 +41,7 @@ from mika.app.handmade import (
     read_parts,
     said,
     span,
+    unit,
 )
 from mika.contracts import affect as affect_c
 from mika.contracts import agency as agency_c
@@ -62,11 +60,13 @@ from mika.faculties.attention.inspect import ORIGIN_FR
 from mika.faculties.body.inspect import SLEEP_FR
 from mika.faculties.goals.inspect import KIND_FR as GOAL_KIND_FR
 from mika.faculties.goals.inspect import STATUS_FR as GOAL_STATUS_FR
-from mika.inspector import names
+from mika.faculties.needs.inspect import FELT_FR
+from mika.inspector import names, render
+from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import money_fr, num_fr, pct_fr
+from mika.kernel.inspect import Ref, money_fr, num_fr, pct_fr
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import causes
@@ -74,14 +74,11 @@ from mika.vocab.circadian import PHASE_FR
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
-log = logging.getLogger("mika.console")
-
 #: l'adresse de la page, et celle du fragment qu'elle relit
 BASE = f"{PREFIX}/maintenant"
 FRAGMENT = f"{PREFIX}/_maintenant"
-#: la journée qu'elle montre, et ses mesures (une toutes les dix minutes)
+#: la journée qu'elle montre
 WINDOW = DAY
-POINTS = 144
 #: au plus tant de pensées, de personnes, de buts, de moments à venir, de lignes du fil de sa journée
 THOUGHTS_SHOWN = 4
 PEOPLE_SHOWN = 8
@@ -98,7 +95,6 @@ FELT_SHOWN = 3 * HOUR
 #: les besoins : (clé, libellé, série)
 NEEDS = ((needs_c.SOCIAL, "Compagnie", "needs.social"), (needs_c.EXPRESSION, "S'exprimer", "needs.expression"),
          (needs_c.CURIOSITY, "Apprendre", "needs.curiosite"))
-FELT_FR = {needs_c.BORED: "de l'ennui", needs_c.LONELY: "de la solitude"}
 PLACE_FR = {place_c.Place.CENTER: "au milieu de sa chambre", place_c.Place.WINDOW: "à la fenêtre",
             place_c.Place.DESK: "à son bureau", place_c.Place.BED: "sur son lit",
             place_c.Place.BOOKSHELF: "devant la bibliothèque", place_c.Place.DOOR: "près de la porte"}
@@ -225,7 +221,7 @@ def body(look: Look) -> dict[str, Any]:
         "awake": awake, "state": "Éveillée" if awake else "Endormie", "depth": "" if awake else SLEEP_FR[sleep],
         "since": span(look.now - since) if since else "",
         "woken": frame.get(body_c.NIGHT_WAKING), "phase": PHASE_FR[frame.get(body_c.PHASE)],
-        "energy": pct_fr(energy), "energy_w": round(100 * max(0.0, min(1.0, energy)), 1),
+        "energy": pct_fr(energy), "energy_w": unit(energy),
         "where": where, "where_since": span(look.now - frame.get(place_c.SINCE)) if frame.get(place_c.SINCE) else "",
         "activity": activity, "night": last_night,
     }
@@ -246,7 +242,7 @@ def needs(look: Look) -> dict[str, Any]:
         if hour_ago:
             delta = value - hour_ago[-1]
             trend = "monte" if delta > 0.03 else "baisse" if delta < -0.03 else "stable"
-        rows.append({"key": key, "label": label, "pct": pct_fr(value), "w": round(100 * max(0.0, min(1.0, value)), 1),
+        rows.append({"key": key, "label": label, "pct": pct_fr(value), "w": unit(value),
                      "dominant": key == r.dominant and value >= 0.05, "trend": trend})
     felt = None
     for e in reversed(look.recent([needs_c.FELT], 5)):
@@ -287,7 +283,7 @@ def mind(look: Look) -> dict[str, Any]:
     for t in thoughts:
         e = emotion(t.emotion)
         items.append({"text": excerpt(texts.get(t.text_ref)), "emotion": e.value, "word": A.FR[e],
-                      "pct": pct_fr(t.intensity), "w": round(100 * max(0.0, min(1.0, t.intensity)), 1),
+                      "pct": pct_fr(t.intensity), "w": unit(t.intensity),
                       "origin": ORIGIN_FR.get(t.origin, ""), "about": look.who(t.about), "born": look.ago(t.born_at)})
     awaited = None
     if anticipated is not None:
@@ -298,8 +294,7 @@ def mind(look: Look) -> dict[str, Any]:
     woke_with = None
     if dream is not None:
         e = emotion(dream.emotion)
-        woke_with = {"text": excerpt(texts.get(dream.text_ref), 280), "emotion": e.value, "word": A.FR[e],
-                     "masked": dream.masked}
+        woke_with = {"text": excerpt(texts.get(dream.text_ref), 280), "emotion": e.value, "masked": dream.masked}
     return {"thoughts": items, "awaited": awaited, "dream": woke_with}
 
 
@@ -330,18 +325,18 @@ def pursuits(look: Look) -> dict[str, Any]:
     goals = []
     for g in live:
         if g.tasks_total:
-            done, total, unit = g.tasks_done, g.tasks_total, "tâches"
+            done, total, counted = g.tasks_done, g.tasks_total, "tâches"
         else:
-            done, total, unit = g.steps, g.max_steps, "séances"
+            done, total, counted = g.steps, g.max_steps, "séances"
         nxt = g.next_step_at or g.due or g.waiting_until
         goals.append({
             "title": excerpt(texts.get(g.title_ref), 120) if g.title_ref else "(sans titre)",
             "kind": "rêverie" if g.musing else GOAL_KIND_FR.get(g.kind, g.kind),
-            "status": GOAL_STATUS_FR.get(g.status, g.status), "waiting": g.status == goals_c.WAITING,
-            "progress": f"{done} / {total} {unit}" if total else "",
-            "w": round(100 * min(1.0, done / total), 1) if total else 0.0,
+            "status": GOAL_STATUS_FR.get(g.status, g.status),
+            "progress": f"{done} / {total} {counted}" if total else "",
+            "w": unit(done / total) if total else 0.0,
             "next": (f"prochaine séance {look.day(nxt)}" if nxt > now else "") if nxt else "",
-            "blocked": g.tasks_blocked, "href": f"{PREFIX}/fiche/goal/{g.id}",
+            "blocked": g.tasks_blocked, "href": fiche_url("goal", str(g.id)),
         })
     agency = frame.get(agency_c.AGENCY)
     holding = agency.refractory_until > now
@@ -469,7 +464,7 @@ def lanes(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> dict[
         who = _target(look, e)
         marks.append({"pct": axis.pct(e.at), "kind": "failed" if failed else kind.lower(),
                       "r": 4.5 if kind == Kind.INITIATIVE else 3.5,
-                      "href": f"{PREFIX}/episode/{quote(e.correlation, safe='')}",
+                      "href": render.href(Ref("episode", e.correlation, "")),
                       "title": f"{look.hm(e.at)} · {names.kind(kind)}{' à ' + who if who else ''} · {outcome}"})
     for e in thoughts:
         marks.append({"pct": axis.pct(e.at), "kind": "thought", "r": 3.5, "href": f"{PREFIX}/pensees",
@@ -549,35 +544,34 @@ def feed(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> list[d
             last["count"] += 1
             last["at"] = e.at
             last["text"] = f"A répondu {last['count']} fois{' à ' + _target(look, e) if e.data.target else ''}"
-            last["href"] = f"{PREFIX}/episode/{quote(e.correlation, safe='')}"
+            last["href"] = render.href(Ref("episode", e.correlation, ""))
             continue
-        entries.append({"at": e.at, "start": e.at, "text": text, "tone": tone, "count": 1, "kind": "episode",
+        entries.append({"at": e.at, "start": e.at, "text": text, "tone": tone, "count": 1,
                         "conversation": (e.data.kind, e.data.target, e.data.outcome),
-                        "href": f"{PREFIX}/episode/{quote(e.correlation, safe='')}"})
+                        "href": render.href(Ref("episode", e.correlation, ""))})
     for e in thoughts:
         entries.append({"at": e.at, "text": "Une pensée lui vient", "quote": excerpt(said(e.data.text), 140),
-                        "tone": "thought", "kind": "thought", "href": f"{PREFIX}/pensees"})
+                        "tone": "thought", "href": f"{PREFIX}/pensees"})
     others = look.recent([body_c.WOKE, body_c.FELL_ASLEEP, body_c.ROUSED, needs_c.FELT, needs_c.REUNITED,
                           goals_c.GOAL_CLOSED], 80)
     for e in others:
         if e.type.name == body_c.WOKE.name:
-            entries.append({"at": e.at, "text": "S'est réveillée", "tone": "sleep", "kind": "body"})
+            entries.append({"at": e.at, "text": "S'est réveillée", "tone": "sleep"})
         elif e.type.name == body_c.FELL_ASLEEP.name:
-            entries.append({"at": e.at, "text": "S'est endormie", "tone": "sleep", "kind": "body"})
+            entries.append({"at": e.at, "text": "S'est endormie", "tone": "sleep"})
         elif e.type.name == body_c.ROUSED.name:
             who = look.name(e.data.person) if e.data.person else ""
-            entries.append({"at": e.at, "text": f"Tirée du sommeil{' par ' + who if who else ''}", "tone": "sleep",
-                            "kind": "body"})
+            entries.append({"at": e.at, "text": f"Tirée du sommeil{' par ' + who if who else ''}", "tone": "sleep"})
         elif e.type.name == needs_c.FELT.name and e.data.feeling in FELT_FR:
-            entries.append({"at": e.at, "text": f"Ressent {FELT_FR[e.data.feeling]}", "tone": "muted", "kind": "need"})
+            entries.append({"at": e.at, "text": f"Ressent {FELT_FR[e.data.feeling]}", "tone": "muted"})
         elif e.type.name == needs_c.REUNITED.name:
             entries.append({"at": e.at, "text": f"Retrouve {look.name(e.data.person)} : ça lui fait du bien",
-                            "tone": "accent", "kind": "need", "href": look.href(e.data.person)})
+                            "tone": "accent", "href": look.href(e.data.person)})
         elif e.type.name == goals_c.GOAL_CLOSED.name:
             status = GOAL_STATUS_FR.get(e.data.status, e.data.status)
             entries.append({"at": e.at, "text": f"But {status}", "quote": excerpt(said(e.data.title), 120),
-                            "tone": "ok" if e.data.status == goals_c.ACHIEVED else "muted", "kind": "goal",
-                            "href": f"{PREFIX}/fiche/goal/{e.data.goal}"})
+                            "tone": "ok" if e.data.status == goals_c.ACHIEVED else "muted",
+                            "href": fiche_url("goal", str(e.data.goal))})
     entries.sort(key=lambda x: x["at"], reverse=True)
     out = []
     for x in entries[:FEED_SHOWN]:
@@ -596,13 +590,16 @@ def today(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> list[
     replies = sum(1 for k, o in ended if k == Kind.REPLY and o == "done")
     initiatives = sum(1 for k, o in ended if k == Kind.INITIATIVE and o == "done")
     silences = sum(1 for _k, o in ended if o == "abstained")
+    failed = {o for _k, o in ended if o in FAILED}
     failures = sum(1 for _k, o in ended if o in FAILED)
     out = [{"label": "réponses", "value": replies},
            {"label": "initiatives", "value": initiatives},
            {"label": "silences choisis", "value": silences},
            {"label": "pensées nées", "value": sum(1 for e in thoughts if e.at >= midnight)},
            {"label": "échecs", "value": failures, "tone": "danger" if failures else "",
-            "href": f"{PREFIX}/decisions/episodes?issue=failed" if failures else ""}]
+            # le filtre des épisodes ne prend qu'une issue : avec des échecs et des délais dépassés, tous
+            "href": f"{PREFIX}/decisions/episodes" + (f"?issue={next(iter(failed))}" if len(failed) == 1 else "")
+            if failures else ""}]
     calls = look.ui.deps.calls
     if calls is not None:
         used = call(calls.usage, midnight, label="appels du jour")
@@ -637,8 +634,7 @@ class NowPage:
         """Tout ce que montre la page ; une partie dont la lecture a échoué vaut ``None`` (sa carte le dit)."""
         look = Look.of(self.ui, WINDOW)
         local = look.frame.local(look.now)
-        return {"her": self.ui.her_name(), "at": look.hm(look.now), "stamp": local.strftime("%H:%M:%S"),
-                "today": f"{WEEKDAYS[local.weekday()]} {local.day} {MONTHS[local.month - 1]}",
+        return {"her": self.ui.her_name(), "stamp": local.strftime("%H:%M:%S"), "today": look.date(look.now),
                 **read_parts(look, PARTS, "en ce moment")}
 
     async def page(self, request: Request) -> Response:

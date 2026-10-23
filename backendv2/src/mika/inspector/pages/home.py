@@ -1,5 +1,5 @@
-"""Le tableau de bord : ce qui attend ton attention, son état en ce moment, sa
-journée en courbes, et ce qu'elle a fait aujourd'hui."""
+"""Les onglets de l'accueil : ce qui attend ton attention, son état en ce moment et ce qu'elle a fait aujourd'hui.
+L'accueil les dessine (``app/handmade/home.py``) ; la console en MCP les sert aussi (``inspector/mcp.py``)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from starlette.requests import Request
 
 from mika.contracts import runtime as rt
 from mika.inspector import names
-from mika.inspector.names import KINDS, OUTCOMES
 from mika.inspector.pages.diagnostics import CHECKS
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
@@ -19,14 +18,10 @@ from mika.kernel.clock import DAY, MINUTE, US
 from mika.kernel.forms import show_duration
 from mika.kernel.inspect import (
     Badge,
-    Chart,
     Column,
-    Disclosure,
-    Grid,
     Note,
     Ref,
     Row,
-    Series,
     Stat,
     Stats,
     Table,
@@ -37,12 +32,8 @@ from mika.kernel.inspect import (
 from mika.runtime import health
 from mika.vocab.episodes import Kind
 
-__all__ = ["KINDS", "OUTCOMES", "outcome_badge"]
-
 #: les derniers épisodes, par page
 EPISODES_PAGE = 20
-#: une courbe mêle au plus tant de séries (au-delà : une autre courbe, jamais une série perdue)
-SERIES_PER_CHART = 4
 
 
 def outcome_badge(outcome: str, kind: str | None = None) -> Badge:
@@ -113,7 +104,7 @@ async def attention(ui: Any, request: Request) -> list[Any]:
             cards.insert(0, Stat("Réponses en échec", count, f"depuis {render_ago(ui.now() - since)} — {why}"[:90],
                                  "danger", _local(f"{EPISODES_HREF}?sorte=reply", "Réponses en échec")))
     sched = ui.kernel.scheduler
-    failing = [ui.names.process(s.name) for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
+    failing = [ui.names.process(s.name) for s in sched.specs if sched.consecutive.get(s.name, 0) >= health.PROCESS_FAILURES_MAX]
     if failing:
         cards.append(Stat("Processus en échec", len(failing), ", ".join(failing)[:90], "danger",
                           _local("/inspecteur/systeme/processus", "Processus")))
@@ -163,35 +154,6 @@ async def now_tab(ui: Any, request: Request) -> list[Any]:
              "info" if open_ else "", _local("/inspecteur/decisions/en_cours", "en cours")),
     ]
     return [Stats(tuple(cards))]
-
-
-@TABS.tab("accueil.courbes", title="Sa journée",
-          description="Les dernières 24 heures, une échelle par courbe.")
-async def curves(ui: Any, request: Request) -> list[Any]:
-    sampler = ui.sampler
-    now = ui.now()
-    since = now - DAY
-    if sampler is None:
-        return [Note("Les courbes apparaîtront quand les mesures auront commencé.", "muted")]
-    charts: list[Any] = []
-    series = ui.kernel.registry.series
-    groups: dict[tuple[float | None, float | None, str], list[Any]] = {}
-    for key, spec in series.items():
-        groups.setdefault((spec.lo, spec.hi, spec.unit), []).append((key, spec))
-    for (lo, hi, unit), specs in groups.items():
-        for start in range(0, len(specs), SERIES_PER_CHART):
-            lines = []
-            for i, (key, spec) in enumerate(specs[start:start + SERIES_PER_CHART]):
-                pts = tuple(sampler(key, since, now, 144))
-                if pts:
-                    lines.append(Series(spec.label, pts, i + 1))
-            if lines:
-                y = (lo, hi) if lo is not None and hi is not None else None
-                charts.append(Chart(tuple(lines), title=" · ".join(s.label for s in lines), unit=unit, y=y,
-                                    zero=0.0 if lo is not None and lo < 0 < (hi or 0) else None, since=since,
-                                    until=now))
-    return [Disclosure("Consulter les courbes", (Grid(tuple(charts)),))] if charts else [
-        Note("Pas encore de mesure sur les dernières 24 heures.", "muted")]
 
 
 @TABS.tab("accueil.aujourdhui", title="Aujourd'hui",

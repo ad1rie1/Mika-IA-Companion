@@ -2,7 +2,8 @@
 
 Le seul endroit où un lien devient une adresse, où une cellule devient une
 forme affichable. Tout texte reste du texte : l'échappement est celui de
-Jinja ; le seul balisage produit à la main vient de ``svg.py``.
+Jinja ; le seul balisage produit à la main vient de ``svg.py`` (les courbes) et
+de ``document.py`` (un document relu, sur une liste blanche).
 """
 
 from __future__ import annotations
@@ -145,11 +146,10 @@ def relative(at: int, now: int) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Env:
-    """Ce qu'il faut pour rendre : l'heure (lisible, relative), les actions offertes."""
+    """Ce qu'il faut pour rendre : l'heure (lisible, relative)."""
 
     when: Callable[[int], str]
     now: int
-    actions: Mapping[str, Any] | None = None
     #: une graduation courte : ``stamp(instant, étendue)``
     stamp: Callable[[int, int], str] | None = None
 
@@ -173,7 +173,7 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
         ratio = min(1.0, max(0.0, float(ratio)))
         return {"t": "meter", "ratio": ratio, "text": value.text or pct_fr(ratio), "tone": tone(value.tone)}
     if isinstance(value, Swatch):
-        return {"t": "swatch", "text": value.text, "palette": value.palette, "key": value.key,
+        return {"t": "swatch", "text": value.text, "key": value.key,
                 "weight": None if value.weight is None else pct_fr(value.weight)}
     if isinstance(value, When):
         return {"t": "when", "text": relative(value.at, env.now) if value.relative else env.when(value.at),
@@ -322,8 +322,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         return {"t": "table", "id": key, "title": title, "empty": b.empty, "caption": b.caption,
                 "layout": layout, "modes": modes, "link_label": b.link_label,
                 "columns": [{"label": columns[i].label, "align": columns[i].align, "hint": columns[i].hint} for i in visible],
-                "rows": rows, "pager": _pager(pager, query), "detail": any(r["detail"] for r in rows),
-                "count": total, "shown": len(source)}
+                "rows": rows, "pager": _pager(pager, query), "count": total, "shown": len(source)}
     if isinstance(b, Fields):
         hints = dict(b.hints)
         return {"t": "fields", "title": b.title, "columns": max(1, min(b.columns, 3)),

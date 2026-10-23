@@ -581,7 +581,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         seen = "jamais" if store is None or not store.configured() else "oui"
         return [("Clé de l'extension", f"définie ({key.hint}…)" if key is not None else "aucune"),
                 ("Reçu de l'extension", seen),
-                ("Conversations et réponses", "Ses canaux › Teams")]
+                ("Conversations et réponses", "Relations & échanges › Teams")]
 
     async def new_teams_key(by: str) -> tuple[str, str]:
         if live.teams is None:
@@ -638,7 +638,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         keyed = sum(1 for n in endpoints if n in keys)
         return [("Réveils", f"{len(endpoints)} ({keyed} avec une clé)" if endpoints else "aucun"),
                 ("Lots permis", ", ".join(wake_tools())),
-                ("Clés, appels et ce qu'ils ont donné", "Ses canaux › Réveils par API")]
+                ("Clés, appels et ce qu'ils ont donné", "Connexions extérieures › Réveils par API")]
 
     def plugin_settings() -> list[Any]:
         rows = (
@@ -810,13 +810,13 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Chaque réveil a sa page : à quoi il sert, ses consignes (elles priment sur le texte "
                             "qu'un appel apporte, qui n'est jamais une consigne), son projet, son mode, ses outils, "
                             "s'il passe outre son sommeil, à qui elle rend compte, ses bornes. Son nom est la fin de "
-                            "son URL. Sa clé, ses appels et ce qu'ils ont donné : Ses canaux › Réveils par "
-                            "API.")),)),
+                            "son URL. Sa clé, ses appels et ce qu'ils ont donné : Connexions "
+                            "extérieures › Réveils par API.")),)),
         SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
                         save_feeds, description="Ce qu'elle lit du monde.", order=20,
                         pages=(SettingsPage("flux", "Flux RSS", description=(
-                            "Les flux RSS ou Atom qu'elle relève. Ce qu'elle en remarque se lit dans Flux et "
-                            "capteurs › Flux.")),)),
+                            "Les flux RSS ou Atom qu'elle relève. Ce qu'elle en remarque se lit dans Connexions "
+                            "extérieures › Flux RSS.")),)),
         SettingsSection("transcription", "Transcription", "sens", SttSettings, stt, save_stt, order=30,
                         description="Pour entendre les messages vocaux (un service compatible Whisper).",
                         pages=(SettingsPage("transcription", "Transcription vocale", description=(
@@ -836,7 +836,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "l'apporte ici, avec cette clé (montrée une seule fois). Ce qu'elle fait de ses "
                             "réponses : un brouillon posé dans Teams (tu l'envoies), un envoi après ton accord, ou "
                             "un envoi sans te demander — toujours sous ton nom. Les conversations et les réponses "
-                            "se lisent dans Ses canaux › Teams.")),)),
+                            "se lisent dans Relations & échanges › Teams.")),)),
         SettingsSection("appareils", "Appareils", "sens", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
                         facts=lambda: [("Jeton", "défini" if settings.sensors_token() else "aucun")],

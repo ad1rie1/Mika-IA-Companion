@@ -3,7 +3,8 @@ facultés) : ses groupes, ses destinations, et les onglets que la console
 fournit elle-même. Les facultés, elles, y rangent leurs vues par ``section``.
 
 La carte répond à des questions d'opérateur, dans cet ordre : que dois-je
-faire (tableau de bord) ; comment va-t-elle (Elle) ; qui connaît-elle (Ses
+faire (l'accueil, dessiné à la main hors de la carte : ``app/handmade/home.py``, qui lit les onglets ``accueil.*``) ;
+comment va-t-elle (Elle) ; qui connaît-elle (Ses
 relations) ; que fait-elle et pourquoi (Son activité : ses décisions, ses
 buts, ses projets) ; par où perçoit-elle et agit-elle (Ses canaux) ; que
 décide-t-on, la machine tient-elle (Exploitation). ``docs/console-carte.md`` détaille chaque menu.
@@ -14,64 +15,58 @@ from __future__ import annotations
 from mika.inspector.catalog import Destination, Labels, NavGroup
 
 NAVIGATION: tuple[NavGroup, ...] = (
-    NavGroup("", (
-        Destination("accueil", "Accueil", "◉", "Ce qui attend ton attention, son état en ce moment et sa "
-                    "journée.",
-                    builtin=("accueil.a_traiter", "accueil.maintenant", "accueil.aujourdhui", "accueil.courbes"),
-                    layout="stack"),
-    )),
     NavGroup("Elle", (
-        Destination("vie", "Humeur et corps", "♡", "Son humeur, ses postures envers chacun, ses besoins, son "
+        Destination("vie", "Humeur et corps", "Son humeur, ses postures envers chacun, ses besoins, son "
                     "rythme, son estime."),
-        Destination("pensees", "Pensées et nuits", "☁", "Ce qui lui trotte dans la tête, ce qu'elle a remarqué, "
+        Destination("pensees", "Pensées et nuits", "Ce qui lui trotte dans la tête, ce qu'elle a remarqué, "
                     "ce qu'elle attend, ses nuits."),
-        Destination("memoire", "Mémoire", "❖", "Ses souvenirs, ses croyances, ses promesses, les pièces qu'on lui a "
+        Destination("memoire", "Mémoire", "Ses souvenirs, ses croyances, ses promesses, les pièces qu'on lui a "
                     "envoyées et la relecture de ses échanges.", subjects=("piece",)),
     )),
     NavGroup("Ses relations", (
-        Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
+        Destination("personnes", "Personnes", "Les gens qu'elle connaît et ce qui les lie.",
                     subjects=("person",)),
-        Destination("identites", "Identités", "◎", "Qui parle derrière chaque moyen de communication, et ce "
+        Destination("identites", "Identités", "Qui parle derrière chaque moyen de communication, et ce "
                     "que ça ouvre.",
                     subjects=("handle",)),
-        Destination("fil", "Conversations", "❝", "Ce qui a été dit, avec qui, et les questions qui attendent."),
+        Destination("fil", "Conversations", "Ce qui a été dit, avec qui, et les questions qui attendent."),
     )),
     NavGroup("Son activité", (
-        Destination("decisions", "Décisions", "⚖", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, ce "
+        Destination("decisions", "Décisions", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, ce "
                     "qui tourne en ce moment, son budget d'initiatives, ses choix, ses épisodes, ses échéances.",
                     builtin=("decisions.maintenant", "decisions.envers", "decisions.en_cours", "decisions.selections",
                              "decisions.episodes", "decisions.echeances"),
                     order=("maintenant", "envers", "en_cours", "initiatives", "selections", "episodes",
                            "echeances")),
-        Destination("buts", "Buts", "➤", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
+        Destination("buts", "Buts", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
                     "explorations, où ils en sont.", subjects=("goal",)),
-        Destination("projets", "Projets", "▦", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
+        Destination("projets", "Projets", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
                     "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
                     subjects=("project",)),
-        Destination("outils", "Ses outils", "✋", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
+        Destination("outils", "Ses outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
                     "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
                     builtin=("outils.tous", "outils.expose"), order=("tous", "serveurs", "expose"),
                     subjects=("serveur",)),
-        Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire sortir de la machine, et ce "
+        Destination("approbations", "Approbations", "Ce qu'elle voudrait faire sortir de la machine, et ce "
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
     NavGroup("Ses canaux", (
-        Destination("courrier", "Courrier", "✉", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
+        Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
                     subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
-        Destination("teams", "Teams", "✆", "Les conversations Teams que l'extension lui apporte, et les réponses "
+        Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
                     subjects=("conversation_teams", "reponse_teams")),
-        Destination("sens", "Flux et capteurs", "◌", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
+        Destination("sens", "Flux et capteurs", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                     "(caméra), ce que ses appareils lui signalent."),
-        Destination("reveils", "Réveils par API", "⏰", "Les réveils que des systèmes extérieurs lui envoient "
+        Destination("reveils", "Réveils par API", "Les réveils que des systèmes extérieurs lui envoient "
                     "(POST /api/wake/<nom>) : les déclarer, leurs clés, leurs appels et ce qu'ils ont donné.",
                     subjects=("reveil",)),
-        Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
+        Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
     )),
     NavGroup("Exploitation", (
-        Destination("reglages", "Réglages", "⚙", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
+        Destination("reglages", "Réglages", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
                     "sujet ; chaque champ dit ce qu'il fait.", layout="menu", dynamic=True),
-        Destination("systeme", "Système", "▣", "La machine : santé, processus, anomalies, sorties, modèles, écrans "
+        Destination("systeme", "Système", "La machine : santé, processus, anomalies, sorties, modèles, écrans "
                     "du monde, coûts, stockage, journaux, anatomie.", layout="menu",
                     builtin=("systeme.sante", "systeme.processus", "systeme.anomalies", "systeme.sorties",
                              "systeme.passerelle", "systeme.monde", "systeme.appels", "systeme.stockage",
@@ -123,7 +118,7 @@ SECTION_LABELS: dict[str, str] = {
     "headlines": "Les titres de ses flux",
     "views": "Ce que voit la caméra", "apps": "Ses apps forgées", "app_news": "Ce que ses apps ont trouvé pour la personne",
     "app_signals": "Ce qu'une app a mis dans sa file", "app_consignes": "Les consignes du projet d'une app",
-    # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
+    # ADR 0033, 0034, 0036
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
     "learned": "Ce qu'elle a appris en lisant", "acquainted": "Les gens qu'on nomme (qu'elle connaît dans son cercle)", "veiled": "Ce qu'elle peut raconter sans nommer personne", "matter": "Ce dont elle pourrait parler",
@@ -135,7 +130,6 @@ SECTION_LABELS: dict[str, str] = {
     "greeting_tone": "Le ton de ses bonjours (sa persona)",
     # ADR 0046
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
-    # ADR 0053
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
     "services": "Ce que ses services extérieurs lui ont rendu",
@@ -243,7 +237,9 @@ EVENT_LABELS: dict[str, str] = {
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
     "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",
     "memory.promise_resolved": "Une promesse tenue ou abandonnée", "memory.reinforced": "Un souvenir renforcé",
-    "memory.remembered": "Un souvenir retenu",
+    "memory.remembered": "Un souvenir retenu", "memory.extraction_deferred": "Passage à reprendre",
+    "memory.life_recalled": "Situations remises en mémoire",
+    "social.relations_recalled": "Relations remises en mémoire",
     "memory.attested": "Un témoignage de plus sur une croyance (ou une discrétion demandée)",
     "memory.joined": "Des croyances dites par plusieurs, réunies la nuit",
     "memory.confronted": "Deux témoins confrontés la nuit (l'un l'emporte, ou elle doute)",

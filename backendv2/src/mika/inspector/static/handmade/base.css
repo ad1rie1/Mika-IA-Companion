@@ -319,7 +319,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 }
 
 /* une liste sans long texte : des lignes serrées, ses étiquettes à côté du titre, ses faits et ses liens sur une ligne */
-.person-entry-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
+.person-entry-name { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; min-width: 0; }
 .person-entry-foot { display: grid; gap: 6px; }
 .person-entries.dense > li { gap: 4px; padding: 10px 0; }
 .person-entries.dense > li:first-child { padding-top: 2px; }
@@ -382,19 +382,19 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .hm-chip.on .hm-count { background: var(--accent); color: var(--on-accent); }
 .hm-chip.muted { color: var(--muted); }
+.hm-chip.danger { color: var(--danger); }
+.hm-chip.warn { color: var(--warn); }
 .hm-toolbar { align-items: center; }
 .now-page form.action-card.card { padding: 20px 22px; border-radius: 18px; }
 .now-page form.action-card.card > h3 { font-family: var(--now-serif); font-size: 1.15rem; font-weight: 600; }
 
 /* une cellule « aperçu » (un titre et sa suite : l'objet d'un message et son début) dans une liste dessinée */
-.person-entry-name { align-items: flex-start; }
 .person-entry-title .cell-preview { display: grid; gap: 2px; max-width: 78ch; }
 .person-entry-title .cell-secondary { color: var(--muted); font-size: 13px; font-weight: 400; }
 .person-entry-name .person-entry-tags { margin-top: 1px; }
 .person-entry-facts .cell-preview { display: inline; }
-.person-entry-facts .cell-secondary { margin-left: 6px; color: var(--muted); }
+.person-entry-facts .cell-secondary { display: inline; margin-left: 6px; color: var(--muted); }
 .person-entry-side { display: flex; flex: none; align-items: center; gap: 10px; }
-.person-entry-facts .cell-secondary { display: inline; }
 
 /* « tout va bien » : une bande calme */
 .hm-calm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 12px 16px; border-radius: 14px;
@@ -523,92 +523,4 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .fiche-head-side .action-bar { margin: 0; }
 @media (max-width: 700px) {
   .fiche-head-side { justify-content: flex-start; }
-}
-
-/* Réglages › Autrices (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux. */
-.authors-warn { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); }
-.authors-warn a { color: inherit; font-weight: 600; }
-.authors-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.authors-row { display: grid; grid-template-columns: minmax(160px, 1.1fr) minmax(130px, .8fr) minmax(0, 2.4fr); gap: 4px 16px;
-  align-items: baseline; padding: 9px 14px; border-top: 1px solid var(--border); font-size: 13.5px; }
-.authors-row:first-child { border-top: 0; }
-.authors-row.head { background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--muted); font-size: 12px;
-  font-weight: 600; }
-.authors-row a { font-weight: 600; }
-.authors-row.off .authors-flow { color: var(--text-2); }
-.authors-flow { font-weight: 600; }
-.authors-what { color: var(--text-2); }
-@media (max-width: 720px) {
-  .authors-row { grid-template-columns: 1fr; }
-  .authors-row.head { display: none; }
-}
-
-/* Réglages › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.
-   La forme proposée : pleine, dans l'accent (validé contre le fond, clair et sombre) ; celle d'aujourd'hui : grise, en
-   pointillé — la seconde marque qui les distingue sans la couleur. */
-:root { --temper-mark: #6544ce; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --temper-mark: #8f6fe3; } }
-:root[data-theme="dark"] { --temper-mark: #8f6fe3; }
-.temper { display: grid; gap: 14px; }
-.temper-body { display: grid; grid-template-columns: minmax(300px, 600px) minmax(0, 1fr); align-items: center; gap: 18px 32px; }
-.temper-fig { margin: 0; }
-.temper-figure { display: block; width: 100%; height: auto; overflow: visible; }
-.temper-ring { fill: none; stroke: color-mix(in srgb, var(--border) 80%, transparent); stroke-width: 1; }
-.temper-ring.middle { stroke: var(--border-strong); stroke-dasharray: 3 3; }
-.temper-spoke { stroke: color-mix(in srgb, var(--border) 70%, transparent); stroke-width: 1; }
-.temper-shape { fill: color-mix(in srgb, var(--temper-mark) 18%, transparent); stroke: var(--temper-mark); stroke-width: 2;
-  stroke-linejoin: round; }
-.temper-before { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
-.temper-dot { fill: var(--temper-mark); stroke: var(--surface); stroke-width: 2; }
-.temper-hit { fill: transparent; cursor: help; }
-.temper-point { outline: none; }
-.temper-point.is-on .temper-dot, .temper-point:focus .temper-dot { r: 6; }
-.temper-point:focus-visible .temper-dot { stroke: var(--text); }
-.temper-before.is-off { display: none; }
-/* la bulle d'un sommet : au survol ou au clavier, tout de suite */
-.temper-tip { opacity: 0; pointer-events: none; transition: opacity .1s; }
-.temper-tip.on { opacity: 1; }
-.temper-tip rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1; }
-.temper-tip text { fill: var(--text-2); font-size: 11.5px; }
-.temper-tip .temper-tip-head { fill: var(--text); font-weight: 600; }
-.temper-legend[hidden], .temper-hint[hidden] { display: none; }
-.temper-hint { padding: 7px 10px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 12.5px; }
-.temper-label { fill: var(--text-2); font-size: 12.5px; }
-.temper-sector { fill: none; }
-.temper-sector.tinted { fill: color-mix(in srgb, var(--text) 4%, transparent); }
-.temper-bracket { fill: none; stroke: var(--border-strong); stroke-width: 1.5; stroke-linecap: round; }
-.temper-choices { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
-.temper-choices dt { color: var(--muted); }
-.temper-choices dd { margin: 0; font-weight: 600; }
-.temper-family { fill: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
-.temper-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; color: var(--text-2); font-size: 12.5px; }
-.temper-key { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--temper-mark); }
-.temper-key.before { border-top: 2px dashed var(--muted); margin-left: 8px; }
-.temper-side { display: grid; gap: 12px; align-content: start; font-size: 13.5px; }
-.temper-side p { margin: 0; }
-.temper-now { font-size: 15px; }
-.temper-pick { display: grid; gap: 6px; }
-.temper-pick label { font-weight: 600; }
-.temper-pick-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.temper-pick-row select { flex: 1 1 260px; max-width: 520px; }
-.temper-pick .help { color: var(--muted); font-size: 12.5px; }
-.temper-proposing { padding: 8px 12px; border-radius: 8px; background: var(--info-bg); color: var(--info); }
-.temper-proposing a { color: inherit; font-weight: 600; }
-.temper-profiles > summary { cursor: pointer; color: var(--text-2); font-weight: 600; }
-.temper-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 14px; margin: 12px 0 0;
-  padding: 0; list-style: none; }
-.temper-list li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
-.temper-list li.on { border-color: color-mix(in srgb, var(--temper-mark) 45%, var(--border)); }
-.temper-list li.proposed { background: var(--info-bg); }
-.temper-mini { width: 52px; height: 52px; }
-.temper-mini .temper-shape { stroke-width: 1.5; }
-.temper-item p { margin: 0; font-size: 13px; }
-.temper-summary { color: var(--text-2); }
-.temper-sets { margin-top: 2px !important; color: var(--muted); font-size: 11.5px !important; }
-.temper-note { font-style: italic; }
-@media (max-width: 900px) {
-  .temper-body { grid-template-columns: 1fr; }
-  .temper-list li { grid-template-columns: 44px minmax(0, 1fr); }
-  .temper-list li .btn { grid-column: 2; justify-self: start; }
 }

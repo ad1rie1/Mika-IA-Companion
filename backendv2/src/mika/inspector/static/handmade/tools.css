@@ -154,7 +154,6 @@
 .server-alert.warn { background: var(--warn-bg); color: var(--warn); }
 .server-alert.danger { background: var(--danger-bg); color: var(--danger); }
 .server-alert a { color: inherit; font-weight: 600; }
-.person-tiles-list.server-tiles li.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .server-read { display: grid; gap: 14px; margin: 0; }
 .server-read dt { margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .server-read dd { margin: 0; font-size: 14px; line-height: 1.5; }

@@ -1,0 +1,15 @@
+{# Un effet qui n'a pas pu partir (Système › Sorties, dessinées, et le panneau de leur repli : pages/system.py) :
+   ce qu'il faisait partir, son état, son erreur, ce qu'il faut vérifier ; le relancer, le marquer comme vu. #}
+{% macro outbox_item(p, csrf, back) -%}
+<li class="st-{{ p.tone }}">
+  <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ p.name }}</p><span class="now-tag {{ p.tone }}">{{ p.state }}</span></div><span class="person-entry-time">{% if p.when %}{{ p.when }} · {% endif %}<a href="{{ PREFIX }}/evenement/{{ p.seq }}">événement n° {{ p.seq }}</a></span></div>
+  <p class="now-sub">{{ p.hint }}</p>
+  {% if p.error %}<pre class="hm-error">{{ p.error }}</pre>{% endif %}
+  <form method="post" action="{{ PREFIX }}/systeme/sorties" class="outbox-actions">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
+    <input type="hidden" name="_retour" value="{{ back }}">
+    {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.name }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
+    <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
+  </form>
+</li>
+{%- endmacro %}

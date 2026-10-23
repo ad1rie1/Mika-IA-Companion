@@ -36,7 +36,6 @@ from mika.kernel.inspect import (
     Filters,
     Note,
     Param,
-    Section,
     Workspace,
     int_query,
     is_table_choice,
@@ -49,8 +48,8 @@ from mika.runtime.operations import dynamic_fields, fixed_values, initial_values
 #: les anciennes adresses de l'inspecteur → la console
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
          "sante": "systeme/sante", "appels": "systeme/appels", "rapports": "systeme/simulations",
-         "facultes": "systeme/vues", "modeles": "reglages/modeles", "persona": "reglages/personnalite",
-         "parametres": "reglages/parametres", "canaux": "reglages/canaux", "forge": "apps",
+         "facultes": "systeme/vues", "modeles": "reglages/fournisseurs", "persona": "reglages/identite",
+         "parametres": "reglages/comportement", "canaux": "reglages/depots", "forge": "apps",
          "comptes": "reglages/comptes"}
 
 
@@ -58,7 +57,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
               ("courrier", "comptes"): "reglages/boites",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
-              ("reglages", "canaux"): "reglages/depots", ("reglages", "sens"): "reglages/boites",
+              ("reglages", "canaux"): "reglages/depots", ("reglages", "sens"): "reglages/plugins",
               ("reglages", "parametres"): "reglages/comportement",
               # le bloc Outils redessiné : la grille dit qui reçoit quoi et s'y règle ; ses apps, sous les services
               ("outils", "qui"): "outils/tous", ("outils", "texte"): "outils/tous",
@@ -80,11 +79,8 @@ def per_row(spec: Any) -> bool:
 #: un champ « sujet » propose au plus tant d'objets connus
 SUBJECT_CHOICES = 300
 
-#: au-delà, les rubriques d'un sous-menu qui ne contiennent pas la page se replient
-SUBMENU_OPEN_MAX = 18
-
 #: les anciens onglets de réglages qui recevaient des enregistrements
-LEGACY_POSTS = {("modeles", ""), ("personnalite", ""), ("canaux", ""), ("sens", "")}
+LEGACY_POSTS = frozenset({"modeles", "personnalite", "canaux", "sens"})
 
 
 def safe_back(target: str) -> str:
@@ -95,7 +91,7 @@ def safe_back(target: str) -> str:
 
 
 def dest_url(key: str) -> str:
-    return f"{PREFIX}/" if key == "accueil" else f"{PREFIX}/{key}"
+    return f"{PREFIX}/{key}"
 
 
 class Pages:
@@ -219,7 +215,7 @@ class Pages:
 
     def render_page(self, request: Request, *, title: str, active: str, blocks: Sequence[Any],
                     filters: Sequence[Param] = (), panel: Panel | None = None, keep: Sequence[tuple[str, str]] = (),
-                    status: int = 200, subject: str = "", template: str = "page.html", **ctx: Any) -> Response:
+                    status: int = 200, subject: str = "", **ctx: Any) -> Response:
         query = {k: v for k, v in request.query_params.items()}
         keep = [*keep, *((k, v) for k, v in query.items() if is_table_choice(k, v) and k not in dict(keep))]
         env = self.ui.env()
@@ -235,9 +231,10 @@ class Pages:
         if flash:
             ctx["messages"] = [flash, *ctx.get("messages", [])]
         rendered = render.blocks(blocks, env, query)
-        return self.ui.page(request, template, title, active=active, status=status,
+        return self.ui.page(request, "page.html", title, active=active, status=status,
                             blocks=rendered, filters=fctx, filtered=active_filter,
                             keep=keep, reset=reset, panel=panel.template if panel else None,
+                            panel_styles=panel.styles if panel else (),
                             forms=self.slot_forms(request, rendered, subject), **panel_ctx, **ctx)
 
     # ── destinations ──
@@ -245,7 +242,7 @@ class Pages:
                           produced: dict[str, Any] | None = None, status: int = 200) -> Response:
         """Une destination et l'onglet demandé ; ``produced`` remplace le contenu de
         l'onglet (un formulaire refusé qu'on remontre, avec ``status``)."""
-        key = key or request.path_params.get("key", "accueil")
+        key = key or request.path_params["key"]
         moved_tab = MOVED_TABS.get((key, request.path_params.get("tab", "")))
         if moved_tab and not tab:
             query = dict(request.query_params)
@@ -263,59 +260,35 @@ class Pages:
             return self.render_page(request, title="Page inconnue", active="", status=404,
                                     blocks=[Note("Cette page n'existe pas.", "warn")])
         tabs = self.tabs_of(d)
-        if d.layout == "stack":
-            if request.path_params.get("tab") or tab:  # un onglet d'une page empilée : la page entière
-                return RedirectResponse(dest_url(d.key), status_code=303)
-            blocks: list[Any] = []
-            for _slug, title, item in tabs:
-                got = await self.produce(item, request)
-                if "response" in got:
-                    continue
-                blocks.append(Section(title, tuple(got["blocks"]),
-                                      item.description if isinstance(item, Builtin) else ""))
-            return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description,
-                                    head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [])
         slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
         current = next((t for t in tabs if t[0] == slug), None)
         if current is None:
             return RedirectResponse(dest_url(d.key), status_code=303)
         item = current[2]
-        if isinstance(item, Builtin) and item.href:
-            return RedirectResponse(item.href, status_code=303)
         got = produced if produced is not None else await self.produce(item, request)
         if "response" in got:
             return got["response"]
         drawn = self.drawn(request, f"{d.key}/{slug}", got) if produced is None else {}
         if drawn:
             got = {**got, "blocks": drawn.pop("blocks"), **({} if drawn.pop("panel") else {"panel": None})}
-        tab_list = [{"title": t, "href": (b.href if isinstance(b, Builtin) and b.href else f"{dest_url(d.key)}/{s}"
-                                          if d.key != "accueil" else f"{PREFIX}/accueil/{s}"),
-                     "on": s == slug, "badge": self.tab_badge(b),
+        tab_list = [{"title": t, "href": f"{dest_url(d.key)}/{s}", "on": s == slug, "badge": self.tab_badge(b),
                      "group": b.group if isinstance(b, Builtin) else ""} for s, t, b in tabs]
         context = {k: request.query_params[k] for k in d.context if request.query_params.get(k)}
         if context:
             for t in tab_list:
                 t["href"] += ("&" if "?" in t["href"] else "?") + urlencode(context)
         if d.layout == "menu":
-            # un sous-menu rangé par rubrique : la page porte le titre de la sous-page
-            submenu: list[dict[str, Any]] = []
-            for t in tab_list:
-                if not submenu or submenu[-1]["title"] != t["group"]:
-                    submenu.append({"title": t["group"], "items": []})
-                submenu[-1]["items"].append(t)
+            # des pages rangées par rubrique (le menu de gauche y mène) : la page porte le titre de la sous-page
             group = next((t["group"] for t in tab_list if t["on"]), "")
-            long_menu = len(tab_list) > SUBMENU_OPEN_MAX
-            for g in submenu:
-                g["open"] = not long_menu or any(t["on"] for t in g["items"]) or not g["title"]
             crumbs = [(d.label, dest_url(d.key))] + ([(group, "")] if group else []) + list(got.get("crumbs") or [])
             description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
-            # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles).
-            # Le répertoire complet : le sélecteur repliable (Système) ; pour les réglages, « Tous les réglages ».
+            # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles) ; pour les réglages, le
+            # répertoire complet est « Tous les réglages ».
             family = next(((link.target, *link.also) for group in self.ui.deps.menu for link in group.items
                            if f"{d.key}/{slug}" in (link.target, *link.also)), ())
             related = [t for t in tab_list if t["href"].removeprefix(PREFIX + "/") in family]
             return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
-                                    subtitle=description or "", submenu=submenu, tabs=related, blocks=got["blocks"],
+                                    subtitle=description or "", tabs=related, blocks=got["blocks"],
                                     console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
@@ -627,7 +600,7 @@ class Pages:
                 {"blocks": reglages.overview(self.ui), "messages": list(state.get("messages", []))}
             return await self.destination(request, key="reglages", tab=target, produced=got, status=status)
         forms_ = self.ui.settings_forms
-        if forms_ is not None and tab not in forms_.pages and (tab, "") in LEGACY_POSTS:
+        if forms_ is not None and tab not in forms_.pages and tab in LEGACY_POSTS:
             # une ancienne adresse d'enregistrement (un onglet par section) : la page qui montre ce champ
             data = await request.form()
             path = str(data.get("_enregistrement") or data.get("_supprimer") or data.get("_champs") or "")
@@ -665,10 +638,10 @@ class Pages:
         ]
 
     def catchall(self) -> list[Route]:
-        """Les destinations : en dernier (toute autre route passe avant)."""
+        """Les destinations : en dernier (toute autre route passe avant ; la racine est l'accueil, dessiné à la
+        main : ``app/handmade/home.py``)."""
         g = self.ui.guarded
         return [
-            Route(PREFIX + "/", g(self.destination)),
             Route(PREFIX + "/{key:str}", g(self.destination)),
             Route(PREFIX + "/{key:str}/{tab:str}", g(self.destination)),
         ]

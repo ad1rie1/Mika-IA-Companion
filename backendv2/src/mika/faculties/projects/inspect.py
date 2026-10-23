@@ -397,7 +397,7 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                  "warn" if waiting else "", APPROVALS),
             Stat("Archivés", sum(1 for p in every if p.status == c.ARCHIVED)),
         )),
-        Table(LIST_COLUMNS, tuple(rows), title="Projets", pager=pager, filters=("etat", "mode"), layout="cards",
+        Table(LIST_COLUMNS, tuple(rows), title="Projets", pager=pager, layout="cards",
               empty="aucun projet avec ces filtres" if wanted != "vivants" or mode else
               "aucun projet : « Créer un projet » (en haut) en ouvre un — elle peut aussi en ouvrir d'elle-même.",
               caption="Une exécution vise un objectif : celui que tu demandes, sinon le constant le plus en retard, "
@@ -464,7 +464,7 @@ def _runs_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
         names = _texts(ctx, (p.title_ref for _, p in running if p is not None))
         blocks.append(Note("En ce moment : " + ", ".join(
             f"« {_text(names, p.title_ref, '(sans titre)')} »" for _, p in running if p is not None) + ".", "info"))
-    blocks.append(Table(RUN_COLUMNS, tuple(rows), title="Les exécutions", pager=pager, filters=("projet", "verdict"),
+    blocks.append(Table(RUN_COLUMNS, tuple(rows), title="Les exécutions", pager=pager,
                         empty="aucune exécution avec ces filtres" if project or verdict else "aucune exécution encore"))
     return blocks
 
@@ -511,7 +511,7 @@ def _decisions_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
                  Text(_text(texts, d.reason_ref), clamp=400)), href=_decisions_ref(p, ""))
             for p, d in page]
     return [Table(DECISION_COLUMNS, tuple(rows), title="Décisions techniques", pager=pager,
-                  filters=("projet", "statut"), empty="aucune décision avec ces filtres")]
+                  empty="aucune décision avec ces filtres")]
 
 
 def _decisions_ref(p: Project, text: str) -> Ref:
@@ -858,7 +858,7 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
         Table((Column("n°", "fit"), Column("la question"), Column("ce qui est choisi"), Column("statut", "fit"),
                Column("posée par", "fit"), Column("quand", "fit")), tuple(rows),
               title=f"Ses décisions ({sum(1 for d in p.decisions if d.status == c.IN_FORCE)} en vigueur)",
-              pager=pager, filters=("statut",),
+              pager=pager,
               empty="aucune décision avec ce filtre" if wanted != c.IN_FORCE else
               "aucune décision encore : elle en consigne pendant ses exécutions, et toi ici"),
     ]

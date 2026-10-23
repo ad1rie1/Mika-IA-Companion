@@ -184,8 +184,6 @@ class Table:
     title: str = ""
     empty: str = "rien pour l'instant"
     pager: Pager | None = None
-    #: les paramètres de la vue montrés comme filtres au-dessus du tableau
-    filters: tuple[str, ...] = ()
     caption: str = ""
     #: Même collection paginée : tableau (vide), fiches (cards), liste (list), ou fil (feed).
     layout: str = ""

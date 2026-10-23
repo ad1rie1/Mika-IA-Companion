@@ -2,9 +2,7 @@
    dessinés, sur le vocabulaire commun (base.css). */
 
 /* ── L'en-tête, sur tous ses onglets : la console y ajoute ses actions ── */
-.fiche-head { align-items: center; gap: 18px 24px; margin-bottom: 22px; }
-.fiche-head-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-.fiche-head-side .action-bar { margin: 0; }
+.fiche-head { align-items: center; }
 .person-head { display: flex; flex: 1 1 520px; align-items: center; gap: 22px; min-width: 0; }
 .person-avatar { position: relative; display: grid; flex: none; place-items: center; width: 84px; height: 84px;
   border: 2px solid color-mix(in srgb, var(--sw) 50%, transparent); border-radius: 50%;
@@ -13,7 +11,6 @@
   color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--now-serif); font-size: 38px;
   font-weight: 600; }
 .person-avatar .now-presence { right: 3px; bottom: 3px; width: 18px; height: 18px; border-width: 3px; }
-.person-avatar .now-presence.typing { background: var(--accent); animation: now-typing 1.1s ease-in-out infinite; }
 .person-head-text { display: grid; gap: 6px; min-width: 0; }
 .person-head-text h1 { font-family: var(--now-serif); font-size: clamp(2rem, 3vw, 2.7rem); font-weight: 600; letter-spacing: -.015em; line-height: 1.05; }
 .person-head-facts { margin: 0; color: var(--text-2); font-size: 13.5px; }
@@ -23,7 +20,6 @@
 .person-live { position: absolute; top: 16px; right: 18px; padding: 3px 10px; font-size: 11.5px; }
 .person-hero { grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: start; }
 .person-bond { display: grid; gap: 12px; padding-left: 28px; border-left: 1px solid var(--border); }
-.person-facts { margin: 0; color: var(--text-2); font-size: 13px; }
 .person-hard { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn);
   font-size: 13px; }
 .person-word { font-size: clamp(2.2rem, 4vw, 3.2rem); }
@@ -90,12 +86,8 @@
   .person-bond { padding: 18px 0 0; border-top: 1px solid var(--border); border-left: 0; }
   .person-head { gap: 14px; }
   .person-avatar { width: 60px; height: 60px; font-size: 27px; }
-  .fiche-head-side { justify-content: flex-start; }
   .person-head-links { flex-direction: column; }
   .person-head-links span[aria-hidden] { display: none; }
   .person-live { position: static; justify-self: start; }
   .person-life li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .person-avatar .now-presence.typing { animation: none; }
 }

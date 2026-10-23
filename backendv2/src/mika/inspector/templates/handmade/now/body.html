@@ -1,6 +1,6 @@
 {# Le corps de « En ce moment » : rendu dans la page, puis relu seul par handmade/live.js (le fragment). Aucun style en
    ligne (CSP) : les longueurs sont des attributs SVG, les couleurs des classes (sw-<émotion> pose --sw). #}
-{% from "handmade/macros.html" import bar, people, failed %}
+{% from "handmade/shared/macros.html" import bar, people, failed, qualifier, facets, figures %}
 <span hidden data-now-stamp>{{ now.stamp }}</span>
 
 {# ── Son humeur ─────────────────────────────────────────────────────────── #}
@@ -10,18 +10,8 @@
   <div class="now-hero-text">
     <h2 class="now-eyebrow" id="now-mood-title">Son humeur</h2>
     <p class="now-word">{{ m.word }}</p>
-    <p class="now-qualifier">
-      {% if m.rest %}Comme d'habitude : c'est son fond, elle est au repos.
-      {% else %}{{ m.qualifier|capitalize }} {{ m.word }}, elle qui est d'habitude <span class="now-inline-sw sw-{{ m.background_emotion }}">{{ m.background }}</span>.{% endif %}
-    </p>
-    {% if m.facets|length > 1 %}
-    <div class="now-facets">
-      <svg class="now-facets-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="Le mélange de ce qu'elle ressent">
-        {% for f in m.facets %}<rect class="sw-{{ f.emotion }}" x="{{ f.x }}" y="0" width="{{ f.w }}" height="10"/>{% endfor %}
-      </svg>
-      <ul class="now-facets-legend">{% for f in m.facets %}<li><span class="now-dot sw-{{ f.emotion }}" aria-hidden="true"></span>{{ f.word }} <span class="now-num">{{ f.share }}</span></li>{% endfor %}</ul>
-    </div>
-    {% endif %}
+    {{ qualifier(m) }}
+    {{ facets(m) }}
     <blockquote class="now-voice">
       <p>{{ m.line }}</p>
       <footer>ce que son prompt lui en dit</footer>
@@ -207,8 +197,8 @@
   {% if g and g.rows %}
   <ul class="now-people">
     {% for p in g.rows %}
-    <li class="now-person{{ ' online' if p.online }}{{ ' composing' if p.composing }}">
-      <span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence"></span>{% endif %}</span>
+    <li class="now-person{{ ' online' if p.online }}">
+      <span class="now-avatar sw-{{ p.felt.emotion if p.felt else 'neutral' }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence{{ ' typing' if p.composing }}"></span>{% endif %}</span>
       <div class="now-person-main">
         <p class="now-person-head">{% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}{% if p.owner %}<span class="now-tag owner">propriétaire</span>{% endif %}<span class="now-tag{{ ' close' if p.close }}">{{ p.closeness }}</span></p>
         <p class="now-person-felt">{% if p.felt %}<span class="now-dot sw-{{ p.felt.emotion }}" aria-hidden="true"></span>{{ p.felt.how }} {{ p.felt.word }} envers cette personne{% else %}<span class="now-muted">rien de particulier envers cette personne</span>{% endif %}</p>
@@ -278,11 +268,7 @@
   <section class="now-card" aria-labelledby="now-today-title">
     <header class="now-card-head"><h2 id="now-today-title">Aujourd'hui, en chiffres</h2><p>depuis minuit</p></header>
     {% if now.day %}
-    <ul class="now-today">
-      {% for x in now.day.today %}
-      <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="now-today-value now-num">{{ x.value }}</span><span class="now-today-label">{{ x.label }}{% if x.sub %} · {{ x.sub }}{% endif %}</span>{% if x.href %}</a>{% endif %}</li>
-      {% endfor %}
-    </ul>
+    {{ figures(now.day.today) }}
     {% else %}{{ failed("sa journée") }}{% endif %}
   </section>
   </div>

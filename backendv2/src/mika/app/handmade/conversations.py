@@ -1,6 +1,6 @@
 """Conversations, dessinées (ADR 0121) : ses messages en conversation (le rendu de l'onglet Échanges d'une fiche, pour
 toutes les personnes), ses réponses que l'opératrice a jugées — le message, sa réponse, l'avis et ce qu'elle aurait dû
-dire —, les questions qui attendent.
+dire. Les questions qui attendent se dessinent bloc par bloc (``pages.py``).
 
 Les données restent celles de la faculté du fil (``transcript`` : ses onglets ``messages``, ``jugees``,
 ``questions``, leurs filtres et leur pagination) ; une forme qu'un onglet ne reconnaît pas rend la main à ses blocs.
@@ -13,12 +13,12 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look
-from mika.app.handmade.person.echanges import exchanges
+from mika.app.handmade import Look, columns, reader
+from mika.app.handmade.exchanges import exchanges
 from mika.inspector import render
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import Badge, Column, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Row, Table, Text, When
 
 
 def messages(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
@@ -26,22 +26,14 @@ def messages(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup 
     return exchanges(ui, "", blocks, query)
 
 
-def _labels(table: Table) -> dict[str, int]:
-    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
-
-
 def judged(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
     """Conversations › Ses réponses jugées : le message, sa réponse, ton avis, ce qu'elle aurait dû dire."""
-    table = next((b for b in blocks if isinstance(b, Table) and "sa réponse" in _labels(b)), None)
+    table = next((b for b in blocks if isinstance(b, Table) and "sa réponse" in columns(b)), None)
     if table is None:
         return None
     look = Look.of(ui, DAY)
     shown = render.Env(when=ui.when_long, now=look.now)
-    at = _labels(table)
-
-    def cell(row: Row, label: str) -> Any:
-        i = at.get(label)
-        return row.cells[i] if i is not None and i < len(row.cells) else None
+    cell = reader(table)
 
     def text(value: Any) -> str:
         return value.text if isinstance(value, Text) else ("" if value in (None, "—") else str(value))

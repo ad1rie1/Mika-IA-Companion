@@ -100,12 +100,12 @@ def directory(look: Look, query: Mapping[str, str]) -> dict[str, Any]:
         cards.append(card)
     chips = [{"label": label, "count": len(matched) if not key else levels.get(key, 0), "on": level == key,
               "href": _href(query, proximite=key)} for key, label in LEVELS if not key or levels.get(key)]
-    here = [{**person_card(look, p, h), "since": h["since"]} for p, h in online.items()]
+    here = [person_card(look, p, h) for p, h in online.items()]
     missed = [{"name": look.name(p), "href": look.href(p), "ratio": num_fr(r, 1)}
               for p, r in (frame.get(social_c.MISSED) or ())[:8]]
     return {
         "cards": cards, "chips": chips, "total": len(matched), "count": len(shown), "q": query.get("q", ""),
-        "level": level, "only_online": only_online, "online": here, "missed": missed,
+        "level": level, "only_online": only_online, "online_key": ONLINE, "online": here, "missed": missed,
         "online_href": _href(query, presence="" if only_online else ONLINE),
         "page": page, "pages": pages,
         "prev": _page_href(query, page - 1) if page > 1 else "",

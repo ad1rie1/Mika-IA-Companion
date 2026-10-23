@@ -216,22 +216,27 @@ class Subjects:
             # Les réglages et les pages natives doivent se trouver aussi : ils ne sont pas des sujets.
             matches = []
             needle = search_text(q)
+            her = self.ui.her_name()
+            for group in self.ui.deps.menu:
+                label = her if group.her else group.label
+                for link in group.items:
+                    if needle in search_text(f"{label} {link.label}"):
+                        matches.append((Ref("local", f"{PREFIX}/{link.target}", link.label), label or "Accueil"))
+            # la rubrique d'une destination : celle du menu qui y mène (ses groupes de la carte ne se montrent pas)
+            rubric = {}
             for group in self.ui.deps.menu:
                 for link in group.items:
-                    if needle in search_text(f"{group.label} {link.label}"):
-                        matches.append((Ref("local", f"{PREFIX}/{link.target}", link.label), group.label or "Accueil"))
+                    for route in (link.target, *link.also):
+                        rubric.setdefault(route.split("/", 1)[0], her if group.her else group.label)
             for group in self.ui.deps.navigation:
                 for dest in group.items:
-                    base = f"{PREFIX}/{dest.key}" if dest.key != "accueil" else f"{PREFIX}/"
+                    base = f"{PREFIX}/{dest.key}"
                     if needle in search_text(dest.label):
-                        matches.append((Ref("local", base, dest.label), group.label or "Accueil"))
-                    if dest.layout == "stack":
-                        continue
+                        matches.append((Ref("local", base, dest.label), rubric.get(dest.key, group.label)))
                     for slug, title, spec in self.pages.tabs_of(dest):
                         family = spec.group if isinstance(spec, Builtin) else ""
                         if needle in search_text(f"{dest.label} {family} {title}"):
-                            url = spec.href if isinstance(spec, Builtin) and spec.href else f"{base}/{slug}"
-                            matches.append((Ref("local", url, title), " › ".join(filter(None, (dest.label, family)))))
+                            matches.append((Ref("local", f"{base}/{slug}", title), " › ".join(filter(None, (dest.label, family)))))
             if matches:
                 unique = {}
                 for row in matches:

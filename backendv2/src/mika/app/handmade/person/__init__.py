@@ -1,7 +1,7 @@
 """Une personne : tout ce qu'elle vit avec elle, sur une page dessinée à la main (ADR 0121).
 
-La fiche d'une personne a douze onglets, un par faculté. « Qu'est-ce qu'elle vit avec cette personne ? » les
-traverse : cette page les croise, lus aux faits au même instant, à sa mémoire (par sa seule porte,
+La fiche d'une personne a un onglet par faculté qui la regarde. « Qu'est-ce qu'elle vit avec cette personne ? »
+les traverse : cette page les croise, lus aux faits au même instant, à sa mémoire (par sa seule porte,
 ``contracts.memory``), au fil et au journal :
 
 - qui elle est pour elle : le lien, ce qu'elle ressent envers elle (et ce que son prompt lui en dit), la chaleur,
@@ -32,22 +32,24 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.app.handmade import (
-    LIVE_WAIT,
+    FORGOTTEN,
     MONTHS,
     PERSON_BASE,
-    WEEKDAYS,
     Look,
     affect_params,
+    date_fr,
     emotion,
     excerpt,
+    felt_of,
+    live_wait,
     read_parts,
     senses,
     span,
     unit,
 )
 from mika.app.handmade.blocks import tab as blocks_tab
+from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn
-from mika.app.handmade.person.echanges import exchanges
 from mika.app.handmade.person.memoire import memory
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
@@ -151,7 +153,7 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
     contact = frame.get(social_c.CONTACT(person))
     stance = frame.get(affect_c.STANCE(person))
     view = frame.get(identity_c.IDENTITY(person))
-    felt = not stance.at_rest and stance.felt_intensity >= 0.1 and stance.felt is not A.Emotion.NEUTRAL
+    felt = felt_of(stance)
     facts = []
     if contact.first_in:
         facts.append(f"premier message le {look.date(contact.first_in)}")
@@ -163,17 +165,16 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         facts.append(f"le dernier {look.ago(contact.last_in)}")
     count = len(who.handles)
     how = "vérifiée" if view.authenticated else f"certitude {pct_fr(view.certainty)}"
-    fiche = f"{PREFIX}/fiche/person/{quote(person, safe='')}"
     return {
         "name": who.name, "initial": (who.name[:1] or "?").upper(),
-        "emotion": stance.felt.value if felt else "neutral",
+        "emotion": felt["emotion"] if felt else "neutral",
         "owner": bool(frame.get(identity_c.IS_OWNER(person))),
         "closeness": CLOSENESS_FR.get(closeness, closeness), "close": closeness in (social_c.FRIEND, social_c.CLOSE),
         "online": bool(set(frame.get(presence_c.PRESENT) or ()) & set(who.handles)),
         "composing": any(frame.get(presence_c.COMPOSING(h)) for h in who.handles),
         "facts": facts,
         "where": f"{count} moyen{'s' if count > 1 else ''} de communication" + (f" · {view.channel}, {how}" if view.channel else ""),
-        "where_href": f"{fiche}?onglet=adresses",
+        "where_href": fiche_url("person", person, "adresses"),
         "toward": f"{PREFIX}/decisions/envers?personne={quote(person, safe='')}",
     }
 
@@ -185,15 +186,11 @@ def portrait(look: Look, who: Who) -> dict[str, Any]:
     """Ce qu'elle ressent envers elle (et ce que son prompt lui en dit), ce que leur lien a installé."""
     frame, now, person = look.frame, look.now, who.person
     stance = frame.get(affect_c.STANCE(person))
-    felt = None
-    if not stance.at_rest and stance.felt_intensity >= 0.1 and stance.felt is not A.Emotion.NEUTRAL:
-        felt = {"emotion": stance.felt.value, "word": A.FR[stance.felt], "how": A.intensity_word(stance.felt_intensity)}
     voice = prose.stance(stance, affect_params(frame), name=who.name, now=now)
     regard = stance.regard
     hard = frame.get(memory_c.HARD_TIMES(person))
     return {
-        "fiche": f"{PREFIX}/fiche/person/{quote(person, safe='')}",
-        "felt": felt, "voice": [line for line in voice.split("\n") if line.strip()],
+        "felt": felt_of(stance), "voice": [line for line in voice.split("\n") if line.strip()],
         "regard": num_fr(regard, 2, signed=True), "regard_w": unit(abs(regard)),
         "regard_tone": "warm" if regard > 0.05 else "cold" if regard < -0.05 else "",
         "bond": pct_fr(stance.bond), "bond_w": unit(stance.bond),
@@ -247,7 +244,7 @@ def story(look: Look, who: Who) -> dict[str, Any]:
             got = days.get(date)
             count = (got["in"] + got["out"]) if got else 0
             felt = got["felt"].most_common(1)[0][0] if got and got["felt"] else None
-            title = f"{WEEKDAYS[date.weekday()]} {date.day} {MONTHS[date.month - 1]}"
+            title = date_fr(date)
             if count:
                 title += f" — {got['in']} de sa part, {got['out']} d'elle"
                 title += f" · elle : {A.FR[felt]}" if felt is not None else ""
@@ -352,9 +349,9 @@ def knows(look: Look, who: Who) -> dict[str, Any]:
                      "important": ev.importance >= memory_c.IMPORTANT_MOMENT, "festive": ev.festive, "felt": felt})
     said_of_self = None
     if profile is not None and not getattr(profile, "masked", False):
-        summary, tone, interests, sensitive = profile_parts(profile, texts)
+        summary, _tone, interests, sensitive = profile_parts(profile, texts)
         if summary or interests or sensitive:
-            said_of_self = {"summary": excerpt(summary, 400) if summary else "", "tone": tone,
+            said_of_self = {"summary": excerpt(summary, 400) if summary else "",
                             "interests": list(interests)[:10], "sensitive": list(sensitive)[:8]}
     return {"beliefs": [_item(look, k) for k in beliefs], "souvenirs": [_item(look, k) for k in souvenirs],
             "lies": [_item(look, k) for k in lies], "life": life, "self": said_of_self}
@@ -371,11 +368,9 @@ def _tone(valence: float, arousal: float) -> str:
 
 
 def reads(look: Look, who: Who) -> dict[str, Any]:
-    frame, now, person = look.frame, look.now, who.person
-    mind = frame.get(others_c.MIND(person))
-    check_in = frame.get(others_c.CHECK_IN_AT(person))
+    mind = look.frame.get(others_c.MIND(who.person))
     if not mind.observed:
-        return {"observed": 0, "check_in": look.day(check_in) if check_in > now else ""}
+        return {"observed": 0}
     shift = ""
     if mind.deviation > 0.15:
         shift = "plus léger que d'habitude"
@@ -386,8 +381,7 @@ def reads(look: Look, who: Who) -> dict[str, Any]:
     return {"observed": mind.observed, "usual": _tone(mind.usual_valence, mind.usual_arousal),
             "now": _tone(mind.current_valence, mind.current_arousal), "shift": shift,
             "confidence": pct_fr(mind.confidence), "confidence_w": unit(mind.confidence),
-            "last": last, "last_at": look.ago(mind.last_at) if mind.last_at else "",
-            "check_in": look.day(check_in) if check_in > now else ""}
+            "last": last, "last_at": look.ago(mind.last_at) if mind.last_at else ""}
 
 
 # ── leurs derniers mots ──
@@ -403,13 +397,12 @@ def thread(look: Look, who: Who) -> dict[str, Any]:
     for n, at, role, text, name, room, unanswered in reversed(rows):
         local = look.frame.local(int(at))
         e = emotion(name) if name else None
-        out.append({"mine": role == "assistant", "text": excerpt(text, 320) if text else "(oublié)",
-                    "when": local.strftime("%H:%M") if local.date() == today else f"{look.date(int(at))}, "
-                                                                              f"{local.strftime('%H:%M')}",
+        out.append({"mine": role == "assistant", "text": excerpt(text, 320) if text else FORGOTTEN,
+                    "when": look.hm(int(at)) if local.date() == today else f"{look.date(int(at))}, {look.hm(int(at))}",
                     "emotion": e.value if e is not None else "", "word": A.FR[e] if e is not None else "",
                     "room": bool(room), "unanswered": bool(unanswered and role == "user"),
                     "why": f"{PREFIX}/parole/{n}" if role == "assistant" else ""})
-    return {"messages": out, "all": f"{PREFIX}/fiche/person/{quote(who.person, safe='')}?onglet=echanges"}
+    return {"messages": out, "all": fiche_url("person", who.person, "echanges")}
 
 
 # ── ce qui reste en suspens ──
@@ -420,7 +413,7 @@ def pending(look: Look, who: Who) -> dict[str, Any]:
     keys = set(who.keys)
     out: list[dict[str, Any]] = []
     waiting = frame.get(attention_c.AWAITING(person))
-    if waiting.unanswered and waiting.last_out and now - waiting.last_out >= LIVE_WAIT:
+    if waiting.unanswered and waiting.last_out and now - waiting.last_out >= live_wait(frame):
         many = f" ({waiting.initiatives} messages d'elle)" if waiting.initiatives > 1 else ""
         out.append({"kind": "attente", "text": f"Elle attend sa réponse depuis {span(now - waiting.last_out)}{many}",
                     "tone": "warn"})
@@ -447,7 +440,7 @@ def pending(look: Look, who: Who) -> dict[str, Any]:
     for g in goals:
         kind = "rêverie" if g.musing else GOAL_KIND_FR.get(g.kind, g.kind)
         out.append({"kind": kind, "text": excerpt(titles.get(g.title_ref), 140),
-                    "note": GOAL_STATUS_FR.get(g.status, g.status), "href": f"{PREFIX}/fiche/goal/{g.id}", "tone": ""})
+                    "note": GOAL_STATUS_FR.get(g.status, g.status), "href": fiche_url("goal", str(g.id)), "tone": ""})
     check_in = frame.get(others_c.CHECK_IN_AT(person))
     if check_in > now:
         out.append({"kind": "nouvelles", "text": f"Elle prendra de ses nouvelles {look.day(check_in)}", "tone": ""})
@@ -516,7 +509,7 @@ class PersonOverview(Overview):
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre
     folded = ("synthese", "lien", "devine", "affect", "pensees_personne")
-    #: les onglets des facultés qu'elle dessine, chacun dans son module (``person/<onglet>.py``)
+    #: les onglets des facultés qu'elle dessine (``TABS``)
     tabs = tuple(TABS)
 
     def __init__(self) -> None:
@@ -528,8 +521,8 @@ class PersonOverview(Overview):
         look = Look.of(ui, DAY)
         who = who_of(look, person)
         parts = tuple((key, lambda lk, fn=fn: fn(lk, who)) for key, fn in PARTS)
-        return {"her": ui.her_name(), "name": who.name, "stamp": look.frame.local(look.now).strftime("%H:%M:%S"),
-                "of": elided("de", who.name), "that": elided("que", who.name),
+        return {"name": who.name, "stamp": look.frame.local(look.now).strftime("%H:%M:%S"),
+                "fiche": fiche_url("person", who.person), "of": elided("de", who.name), "that": elided("que", who.name),
                 **read_parts(look, parts, f"une personne · {person}")}
 
     @staticmethod

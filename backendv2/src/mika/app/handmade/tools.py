@@ -13,10 +13,10 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import blocks
+from mika.app.handmade import blocks, columns, reader
 from mika.inspector import render
 from mika.inspector.ui import UI, Drawn, env
-from mika.kernel.inspect import Badge, Column, Fields, Note, Ref, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Fields, Note, Ref, Row, Table, Text, When
 
 #: la vue de la Forge que « Venus d'ailleurs » montre sous les services : (propriétaire, nom)
 APP_TOOLS = ("forge", "outils_apps")
@@ -54,8 +54,7 @@ class Elsewhere(Drawn):
         html = Markup(env.get_template("handmade/outils/ailleurs.html").render(
             links=links, services=_services(services, shown) if services is not None else None,
             apps=_apps(apps) if apps is not None else None,
-            services_empty=services.empty if services is not None else "", apps_empty=apps.empty if apps is not None else "",
-            services_caption=services.caption if services is not None else ""))
+            services_empty=services.empty if services is not None else "", apps_empty=apps.empty if apps is not None else ""))
         return html + (blocks.page(ui, others, query, forms=forms) or Markup(""))
 
 
@@ -74,21 +73,8 @@ def _buttons(items: Sequence[Any]) -> tuple[list[tuple[str, str]], list[Any]]:
     return [], list(items)
 
 
-def _labels(table: Table) -> dict[str, int]:
-    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
-
-
 def _table(items: Sequence[Any], column: str) -> Table | None:
-    return next((b for b in items if isinstance(b, Table) and column in _labels(b)), None)
-
-
-def _reader(table: Table) -> Any:
-    at = _labels(table)
-
-    def cell(row: Row, label: str) -> Any:
-        i = at.get(label)
-        return row.cells[i] if i is not None and i < len(row.cells) else None
-    return cell
+    return next((b for b in items if isinstance(b, Table) and column in columns(b)), None)
 
 
 def _text(value: Any) -> str:
@@ -100,7 +86,7 @@ def _text(value: Any) -> str:
 def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
     """Une carte par service : son nom, son état, à quoi il lui sert, ses outils servis, ce qui attend ton
     regard, et sa fiche."""
-    cell = _reader(table)
+    cell = reader(table)
     out = []
     for raw in table.rows:
         row = raw if isinstance(raw, Row) else Row(tuple(raw))
@@ -121,7 +107,7 @@ def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
 
 def _apps(table: Table) -> list[dict[str, Any]]:
     """Une carte par app : son titre, quand elle sert, et chacun des outils qu'elle lui donne."""
-    cell = _reader(table)
+    cell = reader(table)
     apps: dict[str, dict[str, Any]] = {}
     for raw in table.rows:
         row = raw if isinstance(raw, Row) else Row(tuple(raw))

@@ -2,6 +2,7 @@
    (du journal au départ), ce qui est à traiter (relancer, marquer comme vu), ce qui part par sorte, les derniers
    départs (filtrés par état). #}
 {% from "_navigation.html" import pager as pages %}
+{% from "handmade/system/macros.html" import outbox_item %}
 <div class="now-page person-tab sys">
   {% if unknown %}<div class="flash warn" role="status">État inconnu : affichage de tous les départs.</div>{% endif %}
   <section class="now-card sys-health sys-out-hero tone-{{ tone }}" aria-labelledby="out-title">
@@ -22,19 +23,7 @@
   <section class="now-card outbox-review hm-outbox sys-out-stuck" aria-labelledby="out-stuck">
     <header class="now-card-head"><h2 id="out-stuck">À traiter</h2><span class="person-count now-num">{{ chosen_total }}</span><p>Ce qui n'a pas pu partir, du plus récent. « Relancer » refait un essai tout de suite ; « Marquer comme vu » garde la trace et éteint le signalement.</p></header>
     <ul class="hm-outbox-list" role="list">
-      {% for p in stuck %}
-      <li class="st-{{ p.tone }}">
-        <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ p.name }}</p><span class="now-tag {{ p.tone }}">{{ p.state }}</span></div><span class="person-entry-time">{{ p.when }} · <a href="{{ PREFIX }}/evenement/{{ p.seq }}">événement n° {{ p.seq }}</a></span></div>
-        <p class="now-sub">{{ p.hint }}</p>
-        {% if p.error %}<pre class="hm-error">{{ p.error }}</pre>{% endif %}
-        <form method="post" action="{{ PREFIX }}/systeme/sorties" class="outbox-actions">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
-          <input type="hidden" name="_retour" value="{{ back }}">
-          {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.name }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
-          <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
-        </form>
-      </li>
-      {% endfor %}
+      {% for p in stuck %}{{ outbox_item(p, csrf, back) }}{% endfor %}
     </ul>
     {% if chosen_total > stuck|length %}{{ pages(stuck_pager) }}{% endif %}
   </section>
@@ -61,7 +50,7 @@
 
   <section class="now-card sys-out-recent" aria-labelledby="out-recent">
     <header class="now-card-head"><h2 id="out-recent">Les derniers départs</h2><p>Du plus récent{% if filtered %}, « {{ filtered }} » seulement{% endif %}. Chacun mène à l'événement qui l'a fait partir.</p></header>
-    <nav class="sys-out-chips" aria-label="Filtrer par état">{% for c in chips %}<a class="{{ 'on' if c.on }} {{ c.tone or '' }}" href="{{ c.href }}"{% if c.on %} aria-current="page"{% endif %}>{{ c.label }} <span class="now-num">{{ c.n }}</span></a>{% endfor %}</nav>
+    <nav class="hm-chips sys-out-chips" aria-label="Filtrer par état">{% for c in chips %}<a class="hm-chip {{ c.tone or '' }}{{ ' on' if c.on }}" href="{{ c.href }}"{% if c.on %} aria-current="page"{% endif %}>{{ c.label }} <span class="hm-count">{{ c.n }}</span></a>{% endfor %}</nav>
     {% if recent %}
     <ol class="sys-out-recent-list" role="list">
       {% for r in recent %}

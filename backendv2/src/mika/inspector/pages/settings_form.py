@@ -104,10 +104,6 @@ def page_url(page: str, **query: str) -> str:
     return base + (f"?{urlencode(query)}" if query else "")
 
 
-#: l'ancien nom (un onglet par section)
-tab_url = page_url
-
-
 def _error_for(path: str, errors: Mapping[str, str]) -> str:
     """L'erreur d'un champ, y compris celles de ses éléments (« owners.0 »)."""
     found = [msg for p, msg in errors.items() if p == path or p.startswith(path + ".")]
@@ -245,11 +241,6 @@ class SettingsForms:
 
             raise CompositionError(problems)
 
-    #: l'ancien nom (une page par onglet) : ce que connaît la route d'enregistrement
-    @property
-    def tabs(self) -> dict[str, tuple[SettingsSection, SettingsPage]]:
-        return self.pages
-
     def _ordered(self) -> list[SettingsSection]:
         rank = {k: i for i, k in enumerate(self._rubric_order)}
         return sorted(self.sections.values(), key=lambda s: (rank.get(s.tab, 99), s.order, s.label))
@@ -313,7 +304,8 @@ class SettingsForms:
         record = view.get("record")
         heading = (("Ajouter · " + record["label"]) if record["new"] else
                    "Modifier · " + (record["key"] or record["label"])) if record else ""
-        return Panel("handmade/reglages/page.html", {"sections": [view], "action": page_url(page), "page_heading": heading})
+        return Panel("handmade/reglages/page.html", {"sections": [view], "action": page_url(page), "page_heading": heading},
+                     styles=("handmade/reglages.css",))
 
     def _fields(self, s: SettingsSection, pg: SettingsPage) -> list[forms.FormField]:
         assert s.model is not None

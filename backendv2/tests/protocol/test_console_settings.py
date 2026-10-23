@@ -286,10 +286,10 @@ def test_every_settings_change_lands_in_the_configuration_journal_without_conten
     raw = " ".join(o.data for o in ops)
     assert CANARY_KEY not in raw and CANARY_STT not in raw
     # canari : aucun secret dans aucune page de la console (chaque destination, chaque sous-page)
-    urls: set[str] = set()
+    urls: set[str] = {"/inspecteur/"}  # l'accueil, dessiné à la main hors de la carte
     for group in NAVIGATION:
         for d in group.items:
-            base = "/inspecteur/" if d.key == "accueil" else f"/inspecteur/{d.key}"
+            base = f"/inspecteur/{d.key}"
             urls.add(base)
             first = client.get(base, follow_redirects=True)
             urls |= links(html_of(first), f"/inspecteur/{d.key}")

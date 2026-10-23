@@ -240,8 +240,8 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     assert "apport de l'opérateur : donnees/mesures.csv" in git and "atelier ouvert" in git
     sha = re.search(r"commit=([0-9a-f]{7,40})", git).group(1)
     shown = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git&commit={sha}").text
-    assert 'class="code diff"' in shown and "d-line d-add" in shown and "+1,2" in html.unescape(shown)
-    block = shown.split('class="code diff"', 1)[1].split("</pre>", 1)[0]
+    assert 'class="hm-code diff"' in shown and "d-line d-add" in shown and "+1,2" in html.unescape(shown)
+    block = shown.split('class="hm-code diff"', 1)[1].split("</pre>", 1)[0]
     assert "</span>\n<span" not in block  # une ligne de diff par ligne, sans ligne vide entre deux
     assert act("projects.outils", "t1", tool_memory="on", tool_rss="on").status_code == 303
     behaviour = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=comportement").text)

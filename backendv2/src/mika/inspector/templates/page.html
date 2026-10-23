@@ -3,13 +3,13 @@
 {# les blocs d'une page dans le vocabulaire des pages dessinées (ADR 0121) ; ``console_blocks`` : le rendu de la
    console (une vue dont l'interface est un contrat) #}
 {% from "handmade/shared/drawn.html" import one with context %}
-{% from "_forms.html" import action_form, action_button %}
+{% from "_forms.html" import action_button %}
 {% from "_cells.html" import cell %}
 {% from "_navigation.html" import filters_form %}
 {# Une fiche dont la composition dessine l'en-tête ou la vue d'ensemble (ADR 0121) : les feuilles et les scripts
-   qu'elle déclare (Overview.styles, Overview.scripts). #}
+   qu'elle déclare (Overview.styles, Overview.scripts) ; un panneau, les siennes (Panel.styles). #}
 {% block head %}
-{% for s in fiche_styles or [] %}<link rel="stylesheet" href="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}">
+{% for s in (fiche_styles or [])|list + (panel_styles or [])|list %}<link rel="stylesheet" href="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}">
 {% endfor %}{% for s in fiche_scripts or [] %}<script src="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}" defer></script>
 {% endfor %}{% endblock %}
 {% macro head_side() %}
@@ -56,32 +56,11 @@
 {% for b in blocks or [] %}{% if console_blocks %}{{ render([b], forms or {}) }}{% else %}{{ one(b) }}{% endif %}{% if panel and panel_after_blocks == loop.index %}{% include panel %}{% endif %}{% endfor %}
 {% if panel and panel_after %}{% include panel %}{% endif %}
 {% if overview and overview_last %}{{ overview }}{% endif %}
-{% if not blocks and not panel and not overview %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
+{% if not blocks and not panel and not overview %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>Cette page se remplira quand elle aura vécu un peu.</div>{% endif %}
 </div>
 {% endmacro %}
 {% block content %}
 <div class="page-view">
-{# avec le menu de gauche, pas de sélecteur de pages : le menu, les onglets et « Tous les réglages » y mènent ; il ne
-   reste que là où il est la seule navigation (une console sans menu d'opérateur) #}
-{% if submenu and not operator_menu %}
-<div class="with-submenu{{ ' menu-directory' if operator_menu }}">
-  <details class="submenu-shell"{% if not operator_menu %} data-responsive-menu open{% endif %}>
-    <summary class="submenu-toggle">Changer de page dans {{ 'les réglages' if active_destination == 'reglages' else 'cette rubrique' }} <span class="muted">· {{ heading or title }}</span></summary>
-    <div class="submenu-search" hidden data-menu-search><label class="sr" for="q-menu">Filtrer les pages de cette rubrique</label><input id="q-menu" type="search" placeholder="Trouver une page…" autocomplete="off"></div>
-  <nav class="submenu" aria-label="Sous-menu">
-    {% for g in submenu %}
-    <details class="submenu-group"{{ ' open' if g.open }}>
-      <summary class="submenu-title">{{ g.title or "Général" }}{% set n = g["items"]|sum(attribute="badge") %}{% if n and not g.open %}<span class="count">{{ n }}</span>{% endif %}</summary>
-      {% for t in g["items"] %}<a class="submenu-item{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}><span>{{ t.title }}</span>{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}
-    </details>
-    {% endfor %}
-  </nav>
-  <p class="caption" data-menu-empty role="status" hidden>Aucune page ne correspond.</p>
-  </details>
-  <div class="submain">{{ head_and_body() }}</div>
-</div>
-{% else %}
 {{ head_and_body() }}
-{% endif %}
 </div>
 {% endblock %}

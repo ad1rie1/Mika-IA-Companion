@@ -8,17 +8,18 @@ from typing import Any
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.kernel.inspect import Badge, Column, Disclosure, Note, Ref, Row, Stat, Stats, Table, Text, When
+from mika.runtime.health import PROCESS_FAILURES_MAX
 
 
 def process_blocks(ui: Any, query: Any) -> list[Any]:
     sched = ui.kernel.scheduler
     running = set(sched.running())
-    failing = [s for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
+    failing = [s for s in sched.specs if sched.consecutive.get(s.name, 0) >= PROCESS_FAILURES_MAX]
 
     def state(name: str) -> Badge:
         consecutive = sched.consecutive.get(name, 0)
         if consecutive:
-            return Badge(f"{consecutive} échec(s) d’affilée", "danger" if consecutive >= 3 else "warn")
+            return Badge(f"{consecutive} échec(s) d’affilée", "danger" if consecutive >= PROCESS_FAILURES_MAX else "warn")
         if name in running:
             return Badge("en cours", "info")
         return Badge("en attente" if sched.runs.get(name, 0) else "pas encore exécuté", "muted")
@@ -31,7 +32,7 @@ def process_blocks(ui: Any, query: Any) -> list[Any]:
                        When(sched.last_run(s.name)) if sched.last_run(s.name) else "—",
                        Text(names.detail(sched.last_error.get(s.name, (0, ""))[1]) or "—", clamp=240),
                        Text(s.name, "mono")),
-                      tone="danger" if sched.consecutive.get(s.name, 0) >= 3 else
+                      tone="danger" if sched.consecutive.get(s.name, 0) >= PROCESS_FAILURES_MAX else
                            "warn" if sched.consecutive.get(s.name, 0) else "") for s in specs)
     procs = Table((Column("processus", role="title"), Column("état", role="badge"), "faculté",
                    Column("voie", detail=True), Column("passages", "num"), Column("échecs", "num"),

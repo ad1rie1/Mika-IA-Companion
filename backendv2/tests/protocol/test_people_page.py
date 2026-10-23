@@ -49,6 +49,6 @@ def test_search_and_filters(world):  # noqa: F811
     assert "Personne ne correspond à « personne-inconnue »" in nobody and "people-card" not in nobody
     # une proximité choisie : la pastille s'allume, la recherche est gardée
     level = html.unescape(client.get(f"{people.BASE}?q=adri&proximite=friend").text)
-    assert re.search(r'<a class="people-chip on" href="/inspecteur/personnes\?q=adri&proximite=friend"', level)
+    assert re.search(r'<a class="hm-chip on" href="/inspecteur/personnes\?q=adri&proximite=friend"', level)
     fragment = client.get(f"{people.FRAGMENT}?q=adri")
     assert fragment.status_code == 200 and "<h1" not in fragment.text and "data-now-stamp" in fragment.text

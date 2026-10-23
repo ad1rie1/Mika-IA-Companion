@@ -20,12 +20,11 @@ from mika.kernel.registry import CompositionError
 class Destination:
     key: str
     label: str
-    icon: str = ""
     description: str = ""
     #: les onglets fournis par la console, dans l'ordre (``"decisions.maintenant"``)
     builtin: tuple[str, ...] = ()
-    #: ``tabs`` (des onglets) | ``menu`` (un sous-menu rangé par rubrique, à gauche) |
-    #: ``stack`` (tout l'un sous l'autre : l'accueil)
+    #: ``tabs`` (des onglets) | ``menu`` (des pages rangées par rubrique, où mène le menu de gauche : la page porte
+    #: le titre de la sous-page, et ses pages liées en onglets)
     layout: str = "tabs"
     #: prend aussi tous les onglets de la console dont la clé commence par « <clé>. »
     #: (rangés par ``Builtin.order``) : des pages connues seulement au démarrage
@@ -72,8 +71,6 @@ class Builtin:
     fn: Callable[..., Awaitable[Any]]
     #: ce qui demande une action : ``fn(ui) -> int``
     badge: Callable[..., int] | None = None
-    #: un lien vers une page à part plutôt qu'un contenu
-    href: str = ""
     #: la rubrique du sous-menu (destinations ``menu``)
     group: str = ""
     order: int = 100
@@ -214,18 +211,20 @@ class Panel:
 
     template: str
     context: Mapping[str, Any] = field(default_factory=dict)
+    #: ses feuilles (sous ``inspector/static/``), chargées dans l'en-tête de la page
+    styles: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
 class Builtins:
     items: dict[str, Builtin] = field(default_factory=dict)
 
-    def tab(self, key: str, *, title: str, badge: Callable[..., int] | None = None, href: str = "",
-            group: str = "", order: int = 100, description: str = ""):
+    def tab(self, key: str, *, title: str, badge: Callable[..., int] | None = None, group: str = "",
+            order: int = 100, description: str = ""):
         def deco(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             if key in self.items:
                 raise ValueError(f"onglet de la console déclaré deux fois : {key}")
-            self.items[key] = Builtin(key, title, fn, badge, href, group, order, description)
+            self.items[key] = Builtin(key, title, fn, badge, group, order, description)
             return fn
 
         return deco

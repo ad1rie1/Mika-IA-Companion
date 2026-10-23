@@ -55,15 +55,15 @@ la table de l'arbitre.
 ## Étape 2 — pour chaque menu, ce qui doit se voir et se consulter
 
 ### Tableau de bord
-- **À traiter** (cadres cliquables) : accords en attente, brouillons à décider,
-  revendications, questions sans réponse, apps cassées, processus en échec
-  d'affilée, anomalies, *aucun modèle configuré* — chacun mène à sa page.
-- **En ce moment** (cadres) : humeur, énergie, sommeil, envie dominante,
-  présents, épisodes en cours, file d'attente, heure.
-- **Sa journée** (courbes 24 h) : énergie et pression de sommeil, besoins
-  (les trois), valence et éveil, estime.
-- **Aujourd'hui** (cadres) : épisodes par issue, coût des modèles.
-- **Derniers épisodes** (table paginée).
+L'accueil est dessiné à la main (`app/handmade/home.py`, ADR 0121) et répond à trois questions :
+- **Ce qui t'attend** : une ligne par page où décider (chaque onglet qui demande une action :
+  accords en attente, brouillons, revendications…), puis les réponses en échec, *aucun modèle
+  configuré*, les processus en échec d'affilée, les anomalies, la sauvegarde à faire et les
+  contrôles de santé qui ne passent pas ; chacune mène à sa page.
+- **Comment elle va** : son humeur en mots, son corps, ses besoins, qui est là (les lectures
+  d'« En ce moment »).
+- **Sa journée** : la journée en chiffres et ses derniers épisodes (paginés). Les courbes des
+  24 heures sont sur « En ce moment ».
 
 ### Projets (ADR 0031)
 Un projet est une boîte noire qu'on pilote, distincte d'un but.
@@ -209,8 +209,9 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 
 ### Configuration (sous-menu)
 Aucune page n'a de sélecteur de pages en tête (« Changer de page dans cette rubrique », retiré le
-2026-10-22) : le menu de gauche, les onglets et « Tous les réglages » (l'annuaire des réglages) y mènent ;
-il ne reste que dans une console sans menu d'opérateur, où il est la seule navigation. Une liste d'entrées (des fournisseurs…) peut
+2026-10-22) : le menu de gauche, les onglets et « Tous les réglages » (l'annuaire des réglages) y mènent.
+La console a toujours son menu d'opératrice : la navigation de repli par la carte (et son sous-menu) a été
+retirée le même jour, comme l'accueil rendu par la console (`layout="stack"`). Une liste d'entrées (des fournisseurs…) peut
 se décrire en mots (`SettingsSection.describe`) : un fournisseur dit son type, s'il la fait
 parler, sa clé, son modèle, les rôles qui le désignent, ses bornes en mots et ses appels des
 dernières 24 h ; son bouton « Détail » déplie sa consommation et ses temps de réponse sur 24 h et
@@ -595,18 +596,18 @@ comptes, demandes en attente) suivent le même vocabulaire. « Tableau »
 gardent le rendu de la console : ses apps déclarent leur interface par un contrat.
 
 Chaque entrée peut réunir plusieurs pages liées. La page la plus précise
-allume le bon lien : les dessins sont dans Activité, la caméra dans Outils,
+allume le bon lien : les dessins et la caméra sont dans Connexions extérieures,
 les brouillons et les identités à confirmer dans À valider. Les compteurs
 restent sur les sous-pages ; la rubrique affiche un point d'attention.
 Elle n'additionne pas des listes qui peuvent contenir la même demande.
 La recherche reconnaît aussi les nouveaux libellés du menu.
 
-L'accueil dispose d'un gabarit dédié : son état, priorités, chiffres du
-jour, épisodes récents puis courbes. Il réemploie les blocs et la pagination
+L'accueil dispose d'un gabarit dédié : ce qui attend, son état, les chiffres du
+jour et ses épisodes récents. Il réemploie les onglets de l'accueil et la pagination
 existants. L'heure du relevé distingue le contenu de page du bandeau de vitaux,
-qui continue à se rafraîchir seul. Le répertoire exhaustif des réglages et du
-système est repliable, au-dessus du contenu ; les pages liées (fournisseurs et
-rôles, pages de personnalité, diagnostic) disposent aussi d'onglets directs.
+qui continue à se rafraîchir seul. Les pages liées (fournisseurs et rôles, pages
+de personnalité, diagnostic) disposent d'onglets directs ; « Tous les réglages »
+est l'annuaire des réglages.
 
 Les vérifications HTTP contrôlent chaque lien du menu sans accepter de
 redirection silencieuse, ainsi que la rubrique active sur les vues et les

@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.handmade import MONTHS, WEEKDAYS, Look, read_parts
+from mika.app.handmade import Look, read_parts
 from mika.app.handmade import now as now_page
 from mika.app.handmade.lists import Roles, listing
 from mika.contracts import attention as attention_c
@@ -119,8 +119,7 @@ class HomePage:
         attention = await acall(tabs.attention, self.ui, request, label="accueil : à traiter")
         today = await acall(tabs.today, self.ui, request, label="accueil : aujourd'hui")
         return {
-            "her": self.ui.her_name(), "stamp": local.strftime("%H:%M:%S"),
-            "today": f"{WEEKDAYS[local.weekday()]} {local.day} {MONTHS[local.month - 1]}",
+            "her": self.ui.her_name(), "stamp": local.strftime("%H:%M:%S"), "today": look.date(look.now),
             "attention": None if isinstance(attention, Failed) else priorities(attention),
             "episodes": None if isinstance(today, Failed) else episodes(self.ui, today, query),
             **read_parts(look, PARTS, "l'accueil"),

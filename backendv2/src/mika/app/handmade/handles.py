@@ -17,7 +17,7 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade import Look
-from mika.app.handmade.person.echanges import exchanges
+from mika.app.handmade.exchanges import exchanges
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.identity.faculty import handles_of, known_as, view_of

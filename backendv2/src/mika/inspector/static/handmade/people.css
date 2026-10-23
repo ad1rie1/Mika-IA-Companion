@@ -14,12 +14,6 @@
 .people-find { display: flex; gap: 8px; }
 .people-find input { flex: 1 1 auto; min-width: 0; padding: 10px 14px; border: 1px solid var(--border);
   border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }
-.people-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.people-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border);
-  border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 13px; }
-.people-chip:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
-.people-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.people-chip .now-num { color: var(--muted); font-size: 12px; }
 .people-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 
 /* ── Une carte par personne ───────────────────────────────────────────── */

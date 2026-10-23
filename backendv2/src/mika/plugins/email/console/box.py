@@ -132,7 +132,7 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if port is None or not port.accounts():
         return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Configuration pour recevoir et envoyer des messages.",
                                            title="Aucun compte de messagerie"),
-                                      Nav((NavItem("Ajouter un compte", add_account()),))], filters=())]
+                                      Nav((NavItem("Ajouter un compte", add_account()),))])]
     account = account_scope(port, ctx)
     if account and port.account(account) is None:
         return [workspace(port, ctx, [Note("Ce compte n'existe plus. Choisis une boîte dans la liste.", tone="warn")])]

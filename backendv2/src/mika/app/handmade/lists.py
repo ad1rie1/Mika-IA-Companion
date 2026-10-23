@@ -55,7 +55,6 @@ class Roles:
     badges: tuple[str, ...] = ()
     body: tuple[str, ...] = ()
     time: str = ""
-    skip: tuple[str, ...] = ()
     tiles: bool = False
 
 
@@ -75,7 +74,7 @@ def _roled(row: dict[str, Any], labels: Sequence[str], roles: Roles) -> None:
     row["time_said"] = "" if time.casefold() in PLAIN_TIMES else time
     row["badges"] = [cells[k] for k in roles.badges if k in cells]
     row["body"] = [{"label": k, "value": cells[k]} for k in roles.body if k in cells]
-    taken = {title, time, *roles.badges, *roles.body, *roles.skip}
+    taken = {title, time, *roles.badges, *roles.body}
     row["fields"] = [{"label": k, "value": v, "hint": ""} for k, v in cells.items() if k not in taken]
 
 

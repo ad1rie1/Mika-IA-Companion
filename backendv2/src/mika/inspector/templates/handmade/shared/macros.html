@@ -1,0 +1,32 @@
+{# Les macros des pages dessinées à la main (app/handmade) : une jauge, des noms en liens, une carte dont la
+   lecture a échoué ; son humeur en mots et le mélange de ce qu'elle ressent, sa journée en chiffres (l'accueil et
+   « En ce moment »). Aucun style en ligne (CSP) : une longueur est un attribut SVG. #}
+{% macro bar(w, cls="") -%}
+<svg class="now-bar {{ cls }}" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% if w > 0 %}<line class="fill" x1="0" x2="{{ w }}" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% endif %}</svg>
+{%- endmacro %}
+{% macro people(list) -%}
+{% for p in list %}{% if p.href %}<a href="{{ p.href }}">{{ p.name }}</a>{% else %}{{ p.name }}{% endif %}{{ ", " if not loop.last }}{% endfor %}
+{%- endmacro %}
+{% macro failed(what) -%}
+<p class="now-failed">Impossible de lire {{ what }} pour l'instant. <a href="{{ PREFIX }}/systeme/anomalies">Voir les anomalies</a></p>
+{%- endmacro %}
+{% macro qualifier(m) -%}
+<p class="now-qualifier">{% if m.rest %}Comme d'habitude : c'est son fond, elle est au repos.{% else %}{{ m.qualifier|capitalize }} {{ m.word }}, elle qui est d'habitude <span class="now-inline-sw sw-{{ m.background_emotion }}">{{ m.background }}</span>.{% endif %}</p>
+{%- endmacro %}
+{% macro facets(m) -%}
+{% if m.facets|length > 1 %}
+<div class="now-facets">
+  <svg class="now-facets-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="Le mélange de ce qu'elle ressent">
+    {% for f in m.facets %}<rect class="sw-{{ f.emotion }}" x="{{ f.x }}" y="0" width="{{ f.w }}" height="10"/>{% endfor %}
+  </svg>
+  <ul class="now-facets-legend">{% for f in m.facets %}<li><span class="now-dot sw-{{ f.emotion }}" aria-hidden="true"></span>{{ f.word }} <span class="now-num">{{ f.share }}</span></li>{% endfor %}</ul>
+</div>
+{% endif %}
+{%- endmacro %}
+{% macro figures(items) -%}
+<ul class="now-today">
+  {% for x in items %}
+  <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="now-today-value now-num">{{ x.value }}</span><span class="now-today-label">{{ x.label }}{% if x.sub %} · {{ x.sub }}{% endif %}</span>{% if x.href %}</a>{% endif %}</li>
+  {% endfor %}
+</ul>
+{%- endmacro %}

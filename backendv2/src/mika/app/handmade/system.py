@@ -4,8 +4,9 @@ Processus : ses processus de fond lus à l'ordonnanceur, comme l'onglet de la co
 sa dernière erreur en clair et son prochain essai ; puis tous les autres, une carte par faculté, une ligne chacun.
 L'historique des échecs gardés au journal reste celui de la console (sa pagination à curseur).
 
-Sorties : ses chiffres, ses états et ce qui est à traiter (ses boutons) restent à la console ; seule la liste des
-effets se redessine, une ligne par effet — ce qu'il fait partir, son état, son événement.
+Sorties : le parcours d'un effet et où en sont les départs, ce qui est à traiter (relancer, marquer comme vu), ce
+qui part, par sorte, et les derniers départs, une ligne par effet — ce qu'il fait partir, son état, son événement.
+Elle dit tout ce que disait le panneau de la console (``panel=False``), qui ne revient qu'au repli.
 
 Santé : le bilan lu au rapport de santé, comme l'onglet de la console — son verdict, puis ses dix contrôles en
 tuiles, ce qui ne va pas d'abord, chacun avec son constat, son détail et la page de son diagnostic ; les projections
@@ -43,8 +44,6 @@ from mika.runtime.boundary import Failed, call
 from mika.runtime.effects import MAX_ATTEMPTS, RETRY_BASE_S, RETRY_MAX_S, STALE_AFTER_S
 from mika.runtime.inspection import SLOW_US
 
-#: échecs d'affilée qui font une panne (comme la santé et l'onglet de la console)
-FAILING = 3
 #: l'ordre des états, du plus urgent au plus calme, et ce que chacun dit
 STATES = (("ko", "en échec"), ("stumbling", "a trébuché"), ("held", "retenu"), ("running", "en cours"),
           ("ok", "passé"), ("never", "pas encore exécuté"))
@@ -52,7 +51,7 @@ STATES = (("ko", "en échec"), ("stumbling", "a trébuché"), ("held", "retenu")
 
 def _state(sched: Any, name: str, running: set[str], now: int) -> str:
     consecutive = sched.consecutive.get(name, 0)
-    if consecutive >= FAILING:
+    if consecutive >= health_m.PROCESS_FAILURES_MAX:
         return "ko"
     if consecutive:
         return "stumbling"
@@ -244,7 +243,7 @@ def outbox(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mappi
             if fam != key:
                 continue
             segments = _segments(k["by"])
-            rows.append({"name": name, "what": what, "tech": effect, "total": sum(k["by"].values()),
+            rows.append({"name": name, "what": what, "total": sum(k["by"].values()),
                          "stuck": sum(k["by"].get(s, 0) for s in STUCK), "segments": segments,
                          "bar": ", ".join(f"{SEGMENTS[g['key']]} {g['n']}" for g in segments), "last": when(k["last"])})
         if rows:
@@ -253,7 +252,7 @@ def outbox(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mappi
     stuck_tone = "danger" if counts.get("failed") or counts.get("orphan") else "warn" if stuck_total else "ok"
     return Markup(env.get_template("handmade/system/sorties.html").render(
         tone=stuck_tone, stuck_total=stuck_total, route=sum(counts.get(s, 0) for s in ROUTE),
-        done=counts.get("done", 0), seen=counts.get("seen", 0), total_all=sum(counts.values()),
+        done=counts.get("done", 0), seen=counts.get("seen", 0),
         attempts=MAX_ATTEMPTS, base_s=int(RETRY_BASE_S), max_min=int(RETRY_MAX_S // 60),
         stale_min=int(STALE_AFTER_S // 60), csrf=getattr(forms, "csrf", ""), back=back,
         unknown=bool(asked and not status), chosen_total=chosen_total,

@@ -28,7 +28,6 @@ from mika.contracts import self_ as self_c
 from mika.inspector import render
 from mika.inspector.catalog import (
     Builtin,
-    Destination,
     Labels,
     MenuGroup,
     NavGroup,
@@ -74,25 +73,21 @@ class InspectorDeps:
     accounts: Accounts
     #: réglages d'exploitation (``app/settings.py``)
     settings: Any
-    #: recharge les modèles après un changement ; rend les problèmes
-    reload: Callable[[], Awaitable[list[str]]]
     #: les derniers appels de modèle (en mémoire)
     traces: Sequence[Any]
+    #: le menu de l'opératrice (``app/console_menu.py``) : la navigation de la console
+    menu: Sequence[MenuGroup]
     tz: ZoneInfo | None = None
     #: le port d'entrée (décider d'un effet, santé)
     port: Any = None
     #: le registre durable des appels de modèle (``adapters/llm/calls.py``)
     calls: Any = None
-    #: rejournalise la persona et les paramètres (persona, tempérament, surcharges)
-    reconfigure: Callable[[], Awaitable[list[str]]] | None = None
     #: après une décision d'approbation (rafraîchit les panneaux du frontend)
     after_decision: Callable[[], Awaitable[Any]] | None = None
     #: les rapports de simulation (``mika sim run --report``)
     reports: Path | None = None
     #: la carte de la console (``app/console.py``)
     navigation: Sequence[NavGroup] = field(default_factory=tuple)
-    #: le menu opérateur (``app/console_menu.py``) ; vide, la console suit la carte ``navigation``
-    menu: Sequence[MenuGroup] = field(default_factory=tuple)
     #: les séries mesurées : ``sampler(clé, depuis, jusqu'à, points)``
     sampler: Callable[..., list[tuple[int, float]]] | None = None
     #: les sections de réglages (``app/reglages.py``) et leurs onglets
@@ -107,7 +102,7 @@ class InspectorDeps:
     faculty_labels: Mapping[str, str] = field(default_factory=dict)
     #: les noms en français de ce que déclarent les facultés (sections, raisons, vetos, processus…)
     labels: Labels | None = None
-    #: le relais MCP du moteur Claude Code (« Ce que Mika expose » : ses sessions ouvertes)
+    #: le relais MCP du moteur Claude Code (« Prêter à un agent » : ses sessions ouvertes)
     relay: Any = None
     #: ses outils prêtés à un agent (``app/lending.py``, ADR 0122) : ce que chaque point sert, ses derniers appels
     lending: Any = None
@@ -295,24 +290,13 @@ class UI:
         return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp)
 
     # ── navigation ──
-    def destination_badge(self, d: Destination) -> int:
-        total = 0
-        for v in self.inspection.in_section(d.key):
-            b = self.inspection.badge(v)
-            total += b[0] if b else 0
-        for key in builtin_keys(d, self.builtins):
-            b = self.builtins.get(key)
-            if b is not None and b.badge is not None:
-                total += int(b.badge(self) or 0)
-        return total
-
     def attention_items(self) -> list[dict[str, Any]]:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
         (le tableau de bord en fait des cadres qui mènent à la bonne page)."""
         out: list[dict[str, Any]] = []
         for g in self.deps.navigation:
             for d in g.items:
-                base = f"{PREFIX}/" if d.key == "accueil" else f"{PREFIX}/{d.key}"
+                base = f"{PREFIX}/{d.key}"
                 for key in builtin_keys(d, self.builtins):
                     b = self.builtins.get(key)
                     if b is None or b.badge is None:
@@ -328,23 +312,8 @@ class UI:
                                     "hint": got[1] if len(got) > 1 else "", "href": f"{base}/{v.name}"})
         return out
 
-    def nav(self, active: str, path: str = "") -> list[dict[str, Any]]:
-        if self.deps.menu:
-            return self.operator_menu(active, path)
-        groups = []
-        for g in self.deps.navigation:
-            items = []
-            for d in g.items:
-                url = f"{PREFIX}/" if d.key == "accueil" else f"{PREFIX}/{d.key}"
-                items.append({"key": d.key, "label": d.label, "icon": d.icon, "href": url, "on": d.key == active,
-                              "badge": self.destination_badge(d)})
-            groups.append({"label": g.label, "items": items,
-                           "active": any(i["on"] for i in items),
-                           "badge": sum(i["badge"] for i in items)})
-        return groups
-
-    def operator_menu(self, active: str, path: str) -> list[dict[str, Any]]:
-        """Résout la rubrique la plus précise, y compris sur les fiches.
+    def nav(self, active: str, path: str) -> list[dict[str, Any]]:
+        """Le menu de l'opératrice : résout la rubrique la plus précise, y compris sur les fiches.
 
         Les nombres restent sur les entrées : deux vues peuvent montrer une
         même demande. Le groupe signale sa présence sans additionner ces nombres.
@@ -405,7 +374,7 @@ class UI:
                         "href": f"{PREFIX}/decisions/episodes"})
         gateway = self.kernel.deps.gateway
         if not getattr(gateway, "configured", gateway is not None):
-            out.append({"label": "Modèles", "text": "aucun", "dot": "danger", "href": f"{PREFIX}/reglages/modeles"})
+            out.append({"label": "Modèles", "text": "aucun", "dot": "danger", "href": f"{PREFIX}/reglages/fournisseurs"})
         out.append({"label": "Heure", "text": datetime.fromtimestamp(self.now() / US, self.tz).strftime("%H:%M"),
                     "optional": True})
         return out
@@ -433,9 +402,7 @@ class UI:
         # ``menu_path`` : la page que le menu allume, quand ce n'est pas celle-ci (une fiche ouverte depuis une liste)
         menu_path = ctx.pop("menu_path", "") or request.url.path
         html = env.get_template(name).render(
-            title=title, csrf=token, nav=self.nav(active, menu_path), vitals=self.vitals(),
-            operator_menu=bool(self.deps.menu),
-            active_destination=active, her=self.her_name(), posted=request.method == "POST",
+            title=title, csrf=token, nav=self.nav(active, menu_path), vitals=self.vitals(), her=self.her_name(), posted=request.method == "POST",
             who=account.display_name if account else "", **ctx)
         response = HTMLResponse(html, status_code=status)
         if not request.cookies.get(CSRF_COOKIE):

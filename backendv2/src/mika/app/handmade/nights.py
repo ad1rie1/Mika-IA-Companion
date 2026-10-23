@@ -14,7 +14,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import MONTHS, WEEKDAYS
+from mika.app.handmade import date_fr
 from mika.app.handmade.lists import listing
 from mika.inspector.ui import UI, env
 from mika.kernel.inspect import Prose, Table
@@ -33,7 +33,7 @@ def day_label(iso: str) -> str:
         d = date.fromisoformat(iso.strip())
     except ValueError:
         return iso
-    return f"{WEEKDAYS[d.weekday()]} {d.day} {MONTHS[d.month - 1]}"
+    return date_fr(d)
 
 
 def _day_in(title: str) -> str:
@@ -76,7 +76,7 @@ def nights(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | 
             "remembered": REMEMBERED.get(remembered, ""), "awake": remembered == "oui",
             "detail": row.get("detail") or [],
         })
-    groups = [{"night": night, "label": day_label(night), "entries": sorted(entries, key=lambda e: not e["journal"])}
+    groups = [{"label": day_label(night), "entries": sorted(entries, key=lambda e: not e["journal"])}
               for night, entries in sorted(by_night.items(), reverse=True)]
     return Markup(env.get_template("handmade/pensees/nuits.html").render(
         journal=texts.get("journal"), told=texts.get("told"), today=texts.get("today"), groups=groups,

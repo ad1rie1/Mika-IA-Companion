@@ -13,11 +13,12 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.authors import Authors, AuthorSpec
-from mika.inspector.ui import env
+from mika.app.handmade import excerpt
+from mika.inspector.ui import PREFIX, env
 from mika.vocab import flows
 
 #: la page
-PAGE = "/inspecteur/reglages/autrices"
+PAGE = f"{PREFIX}/reglages/autrices"
 #: ce que récrit l'autrice de chaque forme de flux, et quand
 WHAT = {
     flows.CHAT: "ses réponses et ses initiatives, avant qu'elles partent (pas le mode pro)",
@@ -25,11 +26,6 @@ WHAT = {
     flows.TEAMS: "les réponses qu'elle prépare à ta place, avant qu'elles partent ou soient posées dans Teams",
     flows.PHONE: "les réponses WhatsApp et SMS qu'elle prépare à ta place, avant que ton téléphone te les propose",
 }
-
-
-def _excerpt(text: str, most: int = 160) -> str:
-    one = " ".join(text.split())
-    return one if len(one) <= most else one[:most - 1].rstrip() + "…"
 
 
 def describe(key: str, entry: Any, cfg: Authors, labels: Mapping[str, str]) -> dict[str, Any]:
@@ -40,7 +36,7 @@ def describe(key: str, entry: Any, cfg: Authors, labels: Mapping[str, str]) -> d
     if spec.example.strip():
         facts.append(("Exemple", f"{len(spec.example.strip())} caractères"))
     return {"title": spec.name.strip() or key, "tags": [("écrit", "ok")] if where else [("sans flux", "muted")],
-            "lead": _excerpt(spec.codes) if spec.codes.strip() else "Pas de codes : le cadre de son flux seul.",
+            "lead": excerpt(spec.codes, 160) if spec.codes.strip() else "Pas de codes : le cadre de son flux seul.",
             "lead_label": "Ses codes", "lead_plain": True, "facts": facts}
 
 
@@ -53,7 +49,7 @@ def head(cfg: Authors, flow_rows: Sequence[tuple[str, str]], *, served: str, tea
         # sans modèle, le bandeau du haut le dit pour tous les flux
         note = "Teams est désactivé : rien n'y part" if author is not None and form == flows.TEAMS and not teams_on \
             else ""
-        rows.append({"flow": flow, "label": label, "what": WHAT.get(form, ""), "author": author,
+        rows.append({"label": label, "what": WHAT.get(form, ""), "author": author,
                      "href": f"{PAGE}?enregistrement=authors&cle={author.key}" if author else "", "note": note})
     return Markup(env.get_template("handmade/reglages/autrices.html").render(
-        rows=rows, served=served, roles="/inspecteur/reglages/roles", writing=sum(1 for r in rows if r["author"])))
+        rows=rows, served=served, roles=f"{PREFIX}/reglages/roles", writing=sum(1 for r in rows if r["author"])))

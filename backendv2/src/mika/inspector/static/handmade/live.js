@@ -1,4 +1,4 @@
-// Les pages dessinées à la main (En ce moment, une personne) se relisent seules — le fragment rendu par le
+// Les pages dessinées à la main (l'accueil, En ce moment, Personnes, une personne) se relisent seules — le fragment rendu par le
 // serveur —, toutes les 20 s, en pause quand l'onglet est caché, aussitôt revenues. Sans script, elles restent des
 // pages complètes.
 (function () {

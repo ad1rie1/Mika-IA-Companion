@@ -211,7 +211,7 @@ async def chronologie(ui: Any, request: Request) -> Any:
                                       Column("corrélation", detail=True)), rows,
                                      title="Le journal", empty="Rien ne correspond.", pager=pager,
                                      layout="list", link_label="Ouvrir l’événement")],
-            "filters": TIMELINE_PARAMS, "values": values}
+            "filters": TIMELINE_PARAMS}
 
 
 #: la chronologie, par page
@@ -398,7 +398,8 @@ async def all_views(ui: Any, request: Request) -> list[Any]:
 
 
 @TABS.tab("systeme.processus", title="Processus", group="Surveillance",
-          badge=lambda ui: sum(1 for s in ui.kernel.scheduler.specs if ui.kernel.scheduler.consecutive.get(s.name, 0) >= 3),
+          badge=lambda ui: sum(1 for s in ui.kernel.scheduler.specs if ui.kernel.scheduler.consecutive.get(s.name, 0)
+                                 >= health.PROCESS_FAILURES_MAX),
           description="Ses processus de fond (relire la mémoire, dormir, relever le courrier…) : combien de passages, "
                       "d'échecs, la dernière erreur — et les échecs gardés au journal, qui survivent au redémarrage.")
 async def processus(ui: Any, request: Request) -> list[Any]:
@@ -443,7 +444,7 @@ async def sorties(ui: Any, request: Request) -> Any:
     selected_problems = (status,) if status in OUTBOX_PROBLEMS else OUTBOX_PROBLEMS if not status else ()
     problem_total = sum(counts.get(st, 0) for st in selected_problems)
     problem_page = ctx.pager("page_problemes", size=OUTBOX_PROBLEMS_SHOWN, total=problem_total)
-    problems = [{"key": key, "seq": seq, "label": _effect_label(ui, effect), "status": labels.get(st, st),
+    problems = [{"key": key, "seq": seq, "name": _effect_label(ui, effect), "state": labels.get(st, st),
                  "tone": tones.get(st, "warn"), "error": names.detail(err) if err else "", "retry": st not in OUTBOX_SEEN_ONLY,
                  "hint": OUTBOX_GUIDANCE[st]}
                 for key, seq, effect, st, err in store.query_mind(

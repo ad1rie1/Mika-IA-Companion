@@ -1191,7 +1191,6 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
     blocks: list[Block] = [
         Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), title=f"Messages{scope}{found}", pager=pager,
               layout="feed", link_label="Pourquoi cette réponse ?",
-              filters=("handle", "q", "role"),
               empty="aucun message ne correspond" if handle or q or role else "aucun message"),
     ]
     if awaiting and not (handle or q or role):

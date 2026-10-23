@@ -336,7 +336,7 @@ def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
             ("entreprendre d'elle-même", When(ready) if ready > now else "possible"),
             ("dernier blocage sur ce qu'elle avait entrepris", When(s.self_stuck_at) if s.self_stuck_at else "—"),
         ), title="Ce qu'elle a entrepris", columns=2),
-        Table(LIVE_COLUMNS, tuple(rows), title="Buts vivants", pager=pager, filters=("sorte", "autorite"),
+        Table(LIVE_COLUMNS, tuple(rows), title="Buts vivants", pager=pager,
               empty="aucun but avec ces filtres" if filtered else "aucun but en cours"),
     ]
 
@@ -389,8 +389,7 @@ def _closed_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
                "« Plus anciens » la reprend là où elle s'est arrêtée.") if stopped else ""
     return [
         Table(CLOSED_COLUMNS, tuple(rows), title="Buts clos", pager=Pager(param="avant", size=GOALS_PAGE, older=older),
-              filters=("sorte", "autorite"), empty=empty if not stopped else "rien dans cette tranche du journal",
-              caption=caption),
+              empty=empty if not stopped else "rien dans cette tranche du journal", caption=caption),
         Note("Un but clos depuis plus de sept jours n'a plus de fiche : son lien mène à l'événement qui l'a clos.",
              tone="muted"),
     ]

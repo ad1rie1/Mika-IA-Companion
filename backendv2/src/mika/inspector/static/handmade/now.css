@@ -119,7 +119,6 @@
 .now-person { display: grid; grid-template-columns: 44px minmax(0, 1fr) 118px; align-items: start; gap: 14px;
   padding: 14px 0; border-top: 1px solid var(--border); }
 .now-person:nth-child(-n+2) { border-top: 0; padding-top: 4px; }
-.now-person.composing .now-presence { background: var(--accent); animation: now-typing 1.1s ease-in-out infinite; }
 .now-person-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; margin: 0; font-weight: 600; }
 .now-person-head a { color: var(--text); }
 .now-person-head a:hover { color: var(--accent); }
@@ -165,5 +164,5 @@
   .now-today { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .plane-halo, .now-person.composing .now-presence { animation: none; }
+  .plane-halo { animation: none; }
 }

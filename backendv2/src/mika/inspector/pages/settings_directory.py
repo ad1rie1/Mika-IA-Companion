@@ -38,7 +38,7 @@ async def directory(ui: Any, request: Request) -> dict[str, Any]:
         if len(description) > 180:
             description = description[:177].rsplit(" ", 1)[0] + "…"
         group["items"].append({"title": page.title, "description": description,
-                               "href": page.href or f"{PREFIX}/reglages/{page.slug}"})
+                               "href": f"{PREFIX}/reglages/{page.slug}"})
     return {"filters": (Param("q", "Rechercher un réglage", placeholder="ex. voix, modèle, boîte, mémoire"),),
             "panel": Panel("handmade/reglages/annuaire.html", {
                 "settings_groups": list(groups.values()), "settings_count": count, "settings_total": total,

@@ -46,9 +46,6 @@ LANES: dict[str, str] = {"conversation": "conversation", "background": "fond", "
 EVENTS: dict[str, str] = {
     "kernel.boot": "Démarrage", "kernel.stopped": "Arrêt", "kernel.lease_acquired": "Bail pris", "kernel.lease_released": "Bail rendu",
     "kernel.params_changed": "Paramètres journalisés", "kernel.selected": "Choix de l'arbitre",
-    "memory.extraction_deferred": "Passage à reprendre",
-    "memory.life_recalled": "Situations remises en mémoire",
-    "social.relations_recalled": "Relations remises en mémoire",
     "kernel.subject_forgotten": "Associations d'une personne oubliées",
     "perception.received": "Message ou signal reçu", "episode.started": "Début d'épisode",
     "episode.utterance": "Parole", "episode.ended": "Fin d'épisode", "effect.proposed": "Demande pour sortir",

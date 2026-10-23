@@ -144,7 +144,6 @@ RICH = [
             (Ref.url("https://example.org/a?b=c#d", "doc"), Ref.view("forge", "meteo/liste", "liste"), Text("—")),
         ),
         title="Tableau", caption="légende", empty="vide", pager=Pager(number=2, size=6, total=12),
-        filters=("etat", "q"),
     ),
     Fields((("âge", 3), ("humeur", Swatch("calme", "emotion", "relieved"))), title="Fiche",
            hints=(("âge", "en jours"),), columns=2),
@@ -200,6 +199,14 @@ def test_rich_example_covers_every_block_and_cell_kind():
 def test_rich_example_validates_against_schema():
     pytest.importorskip("jsonschema")
     validate(encode(RICH))
+
+
+def test_table_filters_are_accepted_without_effect():
+    """Les filtres d'un tableau (retirés le 2026-10-22 : ceux d'une vue sont ses paramètres déclarés) : une app déjà
+    écrite qui les envoie garde sa vue, sans effet ; mal formés, ils l'invalident toujours."""
+    table = {"type": "table", "columns": ["ville"], "rows": [["Paris"]]}
+    assert ok(env({**table, "filters": ["q", "etat"]})) == ok(env(table))
+    assert "nom de filtre invalide" in invalid(env({**table, "filters": ["q", "q"]}))
 
 
 def test_hand_written_payload():
@@ -344,8 +351,7 @@ def _tables(draw, depth: int):
     rows = draw(st.lists(cells | st.builds(Row, cells, href=st.none() | _REF, tone=_TONE, detail=detail),
                          max_size=2).map(tuple))
     return Table(tuple(columns), rows, title=draw(_TEXT), empty=draw(_TEXT), caption=draw(_TEXT),
-                 pager=draw(st.none() | _pagers(len(rows))),
-                 filters=draw(st.lists(_PARAM, unique=True, max_size=3).map(tuple)))
+                 pager=draw(st.none() | _pagers(len(rows))))
 
 
 @st.composite

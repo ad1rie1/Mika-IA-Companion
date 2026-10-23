@@ -28,7 +28,7 @@ T0 = at_paris(2026, 9, 28, 15, 0)
 
 def said_to(target: str, declared: Declared):
     notes = {expression_c.EMOTION_ANNOTATION: declared.encode()}
-    return NS(at=T0, data=NS(kind="REPLY", target=target, visible=True, annotation=notes.get))
+    return NS(at=T0, data=NS(kind="REPLY", target=target, reply_to=1, visible=True, annotation=notes.get))
 
 
 def cx(closeness: dict[str, str]):

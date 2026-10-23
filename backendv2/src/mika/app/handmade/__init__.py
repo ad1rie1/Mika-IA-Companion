@@ -1,17 +1,19 @@
-"""Ce que partagent les pages dessinées à la main de la console (ADR 0121) : « En ce moment » (``now.py``), une
-personne, la vue d'ensemble de sa fiche (``person/``).
+"""Ce que partagent les pages dessinées à la main de la console (ADR 0121) : l'accueil (``home.py``), « En ce
+moment » (``now.py``), Personnes (``people.py``), la fiche d'une personne (``person/``) et les onglets dessinés des
+destinations (``pages.py``).
 
 Une telle page croise les facultés là où une vue déclarée n'en montre qu'une : elle lit leurs faits au même
 instant, le journal, les textes et les séries de la journée, par un ``Look`` ; chacune de ses parties se lit à part
 (``read_parts``) — une lecture qui échoue tait sa carte, jamais la page. Elles partagent leurs gabarits
-(``inspector/templates/handmade/``) et leurs feuilles (``inspector/static/handmade/``, classes ``now-…``) : une même
-façon de dire une humeur, une jauge, une personne, un fil.
+(``inspector/templates/handmade/``) et leurs feuilles (``inspector/static/handmade/``, classes ``now-…``,
+``person-…``, ``hm-…``) : une même façon de dire une humeur, une jauge, une personne, un fil.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 from urllib.parse import quote
 
@@ -21,11 +23,12 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
 from mika.faculties.affect import AFFECT
+from mika.faculties.agency import AGENCY
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import pct_fr
+from mika.kernel.inspect import Column, Row, Table, pct_fr
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab.people import is_identifiable
@@ -98,10 +101,45 @@ def affect_params(frame: Frame) -> Any:
     return got if got is not None else AFFECT.default_params()
 
 
+def live_wait(frame: Frame) -> int:
+    """Son dernier message sans réponse depuis moins de tant : une conversation en cours, pas une attente
+    (``agency.live_wait_us``, ADR 0115)."""
+    got = frame.env.params_of("agency", frame.root)
+    return (got if got is not None else AGENCY.default_params()).live_wait_us
+
+
+def date_fr(day: date) -> str:
+    """Un jour, court : « mardi 14 oct. »."""
+    return f"{WEEKDAYS[day.weekday()]} {day.day} {MONTHS[day.month - 1]}"
+
+
+def felt_of(stance: Any) -> dict[str, str] | None:
+    """Ce qu'elle ressent envers quelqu'un, s'il se montre (son émotion, son mot, son intensité) ; ``None`` : rien
+    de particulier."""
+    if stance.at_rest or stance.felt_intensity < 0.1 or stance.felt is A.Emotion.NEUTRAL:
+        return None
+    return {"emotion": stance.felt.value, "word": A.FR[stance.felt], "how": A.intensity_word(stance.felt_intensity)}
+
+
 def person_href(person: str) -> str:
     """La fiche d'une personne, ouverte sur sa vue d'ensemble (``person/``) ; une adresse qui n'est pas une
     personne n'en a pas."""
     return f"{PREFIX}/fiche/person/{quote(person, safe='')}" if is_identifiable(person) else ""
+
+
+def columns(table: Table) -> dict[str, int]:
+    """La place de chaque colonne d'une table de la faculté, par son libellé."""
+    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
+
+
+def reader(table: Table) -> Callable[[Row, str], Any]:
+    """Une cellule d'une ligne de cette table, par le libellé de sa colonne (``None`` : pas de telle cellule)."""
+    at = columns(table)
+
+    def cell(row: Row, label: str) -> Any:
+        i = at.get(label)
+        return row.cells[i] if i is not None and i < len(row.cells) else None
+    return cell
 
 
 @dataclass(slots=True)
@@ -165,8 +203,7 @@ class Look:
 
     def date(self, at: int) -> str:
         """Un jour passé, court : « mardi 14 oct. »."""
-        local = self.frame.local(at)
-        return f"{WEEKDAYS[local.weekday()]} {local.day} {MONTHS[local.month - 1]}"
+        return date_fr(self.frame.local(at))
 
     def day(self, at: int, *, all_day: bool = False) -> str:
         """Un jour proche, dit simplement : « aujourd'hui à 14:00 », « demain », « jeudi », « 12 oct. »."""
@@ -195,10 +232,6 @@ def read_parts(look: Look, parts: Sequence[tuple[str, Callable[[Look], Any]]], p
 
 # ── une personne en une carte ──
 
-#: son dernier message sans réponse depuis moins de tant : une conversation en cours, pas une attente
-#: (``agency.live_wait_us``, ADR 0115)
-LIVE_WAIT = 15 * MINUTE
-
 
 def presences(look: Look) -> dict[str, dict[str, Any]]:
     """Qui est là, par personne : depuis quand (la plus ancienne de ses connexions) et si elle écrit."""
@@ -225,16 +258,13 @@ def person_card(look: Look, person: str, here: dict[str, Any] | None) -> dict[st
     contact = frame.get(social_c.CONTACT(person))
     waiting = frame.get(attention_c.AWAITING(person))
     hostility = frame.get(affect_c.HOSTILITY(person))
-    felt = None
-    if not stance.at_rest and stance.felt_intensity >= 0.1 and stance.felt is not A.Emotion.NEUTRAL:
-        felt = {"emotion": stance.felt.value, "word": A.FR[stance.felt], "how": A.intensity_word(stance.felt_intensity)}
     notes: list[dict[str, str]] = []
     if here is not None and here["composing"]:
         notes.append({"text": "écrit…", "tone": "live"})
     elif here is not None:
         notes.append({"text": f"en ligne depuis {span(now - here['since'])}" if here["since"] else "en ligne",
                       "tone": "ok"})
-    if waiting.unanswered and waiting.last_out and now - waiting.last_out < LIVE_WAIT:
+    if waiting.unanswered and waiting.last_out and now - waiting.last_out < live_wait(frame):
         notes.append({"text": "en pleine conversation", "tone": "ok"})
     elif waiting.unanswered and waiting.last_out:
         many = f" · {waiting.initiatives} messages d'elle" if waiting.initiatives > 1 else ""
@@ -252,7 +282,7 @@ def person_card(look: Look, person: str, here: dict[str, Any] | None) -> dict[st
         "name": name, "initial": (name[:1] or "?").upper(), "href": look.href(person),
         "closeness": CLOSENESS_FR.get(closeness, closeness), "close": closeness in (social_c.FRIEND, social_c.CLOSE),
         "owner": bool(frame.get(identity_c.IS_OWNER(person))),
-        "felt": felt, "bond": pct_fr(stance.bond), "bond_w": round(100 * max(0.0, min(1.0, stance.bond)), 1),
+        "felt": felt_of(stance), "bond": pct_fr(stance.bond), "bond_w": unit(stance.bond),
         "online": here is not None, "composing": bool(here and here["composing"]),
         "notes": notes, "last_in": contact.last_in,
     }

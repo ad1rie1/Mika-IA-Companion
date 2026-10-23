@@ -412,7 +412,7 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
         Disclosure("Arguments et règles d’utilisation", (argument_table, Fields(tuple(pairs), title="Règles et provenance",
                                                                                columns=2))),
     ]
-    return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/shared/outil.html", {
+    return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/outils/outil.html", {
         "page_heading": spec.name, "page_subtitle": spec.description,
         "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
         "tool_family": ui.names.bundle(spec.bundle), "tool_reserved": spec.owner_only,
@@ -517,7 +517,7 @@ async def rules_post(ui: Any, request: Request) -> Response:
     tool = str(data.get("outil", ""))
     keep = {k: str(data[k]) for k in ("q", "lot") if data.get(k)}
     back = {**keep, **({"outil": tool} if tool else {})}
-    settings = getattr(ui.deps, "settings", None)
+    settings = ui.deps.settings
     if got is None or account is None:
         ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
     elif settings is None:
@@ -553,7 +553,7 @@ async def rules_post(ui: Any, request: Request) -> Response:
                       "lecture, et des points qui lui prêtent quelques-uns de ses outils. Rien ne s'ouvre sans jeton, "
                       "et seulement depuis cette machine.")
 async def exposed(ui: Any, request: Request) -> Any:
-    relay, settings, lending = ui.deps.relay, ui.deps.settings, getattr(ui.deps, "lending", None)
+    relay, settings, lending = ui.deps.relay, ui.deps.settings, ui.deps.lending
     account = ui.operator(request)
     try:
         token = bool(settings.console_mcp_token()) if settings is not None else False
@@ -619,7 +619,7 @@ async def expose_post(ui: Any, request: Request) -> Response:
     got = await ui.form_lists(request)
     account = ui.operator(request)
     token = _secrets.token_urlsafe(9)
-    settings, lending = ui.deps.settings, getattr(ui.deps, "lending", None)
+    settings, lending = ui.deps.settings, ui.deps.lending
     back = f"{BASE}/expose"
     query: dict[str, str] = {}
     if got is None or account is None or settings is None:

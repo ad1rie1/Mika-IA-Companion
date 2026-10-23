@@ -22,7 +22,8 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.inspector.ui import env
+from mika.faculties.self.character import CLEARLY
+from mika.inspector.ui import PREFIX, env
 from mika.kernel import forms
 from mika.vocab.affect import FR
 from mika.vocab.temperament import (
@@ -39,7 +40,7 @@ from mika.vocab.temperament import (
 #: le paramètre qui propose un profil
 CHOSEN = "profil"
 #: la page du tempérament
-PAGE = "/inspecteur/reglages/temperament"
+PAGE = f"{PREFIX}/reglages/temperament"
 #: les axes de la forme, dans le sens des aiguilles d'une montre depuis le haut : tous ses curseurs, dans l'ordre du
 #: formulaire (famille par famille)
 _SLIDERS = tuple(f for f in forms.describe(Temperament) if f.kind == "slider")
@@ -58,8 +59,6 @@ NAMES, FAMILY = RADIUS + 9, 281.0
 NEAR = 22
 #: les anneaux de la grille ; 0,5, « comme la plupart des gens », est marqué
 RINGS = (0.25, 0.5, 0.75, 1.0)
-#: un trait est marqué à 0,3 ou moins, à 0,7 ou plus (« TON TEMPÉRAMENT », ADR 0100)
-MARKED = 0.2
 _ENDS = re.compile(r"\(0 : (.+?) · 1 : (.+?)\)\s*$")
 
 
@@ -118,7 +117,8 @@ def view(shown: Temperament, before: Temperament | None = None) -> dict[str, Any
         v = float(getattr(shown, a))
         x, y = _point(i, v, RADIUS)
         name, lo, hi = sliders[a]
-        word = lo if v <= 0.5 - MARKED else hi if v >= 0.5 + MARKED else "comme la plupart des gens"
+        # un trait est marqué comme en conversation (``CLEARLY`` : 0,3 ou moins, 0,7 ou plus, ADR 0100)
+        word = lo if v <= 0.5 - CLEARLY else hi if v >= 0.5 + CLEARLY else "comme la plupart des gens"
         second = word if before is None else f"{word} · aujourd'hui {_number(float(getattr(before, a)))}"
         points.append({"x": x, "y": y, "title": f"{name} : {_number(v)} — {second}",
                        "tip": _tip(x, y, (f"{name} : {_number(v)}", second))})
@@ -161,8 +161,7 @@ def _families() -> list[dict[str, Any]]:
         name = _arc(end - pad, start + pad, FAMILY + 8) if bottom else _arc(start + pad, end - pad, FAMILY)
         out.append({"sector": f"M0,0 L{x1},{y1} A{RADIUS},{RADIUS} 0 {int(end - start > math.pi)} 1 {x2},{y2} Z",
                     "tinted": n % 2 == 1, "bracket": _arc(_angle(axes[0] - 0.3), _angle(axes[-1] + 0.3), FAMILY - 8),
-                    "name": SHORT.get(group, group),
-                    "title": group, "path": name, "id": f"temper-famille-{n}"})
+                    "name": SHORT.get(group, group), "path": name, "id": f"temper-famille-{n}"})
     return out
 
 
@@ -196,7 +195,7 @@ def marked(t: Temperament, limit: int = 6) -> list[str]:
     far = sorted(((abs(float(getattr(t, s)) - 0.5), s) for s in PERSONALITY), reverse=True)
     out = []
     for gap, s in far[:limit]:
-        if gap < MARKED - 1e-9:
+        if gap < CLEARLY - 1e-9:
             break
         name, lo, hi = sliders[s]
         v = float(getattr(t, s))
@@ -225,7 +224,7 @@ def head(current: Temperament, query: Mapping[str, str]) -> Markup:
         proposed = None  # c'est déjà le sien
     now = profile_of(current)
     traits = dict(NOTE_KEYS)
-    profiles = [{"key": k, "label": p.label, "summary": p.summary, "sets": _sets(k), "on": k == now,
+    profiles = [{"label": p.label, "summary": p.summary, "sets": _sets(k), "on": k == now,
                  "notes": [f"{traits[s]} : « {n} »" for s, n in p.notes.items()],
                  "proposed": k == chosen, "href": f"{PAGE}?" + urlencode({CHOSEN: k}),
                  "shape": _polygon(_values(apply_profile(current, k)), SMALL)} for k, p in PROFILES.items()]

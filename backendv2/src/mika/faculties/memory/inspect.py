@@ -379,8 +379,7 @@ def _list(listing: Listing, frame: Frame, ctx: InspectContext) -> list[Block]:
     filtered = bool(q or status or person)
     return [*notes, Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
                           empty="aucun résultat pour ces filtres" if filtered else listing.nothing, pager=pager,
-                          filters=("q", "status", "person"), layout="list", link_label="Voir l’origine",
-                          caption=READING_HELP[listing.kind])]
+                          layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind])]
 
 
 def _params(listing: Listing) -> list[Param]:

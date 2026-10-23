@@ -75,5 +75,5 @@ def _judged(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block
             Ref("event", str(r["id"]), str(r["id"])),
         ), href=Ref.why(int(r["id"])), detail=(Prose(r["text"] or FORGOTTEN, title="Sa réponse", reading=True),)))
     return [Table(COLUMNS, tuple(out), title="Ses réponses jugées", pager=pager, layout="feed",
-                  link_label="Pourquoi cette réponse ?", filters=("avis",),
+                  link_label="Pourquoi cette réponse ?",
                   empty="aucune réponse jugée : dans le chat, 👍 ou 👎 sous une de ses réponses")]

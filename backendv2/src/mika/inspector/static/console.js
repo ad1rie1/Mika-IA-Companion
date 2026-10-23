@@ -80,39 +80,6 @@
     return function () { if (mobile.matches) setOpen(true); };
   }
 
-  function foldText(value) {
-    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim();
-  }
-
-  function setupMenuSearch() {
-    var wrapper = document.querySelector("[data-menu-search]");
-    if (!wrapper) return;
-    wrapper.hidden = false;
-    var input = wrapper.querySelector("input");
-    var empty = document.querySelector("[data-menu-empty]");
-    var groups = Array.from(document.querySelectorAll(".submenu-group"));
-    var previous = null;
-    input.addEventListener("input", function () {
-      var query = foldText(input.value);
-      if (query && previous === null) previous = groups.map(function (g) { return g.open; });
-      var count = 0;
-      groups.forEach(function (group, i) {
-        var groupMatches = foldText(group.querySelector("summary").textContent).includes(query);
-        var shown = 0;
-        group.querySelectorAll(".submenu-item").forEach(function (link) {
-          link.hidden = !!query && !groupMatches && !foldText(link.textContent).includes(query);
-          if (!link.hidden) shown += 1;
-        });
-        group.hidden = !shown;
-        count += shown;
-        if (query) group.open = !!shown;
-        else if (previous) group.open = previous[i];
-      });
-      empty.hidden = count !== 0;
-      if (!query) previous = null;
-    });
-  }
-
   function setupFormStatus() {
     var edited = new Set();
     var forms = Array.from(document.forms);
@@ -213,7 +180,6 @@
   ready(function () {
     applyTheme(readTheme());
     var openNavigation = setupNavigation();
-    setupMenuSearch();
     // Les longues rubriques restent accessibles sans prendre tout l'écran mobile.
     document.querySelectorAll("[data-responsive-menu]").forEach(function (menu) {
       var narrow = window.matchMedia(menu.getAttribute("data-responsive-menu") || "(max-width: 1100px)");
@@ -254,18 +220,6 @@
         openNavigation();
         search.focus();
       }
-    });
-
-    // Copier.
-    document.querySelectorAll("[data-copy]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        var target = document.querySelector(b.getAttribute("data-copy"));
-        if (!target) return;
-        if (!navigator.clipboard) { b.textContent = "Copie indisponible"; return; }
-        navigator.clipboard.writeText(target.textContent || "").then(function () {
-          var old = b.textContent; b.textContent = "Copié"; setTimeout(function () { b.textContent = old; }, 1200);
-        }).catch(function () { b.textContent = "Copie refusée — sélectionner le texte"; });
-      });
     });
 
     // Champs conditionnels : data-only="chemin=v1|v2;chemin2=v" (toutes), alternatives « || » (l'une).

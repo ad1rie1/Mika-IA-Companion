@@ -1,11 +1,10 @@
-"""Des champs décrits (``kernel/forms.py``) aux contrôles que rend
-``_blocks.html`` : libellé, aide, valeur en texte, erreur. Un secret n'a jamais
+"""Des champs décrits (``kernel/forms.py``) aux contrôles que rend la macro
+``field`` de ``_forms.html`` : libellé, aide, valeur en texte, erreur. Un secret n'a jamais
 de valeur rendue (vide = inchangé)."""
 
 from __future__ import annotations
 
 import dataclasses
-import json
 import secrets as _secrets
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -114,7 +113,3 @@ def visible_fields(view: Mapping[str, Any]) -> int:
     """Combien de champs un opérateur remplit dans ce formulaire (au-delà de deux : une page à part)."""
     return len([f for f in view.get("fields", ()) if f.get("kind") != "hidden"])
 
-
-def slot_key(action: str, initial: Sequence[tuple[str, str]] | Mapping[str, str]) -> str:
-    """La clé d'un formulaire en place (``ActionSlot``) : l'action et ses valeurs initiales."""
-    return f"{action}|{json.dumps(dict(initial), sort_keys=True)}"

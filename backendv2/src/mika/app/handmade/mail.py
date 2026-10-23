@@ -61,8 +61,8 @@ def lines(table: Mapping[str, Any], query: Mapping[str, str]) -> list[dict[str, 
             "unread": bool(heading.get("emphasis")), "who": (who or {}).get("text", ""),
             "where": (who or {}).get("secondary", ""), "when": when,
             "tags": [b for b in row.get("badges", []) if (b.get("text") or "").casefold() not in ORDINARY],
-            "href": _here(query, **{READ: key}) if key else row.get("href", ""), "key": key,
-            "on": bool(key) and key == opened, "fiche": row.get("href", ""),
+            "href": _here(query, **{READ: key}) if key else row.get("href", ""),
+            "on": bool(key) and key == opened,
         })
     return out
 

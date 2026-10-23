@@ -42,6 +42,7 @@ from mika.kernel.inspect import (
     read_params,
 )
 from mika.runtime.boundary import Failed, call
+from mika.runtime.health import PROCESS_FAILURES_MAX
 
 EPISODES_PAGE = 50
 #: un filtre lit le journal par lots de tant d'épisodes, au plus tant de lots par page
@@ -261,13 +262,13 @@ async def towards(ui: Any, request: Request) -> Any:
                         "qui la concernent, et celles qui visent « n'importe qui de présent ».", "info"))
         if chips:
             out.append(Table(("personne",), tuple((c,) for c in chips), title="Personnes dont une ligne existe"))
-        return {"blocks": out, "filters": PERSON_PARAMS, "values": values}
+        return {"blocks": out, "filters": PERSON_PARAMS}
     handles = set(ui.names.handles_named(wanted, ui.inspection.search))
     mine = [r for r in rows if r.target in handles]
     shared = [r for r in rows if r.target == "any"]
     if not handles:
         out.append(Note(f"Personne ne correspond à « {wanted[:80]} ».", "warn"))
-        return {"blocks": out, "filters": PERSON_PARAMS, "values": values}
+        return {"blocks": out, "filters": PERSON_PARAMS}
     who = ui.names.who(next(iter(sorted(handles))))
     live_ = [r for r in mine if r.hazard > 0 and not r.vetoes]
     total = sum(r.hazard for r in live_)
@@ -295,7 +296,7 @@ async def towards(ui: Any, request: Request) -> Any:
     if shared:
         out.append(Disclosure("Ce qui vise n'importe qui de présent", (
             Table(ARBITER_COLUMNS, arbiter_rows(ui, shared), title="Lignes sans cible précise"),)))
-    return {"blocks": out, "filters": PERSON_PARAMS, "values": values}
+    return {"blocks": out, "filters": PERSON_PARAMS}
 
 
 def _verb(kind: str) -> str:
@@ -429,14 +430,14 @@ async def episodes(ui: Any, request: Request) -> Any:
         out.append(Note("La recherche continue dans les épisodes plus anciens : utilise « Plus anciens ».", "info"))
     out.append(Table((Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")), rows, title="Épisodes",
                      empty="Aucun épisode ne correspond." if where or targets else "Aucun épisode encore.",
-                     pager=pager, filters=("sorte", "issue", "cible"), layout="list", link_label="Comprendre le résultat"))
+                     pager=pager, layout="list", link_label="Comprendre le résultat"))
     activity = ([stats] if counts else []) + ([chart] if chart else [])
     if len(sampled) == 1000:
         activity.append(Note("Indicateurs calculés sur les 1 000 derniers épisodes, avec les filtres actuels. "
                              "Le tableau permet de parcourir tout l'historique.", "info"))
     if activity:
         out.append(Disclosure("Activité correspondant aux filtres", tuple(activity)))
-    return {"blocks": out, "filters": EPISODE_PARAMS, "values": values}
+    return {"blocks": out, "filters": EPISODE_PARAMS}
 
 
 @TABS.tab("decisions.echeances", title="Échéances",
@@ -457,7 +458,7 @@ async def schedule(ui: Any, request: Request) -> list[Any]:
             When(sched.last_run(spec.name) or 0) if sched.last_run(spec.name) else "—",
             sched.runs.get(spec.name, 0), Badge(f"{failing} d'affilée", "danger") if failing else "—",
             Text(spec.name, "mono")),
-            tone="danger" if failing >= 3 else "muted" if nd is None else "")))
+            tone="danger" if failing >= PROCESS_FAILURES_MAX else "muted" if nd is None else "")))
     rows.sort(key=lambda x: x[0])
     running = set(sched.running())
     return [Stats((Stat("Processus", len(sched.specs)),

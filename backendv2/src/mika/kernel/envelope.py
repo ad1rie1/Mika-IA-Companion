@@ -584,7 +584,8 @@ class _Decoder:
         if "pagination" in d:
             kw["pager"] = self.pager(d["pagination"], _at(path, "pagination"), len(rows))
         if "filters" in d:
-            kw["filters"] = self.filters(d["filters"], _at(path, "filters"))
+            # accepté sans effet (les apps déjà écrites) : les filtres d'une vue sont ses paramètres déclarés
+            self.filters(d["filters"], _at(path, "filters"))
         if "layout" in d:
             kw["layout"] = self.choice(d["layout"], _at(path, "layout"), ("", "cards", "feed", "list"), "présentation inconnue")
         if "link_label" in d:
@@ -903,8 +904,6 @@ def _enc_table(t: Table) -> dict[str, Any]:
         out["pagination"] = {"page": p.number, "total": p.total, "per_page": p.size}
         if p.param != "page":
             out["pagination"]["param"] = p.param
-    if t.filters:
-        out["filters"] = list(t.filters)
     return out
 
 
@@ -1090,7 +1089,8 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
                                                _ref("column")]}, limits.columns),
                   "rows": _array({"oneOf": [cell_list, _ref("row")]}, limits.rows),
                   "pagination": _ref("pagination"), "layout": {"enum": ["", "cards", "feed", "list"]}, "link_label": text,
-                  "filters": {**_array(param_name, limits.items), "uniqueItems": True}},
+                  # sans effet, accepté pour les apps déjà écrites : les filtres d'une vue sont ses paramètres
+                  "filters": {**_array(param_name, limits.items), "uniqueItems": True, "deprecated": True}},
         "fields": {"items": _array(_obj(_FIELD, {"label": text, "value": _ref("cell"), "hint": text}),
                                    limits.items),
                    "columns": columns_1_3},

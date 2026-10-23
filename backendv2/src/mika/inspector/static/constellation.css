@@ -61,7 +61,7 @@ html, body.cst {
 }
 
 /* ── en-tête ── */
-.cst-head { top: 16px; left: 16px; max-width: min(420px, calc(100vw - 32px)); }
+.cst-head { top: 16px; left: 16px; z-index: 2; max-width: min(420px, calc(100vw - 32px)); }
 .cst-back { color: var(--cst-ink-2); text-decoration: none; font-size: 11px; letter-spacing: 0.12em; }
 .cst-back:hover, .cst-back:focus-visible { color: var(--cst-accent); }
 .cst-title {
@@ -86,7 +86,6 @@ html, body.cst {
 .cst-note:empty { display: none; }
 
 /* ── recherche ── */
-.cst-head { z-index: 2; }
 .cst-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .cst-search { position: relative; margin: 0 0 12px; }
 .cst-search input {
