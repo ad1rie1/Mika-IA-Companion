@@ -129,6 +129,8 @@ class ToolUse:
     kind: str
     ok: bool
     executed: bool
+    #: la cible de son épisode (une adresse, un but, un projet ; ``None`` : personne)
+    target: str | None = None
 
 
 class EpisodeTraces:
@@ -291,10 +293,13 @@ class EpisodeTraces:
         if not self._ready:
             return []
         rows = self.store.query_views(
-            select(ToolUseRow.correlation, ToolUseRow.at, ToolUseRow.kind, ToolUseRow.ok, ToolUseRow.executed)
+            select(ToolUseRow.correlation, ToolUseRow.at, ToolUseRow.kind, ToolUseRow.ok, ToolUseRow.executed,
+                   TraceRow.target)
+            .join(TraceRow, TraceRow.correlation == ToolUseRow.correlation, isouter=True)
             .where(ToolUseRow.name == name).order_by(ToolUseRow.at.desc(), ToolUseRow.id.desc())
             .limit(max(1, min(limit, 500))))
-        return [ToolUse(str(c), int(a), str(k), bool(o), bool(e)) for c, a, k, o, e in rows]
+        return [ToolUse(str(c), int(a), str(k), bool(o), bool(e), None if t is None else str(t))
+                for c, a, k, o, e, t in rows]
 
 
 # ── bornes ──

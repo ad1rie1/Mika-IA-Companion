@@ -41,11 +41,14 @@ from mika.adapters.mcp.stdio import Launcher, Sandbox, StdioTransport
 from mika.ports.mcp import (
     NATURES,
     TOOL_AUTONOMIES,
+    TOOL_KEEPS,
     CallResult,
     LiveTool,
     OfferedTool,
     ServerStatus,
     ToolReview,
+    tool_autonomy,
+    tool_keep,
 )
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
@@ -141,6 +144,7 @@ class McpHub:
                 episodes = frozenset(k for k, on in (("conversation", spec.in_conversation),
                                                      ("initiative", spec.in_initiative),
                                                      ("travail", spec.in_work)) if on)
+                keep = tool_keep(spec.keep, rv.keep)
                 out.append(OfferedTool(
                     server=name, remote=remote, name=mine,
                     description=rv.description or rv.server_description or tool.description,
@@ -148,11 +152,11 @@ class McpHub:
                     episodes=episodes, in_hand=spec.in_hand, max_calls=spec.max_calls,
                     max_result_chars=spec.max_result_chars, purpose=inert(spec.purpose, 400),
                     when_to_use=inert(spec.when_to_use, 400), local=spec.local, fingerprint=rv.fingerprint,
-                    reads_world=spec.keep == "public" and rv.nature == "lecture",
+                    reads_world=keep == "public" and rv.nature == "lecture",
                     with_owner=spec.with_owner, with_accounts=spec.with_accounts,
                     with_people=tuple(p.strip() for p in spec.with_people if p.strip()),
                     situations=tuple(sorted(rv.situations.items())), people=tuple(sorted(rv.people.items())),
-                    keep=spec.keep))
+                    keep=keep))
         return out
 
     def statuses(self) -> list[ServerStatus]:
@@ -178,7 +182,7 @@ class McpHub:
         else:
             state, detail = "jamais", ""
         info = st.info
-        reviews = {r: _review(r, v) for r, v in self._safe_reviews().get(server, {}).items()}
+        reviews = {r: _review(r, v, tool_name(server, r)) for r, v in self._safe_reviews().get(server, {}).items()}
         episodes = tuple(k for k, on in (("conversation", spec.in_conversation), ("initiative", spec.in_initiative),
                                          ("travail", spec.in_work)) if on)
         address = spec.url.strip() if not spec.local else " ".join((spec.command, *spec.args)).strip()
@@ -342,12 +346,13 @@ class McpHub:
 
     # ── les décisions de l'opérateur ──
     async def review(self, server: str, remote: str, *, enabled: bool, nature: str, autonomy: str,
-                     description: str, by: str) -> ToolReview:
+                     description: str, by: str, keep: str = "service") -> ToolReview:
         """Approuver (ou désactiver) un outil tel que le serveur le propose maintenant : c'est cet instantané-là
         qui sera servi ; s'il change, l'outil est suspendu jusqu'à un nouvel accord. Ses règles par situation et par
         personne restent."""
-        if not valid_choice(nature, NATURES) or not valid_choice(autonomy, TOOL_AUTONOMIES):
-            raise ValueError("nature ou accord inconnus")
+        if not valid_choice(nature, NATURES) or not valid_choice(autonomy, TOOL_AUTONOMIES) \
+                or not valid_choice(keep, TOOL_KEEPS):
+            raise ValueError("nature, accord ou ce qu'elle garde inconnus")
         reviews = self._safe_reviews()
         current = reviews.get(server, {}).get(remote)
         st = self._servers.get(server)
@@ -356,7 +361,7 @@ class McpHub:
             raise ValueError("le serveur ne propose pas cet outil en ce moment : teste-le d'abord")
         if tool is not None:
             stored = StoredReview(fingerprint=tool.fingerprint, enabled=enabled, nature=nature, autonomy=autonomy,
-                                  situations=dict(current.situations) if current else {},
+                                  keep=keep, situations=dict(current.situations) if current else {},
                                   people=dict(current.people) if current else {},
                                   description=inert(description, MAX_DESCRIPTION), server_description=tool.description,
                                   title=tool.title, schema=dict(tool.schema), by=by, at=self._now())
@@ -364,7 +369,7 @@ class McpHub:
             assert current is not None
             stored = current.model_copy(update={"enabled": False, "by": by, "at": self._now()})
         await self._store(server, remote, stored, reviews)
-        return _review(remote, stored)
+        return _review(remote, stored, tool_name(server, remote))
 
     async def settle(self, server: str, changes: Mapping[str, Any]) -> None:
         """Ce qu'un serveur fait d'elle (ADR 0128) : avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde —
@@ -396,27 +401,38 @@ class McpHub:
             **current.model_dump(by_alias=True), "situations": {k: v for k, v in situations.items() if v},
             "people": {k.strip(): v for k, v in people.items() if k.strip() and v}, "by": by, "at": self._now()})
         await self._store(server, remote, stored, reviews)
-        return _review(remote, stored)
+        return _review(remote, stored, tool_name(server, remote))
 
-    async def serve_new(self, server: str, *, by: str) -> list[str]:
-        """Servir d'un coup les outils que le serveur propose et que personne n'a regardés, avec les réglages de
-        leur service : lecture ou action d'après ce que le serveur en dit. Rend leurs noms."""
+    async def decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
+        """Les outils nouveaux ou changés, d'un coup (ADR 0129) : coupé (``non``), ou servi tel qu'il est maintenant,
+        en ``lecture`` ou en ``action`` — un outil déjà regardé garde son accord, ce qu'elle en garde, sa
+        description et ses règles. Seuls comptent les outils que le serveur propose et qui attendent un regard ;
+        un autre nom est refusé. Rend ce qui a été appliqué."""
         reviews = self._safe_reviews()
         st = self._servers.get(server)
-        seen = reviews.get(server, {})
-        fresh = [t for t in (st.live if st else ()) if t.remote not in seen]
-        if not fresh:
-            return []
+        mine = reviews.get(server, {})
+        waiting = {t.remote: t for t in (st.live if st else ())
+                   if t.remote not in mine or (mine[t.remote].enabled and mine[t.remote].fingerprint != t.fingerprint)}
+        unknown = [r for r in choices if r not in waiting]
+        if unknown:
+            raise ValueError(f"« {unknown[0][:60]} » n'attend pas de regard sur ce serveur")
+        if any(c not in ("non", "lecture", "action") for c in choices.values()):
+            raise ValueError("choix inconnu : coupé, lecture ou action")
+        if not choices:
+            return {}
         updated = {s: dict(v) for s, v in reviews.items()}
-        mine = updated.setdefault(server, {})
-        for tool in fresh:
-            mine[tool.remote] = StoredReview(
-                fingerprint=tool.fingerprint, enabled=True, nature="lecture" if tool.read_only_hint else "action",
-                server_description=tool.description, title=tool.title, schema=dict(tool.schema), by=by,
-                at=self._now())
+        target = updated.setdefault(server, {})
+        for remote, choice in choices.items():
+            tool, current = waiting[remote], mine.get(remote)
+            kept = current.model_dump(by_alias=True) if current is not None else {}
+            target[remote] = StoredReview.model_validate({
+                **kept, "fingerprint": tool.fingerprint, "enabled": choice != "non",
+                "nature": choice if choice != "non" else kept.get("nature", "action"),
+                "server_description": tool.description, "title": tool.title, "schema": dict(tool.schema), "by": by,
+                "at": self._now()})
         await self._save_reviews(updated)
         self._changed()
-        return [t.remote for t in fresh]
+        return dict(choices)
 
     async def _store(self, server: str, remote: str, stored: StoredReview,
                      reviews: Mapping[str, Mapping[str, StoredReview]]) -> None:
@@ -502,21 +518,16 @@ class McpHub:
 
 
 
-def _review(remote: str, v: StoredReview) -> ToolReview:
+def _review(remote: str, v: StoredReview, name: str = "") -> ToolReview:
     return ToolReview(remote=remote, fingerprint=v.fingerprint, enabled=v.enabled, nature=v.nature,
-                      autonomy=v.autonomy, situations=dict(v.situations), people=dict(v.people),
+                      autonomy=v.autonomy, keep=v.keep, situations=dict(v.situations), people=dict(v.people),
                       description=v.description, server_description=v.server_description,
-                      title=v.title, schema=v.schema_, by=v.by, at=v.at)
+                      title=v.title, schema=v.schema_, by=v.by, at=v.at, name=name)
 
 
 def autonomy_of(spec: McpServer, rv: StoredReview) -> str:
-    """L'accord d'un outil quand aucune règle de situation ni de personne ne le change (ADR 0128) : le sien, sinon
-    celui de son serveur — « lit seule, demande pour agir » selon sa nature."""
-    if rv.autonomy != "service":
-        return rv.autonomy
-    if spec.autonomy == "lit":
-        return "seule" if rv.nature == "lecture" else "carte"
-    return spec.autonomy
+    """L'accord d'un outil quand aucune règle de situation ni de personne ne le change (ADR 0128)."""
+    return tool_autonomy(spec.autonomy, rv.autonomy, rv.nature)
 
 
 def _said(exc: BaseException) -> str:

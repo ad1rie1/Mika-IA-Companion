@@ -291,6 +291,8 @@ class StoredReview(BaseModel):
     enabled: bool = False
     nature: Literal["lecture", "action"] = "lecture"
     autonomy: Literal["service", "seule", "carte", "toi"] = "service"
+    #: ce qu'elle garde de ce qu'il rend (ADR 0129) : ``service`` suit son serveur
+    keep: Literal["service", "public", "perso", "prive", "rien"] = "service"
     #: ses règles par situation (``TOOL_SITUATIONS``) et par personne nommée (``RULE_LEVELS``) — ADR 0128
     situations: dict[str, str] = Field(default_factory=dict)
     people: dict[str, str] = Field(default_factory=dict)

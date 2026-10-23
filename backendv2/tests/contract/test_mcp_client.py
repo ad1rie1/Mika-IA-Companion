@@ -405,20 +405,58 @@ async def test_what_the_server_says_goes_with_each_tool_and_its_rules_stay():
     await client.aclose()
 
 
-async def test_serving_what_nobody_looked_at_takes_the_settings_of_its_service():
+async def test_what_waits_for_a_look_is_decided_tool_by_tool_and_nothing_serves_without_a_choice():
+    """ADR 0129 : les outils nouveaux ou changés se décident d'un coup, un choix par outil — coupé, lecture ou
+    action ; un outil sans choix reste à regarder ; un outil changé garde son accord et ce qu'elle en garde."""
     fake, store = FakeServer(), Store(meteo=_server(autonomy="lit"))
     hub, client = _hub(fake, store)
-    assert await hub.serve_new("meteo", by="op") == []  # pas encore joint : rien de proposé
+    assert await hub.decide("meteo", {}, by="op") == {}  # pas encore joint : rien n'attend
+    with pytest.raises(ValueError):
+        await hub.decide("meteo", {"echo": "lecture"}, by="op")
     await hub.test("meteo")
-    await hub.review("meteo", "boom", enabled=False, nature="action", autonomy="service", description="", by="op")
-    assert sorted(await hub.serve_new("meteo", by="op")) == ["echo", "slow"]  # « boom », regardé et coupé, le reste
+    with pytest.raises(ValueError):  # un nom qui n'attend pas de regard, un choix inconnu
+        await hub.decide("meteo", {"inconnu": "lecture"}, by="op")
+    with pytest.raises(ValueError):
+        await hub.decide("meteo", {"echo": "toujours"}, by="op")
+    # « echo » se dit en lecture seule, mais c'est l'opérateur qui décide ; « slow » n'a pas de choix : il attend
+    assert await hub.decide("meteo", {"echo": "action", "boom": "non"}, by="op") == {"echo": "action", "boom": "non"}
     reviews = store.reviews["meteo"]
-    assert (reviews["echo"].nature, reviews["slow"].nature) == ("lecture", "action")  # d'après ce que dit le serveur
-    assert all(reviews[r].enabled and reviews[r].autonomy == "service" and reviews[r].by == "op"
-               for r in ("echo", "slow"))
-    assert not reviews["boom"].enabled
-    tools = {t.remote: t.autonomy for t in hub.offered()}
-    assert tools == {"echo": "seule", "slow": "carte"}
-    assert await hub.serve_new("meteo", by="op") == [] and await hub.serve_new("inconnu", by="op") == []
+    assert (reviews["echo"].enabled, reviews["echo"].nature, reviews["echo"].by) == (True, "action", "op")
+    assert not reviews["boom"].enabled and "slow" not in reviews
+    assert hub.status("meteo").new == ("slow",)
+    assert {t.remote: t.autonomy for t in hub.offered()} == {"echo": "carte"}  # « lit » : une action demande
+    # son accord et ce qu'elle en garde à lui survivent à un changement du serveur, relu d'un coup
+    await hub.review("meteo", "echo", enabled=True, nature="action", autonomy="seule", description="", by="op",
+                     keep="rien")
+    fake.tools[0] = {**fake.tools[0], "description": "Répète, autrement."}
+    await hub.test("meteo")
+    assert hub.status("meteo").changed == ("echo",) and hub.offered() == []
+    assert await hub.decide("meteo", {"echo": "lecture"}, by="op2") == {"echo": "lecture"}
+    echo = store.reviews["meteo"]["echo"]
+    assert (echo.nature, echo.autonomy, echo.keep, echo.by, echo.server_description) == \
+        ("lecture", "seule", "rien", "op2", "Répète, autrement.")
+    assert hub.status("meteo").changed == ()
+    await hub.aclose()
+    await client.aclose()
+
+
+async def test_a_tool_can_keep_less_or_more_than_its_service():
+    """ADR 0129 : ce qu'elle garde de ce qu'un outil rend suit son service, sauf s'il garde à sa façon ; ce qu'elle lit
+    ne se garde comme un savoir que si l'outil, lui, est « public »."""
+    fake, store = FakeServer(), Store(meteo=_server(keep="public"))
+    hub, client = _hub(fake, store)
+    await hub.test("meteo")
+    await hub.review("meteo", "echo", enabled=True, nature="lecture", autonomy="service", description="", by="op")
+    echo = next(t for t in hub.offered() if t.remote == "echo")
+    assert (echo.keep, echo.reads_world) == ("public", True)
+    await hub.review("meteo", "echo", enabled=True, nature="lecture", autonomy="service", description="", by="op",
+                     keep="rien")
+    echo = next(t for t in hub.offered() if t.remote == "echo")
+    assert (echo.keep, echo.reads_world) == ("rien", False)
+    assert hub.status("meteo").reviews["echo"].keep == "rien"
+    assert hub.status("meteo").reviews["echo"].name == "mcp_meteo_echo"
+    with pytest.raises(ValueError):
+        await hub.review("meteo", "echo", enabled=True, nature="lecture", autonomy="service", description="",
+                         by="op", keep="tout")
     await hub.aclose()
     await client.aclose()

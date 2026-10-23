@@ -9,7 +9,9 @@
   carte à la personne en face ; ``toi``, une carte à sa propriétaire quand c'est elle en face, sinon l'opérateur ;
 - ce que vaut ce qu'un outil a rendu remonte la boucle jusqu'à l'énoncé, et la trace n'en garde rien à « rien » ;
 - la mémoire le respecte : « rien » ne s'indexe pas et ne se relit pas (ni la réplique, ni la demande qu'elle
-  suivait) ; une confidence de service fait de ce qu'on en tire un secret, la nuit aussi.
+  suivait) ; une confidence de service fait de ce qu'on en tire un secret, la nuit aussi ;
+- qui peut quoi (ADR 0129) : la console applique la règle du moteur à des personnes types, et dit où un outil
+  s'écarte de son service — jamais une recopie de la règle.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.mcp import ExternalArgs, _handler, level_of, situation
+from mika.plugins.mcp.console import drift, faces, looser_tools, rules_of, said_level
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.tools import run_tool_loop
 from mika.sim.clock import run_virtual
@@ -157,6 +160,73 @@ def test_a_situation_rule_changes_the_approval_or_removes_the_tool():
     tool = offered_tool(autonomy="seule", with_accounts=True,
                         situations=(("compte", "carte"), ("proprietaire", "toi"), ("travail", "non")))
     assert (level_of(tool, OWNER), level_of(tool, ACCOUNT), level_of(tool, WORK)) == ("toi", "carte", "non")
+
+
+# ── qui peut quoi (ADR 0129) ────────────────────────────────────────────────
+
+
+def service(**kw):
+    base = {"with_owner": True, "with_accounts": False, "with_people": (), "episodes": ("conversation", "travail"),
+            "autonomy": "carte", "keep": "prive", "reviews": {}}
+    return NS(**{**base, **kw})
+
+
+def decided(**kw):
+    base = {"enabled": True, "nature": "action", "autonomy": "service", "keep": "service", "situations": {},
+            "people": {}}
+    return NS(**{**base, **kw})
+
+
+def facing(st, review) -> dict[str, str]:
+    rules = rules_of(st, review)
+    return {f.label: " / ".join(filter(None, said_level(level_of(rules, f.audience), f)[:2]))
+            for f in faces(st, None, tuple(review.people))}
+
+
+def test_who_can_do_what_is_the_engine_rule_on_typical_people():
+    # « carte » : toi, une carte dans ton chat ; une personne, la sienne ; personne en face, la console
+    st = service(with_accounts=True, with_people=("user_3",))
+    assert facing(st, decided()) == {
+        "Toi": "te demande / une carte dans ton chat", "user_3": "lui demande / une carte dans son chat",
+        "Les autres comptes": "lui demande / une carte dans son chat",
+        "Elle travaille seule": "te demande / dans la console (« À valider »)"}
+    # « toi » devant quelqu'un d'autre : la console, pas une carte
+    assert facing(st, decided(autonomy="toi"))["user_3"] == "te demande / dans la console (« À valider »)"
+    # une règle par personne passe avant ; une règle de situation retire
+    ruled = decided(people={"user_3": "seule"}, situations={"compte": "non"})
+    assert facing(st, ruled) == {"Toi": "te demande / une carte dans ton chat", "user_3": "seule",
+                               "Les autres comptes": "non", "Elle travaille seule": "te demande / dans la console "
+                                                                                    "(« À valider »)"}
+    # rien de plus que le service : sans les comptes, pas de colonne pour eux ni pour une personne qu'il n'ouvre pas
+    assert list(facing(service(), decided(people={"user_9": "seule"}))) == ["Toi", "Elle travaille seule"]
+    # ni toi ni le travail quand le service n'est pas avec toi ; aucun moment, aucune colonne
+    assert list(facing(service(with_owner=False, with_people=("user_3",)), decided())) == ["user_3"]
+    assert facing(service(episodes=()), decided()) == {}
+
+
+def test_a_tool_freer_or_stricter_than_its_service_is_said():
+    st = service(autonomy="toi", keep="prive")
+    assert drift(st, decided(autonomy="seule")) == (["Toi", "Elle travaille seule"], [])
+    assert drift(st, decided(situations={"travail": "non"})) == ([], ["Elle travaille seule"])
+    assert drift(st, decided(keep="public")) == (["ce qu'elle en garde"], [])
+    assert drift(st, decided(keep="rien")) == ([], ["ce qu'elle en garde"])
+    # sous « lit seule, demande pour agir », une lecture « seule » à elle ne s'écarte de rien (2026-10-23 : quatre
+    # lectures se disaient « exception » sans rien changer)…
+    reads = service(autonomy="lit")
+    assert drift(reads, decided(nature="lecture", autonomy="seule")) == ([], [])
+    # … jusqu'à ce que le service se resserre : son genre ne le dit pas, la fiche si
+    tight = service(autonomy="toi", reviews={"facture_get": decided(nature="lecture", autonomy="seule"),
+                                             "ticket_create": decided()})
+    assert looser_tools(tight) == ["facture_get"]
+    # « carte » et « toi » reviennent au même quand c'est toi qui décides
+    assert drift(st, decided(autonomy="carte")) == ([], [])
+
+
+def test_a_tool_keeps_its_own_level_or_follows_its_service():
+    assert StoredReview(fingerprint="f").keep == "service"
+    assert StoredReview(fingerprint="f", keep="rien").keep == "rien"
+    with pytest.raises(ValidationError):
+        StoredReview.model_validate({"fingerprint": "f", "keep": "tout"})
 
 
 # ── l'accord, décidé à l'appel ──────────────────────────────────────────────

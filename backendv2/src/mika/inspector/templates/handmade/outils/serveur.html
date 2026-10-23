@@ -1,6 +1,6 @@
-{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123, 0128) : s'il marche et ce qui attend
-   ton regard, ce qu'elle en fait en une phrase, ce qu'elle en lit, ses outils et ce que tu en as décidé, pour qui et
-   quand ; le côté technique replié. #}
+{# La fiche d'un service branché, « En bref » (app/handmade/servers.py, ADR 0123, 0128, 0129) : s'il marche et ce qui
+   attend ton regard, ce qu'elle en fait en une phrase, ce qu'elle en lit, qui peut quoi outil par outil (la règle du
+   moteur devant chaque personne que le service ouvre), pour qui et quand ; le côté technique replié. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page server">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
@@ -37,19 +37,37 @@
     </dl>
   </section>
 
-  <section class="now-card" aria-labelledby="server-tools">
+  <section class="now-card table-block" aria-labelledby="server-tools">
     <header class="now-card-head">
-      <h2 id="server-tools">Ses outils</h2>
-      <span class="person-count now-num">{{ tools|length }}</span>
-      <p>Ce qu'il propose, et ce que tu en as décidé. Un outil ne lui sert qu'approuvé ; s'il change, il est suspendu jusqu'à ton nouvel accord. <a href="{{ tools_tab }}">Les régler</a></p>
+      <h2 id="server-tools">Qui peut quoi</h2>
+      <span class="person-count now-num">{{ matrix|length }}</span>
+      <p>Ses outils servis, devant chaque personne que le service ouvre : ce qu'elle fait, une fois ses règles et celles du service appliquées. <a href="{{ tools_tab }}">Les régler</a></p>
     </header>
-    {% if tools %}
-    <ul class="server-tools" role="list">
-      {% for t in tools %}<li><div class="server-tool-top"><code>{{ t.name }}</code><span class="now-tag {{ t.tone }}">{{ t.state }}</span></div>{% if t.what %}<p>{{ t.what }}</p>{% endif %}{% if t.rules %}<p class="server-tool-rules"><a href="{{ t.rules }}">Par situation et par personne</a></p>{% endif %}</li>{% endfor %}
-    </ul>
+    {% if matrix and columns %}
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Qui peut quoi">
+      <table class="server-who server-matrix">
+        <thead><tr><th scope="col">Outil</th>{% for c in columns %}<th scope="col">{{ c }}</th>{% endfor %}<th scope="col">Ce qu'elle en garde</th></tr></thead>
+        <tbody>
+          {% for t in matrix %}
+          <tr>
+            <th scope="row"><a href="{{ t.rules }}"><code>{{ t.name }}</code></a>{% if t.looser %} <span class="now-tag warn">plus libre</span>{% endif %}<span class="server-matrix-what">{{ t.what }}</span></th>
+            {% for c in t.cells %}<td><span class="now-tag {{ c.tone }}"{% if c.note %} title="{{ c.note }}"{% endif %}>{{ c.word }}</span>{% if c.note %}<span class="server-matrix-note">{{ c.note }}</span>{% endif %}</td>{% endfor %}
+            <td>{{ t.keep.word }}{% if t.keep.own %} <span class="now-tag owner">le sien</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager single">{{ pages(matrix_pager) }}</div>
+    <p class="now-muted server-matrix-legend">« te demande » : une carte dans ton chat quand c'est toi en face ; sans toi en face, la demande t'attend dans la console (« À valider »), un jour au plus. « lui demande » : une carte à la personne en face. La grille « Ce qu'elle peut faire » peut encore retirer un outil dans une situation : « Pour qui, quand », plus bas, en tient compte.</p>
+    {% elif matrix %}
+    <p class="now-muted">Le service ne l'ouvre à personne, à aucun moment : « Ce qu'elle en fait ».</p>
+    {% elif known %}
+    <p class="now-muted">Aucun outil servi.</p>
     {% else %}
     <p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge.</p>
     {% endif %}
+    {% if states %}<p class="server-matrix-rest">{% for word, n in states %}<span>{{ n }} {{ word }}</span>{% endfor %} <a href="{{ tools_tab }}">Ses outils</a></p>{% endif %}
   </section>
 
   <section class="now-card table-block" aria-labelledby="server-who">

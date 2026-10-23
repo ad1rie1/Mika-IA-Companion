@@ -1,6 +1,7 @@
-{# Un service branché › « Ce qu'elle en fait » (app/handmade/servers.py, ADR 0128) : la phrase, un genre en un clic, puis
-   les trois réglages — avec qui, ce qu'elle fait seule, ce qu'elle en garde. Les formulaires sont ceux des actions
-   ``mcp.genre`` et ``mcp.service`` (jeton, retour, audit), dessinés ici. #}
+{# Un service branché › « Ce qu'elle en fait » (app/handmade/servers.py, ADR 0128, 0129) : la phrase (et ce qu'elle ne
+   dit pas : il ne sert à personne, des outils plus libres que lui), un genre en un clic, puis les trois réglages — avec
+   qui, ce qu'elle fait seule, ce qu'elle en garde. Les formulaires sont ceux des actions ``mcp.genre`` et
+   ``mcp.service`` (jeton, retour, audit), dessinés ici. #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -25,6 +26,7 @@
 </div>
 {%- endmacro %}
 <div class="now-page service">
+  {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
   <section class="now-card service-said" aria-labelledby="service-phrase">
     <header class="now-card-head">
       <h2 id="service-phrase">En une phrase</h2>
@@ -38,7 +40,7 @@
   <section class="now-card" aria-labelledby="service-genres">
     <header class="now-card-head">
       <h2 id="service-genres">Quel genre de service ?</h2>
-      <p>Un genre règle d'un coup avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde. Tu ajustes ensuite, plus bas.</p>
+      <p>Un genre règle d'un coup avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde : un clic l'applique aussitôt, à la place des réglages plus bas (ce que tu y as changé sans l'enregistrer est perdu). Tu ajustes ensuite, plus bas.</p>
     </header>
     <ul class="service-genres" role="list">
       {% for g in genres %}
@@ -67,7 +69,7 @@
         <p>Le plafond du service : aucun de ses outils ne sert à plus de monde. Jamais dans un salon ni avec une inconnue.</p>
       </header>
       {{ check("avec_toi", with_owner, "Toi", "sa propriétaire, et quand elle travaille pour toi") }}
-      {{ check("avec_les_comptes", with_accounts, "Toutes les personnes qui ont un compte", "en tête-à-tête, authentifiées") }}
+      {{ check("avec_les_comptes", with_accounts, "Toutes les personnes qui ont un compte chez elle", "connectées à l'app ou au web, en tête-à-tête ; un compte de messagerie ne suffit pas") }}
       <fieldset class="service-people">
         <legend>Des personnes choisies</legend>
         <div class="service-people-row">
@@ -94,7 +96,7 @@
     <section class="now-card" aria-labelledby="service-alone">
       <header class="now-card-head">
         <h2 id="service-alone">Ce qu'elle fait seule</h2>
-        <p>Plus on va à droite, plus c'est serré. Un outil peut faire exception, par situation ou pour une personne : « Par situation et par personne ».</p>
+        <p>Plus on va à droite, plus c'est serré. Un outil peut s'en écarter, dans un sens ou dans l'autre (son accord à lui, ou par situation et par personne) : sa ligne le dit dans « Ses outils ».</p>
       </header>
       {{ ladder("seule", autonomies, autonomy, "Ce qu'elle fait seule") }}
     </section>
@@ -102,7 +104,7 @@
     <section class="now-card" aria-labelledby="service-keep">
       <header class="now-card-head">
         <h2 id="service-keep">Ce qu'elle en garde</h2>
-        <p>Ça vaut pour tout ce qui en sort : ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a rendu.</p>
+        <p>Ça vaut pour tout ce qui en sort : ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a rendu. À partir de maintenant : ce qu'elle a déjà gardé ne change pas. Un outil peut garder autrement (« Régler », dans « Ses outils »).</p>
       </header>
       {{ ladder("garde", keeps, keep, "Ce qu'elle en garde") }}
     </section>

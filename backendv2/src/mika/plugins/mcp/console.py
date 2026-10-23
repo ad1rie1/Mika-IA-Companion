@@ -3,21 +3,26 @@ chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses 
 
 Les connexions (adresse, jeton, commande) se règlent dans Réglages › Plugins › Outils extérieurs ; un lien y mène et
 l'enregistrement ramène ici. Ce qui se décide ici (ADR 0128) : ce que le service fait d'elle (avec qui, quand, ce
-qu'elle fait seule, ce qu'elle en garde — d'un coup par un genre) ; outil par outil, l'activer, sa nature, son accord à
-lui, la description qu'elle lit, et ses règles par situation et par personne. Ce que le serveur dit de lui-même et de
-ses outils est une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
+qu'elle fait seule, ce qu'elle en garde — d'un coup par un genre) ; ce qu'il propose de neuf, regardé d'un coup (ADR
+0129) ; outil par outil, l'activer, sa nature, son accord et ce qu'elle en garde à lui, la description qu'elle lit, et
+ses règles par situation et par personne. « Qui peut quoi » se calcule par la règle du moteur (``level_of``), jamais
+par une recopie. Ce que le serveur dit de lui-même et de ses outils est une donnée venue d'ailleurs : montrée à
+l'opérateur, jamais obéie.
 """
 
 from __future__ import annotations
 
 import shlex
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, create_model
 
 from mika.contracts import identity as identity_c
+from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
-from mika.kernel.frame import Frame
+from mika.kernel.frame import Audience, Frame
 from mika.kernel.inspect import (
     ActionSlot,
     Badge,
@@ -38,7 +43,23 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.kernel.operate import Done, Refused
-from mika.plugins.mcp import MCP, STATUS, McpState, status_drafts
+from mika.plugins.mcp import (
+    ALONE,
+    ANSWERED,
+    APPROVED,
+    CARD,
+    EXPIRED,
+    EXPIRER,
+    FAILED,
+    MCP,
+    NO,
+    REFUSED,
+    STATUS,
+    WAITING,
+    McpState,
+    level_of,
+    status_drafts,
+)
 from mika.ports.mcp import (
     AUTONOMIES,
     EPISODES,
@@ -47,8 +68,13 @@ from mika.ports.mcp import (
     RULE_LEVELS,
     STATES,
     TOOL_AUTONOMIES,
+    TOOL_KEEPS,
     TOOL_SITUATIONS,
+    tool_autonomy,
+    tool_keep,
 )
+from mika.vocab.episodes import is_work_target
+from mika.vocab.privacy import ChannelTrust
 
 SETTINGS = "/inspecteur/reglages/serveurs-mcp"
 LIST = "/inspecteur/outils/serveurs"
@@ -127,6 +153,124 @@ def sentence(st: Any, frame: Frame | None = None) -> str:
             and (e != "travail" or st.with_owner)]
     said = ", " + " ou ".join(when) if when else ", mais à aucun moment : il ne sert jamais"
     return f"{who}{said}. {ALONE_SAID.get(st.autonomy, '')} {KEEP_SAID.get(st.keep, '')}".strip()
+
+
+def serves_nobody(st: Any) -> bool:
+    """Le service n'est ouvert à personne : ni toi, ni les comptes, ni une personne choisie."""
+    return not (st.with_owner or st.with_accounts or st.with_people)
+
+
+# ── qui peut quoi (ADR 0129) : la règle du moteur, appliquée à des personnes types ──
+
+
+def _facing(person: str = "", *, owner: bool = False) -> Audience:
+    """Une personne en tête-à-tête, authentifiée, comme le moteur en voit une ; ``person`` vide : un compte que rien
+    ne nomme."""
+    return Audience(persons=(f"colonne:{person or ('toi' if owner else 'compte')}",), channel="web", public=False,
+                    trust=ChannelTrust.AUTHENTICATED.value, owner=owner, person=person)
+
+
+#: elle travaille seule : personne n'écoute (l'audience que le moteur donne à un pas, une exécution, une tâche)
+WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Face:
+    """Une colonne de « qui peut quoi » : qui est en face, ou personne quand elle travaille seule."""
+
+    key: str
+    label: str
+    audience: Audience
+
+
+@dataclass(frozen=True, slots=True)
+class Rules:
+    """Ce que la règle du moteur (``level_of``) lit d'un outil : avec qui son service sert, ses règles, son accord."""
+
+    with_owner: bool
+    with_accounts: bool
+    with_people: tuple[str, ...]
+    situations: tuple[tuple[str, str], ...]
+    people: tuple[tuple[str, str], ...]
+    autonomy: str
+
+
+def rules_of(st: Any, review: Any, *, bare: bool = False) -> Rules:
+    """Les règles d'un outil telles que son service servi les donnerait au moteur (``OfferedTool``) ; ``bare`` : son
+    service seul, sans son accord à lui ni ses règles."""
+    return Rules(with_owner=st.with_owner, with_accounts=st.with_accounts,
+                 with_people=tuple(p.strip() for p in st.with_people if p.strip()),
+                 situations=() if bare else tuple(sorted(review.situations.items())),
+                 people=() if bare else tuple(sorted(review.people.items())),
+                 autonomy=tool_autonomy(st.autonomy, "service" if bare else review.autonomy, review.nature))
+
+
+def faces(st: Any, frame: Frame | None = None, named: Sequence[str] = ()) -> list[Face]:
+    """Les colonnes de « qui peut quoi » : ce que le service ouvre, rien de plus — toi, chaque personne nommée (par
+    le service, ou par une règle d'outil quand il ouvre les comptes), les autres comptes, et quand elle travaille
+    seule pour toi."""
+    talks = bool({"conversation", "initiative"} & set(st.episodes))
+    out: list[Face] = []
+    if st.with_owner and talks:
+        out.append(Face("toi", "Toi", _facing(owner=True)))
+    if talks:
+        people = list(dict.fromkeys((*st.with_people, *(named if st.with_accounts else ()))))
+        out += [Face(f"p:{p}", name_of(frame, p), _facing(p)) for p in people if p.strip()]
+        if st.with_accounts:
+            out.append(Face("comptes", "Les autres comptes" if people else "Les comptes", _facing()))
+    if st.with_owner and "travail" in st.episodes:
+        out.append(Face("travail", "Elle travaille seule", WORKING))
+    return out
+
+
+def said_level(level: str, face: Face) -> tuple[str, str, str]:
+    """Un accord devant cette colonne, en mots : (ce qu'elle fait, où se décide l'accord, ton). « Toi » et « ton
+    accord » reviennent au même quand c'est toi en face ; sans personne en face, la demande t'attend dans la console."""
+    if level == NO:
+        return "non", "", "muted"
+    if level == ALONE:
+        return "seule", "", "ok"
+    if face.key == "toi":
+        return "te demande", "une carte dans ton chat", "info"
+    if face.key != "travail" and level == CARD:
+        return "lui demande", "une carte dans son chat", "info"
+    return "te demande", "dans la console (« À valider »)", "info"
+
+
+def _strictness(level: str, face: Face) -> int:
+    """Plus c'est grand, plus c'est serré : seule, une carte à la personne en face, ton accord, non."""
+    if level == NO:
+        return 3
+    if level == ALONE:
+        return 0
+    if face.key in ("toi", "travail") or level != CARD:
+        return 2
+    return 1
+
+
+#: ce qu'elle garde, du plus ouvert au plus serré
+_KEEP_ORDER = {k: i for i, (k, _) in enumerate(KEEPS)}
+
+
+def drift(st: Any, review: Any, frame: Frame | None = None) -> tuple[list[str], list[str]]:
+    """Où un outil s'écarte de son service (son accord à lui, ses règles, ce qu'elle en garde) : ce où il est plus
+    libre, et ce où il est plus serré — par colonne de « qui peut quoi », puis « ce qu'elle en garde »."""
+    looser: list[str] = []
+    stricter: list[str] = []
+    own, bare = rules_of(st, review), rules_of(st, review, bare=True)
+    for f in faces(st, frame, tuple(review.people)):
+        mine, service = _strictness(level_of(own, f.audience), f), _strictness(level_of(bare, f.audience), f)
+        if mine != service:
+            (looser if mine < service else stricter).append(f.label)
+    keep = tool_keep(st.keep, review.keep)
+    if keep != st.keep:
+        (looser if _KEEP_ORDER[keep] < _KEEP_ORDER[st.keep] else stricter).append("ce qu'elle en garde")
+    return looser, stricter
+
+
+def looser_tools(st: Any, frame: Frame | None = None) -> list[str]:
+    """Les outils servis plus libres que leur service : ce que son genre ne dit pas."""
+    return [r for r, v in st.reviews.items() if v.enabled and drift(st, v, frame)[0]]
 
 
 def _fiche(name: str, tab: str = "") -> Ref:
@@ -279,9 +423,7 @@ def tool_state(st: Any, remote: str) -> tuple[str, str]:
         return "désactivé", "muted"
     if review.fingerprint != tool.fingerprint:
         return "changé : suspendu", "danger"
-    if review.autonomy == "service":
-        return "servi", "ok"
-    return f"servi, {WORDS.get(review.autonomy, review.autonomy)}", "ok"
+    return "servi", "ok"
 
 
 def _schema_rows(schema: Any) -> tuple[tuple[Any, ...], ...]:
@@ -308,8 +450,8 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not st.live:
         blocks.append(Note("La liste de ses outils n'est pas connue : « Tester la connexion » la charge.",
                            tone="muted"))
-    if st.new:
-        blocks.append(ActionSlot("mcp.servir", title=f"Servir les {len(st.new)} nouveaux avec les réglages du service"))
+    if st.new or st.changed:
+        blocks.append(ActionSlot("mcp.revoir", title="Enregistrer ces choix"))
     if st.changed:
         blocks.append(Note("Le serveur a changé la description, le schéma ou les annotations de "
                            f"{', '.join(st.changed)} depuis ton accord : suspendu(s) jusqu'à ce que tu les relises.",
@@ -338,6 +480,7 @@ def _tab_tools(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                 ("outil", remote), ("actif", "1" if review is None or review.enabled else ""),
                 ("nature", review.nature if review is not None else ("lecture" if tool.read_only_hint else "action")),
                 ("seule", review.autonomy if review is not None else "service"),
+                ("garde", review.keep if review is not None else "service"),
                 ("description", current)), title="Régler cet outil", compact=True))
         if review is not None:
             detail.append(rules_ref(st.name, remote))
@@ -415,23 +558,66 @@ def _tab_rules(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [ActionSlot("mcp.regles", rules_initial(remote, review), title="Enregistrer")]
 
 
+#: l'issue d'un appel sur accord, son ton
+REQUEST_TONES = {WAITING: "info", APPROVED: "info", ANSWERED: "ok", REFUSED: "warn", EXPIRED: "muted",
+                 FAILED: "danger"}
+#: où l'accord se décidait
+ASKED = {"conversation": "une carte dans le chat", "operateur": "dans la console"}
+#: ce que l'onglet « Appels » remonte
+CALLS_DAYS = 14
+
+
+def _for(frame: Frame | None, target: str | None) -> str:
+    """Pour qui un appel est parti : une personne, par son nom ; « elle travaillait » sans personne en face."""
+    if not target or is_work_target(target):
+        return "elle travaillait"
+    person = frame.get(identity_c.PERSON(target)) if frame is not None else None
+    return name_of(frame, str(person or target))
+
+
+def _decided(frame: Frame | None, req: Any) -> str:
+    if req.status == WAITING:
+        return ""
+    if req.by == EXPIRER:
+        return "le délai"
+    return _for(frame, req.by) if req.approval == "conversation" else (req.by or "")
+
+
 @MCP.inspect("appels", title="Appels", subject="serveur", order=30,
-             description="Les derniers appels de ses outils (14 jours), vers l'épisode où les relire.")
+             description="Les appels de ses outils (14 jours) : pour qui, comment l'accord s'est décidé, ce qui en est "
+                         "sorti, vers l'épisode où les relire.")
 def _tab_calls(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port, traces = ctx.ports.get("mcp"), ctx.ports.get("traces")
-    if port is None or traces is None:
-        return [Note(NO_PORT, tone="muted")]
-    rows = []
-    for t in (x for x in port.offered() if x.server == ctx.subject):
-        for u in traces.tool_uses(t.name, 20):
-            rows.append((u.at, Row((When(u.at), Text(t.remote, "mono"),
-                                    Badge("réussi" if u.ok else "refusé" if not u.executed else "échec",
-                                          "ok" if u.ok else "warn" if not u.executed else "danger"),
-                                    Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))))
+    st = port.status(ctx.subject) if port is not None else None
+    if st is None:
+        return [Note(NO_PORT if port is None else "Ce serveur n'existe plus.", tone="muted")]
+    since = frame.now - CALLS_DAYS * DAY
+    asked = [r for r in s.requests.values() if r.server == st.name and r.at >= since]
+    # un appel qui demandait un accord a sa ligne à lui : la trace n'en a vu que la proposition
+    proposed = {(r.request.split(":", 1)[0], r.remote) for r in asked}
+    names = {t.remote: t.name for t in port.offered() if t.server == st.name}
+    for remote, review in st.reviews.items():
+        names.setdefault(remote, review.name)
+    rows: list[tuple[int, Row]] = []
+    for remote, name in (names.items() if traces is not None else ()):
+        for u in (traces.tool_uses(name, 20) if name else ()):
+            if u.at < since or (u.correlation, remote) in proposed:
+                continue
+            issue = ("rendu", "ok") if u.ok else ("pas lancé", "warn") if not u.executed else ("échec", "danger")
+            rows.append((u.at, Row((When(u.at), Text(remote, "mono"), _for(frame, u.target), "seule", Badge(*issue),
+                                    "", Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))))
+    for r in asked:
+        rows.append((r.at, Row((When(r.at), Text(r.remote, "mono"), _for(frame, r.target),
+                                ASKED.get(r.approval, r.approval), Badge(r.status, REQUEST_TONES.get(r.status, "")),
+                                _decided(frame, r),
+                                Ref("episode", r.request.split(":", 1)[0], "relire", (("onglet", "outils"),))))))
     rows.sort(key=lambda r: -r[0])
-    return [Table((Column("quand", "fit"), Column("outil", "fit"), Column("issue", "fit"), ""),
+    return [Table((Column("quand", "fit"), Column("outil", "fit"), Column("pour qui", "fit"),
+                   Column("l'accord", "fit"), Column("issue", "fit"), Column("décidé par", "fit"), ""),
                   tuple(r for _, r in rows[:50]), title="Derniers appels",
-                  empty="Aucun appel de ses outils servis depuis 14 jours.")]
+                  empty=f"Aucun appel de ses outils depuis {CALLS_DAYS} jours.",
+                  caption="« seule » : l'appel est parti sans demander. Sur accord, rien ne part avant le oui ; "
+                          "« rendue » : il est parti et a répondu.")]
 
 
 # ── Actions ───────────────────────────────────────────────────────────────
@@ -450,6 +636,10 @@ class ReviewArgs(BaseModel):
         label="Ce qu'il fait seul", choices=TOOL_AUTONOMIES, advanced=False,
         help="Seul, l'appel part aussitôt et ses arguments sortent de la machine. Une règle par situation ou par "
              "personne passe avant (onglet « Par situation et par personne »).")] = "service"
+    garde: Annotated[Literal["service", "public", "perso", "prive", "rien"], Knob(
+        label="Ce qu'elle en garde", choices=TOOL_KEEPS, advanced=False,
+        help="Pour un outil qui ne vaut pas le reste du service : « rien » pour des données de tiers qu'elle n'a pas "
+             "à retenir, par exemple. À partir de maintenant : ce qu'elle a déjà gardé ne change pas.")] = "service"
     description: Annotated[str, Knob(
         label="Ce qu'elle lit", widget="textarea", advanced=False,
         help="Vide : la description du serveur. Une phrase à toi si la sienne est floue ou trop longue.")] = \
@@ -477,12 +667,13 @@ async def _test(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
 
 
 @MCP.action("regler", title="Régler l'outil", args=ReviewArgs, emits=[STATUS], subject="serveur", order=20,
-            inline=True, description="L'activer ou non, sa nature, l'accord qu'il demande, ce qu'elle lit.")
+            inline=True, description="L'activer ou non, sa nature, l'accord qu'il demande, ce qu'elle en garde, ce "
+                                     "qu'elle lit.")
 async def _review(s: McpState, frame: Frame, args: ReviewArgs, ctx: Any) -> Done:
     port = _port(ctx)
     try:
         await port.review(ctx.subject, args.outil, enabled=args.actif, nature=args.nature, autonomy=args.seule,
-                          description=args.description, by=ctx.by)
+                          description=args.description, by=ctx.by, keep=args.garde)
     except ValueError as exc:
         raise Refused(str(exc)) from None
     word = "activé" if args.actif else "désactivé"
@@ -589,14 +780,32 @@ async def _rules(s: McpState, frame: Frame, args: Any, ctx: Any) -> Done:
     return Done(message=f"{args.outil} : {n} règle{'s' if n > 1 else ''}.", drafts=status_drafts(s, port))
 
 
-@MCP.action("servir", title="Servir les nouveaux outils", args=NoArgs, emits=[STATUS], subject="serveur", order=25,
-            inline=True, description="Les outils que personne n'a regardés, servis avec les réglages du service.")
-async def _serve_new(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
+#: ce qu'on décide d'un outil nouveau ou changé (ADR 0129) : rien ne se sert sans un choix
+CHOICES = (("non", "laisser coupé"), ("lecture", "servir : il lit"), ("action", "servir : il agit"))
+
+
+class DecideArgs(BaseModel):
+    outils: Annotated[dict[str, Literal["non", "lecture", "action"]], Knob(
+        label="Ses outils", advanced=False, help="Un choix par outil : laisser coupé, ou servir en lecture ou en "
+                                                 "action.")] = Field(default_factory=dict)
+
+
+@MCP.action("revoir", title="Ce qu'il propose de neuf", args=DecideArgs, emits=[STATUS], subject="serveur", order=25,
+            inline=True, description="Les outils nouveaux ou changés, d'un coup : laisser coupé, ou servir en lecture "
+                                     "ou en action.")
+async def _decide(s: McpState, frame: Frame, args: DecideArgs, ctx: Any) -> Done:
     port = _port(ctx)
-    served = await port.serve_new(ctx.subject, by=ctx.by)
-    if not served:
-        return Done(message="Aucun outil nouveau.", drafts=status_drafts(s, port))
-    return Done(message=f"Servis avec les réglages du service : {', '.join(served)}.", drafts=status_drafts(s, port))
+    try:
+        done = await port.decide(ctx.subject, args.outils, by=ctx.by)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    if not done:
+        return Done(message="Aucun choix.", drafts=status_drafts(s, port))
+    served = [r for r, c in done.items() if c != "non"]
+    off = len(done) - len(served)
+    said = f"Servis : {', '.join(served)}." if served else "Aucun servi."
+    return Done(message=said + (f" {off} laissé{'s' if off > 1 else ''} coupé{'s' if off > 1 else ''}." if off else ""),
+                drafts=status_drafts(s, port))
 
 
 #: où tourne un serveur qu'on branche (comme Claude Code ; l'ancien transport SSE seul n'est pas pris, ADR 0064)
@@ -634,8 +843,8 @@ def lines(text: str) -> list[str]:
 
 
 @MCP.action("brancher", title="Brancher un service", args=BranchArgs, emits=[STATUS], order=5, inline=True,
-            description="À quoi il sert, son genre, comment le joindre ; ses outils arrivent coupés, à servir en un "
-                        "clic.")
+            description="À quoi il sert, son genre, comment le joindre ; ses outils arrivent coupés, à regarder un "
+                        "par un.")
 async def _plug(s: McpState, frame: Frame, args: BranchArgs, ctx: Any) -> Done:
     port = ctx.ports.get("mcp")
     if port is None:
@@ -662,7 +871,7 @@ async def _plug(s: McpState, frame: Frame, args: BranchArgs, ctx: Any) -> Done:
         await port.plug(name, spec)
     except ValueError as exc:
         raise Refused(str(exc).splitlines()[-1][:300]) from None
-    return Done(message=f"« {name} » branché. Teste-le, puis sers ses outils.", drafts=status_drafts(s, port),
+    return Done(message=f"« {name} » branché. Teste-le, puis choisis ses outils.", drafts=status_drafts(s, port),
                 go=Ref.subject("serveur", name, name, "outils"))
 
 

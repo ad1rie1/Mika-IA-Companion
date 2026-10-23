@@ -1,22 +1,50 @@
-{# Un service branché › « Ses outils » (app/handmade/servers.py, ADR 0128) : le réglage du service, qui vaut pour tous ;
-   les nouveaux, servis en un clic avec ce réglage ; puis ce qui lit et ce qui agit, un outil par ligne — son état, son
-   accord s'il fait exception, ses règles, et « Régler » replié (le formulaire de l'action ``mcp.regler``). #}
+{# Un service branché › « Ses outils » (app/handmade/servers.py, ADR 0128, 0129) : le réglage du service, qui vaut pour
+   tous ; ce qui attend ton regard (nouveau ou changé), chacun avec sa description entière et ce que le serveur en
+   dit, un choix par outil — rien ne se sert sans lui (le formulaire de l'action ``mcp.revoir``) ; puis ce qui lit et ce
+   qui agit, un outil par ligne — son état, ce qu'il fait devant chacun, où il s'écarte du service, « Régler » replié
+   (le formulaire de l'action ``mcp.regler``). #}
 {% from "_forms.html" import action_form %}
 <div class="now-page service">
+  {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
   <section class="now-card tools-default" aria-labelledby="tools-default">
     <div>
       <h2 id="tools-default">Par défaut, pour tous ses outils</h2>
       <p class="tools-default-said">{{ alone }} · garde : {{ keep }}</p>
-      <p class="now-muted">Les réglages du service ({{ genre }}). Un outil n'a de réglage à lui que s'il fait exception.</p>
+      <p class="now-muted">Les réglages du service ({{ genre }}). Un outil qui s'en écarte le dit sur sa ligne.</p>
     </div>
     <a class="btn quiet" href="{{ service_tab }}">Changer</a>
   </section>
 
-  {% if fresh %}
-  <section class="tools-fresh" aria-label="Nouveaux outils">
-    <p><b>{{ fresh|length }} outil{{ 's' if fresh|length > 1 }} nouveau{{ 'x' if fresh|length > 1 }}</b> : {% for f in fresh %}<code>{{ f }}</code>{{ ', ' if not loop.last }}{% endfor %}. {{ 'Ils sont coupés' if fresh|length > 1 else 'Il est coupé' }}.</p>
-    {% if serve_form %}{{ action_form(serve_form, True, True, True) }}{% endif %}
-  </section>
+  {% if waiting and decide_form %}
+  <form method="post" action="{{ decide_form.url }}" class="now-card tools-review" aria-labelledby="tools-review">
+    <input type="hidden" name="csrf" value="{{ decide_form.csrf }}"><input type="hidden" name="_op" value="{{ decide_form.nonce }}">
+    <input type="hidden" name="_retour" value="{{ decide_form.back }}"><input type="hidden" name="_sujet" value="{{ decide_form.subject }}">
+    {% for k, v in decide_form.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="_champs" value="outils">
+    <header class="now-card-head">
+      <h2 id="tools-review">À regarder</h2>
+      <span class="person-count now-num">{{ waiting|length }}</span>
+      <p>Nouveaux, ou changés depuis ton accord : aucun ne lui sert tant que tu n'as pas choisi. Lis ce qu'il fait, puis dis s'il <b>lit</b> (rien ne change ailleurs) ou s'il <b>agit</b> (créer, envoyer, exécuter, supprimer) : le serveur ne le dit pas toujours, ou se trompe. Servi, il suit les réglages du service.</p>
+    </header>
+    <ul class="tools-review-rows" role="list">
+      {% for t in waiting %}
+      <li class="tools-review-row">
+        <div class="tools-review-main">
+          <p class="tools-review-name"><code>{{ t.name }}</code>{% if t.changed %} <span class="now-tag danger">changé : suspendu</span>{% else %} <span class="now-tag warn">nouveau</span>{% endif %}{% for h in t.said %} <span class="now-tag {{ h.tone }}">{{ h.text }}</span>{% endfor %}</p>
+          <p class="tools-review-what">{{ t.what }}</p>
+          {% if t.before %}<p class="now-muted tools-review-before">Avant : {{ t.before }}</p>{% endif %}
+        </div>
+        <fieldset class="tools-review-choice">
+          <legend class="service-hidden">{{ t.name }}</legend>
+          <label class="plug-option"><input type="radio" name="{{ t.path }}" value="non"{{ ' checked' if t.current == 'non' }}><span>Coupé</span></label>
+          <label class="plug-option"><input type="radio" name="{{ t.path }}" value="lecture"{{ ' checked' if t.current == 'lecture' }}><span>Servi : il lit</span></label>
+          <label class="plug-option"><input type="radio" name="{{ t.path }}" value="action"{{ ' checked' if t.current == 'action' }}><span>Servi : il agit</span></label>
+        </fieldset>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="form-actions-inline"><button class="btn">Enregistrer ces choix</button> <span class="now-muted">Un outil sans choix reste à regarder.</span></div>
+  </form>
   {% endif %}
   {% for n in notes %}<p class="server-alert {{ n.tone }}">{{ n.text }}</p>{% endfor %}
 
@@ -30,10 +58,13 @@
         <div class="tools-row-main">
           <code>{{ t.name }}</code>
           {% if t.what %}<span class="tools-row-what">{{ t.what }}</span>{% endif %}
+          {% if t.full %}<details class="tools-row-more"><summary>Tout lire</summary><p>{{ t.full }}</p></details>{% endif %}
+          {% if t.cells %}<p class="tools-row-who">{% for c in t.cells %}<span{% if c.note %} title="{{ c.note }}"{% endif %}>{{ c.label }} : <b>{{ c.word }}</b></span>{% endfor %}<span>garde : <b>{{ t.keep.word }}</b></span></p>{% endif %}
         </div>
         <div class="tools-row-tags">
           <span class="now-tag {{ t.tone }}">{{ t.state }}</span>
-          {% if t.own %}<span class="now-tag owner">exception : {{ t.own }}</span>{% endif %}
+          {% if t.looser %}<span class="now-tag warn" title="{{ t.looser }}">plus libre que le service</span>{% endif %}
+          {% if t.stricter %}<span class="now-tag info" title="{{ t.stricter }}">plus serré que le service</span>{% endif %}
           {% if t.rules %}<a class="now-tag info" href="{{ t.rules_href }}">{{ t.rules }}</a>{% endif %}
         </div>
         <div class="tools-row-actions">
@@ -53,5 +84,5 @@
     {% endif %}
   </section>
   {% endfor %}
-  <p class="now-muted">Lire ou agir : deviné d'après ce que le serveur dit de l'outil ; « Régler » le corrige. Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
+  <p class="now-muted">Lire ou agir : ce que tu en as dit (« Régler » le corrige). « Plus libre » ou « plus serré » : son accord, ses règles ou ce qu'elle en garde s'écartent du service (au survol, où). Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
 </div>

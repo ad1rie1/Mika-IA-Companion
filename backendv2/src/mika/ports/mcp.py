@@ -21,8 +21,10 @@ NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
 #: demander à chaque appel (une carte à la personne en face) ; ou à sa propriétaire, à chaque appel
 AUTONOMIES = (("seule", "seule — elle s'en sert sans demander"),
               ("lit", "lit seule, demande pour agir — lire ne change rien ; créer, envoyer, supprimer : un accord"),
-              ("carte", "demande à chaque appel — une carte à la personne en face"),
-              ("toi", "te demande à chaque appel — même quand c'est quelqu'un d'autre, ou qu'elle travaille seule"))
+              ("carte", "demande à chaque appel — une carte à la personne en face ; quand elle travaille seule, la "
+                        "demande t'attend dans la console"),
+              ("toi", "te demande à chaque appel — une carte dans ton chat quand c'est toi en face ; sinon la demande "
+                      "t'attend dans la console (« À valider »)"))
 #: ce qu'un outil fait seul : comme son service, ou son accord à lui
 TOOL_AUTONOMIES = (("service", "comme le service"), ("seule", "seule"), ("carte", "demande à chaque appel"),
                    ("toi", "te demande à chaque appel"))
@@ -30,13 +32,15 @@ TOOL_AUTONOMIES = (("service", "comme le service"), ("seule", "seule"), ("carte"
 RULE_LEVELS = (("seule", "oui, seule"), ("carte", "oui, sur accord de la personne"), ("toi", "oui, avec ton accord"),
                ("non", "non"))
 #: les situations où un outil a une règle à lui (ADR 0128)
-TOOL_SITUATIONS = (("proprietaire", "toi"), ("compte", "une personne qui a un compte"),
+TOOL_SITUATIONS = (("proprietaire", "toi"), ("compte", "une personne qui a un compte chez elle"),
                    ("travail", "quand elle travaille seule"))
 #: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré
 KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"),
          ("perso", "un souvenir — comme ce qu'on lui raconte"),
          ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
          ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
+#: ce qu'elle garde de ce qu'un outil rend : comme son service, ou ce qu'il garde à lui
+TOOL_KEEPS = (("service", "comme le service"), *KEEPS)
 #: les familles d'épisodes où un serveur peut servir
 EPISODES = (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
             ("travail", "quand elle travaille (si le but ou le projet a pris ce lot)"))
@@ -50,6 +54,21 @@ STATES = {
     "erreur": "en erreur (il réessaie au prochain appel)",
     "panne": "en panne (trop d'échecs d'affilée : à relancer)",
 }
+
+
+def tool_autonomy(service: str, own: str, nature: str) -> str:
+    """L'accord d'un outil quand aucune règle de situation ni de personne ne le change (ADR 0128) : le sien, sinon
+    celui de son service — « lit seule, demande pour agir » selon sa nature."""
+    if own != "service":
+        return own
+    if service == "lit":
+        return "seule" if nature == "lecture" else "carte"
+    return service
+
+
+def tool_keep(service: str, own: str) -> str:
+    """Ce qu'elle garde de ce qu'un outil rend (ADR 0129) : le sien, sinon celui de son service."""
+    return service if own == "service" else own
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +98,8 @@ class ToolReview:
     nature: str = "lecture"
     #: son accord à lui (``TOOL_AUTONOMIES``) : ``service`` suit son serveur
     autonomy: str = "service"
+    #: ce qu'elle garde de ce qu'il rend (``TOOL_KEEPS``) : ``service`` suit son serveur
+    keep: str = "service"
     #: ses règles par situation et par personne nommée (``RULE_LEVELS`` ; absente : comme le service, ou sa situation)
     situations: Mapping[str, str] = field(default_factory=dict)
     people: Mapping[str, str] = field(default_factory=dict)
@@ -89,6 +110,8 @@ class ToolReview:
     schema: Mapping[str, Any] = field(default_factory=dict)
     by: str = ""
     at: int = 0
+    #: son nom chez elle (``mcp_<serveur>_<outil>``), celui de ses appels dans les traces
+    name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +228,7 @@ class ExternalTools(Protocol):
     async def refresh(self, server: str | None = None) -> None: ...
 
     async def review(self, server: str, remote: str, *, enabled: bool, nature: str, autonomy: str,
-                     description: str, by: str) -> ToolReview: ...
+                     description: str, by: str, keep: str = "service") -> ToolReview: ...
 
     async def rule(self, server: str, remote: str, *, situations: Mapping[str, str], people: Mapping[str, str],
                    by: str) -> ToolReview: ...
@@ -214,7 +237,10 @@ class ExternalTools(Protocol):
 
     async def plug(self, server: str, changes: Mapping[str, Any]) -> None: ...
 
-    async def serve_new(self, server: str, *, by: str) -> list[str]: ...
+    async def decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
+        """Les outils nouveaux ou changés, d'un coup (ADR 0129) : ``non`` (coupé), ``lecture`` ou ``action`` (servi,
+        tel qu'il est maintenant). Rend ce qui a été appliqué."""
+        ...
 
     def on_change(self, fn: Callable[[], Awaitable[Any] | Any]) -> None: ...
 

@@ -157,11 +157,15 @@
 .server-read { display: grid; gap: 14px; margin: 0; }
 .server-read dt { margin-bottom: 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .server-read dd { margin: 0; font-size: 14px; line-height: 1.5; }
-.server-tools { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.server-tools li { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
-.server-tool-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
-.server-tool-top code { font-size: 13px; font-weight: 600; }
-.server-tools p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
+/* Qui peut quoi (ADR 0129) : ses outils servis × les personnes que le service ouvre */
+.server-matrix tbody th[scope="row"] { padding-left: 10px; white-space: normal; }
+.server-matrix th[scope="row"] a { color: inherit; }
+.server-matrix th[scope="row"] code { font-size: 13px; font-weight: 600; }
+.server-matrix-what { display: block; max-width: 360px; color: var(--muted); font-size: 12.5px; }
+.server-matrix td, .server-matrix td:nth-child(2) { width: auto; white-space: nowrap; }
+.server-matrix-note { display: block; color: var(--muted); font-size: 12px; }
+.server-matrix-legend { margin: 10px 0 0; font-size: 12.5px; }
+.server-matrix-rest { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0; color: var(--text-2); font-size: 13px; }
 .server-facts { display: grid; gap: 8px; margin: 0; }
 .server-facts > div { display: grid; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
 .server-facts dt { color: var(--muted); }
@@ -248,7 +252,7 @@
 .rule-clear > div { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr); gap: 12px; }
 .rule-clear dt { font-weight: 600; }
 .rule-clear dd { margin: 0; }
-.server-tool-rules { font-size: 12.5px; }
+.rule-clear-note { color: var(--text-2); font-size: 13px; }
 @media (max-width: 640px) {
   .rule-clear > div { grid-template-columns: 1fr; gap: 0; }
 }
@@ -271,10 +275,22 @@
 .tools-default { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
 .tools-default h2 { margin: 0; color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; }
 .tools-default-said { margin: 4px 0 2px; font-size: 16px; font-weight: 600; }
-.tools-fresh { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 14px 18px;
-  border-radius: 12px; background: var(--warn-bg); color: var(--warn); }
-.tools-fresh p { margin: 0; }
-.tools-fresh form { margin: 0; }
+/* À regarder (ADR 0129) : un choix par outil nouveau ou changé, rien ne se sert sans lui */
+.tools-review-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.tools-review-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 18px; padding: 12px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.tools-review-main { flex: 1 1 380px; min-width: 0; }
+.tools-review-main p { margin: 0; }
+.tools-review-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tools-review-name code { font-size: 13px; font-weight: 600; }
+.tools-review-what { margin-top: 6px !important; color: var(--text-2); font-size: 13px; }
+.tools-review-before { margin-top: 4px !important; font-size: 12.5px; }
+.tools-review-choice { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }
+.tools-review-choice .plug-option { align-items: center; padding: 6px 12px; font-size: 13px; white-space: nowrap; }
+.tools-review-choice .plug-option input { margin-top: 0; }
+.tools-row-more summary { color: var(--accent); font-size: 12.5px; cursor: pointer; }
+.tools-row-more p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
+.tools-row-who { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 4px 0 0; color: var(--text-2); font-size: 12.5px; }
 .tools-rows { display: grid; margin: 0; padding: 0; list-style: none; }
 .tools-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }

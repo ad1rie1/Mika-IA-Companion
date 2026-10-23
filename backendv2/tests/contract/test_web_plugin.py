@@ -47,7 +47,7 @@ async def test_the_web_plugin_serves_her_through_the_mcp_client_when_active(tmp_
         assert ok and "mika-web" in message and "3 outil(s)" in message and "à regarder" not in message, message
         offered = {t.name: t for t in hub.offered()}  # aucun accord de l'opérateur : ce sont des outils système
         assert set(offered) == {"mcp_web_search", "mcp_web_read", "mcp_web_read_pages"}
-        assert all(t.nature == "lecture" and t.approval == "aucun" for t in offered.values())
+        assert all(t.nature == "lecture" and t.autonomy == "seule" for t in offered.values())
         assert problems(offered["mcp_web_read_pages"].schema, {"urls": ["https://a.fr/", "https://b.fr/"]}) == []
         assert problems(offered["mcp_web_read_pages"].schema, {"urls": "https://a.fr/"})
 

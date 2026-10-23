@@ -1,6 +1,7 @@
-{# Un service branché › « Par situation et par personne » (app/handmade/servers.py, ADR 0128) : pour un outil, la règle par
-   défaut de chaque situation, puis des personnes nommées qui passent avant leur situation ; « En clair » le redit. Le
-   service est le plafond : une situation qu'il ferme reste grisée. Le formulaire est celui de l'action ``mcp.regles``. #}
+{# Un service branché › « Par situation et par personne » (app/handmade/servers.py, ADR 0128, 0129) : pour un outil, la
+   règle par défaut de chaque situation, puis des personnes nommées qui passent avant leur situation ; « En clair » dit
+   ce qui s'applique, calculé par la règle du moteur. Le service fixe avec qui : une situation qu'il ferme reste
+   grisée. Le formulaire est celui de l'action ``mcp.regles``. #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -19,8 +20,8 @@
       <span class="now-tag">{{ nature }}</span>
     </header>
     {% if what %}<p class="service-tool-what">{{ what }}</p>{% endif %}
-    <p class="service-ceiling"><b>Le plafond, le service :</b> {{ sentence }} <a href="{{ service_tab }}">Changer le service</a></p>
-    <p class="now-muted">Ici, on peut resserrer, jamais laisser plus de monde que le service. Son accord à lui (« {{ own }} ») se règle dans <a href="{{ tools_tab }}">Ses outils</a>.</p>
+    <p class="service-ceiling"><b>Le service :</b> {{ sentence }} <a href="{{ service_tab }}">Changer le service</a></p>
+    <p class="now-muted">Le service fixe avec qui : ici, jamais personne de plus. L'accord, lui, peut être plus libre ou plus serré que le sien : « En clair », en bas, dit ce qui s'applique une fois enregistré. Son accord à lui (« {{ own }} ») et ce qu'elle en garde se règlent dans <a href="{{ tools_tab }}">Ses outils</a>.</p>
   </section>
 
   {% if form %}
@@ -69,9 +70,9 @@
     </section>
 
     <section class="now-card service-said" aria-labelledby="rule-clear">
-      <header class="now-card-head"><h2 id="rule-clear">En clair</h2></header>
+      <header class="now-card-head"><h2 id="rule-clear">En clair</h2><p>Ce qui s'applique maintenant (enregistre pour voir un changement).</p></header>
       <dl class="rule-clear">
-        {% for who, what in summary %}<div><dt>{{ who }}</dt><dd>{{ what }}</dd></div>{% endfor %}
+        {% for r in summary %}<div><dt>{{ r.who }}</dt><dd><span class="now-tag {{ r.tone }}">{{ r.word }}</span>{% if r.note %} <span class="rule-clear-note">{{ r.note }}</span>{% endif %}</dd></div>{% endfor %}
       </dl>
     </section>
 
