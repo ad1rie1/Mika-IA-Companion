@@ -992,7 +992,7 @@ def _run(argv: list[str] | None) -> int:
     if args.cmd == "mcp":
         async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
             token = await settings.new_console_mcp_token()
-            return {"token": token, "usage": "claude mcp add --transport http mika http://127.0.0.1:8001/mcp/console "
+            return {"token": token, "usage": "claude mcp add --transport http mika http://127.0.0.1:8001/mcp/console/ "
                                               f"--header \"Authorization: Bearer {token}\""}
 
         print(json.dumps(asyncio.run(_with_settings(args.data, mcp_token)), ensure_ascii=False, indent=2))

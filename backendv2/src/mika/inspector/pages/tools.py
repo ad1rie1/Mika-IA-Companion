@@ -551,16 +551,17 @@ async def rules_post(ui: Any, request: Request) -> Response:
 @TABS.tab("outils.expose", title="Prêter à un agent",
           description="Ce que tu laisses voir ou faire à un agent (ton Claude Code, par exemple) : la console en "
                       "lecture, et des points qui lui prêtent quelques-uns de ses outils. Rien ne s'ouvre sans jeton, "
-                      "et seulement depuis cette machine.")
+                      "et seulement depuis cette machine, sauf la console si tu l'ouvres au réseau.")
 async def exposed(ui: Any, request: Request) -> Any:
     relay, settings, lending = ui.deps.relay, ui.deps.settings, ui.deps.lending
     account = ui.operator(request)
     try:
         token = bool(settings.console_mcp_token()) if settings is not None else False
+        network = token and settings.console_mcp_network()
         chosen = settings.console_mcp_served() if settings is not None else None
         entries = settings.lent() if settings is not None else {}
     except Exception:  # noqa: BLE001 — un réglage illisible : « absent », jamais une page cassée
-        token, chosen, entries = False, None, {}
+        token, network, chosen, entries = False, False, None, {}
     served = set(console_mcp.DEFAULT_SERVED if chosen is None else chosen)
     pages = [{"key": k, "title": ui.builtins[k].title if k in ui.builtins else k, "on": k in served,
               "default": k in console_mcp.PAGES} for k in console_mcp.SERVABLE]
@@ -581,6 +582,7 @@ async def exposed(ui: Any, request: Request) -> Any:
     shown = ui.pop_reveal(str(request.query_params.get("montrer", "")), account.handle if account else "")
     return {"blocks": [], "panel": Panel("handmade/outils/expose.html", {
         "relay_sessions": len(relay) if relay is not None else 0, "console_token": token, "served_pages": pages,
+        "console_network": network, "console_url": _console_url(request, network),
         "parts": parts, "console_tools": CONSOLE_TOOLS, "points": points, "editing": editing, "shown": shown,
         "action": f"{BASE}/exposer", "console_address": CONSOLE_ADDRESS, "lent_address": LENT_ADDRESS,
     })}
@@ -608,9 +610,20 @@ def _editor(ui: Any, request: Request, entries: Mapping[str, Mapping[str, Any]],
             "recent": [{"at": ui.when(c.at), "tool": c.tool, "ok": c.ok} for c in lending.recent(name)] if name else []}
 
 
-def _command(name: str, address: str, token: str) -> str:
-    return (f"claude mcp add --transport http {name} {LOCAL_ORIGIN}{address} "
-            f"--header \"Authorization: Bearer {token}\"")
+def _console_url(request: Request, network: bool) -> str:
+    """Où un agent joint la console : par l'adresse où on la lit si elle est ouverte au réseau (ADR 0126), sinon
+    sur cette machine. La barre finale évite la redirection vers ``/mcp/console/``."""
+    origin = f"{request.url.scheme}://{request.url.netloc}" if network else LOCAL_ORIGIN
+    return f"{origin}{CONSOLE_ADDRESS}/"
+
+
+def _lent_url(name: str) -> str:
+    """Un point de prêt ne sert que cette machine (ADR 0122)."""
+    return f"{LOCAL_ORIGIN}{LENT_ADDRESS}/{name}"
+
+
+def _command(name: str, url: str, token: str) -> str:
+    return f"claude mcp add --transport http {name} {url} --header \"Authorization: Bearer {token}\""
 
 
 async def expose_post(ui: Any, request: Request) -> Response:
@@ -633,7 +646,8 @@ async def expose_post(ui: Any, request: Request) -> Response:
         if what == "console_jeton":
             fresh = await settings.new_console_mcp_token()
             query["montrer"] = ui.reveal(account.handle, {"title": "Le jeton de la console en MCP", "token": fresh,
-                                                          "command": _command("mika", CONSOLE_ADDRESS, fresh)})
+                                                          "command": _command("mika", _console_url(
+                                                              request, settings.console_mcp_network()), fresh)})
             ui.flash(token, "ok", "Jeton neuf : l'ancien ne vaut plus.")
             audit, subject = "console.mcp.jeton", "console"
         elif what == "console_fermer":
@@ -641,6 +655,12 @@ async def expose_post(ui: Any, request: Request) -> Response:
             ui.flash(token, "ok" if closed else "info", "La console en MCP est fermée : son adresse répond 404."
                      if closed else "Elle n'avait pas de jeton.")
             audit, subject = ("console.mcp.fermer", "console") if closed else ("", "")
+        elif what in ("console_reseau_ouvrir", "console_reseau_fermer"):
+            opened = what == "console_reseau_ouvrir"
+            await settings.save_console_mcp_network(opened)
+            ui.flash(token, "ok", f"La console en MCP répond au réseau : {_console_url(request, True)}, avec son jeton."
+                     if opened else "La console en MCP ne répond plus qu'à cette machine.")
+            audit, subject = f"console.mcp.reseau.{'ouvrir' if opened else 'fermer'}", "console"
         elif what == "console_servir":
             picked = [str(k) for k in lists.get("servi", [])]
             default = set(picked) == set(console_mcp.DEFAULT_SERVED)
@@ -661,7 +681,7 @@ async def expose_post(ui: Any, request: Request) -> Response:
                 fresh = await settings.new_lent_token(name, by=account.handle, at=now)
                 query["montrer"] = ui.reveal(account.handle, {"title": f"Le jeton du point « {name} »",
                                                               "token": fresh,
-                                                              "command": _command(name, f"{LENT_ADDRESS}/{name}", fresh)})
+                                                              "command": _command(name, _lent_url(name), fresh)})
             query["pret"] = name
             ui.flash(token, "ok", f"Le point « {name} » prête {len(tools)} outil{'s' if len(tools) > 1 else ''}"
                                   + (", et peut écrire dans sa vie." if data.get("ecrit") == "oui" else ", en lecture seule."))
@@ -670,7 +690,7 @@ async def expose_post(ui: Any, request: Request) -> Response:
             fresh = await settings.new_lent_token(name, by=account.handle, at=now)
             query.update(pret=name, montrer=ui.reveal(account.handle, {
                 "title": f"Le jeton du point « {name} »", "token": fresh,
-                "command": _command(name, f"{LENT_ADDRESS}/{name}", fresh)}))
+                "command": _command(name, _lent_url(name), fresh)}))
             ui.flash(token, "ok", "Jeton neuf : l'ancien ne vaut plus.")
             audit, subject = "console.mcp.pret.jeton", name
         elif what == "pret_supprimer":

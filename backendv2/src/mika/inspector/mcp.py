@@ -8,9 +8,10 @@ coûts, la chronologie, les épisodes, les choix de l'arbitre, « Que
 ferait-elle ? », « À traiter » — plus « pourquoi a-t-elle dit ça ? »
 (``pourquoi``). Jamais une page à formulaires (approbations, réglages,
 comptes), et aucune action d'opérateur ici (elles passent par la console, avec
-leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale
-seulement, derrière un jeton d'opérateur (``mika mcp token``, ou Outils › Prêter
-à un agent) ; sans jeton défini, le point n'existe pas (404). Ce qu'elle sert
+leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale,
+ou aussi au réseau si une opératrice l'y ouvre (ADR 0126), toujours derrière un
+jeton d'opérateur (``mika mcp token``, ou Outils › Prêter à un agent) ; sans
+jeton défini, le point n'existe pas (404). Ce qu'elle sert
 se choisit dans la console (``served`` : ses pages parmi ``SERVABLE``, ses vues,
 ses fiches, « pourquoi » — ADR 0122) ; ce qui n'est pas servi n'est ni listé ni
 lu.
@@ -232,14 +233,16 @@ class ConsoleHost:
 
 
 def console_app(kernel: Kernel, token: Callable[[], str], pages: ConsolePages | None = None,
-                served: Callable[[], Sequence[str] | None] | None = None) -> Callable[..., Any]:
+                served: Callable[[], Sequence[str] | None] | None = None,
+                network: Callable[[], bool] | None = None) -> Callable[..., Any]:
     """Le point MCP de la console : boucle locale, jeton d'opérateur ; sans jeton défini, 404. ``pages`` : celles
     de la console (``inspector.app.assemble``), pour servir aussi ses pages et « pourquoi » ; ``served`` : ce qu'une
-    opératrice lui fait servir."""
+    opératrice lui fait servir ; ``network`` : vrai quand elle l'a ouvert au réseau (ADR 0126), le jeton restant
+    exigé."""
     host = ConsoleHost(kernel, pages, served)
 
     def resolve(scope: Mapping[str, Any]) -> Any:
-        if not loopback(scope):
+        if not loopback(scope) and not (network is not None and network()):
             return 403
         expected = token()
         if not expected:

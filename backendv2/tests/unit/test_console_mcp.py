@@ -4,7 +4,8 @@
   texte, paramètres compris ; les fiches aussi, par la recherche ;
 - rien n'y écrit : tous les outils sont en lecture seule ;
 - le point ne sert que la boucle locale, le bon jeton, et n'existe pas tant
-  qu'aucun jeton n'est défini.
+  qu'aucun jeton n'est défini ; ouvert au réseau (ADR 0126), il sert aussi une
+  autre machine, mandataire compris, toujours avec le jeton.
 """
 
 from __future__ import annotations
@@ -59,11 +60,14 @@ def test_the_console_endpoint_is_read_only():
     assert {t.name for t in TOOLS} == {"lister_vues", "vue", "pourquoi", "chercher", "fiche"}
 
 
-async def _post(app, *, token: str = "", client: str = "127.0.0.1") -> tuple[int, Any]:
+async def _post(app, *, token: str = "", client: str = "127.0.0.1", proxied: bool = False) -> tuple[int, Any]:
     sent: list[dict[str, Any]] = []
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+    headers = [(b"authorization", f"Bearer {token}".encode())] if token else []
+    if proxied:  # relayée par un mandataire local : elle arrive de 127.0.0.1, ses en-têtes la trahissent
+        headers.append((b"x-forwarded-for", b"192.168.1.22"))
     scope = {"type": "http", "method": "POST", "path": "/mcp/console", "root_path": "", "client": (client, 5000),
-             "headers": [(b"authorization", f"Bearer {token}".encode())] if token else []}
+             "headers": headers}
     received = iter([{"type": "http.request", "body": body, "more_body": False}])
 
     async def receive():
@@ -98,3 +102,26 @@ def test_the_console_endpoint_serves_only_this_machine_and_the_operator_token(tm
     assert closed[0] == 404  # pas de jeton défini : le point n'existe pas
     assert ok[0] == 200 and {t["name"] for t in ok[1]["result"]["tools"]} >= {"vue", "fiche"}
     assert far[0] == 403 and wrong[0] == 401
+
+
+def test_the_console_opened_to_the_network_still_wants_its_token(tmp_path):
+    kernel, clock = _kernel_with_someone(tmp_path)
+    network = {"open": False}
+
+    async def main():
+        await boot(kernel)
+        try:
+            app = console_app(kernel, lambda: "jeton-de-l-operatrice", network=lambda: network["open"])
+            relayed = await _post(app, token="jeton-de-l-operatrice", proxied=True)
+            network["open"] = True
+            far = await _post(app, token="jeton-de-l-operatrice", client="192.168.1.22")
+            through = await _post(app, token="jeton-de-l-operatrice", proxied=True)
+            wrong = await _post(app, token="mauvais", client="192.168.1.22")
+            return relayed, far, through, wrong
+        finally:
+            await kernel.stop()
+
+    relayed, far, through, wrong = run_virtual(clock, main)
+    assert relayed[0] == 403  # fermée au réseau : relayée par le mandataire, elle ne passe pas
+    assert far[0] == 200 and through[0] == 200
+    assert wrong[0] == 401

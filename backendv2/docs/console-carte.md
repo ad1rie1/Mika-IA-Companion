@@ -199,7 +199,8 @@ Les clés techniques sont dans « Détails techniques ».
   propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil
   changé est suspendu), *Appels*.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
-  une seule fois, avec sa ligne `claude mcp add`), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
+  une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
+  l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
   vues, ses fiches, « pourquoi ») ; ses outils prêtés — des points `/mcp/pret/<nom>` à déclarer (`?nouveau`), régler
   (`?pret=<nom>` : lecture seule ou non, ses outils), renouveler et retirer, avec ce que chacun sert et ses derniers
   appels ; replié en bas, le relais MCP du moteur Claude Code (lu).

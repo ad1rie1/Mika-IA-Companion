@@ -523,7 +523,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages,
-                                                            settings.console_mcp_served))
+                                                            settings.console_mcp_served, settings.console_mcp_network))
     lent = Mount(LENT_PREFIX, app=lending.app())
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),

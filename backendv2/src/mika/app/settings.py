@@ -466,12 +466,28 @@ class Settings:
         return token
 
     async def revoke_console_mcp_token(self) -> bool:
-        """Le point de la console fermé (404) ; faux s'il n'avait pas de jeton. Ce qu'il sert reste choisi."""
+        """Le point de la console fermé (404) ; faux s'il n'avait pas de jeton. Ce qu'il sert reste choisi ; son
+        ouverture au réseau, non : un jeton neuf la rouvre en local seulement."""
         data = dict(self._get(CONSOLE_MCP_KEY) or {})
+        data.pop("network", None)
         if not data.pop("token_sealed", ""):
             return False
         await self._put(CONSOLE_MCP_KEY, data)
         return True
+
+    def console_mcp_network(self) -> bool:
+        """Vrai : ``/mcp/console`` répond aussi au réseau, mandataire compris, jeton toujours exigé (ADR 0126)."""
+        return bool(dict(self._get(CONSOLE_MCP_KEY) or {}).get("network"))
+
+    async def save_console_mcp_network(self, network: bool) -> None:
+        data = dict(self._get(CONSOLE_MCP_KEY) or {})
+        if network and not data.get("token_sealed"):
+            raise ValueError("la console n'a pas de jeton")
+        if network:
+            data["network"] = True
+        else:
+            data.pop("network", None)
+        await self._put(CONSOLE_MCP_KEY, data)
 
     def console_mcp_served(self) -> tuple[str, ...] | None:
         """Ce que sert la console en MCP (``inspector.mcp`` : des pages de ``SERVABLE`` et des ``PARTS``) ;

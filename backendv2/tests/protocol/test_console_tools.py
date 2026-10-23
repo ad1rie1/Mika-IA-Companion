@@ -189,7 +189,7 @@ def _expose(client, what: str, **fields):
 
 def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     """La console en MCP : un jeton créé ici se montre une seule fois (la ligne ``claude mcp add`` comprise), ce
-    qu'elle sert se choisit ; un point de prêt se déclare (son jeton montré une fois, seule l'empreinte gardée),
+    qu'elle sert se choisit, elle s'ouvre au réseau et s'y ferme (ADR 0126) ; un point de prêt se déclare (son jeton montré une fois, seule l'empreinte gardée),
     se règle — jamais au-delà de ce que la porte offre —, se renouvelle et se retire. Tout est audité."""
     client, live, _ = world
     bootstrap(client)
@@ -208,7 +208,16 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     assert token not in client.get(made.headers["location"]).text  # une seule fois
     served = _expose(client, "console_servir", servi=["systeme.sante", "vues"])
     assert served.status_code == 303 and read("console_mcp_served") == ("systeme.sante", "vues")
+    assert "http://127.0.0.1:8001/mcp/console/" in html_of(client.get(f"{BASE}/expose"))
+    assert _expose(client, "console_reseau_ouvrir").status_code == 303 and read("console_mcp_network")
+    assert "http://localhost:8001/mcp/console/" in html_of(client.get(f"{BASE}/expose"))  # là où on la lit
+    assert _expose(client, "console_reseau_fermer").status_code == 303 and not read("console_mcp_network")
+    _expose(client, "console_reseau_ouvrir")
     assert _expose(client, "console_fermer").status_code == 303 and not read("console_mcp_token")
+    assert not read("console_mcp_network")  # fermer le jeton la ferme au réseau
+    alone = _expose(client, "console_reseau_ouvrir")
+    assert "la console n'a pas de jeton" in html_of(client.get(alone.headers["location"]))
+    assert not read("console_mcp_network")
     declared = _expose(client, "pret_declarer", nom="agent", ecrit="non",
                        outil=["memory_search", "report_step", "outil_qui_n_existe_pas"])
     assert declared.status_code == 303
@@ -226,8 +235,9 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     assert _expose(client, "pret_supprimer", nom="agent").status_code == 303 and "agent" not in read("lent")
     audit = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
     actions = " ".join(a.data for a in audit)
-    for action in ("console.mcp.jeton", "console.mcp.servir", "console.mcp.fermer", "console.mcp.pret.declarer",
-                   "console.mcp.pret.jeton", "console.mcp.pret.retirer"):
+    for action in ("console.mcp.jeton", "console.mcp.servir", "console.mcp.reseau.ouvrir", "console.mcp.reseau.fermer",
+                   "console.mcp.fermer", "console.mcp.pret.declarer", "console.mcp.pret.jeton",
+                   "console.mcp.pret.retirer"):
         assert action in actions, action
     refused = client.post(f"{BASE}/exposer", data={"csrf": "faux", "faire": "console_jeton"}, follow_redirects=False)
     assert refused.status_code == 303 and not read("console_mcp_token")

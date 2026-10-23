@@ -215,11 +215,14 @@ ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika serv
     --origin https://mika.example --behind-proxy
 ```
 
-Le mandataire **doit** transmettre l'adresse du client (`X-Forwarded-For`) et
-**ne jamais** relayer `/mcp/` : ces points (le relais de Claude Code, la console
-MCP, ses outils prêtés `/mcp/pret/<nom>`) ne servent que la machine elle-même,
-et refusent toute requête qui porte un en-tête de mandataire — fermer le chemin
-chez le mandataire est la seconde porte.
+Le mandataire **doit** transmettre l'adresse du client (`X-Forwarded-For`) et ne
+relayer de `/mcp/` que la console MCP (`/mcp/console/`). Le relais de Claude Code
+et les outils prêtés (`/mcp/pret/<nom>`) ne servent que la machine elle-même et
+refusent toute requête qui porte un en-tête de mandataire : fermer leur chemin
+chez le mandataire est la seconde porte. La console MCP les refuse aussi, tant
+qu'une opératrice ne l'ouvre pas au réseau (Outils › Prêter à un agent, ADR 0126) ;
+ouverte, elle répond au travers du mandataire, jeton toujours exigé. Sans TLS, ce
+jeton passe en clair : ne l'ouvre ainsi que sur un réseau local.
 
 Ce qui le dimensionne, c'est la console, pas les pings des clients (toutes les
 20 s) : un corps de requête d'au moins 5 Mo plus la marge du formulaire (un
@@ -233,7 +236,10 @@ Caddy transmet l'adresse de lui-même :
 
 ```
 mika.example {
-    @mcp path /mcp/*
+    @mcp {
+        path /mcp /mcp/*
+        not path /mcp/console /mcp/console/*
+    }
     respond @mcp 404
     reverse_proxy 127.0.0.1:8001
 }
@@ -242,6 +248,12 @@ mika.example {
 nginx :
 
 ```nginx
+location /mcp/console/ {                              # la console MCP, si on l'ouvre au réseau
+    proxy_pass http://127.0.0.1:8001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 location /mcp/ { return 404; }
 location / {
     proxy_pass http://127.0.0.1:8001;

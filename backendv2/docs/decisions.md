@@ -28,7 +28,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les fournisseurs de modèles | 0026, 0072, 0073 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1427,7 +1427,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* la console montrait ses outils sous tous les angles sans permettre de rien décider.
 
-*Révisée par 0123.*
+*Révisée par 0123, 0126.*
 
 ### 0123 — Le bloc Outils, redessiné
 
@@ -1451,6 +1451,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* en service, l'utilisateur `mika` n'écrit pas dans `/var/lib` : échanger deux dossiers voisins y échouait, et root ne se connecte pas à MariaDB sous le compte `mika`.
 
 *Révise 0024 (en partie).*
+
+### 0126 — La console en MCP s'ouvre au réseau, si on le veut
+
+- Une opératrice peut ouvrir `/mcp/console/` au réseau (Outils › Prêter à un agent) : le point répond alors à une autre machine, mandataire compris. Le jeton reste exigé, et la lecture seule ne change pas.
+- Fermée par défaut. L'ouverture demande un jeton, se ferme d'un bouton, et fermer le jeton la ferme aussi ; un jeton neuf rouvre la console en local seulement. Chaque changement est audité.
+- Ouverte, la ligne `claude mcp add` prend l'adresse par laquelle on lit la console ; fermée, celle de la machine (`127.0.0.1:8001`). La ligne finit par `/`, ce qui évite la redirection.
+- Le relais de Claude Code et les points de prêt (`/mcp/pret/<nom>`) restent sur la boucle locale ; le mandataire ne relaie de `/mcp/` que `/mcp/console/`.
+- Sans TLS, le jeton passe en clair : on ne l'ouvre ainsi que sur un réseau local.
+
+*Pourquoi :* Mika vit sur un portable, et son opératrice lit sa console depuis une autre machine. Sans ouverture, il fallait un tunnel SSH, à rouvrir après chaque redémarrage.
+
+*Révise 0122 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 
