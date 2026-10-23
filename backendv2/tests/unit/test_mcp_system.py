@@ -22,6 +22,7 @@ from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
 from mika.kernel.clock import MINUTE, US
 from mika.plugins import web
 from mika.plugins.web import serveur
+from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER
 
 
 def _system(p: web.WebParams | None) -> SystemServers:
@@ -37,11 +38,15 @@ def test_active_the_web_plugin_brings_its_server_into_the_mcp_client():
     srv = cfg.servers["web"]
     assert srv.ready and srv.local and srv.network == "isole" and srv.command == "python3"
     assert srv.args == ("-I", str(web.server_path())) and srv.shared == (str(web.server_path().parent),)
-    assert srv.in_conversation and srv.in_work and not srv.in_initiative and not srv.in_hand
-    assert srv.with_owner and not srv.with_accounts and srv.with_people == () and "DuckDuckGo" in srv.purpose
-    assert srv.keep == "public"  # ce qu'elle lit sur le web peut devenir un savoir (ADR 0085, 0128)
-    shared = _system(web.WebParams(audience="comptes")).config(McpConfig()).servers["web"]
-    assert shared.with_owner and shared.with_accounts
+    assert not srv.in_hand and "DuckDuckGo" in srv.purpose
+    # avec toi quand elle répond et quand elle travaille ; elle lit seule, te demande avant d'agir, et ce qu'elle lit
+    # sur le web peut devenir un savoir (ADR 0085, 0128) ; personne d'autre : la ligne par défaut est fermée (ADR 0131)
+    assert [(a.who, a.when, a.read, a.act, a.keep) for a in srv.access] == [
+        (WHO_OWNER, ("conversation", "travail"), "seule", "toi", "public")]
+    assert (srv.default_read, srv.default_act) == ("non", "non")
+    shared = _system(web.WebParams(audience="comptes", in_work=False)).config(McpConfig()).servers["web"]
+    assert [(a.who, a.when) for a in shared.access] == [(WHO_OWNER, ("conversation",)),
+                                                        (WHO_ACCOUNTS, ("conversation",))]
 
 
 def test_disabled_it_is_gone():
@@ -68,7 +73,7 @@ def test_its_tools_are_approved_on_what_the_server_will_say():
     assert set(reviews) == set(listed) == {"search", "read", "read_pages"}
     for name, review in reviews.items():
         assert review.fingerprint == listed[name].fingerprint  # l'empreinte que le client calculera
-        assert review.enabled and review.nature == "lecture" and review.autonomy == "seule" and review.by == BY
+        assert review.enabled and review.nature == "lecture" and review.by == BY
     assert set(_system(web.WebParams(parallel_pages=1)).reviews({})["web"]) == {"search", "read"}
 
 
@@ -76,7 +81,7 @@ def test_a_tool_that_does_not_say_it_only_reads_waits_for_the_operator():
     raw = {"name": "envoyer", "description": "envoie", "inputSchema": {"type": "object"}}
     system = SystemServers(lambda: {"x": Provided(OPERATOR, (raw,))})
     review = system.reviews({})["x"]["envoyer"]
-    assert review.nature == "action" and review.autonomy == "toi"
+    assert review.nature == "action"  # ses lignes d'accès lui demandent ton accord pour agir
 
 
 def test_the_operator_stores_nothing_for_it_and_its_name_wins():

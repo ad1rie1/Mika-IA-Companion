@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
@@ -1064,7 +1064,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un serveur pro (factures, devis, tickets) ne doit servir qu'à sa propriétaire, et rien de ce qu'elle y lit ne doit ressortir ailleurs. Un serveur disait pour qui, jamais ce que valait ce qu'elle y lisait : sa mémoire le gardait au niveau de la question qu'on lui avait posée.
 
-*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129, 0130.*
+*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129, 0130, 0131.*
 
 ### 0129 — Ce qu'un service propose se regarde, et qui peut quoi se voit
 
@@ -1076,7 +1076,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sur un vrai serveur de 22 outils, un clic servait l'exécution de scripts chez un client avec les statistiques ; le serveur ne disait pas ce qui lisait ; quatre lectures se disaient « exception » sans rien changer, et le seraient restées sous « sous contrôle » ; l'écran recopiait la règle, et se trompait.
 
-*Révise 0128 (en partie). Révisée par 0130.*
+*Révise 0128 (en partie). Révisée par 0130, 0131.*
 
 ### 0130 — La fiche d'un service : trois onglets, quatre questions, un outil sur sa ligne
 
@@ -1087,7 +1087,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « j'ai vraiment du mal à comprendre comment la conf des serveurs MCP est faite » : cinq endroits, « qui » réglé à quatre, et une exception rare présentée comme un onglet à part entière.
 
-*Révise 0128 (en partie), 0129 (en partie).*
+*Révise 0128 (en partie), 0129 (en partie). Révisée par 0131.*
+
+### 0131 — Qui peut quoi : des lignes d'accès, lues de haut en bas
+
+- Un service dit qui peut quoi en **lignes d'accès**, lues de haut en bas comme les règles d'un pare-feu, puis une **ligne par défaut**, obligatoire. Une ligne : qui (toi, toute personne qui a un compte, une personne nommée — authentifiée), quand (toujours, ou un ou plusieurs moments à cocher : quand elle répond, quand elle prend la parole, quand elle travaille seule), ce qu'elle fait d'un outil qui lit et d'un outil qui agit (seule, demande à la personne, ton accord, non), ce qu'elle en garde (ce qu'elle sait, un souvenir, une confidence, rien), et ses outils (tous, ou une sélection).
+- Pour un outil, la première ligne qui le concerne — qui est en face, quand, l'outil dans sa colonne — décide (`plugins.mcp.access_for`) ; aucune : la ligne par défaut. Ce qui lui est offert, c'est l'ensemble des outils qu'une ligne lui ouvre : deux lignes peuvent ouvrir deux outils différents. Jamais dans un salon ni avec une inconnue, quelles que soient les lignes.
+- La sorte d'épisode compte : un outil se garde par une condition qui la lit (`ToolSpec.fits(audience, kind)`), lue par la porte d'offre comme par la console.
+- Un service qu'on branche est fermé (non, non, rien) tant qu'aucune ligne ne l'ouvre. Les genres, les quatre questions de « Réglages du service », l'accord et ce qu'elle garde d'un outil à lui, ses exceptions par situation et par personne sont retirés : un outil ne se règle plus que servi ou non, lecture ou action, et ce qu'elle lit de lui. L'onglet « Réglages du service » devient « Accès aux outils » (`mcp.acces` : chaque bouton envoie tout le tableau).
+- Un service d'avant se lit en lignes qui font la même chose : celles des outils qui s'écartaient de lui d'abord (une personne nommée avant les comptes, les comptes avant toi), puis les siennes ; sa ligne par défaut est fermée. Les réglages l'écrivent sous la forme neuve avant toute écriture des décisions d'outils, qui ne portent plus ces exceptions.
+
+*Pourquoi :* « on peut combiner les droits comme on veut » : avec qui, quand, l'accord et ce qu'elle garde, réglés à part au service puis corrigés outil par outil, ne se lisaient qu'en recomposant cinq réglages ; un tableau ordonné se lit d'un regard, et sa dernière ligne dit ce qui arrive à tout le reste.
+
+*Révise 0128 (en partie), 0129 (en partie), 0130 (en partie).*
 
 ## Les fournisseurs de modèles
 

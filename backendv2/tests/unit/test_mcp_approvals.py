@@ -23,7 +23,7 @@ from mika.plugins.mcp import ANSWERED, EPISODES, EXPIRED, prompt
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build, connect, said
-from tests.unit.test_mcp_plugin import NAME, FakePort, offered_tool
+from tests.unit.test_mcp_plugin import NAME, FakePort, ruled
 
 SECRET_ANSWER = "Grand soleil sur Lyon, 24 degrés."
 
@@ -81,7 +81,7 @@ def pending(kernel):
 
 
 def test_in_the_conversation_only_she_decides_on_what_she_was_shown(tmp_path):
-    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
+    port = AnsweringPort(ruled("carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
@@ -128,14 +128,14 @@ def test_in_the_conversation_only_she_decides_on_what_she_was_shown(tmp_path):
 
 
 def test_a_tool_changed_before_approval_blocks_it(tmp_path):
-    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
+    port = AnsweringPort(ruled("carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
         await ask(kernel)
         (proposal,) = pending(kernel)
         digest = (await mind_port.approval_cards("user_1"))[0]["digest"]
-        port.tools = [offered_tool(autonomy="carte", fingerprint="f2")]
+        port.tools = [ruled("carte", fingerprint="f2")]
         kernel.refresh_tools()
         cards = await mind_port.approval_cards("user_1")
         return cards, await mind_port.decide_card("user_1", proposal, True, digest), port.calls
@@ -145,7 +145,7 @@ def test_a_tool_changed_before_approval_blocks_it(tmp_path):
 
 
 def test_a_card_left_unanswered_expires_and_she_is_told(tmp_path):
-    port = AnsweringPort(offered_tool(autonomy="carte", fingerprint="f1"))
+    port = AnsweringPort(ruled("carte", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         await ask(kernel)
@@ -165,7 +165,7 @@ def test_a_card_left_unanswered_expires_and_she_is_told(tmp_path):
 def test_her_approval_asked_before_someone_else_has_no_card_and_is_decided_in_the_console(tmp_path):
     """``toi`` devant une autre personne (Béa, un compte) : ni Béa ni sa propriétaire n'ont de carte, la console
     décide (ADR 0128)."""
-    port = AnsweringPort(offered_tool(autonomy="toi", with_accounts=True, fingerprint="f1"))
+    port = AnsweringPort(ruled("toi", accounts=True, fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
@@ -186,7 +186,7 @@ def test_her_approval_asked_before_someone_else_has_no_card_and_is_decided_in_th
 def test_her_approval_is_a_card_when_she_is_the_one_in_front(tmp_path):
     """``toi`` devant sa propriétaire : la carte lui est montrée dans la conversation, et ce qu'elle en gardera y est
     dit (ADR 0128)."""
-    port = AnsweringPort(offered_tool(autonomy="toi", keep="prive", fingerprint="f1"))
+    port = AnsweringPort(ruled("toi", keep="prive", fingerprint="f1"))
 
     async def scenario(kernel, llm):
         mind_port = KernelPort(kernel)
@@ -201,10 +201,9 @@ def test_her_approval_is_a_card_when_she_is_the_one_in_front(tmp_path):
 
 def test_a_card_tool_serves_where_its_service_does_and_no_longer_only_in_reply(tmp_path):
     """Avant l'ADR 0128, un outil « dans la conversation » n'était servi qu'en répondant. Désormais l'accord se
-    décide à l'appel (sans personne pour accepter, l'opérateur décide) : il sert dans tous les épisodes de son
-    service, avec les mêmes personnes — jamais un salon ni une inconnue."""
-    port = AnsweringPort(offered_tool(autonomy="carte", with_accounts=True,
-                                      episodes=frozenset({"conversation", "initiative", "travail"})))
+    décide à l'appel (sans personne pour accepter, l'opérateur décide) : il sert à tous les moments que ses lignes
+    d'accès ouvrent, avec les mêmes personnes — jamais un salon ni une inconnue."""
+    port = AnsweringPort(ruled("carte", accounts=True, episodes=frozenset({"conversation", "initiative", "travail"})))
 
     async def scenario(kernel, llm):
         from tests.unit.test_mcp_plugin import _offers

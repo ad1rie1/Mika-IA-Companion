@@ -26,7 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
-from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
+from mika.adapters.mcp.config import LEGACY_KEYS, McpConfig, McpServer, StoredReview, access_from_0128
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
@@ -292,10 +292,14 @@ class Settings:
     MCP_SECRETS = ("token", "secret_env", "secret_headers")
 
     def mcp(self) -> McpConfig:
-        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""
+        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant. Un serveur d'avant
+        l'ADR 0131 est lu en lignes d'accès, les exceptions de ses outils comprises."""
+        tools = dict(self._get(MCP_TOOLS_KEY) or {})
         servers = {}
         for name, spec in dict(dict(self._get(MCP_KEY) or {}).get("servers") or {}).items():
             spec = dict(spec)
+            if set(LEGACY_KEYS) & set(spec):
+                spec = access_from_0128(spec, dict(tools.get(name) or {}))
             for k in self.MCP_SECRETS:
                 spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
             try:
@@ -332,6 +336,12 @@ class Settings:
         return out
 
     async def save_mcp_tools(self, reviews: dict[str, dict[str, StoredReview]]) -> None:
+        """Les décisions sur les outils. Une décision rangée d'avant l'ADR 0131 portait l'accord et les exceptions de
+        son outil, que la décision neuve n'a plus : un serveur encore rangé à l'ancienne est d'abord écrit en lignes
+        d'accès, pendant qu'elles se lisent encore."""
+        legacy = dict(dict(self._get(MCP_KEY) or {}).get("servers") or {})
+        if any(set(LEGACY_KEYS) & set(dict(spec)) for spec in legacy.values()):
+            await self.save_mcp(self.mcp())
         await self._put(MCP_TOOLS_KEY, {s: {r: v.model_dump(mode="json", by_alias=True) for r, v in tools.items()}
                                         for s, tools in reviews.items()})
 

@@ -173,9 +173,10 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
         return "il faut plus de confiance"
     if spec.owner_only and not s.audience.owner:
         return "réservé à sa propriétaire"
-    if spec.when is not None:
+    if spec.when is not None or spec.fits is not None:
         try:
-            ok = spec.when(s.audience) is True
+            ok = (spec.when is None or spec.when(s.audience) is True) and (
+                spec.fits is None or spec.fits(s.audience, s.kind) is True)
         except Exception:  # noqa: BLE001 — la porte compte une panne comme un refus
             ok = False
         if not ok:
@@ -186,10 +187,11 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
 
 
 def condition(spec: ToolSpec) -> str:
-    """La condition d'offre d'un outil (``when=``), en mots : la première phrase de sa docstring."""
-    if spec.when is None:
+    """La condition d'offre d'un outil (``when=``, ou ``fits=``), en mots : la première phrase de sa docstring."""
+    gate = spec.when if spec.when is not None else spec.fits
+    if gate is None:
         return ""
-    doc = inspect.getdoc(spec.when) or ""
+    doc = inspect.getdoc(gate) or ""
     return " ".join(doc.split("\n\n")[0].split())
 
 

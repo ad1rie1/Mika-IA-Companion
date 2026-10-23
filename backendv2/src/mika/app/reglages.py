@@ -795,16 +795,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Les serveurs MCP dont elle peut utiliser les outils (ADR 0064). Jetons et "
                                     "variables secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
                         fixed_names=("servers",),
-                        # avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde : sur la fiche du serveur, par
-                        # leur nom (« Réglages du service », ADR 0128, 0130) — ici, la connexion seulement
-                        exclude=tuple(f"servers.{k}" for k in (
-                            "with_owner", "with_accounts", "with_people", "in_conversation", "in_initiative",
-                            "in_work", "autonomy", "keep")),
+                        # qui peut quoi : sur la fiche du serveur, en lignes d'accès (« Accès aux outils », ADR 0131)
+                        # — ici, la connexion seulement
+                        exclude=tuple(f"servers.{k}" for k in ("access", "default_read", "default_act",
+                                                               "default_keep")),
                         pages=(SettingsPage("serveurs-mcp", "Outils extérieurs (MCP)", ("servers",), description=(
                             "Chaque serveur a sa page : à quoi il sert, pour elle — la ligne de son catalogue —, puis "
-                            "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Avec qui, "
-                            "quand, ce qu'elle fait seule et ce qu'elle en garde se règlent sur sa fiche (Outils › "
-                            "Venus d'ailleurs › le serveur › « Réglages du service »).")),)),
+                            "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "
+                            "quoi se règle sur sa fiche (Outils › Venus d'ailleurs › le serveur › « Accès aux "
+                            "outils »).")),)),
         SettingsSection("reveils", "Réveils par API", "sens", WakeupConfig, settings.wakeup, save_wakeup, order=45,
                         description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>, ADR "
                                     "0068) : ce qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés "

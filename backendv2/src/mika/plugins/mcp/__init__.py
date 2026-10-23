@@ -4,8 +4,10 @@ Rien ici ne parle à un serveur : le port ``mcp`` le fait. La faculté dit ce qu
 nom, son lot (``mcp.<serveur>``, décrit par ce que l'opérateur a écrit : à quoi il sert, quand s'en servir), pour
 qui, quand — et ce qu'elle lit de sa réponse : une donnée venue d'ailleurs, désamorcée, citée, bornée.
 
-Un outil sert selon son service et ses règles (ADR 0128) : avec qui (sa propriétaire, les comptes, des personnes
-nommées), et l'accord qu'il demande devant la personne en face, décidé à l'appel :
+Un outil sert selon les lignes d'accès de son service (ADR 0131), lues de haut en bas comme les règles d'un
+pare-feu : la première qui le concerne (qui est en face, quand, ses outils) dit ce qu'elle en fait et ce qu'elle en
+garde ; aucune, c'est la ligne par défaut. Jamais dans un salon ni avec une inconnue. Ce qu'elle en fait, décidé à
+l'appel :
 
 - *seule* : l'appel part dans la boucle, elle lit la réponse aussitôt ;
 - *sur accord* (``carte`` : de la personne en face ; ``toi`` : de sa propriétaire quand c'est elle en face ; sans
@@ -39,6 +41,7 @@ from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
+from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
 from mika.ports.preprocess import cite, inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind, is_work_target
 from mika.vocab.phrasebook import phrase
@@ -255,22 +258,36 @@ def situation(audience: Any) -> str | None:
     return "compte" if audience.trust == ChannelTrust.AUTHENTICATED.value else None
 
 
-def level_of(tool: Any, audience: Any) -> str:
-    """L'accord d'un outil devant cette audience : ``non`` s'il ne lui sert pas (hors de son service, ou une règle
-    l'a retiré), sinon ``seule``, ``carte`` ou ``toi``. Une personne nommée passe avant sa situation ; une règle ne
-    laisse personne de plus que le service."""
+def who_is(who: str, where: str, person: str) -> bool:
+    """Une ligne d'accès désigne-t-elle qui est en face ? Toi (et quand elle travaille seule, pour toi), toute
+    personne qui a un compte, une personne nommée (authentifiée) ; la ligne par défaut (``who`` vide) : tout le
+    monde."""
+    if not who:
+        return True
+    if who == WHO_OWNER:
+        return where in ("proprietaire", "travail")
+    if who == WHO_ACCOUNTS:
+        return where == "compte"
+    return where == "compte" and bool(person) and who == WHO_PERSON + person
+
+
+def moment(when: tuple[str, ...], kind: str) -> bool:
+    """Une ligne d'accès vaut-elle dans cette sorte d'épisode ? Sans moment : toujours."""
+    return not when or any(kind in EPISODES.get(w, frozenset()) for w in when)
+
+
+def access_for(tool: Any, audience: Any, kind: str) -> tuple[str, str]:
+    """Ce qu'elle fait d'un outil devant cette audience, dans cette sorte d'épisode, et ce qu'elle garde de ce qu'il
+    rend : la première de ses lignes d'accès qui les désigne, sinon la ligne par défaut (ADR 0131). ``non`` hors de
+    toute situation : jamais dans un salon, avec une inconnue, ni sans personne."""
     where = situation(audience)
     if where is None:
-        return NO
+        return NO, "rien"
     person = (audience.person or "") if where == "compte" else ""
-    if where != "compte" and not tool.with_owner:
-        return NO
-    if where == "compte" and not (tool.with_accounts or (person and person in tool.with_people)):
-        return NO
-    named = dict(tool.people)
-    if person and person in named:
-        return named[person]
-    return dict(tool.situations).get(where) or tool.autonomy
+    for a in (*tool.access, tool.default):
+        if who_is(a.who, where, person) and moment(a.when, kind):
+            return a.level(tool.nature), a.keep
+    return NO, "rien"
 
 
 def can_approve(audience: Any) -> bool:
@@ -303,7 +320,7 @@ def call_digest(args: Mapping[str, Any]) -> str:
 CONSULTED_MAX = 2500
 
 
-async def _call(t: Any, args: ExternalArgs, ctx: Any) -> ToolResult:
+async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
     """L'appel part dans la boucle : elle lit la réponse aussitôt, avec ce qu'elle vaut (``keep``)."""
     port = ctx.ports.get("mcp")
     data = args.model_dump()
@@ -316,7 +333,7 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any) -> ToolResult:
     # conversation, c'est lu pour quelqu'un (ADR 0110) : ce qu'on cherchait (les arguments) est à lui et ne se
     # garde pas ; ce qu'elle a lu porte son nom, et la nuit n'en retient que les nouvelles et les faits publics
     asked_by = (ep.target or "") if ep is not None and ep.kind in CONVERSATIONAL else ""
-    reads_world = getattr(t, "reads_world", False)
+    reads_world = keep == "public" and t.nature == "lecture"
     if reads_world and ep is not None and result.text and (ep.kind in WORKING or asked_by):
         sought = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
         await ctx.emit(c.CONSULTED.draft(
@@ -329,13 +346,12 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any) -> ToolResult:
     # ce qu'elle lit pour quelqu'un se raconte : la consigne de son prompt ne suffisait pas (2026-10-14 : « c'est
     # la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le début de la page »)
     told = "\n" + phrase("mcp.tools.read_aloud") if reads_world and asked_by and result.text else ""
-    keep = getattr(t, "keep", "perso")
     return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
                               + (cite(result.text, t.max_result_chars) or phrase("mcp.tools.nothing")) + told,
                       floor=FLOORS.get(keep, 0), unkept=keep == "rien")
 
 
-async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any) -> ToolResult:
+async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
     """Un appel qui demande un accord : il propose l'appel (rien ne part) et le dit. La carte va à la personne en
     face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
     ep = ctx.frame.episode
@@ -348,7 +364,7 @@ async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any) -> ToolResult:
     payload: dict[str, Any] = {
         "server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
         "request": f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", "target": target,
-        "approval": "conversation" if in_chat else "operateur", "keep": getattr(t, "keep", "perso"),
+        "approval": "conversation" if in_chat else "operateur", "keep": keep,
         rt.EXPIRES: ctx.frame.now + (CARD_TTL if in_chat else OPERATOR_TTL)}
     if in_chat:
         payload[rt.DECIDER] = target
@@ -367,23 +383,24 @@ def _handler(t: Any) -> Any:
     async def handler(args: ExternalArgs, ctx: Any) -> ToolResult:
         if ctx.ports.get("mcp") is None:
             return ToolResult(ok=False, content=phrase("mcp.unavailable"))
-        level = level_of(t, ctx.frame.audience)
+        ep = ctx.frame.episode
+        level, keep = access_for(t, ctx.frame.audience, ep.kind if ep is not None else "")
         if level == NO:
             return ToolResult(ok=False, content=phrase("mcp.tools.closed"))
         if level == ALONE:
-            return await _call(t, args, ctx)
-        return await _ask(t, level, args, ctx)
+            return await _call(t, args, ctx, keep)
+        return await _ask(t, level, args, ctx, keep)
 
     return handler
 
 
 def _gate(t: Any) -> Any:
-    def served(audience: Any) -> bool:
-        """Seulement avec qui son service le permet (sa propriétaire, les comptes, des personnes nommées et
-        authentifiées), sauf là où une règle de l'outil l'a retiré.
+    def served(audience: Any, kind: str) -> bool:
+        """Seulement quand une ligne d'accès de son service le laisse servir devant cette personne, à ce moment-là.
 
-        ADR 0128 : jamais dans un salon ni avec une inconnue."""
-        return level_of(t, audience) != NO
+        ADR 0131 : la première ligne qui la désigne décide, sinon la ligne par défaut ; jamais dans un salon ni avec
+        une inconnue."""
+        return access_for(t, audience, kind)[0] != NO
 
     return served
 
@@ -400,7 +417,7 @@ def specs_of(offered: Sequence[Any]) -> tuple[list[ToolSpec], dict[str, str]]:
         bundles[bundle] = bundle_line(t)
         tools.append(ToolSpec(
             MCP.name, t.name, inert(t.description, 1024) or phrase("mcp.tool_fallback", server=t.server), ExternalArgs,
-            _handler(t), bundle, episodes, max_calls_per_episode=t.max_calls, when=_gate(t), rule=RULE,
+            _handler(t), bundle, episodes, max_calls_per_episode=t.max_calls, fits=_gate(t), rule=RULE,
             schema=dict(t.schema), in_hand=t.in_hand, outside=True))
     return tools, bundles
 

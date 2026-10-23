@@ -180,7 +180,7 @@ Les clés techniques sont dans « Détails techniques ».
   répondu ? » : la fin d'épisode qui l'a réglé et sa cause en mots (un silence choisi, ce qui l'a fait taire, trop
   tard, une panne), puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en échec.
 
-### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130)
+### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130, 0131)
 
 - **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses familles d'outils en lignes, chacune
   s'ouvre sur ses outils (ce qu'il fait, son nom, ses appels des 14 derniers jours) ; les situations en colonnes,
@@ -192,20 +192,21 @@ Les clés techniques sont dans « Détails techniques ».
   derniers appels vers leur épisode, ses arguments lus du schéma, sa condition d'offre et la règle vérifiée à
   l'exécution.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
-  proposés, à revoir, son genre et ses trois réglages — badge et vitale), puis les outils que ses apps lui donnent
-  (la vue de la Forge, dessous). La fiche d'un serveur a trois onglets (ADR 0130) : *En bref* (son état, ses outils
-  servis, à revoir, ses appels ; ses réglages en quatre réponses ; ce qu'elle en lit ; *qui peut quoi* — ses outils
-  servis devant toi, chaque personne que le service ouvre, les autres comptes, quand elle travaille seule, et ce
-  qu'elle en garde ; pour qui et quand ; le côté technique replié), *Réglages du service* (dessiné : un genre pour
-  aller vite, puis quatre questions — avec qui, quand, avant de se servir d'un outil elle…, ce qu'elle y lit elle…),
-  *Ses outils* (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce
-  qui lit et ce qui agit, chacun avec ce qu'il fait devant qui et où il s'écarte du service ; une ligne se déplie sur
-  son réglage, d'un seul envoi — servi, lit ou agit, avant de s'en servir, ce qu'elle en retient, ce qu'elle lit de
-  lui —, ses exceptions par situation et par personne repliées dedans ; `?outil=` l'ouvre ; un outil changé est
-  suspendu) ; sous « Le détail », *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais
-  lu par elle —, « Tester la connexion ») et *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé). La
-  connexion se règle par « Modifier la connexion ». Une alerte dit ce que le genre ne dit pas : un service qui ne
-  sert à personne, des outils plus libres que lui.
+  proposés, à revoir, avec qui et ses accès — badge et vitale), puis les outils que ses apps lui donnent (la vue de la
+  Forge, dessous). Brancher un service : à quoi il lui sert, comment le joindre ; il est fermé tant qu'aucune ligne
+  d'accès ne l'ouvre. La fiche d'un serveur a trois onglets : *En bref* (son état, ses outils servis, à revoir, ses
+  appels ; ses lignes d'accès d'un regard ; ce qu'elle en lit ; *qui peut quoi* — ses outils servis devant toi, toi
+  quand elle te parle d'elle-même, chaque personne que nomme une ligne, les autres comptes, quand elle travaille
+  seule, et ce qu'elle en garde, par la règle du moteur ; pour qui et quand ; le côté technique replié), *Accès aux
+  outils* (dessiné, ADR 0131 : un tableau de lignes lues de haut en bas comme les règles d'un pare-feu — qui, quand
+  (toujours, ou des moments à cocher), politique de lecture, d'action, de mémorisation, ses outils —, « + Ajouter un accès aux outils » en haut à droite,
+  chaque ligne montée, descendue ou retirée ; dernière ligne, obligatoire, le comportement par défaut), *Ses outils*
+  (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce qui lit et ce
+  qui agit, chacun avec ce qu'il fait devant qui d'après ses lignes ; une ligne se déplie sur son réglage — servi, lit
+  ou agit, ce qu'elle lit de lui ; `?outil=` l'ouvre ; un outil changé est suspendu) ; sous « Le détail », *État* (ce
+  qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion ») et
+  *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé). La connexion se règle par « Modifier la
+  connexion ». Une alerte dit un service qui ne sert à personne.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
@@ -273,7 +274,7 @@ rôle par rôle (`CallLog.profile`).
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
 | | Teams | la clé de l'extension, le mode de ses réponses (brouillon, accord, autonome), sa signature |
-| | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; avec qui (toi, les comptes, des personnes choisies), quand, en main ; ce qu'elle fait seule ; ce qu'elle en garde ; bornes. Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128 |
+| | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; en main ; bornes (qui peut quoi : sur sa fiche, « Accès aux outils »). Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128, 0131 |
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |
 | | Appareils | jeton des appareils |

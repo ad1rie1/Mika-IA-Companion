@@ -90,67 +90,80 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # le servir en lecture, laisser « boom » coupé ; « slow », sans choix, reste à regarder
     done = submit(client, tools_tab, "mcp.revoir", **{"outils.echo": "lecture", "outils.boom": "non"})
     assert done.status_code == 200 and "Servis : echo. 1 laissé coupé." in html_of(done)
-    assert live.kernel.registry.is_dynamic("mcp_meteo_echo")
     assert client.portal.call(live.mcp.status, "meteo").new == ("slow",)
-    # puis son accord à lui : seule (le service demande une carte) — sur sa ligne, d'un seul envoi (ADR 0130)
-    # (un navigateur envoie la valeur de chaque liste ; ``submit`` ne lit que les champs cachés)
-    tools_tab = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
-    assert '<details class="tool-edit">' in tools_tab and "Ajouter une exception" in tools_tab
-    done = submit(client, tools_tab, "mcp.regler", outil="echo", actif="1", nature="lecture", seule="seule",
-                  garde="service", description="", s_proprietaire="service", p1="", r1="situation")
-    assert done.status_code == 200 and "echo : servi." in html_of(done)
-    assert live.kernel.registry.bundles["mcp.meteo"].startswith("la météo et les prévisions d'une ville")
-    # « Pour qui, quand » mène à la grille où l'on retire un outil, ouverte sur sa famille, et à ses réglages
+    # servi, mais personne n'y a accès : un service branché est fermé, comme un pare-feu (ADR 0131)
+    assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
+    made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
+    assert all(part in made for part in ("Accès aux outils", "+ Ajouter un accès aux outils",
+                                         "Comportement par défaut", "Politique de mémorisation"))
+    assert "Pour aller vite : un genre" not in made and "1. Avec qui ?" not in made
+    closed = "aucune ligne d'accès ne l'ouvre, et le comportement par défaut est fermé"
+    assert closed in made and closed in html_of(client.get("/inspecteur/fiche/serveur/meteo"))
+    # ajouter une ligne : toi, toujours ; elle lit seule, te demande avant d'agir, garde en confidence
+    added = submit(client, made, "mcp.acces", faire="ajouter", defaut_lecture="non", defaut_action="non",
+                   defaut_garde="rien")
+    assert added.status_code == 200 and "Ligne 1 ajoutée" in html_of(added)
+    spec = client.portal.call(live.settings.mcp).servers["meteo"]
+    assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
+        ("toi", (), "seule", "toi", "prive", ())]
+    assert live.kernel.registry.is_dynamic("mcp_meteo_echo")
+    # la propriétaire n'est jamais une « personne choisie » : sa ligne, c'est « Toi »
+    made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
+    assert '<option value="personne:adrien"' not in made and '<option value="toi" selected>Toi</option>' in made
+    # deux lignes, de haut en bas : toi quand elle répond ; les comptes, sur « echo » seulement, sur accord
+    rows = {"qui.1": "toi", "moments.1|conversation": "on", "moments.1|travail": "on", "lecture.1": "seule",
+            "action.1": "toi", "garde.1": "prive", "tous.1": "on", "qui.2": "comptes", "toujours.2": "on",
+            "lecture.2": "carte", "action.2": "non", "garde.2": "rien", "prend.2|echo": "on", "defaut_lecture": "non",
+            "defaut_action": "non", "defaut_garde": "rien"}
+
+    def access_page() -> str:  # un formulaire ne sert qu'une fois (son jeton) : la page relue avant chaque envoi
+        return html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
+
+    saved = submit(client, access_page(), "mcp.acces", faire="", **rows)
+    assert saved.status_code == 200 and "Accès enregistrés." in html_of(saved)
+    spec = client.portal.call(live.settings.mcp).servers["meteo"]
+    assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
+        ("toi", ("conversation", "travail"), "seule", "toi", "prive", ()), ("comptes", (), "carte", "non", "rien", ("echo",))]
+    # « quand » se coche : une ligne sans moment se refuse
+    refused = submit(client, access_page(), "mcp.acces", faire="",
+                     **{k: v for k, v in rows.items() if k != "toujours.2"})
+    assert "Ligne 2 : coche au moins un moment, ou « toujours »." in html_of(refused)
+    # une ligne sans outil se refuse ; rien n'est écrit
+    # (une case décochée n'est pas envoyée)
+    refused = submit(client, access_page(), "mcp.acces", faire="",
+                     **{k: v for k, v in rows.items() if k != "prend.2|echo"})
+    assert "Ligne 2 : coche au moins un outil, ou « tous »." in html_of(refused)
+    assert len(client.portal.call(live.settings.mcp).servers["meteo"].access) == 2
+    # monter la seconde : l'ordre change, rien d'autre
+    moved = submit(client, access_page(), "mcp.acces", faire="monter:2", **rows)
+    assert "Ligne 2 montée." in html_of(moved)
+    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == ["comptes", "toi"]
+    submit(client, access_page(), "mcp.acces", faire="", **rows)
+    # « En bref » : ses lignes d'un regard, qui peut quoi, et la grille où l'on retire un outil, ouverte sur sa famille
     served = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
-    assert "/inspecteur/outils/tous?lot=mcp.meteo" in served and "Changer avec qui, et quand" in served
-    assert "Réglages du service" in served and "/inspecteur/fiche/serveur/meteo?onglet=outils&outil=echo#outil-echo" in served
+    assert "/inspecteur/outils/tous?lot=mcp.meteo" in served and "Changer les accès" in served
+    assert "/inspecteur/fiche/serveur/meteo?onglet=outils&outil=echo#outil-echo" in served
     # trois onglets ; « État » et « Appels » sous « Le détail », plus d'onglet des règles
     tabs = served[:served.index("Le détail")]
     assert "onglet=etat" not in tabs and "onglet=appels" not in tabs and "onglet=regles" not in served
-    # qui peut quoi : la règle du moteur, devant toi (le service n'ouvre que toi, quand elle répond)
+    # qui peut quoi : la règle du moteur, devant chaque personne type
     matrix = served[served.index("Qui peut quoi"):served.index('id="server-who"')]
-    assert '<th scope="col">Toi</th>' in matrix and ">seule</span>" in matrix and "1 à regarder" in matrix
-    # une inconnue, un salon : la raison du service, pas la condition du code
-    assert "jamais dans un salon, quel que soit le réglage" in served and "Seulement avec qui" not in served
+    assert '<th scope="col">Toi</th>' in matrix and ">seule</span>" in matrix and ">lui demande</span>" in matrix
+    assert "1 à regarder" in matrix
+    # une inconnue, un salon : la raison de ses lignes, pas la condition du code
+    assert "jamais dans un salon, quelles que soient ses lignes" in served and "Seulement quand" not in served
     all_tools = html_of(client.get("/inspecteur/outils/tous", params={"lot": "mcp.meteo"}))
     assert "mcp_meteo_echo" in all_tools and "Service « meteo »" in all_tools
     tool_fiche = html_of(client.get("/inspecteur/outils/tous", params={"outil": "mcp_meteo_echo"}))
     assert "il vient d'un service ou d'une app" in tool_fiche and "venu d'ailleurs" in tool_fiche
     assert "text" in tool_fiche
-    # réglages du service (ADR 0128, 0130) : un genre pour aller vite, puis quatre questions, redites en une phrase
-    made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
-    assert "En une phrase" in made and "Pour aller vite : un genre" in made
-    assert all(q in made for q in ("1. Avec qui ?", "2. Quand ?", "3. Avant de se servir d'un de ses outils, elle…",
-                                   "4. Ce qu'elle y lit, elle…"))
-    # la propriétaire n'est jamais une « personne choisie » : sa ligne, c'est « Toi »
-    assert '<option value="adrien"' not in made and "connectées à l'app ou au web" in made
-    picked = submit(client, made, "mcp.genre")  # le premier : « Mon travail, sous contrôle »
-    assert picked.status_code == 200 and "« Mon travail, sous contrôle »" in html_of(picked)
-    spec = client.portal.call(live.settings.mcp).servers["meteo"]
-    assert (spec.with_owner, spec.with_accounts, spec.autonomy, spec.keep) == (True, False, "toi", "rien")
-    # « echo » reste seul : le genre ne le dit pas, la fiche si
-    made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
-    assert "1 outil plus libre que le service (echo) : son genre ne le dit pas." in made
-    assert "1 outil plus libre" in html_of(client.get("/inspecteur/fiche/serveur/meteo"))
-    tools_tab = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
-    assert "plus libre que le service" in tools_tab and "Toi : <b>seule</b>" in tools_tab
-    saved = submit(client, made, "mcp.service", avec_toi="on", avec_les_comptes="on", repond="on", seule="seule",
-                   garde="public")
-    assert saved.status_code == 200 and "Avec toi et toute personne qui a un compte" in html_of(saved)
-    spec = client.portal.call(live.settings.mcp).servers["meteo"]
-    assert spec.with_accounts and spec.autonomy == "seule" and spec.keep == "public" and not spec.in_work
-    assert live.kernel.registry.is_dynamic("mcp_meteo_echo")
-    # ses exceptions, par situation et par personne : sur sa ligne, dans le même envoi que son réglage
+    # un outil se règle sur sa ligne : servi, il lit ou il agit, ce qu'elle lit de lui — plus d'exception (ADR 0131)
     opened = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils", "outil": "echo"}))
-    assert '<details class="tool-edit" open>' in opened and "jamais personne de plus" in opened
-    ruled = submit(client, opened, "mcp.regler", outil="echo", actif="1", nature="lecture", seule="seule",
-                   garde="service", description="", s_proprietaire="service", s_compte="non", p1="user_9", r1="carte")
-    assert ruled.status_code == 200 and "echo : servi, 2 exceptions." in html_of(ruled)
-    review = client.portal.call(live.mcp.status, "meteo").reviews["echo"]
-    assert dict(review.situations) == {"compte": "non"} and dict(review.people) == {"user_9": "carte"}
-    clear = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
-    assert "Ses exceptions (2)" in clear and "Les autres comptes : <b>non</b>" in clear
-    assert "user_9 : <b>lui demande</b>" in clear
+    assert '<details class="tool-edit" open>' in opened and "Ajouter une exception" not in opened
+    assert "Toi : <b>seule</b>" in opened and "Les comptes : <b>lui demande</b> · rien" in opened
+    done = submit(client, opened, "mcp.regler", outil="echo", actif="1", nature="lecture", description="")
+    assert done.status_code == 200 and "echo : servi, il lit." in html_of(done)
+    assert live.kernel.registry.bundles["mcp.meteo"].startswith("la météo et les prévisions d'une ville")
     # ses appels : un appel sur accord a sa ligne — pour qui, où l'accord se décide, où il en est
     import json as _json
 
@@ -176,19 +189,19 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     changed = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
     assert "changé : suspendu" in changed
     assert "à revoir" in html_of(client.get("/inspecteur/outils/serveurs"))
-    # brancher un service en trois questions (ADR 0128) : son genre d'un coup, puis ses outils à servir
+    # brancher un service (ADR 0128, 0131) : à quoi il sert, comment le joindre — fermé tant qu'aucune ligne ne l'ouvre
     plug_page = html_of(client.get("/inspecteur/outils/serveurs", params={"brancher": "1"}))
-    assert "Quel genre de service ?" in plug_page and "Mon travail, sous contrôle" in plug_page
-    plugged = submit(client, plug_page, "mcp.brancher", nom="factures", genre="pro", ou="distant",
+    assert "Quel genre de service ?" not in plug_page and "2. Comment le joindre" in plug_page
+    plugged = submit(client, plug_page, "mcp.brancher", nom="factures", ou="distant",
                      a_quoi="Les factures et les devis de mon activité.", adresse="http://factures.lan/mcp",
                      entetes="Authorization: Bearer abc\nX-Tenant: moi")
     assert plugged.status_code == 200 and "« factures » branché" in html_of(plugged)
     spec = client.portal.call(live.settings.mcp).servers["factures"]
-    assert (spec.autonomy, spec.keep, spec.with_accounts, spec.url) == ("toi", "rien", False, "http://factures.lan/mcp")
+    assert (spec.access, spec.default_read, spec.default_act, spec.url) == ((), "non", "non", "http://factures.lan/mcp")
     assert spec.headers() == {"Authorization": "Bearer abc", "X-Tenant": "moi"}
     assert "Bearer abc" not in repr(client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings"))
     plug_page = html_of(client.get("/inspecteur/outils/serveurs", params={"brancher": "1"}))  # un jeton neuf
-    again = submit(client, plug_page, "mcp.brancher", nom="factures", genre="pro", ou="distant",
+    again = submit(client, plug_page, "mcp.brancher", nom="factures", ou="distant",
                    a_quoi="Les mêmes, une seconde fois.", adresse="http://factures.lan/mcp")
     assert "un serveur s'appelle déjà « factures »" in html_of(again)
     client.portal.call(transport.aclose)

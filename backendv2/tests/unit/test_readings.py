@@ -245,10 +245,9 @@ class Port:
         return NS(ok=True, text="La comète C/2026 A1 passera au plus près de la Terre le 3 novembre.")
 
 
-def _search(reads_world: bool = True) -> NS:
-    """L'outil « search » d'un serveur dont ce qu'elle lit est public (``keep``), ou non."""
-    return NS(server="web", remote="search", max_result_chars=4000, reads_world=reads_world,
-              keep="public" if reads_world else "perso")
+def _search() -> NS:
+    """L'outil « search » d'un serveur : il lit."""
+    return NS(server="web", remote="search", max_result_chars=4000, nature="lecture")
 
 
 async def _consult(kind: str, reads_world: bool = True, target: str | None = None) -> list:
@@ -258,7 +257,8 @@ async def _consult(kind: str, reads_world: bool = True, target: str | None = Non
         out.extend(drafts)
 
     ctx = NS(ports={"mcp": Port()}, frame=NS(episode=NS(kind=kind, target=target)), emit=emit)
-    result = await _call(_search(reads_world), ExternalArgs(q="comète"), ctx)
+    # ce qu'elle garde, la ligne d'accès qui a laissé passer l'appel le dit : public, ou un souvenir
+    result = await _call(_search(), ExternalArgs(q="comète"), ctx, "public" if reads_world else "perso")
     assert result.ok and (result.floor, result.unkept) == (0, False)
     return out
 
@@ -278,7 +278,9 @@ async def test_what_she_reads_working_or_for_someone_is_kept():
     assert await _consult(Kind.REPLY) == []  # personne en face : rien à garder pour quelqu'un
     assert await _consult(Kind.STEP, reads_world=False) == []  # un serveur que l'opérateur n'a pas dit public
     from mika.adapters.mcp.config import McpServer
-    assert McpServer.model_fields["keep"].default != "public"  # un courrier, un agenda : jamais par défaut
+    # un courrier, un agenda : jamais public par défaut — un service branché garde « rien » tant qu'aucune ligne
+    # d'accès ne dit autre chose (ADR 0131)
+    assert McpServer.model_fields["default_keep"].default == "rien"
 
 
 async def test_what_she_reads_for_someone_she_tells_as_news():
@@ -289,7 +291,7 @@ async def test_what_she_reads_for_someone_she_tells_as_news():
         async def emit(*drafts):
             pass
         ctx = NS(ports={"mcp": Port()}, frame=NS(episode=NS(kind=kind, target=target)), emit=emit)
-        return (await _call(_search(), ExternalArgs(q="comète"), ctx)).content
+        return (await _call(_search(), ExternalArgs(q="comète"), ctx, "public")).content
 
     told = await result(Kind.REPLY, ALICE)
     assert "3 novembre" in told and "Raconte-le comme quelqu'un qui vient de le lire" in told

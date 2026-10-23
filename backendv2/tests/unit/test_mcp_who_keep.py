@@ -1,17 +1,17 @@
-"""Un service dit avec qui, ce qu'elle fait seule, et ce qu'elle en garde (ADR 0128) — par leurs intentions.
+"""Qui peut quoi, en lignes d'accès lues de haut en bas comme les règles d'un pare-feu, et ce qu'elle en garde
+(ADR 0128, 0131) — par leurs intentions.
 
-- une fiche d'avant l'ADR (« pour qui », « devient un savoir », l'accord d'un outil) reste lisible, sous la forme
-  neuve ; une règle d'outil inconnue est refusée ;
-- avec qui : sa propriétaire, toute personne qui a un compte, des personnes nommées et authentifiées — jamais un
-  salon ni une inconnue ; une règle par personne passe avant sa situation, et aucune règle ne laisse personne de
-  plus que le service ; quand elle travaille seule, seulement un service « avec toi » ;
+- une fiche d'avant (avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde, les exceptions de ses outils) devient
+  les lignes qui font la même chose, sa ligne par défaut fermée ; une ligne illisible est refusée ;
+- pour un outil, la première ligne qui le concerne (qui est en face, quand, ses outils) décide ; aucune, la ligne par
+  défaut ; ce qui lui est offert, c'est l'ensemble des outils qu'une ligne lui ouvre — jamais dans un salon ni avec une
+  inconnue, une personne nommée seulement authentifiée ;
 - l'accord se décide à l'appel : seule, l'appel part et rend ce qu'il vaut (``floor``, ``unkept``) ; ``carte``, une
   carte à la personne en face ; ``toi``, une carte à sa propriétaire quand c'est elle en face, sinon l'opérateur ;
 - ce que vaut ce qu'un outil a rendu remonte la boucle jusqu'à l'énoncé, et la trace n'en garde rien à « rien » ;
 - la mémoire le respecte : « rien » ne s'indexe pas et ne se relit pas (ni la réplique, ni la demande qu'elle
   suivait) ; une confidence de service fait de ce qu'on en tire un secret, la nuit aussi ;
-- qui peut quoi (ADR 0129) : la console applique la règle du moteur à des personnes types, et dit où un outil
-  s'écarte de son service — jamais une recopie de la règle.
+- qui peut quoi (ADR 0129) : la console applique la règle du moteur à des personnes types — jamais une recopie.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from types import SimpleNamespace as NS
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from mika.adapters.mcp.config import McpServer, StoredReview
-from mika.adapters.mcp.hub import autonomy_of
+from mika.adapters.mcp.config import AccessRule, McpServer, StoredReview, access_from_0128
+from mika.adapters.mcp.hub import access_of, granted
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts.transcript import thread_table
@@ -36,9 +36,10 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy
-from mika.plugins.mcp import ExternalArgs, _handler, level_of, situation
-from mika.plugins.mcp.console import drift, faces, looser_tools, rules_of, said_level
+from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for, situation
+from mika.plugins.mcp.console import faces, said_level, serves_nobody, tool_view
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
+from mika.ports.mcp import CLOSED, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON, Access
 from mika.runtime.tools import run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
@@ -69,52 +70,73 @@ ROOM = Audience(persons=("user_2",), channel="web", room="salon", public=True,
 WORK = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
 EVERYONE = {"owner": OWNER, "account": ACCOUNT, "named": NAMED, "unproven": NAMED_UNPROVEN, "stranger": STRANGER,
             "room": ROOM, "work": WORK, "none": None}
+#: la sorte d'épisode de chacun : on répond à quelqu'un, on travaille seule
+KINDS = {who: Kind.STEP if who == "work" else Kind.REPLY for who in EVERYONE}
+NAMED_3 = WHO_PERSON + "user_3"
 
 
-def levels(tool) -> dict[str, str]:
-    return {who: level_of(tool, aud) for who, aud in EVERYONE.items()}
+def tool(*rows: Access, nature: str = "lecture", default: Access = CLOSED, remote: str = "prevision") -> NS:
+    """Un outil tel que la règle du moteur le lit : sa nature, les lignes de son service qui le concernent, la ligne
+    par défaut."""
+    return NS(nature=nature, access=tuple(a for a in rows if a.concerns(remote)), default=default)
+
+
+def levels(t) -> dict[str, str]:
+    return {who: access_for(t, aud, KINDS[who])[0] for who, aud in EVERYONE.items()}
 
 
 # ── les fiches d'avant ──────────────────────────────────────────────────────
 
 
-def test_a_server_saved_before_0128_keeps_who_it_served_and_what_became_knowledge():
+def test_a_server_saved_before_0131_becomes_the_rows_that_do_the_same():
+    old = McpServer.model_validate({"purpose": "la facturation", "url": URL, "with_owner": True,
+                                    "in_conversation": True, "in_work": True, "autonomy": "lit", "keep": "prive"})
+    # une ligne : toi, quand elle répond ou quand elle travaille
+    assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in old.access] == [
+        (WHO_OWNER, ("conversation", "travail"), "seule", "carte", "prive", ())]
+    assert (old.default_read, old.default_act, old.default_keep) == ("non", "non", "rien")  # fermé : comme avant
+    # d'avant l'ADR 0128 : « pour qui : les comptes », « devient un savoir »
     shared = McpServer.model_validate({"purpose": "la météo", "url": URL, "audience": "comptes", "learns": True})
-    assert (shared.with_owner, shared.with_accounts, shared.keep) == (True, True, "public")
-    mine = McpServer.model_validate({"purpose": "la météo", "url": URL, "audience": "proprietaire", "learns": False})
-    assert (mine.with_owner, mine.with_accounts, mine.keep, mine.autonomy) == (True, False, "prive", "carte")
-    # ce qui est écrit sous la forme neuve l'emporte ; la forme ancienne ne se réécrit jamais
-    both = McpServer.model_validate({"purpose": "la météo", "url": URL, "audience": "comptes", "learns": True,
-                                     "with_accounts": False, "keep": "rien"})
-    assert (both.with_accounts, both.keep) == (False, "rien")
-    assert not {"audience", "learns"} & set(shared.model_dump())
+    assert {(a.who, a.keep) for a in shared.access} == {(WHO_OWNER, "public"), (WHO_ACCOUNTS, "public")}
+    assert not {"audience", "learns", "with_owner", "autonomy"} & set(shared.model_dump())
     with pytest.raises(ValidationError):  # une clé inconnue reste refusée
         McpServer.model_validate({"purpose": "la météo", "url": URL, "pour": "comptes"})
 
 
-def test_a_review_saved_before_0128_keeps_its_approval_and_bad_rules_are_refused():
-    for old, new in (("aucun", "seule"), ("conversation", "service"), ("operateur", "toi"), ("inconnu", "service")):
-        assert StoredReview.model_validate({"fingerprint": "f", "approval": old}).autonomy == new
-    assert StoredReview.model_validate({"fingerprint": "f", "approval": "aucun", "autonomy": "toi"}).autonomy == "toi"
-    ok = StoredReview(fingerprint="f", situations={"proprietaire": "seule", "compte": "non", "travail": "toi"},
-                      people={"user_3": "carte"})
-    assert ok.situations["compte"] == "non" and ok.people == {"user_3": "carte"}
-    for bad in ({"situations": {"salon": "seule"}}, {"situations": {"compte": "toujours"}},
-                {"people": {"user_3": "jamais"}}, {"people": {"": "seule"}}, {"autonomy": "lit"}):
+def test_the_exceptions_of_her_tools_become_rows_above_the_service():
+    spec = {"purpose": "la météo", "url": URL, "with_accounts": True, "with_people": ["user_3"],
+            "in_initiative": True, "in_work": True, "autonomy": "carte", "keep": "prive"}
+    tools = {"t1": {"enabled": True, "nature": "action", "autonomy": "seule", "situations": {"compte": "non"},
+                    "people": {"user_3": "toi"}, "keep": "rien"},
+             # une lecture « seule » sous « lit seule » : rien ne change, aucune ligne (2026-10-23)
+             "t2": {"enabled": True, "nature": "lecture", "autonomy": "seule"},
+             "coupe": {"enabled": False, "nature": "action", "autonomy": "seule"}}
+    rows, _ = access_of(McpServer.model_validate(access_from_0128({**spec, "autonomy": "lit"}, {"t2": tools["t2"]})))
+    assert all(not a.tools for a in rows)
+    rows, _ = access_of(McpServer.model_validate(access_from_0128(spec, tools)))
+    t1 = tool(*rows, nature="action", remote="t1")
+    # la personne nommée d'abord, puis les autres comptes, puis toi ; ce qu'elle garde suit l'outil
+    assert levels(t1) == {"owner": "seule", "account": "non", "named": "toi", "unproven": "non", "stranger": "non",
+                          "room": "non", "work": "seule", "none": "non"}
+    assert access_for(t1, NAMED, Kind.REPLY) == ("toi", "rien")
+    other = tool(*rows, nature="action", remote="t9")
+    assert levels(other) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
+                             "stranger": "non", "room": "non", "work": "carte", "none": "non"}
+    assert not any("coupe" in a.tools for a in rows)  # un outil coupé n'a pas de ligne
+
+
+def test_a_review_keeps_only_what_is_hers_and_a_bad_row_is_refused():
+    review = StoredReview.model_validate({"fingerprint": "f", "nature": "action", "approval": "aucun",
+                                          "autonomy": "toi", "keep": "rien", "situations": {"compte": "non"}})
+    assert (review.nature, review.enabled) == ("action", False)
+    assert not {"autonomy", "keep", "situations", "people"} & set(review.model_dump())
+    for bad in ({"who": "salon"}, {"who": WHO_PERSON}, {"who": WHO_OWNER, "when": "parfois"},
+                {"who": WHO_OWNER, "read": "jamais"}, {"who": WHO_OWNER, "keep": "tout"}):
         with pytest.raises(ValidationError):
-            StoredReview.model_validate({"fingerprint": "f", **bad})
+            AccessRule.model_validate(bad)
 
 
-def test_a_tool_follows_its_service_unless_it_has_its_own_approval():
-    reading, acting = StoredReview(fingerprint="f", nature="lecture"), StoredReview(fingerprint="f", nature="action")
-    reads = McpServer(purpose="la météo", url=URL, autonomy="lit")
-    assert (autonomy_of(reads, reading), autonomy_of(reads, acting)) == ("seule", "carte")
-    for mode in ("seule", "carte", "toi"):
-        assert autonomy_of(McpServer(purpose="la météo", url=URL, autonomy=mode), acting) == mode
-    assert autonomy_of(reads, StoredReview(fingerprint="f", nature="lecture", autonomy="toi")) == "toi"
-
-
-# ── avec qui ────────────────────────────────────────────────────────────────
+# ── de haut en bas ──────────────────────────────────────────────────────────
 
 
 def test_where_she_would_use_a_service():
@@ -126,107 +148,102 @@ def test_where_she_would_use_a_service():
     assert situation(owner_in_room) is None  # même sa propriétaire, jamais dans un salon
 
 
-def test_with_her_owner_only_by_default():
-    assert levels(offered_tool()) == {"owner": "seule", "account": "non", "named": "non", "unproven": "non",
-                                      "stranger": "non", "room": "non", "work": "seule", "none": "non"}
+def test_without_a_row_the_default_decides_and_it_starts_closed():
+    assert set(levels(tool()).values()) == {"non"}
+    opened = tool(default=Access(who="", read="carte", act="toi", keep="prive"))
+    # « tout le monde », c'est en tête-à-tête : jamais un salon, une inconnue, ni sans personne
+    assert levels(opened) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
+                              "stranger": "non", "room": "non", "work": "carte", "none": "non"}
 
 
-def test_with_every_account_never_a_room_nor_a_stranger():
-    tool = offered_tool(autonomy="carte", with_accounts=True)
-    assert levels(tool) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
-                            "stranger": "non", "room": "non", "work": "carte", "none": "non"}
+def test_her_owner_she_works_for_accounts_and_named_people_only_authenticated():
+    assert levels(tool(Access(who=WHO_OWNER, read="seule"))) == {
+        "owner": "seule", "account": "non", "named": "non", "unproven": "non", "stranger": "non", "room": "non",
+        "work": "seule", "none": "non"}
+    assert levels(tool(Access(who=WHO_ACCOUNTS, read="carte"))) == {
+        "owner": "non", "account": "carte", "named": "carte", "unproven": "non", "stranger": "non", "room": "non",
+        "work": "non", "none": "non"}
+    assert levels(tool(Access(who=NAMED_3, read="toi"))) == {
+        "owner": "non", "account": "non", "named": "toi", "unproven": "non", "stranger": "non", "room": "non",
+        "work": "non", "none": "non"}
 
 
-def test_a_named_person_is_served_only_authenticated_and_her_rule_beats_her_situation():
-    tool = offered_tool(autonomy="toi", with_owner=False, with_people=("user_3",),
-                        situations=(("compte", "non"),), people=(("user_3", "seule"),))
-    # pas avec sa propriétaire, ni quand elle travaille seule : le service n'est pas « avec toi »
-    assert levels(tool) == {"owner": "non", "account": "non", "named": "seule", "unproven": "non",
-                            "stranger": "non", "room": "non", "work": "non", "none": "non"}
-    # sans règle à elle, sa situation décide (ici : retiré)
-    assert level_of(offered_tool(with_owner=False, with_people=("user_3",), situations=(("compte", "non"),)),
-                    NAMED) == "non"
-    # et sans aucune règle, l'accord du service
-    assert level_of(offered_tool(autonomy="toi", with_owner=False, with_people=("user_3",)), NAMED) == "toi"
+def test_the_first_row_that_matches_decides():
+    rows = (Access(who=NAMED_3, read="non"), Access(who=WHO_ACCOUNTS, read="seule"),
+            Access(who=WHO_OWNER, when=("conversation",), read="seule"), Access(who=WHO_OWNER, read="toi"))
+    t = tool(*rows, default=Access(who="", read="carte"))
+    assert levels(t) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "non",
+                         "stranger": "non", "room": "non", "work": "toi", "none": "non"}
+    assert access_for(t, OWNER, Kind.INITIATIVE)[0] == "toi"  # « quand elle répond » ne vaut pas d'elle-même
+    # dans l'autre ordre, la ligne des comptes passe avant celle de la personne nommée : elle n'y vaut plus rien
+    assert access_for(tool(rows[1], rows[0]), NAMED, Kind.REPLY)[0] == "seule"
 
 
-def test_no_rule_lets_anyone_in_beyond_the_service():
-    tool = offered_tool(people=(("user_2", "seule"), ("web_x", "seule")), situations=(("compte", "seule"),))
-    assert level_of(tool, ACCOUNT) == "non" and level_of(tool, STRANGER) == "non"
-    assert level_of(tool, OWNER) == "seule"
+def test_a_tool_reads_or_acts_and_takes_its_column():
+    row = Access(who=WHO_OWNER, read="seule", act="toi", keep="prive")
+    assert access_for(tool(row, nature="lecture"), OWNER, Kind.REPLY) == ("seule", "prive")
+    assert access_for(tool(row, nature="action"), OWNER, Kind.REPLY) == ("toi", "prive")
 
 
-def test_a_situation_rule_changes_the_approval_or_removes_the_tool():
-    tool = offered_tool(autonomy="seule", with_accounts=True,
-                        situations=(("compte", "carte"), ("proprietaire", "toi"), ("travail", "non")))
-    assert (level_of(tool, OWNER), level_of(tool, ACCOUNT), level_of(tool, WORK)) == ("toi", "carte", "non")
+def test_what_she_has_at_hand_is_every_tool_a_row_opens():
+    """La facturation : la lecture des factures en souvenir, leur écriture sur ton accord, en confidence — deux
+    lignes, deux outils ; ce qu'elle a sous la main, ce sont les deux (2026-10-23)."""
+    rows = (Access(who=WHO_OWNER, read="seule", act="toi", keep="prive", tools=("set_facture",)),
+            Access(who=WHO_OWNER, read="seule", act="toi", keep="perso", tools=("get_facture",)),
+            Access(who=WHO_OWNER, read="non", act="non"))
+    get = tool(*rows, nature="lecture", remote="get_facture")
+    put = tool(*rows, nature="action", remote="set_facture")
+    rest = tool(*rows, nature="lecture", remote="ticket_list")
+    assert access_for(get, OWNER, Kind.REPLY) == ("seule", "perso")
+    assert access_for(put, OWNER, Kind.REPLY) == ("toi", "prive")
+    assert access_for(rest, OWNER, Kind.REPLY)[0] == "non"  # sa première ligne le ferme
+    gates = {name: _gate(t)(OWNER, Kind.REPLY) for name, t in (("get", get), ("put", put), ("rest", rest))}
+    assert gates == {"get": True, "put": True, "rest": False}
 
 
-# ── qui peut quoi (ADR 0129) ────────────────────────────────────────────────
+def test_the_moments_she_may_be_offered_it_come_from_the_rows_that_open_it():
+    rows = (Access(who=WHO_OWNER, when=("conversation",), read="seule"), Access(who=WHO_OWNER, when=("travail",), act="toi"))
+    assert granted(rows, CLOSED, "lecture") == frozenset({"conversation"})
+    assert granted(rows, CLOSED, "action") == frozenset({"travail"})
+    assert granted((), Access(who="", read="carte"), "lecture") == frozenset({"conversation", "initiative", "travail"})
+    assert granted((), CLOSED, "lecture") == frozenset()
 
 
-def service(**kw):
-    base = {"with_owner": True, "with_accounts": False, "with_people": (), "episodes": ("conversation", "travail"),
-            "autonomy": "carte", "keep": "prive", "reviews": {}}
-    return NS(**{**base, **kw})
+# ── qui peut quoi (ADR 0129, 0131) ──────────────────────────────────────────
 
 
-def decided(**kw):
-    base = {"enabled": True, "nature": "action", "autonomy": "service", "keep": "service", "situations": {},
-            "people": {}}
-    return NS(**{**base, **kw})
+def service(*rows: Access, default: Access = CLOSED) -> NS:
+    return NS(access=rows, default=default, reviews={})
 
 
-def facing(st, review) -> dict[str, str]:
-    rules = rules_of(st, review)
-    return {f.label: " / ".join(filter(None, said_level(level_of(rules, f.audience), f)[:2]))
-            for f in faces(st, None, tuple(review.people))}
+def facing(st, nature: str = "action", remote: str = "prevision") -> dict[str, str]:
+    t = tool_view(st, remote, nature)
+    return {f.label: " / ".join(filter(None, said_level(access_for(t, f.audience, f.kind)[0], f)[:2]))
+            for f in faces(st)}
 
 
 def test_who_can_do_what_is_the_engine_rule_on_typical_people():
     # « carte » : toi, une carte dans ton chat ; une personne, la sienne ; personne en face, la console
-    st = service(with_accounts=True, with_people=("user_3",))
-    assert facing(st, decided()) == {
-        "Toi": "te demande / une carte dans ton chat", "user_3": "lui demande / une carte dans son chat",
-        "Les autres comptes": "lui demande / une carte dans son chat",
+    st = service(Access(who=NAMED_3, act="carte"), Access(who=WHO_ACCOUNTS, act="carte"),
+                 Access(who=WHO_OWNER, act="carte"))
+    assert facing(st) == {
+        "Toi": "te demande / une carte dans ton chat",
+        "Toi, quand elle te parle d'elle-même": "te demande / une carte dans ton chat",
+        "user_3": "lui demande / une carte dans son chat", "Les autres comptes": "lui demande / une carte dans son chat",
         "Elle travaille seule": "te demande / dans la console (« À valider »)"}
-    # « toi » devant quelqu'un d'autre : la console, pas une carte
-    assert facing(st, decided(autonomy="toi"))["user_3"] == "te demande / dans la console (« À valider »)"
-    # une règle par personne passe avant ; une règle de situation retire
-    ruled = decided(people={"user_3": "seule"}, situations={"compte": "non"})
-    assert facing(st, ruled) == {"Toi": "te demande / une carte dans ton chat", "user_3": "seule",
-                               "Les autres comptes": "non", "Elle travaille seule": "te demande / dans la console "
-                                                                                    "(« À valider »)"}
-    # rien de plus que le service : sans les comptes, pas de colonne pour eux ni pour une personne qu'il n'ouvre pas
-    assert list(facing(service(), decided(people={"user_9": "seule"}))) == ["Toi", "Elle travaille seule"]
-    # ni toi ni le travail quand le service n'est pas avec toi ; aucun moment, aucune colonne
-    assert list(facing(service(with_owner=False, with_people=("user_3",)), decided())) == ["user_3"]
-    assert facing(service(episodes=()), decided()) == {}
+    # « ton accord » devant quelqu'un d'autre : la console, pas une carte
+    assert facing(service(Access(who=NAMED_3, act="toi")))["user_3"] == "te demande / dans la console (« À valider »)"
+    # un moment : toi quand elle répond, mais pas d'elle-même ni au travail
+    only = facing(service(Access(who=WHO_OWNER, when=("conversation",), act="seule")))
+    assert (only["Toi"], only["Toi, quand elle te parle d'elle-même"], only["Elle travaille seule"]) == (
+        "seule", "non", "non")
 
 
-def test_a_tool_freer_or_stricter_than_its_service_is_said():
-    st = service(autonomy="toi", keep="prive")
-    assert drift(st, decided(autonomy="seule")) == (["Toi", "Elle travaille seule"], [])
-    assert drift(st, decided(situations={"travail": "non"})) == ([], ["Elle travaille seule"])
-    assert drift(st, decided(keep="public")) == (["ce qu'elle en garde"], [])
-    assert drift(st, decided(keep="rien")) == ([], ["ce qu'elle en garde"])
-    # sous « lit seule, demande pour agir », une lecture « seule » à elle ne s'écarte de rien (2026-10-23 : quatre
-    # lectures se disaient « exception » sans rien changer)…
-    reads = service(autonomy="lit")
-    assert drift(reads, decided(nature="lecture", autonomy="seule")) == ([], [])
-    # … jusqu'à ce que le service se resserre : son genre ne le dit pas, la fiche si
-    tight = service(autonomy="toi", reviews={"facture_get": decided(nature="lecture", autonomy="seule"),
-                                             "ticket_create": decided()})
-    assert looser_tools(tight) == ["facture_get"]
-    # « carte » et « toi » reviennent au même quand c'est toi qui décides
-    assert drift(st, decided(autonomy="carte")) == ([], [])
-
-
-def test_a_tool_keeps_its_own_level_or_follows_its_service():
-    assert StoredReview(fingerprint="f").keep == "service"
-    assert StoredReview(fingerprint="f", keep="rien").keep == "rien"
-    with pytest.raises(ValidationError):
-        StoredReview.model_validate({"fingerprint": "f", "keep": "tout"})
+def test_a_service_open_to_nobody_says_so():
+    assert serves_nobody(service())
+    assert serves_nobody(service(Access(who=WHO_OWNER, read="non", act="non")))
+    assert not serves_nobody(service(Access(who=WHO_OWNER, read="seule")))
+    assert not serves_nobody(service(default=Access(who="", act="toi")))
 
 
 # ── l'accord, décidé à l'appel ──────────────────────────────────────────────
@@ -253,8 +270,12 @@ class Ctx:
         return json.loads(draft.data.args_json)
 
 
-async def call(tool, ctx) -> ToolResult:
-    return await _handler(tool)(ExternalArgs(ville="Lyon"), ctx)
+async def call(t, ctx) -> ToolResult:
+    return await _handler(t)(ExternalArgs(ville="Lyon"), ctx)
+
+
+def asking(level: str, who: str = WHO_OWNER, keep: str = "prive", **kw):
+    return offered_tool(access=(Access(who=who, read=level, act=level, keep=keep),), **kw)
 
 
 async def test_alone_the_call_leaves_and_what_it_returns_carries_what_she_keeps():
@@ -267,9 +288,18 @@ async def test_alone_the_call_leaves_and_what_it_returns_carries_what_she_keeps(
         assert "Grand soleil sur Lyon" in got.content
 
 
+async def test_what_she_keeps_comes_from_the_row_that_matched():
+    t = offered_tool(access=(Access(who=WHO_OWNER, when=("conversation",), read="seule", keep="rien"),
+                             Access(who=WHO_OWNER, read="seule", keep="public")))
+    got = await call(t, Ctx(OWNER, "user_1"))
+    assert got.unkept
+    got = await call(t, Ctx(WORK, None, kind=Kind.STEP))
+    assert not got.unkept and got.floor == 0
+
+
 async def test_a_card_goes_to_the_authenticated_person_in_front():
     ctx = Ctx(ACCOUNT, "user_2")
-    got = await call(offered_tool(autonomy="carte", with_accounts=True, keep="prive", fingerprint="f1"), ctx)
+    got = await call(asking("carte", WHO_ACCOUNTS, fingerprint="f1"), ctx)
     args = ctx.payload()
     assert got.ok and "rien n'est encore parti" in got.content and ctx.ports["mcp"].calls == []
     assert args[rt.DECIDER] == "user_2" and args["approval"] == "conversation" and args["target"] == "user_2"
@@ -278,7 +308,7 @@ async def test_a_card_goes_to_the_authenticated_person_in_front():
 
 async def test_her_approval_before_someone_else_goes_to_the_operator():
     ctx = Ctx(ACCOUNT, "user_2")
-    await call(offered_tool(autonomy="toi", with_accounts=True), ctx)
+    await call(asking("toi", WHO_ACCOUNTS), ctx)
     args = ctx.payload()
     assert rt.DECIDER not in args and args["approval"] == "operateur" and args["target"] == "user_2"
     assert ctx.ports["mcp"].calls == []
@@ -286,21 +316,21 @@ async def test_her_approval_before_someone_else_goes_to_the_operator():
 
 async def test_her_approval_before_her_is_a_card():
     ctx = Ctx(OWNER, "user_1")
-    await call(offered_tool(autonomy="toi"), ctx)
+    await call(asking("toi"), ctx)
     args = ctx.payload()
     assert args[rt.DECIDER] == "user_1" and args["approval"] == "conversation"
 
 
 async def test_working_alone_nobody_can_accept_so_the_operator_decides():
     ctx = Ctx(WORK, None, kind=Kind.STEP)
-    await call(offered_tool(autonomy="carte"), ctx)
+    await call(asking("carte"), ctx)
     args = ctx.payload()
     assert rt.DECIDER not in args and args["approval"] == "operateur" and args["target"] == ""
 
 
-async def test_out_of_its_service_nothing_leaves_and_without_port_nothing_either():
+async def test_out_of_its_rows_nothing_leaves_and_without_port_nothing_either():
     ctx = Ctx(STRANGER, "web_x")
-    got = await call(offered_tool(with_accounts=True), ctx)
+    got = await call(asking("seule", WHO_ACCOUNTS), ctx)
     assert not got.ok and got.content == phrase("mcp.tools.closed")
     assert ctx.ports["mcp"].calls == [] and ctx.proposed == []
     ctx = Ctx(OWNER, "user_1")

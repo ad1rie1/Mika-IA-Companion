@@ -11,9 +11,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from mika.adapters.mcp.config import McpServer
+from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.mcp.system import Provided
 from mika.plugins import web
+from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER
 
 #: les plugins qui apportent un serveur : quand leurs paramètres changent, le client MCP se reconfigure
 OWNERS = frozenset({web.WEB.name})
@@ -29,8 +30,13 @@ def provided(params_of: Callable[[str], Any]) -> dict[str, Provided]:
 
 
 def spec(s: web.SystemServer) -> McpServer:
+    """Son serveur, ses lignes d'accès d'après les paramètres du plugin (ADR 0131) : avec toi quand elle répond (et
+    quand elle travaille, s'il le dit), avec les comptes s'il le dit ; elle lit seule, te demande avant d'agir, et ce
+    qu'elle y lit est public. Personne d'autre : la ligne par défaut est fermée."""
+    mine = ("conversation", "travail") if s.in_work else ("conversation",)
+    rows = [AccessRule(who=WHO_OWNER, when=mine, read="seule", act="toi", keep="public")]
+    if s.audience == "comptes":
+        rows.append(AccessRule(who=WHO_ACCOUNTS, when=("conversation",), read="seule", act="toi", keep="public"))
     return McpServer(purpose=s.purpose, when_to_use=s.when_to_use, enabled=True, transport="local", command=s.command,
-                     args=s.args, env=s.env, network="isole", shared=s.shared, with_owner=True,
-                     with_accounts=s.audience == "comptes", in_conversation=True, in_initiative=False,
-                     in_work=s.in_work, in_hand=False, keep="public",
+                     args=s.args, env=s.env, network="isole", shared=s.shared, access=tuple(rows), in_hand=False,
                      timeout_s=s.timeout_s, max_calls=s.max_calls, max_result_chars=s.max_result_chars)

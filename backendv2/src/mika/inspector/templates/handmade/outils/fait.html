@@ -1,120 +1,114 @@
-{# Un service branché › « Réglages du service » (app/handmade/servers.py, ADR 0128, 0129, 0130) : la phrase (et ce
-   qu'elle ne dit pas : il ne sert à personne, des outils plus libres que lui), un genre pour aller vite, puis quatre
-   questions numérotées — avec qui, quand, avant un outil, ce qu'elle y lit. Les formulaires sont ceux des actions
-   ``mcp.genre`` et ``mcp.service`` (jeton, retour, audit), dessinés ici. #}
+{# Un service branché › « Accès aux outils » (app/handmade/servers.py, ADR 0131) : un tableau de lignes lues de haut en
+   bas, comme les règles d'un pare-feu — qui, quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce
+   qu'elle en garde, à quels outils —, puis le comportement par défaut, obligatoire. Pour un outil, la première ligne qui
+   le concerne décide. Le formulaire est celui de l'action ``mcp.acces`` : chaque bouton (ajouter, monter, descendre,
+   retirer, enregistrer) envoie tout le tableau, rien de ce qu'on a changé ne se perd. #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
 {% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
 {%- endmacro %}
-{% macro check(path, on, label, hint) -%}
-<input type="hidden" name="_champs" value="{{ path }}">
-<label class="service-check"><input type="checkbox" name="{{ path }}"{{ ' checked' if on }}> <span><b>{{ label }}</b>{% if hint %}<span>{{ hint }}</span>{% endif %}</span></label>
+{% macro pick(name, options, current, label, locked) -%}
+<select name="{{ name }}" aria-label="{{ label }}" class="access-select {{ current }}"{{ ' disabled' if locked }}>
+  {% for k, text in options %}<option value="{{ k }}"{{ ' selected' if k == current }}>{{ text }}</option>{% endfor %}
+</select>
 {%- endmacro %}
-{% macro ladder(path, steps, current, label) -%}
-<input type="hidden" name="_champs" value="{{ path }}">
-<div class="service-ladder" role="radiogroup" aria-label="{{ label }}">
-  {% for s in steps %}
-  <label class="service-step{{ ' on' if s.key == current }}">
-    <input type="radio" name="{{ path }}" value="{{ s.key }}"{{ ' checked' if s.key == current }}>
-    <span class="service-step-n">{{ loop.index }}</span>
-    <span class="service-step-name">{{ s.name }}</span>
-    <span class="service-step-what">{{ s.what }}</span>
-    {% if s.later %}<span class="service-step-later">Plus tard, à quelqu'un d'autre : <b>{{ s.later }}</b></span>{% endif %}
-  </label>
-  {% endfor %}
-</div>
-{%- endmacro %}
+{% set locked = system or not form %}
 <div class="now-page service">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
-  <section class="now-card service-said" aria-labelledby="service-phrase">
-    <header class="now-card-head">
-      <h2 id="service-phrase">En une phrase</h2>
-      <span class="now-tag info">{{ genre }}</span>
-    </header>
-    <p class="service-sentence">{{ sentence }}</p>
-    {% if system %}<p class="now-muted">Un serveur du système : il suit les paramètres de son plugin et ne se règle pas ici.</p>{% endif %}
-  </section>
-
-  {% if genre_form and not system %}
-  <section class="now-card" aria-labelledby="service-genres">
-    <header class="now-card-head">
-      <h2 id="service-genres">Pour aller vite : un genre</h2>
-      <p>Un genre répond d'un coup aux quatre questions plus bas. Un clic l'applique aussitôt (ce que tu as changé plus bas sans l'enregistrer est perdu) ; tu ajustes ensuite.</p>
-    </header>
-    <ul class="service-genres" role="list">
-      {% for g in genres %}
-      <li>
-        <form method="post" action="{{ genre_form.url }}">
-          {{ plumbing(genre_form) }}
-          <input type="hidden" name="_champs" value="genre"><input type="hidden" name="genre" value="{{ g.key }}">
-          <button class="service-genre{{ ' on' if g.on }}" aria-pressed="{{ 'true' if g.on else 'false' }}">
-            <span class="service-genre-name">{{ g.label }}</span>
-            <span class="service-genre-example">{{ g.example }}</span>
-            <span class="service-genre-lines"><span>{{ g.who }}</span><span>{{ g.alone }}</span><span>{{ g.keep }}</span></span>
-          </button>
-        </form>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
-
-  {% if form and not system %}
-  <form method="post" action="{{ form.url }}" class="service-form">
+  {% if system %}<p class="server-alert info">Un serveur du système : il suit les paramètres de son plugin et ne se règle pas ici.</p>{% endif %}
+  <form method="post" action="{{ form.url if form else '' }}" class="access-form">
+    {% if not locked %}
     {{ plumbing(form) }}
-    <section class="now-card" aria-labelledby="service-who">
-      <header class="now-card-head">
-        <h2 id="service-who">1. Avec qui ?</h2>
-        <p>Personne d'autre ne s'en sert, aucun outil, quoi qu'on règle plus loin. Jamais dans un salon ni avec une inconnue.</p>
-      </header>
-      {{ check("avec_toi", with_owner, "Toi", "sa propriétaire, et quand elle travaille pour toi") }}
-      {{ check("avec_les_comptes", with_accounts, "Toutes les personnes qui ont un compte chez elle", "connectées à l'app ou au web, en tête-à-tête ; un compte de messagerie ne suffit pas") }}
-      <fieldset class="service-people">
-        <legend>Des personnes choisies</legend>
-        <div class="service-people-row">
-        {% for slot in people_slots %}
-          <input type="hidden" name="_champs" value="{{ slot.path }}">
-          <label class="service-hidden" for="service-{{ slot.path }}">Personne choisie {{ loop.index }}</label>
-          <select id="service-{{ slot.path }}" name="{{ slot.path }}">
-            <option value="">{{ '+ ajouter une personne' if not slot.value else '— retirer —' }}</option>
-            {% for p in people %}<option value="{{ p.key }}"{{ ' selected' if p.key == slot.value }}>{{ p.name }}</option>{% endfor %}
-            {% if slot.value and slot.value not in people_keys %}<option value="{{ slot.value }}" selected>{{ slot.value }}</option>{% endif %}
-          </select>
-        {% endfor %}
+    {% for p in ("qui", "toujours", "moments", "lecture", "action", "garde", "tous", "prend", "defaut_lecture", "defaut_action", "defaut_garde", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
+    <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
+    {% endif %}
+    <section class="now-card access-card" aria-labelledby="access-title">
+      <header class="access-head">
+        <div>
+          <h2 id="access-title">Accès aux outils</h2>
+          <p>De haut en bas : pour chaque outil, <b>la première ligne qui correspond</b> (qui est en face, quand, et l'outil dans sa colonne « Outils ») décide. Aucune : le comportement par défaut. Ce qu'elle a sous la main, c'est l'ensemble des outils qu'une ligne lui ouvre. Jamais dans un salon ni avec une inconnue.</p>
         </div>
-        <p class="now-muted">Seulement authentifiées : sur un moyen de communication non vérifié, la personne compte comme une inconnue. Ce qu'elle lit pour l'une d'elles reste sa confidence.</p>
-      </fieldset>
-    </section>
-
-    <section class="now-card" aria-labelledby="service-when">
-      <header class="now-card-head">
-        <h2 id="service-when">2. Quand ?</h2>
+        {% if not locked %}<button class="btn" name="faire" value="ajouter">+ Ajouter un accès aux outils</button>{% endif %}
       </header>
-      <div class="service-when">
-        {{ check("repond", "conversation" in episodes, "Quand elle répond", "") }}
-        {{ check("parle", "initiative" in episodes, "Quand elle prend la parole d'elle-même", "") }}
-        {{ check("travaille", "travail" in episodes, "Quand elle travaille seule", "un projet ou un but qui a pris ce service ; seulement avec toi") }}
+      <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Accès aux outils">
+        <table class="access-table">
+          <thead>
+            <tr>
+              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Quand</th>
+              <th scope="col">Politique de lecture</th><th scope="col">Politique d'action</th>
+              <th scope="col">Politique de mémorisation</th><th scope="col">Outils</th>
+              {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="access-n">{{ r.n }}</td>
+              <td>{{ pick("qui." ~ r.n, r.whos, r.who, "Qui, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <details class="access-tools access-when">
+                  <summary>{{ r.when_said }}</summary>
+                  <div class="access-tools-list">
+                    <label class="access-tool all"><input type="checkbox" name="toujours.{{ r.n }}"{{ ' checked' if r.always }}{{ ' disabled' if locked }}> <b>Toujours</b><span>à tout moment</span></label>
+                    {% for m in r.moments %}
+                    <label class="access-tool"><input type="checkbox" name="moments.{{ r.n }}|{{ m.key }}"{{ ' checked' if m.on }}{{ ' disabled' if locked }}> {{ m.label }}</label>
+                    {% endfor %}
+                  </div>
+                </details>
+              </td>
+              <td>{{ pick("lecture." ~ r.n, policies, r.read, "Politique de lecture, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("action." ~ r.n, policies, r.act, "Politique d'action, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("garde." ~ r.n, keeps, r.keep, "Politique de mémorisation, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <details class="access-tools">
+                  <summary>{{ r.said }}</summary>
+                  <div class="access-tools-list">
+                    <label class="access-tool all"><input type="checkbox" name="tous.{{ r.n }}"{{ ' checked' if r.all }}{{ ' disabled' if locked }}> <b>Tous ses outils</b><span>même ceux qu'il proposera plus tard</span></label>
+                    {% for t in r.tools %}
+                    <label class="access-tool"><input type="checkbox" name="prend.{{ r.n }}|{{ t.name }}"{{ ' checked' if t.on }}{{ ' disabled' if locked }}> <code>{{ t.name }}</code> <span class="now-tag {{ 'info' if t.nature == 'lit' else 'warn' }}">{{ t.nature }}</span>{% if t.state != 'servi' %} <span class="now-tag muted">{{ t.state }}</span>{% endif %}</label>
+                    {% endfor %}
+                  </div>
+                </details>
+              </td>
+              {% if not locked %}
+              <td class="access-move">
+                <button class="btn quiet" name="faire" value="monter:{{ r.n }}"{{ ' disabled' if r.first }} aria-label="Monter la ligne {{ r.n }}" title="Monter">↑</button>
+                <button class="btn quiet" name="faire" value="descendre:{{ r.n }}"{{ ' disabled' if r.last }} aria-label="Descendre la ligne {{ r.n }}" title="Descendre">↓</button>
+                <button class="btn quiet danger" name="faire" value="retirer:{{ r.n }}" aria-label="Retirer la ligne {{ r.n }}" title="Retirer">✕</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="access-default">
+              <td class="access-n"></td>
+              <th scope="row" colspan="2">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
+              <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, politique de lecture", locked) }}</td>
+              <td>{{ pick("defaut_action", policies, default.act, "Par défaut, politique d'action", locked) }}</td>
+              <td>{{ pick("defaut_garde", keeps, default.keep, "Par défaut, politique de mémorisation", locked) }}</td>
+              <td class="access-all">Tous</td>
+              {% if not locked %}<td></td>{% endif %}
+            </tr>
+          </tbody>
+        </table>
       </div>
+      {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès aux outils » ouvre une ligne, que tu règles.</p>{% endif %}
+      {% if not known %}<p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge, puis choisis-les dans <a href="{{ tools_tab }}">« Ses outils »</a>.</p>{% endif %}
+      {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
     </section>
-
-    <section class="now-card" aria-labelledby="service-alone">
-      <header class="now-card-head">
-        <h2 id="service-alone">3. Avant de se servir d'un de ses outils, elle…</h2>
-        <p>De gauche à droite, de plus en plus prudente. Un outil peut faire autrement : c'est dit sur sa ligne, dans « Ses outils ».</p>
-      </header>
-      {{ ladder("seule", autonomies, autonomy, "Avant de se servir d'un de ses outils, elle…") }}
-    </section>
-
-    <section class="now-card" aria-labelledby="service-keep">
-      <header class="now-card-head">
-        <h2 id="service-keep">4. Ce qu'elle y lit, elle…</h2>
-        <p>Ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a rendu. À partir de maintenant : ce qu'elle a déjà gardé ne change pas. Un outil peut faire autrement (dans « Ses outils »).</p>
-      </header>
-      {{ ladder("garde", keeps, keep, "Ce qu'elle y lit, elle…") }}
-    </section>
-
-    <div class="form-actions-inline"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ form.back }}">Annuler</a></div>
   </form>
-  {% endif %}
+
+  <section class="now-card access-legend" aria-labelledby="access-legend">
+    <h2 id="access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
+    <dl>
+      <div><dt>Qui</dt><dd><b>Toi</b> : en tête-à-tête, et quand elle travaille seule pour toi · <b>Les comptes</b> : toute personne qui a un compte chez elle, en tête-à-tête · une personne par son nom, reconnue seulement connectée. Jamais un salon ni une inconnue.</dd></div>
+      <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la politique de lecture, un outil qui agit (créer, envoyer, exécuter, supprimer) celle d'action — c'est réglé outil par outil dans <a href="{{ tools_tab }}">« Ses outils »</a>.</dd></div>
+      <div><dt>Seule</dt><dd>Elle s'en sert sans demander : l'appel part aussitôt.</dd></div>
+      <div><dt>Demande à la personne</dt><dd>Une carte dans le chat de la personne en face ; quand elle travaille seule, la demande t'attend dans la console.</dd></div>
+      <div><dt>Ton accord</dt><dd>Une carte dans ton chat quand c'est toi en face ; sinon la demande t'attend dans la console (« À valider »).</dd></div>
+      <div><dt>Non</dt><dd>L'outil ne lui est pas offert.</dd></div>
+      <div><dt>Mémorisation</dt><dd><b>Ce qu'elle sait</b> : peut devenir un savoir et se raconter · <b>un souvenir</b> : comme ce qu'on lui raconte · <b>une confidence</b> : elle en reparle avec la personne, jamais à quelqu'un d'autre · <b>rien</b> : elle s'en sert sur le moment, puis l'oublie.</dd></div>
+    </dl>
+  </section>
 </div>

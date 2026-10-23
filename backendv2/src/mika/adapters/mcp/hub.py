@@ -39,16 +39,14 @@ from mika.adapters.mcp.config import (
 from mika.adapters.mcp.http import HttpTransport
 from mika.adapters.mcp.stdio import Launcher, Sandbox, StdioTransport
 from mika.ports.mcp import (
+    MOMENTS,
     NATURES,
-    TOOL_AUTONOMIES,
-    TOOL_KEEPS,
+    Access,
     CallResult,
     LiveTool,
     OfferedTool,
     ServerStatus,
     ToolReview,
-    tool_autonomy,
-    tool_keep,
 )
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
@@ -135,28 +133,22 @@ class McpHub:
             if not spec.enabled or not spec.ready or st is None or st.broken or not st.listed:
                 continue
             live = {t.remote: t for t in st.live}
+            rows, default = access_of(spec)
             for remote, rv in sorted(reviews.get(name, {}).items()):
                 tool = live.get(remote)
                 if not rv.enabled or tool is None or tool.fingerprint != rv.fingerprint:
                     continue
                 mine = tool_name(name, remote, taken)
                 taken.add(mine)
-                episodes = frozenset(k for k, on in (("conversation", spec.in_conversation),
-                                                     ("initiative", spec.in_initiative),
-                                                     ("travail", spec.in_work)) if on)
-                keep = tool_keep(spec.keep, rv.keep)
+                own = tuple(a for a in rows if a.concerns(remote))
                 out.append(OfferedTool(
                     server=name, remote=remote, name=mine,
                     description=rv.description or rv.server_description or tool.description,
-                    schema=rv.schema_ or tool.schema, nature=rv.nature, autonomy=autonomy_of(spec, rv),
-                    episodes=episodes, in_hand=spec.in_hand, max_calls=spec.max_calls,
+                    schema=rv.schema_ or tool.schema, nature=rv.nature,
+                    episodes=granted(own, default, rv.nature), in_hand=spec.in_hand, max_calls=spec.max_calls,
                     max_result_chars=spec.max_result_chars, purpose=inert(spec.purpose, 400),
                     when_to_use=inert(spec.when_to_use, 400), local=spec.local, fingerprint=rv.fingerprint,
-                    reads_world=keep == "public" and rv.nature == "lecture",
-                    with_owner=spec.with_owner, with_accounts=spec.with_accounts,
-                    with_people=tuple(p.strip() for p in spec.with_people if p.strip()),
-                    situations=tuple(sorted(rv.situations.items())), people=tuple(sorted(rv.people.items())),
-                    keep=keep))
+                    access=own, default=default))
         return out
 
     def statuses(self) -> list[ServerStatus]:
@@ -183,15 +175,12 @@ class McpHub:
             state, detail = "jamais", ""
         info = st.info
         reviews = {r: _review(r, v, tool_name(server, r)) for r, v in self._safe_reviews().get(server, {}).items()}
-        episodes = tuple(k for k, on in (("conversation", spec.in_conversation), ("initiative", spec.in_initiative),
-                                         ("travail", spec.in_work)) if on)
+        rows, default = access_of(spec)
         address = spec.url.strip() if not spec.local else " ".join((spec.command, *spec.args)).strip()
         return ServerStatus(
             name=server, kind=spec.transport, enabled=spec.enabled, ready=not problems, state=state, detail=detail,
-            purpose=spec.purpose, when_to_use=spec.when_to_use, address=address[:300],
-            with_owner=spec.with_owner, with_accounts=spec.with_accounts,
-            with_people=tuple(p.strip() for p in spec.with_people if p.strip()), autonomy=spec.autonomy,
-            keep=spec.keep, episodes=episodes, in_hand=spec.in_hand,
+            purpose=spec.purpose, when_to_use=spec.when_to_use, address=address[:300], access=rows, default=default,
+            in_hand=spec.in_hand,
             server_name=info.name if info else "", server_version=info.version if info else "",
             protocol=info.protocol if info else "", instructions=info.instructions if info else "",
             live=st.live, reviews=reviews, last_ok_at=st.last_ok_at, last_error_at=st.last_error_at,
@@ -345,14 +334,13 @@ class McpHub:
         return CallResult(False, phrase("mcp.unavailable"), reached=False)
 
     # ── les décisions de l'opérateur ──
-    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, autonomy: str,
-                     description: str, by: str, keep: str = "service") -> ToolReview:
+    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, description: str,
+                     by: str) -> ToolReview:
         """Approuver (ou désactiver) un outil tel que le serveur le propose maintenant : c'est cet instantané-là
-        qui sera servi ; s'il change, l'outil est suspendu jusqu'à un nouvel accord. Ses règles par situation et par
-        personne restent."""
-        if not valid_choice(nature, NATURES) or not valid_choice(autonomy, TOOL_AUTONOMIES) \
-                or not valid_choice(keep, TOOL_KEEPS):
-            raise ValueError("nature, accord ou ce qu'elle garde inconnus")
+        qui sera servi ; s'il change, l'outil est suspendu jusqu'à un nouvel accord. Qui peut quoi se dit par les
+        lignes d'accès de son serveur (ADR 0131)."""
+        if not valid_choice(nature, NATURES):
+            raise ValueError("nature inconnue : lecture ou action")
         reviews = self._safe_reviews()
         current = reviews.get(server, {}).get(remote)
         st = self._servers.get(server)
@@ -360,9 +348,7 @@ class McpHub:
         if tool is None and (enabled or current is None):
             raise ValueError("le serveur ne propose pas cet outil en ce moment : teste-le d'abord")
         if tool is not None:
-            stored = StoredReview(fingerprint=tool.fingerprint, enabled=enabled, nature=nature, autonomy=autonomy,
-                                  keep=keep, situations=dict(current.situations) if current else {},
-                                  people=dict(current.people) if current else {},
+            stored = StoredReview(fingerprint=tool.fingerprint, enabled=enabled, nature=nature,
                                   description=inert(description, MAX_DESCRIPTION), server_description=tool.description,
                                   title=tool.title, schema=dict(tool.schema), by=by, at=self._now())
         else:
@@ -372,8 +358,8 @@ class McpHub:
         return _review(remote, stored, tool_name(server, remote))
 
     async def settle(self, server: str, changes: Mapping[str, Any]) -> None:
-        """Ce qu'un serveur fait d'elle (ADR 0128) : avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde —
-        enregistré dans ses réglages, puis appliqué (ses outils sont recalculés)."""
+        """Ce qu'un serveur fait d'elle (ADR 0131) : ses lignes d'accès et sa ligne par défaut — enregistrées dans ses
+        réglages, puis appliquées (ses outils sont recalculés)."""
         if self._settle is None:
             raise ValueError("les réglages des serveurs ne s'enregistrent pas d'ici")
         await self._settle(server, dict(changes))
@@ -389,24 +375,9 @@ class McpHub:
         await self.reconfigure()
         self._changed()
 
-    async def rule(self, server: str, remote: str, *, situations: Mapping[str, str], people: Mapping[str, str],
-                   by: str) -> ToolReview:
-        """Les règles d'un outil déjà regardé, par situation et par personne nommée (ADR 0128) : une règle absente
-        suit son service (ou sa situation)."""
-        reviews = self._safe_reviews()
-        current = reviews.get(server, {}).get(remote)
-        if current is None:
-            raise ValueError("cet outil n'a pas encore été regardé : approuve-le d'abord")
-        stored = StoredReview.model_validate({
-            **current.model_dump(by_alias=True), "situations": {k: v for k, v in situations.items() if v},
-            "people": {k.strip(): v for k, v in people.items() if k.strip() and v}, "by": by, "at": self._now()})
-        await self._store(server, remote, stored, reviews)
-        return _review(remote, stored, tool_name(server, remote))
-
     async def decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
         """Les outils nouveaux ou changés, d'un coup (ADR 0129) : coupé (``non``), ou servi tel qu'il est maintenant,
-        en ``lecture`` ou en ``action`` — un outil déjà regardé garde son accord, ce qu'elle en garde, sa
-        description et ses règles. Seuls comptent les outils que le serveur propose et qui attendent un regard ;
+        en ``lecture`` ou en ``action`` — un outil déjà regardé garde sa description. Seuls comptent les outils que le serveur propose et qui attendent un regard ;
         un autre nom est refusé. Rend ce qui a été appliqué."""
         reviews = self._safe_reviews()
         st = self._servers.get(server)
@@ -476,9 +447,8 @@ class McpHub:
 
     def _changed(self) -> None:
         """Prévenir (une fois par changement réel de l'offre) : le noyau recalcule ses outils."""
-        key = tuple((t.name, t.server, t.remote, t.description, t.autonomy, t.nature, tuple(sorted(t.episodes)),
-                     t.with_owner, t.with_accounts, t.with_people, t.situations, t.people, t.keep, t.in_hand)
-                    for t in self.offered())
+        key = tuple((t.name, t.server, t.remote, t.description, t.nature, tuple(sorted(t.episodes)), t.access,
+                     t.default, t.in_hand) for t in self.offered())
         if key == self._last_offer:
             return
         self._last_offer = key
@@ -520,14 +490,25 @@ class McpHub:
 
 def _review(remote: str, v: StoredReview, name: str = "") -> ToolReview:
     return ToolReview(remote=remote, fingerprint=v.fingerprint, enabled=v.enabled, nature=v.nature,
-                      autonomy=v.autonomy, keep=v.keep, situations=dict(v.situations), people=dict(v.people),
                       description=v.description, server_description=v.server_description,
                       title=v.title, schema=v.schema_, by=v.by, at=v.at, name=name)
 
 
-def autonomy_of(spec: McpServer, rv: StoredReview) -> str:
-    """L'accord d'un outil quand aucune règle de situation ni de personne ne le change (ADR 0128)."""
-    return tool_autonomy(spec.autonomy, rv.autonomy, rv.nature)
+def access_of(spec: McpServer) -> tuple[tuple[Access, ...], Access]:
+    """Les lignes d'accès d'un serveur, dans leur ordre, et sa ligne par défaut (ADR 0131)."""
+    rows = tuple(Access(who=a.who, when=tuple(a.when), read=a.read, act=a.act, keep=a.keep, tools=tuple(a.tools))
+                 for a in spec.access)
+    return rows, Access(who="", read=spec.default_read, act=spec.default_act, keep=spec.default_keep)
+
+
+#: tous les moments : ceux d'une ligne qui vaut toujours
+_ALWAYS = frozenset(k for k, _ in MOMENTS)
+
+
+def granted(rows: tuple[Access, ...], default: Access, nature: str) -> frozenset[str]:
+    """Les familles d'épisodes où une de ses lignes (ou la ligne par défaut) peut le laisser servir : ce qu'on lui
+    offre au plus. Qui l'a vraiment se décide devant chaque audience (``plugins.mcp.access_for``)."""
+    return frozenset().union(*(frozenset(a.when) or _ALWAYS for a in (*rows, default) if a.level(nature) != "non"))
 
 
 def _said(exc: BaseException) -> str:

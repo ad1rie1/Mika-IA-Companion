@@ -1,43 +1,34 @@
-{# Un service branché › « Ses outils » (app/handmade/servers.py, ADR 0128, 0129, 0130) : le réglage du service, qui vaut
-   pour tous ; ce qui attend ton regard (nouveau ou changé), chacun avec sa description entière et ce que le serveur en
-   dit, un choix par outil — rien ne se sert sans lui (le formulaire de l'action ``mcp.revoir``) ; puis ce qui lit et ce
-   qui agit, un outil par ligne — son état, ce qu'il fait devant chacun, où il s'écarte du service. La ligne se déplie
-   sur son réglage, d'un seul envoi, ses exceptions par situation et par personne repliées dedans (le formulaire de
-   l'action ``mcp.regler``, dessiné ici). #}
+{# Un service branché › « Ses outils » (app/handmade/servers.py, ADR 0129, 0130, 0131) : qui peut s'en servir (ses
+   lignes d'accès, réglées dans « Accès aux outils ») ; ce qui attend ton regard (nouveau ou changé), chacun avec sa
+   description entière et ce que le serveur en dit, un choix par outil — rien ne se sert sans lui (le formulaire de
+   l'action ``mcp.revoir``) ; puis ce qui lit et ce qui agit, un outil par ligne — son état, ce qu'il fait devant
+   chacun d'après ses lignes d'accès. La ligne se déplie sur son réglage : servi, il lit ou il agit, ce qu'elle lit de
+   lui (le formulaire de l'action ``mcp.regler``, dessiné ici). #}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
 {% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
 {%- endmacro %}
-{% macro choose(id, path, options, current, label) -%}
-<input type="hidden" name="_champs" value="{{ path }}">
-<label class="service-hidden" for="{{ id }}">{{ label }}</label>
-<select id="{{ id }}" name="{{ path }}" class="rule-select{{ ' on' if current not in ('service', 'situation') }}">
-  {% for k, text in options %}<option value="{{ k }}"{{ ' selected' if k == current }}>{{ text }}</option>{% endfor %}
-</select>
-{%- endmacro %}
 {% macro head(t) -%}
 <span class="tools-row-main">
   <code>{{ t.name }}</code>
   {% if t.what %}<span class="tools-row-what">{{ t.what }}</span>{% endif %}
-  {% if t.cells %}<span class="tools-row-who">{% for c in t.cells %}<span{% if c.note %} title="{{ c.note }}"{% endif %}>{{ c.label }} : <b>{{ c.word }}</b></span>{% endfor %}<span>garde : <b>{{ t.keep.word }}</b></span></span>{% endif %}
+  {% if t.cells %}<span class="tools-row-who">{% for c in t.cells %}<span{% if c.note %} title="{{ c.note }}"{% endif %}>{{ c.label }} : <b>{{ c.word }}</b>{% if c.keep %} · {{ c.keep }}{% endif %}</span>{% endfor %}</span>{% endif %}
 </span>
 <span class="tools-row-tags">
   <span class="now-tag {{ t.tone }}">{{ t.state }}</span>
-  {% if t.looser %}<span class="now-tag warn" title="{{ t.looser }}">plus libre que le service</span>{% endif %}
-  {% if t.stricter %}<span class="now-tag info" title="{{ t.stricter }}">plus serré que le service</span>{% endif %}
-  {% if t.rules %}<span class="now-tag info">{{ t.rules }}</span>{% endif %}
+  {% if t.closed %}<span class="now-tag warn">aucune ligne d'accès ne l'ouvre</span>{% endif %}
 </span>
 {%- endmacro %}
 <div class="now-page service">
   {% for a in alerts %}<p class="server-alert {{ a.tone }}">{{ a.text }}{% if a.href %} <a href="{{ a.href }}">{{ a.link }}</a>{% endif %}</p>{% endfor %}
   <section class="now-card tools-default" aria-labelledby="tools-default">
     <div>
-      <h2 id="tools-default">Par défaut, pour tous ses outils</h2>
-      <p class="tools-default-said">Avant un outil, elle {{ alone }} · ce qu'elle y lit, elle {{ keep }}</p>
-      <p class="now-muted">Les réglages du service ({{ genre }}). Un outil qui fait autrement le dit sur sa ligne ; clique une ligne pour la régler.</p>
+      <h2 id="tools-default">Qui peut s'en servir</h2>
+      <p class="tools-default-said">{{ access_said[:1]|upper }}{{ access_said[1:] }}</p>
+      <p class="now-muted">Qui, quand, ce qu'elle en fait et ce qu'elle en garde se règlent en lignes dans « Accès aux outils ». Ici, outil par outil : servi ou non, et s'il lit ou s'il agit (la colonne de ses lignes qui s'applique).</p>
     </div>
-    <a class="btn quiet" href="{{ service_tab }}">Changer</a>
+    <a class="btn quiet" href="{{ access_tab }}">Accès aux outils</a>
   </section>
 
   {% if waiting and decide_form %}
@@ -49,7 +40,7 @@
     <header class="now-card-head">
       <h2 id="tools-review">À regarder</h2>
       <span class="person-count now-num">{{ waiting|length }}</span>
-      <p>Nouveaux, ou changés depuis ton accord : aucun ne lui sert tant que tu n'as pas choisi. Lis ce qu'il fait, puis dis s'il <b>lit</b> (rien ne change ailleurs) ou s'il <b>agit</b> (créer, envoyer, exécuter, supprimer) : le serveur ne le dit pas toujours, ou se trompe. Servi, il suit les réglages du service.</p>
+      <p>Nouveaux, ou changés depuis ton accord : aucun ne lui sert tant que tu n'as pas choisi. Lis ce qu'il fait, puis dis s'il <b>lit</b> (rien ne change ailleurs) ou s'il <b>agit</b> (créer, envoyer, exécuter, supprimer) : le serveur ne le dit pas toujours, ou se trompe. Servi, il suit ses lignes d'accès.</p>
     </header>
     <ul class="tools-review-rows" role="list">
       {% for t in waiting %}
@@ -98,48 +89,12 @@
                 <label class="plug-option"><input type="radio" name="nature" value="lecture"{{ ' checked' if e.nature == 'lecture' }}><span>lit</span></label>
                 <label class="plug-option"><input type="radio" name="nature" value="action"{{ ' checked' if e.nature == 'action' }}><span>agit</span></label>
               </fieldset>
-              <div class="tool-edit-field">
-                <span class="tool-edit-label">Avant de s'en servir, elle…</span>
-                {{ choose("seule-" ~ t.name, "seule", e.before, e.own, "Avant de s'en servir, elle…") }}
-              </div>
-              <div class="tool-edit-field">
-                <span class="tool-edit-label">Ce qu'elle y lit, elle…</span>
-                {{ choose("garde-" ~ t.name, "garde", e.kept, e.keep, "Ce qu'elle y lit, elle…") }}
-              </div>
             </div>
             <div class="tool-edit-field">
               <input type="hidden" name="_champs" value="description">
               <label class="tool-edit-label" for="desc-{{ t.name }}">Ce qu'elle lit de lui pour décider de s'en servir</label>
               <textarea id="desc-{{ t.name }}" name="description" rows="2" placeholder="Vide : la description du serveur.">{{ e.description }}</textarea>
             </div>
-            <details class="tool-edit-rules"{{ ' open' if e.rules }}>
-              <summary>{% if e.rules %}Ses exceptions ({{ e.rules }}){% else %}Ajouter une exception, pour une situation ou une personne{% endif %}</summary>
-              <p class="now-muted">Rarement utile. Une exception change ce qu'elle fait dans une situation, ou devant une personne (qui passe avant sa situation) ; elle ne laisse jamais personne de plus que le service.</p>
-              <ul class="rule-rows" role="list">
-                {% for r in e.situations %}
-                <li class="rule-row{{ ' locked' if r.why }}">
-                  <div class="rule-who"><span class="rule-label">{{ r.label }}</span><span>{{ r.hint }}</span></div>
-                  {% if r.why %}<input type="hidden" name="_champs" value="{{ r.path }}"><input type="hidden" name="{{ r.path }}" value="{{ r.value }}"><span class="rule-locked">{{ r.why }}</span>
-                  {% else %}{{ choose(r.path ~ "-" ~ t.name, r.path, r.options, r.value, r.label) }}{% endif %}
-                </li>
-                {% endfor %}
-                {% for slot in e.slots %}
-                <li class="rule-row">
-                  <div class="rule-who">
-                    <input type="hidden" name="_champs" value="{{ slot.person_path }}">
-                    <label class="service-hidden" for="{{ slot.person_path }}-{{ t.name }}">Personne {{ loop.index }}</label>
-                    <select id="{{ slot.person_path }}-{{ t.name }}" name="{{ slot.person_path }}">
-                      <option value="">{{ '+ une personne' if not slot.person else '— retirer —' }}</option>
-                      {% for p in e.people %}<option value="{{ p.key }}"{{ ' selected' if p.key == slot.person }}>{{ p.name }}</option>{% endfor %}
-                      {% if slot.person and slot.person not in e.people_keys %}<option value="{{ slot.person }}" selected>{{ slot.person }}</option>{% endif %}
-                    </select>
-                    {% if slot.outside %}<span>hors du service : ajoute-la dans « Réglages du service »</span>{% endif %}
-                  </div>
-                  {{ choose(slot.level_path ~ "-" ~ t.name, slot.level_path, e.person_options, slot.level, "Ce qu'elle fait devant elle") }}
-                </li>
-                {% endfor %}
-              </ul>
-            </details>
             <div class="form-actions-inline"><button class="btn">Enregistrer</button></div>
           </form>
         </details>
@@ -154,5 +109,5 @@
     {% endif %}
   </section>
   {% endfor %}
-  <p class="now-muted">« Plus libre » ou « plus serré » : il fait autrement que le service (au survol, où). Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
+  <p class="now-muted">Sur chaque ligne, ce qu'elle en fait devant chacun et ce qu'elle en garde, d'après ses lignes d'accès (au survol, où se décide l'accord). Un outil que son serveur change est suspendu jusqu'à ton nouvel accord.</p>
 </div>

@@ -277,6 +277,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
             continue
         if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:
             continue
+        if spec.fits is not None and boundary.call(spec.fits, audience, kind, label=f"offre de {name}") is not True:
+            continue
         out[name] = spec
     return out
 

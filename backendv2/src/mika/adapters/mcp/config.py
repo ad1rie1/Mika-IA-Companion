@@ -2,8 +2,8 @@
 secrets scellés), jamais dans le journal ; le hub la relit à chaque usage.
 
 Ce que l'opérateur dit d'abord, c'est **à quoi sert le serveur, pour elle** : la ligne de son catalogue. Puis
-comment le joindre (une adresse, ou une commande sur cette machine), avec qui, quand, ce qu'elle fait seule, ce
-qu'elle en garde (ADR 0128), et ses bornes.
+comment le joindre (une adresse, ou une commande sur cette machine), qui peut quoi — ses lignes d'accès, lues de haut
+en bas, et la ligne par défaut (ADR 0131) —, et ses bornes.
 """
 
 from __future__ import annotations
@@ -11,14 +11,15 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
-from mika.ports.mcp import AUTONOMIES, KEEPS, RULE_LEVELS, TOOL_SITUATIONS
+from mika.ports.mcp import KEEPS, MOMENTS, POLICIES, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -41,6 +42,37 @@ NETWORKS = (("aucun", "aucun réseau"), ("isole", "réseau isolé (Internet, jam
 
 _LOCAL = ((("transport", ("local",)),))
 _REMOTE = ((("transport", ("distant",)),))
+
+
+_Policy = Literal["seule", "carte", "toi", "non"]
+_Keep = Literal["public", "perso", "prive", "rien"]
+_Moment = Literal["conversation", "initiative", "travail"]
+#: qui une ligne désigne : toi, les comptes, ou une personne nommée par sa clé
+WHO = re.compile(rf"(?:{WHO_OWNER}|{WHO_ACCOUNTS}|{WHO_PERSON}\S{{1,200}})")
+
+
+class AccessRule(BaseModel):
+    """Une ligne d'accès aux outils d'un serveur (ADR 0131), telle qu'elle est rangée : qui, quand, ce qu'elle fait
+    d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, et ses outils (vide : tous)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    who: str = Field(pattern=f"^{WHO.pattern}$")
+    #: ses moments ; vide (ou tous) : toujours
+    when: tuple[_Moment, ...] = ()
+    read: _Policy = "non"
+    act: _Policy = "non"
+    keep: _Keep = "rien"
+    tools: tuple[str, ...] = ()
+
+    @field_validator("when", mode="before")
+    @classmethod
+    def _moments(cls, value: Any) -> Any:
+        """Un seul moment écrit seul, « toujours », ou tous les moments : la même chose qu'une liste, ou que rien."""
+        if isinstance(value, str):
+            value = () if value == "toujours" else (value,)
+        got = tuple(dict.fromkeys(value or ()))
+        return () if {k for k, _ in MOMENTS} <= set(got) else got
 
 
 class McpServer(BaseModel):
@@ -99,32 +131,19 @@ class McpServer(BaseModel):
     shared: Annotated[tuple[str, ...], Knob(
         label="Dossiers partagés", group="Sur cette machine", order=25, only=_LOCAL,
         help="Un chemin absolu par ligne, en lecture seule ; « chemin:rw » pour qu'il puisse y écrire.")] = ()
-    with_owner: Annotated[bool, Knob(label="Avec toi", group="Avec qui", advanced=False, order=30,
-                                     help="Sa propriétaire, et quand elle travaille pour elle.")] = True
-    with_accounts: Annotated[bool, Knob(
-        label="Avec toute personne qui a un compte", group="Avec qui", advanced=False, order=31,
-        help="En tête-à-tête, authentifiée. Jamais dans un salon ni avec une inconnue, quel que soit ce choix. Ce "
-             "qu'elle met dans un appel part de la machine.")] = False
-    with_people: Annotated[tuple[str, ...], Knob(
-        label="Avec des personnes choisies", group="Avec qui", order=32,
-        help="Une clé de personne par ligne ; reconnue seulement authentifiée.")] = ()
-    in_conversation: Annotated[bool, Knob(label="Quand elle répond", group="Quand", advanced=False,
-                                          order=33)] = True
-    in_initiative: Annotated[bool, Knob(label="Quand elle prend la parole", group="Quand", order=34)] = False
-    in_work: Annotated[bool, Knob(label="Quand elle travaille", group="Quand", order=35,
-                                  help="Un pas sur un but ou une exécution de projet — seulement si le but ou le "
-                                       "projet a pris ce lot, et seulement s'il est « avec toi ».")] = False
-    in_hand: Annotated[bool, Knob(label="En main", group="Quand", order=36,
+    in_hand: Annotated[bool, Knob(label="En main", group="Ses outils", order=36,
                                   help="Décoché (conseillé) : ses outils sont à la demande, elle les cherche par ce "
                                        "qu'ils font quand elle en a besoin.")] = False
-    autonomy: Annotated[Literal["seule", "lit", "carte", "toi"], Knob(
-        label="Ce qu'elle fait seule", group="Ce qu'elle fait seule", choices=AUTONOMIES, advanced=False, order=37,
-        help="Un outil peut avoir son accord à lui, et une règle par situation ou par personne.")] = "carte"
-    keep: Annotated[Literal["public", "perso", "prive", "rien"], Knob(
-        label="Ce qu'elle en garde", group="Ce qu'elle en garde", choices=KEEPS, advanced=False, order=38,
-        help="Pour tout ce qui en sort : ce qu'elle en dit, ce qu'elle en retient la nuit, ce qu'un appel accepté a "
-             "rendu. « Ce qu'elle sait » seulement pour un serveur qui lit le monde public (une recherche, des "
-             "pages) : jamais pour un courrier, un agenda, des notes.")] = "prive"
+    access: Annotated[tuple[AccessRule, ...], Knob(
+        label="Accès à ses outils", group="Accès", order=37,
+        help="Les lignes se lisent de haut en bas : pour un outil, la première qui le concerne (qui, quand, ses "
+             "outils) décide ; aucune, c'est la ligne par défaut. Jamais dans un salon ni avec une inconnue.")] = ()
+    default_read: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", group="Accès", choices=POLICIES,
+                                          order=38)] = "non"
+    default_act: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", group="Accès", choices=POLICIES,
+                                         order=39)] = "non"
+    default_keep: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", group="Accès", choices=KEEPS,
+                                        order=40)] = "rien"
     timeout_s: Annotated[float, Knob(label="Délai d'un appel", group="Bornes", lo=1, hi=300, unit="s",
                                      order=40)] = 30.0
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
@@ -136,17 +155,13 @@ class McpServer(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _before_0128(cls, data: Any) -> Any:
-        """Une fiche d'avant l'ADR 0128 reste lisible : « pour qui » devient « avec qui », « ce qu'elle y lit devient
-        un savoir » devient « ce qu'elle en garde : public » ; la prochaine sauvegarde l'écrit sous la forme neuve."""
-        if not isinstance(data, dict) or ("audience" not in data and "learns" not in data):
+    def _before_0131(cls, data: Any) -> Any:
+        """Une fiche d'avant l'ADR 0131 reste lisible : ses réglages (avec qui, quand, ce qu'elle fait seule, ce
+        qu'elle en garde) deviennent les lignes qui font la même chose ; la prochaine sauvegarde l'écrit sous la forme
+        neuve. Les exceptions de ses outils, rangées à part, sont traduites par les réglages (``Settings.mcp``)."""
+        if not isinstance(data, dict) or not set(LEGACY_KEYS) & set(data):
             return data
-        data = dict(data)
-        if data.pop("audience", None) == "comptes":
-            data.setdefault("with_accounts", True)
-        if data.pop("learns", False):
-            data.setdefault("keep", "public")
-        return data
+        return access_from_0128(data)
 
     @property
     def local(self) -> bool:
@@ -204,6 +219,109 @@ class McpServer(BaseModel):
         data = self.model_dump(include={"transport", "url", "auth", "token", "header", "secret_headers", "ca_file",
                                         "command", "args", "env", "secret_env", "network", "shared"})
         return hashlib.sha256(canonical_json(data).encode()).hexdigest()
+
+
+# ── les réglages d'avant l'ADR 0131 ───────────────────────────────────────
+
+#: ce qu'un service disait de lui avant l'ADR 0131 (et avant l'ADR 0128 : ``audience``, ``learns``)
+LEGACY_KEYS = ("with_owner", "with_accounts", "with_people", "in_conversation", "in_initiative", "in_work", "autonomy",
+               "keep", "audience", "learns")
+#: un accord d'avant l'ADR 0131 : (ce qu'elle fait d'un outil qui lit, d'un outil qui agit)
+_AUTONOMIES = {"seule": ("seule", "seule"), "lit": ("seule", "carte"), "carte": ("carte", "carte"),
+               "toi": ("toi", "toi")}
+#: l'accord d'un outil d'avant l'ADR 0128 : ce qu'il devient
+LEGACY_APPROVALS = {"aucun": "seule", "conversation": "service", "operateur": "toi"}
+#: ses lignes, du plus précis au plus large : une personne nommée passe avant les comptes (elle en a un)
+_SPECIFIC = {WHO_ACCOUNTS: 1, WHO_OWNER: 2}
+
+
+def _whens(episodes: list[str], owner: bool) -> list[str] | None:
+    """Les moments d'une ligne : rien (toujours) quand elle vaut à tout moment où cette personne peut la voir (une
+    personne ne la voit jamais travailler), sinon les siens ; ``None`` : aucun, pas de ligne."""
+    every = {"conversation", "initiative", "travail"} if owner else {"conversation", "initiative"}
+    got = [e for e in episodes if owner or e != "travail"]
+    if not got:
+        return None
+    return [] if every <= set(got) else got
+
+
+def access_from_0128(data: Mapping[str, Any], tools: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """Les réglages d'un service d'avant l'ADR 0131 — avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde, et
+    les exceptions de ses outils (``tools`` : leurs décisions telles que rangées) — en lignes d'accès qui font la même
+    chose : celles des outils qui s'écartent du service d'abord (une personne nommée avant les comptes, les comptes
+    avant toi), puis celles du service. La ligne par défaut est fermée : avant, personne d'autre n'en avait."""
+    data = dict(data)
+    if data.pop("audience", None) == "comptes":
+        data.setdefault("with_accounts", True)
+    if data.pop("learns", False):
+        data.setdefault("keep", "public")
+    owner = bool(data.pop("with_owner", True))
+    accounts = bool(data.pop("with_accounts", False))
+    named = list(dict.fromkeys(str(p).strip() for p in data.pop("with_people", ()) or () if str(p).strip()))
+    episodes = [e for e, on in (("conversation", data.pop("in_conversation", True)),
+                                ("initiative", data.pop("in_initiative", False)),
+                                ("travail", data.pop("in_work", False))) if on]
+    autonomy = str(data.pop("autonomy", "carte"))
+    keep = str(data.pop("keep", "prive"))
+    read, act = _AUTONOMIES.get(autonomy, ("carte", "carte"))
+    whos = ([WHO_OWNER] if owner else []) + [WHO_PERSON + p for p in named] + ([WHO_ACCOUNTS] if accounts else [])
+    service = [{"who": w, "when": when, "read": read, "act": act, "keep": keep, "tools": []}
+               for w in whos if (when := _whens(episodes, w == WHO_OWNER)) is not None]
+    rows: list[dict[str, Any]] = []
+    for remote, raw in sorted((tools or {}).items()):
+        rows += [{**r, "tools": [remote]} for r in _tool_rows(raw, owner, accounts, named, episodes, autonomy, keep)]
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for r in sorted(rows, key=lambda r: _SPECIFIC.get(r["who"], 0)):
+        key = (r["who"], tuple(r["when"]), r["read"], r["act"], r["keep"])
+        if key in merged:
+            merged[key]["tools"] += r["tools"]
+        else:
+            merged[key] = r
+    data["access"] = [*merged.values(), *service]
+    data.update(default_read="non", default_act="non", default_keep="rien")
+    return data
+
+
+def _tool_rows(raw: Mapping[str, Any], owner: bool, accounts: bool, named: list[str], episodes: list[str],
+               autonomy: str, keep: str) -> list[dict[str, Any]]:
+    """Les lignes d'un outil qui s'écarte de son service (son accord, ce qu'elle en garde, ses exceptions par
+    situation et par personne) ; aucune s'il fait comme lui. Un outil coupé n'en a pas : rien ne lui sert."""
+    raw = dict(raw)
+    if not raw.get("enabled"):
+        return []
+    nature = "lecture" if raw.get("nature", "lecture") == "lecture" else "action"
+    own = str(raw.get("autonomy") or LEGACY_APPROVALS.get(str(raw.get("approval") or ""), "service"))
+    service = _AUTONOMIES.get(autonomy, ("carte", "carte"))[0 if nature == "lecture" else 1]
+    base = service if own == "service" else own
+    kept = keep if raw.get("keep", "service") == "service" else str(raw["keep"])
+    situations = dict(raw.get("situations") or {})
+    people = dict(raw.get("people") or {})
+    talks = [e for e in episodes if e != "travail"]
+    out: list[dict[str, Any]] = []
+
+    def add(who: str, whens: list[str] | None, level: str) -> None:
+        if whens is not None and (level, kept) != (service, keep):
+            out.append({"who": who, "when": whens, "read": level, "act": level, "keep": kept})
+
+    for person, level in people.items():
+        if accounts or person in named:
+            add(WHO_PERSON + person, _whens(talks, False), level)
+    compte = situations.get("compte") or base
+    if accounts:
+        add(WHO_ACCOUNTS, _whens(talks, False), compte)
+    for person in named:
+        if person not in people:
+            add(WHO_PERSON + person, _whens(talks, False), compte)
+    if owner:
+        mine = situations.get("proprietaire") or base
+        work = situations.get("travail") or base
+        if "travail" in episodes and mine == work:
+            add(WHO_OWNER, _whens(episodes, True), mine)
+        else:
+            add(WHO_OWNER, talks or None, mine)
+            if "travail" in episodes:
+                add(WHO_OWNER, ["travail"], work)
+    return out
 
 
 def _header_lines(raw: str) -> list[str]:
@@ -290,43 +408,14 @@ class StoredReview(BaseModel):
     fingerprint: str
     enabled: bool = False
     nature: Literal["lecture", "action"] = "lecture"
-    autonomy: Literal["service", "seule", "carte", "toi"] = "service"
-    #: ce qu'elle garde de ce qu'il rend (ADR 0129) : ``service`` suit son serveur
-    keep: Literal["service", "public", "perso", "prive", "rien"] = "service"
-    #: ses règles par situation (``TOOL_SITUATIONS``) et par personne nommée (``RULE_LEVELS``) — ADR 0128
-    situations: dict[str, str] = Field(default_factory=dict)
-    people: dict[str, str] = Field(default_factory=dict)
+    #: (son accord, ce qu'elle en gardait et ses exceptions d'avant l'ADR 0131, encore rangés, sont devenus des lignes
+    #: d'accès de son serveur : ignorés ici)
     description: str = ""
     server_description: str = ""
     title: str = ""
     schema_: dict[str, Any] = Field(default_factory=dict, alias="schema")
     by: str = ""
     at: int = 0
-
-    @model_validator(mode="before")
-    @classmethod
-    def _before_0128(cls, data: Any) -> Any:
-        """L'accord d'avant l'ADR 0128 (``approval``) devient l'accord de l'outil : « dans la conversation » était
-        l'accord par défaut, celui de son serveur aujourd'hui."""
-        if not isinstance(data, dict) or "approval" not in data or "autonomy" in data:
-            return data
-        data = dict(data)
-        data["autonomy"] = LEGACY_APPROVALS.get(str(data.pop("approval")), "service")
-        return data
-
-    @model_validator(mode="after")
-    def _rules(self) -> StoredReview:
-        situations = {k for k, _ in TOOL_SITUATIONS}
-        levels = {k for k, _ in RULE_LEVELS}
-        if any(k not in situations or v not in levels for k, v in self.situations.items()):
-            raise ValueError("règle de situation inconnue")
-        if any(not k or v not in levels for k, v in self.people.items()):
-            raise ValueError("règle de personne inconnue")
-        return self
-
-
-#: l'accord d'un outil d'avant l'ADR 0128 : ce qu'il devient
-LEGACY_APPROVALS = {"aucun": "seule", "conversation": "service", "operateur": "toi"}
 
 
 def valid_choice(value: str, choices: tuple[tuple[str, str], ...]) -> bool:

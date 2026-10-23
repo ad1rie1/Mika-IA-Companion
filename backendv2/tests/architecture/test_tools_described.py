@@ -24,8 +24,8 @@ def test_every_bundle_of_the_code_says_what_it_allows():
 
 def test_every_offer_condition_says_itself():
     registry = _registry()
-    silent = sorted(s.name for s in registry.tools.values()
-                    if s.when is not None and not (inspect.getdoc(s.when) or "").strip())
+    silent = sorted(s.name for s in registry.tools.values() for gate in (s.when, s.fits)
+                    if gate is not None and not (inspect.getdoc(gate) or "").strip())
     assert silent == [], f"conditions d'offre sans docstring : {silent}"
 
 

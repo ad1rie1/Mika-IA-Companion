@@ -18,10 +18,9 @@
         <div class="elsewhere-top">
           <p class="elsewhere-name">{% if s.href %}<a href="{{ s.href }}">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</p>
           <span class="now-tag {{ s.tone }}">{{ s.state }}</span>
-          {% if s.genre %}<span class="now-tag owner">{{ s.genre }}</span>{% endif %}
         </div>
         {% if s.purpose %}<p class="elsewhere-what">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</p>{% endif %}
-        {% if s.who %}<p class="elsewhere-three"><span>Avec {{ s.who }}</span><span>{{ s.alone[:1]|upper }}{{ s.alone[1:] }}</span><span>Garde : {{ s.keep }}</span></p>{% endif %}
+        {% if s.who %}<p class="elsewhere-three"><span>Avec {{ s.who }}</span><span>{{ s.access[:1]|upper }}{{ s.access[1:] }}</span></p>{% endif %}
         <p class="elsewhere-facts">
           <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
           {% if s.where %}<span>{{ s.where }}</span>{% endif %}

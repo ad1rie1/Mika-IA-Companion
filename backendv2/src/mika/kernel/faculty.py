@@ -209,6 +209,10 @@ class ToolSpec:
     #: ce qu'elle met dans ses arguments part de la machine, ce qu'il rend vient d'ailleurs (la règle de ses mains
     #: le lui dit)
     outside: bool = False
+    #: la condition d'offre quand elle dépend aussi de la sorte d'épisode (``fn(audience, kind) -> bool``) : un outil
+    #: venu d'ailleurs que ses lignes d'accès ouvrent quand elle répond, pas quand elle prend la parole (ADR 0131).
+    #: Le dernier champ : le décorateur ``tool`` construit les outils du code par position.
+    fits: Callable[[Any, str], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)

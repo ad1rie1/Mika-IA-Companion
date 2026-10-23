@@ -13,7 +13,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import blocks, columns, reader, servers
+from mika.app.handmade import blocks, columns, reader
 from mika.inspector import render
 from mika.inspector.ui import UI, Drawn, env
 from mika.kernel.inspect import Badge, Fields, Note, Ref, Row, Table, Text, When
@@ -46,9 +46,10 @@ class Elsewhere(Drawn):
                forms: Mapping[str, Any] | None = None) -> Any:
         plug = next((v for k, v in dict(forms or {}).items() if k.split("|", 1)[0] == "mcp.brancher"), None)
         if query.get("brancher") and plug is not None:
-            # brancher un service : trois questions (ADR 0128)
+            # brancher un service : à quoi il sert, comment le joindre (ADR 0128, 0131) — fermé tant qu'aucune ligne
+            # d'accès ne l'ouvre
             return Markup(env.get_template("handmade/outils/brancher.html").render(
-                form=plug, back=LIST, genres=servers.genre_cards("pro"), values={"genre": "pro", "ou": "local"}))
+                form=plug, back=LIST, values={"ou": "local"}))
         links, rest = _buttons(items)
         spec = ui.inspection.find(*APP_TOOLS)
         rest += ui.inspection.run(spec, {}, ui.when) if spec is not None else []
@@ -107,8 +108,7 @@ def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
             "purpose": _text(cell(row, "à quoi il lui sert")), "where": _text(cell(row, "où")),
             "served": given.strip(), "offered": offered.strip(), "review": int(review) if review.isdigit() else 0,
             "joined": render.cell(joined, shown)["text"] if isinstance(joined, When) else _text(joined),
-            "notes": notes, "genre": _text(cell(row, "genre")), "who": _text(cell(row, "avec qui")),
-            "alone": _text(cell(row, "seule")), "keep": _text(cell(row, "garde")),
+            "notes": notes, "who": _text(cell(row, "avec qui")), "access": _text(cell(row, "accès")),
         })
     return out
 

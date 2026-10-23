@@ -1,12 +1,13 @@
-{# Outils › Venus d'ailleurs › Brancher un service (app/handmade/tools.py, ADR 0128) : trois questions — à quoi il lui
-   sert, quel genre de service, comment le joindre. Le formulaire est celui de l'action ``mcp.brancher`` ; le reste
-   (en-tête nommé, autorité, variables, bornes) se règle ensuite dans ses réglages. #}
+{# Outils › Venus d'ailleurs › Brancher un service (app/handmade/tools.py, ADR 0128, 0131) : deux questions — à quoi
+   il lui sert, comment le joindre. Le formulaire est celui de l'action ``mcp.brancher`` ; le reste (en-tête nommé,
+   autorité, variables, bornes) se règle ensuite dans ses réglages, et qui peut quoi dans « Accès aux outils » : un
+   service branché est fermé tant qu'aucune ligne ne l'ouvre. #}
 <div class="now-page service">
   <h2 class="plug-title">Ajout d'un serveur MCP</h2>
   <form method="post" action="{{ form.url }}" class="service-form">
     <input type="hidden" name="csrf" value="{{ form.csrf }}"><input type="hidden" name="_op" value="{{ form.nonce }}">
     <input type="hidden" name="_retour" value="{{ back }}"><input type="hidden" name="_sujet" value="">
-    {% for p in ("nom", "a_quoi", "genre", "ou", "commande", "arguments", "variables", "adresse", "entetes") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("nom", "a_quoi", "ou", "commande", "arguments", "variables", "adresse", "entetes") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
 
     <section class="now-card" aria-labelledby="plug-what">
       <header class="now-card-head"><h2 id="plug-what">1. Le service</h2></header>
@@ -24,25 +25,8 @@
       </div>
     </section>
 
-    <section class="now-card" aria-labelledby="plug-genre">
-      <header class="now-card-head">
-        <h2 id="plug-genre">2. Quel genre de service ?</h2>
-        <p>Le genre règle d'un coup avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde. Tu ajustes ensuite, sur sa fiche.</p>
-      </header>
-      <div class="plug-genres" role="radiogroup" aria-label="Genre">
-        {% for g in genres %}
-        <label class="service-genre plug-genre">
-          <input type="radio" name="genre" value="{{ g.key }}"{{ ' checked' if g.key == values.genre }}>
-          <span class="service-genre-name">{{ g.label }}</span>
-          <span class="service-genre-example">{{ g.example }}</span>
-          <span class="service-genre-lines"><span>{{ g.who }}</span><span>{{ g.alone }}</span><span>{{ g.keep }}</span></span>
-        </label>
-        {% endfor %}
-      </div>
-    </section>
-
     <section class="now-card plug-connect" aria-labelledby="plug-where">
-      <header class="now-card-head"><h2 id="plug-where">3. Comment le joindre</h2></header>
+      <header class="now-card-head"><h2 id="plug-where">2. Comment le joindre</h2></header>
       <fieldset class="plug-transport">
         <legend>Transport</legend>
         <label class="plug-option"><input type="radio" name="ou" value="local"{{ ' checked' if values.ou == 'local' }}><span><b>Sur cette machine (stdio)</b><span>Lance une commande ici, isolée</span></span></label>
@@ -60,6 +44,6 @@
       <p class="now-muted">Une autorité de certification, le réseau, des dossiers partagés, les bornes : dans ses réglages, une fois branché. L'ancien transport SSE seul n'est pas pris en charge.</p>
     </section>
 
-    <div class="form-actions-inline"><button class="btn">Brancher</button> <a class="btn quiet" href="{{ back }}">Annuler</a> <span class="now-muted">Ses outils arrivent coupés : sur sa fiche (« Ses outils »), tu choisis lesquels servir, et s'ils lisent ou agissent.</span></div>
+    <div class="form-actions-inline"><button class="btn">Brancher</button> <a class="btn quiet" href="{{ back }}">Annuler</a> <span class="now-muted">Ses outils arrivent coupés : sur sa fiche, tu choisis lesquels servir et s'ils lisent ou agissent (« Ses outils »), puis qui peut s'en servir (« Accès aux outils ») — fermé tant qu'aucune ligne ne l'ouvre.</span></div>
   </form>
 </div>

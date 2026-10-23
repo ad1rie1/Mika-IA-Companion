@@ -1,7 +1,7 @@
 """Les outils venus d'ailleurs (ADR 0064) : ce que la faculté « mcp » voit des serveurs MCP branchés.
 
-Un serveur est déclaré par l'opérateur (à quoi il sert pour elle, comment le joindre, avec qui, quand, ce qu'elle
-fait seule et ce qu'elle en garde : ADR 0128) ; ses outils
+Un serveur est déclaré par l'opérateur (à quoi il sert pour elle, comment le joindre) ; qui peut quoi se dit par ses
+lignes d'accès, lues de haut en bas comme les règles d'un pare-feu, et la ligne par défaut (ADR 0131) ; ses outils
 ne lui sont offerts que tels qu'ils ont été **approuvés** — l'empreinte d'un outil (nom, description, schéma,
 annotations) qui change le suspend jusqu'à une nouvelle approbation. Le port rend cet instantané approuvé
 (``offered``), l'état de chaque serveur, et exécute un appel ; il ne décide jamais à qui un outil est offert (c'est
@@ -17,33 +17,52 @@ from typing import Any, Protocol
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
            ("action", "action — ça change quelque chose ailleurs"))
-#: ce qu'elle fait seule d'un serveur (ADR 0128) : s'en servir sans demander ; lire seule et demander pour agir ;
-#: demander à chaque appel (une carte à la personne en face) ; ou à sa propriétaire, à chaque appel
-AUTONOMIES = (("seule", "seule — elle s'en sert sans demander"),
-              ("lit", "lit seule, demande pour agir — lire ne change rien ; créer, envoyer, supprimer : un accord"),
-              ("carte", "demande à chaque appel — une carte à la personne en face ; quand elle travaille seule, la "
-                        "demande t'attend dans la console"),
-              ("toi", "te demande à chaque appel — une carte dans ton chat quand c'est toi en face ; sinon la demande "
-                      "t'attend dans la console (« À valider »)"))
-#: ce qu'un outil fait seul : comme son service, ou son accord à lui
-TOOL_AUTONOMIES = (("service", "comme le service"), ("seule", "seule"), ("carte", "demande à chaque appel"),
-                   ("toi", "te demande à chaque appel"))
-#: une règle d'outil dans une situation ou pour une personne : comme le service (ou sa situation), un accord, ou non
-RULE_LEVELS = (("seule", "oui, seule"), ("carte", "oui, sur accord de la personne"), ("toi", "oui, avec ton accord"),
-               ("non", "non"))
-#: les situations où un outil a une règle à lui (ADR 0128)
-TOOL_SITUATIONS = (("proprietaire", "toi"), ("compte", "une personne qui a un compte chez elle"),
-                   ("travail", "quand elle travaille seule"))
+#: ce qu'une ligne d'accès lui laisse faire d'un outil (ADR 0131) : seule, l'appel part aussitôt ; sur accord de la
+#: personne en face (une carte dans son chat ; sans personne en face, l'opérateur) ; sur ton accord à toi (une carte
+#: dans ton chat quand c'est toi en face, sinon la console) ; ou non : l'outil ne lui est pas offert
+POLICIES = (("seule", "seule — sans demander"), ("carte", "demande à la personne en face"),
+            ("toi", "demande ton accord"), ("non", "non"))
 #: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré
 KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"),
          ("perso", "un souvenir — comme ce qu'on lui raconte"),
          ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
          ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
-#: ce qu'elle garde de ce qu'un outil rend : comme son service, ou ce qu'il garde à lui
-TOOL_KEEPS = (("service", "comme le service"), *KEEPS)
+#: qui une ligne d'accès désigne (ADR 0131) : sa propriétaire, toute personne qui a un compte chez elle, ou une
+#: personne nommée (``personne:<clé>``, reconnue seulement authentifiée). Jamais un salon ni une inconnue.
+WHO_OWNER, WHO_ACCOUNTS, WHO_PERSON = "toi", "comptes", "personne:"
+#: les moments où une ligne d'accès vaut (plusieurs à la fois ; aucun : toujours)
+MOMENTS = (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
+           ("travail", "quand elle travaille seule"))
 #: les familles d'épisodes où un serveur peut servir
-EPISODES = (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
-            ("travail", "quand elle travaille (si le but ou le projet a pris ce lot)"))
+EPISODES = MOMENTS
+
+
+@dataclass(frozen=True, slots=True)
+class Access:
+    """Une ligne d'accès aux outils d'un serveur (ADR 0131) : qui, quand, ce qu'elle fait d'un outil qui lit et d'un
+    outil qui agit, ce qu'elle garde de ce qu'ils rendent, et à quels outils elle s'applique (vide : tous). Les
+    lignes se lisent de haut en bas : pour un outil, la première qui le concerne décide ; aucune, c'est la ligne par
+    défaut."""
+
+    who: str
+    #: ses moments (``MOMENTS``) ; vide : toujours
+    when: tuple[str, ...] = ()
+    read: str = "non"
+    act: str = "non"
+    keep: str = "rien"
+    tools: tuple[str, ...] = ()
+
+    def concerns(self, remote: str) -> bool:
+        return not self.tools or remote in self.tools
+
+    def level(self, nature: str) -> str:
+        """Ce qu'elle fait d'un outil de cette nature (``lecture`` ou ``action``)."""
+        return self.read if nature == "lecture" else self.act
+
+
+#: la ligne par défaut d'un service qu'on branche : fermé, comme un pare-feu
+CLOSED = Access(who="", read="non", act="non", keep="rien")
+
 
 #: l'état d'un serveur, du plus calme au plus grave
 STATES = {
@@ -54,21 +73,6 @@ STATES = {
     "erreur": "en erreur (il réessaie au prochain appel)",
     "panne": "en panne (trop d'échecs d'affilée : à relancer)",
 }
-
-
-def tool_autonomy(service: str, own: str, nature: str) -> str:
-    """L'accord d'un outil quand aucune règle de situation ni de personne ne le change (ADR 0128) : le sien, sinon
-    celui de son service — « lit seule, demande pour agir » selon sa nature."""
-    if own != "service":
-        return own
-    if service == "lit":
-        return "seule" if nature == "lecture" else "carte"
-    return service
-
-
-def tool_keep(service: str, own: str) -> str:
-    """Ce qu'elle garde de ce qu'un outil rend (ADR 0129) : le sien, sinon celui de son service."""
-    return service if own == "service" else own
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,13 +100,6 @@ class ToolReview:
     fingerprint: str
     enabled: bool = False
     nature: str = "lecture"
-    #: son accord à lui (``TOOL_AUTONOMIES``) : ``service`` suit son serveur
-    autonomy: str = "service"
-    #: ce qu'elle garde de ce qu'il rend (``TOOL_KEEPS``) : ``service`` suit son serveur
-    keep: str = "service"
-    #: ses règles par situation et par personne nommée (``RULE_LEVELS`` ; absente : comme le service, ou sa situation)
-    situations: Mapping[str, str] = field(default_factory=dict)
-    people: Mapping[str, str] = field(default_factory=dict)
     #: la description qu'elle lit (vide : celle du serveur, désamorcée)
     description: str = ""
     server_description: str = ""
@@ -125,8 +122,7 @@ class OfferedTool:
     description: str
     schema: Mapping[str, Any]
     nature: str
-    #: son accord quand aucune règle de situation ni de personne ne le change : ``seule``, ``carte`` ou ``toi``
-    autonomy: str
+    #: les familles d'épisodes où une de ses lignes (ou la ligne par défaut) le laisse servir (``EPISODES``)
     episodes: frozenset[str]
     in_hand: bool
     max_calls: int
@@ -137,18 +133,9 @@ class OfferedTool:
     local: bool
     #: l'empreinte approuvée (un appel proposé l'épingle : s'il change avant l'accord, l'accord est refusé)
     fingerprint: str = ""
-    #: un outil de lecture d'un serveur dont ce qu'elle lit est public (``keep``) : ce qu'elle y lit en travaillant se
-    #: garde comme une lecture (ADR 0085)
-    reads_world: bool = False
-    #: avec qui (ADR 0128) : sa propriétaire, toute personne qui a un compte, des personnes nommées (leurs clés)
-    with_owner: bool = True
-    with_accounts: bool = False
-    with_people: tuple[str, ...] = ()
-    #: ses règles par situation et par personne, triées (``RULE_LEVELS``)
-    situations: tuple[tuple[str, str], ...] = ()
-    people: tuple[tuple[str, str], ...] = ()
-    #: ce qu'elle garde de ce qu'il rend (``KEEPS``)
-    keep: str = "perso"
+    #: les lignes d'accès de son serveur qui le concernent, dans leur ordre, puis la ligne par défaut (ADR 0131)
+    access: tuple[Access, ...] = ()
+    default: Access = CLOSED
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,12 +150,9 @@ class ServerStatus:
     purpose: str = ""
     when_to_use: str = ""
     address: str = ""
-    with_owner: bool = True
-    with_accounts: bool = False
-    with_people: tuple[str, ...] = ()
-    autonomy: str = "carte"
-    keep: str = "prive"
-    episodes: tuple[str, ...] = ()
+    #: ses lignes d'accès, dans leur ordre, et sa ligne par défaut (ADR 0131)
+    access: tuple[Access, ...] = ()
+    default: Access = CLOSED
     in_hand: bool = False
     server_name: str = ""
     server_version: str = ""
@@ -227,11 +211,8 @@ class ExternalTools(Protocol):
 
     async def refresh(self, server: str | None = None) -> None: ...
 
-    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, autonomy: str,
-                     description: str, by: str, keep: str = "service") -> ToolReview: ...
-
-    async def rule(self, server: str, remote: str, *, situations: Mapping[str, str], people: Mapping[str, str],
-                   by: str) -> ToolReview: ...
+    async def review(self, server: str, remote: str, *, enabled: bool, nature: str, description: str,
+                     by: str) -> ToolReview: ...
 
     async def settle(self, server: str, changes: Mapping[str, Any]) -> None: ...
 
