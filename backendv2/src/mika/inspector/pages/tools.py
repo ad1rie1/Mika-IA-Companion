@@ -125,7 +125,7 @@ SITUATIONS: tuple[Situation, ...] = (
               _person("proprietaire", trust=ChannelTrust.AUTHENTICATED.value, owner=True)),
     Situation("compte", "un compte", "Elle répond à une personne qui a un compte, en tête-à-tête", Kind.REPLY,
               _person("compte", trust=ChannelTrust.AUTHENTICATED.value)),
-    Situation("inconnue", "une inconnue", "Elle répond à une inconnue (une adresse sans compte)", Kind.REPLY,
+    Situation("inconnue", "une inconnue", "Elle répond à une inconnue (un moyen de communication sans compte)", Kind.REPLY,
               _person("inconnue", trust=ChannelTrust.ACCOUNT.value, channel="external")),
     Situation("salon", "un salon", "Elle répond dans un salon, devant plusieurs personnes", Kind.REPLY,
               _person("salon", trust=ChannelTrust.PUBLIC.value, public=True, room="salon")),

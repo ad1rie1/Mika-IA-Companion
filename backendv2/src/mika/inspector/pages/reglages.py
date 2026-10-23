@@ -1,5 +1,5 @@
-"""Réglages › Comportement : les paramètres internes des facultés, une page
-par faculté, un groupe à la fois ; et Réglages › Historique, le journal des
+"""Réglages › Paramètres avancés : les paramètres internes des facultés, une page
+par faculté, un groupe à la fois ; et Réglages › Historique des réglages, le journal des
 modifications. (Les réglages d'une app forgée vivent sur sa fiche ; les comptes,
 dans ``accounts.py``.)
 
@@ -64,7 +64,8 @@ from mika.runtime.params import shown as params_shown
 FACULTY_PAGE = "comportement-"
 TONES = {"défaut": "muted", "tempérament": "info", "réglage": "ok", "surcharge": "warn"}
 SOURCES_FR = {"défaut": "valeur par défaut", "tempérament": "dérivée du tempérament",
-              "réglage": "réglée ailleurs (canaux, courrier…)", "surcharge": "surchargée par un opérateur"}
+              "réglage": "réglée ailleurs (sa persona, ses boîtes aux lettres…)",
+              "surcharge": "surchargée par un opérateur"}
 #: au-delà, une faculté se lit un groupe à la fois
 ONE_PAGE_MAX = 12
 COMPORTEMENT_ORDER = 1000
@@ -129,7 +130,7 @@ def _label_of(ui: Any, owner: str) -> str:
 
 
 def param_builtins(parameters: Any, families: Any, labels: Mapping[str, str]) -> dict[str, Builtin]:
-    """Une page de Réglages › Comportement par faculté qui a des paramètres,
+    """Une page de Réglages › Paramètres avancés par faculté qui a des paramètres,
     rangée par famille (celle que la composition déclare, sinon « Autres »)."""
     if parameters is None:
         return {}
@@ -146,14 +147,15 @@ def param_builtins(parameters: Any, families: Any, labels: Mapping[str, str]) ->
         async def fn(ui: Any, request: Request, _owner: str = fac.name) -> Any:
             return await faculty_page(ui, request, _owner, {})
 
-        out[key] = Builtin(key, label, fn, group=f"Comportement · {family}", order=COMPORTEMENT_ORDER + 1 + rank,
+        out[key] = Builtin(key, label, fn, group=f"Paramètres avancés · {family}",
+                           order=COMPORTEMENT_ORDER + 1 + rank,
                            description=f"Les paramètres internes de « {label} » ({fac.name}) : ce que chacun fait, "
                                        "sa valeur, d'où elle vient. Changer une valeur pose une surcharge bornée et "
                                        "journalisée.")
     return out
 
 
-@TABS.tab("reglages.comportement", title="Vue d'ensemble", group="Comportement", order=COMPORTEMENT_ORDER,
+@TABS.tab("reglages.comportement", title="Vue d'ensemble", group="Paramètres avancés", order=COMPORTEMENT_ORDER,
           description="Chaque faculté règle son comportement par des paramètres internes. Le tempérament "
                       "(Personnage › Tempérament) est l'entrée principale ; une surcharge se pose sur la page de la "
                       "faculté.")
@@ -366,7 +368,7 @@ def effect(ui: Any, planned: Mapping[str, Planned]) -> list[Any]:
     return out
 
 
-@TABS.tab("reglages.journal", title="Journal des modifications", group="Historique", order=3000,
+@TABS.tab("reglages.journal", title="Journal des modifications", group="Historique des réglages", order=3000,
           description="Chaque réglage enregistré depuis la console (qui, quoi, sur quoi — jamais un contenu ni un "
                       "secret), et chaque journalisation des paramètres (au démarrage, après un changement de "
                       "persona, de tempérament ou de surcharge).")

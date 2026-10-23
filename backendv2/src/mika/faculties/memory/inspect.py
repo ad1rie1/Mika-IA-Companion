@@ -83,7 +83,7 @@ SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): ""
                     int(Sensitivity.PERSONAL): "info", int(Sensitivity.CONFIDENCE): "warn"}
 
 SEARCH = Param("q", "recherche", placeholder="un mot du texte")
-PERSON = Param("person", "personne", placeholder="un nom ou une adresse")
+PERSON = Param("person", "personne", placeholder="un nom ou un moyen de communication")
 READING_HELP = {
     c.SOUVENIR: "Un souvenir raconte ce qu’elle a retenu. Sa sensibilité et son état restent visibles ; "
                 "les détails donnent le texte complet et les messages d’origine.",
@@ -623,7 +623,7 @@ PERSON_KIND = "person"
 
 @MEMORY.inspect("memoire", title="Mémoire", subject=PERSON_KIND, hidden=not PERSON_KIND, order=50, params=[SEARCH],
                 description="Ce qu'elle garde de cette personne : souvenirs, croyances et promesses qui la "
-                            "concernent, sous l'une de ses adresses.")
+                            "concernent, sous l'un de ses moyens de communication.")
 def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not ctx.subject:
         return [Note("Choisissez une personne : cet onglet se lit sur sa fiche.", tone="muted")]

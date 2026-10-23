@@ -724,7 +724,7 @@ def _size(base: _Base) -> str:
     return _bytes(base.size) if base.size is not None else "—"
 
 
-#: au-delà, une sauvegarde est « ancienne » (le tableau de bord le signale)
+#: au-delà, une sauvegarde est « ancienne » (l'accueil le signale)
 BACKUP_LATE_DAYS = 2
 
 
@@ -739,7 +739,7 @@ def _failed_attempt(got: Any) -> dict[str, Any]:
 
 
 def backup_state(ui: Any) -> tuple[str, str]:
-    """(ton, phrase) : l'état des sauvegardes, pour le tableau de bord et la page Stockage."""
+    """(ton, phrase) : l'état des sauvegardes, pour l'accueil et la page Stockage et sauvegardes."""
     fn = ui.deps.backups
     if fn is None:
         return "", ""

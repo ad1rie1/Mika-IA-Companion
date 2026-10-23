@@ -397,7 +397,7 @@ class Pages:
                                 panel=replay_panel(self.ui, corr, back) if status == 200 else None)
 
     async def outbox(self, request: Request) -> Response:
-        """Système › Sorties : relancer un effet en échec, ou le marquer comme vu."""
+        """Système › File de sortie : relancer un effet en échec, ou le marquer comme vu."""
         return await outbox_post(self.ui, request)
 
     async def tool_rules(self, request: Request) -> Response:

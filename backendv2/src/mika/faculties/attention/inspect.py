@@ -263,7 +263,7 @@ def _noticed_history(ctx: InspectContext) -> Table:
 
 
 @ATTENTION.inspect("remarque", title="Ce qu'elle remarque", section="pensees", order=20,
-                   description="Ce que ses sens et ses sources lui signalent (courrier, flux, caméra, apps) : la "
+                   description="Ce que ses plugins lui signalent (courrier, flux, caméra, apps) : la "
                                "même source qui se répète se remarque de moins en moins, et une source ne lui fait "
                                "jamais plus qu'une petite émotion en quelques minutes.")
 def _inspect_noticed(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]:

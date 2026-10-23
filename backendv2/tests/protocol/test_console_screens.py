@@ -37,7 +37,7 @@ PARITY: dict[str, tuple[str, str]] = {
     "Conscience › Planification": ("/inspecteur/decisions/echeances", "Échéances"),
     "Conscience › Initiatives": ("/inspecteur/decisions/initiatives", "Initiatives"),
     "Projets": ("/inspecteur/projets", "Créer un projet"),
-    "Projets › Actions en attente": ("/inspecteur/approbations", "Approbations"),
+    "Projets › Actions en attente": ("/inspecteur/approbations", "Actions à autoriser"),
     "Modules › Email": ("/inspecteur/courrier/reception", "Réception"),
     "Modules › Email (brouillons)": ("/inspecteur/courrier/brouillons", "Brouillons"),
     "Modules › Email (envoyés)": ("/inspecteur/courrier/envoyes", "Envoyés"),

@@ -61,7 +61,7 @@ Ce qu'un agent laisse non commité est sauvegardé en patch dans `logs/`
 
 `frontend/Web/node_modules` et `frontend/Android/local.properties` sont liés
 depuis la copie principale. Android se vérifie par `:app:compileDebugKotlin`,
-sous le garde-fou mémoire `borne.sh` s'il existe. Unity ne peut pas être
+sous le garde-fou mémoire `scripts/borne.sh`. Unity ne peut pas être
 compilé hors de l'éditeur : l'agent ne touche qu'au C# existant et le dit
 dans la PR. Le Python est
 celui de `backendv2/.venv`, appelé avec `PYTHONPATH=src` : son paquet `mika`

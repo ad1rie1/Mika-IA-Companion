@@ -93,7 +93,7 @@ class AttachmentsParams(BaseModel):
              "toujours (seule la place par personne la limite).")] = 0
     per_person_mb: Annotated[int, Knob(
         label="Place par personne (Mio)", group="Garder", lo=10, hi=100_000,
-        help="Quand les pièces gardées de quelqu'un (toutes ses adresses) dépassent cette place, les plus anciennes "
+        help="Quand les pièces gardées de quelqu'un (tous ses moyens de communication) dépassent cette place, les plus anciennes "
              "sont retirées. La console montre ce que chacun occupe.")] = 2048
 
 

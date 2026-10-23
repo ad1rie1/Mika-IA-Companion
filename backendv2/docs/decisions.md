@@ -28,7 +28,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les fournisseurs de modèles | 0026, 0072, 0073 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1328,7 +1328,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* en v1, `/health` disait « ok » avec une boucle morte, la sauvegarde n'était jamais vérifiée et l'oubli laissait ce qui citait la personne.
 
-*Révisée par 0025, 0054, 0101.*
+*Révisée par 0025, 0054, 0101, 0125.*
 
 ### 0025 — La console : un back-office que les facultés déclarent
 
@@ -1440,6 +1440,17 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* trois pages montraient les mêmes données avec trois vocabulaires venus du code, et l'on n'y comprenait rien.
 
 *Révise 0122 (en partie), 0121 (en partie).*
+
+### 0125 — Une restauration ne sort pas de son dossier
+
+- La restauration travaille dans le dossier de données même : l'archive y est préparée (`.restauration-…`), l'ancien contenu mis de côté (`.avant-restauration-…`), puis chaque entrée prend sa place. Rien ne s'écrit dans le dossier parent.
+- Le verrou reste en place, comme ce que la sauvegarde ne prend pas (`cache/`, le modèle de plongements).
+- Ces dossiers cachés n'entrent dans aucune archive et aucune restauration suivante ne les remplace ; on les supprime à la main.
+- Une mise de côté qui échoue remet l'ancien contenu à sa place ; une pose interrompue dit où se trouve l'ancien contenu.
+
+*Pourquoi :* en service, l'utilisateur `mika` n'écrit pas dans `/var/lib` : échanger deux dossiers voisins y échouait, et root ne se connecte pas à MariaDB sous le compte `mika`.
+
+*Révise 0024 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

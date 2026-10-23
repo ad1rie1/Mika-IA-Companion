@@ -1,4 +1,4 @@
-"""Réglages › Autrices, dessiné (ADR 0121, 0124) : la carte de chaque autrice, et en tête où chacune écrit.
+"""Réglages › Personnage › Autrices, dessiné (ADR 0121, 0124) : la carte de chaque autrice, et en tête où chacune écrit.
 
 Le tableau du haut dit, flux par flux (le chat, chaque boîte mail, Teams, le téléphone), qui y écrit, ce qu'elle
 récrit et ce qui l'en empêcherait (aucun modèle au rôle « rendre naturel », Teams désactivé). Les autrices et le flux

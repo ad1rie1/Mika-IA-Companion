@@ -81,8 +81,8 @@ def _rights(s: IdentityState, frame: Frame, handle: str, h: Handle, person: str)
     if h.trust is privacy.ChannelTrust.ACCOUNT:
         return (f" {known_as(s, person)} est propriétaire : qui écrit d'ici en recevra les droits (forge, caméra, "
                 "courrier, projets…), hors des salons publics.")
-    return (f" {known_as(s, person)} est propriétaire, mais rien ne prouve qui écrit d'ici : cette adresse n'en "
-            "recevra pas les droits.")
+    return (f" {known_as(s, person)} est propriétaire, mais rien ne prouve qui écrit d'ici : ce moyen de "
+            "communication n'en recevra pas les droits.")
 
 
 # ── Relier ────────────────────────────────────────────────────────────────
@@ -127,28 +127,31 @@ def _can_link(s: IdentityState, frame: Frame, key: str) -> bool:
 
 
 @IDENTITY.action("relier", title="Relier à une personne", args=LinkArgs, emits=[c.LINKED], subject="handle",
-                 description="Cette adresse parlera pour la personne choisie (certitude « liée ») : sa mémoire, "
-                             "ses liens, sa fiche et son fil s'y attachent — et, sur un compte extérieur, les droits "
-                             "d'une propriétaire. Jamais sur une session authentifiée : elle prouve déjà qui écrit.",
-                 confirm="Relier cette adresse ? Elle recevra tout ce que la personne choisie lui a confié.",
+                 description="Ce moyen de communication parlera pour la personne choisie (certitude « liée ») : sa "
+                             "mémoire, ses liens, sa fiche et son fil s'y attachent — et, sur un compte extérieur, les "
+                             "droits d'une propriétaire. Jamais sur une session authentifiée : elle prouve déjà qui "
+                             "écrit.",
+                 confirm="Relier ce moyen de communication ? Il recevra tout ce que la personne choisie lui a "
+                         "confié.",
                  available=_can_link, order=10)
 def _link(s: IdentityState, frame: Frame, args: LinkArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None:
-        raise Refused("Adresse inconnue.")
+        raise Refused("Moyen de communication inconnu.")
     if h.authenticated:
         raise Refused("Une session authentifiée prouve déjà qui écrit : on ne la relie à personne.")
     person = _resolve(s, frame, args.person)
     if person == handle:
         raise Refused("C'est elle-même.", {"person": "C'est déjà elle-même : choisis une autre personne."})
     if h.person == person and h.via == c.VIA_OPERATOR:
-        raise Refused("Déjà reliée.", {"person": f"Cette adresse parle déjà pour {known_as(s, person)}."})
+        raise Refused("Déjà relié.",
+                      {"person": f"Ce moyen de communication parle déjà pour {known_as(s, person)}."})
     followers = sorted(k for k, o in s.handles.items() if o.person == handle)
     if followers:
-        raise Refused("D'autres adresses parlent pour elle.", {"person": (
-            f"D'autres adresses parlent pour elle ({', '.join(followers[:5])}) : relie-les d'abord à "
-            f"{known_as(s, person)}, ou délie-les.")})
+        raise Refused("D'autres moyens de communication parlent pour lui.", {"person": (
+            f"D'autres moyens de communication parlent pour lui ({', '.join(followers[:5])}) : relie-les "
+            f"d'abord à {known_as(s, person)}, ou délie-les.")})
     outcome = f"« {handle} » parlera pour {known_as(s, person)} : ce que cette personne lui a confié s'y ouvre." + \
         _rights(s, frame, handle, h, person)
     if not args.confirmed:
@@ -176,17 +179,17 @@ def _can_confirm(s: IdentityState, frame: Frame, key: str) -> bool:
 
 @IDENTITY.action("confirmer", title="Confirmer la liaison", args=ConfirmArgs, emits=[c.LINKED], subject="handle",
                  description="Elle a reconnu cette personne par ce qu'elle seule savait ; tant qu'un opérateur ne "
-                             "l'a pas confirmé, son fil des autres adresses lui reste fermé et elle ne lui écrit pas "
-                             "d'elle-même par ici.",
-                 confirm="Confirmer cette liaison ? Le fil de ses autres adresses s'y ouvre.",
+                             "l'a pas confirmé, son fil des autres moyens de communication lui reste fermé et elle "
+                             "ne lui écrit pas d'elle-même par ici.",
+                 confirm="Confirmer cette liaison ? Le fil de ses autres moyens de communication s'y ouvre.",
                  available=_can_confirm, order=15)
 def _confirm(s: IdentityState, frame: Frame, args: ConfirmArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None or not h.person or h.via in c.CONFIRMED_VIA:
-        raise Refused("Aucune liaison à confirmer sur cette adresse.")
-    outcome = (f"« {handle} » est bien {known_as(s, h.person)} : son fil des autres adresses s'y ouvre, et elle "
-               "pourra lui écrire d'elle-même par ici." + _rights(s, frame, handle, h, h.person))
+        raise Refused("Aucune liaison à confirmer sur ce moyen de communication.")
+    outcome = (f"« {handle} » est bien {known_as(s, h.person)} : son fil des autres moyens de communication s'y "
+               "ouvre, et elle pourra lui écrire d'elle-même par ici." + _rights(s, frame, handle, h, h.person))
     if not args.confirmed:
         raise Refused(f"À confirmer : {outcome}", {"confirmed": f"{outcome} Coche « Je confirme »."})
     return Done(drafts=(c.LINKED.draft(handle=handle, person=h.person, by="operator"),),
@@ -206,16 +209,16 @@ def _can_unlink(s: IdentityState, frame: Frame, key: str) -> bool:
 
 
 @IDENTITY.action("delier", title="Délier", args=NoArgs, emits=[c.LINKED], subject="handle",
-                 description="Cette adresse ne parlera plus que pour elle-même ; sa revendication éventuelle "
-                             "tombe aussi.",
-                 confirm="Délier cette adresse ? Ce que la personne lui avait confié se referme (et ses droits de "
-                         "propriétaire, s'il en avait).",
+                 description="Ce moyen de communication ne parlera plus que pour lui-même ; sa revendication "
+                             "éventuelle tombe aussi.",
+                 confirm="Délier ce moyen de communication ? Ce que la personne lui avait confié se referme (et ses "
+                         "droits de propriétaire, s'il en avait).",
                  available=_can_unlink, order=20)
 def _unlink(s: IdentityState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None or not h.person:
-        raise Refused("Cette adresse n'est reliée à personne d'autre qu'elle-même.")
+        raise Refused("Ce moyen de communication n'est relié à personne d'autre que lui-même.")
     return Done(drafts=(c.LINKED.draft(handle=handle, person=None, by="operator"),),
                 message=f"« {handle} » ne parle plus pour {known_as(s, h.person)}.", guard=_seen(handle))
 
@@ -271,8 +274,9 @@ def _check(s: IdentityState, h: Handle, handle: str, args: EvidenceArgs, now: in
     names = [n for n in (h.name, h.claim.name if h.claim else "", known_as(s, h.person) if h.person else "") if n]
     if not any(same_name(name, n) for n in names):
         known = ", ".join(f"« {n} »" for n in names) or "aucun nom"
-        raise Refused("Nom inconnu pour cette adresse.", {"name": (
-            f"Elle ne connaît pas cette adresse sous ce nom ({known}) : un démenti n'y changerait rien.")})
+        raise Refused("Nom inconnu pour ce moyen de communication.", {"name": (
+            f"Elle ne connaît pas ce moyen de communication sous ce nom ({known}) : un démenti n'y changerait "
+            "rien.")})
     return name
 
 
@@ -280,7 +284,7 @@ def _outcome(s: IdentityState, before: Handle, after: Handle) -> str:
     if before.person and not after.person:
         return f"la liaison avec {known_as(s, before.person)} est défaite"
     if after.person and after.person != before.person:
-        return f"la revendication est confirmée : elle parle désormais pour {known_as(s, after.person)}"
+        return f"la revendication est confirmée : il parle désormais pour {known_as(s, after.person)}"
     if before.person and after.certainty != before.certainty:
         return f"certitude de la liaison : {certainty_fr(before.certainty)} → {certainty_fr(after.certainty)}"
     if before.claim and after.claim is None:
@@ -297,7 +301,7 @@ def _outcome(s: IdentityState, before: Handle, after: Handle) -> str:
 def _heavy(s: IdentityState, before: Handle, after: Handle, handle: str) -> str:
     """L'issue d'une preuve qui change qui elle reconnaît ici, dite en clair (vide : rien de lourd)."""
     if after.person and after.person != before.person:
-        return (f"« {handle} » sera liée à {known_as(s, after.person)} : ce que cette personne lui a confié "
+        return (f"« {handle} » sera lié à {known_as(s, after.person)} : ce que cette personne lui a confié "
                 "s'y ouvrira (sans ses droits de propriétaire : seule « Relier » les donne).")
     if before.person and not after.person:
         return (f"« {handle} » ne parlera plus pour {known_as(s, before.person)} : ce que cette personne lui "
@@ -308,13 +312,14 @@ def _heavy(s: IdentityState, before: Handle, after: Handle, handle: str) -> str:
 @IDENTITY.action("preuve", title="Verser une preuve", args=EvidenceArgs, emits=[c.EVIDENCE], subject="handle",
                  description="Une raison de croire ou de ne plus croire, pesée comme les autres : un opérateur "
                              "ne fait pas monter la confiance au-delà du plafond du canal.",
-                 confirm="Verser cette preuve ? Elle peut relier cette adresse à quelqu'un, ou l'en délier.",
+                 confirm="Verser cette preuve ? Elle peut relier ce moyen de communication à quelqu'un, ou l'en "
+                         "délier.",
                  available=_can_testify, order=30)
 def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None:
-        raise Refused("Adresse inconnue.")
+        raise Refused("Moyen de communication inconnu.")
     if h.authenticated:
         raise Refused("Une session authentifiée prouve déjà qui écrit : aucune preuve n'y change rien.")
     name = _check(s, h, handle, args, frame.now)

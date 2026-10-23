@@ -109,5 +109,5 @@ def _world_view(s: WorldState, frame: Frame, ctx: InspectContext) -> list[Block]
               tuple(_remarks(s, frame, ctx)), title="Ce qu'elle en a remarqué",
               empty="rien de changé chez elle, ou rien qui se voie"),
         Note("Ce qu'elle lit de tout ça dans son prompt est la section « AUTOUR DE TOI » ; ce qu'elle remarque d'une "
-             "édition est un signal, que l'attention dose comme les autres sens.", tone="muted"),
+             "édition est un signal, que l'attention dose comme les autres signaux.", tone="muted"),
     ]

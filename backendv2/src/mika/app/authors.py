@@ -8,7 +8,7 @@ Une installation qui n'a rien réglé a quatre autrices livrées (``defaults``, 
 chacune d'office sur son flux : « Message » au chat, « Mail pro » à chaque boîte, « Pro Teams » à Teams, « SMS perso »
 au téléphone. Une fois le réglage enregistré, il fait foi (un flux laissé vide part en premier jet) ; mais un champ
 laissé vide d'une autrice livrée reprend son texte par défaut (``filled``) — l'exemple de « Message », le fil de
-référence de sa persona s'il y en a un. La page (Réglages › Autrices, ``app/handmade/authors.py``) les liste, et dit en
+référence de sa persona s'il y en a un. La page (Réglages › Personnage › Autrices, ``app/handmade/authors.py``) les liste, et dit en
 tête où chacune écrit.
 """
 

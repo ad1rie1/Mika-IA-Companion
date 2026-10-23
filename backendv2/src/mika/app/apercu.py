@@ -143,7 +143,7 @@ def export(out: Path) -> list[str]:
     clock = RealClock()
     sink: list[Callable[[LLMTrace], None]] = []
     # un seul fournisseur, déclaré comme un opérateur le ferait : il sert « répondre », les autres rôles y
-    # retombent (replis de rôle) ; chaque appel laisse sa trace (Coûts, Pourquoi a-t-elle dit ça ?)
+    # retombent (replis de rôle) ; chaque appel laisse sa trace (Appels et coûts, Pourquoi a-t-elle dit ça ?)
     gateway = LiveGateway(Gateway({NAME: _Model(clock, latency=0.0, abstain_rate=0.0)}, {"reply": NAME},
                                   clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
                                   fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots={NAME: 1},

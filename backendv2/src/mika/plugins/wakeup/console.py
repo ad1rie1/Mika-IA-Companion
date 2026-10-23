@@ -1,4 +1,4 @@
-"""La console des réveils par API (ADR 0068) : une entrée à elle (« Ses canaux › Réveils par API »), la liste des
+"""La console des réveils par API (ADR 0068) : une entrée à elle (« Connexions extérieures › Réveils par API »), la liste des
 réveils et leurs derniers appels, puis la fiche de chacun — ce qui a été déclaré, sa clé, ses appels et ce qu'ils ont donné.
 
 Un réveil se déclare dans Réglages › Plugins › Réveils par API (un lien y mène, l'enregistrement ramène ici). Sa
@@ -141,11 +141,11 @@ def risks(endpoint: Any) -> list[str]:
 @WAKEUP.inspect("reveils", title="Réveils par API", section="reveils", order=10,
                 params=[Param("reveil", "Réveil", placeholder="nom exact d'un réveil")],
                 description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>), et ce que "
-                            "leurs appels ont donné. Ils se déclarent dans Configuration.")
+                            "leurs appels ont donné. Ils se déclarent dans Réglages › Plugins › Réveils par API.")
 def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("wakeup")
     blocks: list[Block] = [Fields((("nouveau réveil", add_endpoint()),
-                                   ("tous les réglages", Ref("local", SETTINGS, "Réglages › Réveils par API"))))]
+                                   ("tous les réglages", Ref("local", SETTINGS, "Réglages › Plugins › Réveils par API"))))]
     if port is None:
         blocks.append(Note(NO_PORT, tone="muted"))
     else:

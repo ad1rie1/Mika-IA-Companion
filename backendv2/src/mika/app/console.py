@@ -4,10 +4,12 @@ fournit elle-même. Les facultés, elles, y rangent leurs vues par ``section``.
 
 La carte répond à des questions d'opérateur, dans cet ordre : que dois-je
 faire (l'accueil, dessiné à la main hors de la carte : ``app/handmade/home.py``, qui lit les onglets ``accueil.*``) ;
-comment va-t-elle (Elle) ; qui connaît-elle (Ses
-relations) ; que fait-elle et pourquoi (Son activité : ses décisions, ses
-buts, ses projets) ; par où perçoit-elle et agit-elle (Ses canaux) ; que
-décide-t-on, la machine tient-elle (Exploitation). ``docs/console-carte.md`` détaille chaque menu.
+comment va-t-elle (sa rubrique, à son nom) ; qui connaît-elle (Relations & échanges) ; que fait-elle et pourquoi
+(Activité : ses décisions, ses buts, ses projets ; Outils ; À valider) ; par où perçoit-elle et agit-elle
+(Connexions extérieures) ; que décide-t-on, la machine tient-elle (Réglages, Système). Le menu visible est
+``app/console_menu.py`` : chaque groupe ci-dessous porte le nom de la rubrique où ses destinations s'y rangent (le
+groupe ne se montre que si une destination n'avait pas de lien au menu). ``docs/console-carte.md`` détaille chaque
+menu.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("memoire", "Mémoire", "Ses souvenirs, ses croyances, ses promesses, les pièces qu'on lui a "
                     "envoyées et la relecture de ses échanges.", subjects=("piece",)),
     )),
-    NavGroup("Ses relations", (
+    NavGroup("Relations & échanges", (
         Destination("personnes", "Personnes", "Les gens qu'elle connaît et ce qui les lie.",
                     subjects=("person",)),
         Destination("identites", "Identités", "Qui parle derrière chaque moyen de communication, et ce "
@@ -31,7 +33,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     subjects=("handle",)),
         Destination("fil", "Conversations", "Ce qui a été dit, avec qui, et les questions qui attendent."),
     )),
-    NavGroup("Son activité", (
+    NavGroup("Activité", (
         Destination("decisions", "Décisions", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, ce "
                     "qui tourne en ce moment, son budget d'initiatives, ses choix, ses épisodes, ses échéances.",
                     builtin=("decisions.maintenant", "decisions.envers", "decisions.en_cours", "decisions.selections",
@@ -43,29 +45,39 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("projets", "Projets", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
                     "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
                     subjects=("project",)),
-        Destination("outils", "Ses outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
+    )),
+    NavGroup("Outils", (
+        Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
                     "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
                     builtin=("outils.tous", "outils.expose"), order=("tous", "serveurs", "expose"),
                     subjects=("serveur",)),
-        Destination("approbations", "Approbations", "Ce qu'elle voudrait faire sortir de la machine, et ce "
+    )),
+    NavGroup("À valider", (
+        Destination("approbations", "À valider", "Ce qu'elle voudrait faire sortir de la machine, et ce "
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
-    NavGroup("Ses canaux", (
+    NavGroup("Relations & échanges", (
         Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
                     subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
         Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
                     subjects=("conversation_teams", "reponse_teams")),
-        Destination("sens", "Flux et capteurs", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
+    )),
+    NavGroup("Connexions extérieures", (
+        Destination("sens", "Connexions extérieures", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                     "(caméra), ce que ses appareils lui signalent."),
         Destination("reveils", "Réveils par API", "Les réveils que des systèmes extérieurs lui envoient "
                     "(POST /api/wake/<nom>) : les déclarer, leurs clés, leurs appels et ce qu'ils ont donné.",
                     subjects=("reveil",)),
+    )),
+    NavGroup("Outils", (
         Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
     )),
-    NavGroup("Exploitation", (
+    NavGroup("Réglages", (
         Destination("reglages", "Réglages", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
                     "sujet ; chaque champ dit ce qu'il fait.", layout="menu", dynamic=True),
+    )),
+    NavGroup("Système", (
         Destination("systeme", "Système", "La machine : santé, processus, anomalies, sorties, modèles, écrans "
                     "du monde, coûts, stockage, journaux, anatomie.", layout="menu",
                     builtin=("systeme.sante", "systeme.processus", "systeme.anomalies", "systeme.sorties",
@@ -76,14 +88,14 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
 )
 
-#: Réglages › Comportement : les facultés rangées par famille, et leur nom
+#: Réglages › Paramètres avancés : les facultés rangées par famille, et leur nom
 #: pour un opérateur (les autres tombent dans « Autres », sous leur nom technique)
 PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "attachments", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
-    ("Canaux", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
+    ("Plugins", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )
 FACULTY_LABELS: dict[str, str] = {

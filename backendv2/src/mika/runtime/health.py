@@ -154,7 +154,7 @@ def _llm(kernel: Kernel) -> Check:
     configured = getattr(gateway, "configured", gateway is not None)
     if not configured:
         return Check("llm", DEGRADED, "aucun modèle ne sert « répondre » : elle ne peut pas parler — déclare un "
-                                      "fournisseur (Réglages › Fournisseurs)")
+                                      "fournisseur (Réglages › Intelligence › Fournisseurs)")
     failing = getattr(gateway, "failing", None)
     if callable(failing):
         now = kernel.mind.clock.now()

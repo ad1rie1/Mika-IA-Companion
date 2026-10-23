@@ -195,11 +195,43 @@ def test_an_occupied_folder_is_replaced_only_on_demand_and_kept_aside(tmp_path, 
         backup.restore(made.archive, occupied)
     assert (occupied / "mind.db").read_bytes() == b"une autre vie"
     done = backup.restore(made.archive, occupied, force=True)
-    aside = [p for p in tmp_path.iterdir() if p.name.startswith("occupee.avant-restauration-")]
+    aside = [p for p in occupied.iterdir() if p.name.startswith(backup.ASIDE)]
     assert len(aside) == 1 and (aside[0] / "mind.db").read_bytes() == b"une autre vie"
     assert done.state == made.state
     with pytest.raises(backup.BackupError, match="destination"):
         backup.backup(data, data / "archives")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root écrit partout : le dossier parent fermé ne se ferme pas à lui")
+def test_a_restore_writes_nothing_beside_the_folder(tmp_path, monkeypatch):
+    """En service, le dossier de données (``/var/lib/mika``) est à l'utilisateur ``mika``, pas son parent
+    (``/var/lib``) : la restauration prépare, met de côté et pose tout dans le dossier même. Le modèle de
+    plongements (``cache/``, jamais archivé) reste en place ; l'ancien contenu mis de côté n'entre dans aucune
+    archive suivante."""
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest = tmp_path / "data", tmp_path / "archives"
+    live(data, talk=False)
+    made = backup.backup(data, dest)
+    parent = tmp_path / "var-lib"
+    service = parent / "mika"
+    service.mkdir(parents=True)
+    (service / "mind.db").write_bytes(b"la vie d'avant")
+    (service / "cache").mkdir()
+    (service / "cache" / "modele.bin").write_bytes(b"1,2 Go")
+    parent.chmod(0o555)
+    try:
+        done = backup.restore(made.archive, service, force=True)
+    finally:
+        parent.chmod(0o755)
+    assert done.state == made.state
+    assert sorted(p.name for p in parent.iterdir()) == ["mika"]  # rien à côté du dossier
+    aside = [p for p in service.iterdir() if p.name.startswith(backup.ASIDE)]
+    assert len(aside) == 1 and (aside[0] / "mind.db").read_bytes() == b"la vie d'avant"
+    assert (service / "cache" / "modele.bin").read_bytes() == b"1,2 Go"
+    assert not (aside[0] / "cache").exists()
+    again = backup.backup(service, tmp_path / "suivantes")
+    with tarfile.open(again.archive) as tar:
+        assert not any(backup.ASIDE in name or "/cache/" in name for name in tar.getnames())
 
 
 def test_old_archives_are_pruned(tmp_path, monkeypatch):
@@ -215,7 +247,7 @@ def test_old_archives_are_pruned(tmp_path, monkeypatch):
 
 
 def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeypatch):
-    """La console (Système › Stockage) lit la dernière sauvegarde et la dernière vérification ; la note
+    """La console (Système › Stockage et sauvegardes) lit la dernière sauvegarde et la dernière vérification ; la note
     vit dans le dossier de données mais n'entre pas dans les archives."""
     from datetime import UTC, datetime
 
@@ -264,8 +296,8 @@ def test_a_restore_under_a_running_mika_is_refused_and_touches_nothing(tmp_path,
         holder.kill()
         holder.wait()
     assert (running / "mind.db").read_bytes() == b"la vie en cours"
-    assert not [p for p in tmp_path.iterdir() if ".avant-restauration-" in p.name]
-    # serveur arrêté : la restauration passe, et le verrou suit le dossier restauré
+    assert not [p for p in running.iterdir() if p.name.startswith((backup.ASIDE, backup.STAGING))]
+    # serveur arrêté : la restauration passe, et le verrou reste en place
     done = backup.restore(made.archive, running, force=True)
     assert done.state == made.state and (running / datadir.LOCK_NAME).exists()
     datadir.hold(running)  # rendu à la fin : ce processus le reprend

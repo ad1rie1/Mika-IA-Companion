@@ -1,4 +1,4 @@
-/* Réglages › Tempérament (app/handmade/temperament.py) : changer de profil montre la différence sur la figure, sans
+/* Réglages › Personnage › Tempérament (app/handmade/temperament.py) : changer de profil montre la différence sur la figure, sans
    rien remplir — seul « Pré-remplir » met ses valeurs dans le formulaire. Le sommet le plus proche de la souris (ou
    atteint au clavier, ou touché) dit sa valeur dans une bulle, une seule, posée par-dessus tout : les sommets se
    serrent près du centre, aucun ne cache son voisin. Sans ce script, la page marche :

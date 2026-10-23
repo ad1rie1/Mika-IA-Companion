@@ -97,7 +97,7 @@ class InspectorDeps:
     parameters: Any = None
     #: les sauvegardes : ``fn() -> {sauvegarde, tentative, verification, archives}`` (``app/backup.overview``)
     backups: Callable[[], Mapping[str, Any]] | None = None
-    #: Réglages › Comportement : (famille, facultés) et le nom lisible de chacune
+    #: Réglages › Paramètres avancés : (famille, facultés) et le nom lisible de chacune
     param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
     faculty_labels: Mapping[str, str] = field(default_factory=dict)
     #: les noms en français de ce que déclarent les facultés (sections, raisons, vetos, processus…)
@@ -292,7 +292,7 @@ class UI:
     # ── navigation ──
     def attention_items(self) -> list[dict[str, Any]]:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
-        (le tableau de bord en fait des cadres qui mènent à la bonne page)."""
+        (l'accueil en fait des cadres qui mènent à la bonne page)."""
         out: list[dict[str, Any]] = []
         for g in self.deps.navigation:
             for d in g.items:

@@ -839,8 +839,8 @@ expression:
     mark: "[{mark}]"
     # son nom, quand sa persona n'en donne pas
     unnamed: elle
-    # les codes de l'autrice du chat (Réglages › Autrices, ADR 0124), après son portrait et qui est l'autre. {codes} :
-    # ses codes, tels que l'opératrice les a écrits
+    # les codes de l'autrice du chat (Réglages › Personnage › Autrices, ADR 0124), après son portrait et qui est
+    # l'autre. {codes} : ses codes, tels que l'opératrice les a écrits
     codes: "Comment elle écrit ici, ses codes à tenir dans chaque message :\n{codes}"
 
   # La passe d'une autrice sur un brouillon d'outil (ADR 0124) : un courriel, un message Teams, un SMS ou un WhatsApp
@@ -862,10 +862,10 @@ expression:
     message: "Ce à quoi il répond :\n{about}\n\nLe brouillon :\n<brouillon>\n{draft}\n</brouillon>\n\nRécris-le selon ces codes. Réponds par le texte récrit seul : ni titre, ni commentaire, ni guillemets autour."
     # un brouillon qui ne répond à rien : il ouvre l'échange
     opening: "rien : il ouvre l'échange."
-    # les autrices d'une installation qui n'en a pas encore réglé (Réglages › Autrices, ADR 0124), chacune d'office sur
-    # son flux : « Message » au chat, « Mail pro » à chaque boîte, « Pro Teams » à Teams, « SMS perso » au téléphone. Un
-    # champ qu'on laisse vide sur l'une d'elles reprend son texte d'ici (l'exemple de « Message » : le fil de référence
-    # de sa persona, s'il y en a un)
+    # les autrices d'une installation qui n'en a pas encore réglé (Réglages › Personnage › Autrices, ADR 0124),
+    # chacune d'office sur son flux : « Message » au chat, « Mail pro » à chaque boîte, « Pro Teams » à Teams, « SMS
+    # perso » au téléphone. Un champ qu'on laisse vide sur l'une d'elles reprend son texte d'ici (l'exemple de
+    # « Message » : le fil de référence de sa persona, s'il y en a un)
     defaults:
       message:
         name: "Message"

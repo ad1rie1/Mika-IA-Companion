@@ -1,4 +1,4 @@
-/* Pensées › Nuits (app/handmade/nights.py) : son journal en page de carnet, sa journée en cours, ses nuits. */
+/* Journal et rêves (app/handmade/nights.py) : son journal en page de carnet, sa journée en cours, ses nuits. */
 
 /* le journal : une page qu'on lit, en serif, une ligne de texte aérée */
 .nights-journal { display: grid; gap: 16px; padding: 28px 32px; }

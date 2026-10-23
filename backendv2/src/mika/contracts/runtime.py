@@ -223,7 +223,7 @@ AWAITING = FactKey("runtime.awaiting", type=tuple, doc="perceptions sans répons
 #: messages encore sans réponse, du plus ancien au plus récent. Une réponse règle le tour entier ; un nouveau
 #: message du même tour supplante la réponse en train de s'écrire (elle sera recomposée en le lisant).
 TURN = FactFamily("runtime.turn", arg=tuple, type=tuple,
-                  doc="les messages sans réponse d'une adresse en un lieu (adresse, salon)")
+                  doc="les messages sans réponse d'un moyen de communication en un lieu (moyen de communication, salon)")
 
 
 

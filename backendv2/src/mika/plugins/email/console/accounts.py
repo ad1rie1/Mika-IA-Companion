@@ -112,7 +112,7 @@ def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: 
 
 
 @EMAIL.inspect("etat", title="État", subject="compte", order=10,
-               description='Vérifie la connexion, les derniers relevés et les dossiers de cette boîte. Les connexions se modifient dans Configuration.')
+               description='Vérifie la connexion, les derniers relevés et les dossiers de cette boîte. Les connexions se modifient dans Réglages › Plugins › Boîtes aux lettres.')
 def _tab_state(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     info = port.account(ctx.subject) if port is not None else None

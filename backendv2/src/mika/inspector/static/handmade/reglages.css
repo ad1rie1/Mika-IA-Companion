@@ -1,7 +1,7 @@
 /* Les pages de réglages qui ont une forme à elles (le panneau des réglages, ``Panel.styles``), sur le vocabulaire
    commun (base.css). */
 
-/* Réglages › Autrices (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux. */
+/* Réglages › Personnage › Autrices (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux. */
 .authors-warn { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); }
 .authors-warn a { color: inherit; font-weight: 600; }
 .authors-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -19,7 +19,7 @@
   .authors-row.head { display: none; }
 }
 
-/* Réglages › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.
+/* Réglages › Personnage › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.
    La forme proposée : pleine, dans l'accent (validé contre le fond, clair et sombre) ; celle d'aujourd'hui : grise, en
    pointillé — la seconde marque qui les distingue sans la couleur. */
 :root { --temper-mark: #6544ce; }

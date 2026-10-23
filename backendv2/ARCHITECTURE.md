@@ -43,7 +43,7 @@ Vérifié à chaque test (`lint-imports`, configuré dans `pyproject.toml`) :
 - **Autres contributions** : évaluations (ce qu'un événement fait ressentir, ADR 0017), préludes, interprètes (ADR 0014), formes de signal (`shapes=`), outils, projections, **vues d'inspection** (`@f.inspect`, ADR 0024).
 - **Paramètres** (`runtime/params.py`) : chaque valeur vient de la chaîne défaut ← tempérament ← réglage ← surcharge ; tout paramètre porte un `Knob` borné.
 - **Opérations** (`runtime/operations.py`) : un seul chemin pour la console et la ligne de commande — valider, proposer, exécuter, vérifier les types émis, ajouter (origine extérieure), auditer (`runtime.operated`).
-- **Passerelle LLM** (`adapters/llm/`). Routage par rôle (`vocab/episodes.py`) ; un rôle se replie sur un autre rôle (`FALLBACKS`, par exemple `extract` → `reply`), **jamais un fournisseur sur un autre** : un appel en échec est journalisé et propagé (ADR 0073). Le premier fournisseur déclaré sert `reply` d'office et les autres rôles y retombent, sauf `polish`. Un rôle « voix » exige la persona. Créneaux à priorité avec préemption (`kernel/slots.py` : un créneau réservé au premier plan dès deux, priorité héritée par les appels faits pendant un épisode), délais par voie (conversation 120 s, fond 300 s), passerelle collante par `call_id` et `release` en fin de boucle, une trace chiffrée par appel au registre des appels (`adapters/llm/calls.py`). Fournisseurs : Claude (API), **Claude Code** (la CLI `claude -p` et son propre login, jamais un jeton ; ses appels d'outils passent par un relais MCP local et c'est le runtime qui les exécute — ADR 0026 ; ceux d'un même message font un seul tour, dans l'ordre écrit — ADR 0072), compatibles OpenAI, Ollama, Ollama Cloud.
+- **Passerelle LLM** (`adapters/llm/`). Routage par rôle (`vocab/episodes.py`) ; un rôle se replie sur un autre rôle (`FALLBACKS`, par exemple `extract` → `reply`), **jamais un fournisseur sur un autre** : un appel en échec est journalisé et propagé (ADR 0073). Le premier fournisseur déclaré sert `reply` d'office et les autres rôles y retombent, sauf `polish`. Un rôle « voix » exige la persona. Créneaux à priorité avec préemption (`kernel/slots.py` : un créneau réservé au premier plan dès deux, priorité héritée par les appels faits pendant un épisode), délais par voie (conversation 120 s, fond 300 s), passerelle collante par `call_id` et `release` en fin de boucle, une trace chiffrée par appel au registre des appels (`adapters/llm/calls.py`). Fournisseurs : Claude (API, par le SDK Anthropic : `workspace` pour une clé non attachée à un espace de travail, `effort` pour la réflexion adaptative), **Claude Code** (la CLI `claude -p` et son propre login, jamais un jeton ; ses appels d'outils passent par deux serveurs MCP relais, `mika` et `mika_plus`, servis sur `/mcp/relais` en boucle locale, et c'est le runtime qui les exécute — ADR 0026 ; ceux d'un même message font un seul tour, dans l'ordre écrit — ADR 0072 ; la CLI ajoute d'elle-même une identité d'agent, un rappel `userEmail` et un bloc « # Environment » autour du prompt, qu'aucun réglage ne retire — ADR 0112), compatibles OpenAI, Ollama, Ollama Cloud.
 - **Outils** (`runtime/tools.py`). Les lots hors du socle d'un épisode sont « à la demande » : le modèle les cherche, guidé par un catalogue d'une ligne par lot — sauf chez un fournisseur qui ne sait pas différer (`defers_tools=False` : Ollama, compatibles OpenAI), qui reçoit tout. Un outil peut clore la boucle quand il réussit (`ToolSpec.ends_loop`, ADR 0054). Les outils d'une faculté peuvent être dynamiques : une famille de lots (`Faculty.tool_source`, `Registry.set_dynamic`). Une seule porte les offre (`runtime.tools.offer`), et un opérateur y règle chaque outil par situation (`rules=`, `situation_of`, lus à chaque épisode par `KernelDeps.tool_rules` ; ADR 0122, 0123) : le retirer, le mettre en main ou à la demande, jamais offrir ce que le code n'offre pas.
 - **Passerelle d'images** (`adapters/imaging/`, port `imaging`, ADR 0061) : la même forme — fournisseurs déclarés, rôles (`draw`, `edit`, `own`), créneaux à priorité partagés avec la passerelle LLM, délais par voie, une trace chiffrée par appel (`image.<rôle>`) —, mais **avec** une chaîne de replis. Une demande dit une proportion et une qualité, chaque fournisseur la traduit ; seuls les candidats capables sont appelés (références, contenu pour adultes) ; un refus de modération est une réponse, jamais redemandée à un autre service hébergé. Fournisseurs : OpenAI (API Images), stable-diffusion.cpp (le serveur local `services/mika-images`, API native) et tout serveur compatible OpenAI. **Désactivée tant qu'aucun fournisseur n'est branché.**
 
@@ -59,6 +59,38 @@ Vérifié à chaque test (`lint-imports`, configuré dans `pyproject.toml`) :
 - **Sauvegarde** (`app/backup.py`, ADR 0024). Une sauvegarde rejoue sa copie et en garde l'empreinte ; une restauration la revérifie avant de toucher au dossier et prend le verrou du dossier (ADR 0045). Sur MariaDB, elle garde à côté du dossier une copie SQL de chaque base (`mariadb-dump`, instantané cohérent), qui se vérifie dans une base de travail ; une restauration copie d'abord les bases en service dans le dossier mis de côté.
 - **Oubli** (ADR 0024, 0045, 0073). L'oubli d'un sujet, depuis la console comme depuis la ligne de commande, emporte ses textes, ses archives, ses caches et ses alias, y compris les textes qu'une projection avait rattachés au sujet après coup ; une projection reconstruite ne les fait pas revenir. L'oubli d'un nom (`name:…`) le remplace par un jeton opaque dans les enveloppes du journal.
 - **Sur des années.** Le rappel et l'index des vecteurs restent en temps borné (ADR 0054, 0059) : au-delà de 50 000 vecteurs, la recherche parcourt la base par blocs de 1 024, hors de la boucle d'événements.
+
+## Démarrage, dossier de données, environnement
+
+**Démarrage** (`app/server.py::serve`) :
+
+1. Prendre le verrou du dossier.
+2. Lire la persona : celle éditée dans la console prime sur `persona/mika.yaml` ; une persona illisible est dite en français, et elle repart sur la dernière gardée (ADR 0057).
+3. `schema.migrate_data` passe chaque base à sa dernière révision, **avant toute ouverture**.
+4. `Kernel.boot()` (`runtime/bootstrap.py`) : rejeu, invariants de composition, ports, outils, configuration journalisée.
+5. Réglages, comptes (`register_accounts`), LLM, images, MCP, hub, monde, constellation.
+6. Attente des plongements, 30 s au plus.
+7. `live()` : les voies démarrent, puis `recover()` clôt les épisodes ouverts comme `interrupted` ; un tour resté sans réponse est repris une fois sur son dernier message, ou abandonné après 600 s ou deux tentatives. Viennent ensuite l'ordonnanceur, la file de sortie et les projections.
+
+uvicorn est forcé en `loop="asyncio"` : uvloop casse pasta.
+
+**Le dossier de données** (`--data`, défaut `data/v2`, **relatif au dossier courant** : lancer depuis `backendv2/`) :
+
+- les bases `mind.db` (sa vie, qu'on sauvegarde), `views.db` (jetable : projections différées, vecteurs, registre des appels, traces, séries), `mail.db`, `feeds.db` et `teams.db` ;
+- `secret.key` (Fernet, 0600, créé au premier démarrage sauf si `MIKA_SECRET_KEY` est posé) ;
+- `mika.lock` (le pid), `sauvegardes.json`, l'éventuel `firebase-service-account.json` ;
+- les dossiers `partages/` (les fichiers qu'elle envoie) et `pieces/` (ce qu'on lui envoie), tous deux 0700 et gardés hors du journal, puis `forge/`, `ateliers/` et `mcp/` ; `cache/` (le modèle de plongements en service), jamais archivé ; après une restauration, l'ancien contenu dans `.avant-restauration-…` (ADR 0125).
+
+La persona et `voix.yaml` se trouvent depuis l'installation, pas depuis le dossier courant. Les dossiers d'appel de Claude Code sont sous `$XDG_RUNTIME_DIR/mika/claude-code/<hash>`.
+
+**Les variables d'environnement** (il n'y a pas de `.env`) :
+
+- `MIKA_SECRET_KEY` : la clé des secrets ;
+- `MIKA_DATABASE_URL` : un serveur MariaDB, par socket Unix, pilote PyMySQL ; `MIKA_DATABASE_PREFIX` : le préfixe des noms de base, `mika_` par défaut ;
+- `MIKA_VOIX` : un autre fichier de voix, pour un jumeau ;
+- `MIKA_EMBEDDINGS_MODEL`, `MIKA_EMBEDDINGS_DEVICE` : le modèle de plongements et son appareil (`cpu`, `cuda`, `auto` ; une valeur inconnue revient au processeur), ADR 0109 ;
+- `MIKA_WEB_*` : le plugin web ;
+- `MIKA_TEST_MARIADB` : seulement pour les tests.
 
 ## Les facultés
 
@@ -304,14 +336,27 @@ Les plugins ont la même forme que les facultés et une confiance restreinte : d
   - **La console en MCP** (`/mcp/console`, boucle locale, jeton d'opérateur) sert les mêmes lectures à un agent : vues, fiches, `pourquoi` et une liste blanche de pages (`inspector/mcp.py::PAGES`, d'autres parmi `SERVABLE`), jamais un formulaire ni une action. Son jeton et ce qu'elle sert se règlent dans Outils › Prêter à un agent (ADR 0122, 0123).
   - **Ses outils se règlent** dans Outils › Ce qu'elle peut faire, une grille familles × situations où l'on décoche (ADR 0123) ; la fiche d'un outil en change la place (en main, à la demande). Un outil qui clôt la boucle ne se règle pas.
   - **Ses outils prêtés** (`app/lending.py`, `/mcp/pret/<nom>`, ADR 0122) : un point déclaré dans Outils › Prêter à un agent prête des outils choisis parmi ce que la porte offre en conversation à l'opératrice qui l'a déclaré, avec ses droits à elle. Chaque appel est une séance sans modèle (`pret:<nom>:…`, arguments vérifiés comme dans la boucle, `checked_args`) ; en lecture seule, toute écriture est refusée (`ReadingContext`). Boucle locale, un jeton par point (empreinte seule), 60 appels par minute.
-- **Santé** (`/health`, public) : des noms et des états seulement ; 503 tant qu'elle n'est pas prête ; « dégradé » quand le fournisseur qui la fait répondre échoue ou qu'aucun ne sert `reply`. `/` mène à la console, qui crée le premier compte opérateur ; une persona illisible est dite en français, et elle repart sur la dernière gardée (ADR 0057).
+- **Santé** (`/health`, public) : des noms et des états seulement ; 503 tant qu'elle n'est pas prête ; « dégradé » quand le fournisseur qui la fait répondre échoue ou qu'aucun ne sert `reply`. `runtime/health.py` fait dix contrôles : journal, tranches, boucles, projections, processus, sorties, llm, voies, config, ports. `/` mène à la console, qui crée le premier compte opérateur ; une persona illisible est dite en français, et elle repart sur la dernière gardée (ADR 0057).
 - **Sa voix** (`persona/voix.yaml`, ADR 0071) : toutes les phrases que le modèle lit ou qu'elle dit sans modèle — consignes, sections du prompt et leurs titres, cadrages des épisodes, descriptions des outils, mots des humeurs, repères de temps, sa journée « à raconter » — dans un seul fichier documenté, en dix sections, un bloc par propriétaire. Le code les demande par clé (`mika.vocab.phrasebook` : `phrase`, `phrases`, `family`), et les trous sont stricts ; `MIKA_VOIX` désigne une autre voix (un jumeau). La console, la ligne de commande et les journaux techniques n'y sont pas. Une heuristique d'architecture refuse toute nouvelle prose écrite en dur dans les facultés et les plugins (`test_no_new_prose.py`).
 - **Genèse** (`app/genesis.py`, ADR 0070) : un pilote extérieur, sur un noyau démarré (souvent sur horloge virtuelle), lui donne ce que ses archives disent d'elle. `remember`, `believe` et `note_event` émettent les événements de sa mémoire avec `origin=GENESIS`, par `Mind.append`, en clés de personne canoniques vérifiées (l'oubli les atteint). Le pilote pose puis lève le préréglage « avance rapide » (`begin_fast_forward`, `end_fast_forward`) : des surcharges journalisées qui coupent sa vie spontanée le temps du rejeu. C'est la couture avec `INJECTION/`.
 - **Simulateur** (`sim/`, ADR 0007) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice qui répète tout secret (`CANARI-…`) qu'on lui montre, des pannes, des mesures. Voie rapide : S01–S13 puis S15–S23 (il n'y a pas de S14). On valide par cibles d'intention, et on casse exprès ce qu'un test garde pour vérifier qu'il n'est pas vide. **La sonde** (`mika sim sonde --semaine 1|2`) fait vivre une semaine au vrai modèle configuré, pour voir ce que la doublure ne montre pas (ADR 0043, 0048, 0054) ; la seconde semaine : un deuil, un rappel promis, un anniversaire, un surnom, un salon.
 
-## Ajouter une faculté
+## Écrire une faculté
 
-Les tests exigent tout ce qui suit.
+**La déclarer** (`kernel/faculty.py`) : `Faculty(name, state, init, state_version, params, volatile, derive…)`. Tout le reste se déclare par décorateurs.
+
+- Événements : `F.declare(*contracts.x.ALL)` (déclarés par `event_type(...)` dans `contracts/`), ou `F.event(...)` en ligne.
+- Réduire et lire : `@f.reducer(*types, reads=…)`, `@f.fact(key, reads=…)`.
+- Le prompt : `@f.section(key, zone=…, trim_rank=…, floor_chars=…, untrusted=…)`, `@f.enricher`, `@f.prelude`, `@f.interpret`.
+- L'arbitre : `@f.propose(kinds, reasons=…)` pour les preuves, `@f.modulate` pour les modulations et vetos.
+- Les ressentis : `@f.appraisal`, `@f.feels`.
+- Le temps : `@f.process(name, wake_on=…, lane=…, deadline_s=…)`.
+- Les outils : `@f.tool(name, args=…, bundle=…, episodes=…, ends_loop=…, owner_only=…, when=…)`, `f.bundle(...)`, `@f.tool_source(famille)` pour des outils dynamiques.
+- Les effets : `@f.capability(name, preview=…)`, `@f.effect(type, lane=…)`, `projector(name, version, tier=…)`.
+- La console : `@f.inspect` (un onglet de fiche qui ne se montre que s'il a quelque chose à dire : `shown=`), `@f.subject`, `@f.search`, `@f.download`, `@f.action`, `@f.vital`, `@f.series`.
+- La cohérence : `@f.invariant`.
+
+**En ajouter une** : les tests exigent tout ce qui suit.
 
 1. `faculties/<nom>/` : une tranche gelée, des `Params` dont chaque champ porte un `Knob` borné, et `Faculty(...)`.
 2. `contracts/<nom>.py` : ce que d'autres doivent lire.
@@ -322,6 +367,24 @@ Les tests exigent tout ce qui suit.
 7. Déclarer les `subjects=` de tout événement qui porte du texte.
 
 Au démarrage, sa tranche se reconstruit depuis le journal et elle apparaît seule dans la console (ses vues, ses onglets de fiche, ses actions, ses paramètres documentés par `Knob`).
+
+**Les gardes d'architecture** (`tests/architecture/`) :
+
+| Test | Ce qu'il garde |
+|---|---|
+| `test_composition` | Le démarrage refuse un registre incohérent ; `lint-imports` passe. |
+| `test_console_labels`, `test_console_registry` | Tout ce qui est déclaré est nommé ; sujets, onglets, actions et badges sont cohérents. |
+| `test_params_documented` | Tout paramètre a un `Knob` borné, et les extrêmes du tempérament donnent des valeurs valides. |
+| `test_forgetting`, `test_people_texts` | Tout texte gardé déclare ses sujets ; les champs de personne en clair sont comptés. |
+| `test_phrasebook`, `test_no_new_prose` | Clés et trous concordent, pas de phrase orpheline ; pas de nouvelle prose française dans les facultés et plugins (plafonds par fichier). |
+| `test_memory_has_one_door` | La mémoire ne se lit que par les vues de `contracts.memory`. |
+| `test_views_read_the_journal_through_the_context` | Les vues lisent le journal par `ctx.events` et `ctx.tally`, jamais en SQL. |
+| `test_sql_portable`, `test_mail_sql_is_portable` | Rien que MariaDB lirait autrement. |
+| `test_her_name_comes_from_her_persona` | Pas de « Mika » en dur. |
+| `test_tools_described` | Les lots, outils et conditions `when=` sont décrits. |
+| `test_causes_are_said` | Une cause d'humeur est un code `vocab.causes` qui a sa phrase. |
+| `test_audiences_say_who_knows_whom` | Toute audience réelle précise `untied_level`. |
+| `test_docs_agree` | La documentation dit ce que fait le code : les trames du chat, les sous-commandes de la CLI, les chemins cités, les numéros d'ADR. |
 
 ## Invariants
 
@@ -344,5 +407,28 @@ tranche = *slice* · bail = *lease* · supplanté = *superseded* · divulgation 
 .venv/bin/python -m mika --data data/v2 replay --verify
 .venv/bin/python -m mika --data data/v2 backup ARCHIVES --keep 14   # verify ARCHIVE, restore ARCHIVE
 .venv/bin/python -m mika --data data/v2 profil reflechie    # appliquer un profil de personnalité (serveur arrêté)
-.venv/bin/python -m mika --help                            # modèles, comptes, jetons, sens, forge, oubli
+.venv/bin/python -m mika.app.schema revision <base> "<message>"   # une révision Alembic
+.venv/bin/python -m mika.vocab.phrasebook                 # contrôle de persona/voix.yaml
+.venv/bin/python -m mika --help
 ```
+
+Toutes les sous-commandes de `mika` (`src/mika/app/cli.py`) :
+
+| Sous-commandes | Rôle |
+|---|---|
+| `serve` | Lance le serveur. Options : `--port 8001`, `--host 127.0.0.1`, `--origin URL` (répétable ; remplace les origines de développement localhost/127.0.0.1 en :3000 et :4173), `--cookie-secure`, `--behind-proxy`, `--reports DIR`. |
+| `replay --verify`, `rebuild <propriétaires…>`, `forget <sujet>` | Le journal et l'oubli. |
+| `sim selftest\|run\|sonde` | Le simulateur. Options : `--profil`, `--semaine 1\|2`, `--backend`. |
+| `profil [nom]` | La personnalité. |
+| `backup`, `verify`, `restore` | Sauvegarder et restaurer. |
+| `llm show\|backend\|route\|remove\|context` | Modèles. Types de fournisseur : `claude`, `claude_code`, `openai`, `ollama`, `ollama_cloud`. |
+| `images show\|backend\|route\|remove\|essai` | Images. Types : `openai`, `sdcpp`, `openai_compatible`. Rôles : `draw`, `edit`, `own`. |
+| `claude-code check\|login` | Le moteur Claude Code. |
+| `account <nom> [--operator] [--full-name]`, `token create\|list\|revoke` (`--client screen\|mobile`) | Comptes et jetons. |
+| `identity link\|unlink`, `social closeness <personne> <niveau\|auto>`, `forge promote\|demote <app>` | Identités, relations, apps forgées. |
+| `mail`, `rss`, `stt` | Courrier, flux, transcription. |
+| `mcp token\|serveurs\|essai` | MCP. `mcp token` imprime la ligne `claude mcp add` pour `/mcp/console`. |
+| `sensors token`, `teams key\|revoke\|status`, `wakeup list\|key\|revoke` | Capteurs, Teams, réveils par API. |
+| `console apercu --out DIR` | Aperçu de la console. |
+
+Codes de sortie : 0 en cas de succès, 1 en cas d'échec, 3 quand un autre processus tient le dossier de données.

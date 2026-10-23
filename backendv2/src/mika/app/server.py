@@ -463,7 +463,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("aucun modèle ne sert « répondre » : elle ne peut pas parler. Déclare un fournisseur dans "
                         "la console, %s (ou `python -m mika llm backend --help`)",
                         f"{live.console_url}/reglages/fournisseurs" if live.console_url else
-                        "Réglages › Fournisseurs")
+                        "Réglages › Intelligence › Fournisseurs")
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
         for problem in await live.reload_imaging():

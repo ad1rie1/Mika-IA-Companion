@@ -116,7 +116,7 @@ class EmailParams(BaseModel):
              "opérateur (qui peut le retoucher) ; décochée, il part dès qu'elle le propose.")] = True
     autodraft: Annotated[tuple[str, ...], Knob(
         label="Comptes où elle prépare des réponses", group="Brouillons", readonly=True,
-        help="Réglé compte par compte (Réglages › Sens › Courrier, « Préparer des réponses d'elle-même ») : "
+        help="Réglé compte par compte (Réglages › Plugins › Boîtes aux lettres, « Préparer des réponses d'elle-même ») : "
              "pour un mail qui attend une réponse, elle prépare un brouillon, qui attend ton accord.")] = ()
     autodraft_skip: Annotated[tuple[str, ...], Knob(
         label="Jamais pour", group="Brouillons", readonly=True,

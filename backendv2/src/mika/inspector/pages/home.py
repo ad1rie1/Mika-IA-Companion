@@ -42,7 +42,7 @@ def outcome_badge(outcome: str, kind: str | None = None) -> Badge:
 
 
 def episode_row(ui: Any, e: Any) -> Row:
-    """Une ligne d'épisode terminé (tableau de bord, Décisions › Épisodes) : quand, quoi, vers qui (un
+    """Une ligne d'épisode terminé (accueil, Activité › Épisodes) : quand, quoi, vers qui (un
     nom), l'issue, le détail en mots — la ligne mène à l'épisode."""
     return Row((When(e.at), names.kind(e.data.kind), ui.names.who_cell(e.data.target),
                 outcome_badge(e.data.outcome, e.data.kind),
@@ -56,7 +56,7 @@ def _local(href: str, text: str) -> Ref:
     return Ref("local", href, text)
 
 
-#: les épisodes (Décisions › Épisodes)
+#: les épisodes (Activité › Épisodes)
 EPISODES_HREF = "/inspecteur/decisions/episodes"
 #: les réponses relues pour savoir si elles échouent (les plus récentes d'abord)
 REPLIES_SCANNED = 200
@@ -177,7 +177,7 @@ async def today(ui: Any, request: Request) -> list[Any]:
         cost = sum(u.cost_usd for u in spent)
         failed = sum(u.failures for u in spent)
         cards.append(Stat("Appels de modèle", sum(u.calls for u in spent), f"{money_fr(cost)} · {failed} échec(s)",
-                          "danger" if failed else "", _local("/inspecteur/systeme/appels", "coûts")))
+                          "danger" if failed else "", _local("/inspecteur/systeme/appels", "Appels et coûts")))
     ended, pager = ctx.older([rt.EPISODE_ENDED], EPISODES_PAGE)
     rows = tuple(episode_row(ui, e) for e in ended)
     scope = [Note("Ces indicateurs portent sur les 1 000 derniers épisodes : la journée peut en contenir davantage.",

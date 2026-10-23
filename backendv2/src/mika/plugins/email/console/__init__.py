@@ -7,7 +7,7 @@
   montre exactement ce qui partira ; l'envoyer, le retoucher, le refuser.
 - **Envoyés**, **Contacts**.
 - **Comptes** : chaque boîte, son état, ses dossiers, sa voix ; les réglages
-  (Réglages › Sens › Courrier) à un clic, et retour ici.
+  (Réglages › Plugins › Boîtes aux lettres) à un clic, et retour ici.
 - **Les fiches** d'un mail, d'un brouillon, d'un compte, avec leurs actions.
 
 Un mail est un texte venu d'ailleurs : il ne s'affiche qu'en texte (cellules,

@@ -107,7 +107,7 @@ SUMMARY_CLAMP = 260
 FILE_SHOWN = 60_000
 DIFF_SHOWN = 40_000
 DOWNLOAD_MAX = 20 * 1024 * 1024
-APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les approbations")
+APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les actions à autoriser")
 
 MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
 MODE_LONG = dict(MODE_CHOICES)

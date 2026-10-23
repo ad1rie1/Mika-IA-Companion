@@ -17,7 +17,7 @@ est dans `~/.claude/plans/stateful-imagining-turing.md`, le mode d'emploi dans `
    origine : `src/twin/timing.py`). Une estimation dit d'où elle vient. Un conflit est signalé,
    jamais tranché en silence.
 4. **Mémoire de la machine** : les traitements lourds (avance rapide, grosses ingestions, suites
-   complètes du moteur) passent par `~/recup-audit-v2-2026-10-01/outils/borne.sh`, une seule
+   complètes du moteur) passent par `../scripts/borne.sh`, une seule
    exécution lourde à la fois. Regarder `free -m` avant.
 
 ## Conventions

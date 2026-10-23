@@ -62,7 +62,7 @@ ANDROID_SDK="${ANDROID_HOME:-${HOME}/Android/Sdk}"
 # Garde-fou mémoire des commandes lourdes (une construction Gradle prend
 # ~2 Gio) : plafond sans swap, seule la commande est tuée au-delà. Vide si
 # l'outil n'existe pas sur la machine.
-MEMORY_GUARD="${AI_PIPELINE_MEMORY_GUARD:-${HOME}/recup-audit-v2-2026-10-01/outils/borne.sh}"
+MEMORY_GUARD="${AI_PIPELINE_MEMORY_GUARD:-${PROJECT_ROOT}/scripts/borne.sh}"
 [[ -x "$MEMORY_GUARD" ]] || MEMORY_GUARD=""
 
 # -- Agent IA -----------------------------------------------------------------

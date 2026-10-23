@@ -299,7 +299,7 @@ TIERS = {Tier.T0: "dans la transaction", Tier.T1: "différée", Tier.T2: "diffé
 
 
 def health(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup:
-    """Système › Santé : le verdict, les dix contrôles en tuiles, les replis techniques de la console."""
+    """Système › Santé générale : le verdict, les dix contrôles en tuiles, les replis techniques de la console."""
     report = health_m.report(ui.kernel)
     checks = [{"name": diagnostics.CHECKS.get(c.name, c.name), "key": c.name,
                "state": diagnostics.STATES.get(c.state, c.state), "tone": diagnostics.TONES.get(c.state, "warn"),

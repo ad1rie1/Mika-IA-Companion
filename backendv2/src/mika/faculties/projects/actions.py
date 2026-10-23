@@ -227,7 +227,7 @@ class CreateArgs(BaseModel):
     cadence_hours: Annotated[int, Knob(label="Cadence des constants (heures)", group="Ses objectifs",
                                        advanced=False, order=55, lo=0, hi=720,
                                        help="Un objectif constant revient après ce délai une fois son passage fait. "
-                                            "0 : la valeur par défaut (Réglages › Comportement › Projets).")
+                                            "0 : la valeur par défaut (Réglages › Paramètres avancés › Projets).")
                          ] = Field(default=0, ge=0, le=720)
     mode: Annotated[str, Knob(label="Mode de travail", choices=MODE_CHOICES, group="Son mode et ses outils",
                               advanced=False, order=60, help=MODE_HELP)] = c.PERSONA

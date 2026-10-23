@@ -19,7 +19,7 @@ NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
 #: qui doit accepter un appel avant qu'il parte
 APPROVALS = (("aucun", "aucun — l'appel part dans la boucle, elle lit la réponse"),
              ("conversation", "dans la conversation — la personne accepte une carte dans le chat"),
-             ("operateur", "de l'opérateur — dans Approbations"))
+             ("operateur", "de l'opérateur — dans À valider › Actions à autoriser"))
 #: à qui un serveur peut servir (jamais dans un salon : une règle, pas un réglage)
 AUDIENCES = (("proprietaire", "sa propriétaire seulement"),
              ("comptes", "aussi une personne authentifiée, en tête-à-tête"))

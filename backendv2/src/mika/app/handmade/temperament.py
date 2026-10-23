@@ -1,4 +1,4 @@
-"""Réglages › Tempérament, dessiné (ADR 0100, 0121) : la forme de son caractère, et partir d'un profil.
+"""Réglages › Personnage › Tempérament, dessiné (ADR 0100, 0121) : la forme de son caractère, et partir d'un profil.
 
 Un profil n'est qu'un préréglage du tempérament (``vocab.temperament.apply_profile`` : ses curseurs de caractère, son
 humeur de fond, sa réaction, sa défense et ses précisions ; son chronotype et celles de l'opératrice gardés), recalculé à chaque lecture

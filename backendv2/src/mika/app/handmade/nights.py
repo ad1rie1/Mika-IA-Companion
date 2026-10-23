@@ -1,4 +1,4 @@
-"""Pensées › Nuits, dessinée (ADR 0121) : son journal de la nuit en page de carnet, ce qu'elle en raconte à
+"""Journal et rêves, dessiné (ADR 0121) : son journal de la nuit en page de carnet, ce qu'elle en raconte à
 n'importe qui, sa journée en cours telle qu'elle pourra la dire demain ; puis ses nuits, une carte par nuit — son
 journal et ses rêves ensemble, ce dont elle s'est souvenue au réveil.
 
@@ -49,7 +49,7 @@ def _text(cell: Mapping[str, Any] | None) -> str:
 
 
 def nights(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
-    """Pensées › Nuits : le journal, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit."""
+    """Journal et rêves : le journal, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit."""
     table = next((b for b in blocks if isinstance(b, Table)), None)
     if table is None:
         return None

@@ -130,7 +130,8 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                Param("de", "Expéditeur", placeholder="nom ou adresse"),
                Param("q", "Recherche", placeholder="objet ou contenu du message"))
     if port is None or not port.accounts():
-        return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Configuration pour recevoir et envoyer des messages.",
+        return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Réglages › Plugins › Boîtes aux "
+                                           "lettres pour recevoir et envoyer des messages.",
                                            title="Aucun compte de messagerie"),
                                       Nav((NavItem("Ajouter un compte", add_account()),))])]
     account = account_scope(port, ctx)

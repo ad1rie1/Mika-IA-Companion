@@ -34,10 +34,10 @@ class IdentityParams(BaseModel):
 
     #: Adresses de propriétaires sans compte opérateur (un compte du chat, par exemple).
     owners: Annotated[tuple[str, ...], Knob(
-        label="Propriétaires (adresses)", group="Propriétaires",
-        help="Une adresse par ligne (ex. user_3) traitée comme la propriétaire, sans compte opérateur : récit "
-             "complet de ses travaux, outils réservés (forge, caméra…). Seulement sur un canal qui prouve le "
-             "compte, et jamais dans un salon public.")] = ()
+        label="Propriétaires (moyens de communication)", group="Propriétaires",
+        help="Un moyen de communication par ligne (ex. user_3), traité comme la propriétaire, sans compte "
+             "opérateur : récit complet de ses travaux, outils réservés (forge, caméra…). Seulement sur un canal "
+             "qui prouve le compte, et jamais dans un salon public.")] = ()
     #: Deux preuves de recoupement : sur deux messages au moins aussi espacés.
     proof_spacing_us: Annotated[int, Knob(
         label="Recoupement : écart entre les deux preuves", group="Être convaincue", lo=0, hi=DAY,

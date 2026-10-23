@@ -1,4 +1,4 @@
-"""Réglages › Accès › Comptes : qui peut se connecter, et qui administre.
+"""Réglages › Comptes opérateurs : qui peut se connecter, et qui administre.
 
 Une liste paginée ; créer un compte et en modifier un se font chacun sur leur
 page (``?nouveau=1``, ``?compte=<id>``). Leurs règles ne sont pas celles d'un
@@ -57,7 +57,7 @@ def _account_url(**query: str) -> str:
     return URL + ("?" + urlencode(query) if query else "")
 
 
-@TABS.tab("reglages.comptes", title="Comptes", group="Accès", order=2000,
+@TABS.tab("reglages.comptes", title="Comptes", group="Comptes opérateurs", order=2000,
           description="Qui peut se connecter au frontend (un compte = une personne qu'elle reconnaît), et qui "
                       "administre : un opérateur ouvre la console, décide des approbations et des apps.")
 async def comptes(ui: Any, request: Request) -> Any:

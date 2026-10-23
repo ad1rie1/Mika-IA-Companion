@@ -188,7 +188,7 @@ class WakeupConfig(BaseModel):
     endpoints: Annotated[dict[str, WakeEndpoint], Knob(
         label="Réveils", advanced=False, order=10,
         help=f"Chaque réveil a sa page. Son nom ({NAME_RULE}) est la fin de son URL : POST /api/wake/<nom>. Sa clé "
-             "se génère sur sa fiche (Ses canaux › Réveils par API).")] = Field(default_factory=dict)
+             "se génère sur sa fiche (Connexions extérieures › Réveils par API).")] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _names(self) -> WakeupConfig:
@@ -329,7 +329,7 @@ class WakeupDesk:
     async def new_key(self, name: str, by: str) -> str:
         ep = self.settings.wakeup().endpoints.get(name)
         if ep is None:
-            raise ValueError("Réveil inconnu : déclare-le d'abord dans Configuration.")
+            raise ValueError("Réveil inconnu : déclare-le d'abord dans Réglages › Plugins › Réveils par API.")
         key = new_key()
         # un réveil signé garde aussi sa clé chiffrée : il faut la relire pour vérifier une signature
         sealed = self.settings.box.seal(key) if ep.signed else ""

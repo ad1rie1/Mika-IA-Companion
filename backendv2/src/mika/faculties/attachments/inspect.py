@@ -158,9 +158,9 @@ def _people_usage(frame: Frame, store: Any) -> list[tuple[str, int, int]]:
 
 
 @ATTACHMENTS.inspect("place", title="Place des pièces", section="memoire", order=26,
-                     description="Ce que les pièces de chacun occupent (toutes ses adresses réunies), face à sa place : "
-                                 "au-delà, les plus anciennes sont retirées — leurs octets s'effacent, ce qu'elle en "
-                                 "avait lu reste.")
+                     description="Ce que les pièces de chacun occupent (tous ses moyens de communication réunis), "
+                                 "face à sa place : au-delà, les plus anciennes sont retirées — leurs octets "
+                                 "s'effacent, ce qu'elle en avait lu reste.")
 def _place(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     store = ctx.store
     if store is None:
@@ -235,7 +235,7 @@ def _seen_tab(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Bl
         return [Note("Cette pièce n'est pas (ou plus) connue.", tone="muted")]
     if not r.seen:
         return [Note("Rien n'a pu en être lu : un format illisible, ou pas de modèle qui voit (Réglages › "
-                     "Fournisseurs, « décrire une image »).", tone="muted")]
+                     "Intelligence › Qui sert quoi, « décrire une image »).", tone="muted")]
     return [Prose(r.seen, title="Ce qu'elle y a lu", reading=True)]
 
 

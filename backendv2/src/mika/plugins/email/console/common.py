@@ -190,7 +190,7 @@ def box_note(port: Any, p: EmailParams) -> Note:
     if not port.accounts():
         return Note(NOT_CONFIGURED, tone="warn")
     if not port.configured():
-        return Note("Aucun compte n'est prêt à relever (serveur, utilisateur ou compte inactif) : voir Courrier › "
+        return Note("Aucun compte n'est prêt à relever (serveur, utilisateur ou compte inactif) : voir "
                     "Réglages › Plugins › Boîtes aux lettres.", tone="warn")
     n = sum(1 for a in port.accounts() if a.ready)
     boxes = "Boîte aux lettres configurée" if n == 1 else f"{n} boîtes aux lettres configurées"
@@ -258,7 +258,7 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
         entries.append(NavItem("Tous les dossiers", box_link("Tous les dossiers", account=account, folder="*"),
                                active=folder == "*"))
         side.append(Nav(tuple(entries), title="Dossiers"))
-    side.append(Nav((NavItem("Gérer les comptes", Ref("local", SETTINGS, "")),), title="Configuration"))
+    side.append(Nav((NavItem("Gérer les comptes", Ref("local", SETTINGS, "")),), title="Réglages"))
     actions: list[Block] = []
     if can_send(port) and (not account or (chosen is not None and chosen.can_send)):
         initial = ((("account", account),) if chosen and chosen.can_send else ()) + (("_bouton", "Envoyer le message"),)

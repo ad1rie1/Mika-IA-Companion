@@ -522,7 +522,7 @@ def test_trust_changing_actions_announce_their_outcome_and_are_guarded(tmp_path)
     assert out["link"].ok and out["owner"]
     assert not out["doubt unconfirmed"].ok and "ne parlera plus" in out["doubt unconfirmed"].errors["confirmed"]
     assert out["still linked"]  # « J'en doute » délierait : rien sans « Je confirme »
-    assert not out["vouch unconfirmed"].ok and "sera liée à Adrien" in out["vouch unconfirmed"].errors["confirmed"]
+    assert not out["vouch unconfirmed"].ok and "sera lié à Adrien" in out["vouch unconfirmed"].errors["confirmed"]
     assert out["vouch"].ok and out["vouched"].bound and not out["vouched owner"]  # garantie : pas les droits
     assert not out["close unconfirmed"].ok and "confidences" in out["close unconfirmed"].errors["confirmed"]
     assert all(spec.confirm for spec in specs.values())

@@ -1243,7 +1243,8 @@ def _stats(store: Any, handles: Sequence[str]) -> Stats:
 
 
 @TRANSCRIPT.inspect("echanges", title="Échanges", subject="person", order=40,
-                    description="Ce qu'ils se sont dit, toutes ses adresses confondues, du plus récent au plus ancien.")
+                    description="Ce qu'ils se sont dit, tous ses moyens de communication confondus, du plus récent au "
+                                "plus ancien.")
 def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -1267,11 +1268,12 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
 
 
 @TRANSCRIPT.inspect("fil", title="Fil", subject="handle", subject_param="handle", order=50,
-                    description="Les messages de cette adresse seulement.")
+                    description="Les messages de ce moyen de communication seulement.")
 def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle = ctx.subject or ctx.param("handle")
     if not handle:
-        return [Note("Ouvre la fiche d'une adresse : Identités, puis l'adresse.", tone="muted")]
+        return [Note("Ouvre la fiche d'un moyen de communication : Identités et moyens de communication, puis le "
+                     "moyen de communication.", tone="muted")]
     store = ctx.store
     if store is None:
         return _no_store()

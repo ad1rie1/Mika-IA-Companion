@@ -32,7 +32,7 @@ async def directory(ui: Any, request: Request) -> dict[str, Any]:
         count += 1
         group = groups.setdefault(page.group or "Autres", {
             "title": page.group or "Autres", "id": f"reglages-groupe-{len(groups)}", "items": [],
-            "advanced": page.group.startswith("Comportement"),
+            "advanced": page.group.startswith("Paramètres avancés"),
         })
         description = page.description
         if len(description) > 180:

@@ -93,7 +93,7 @@ def _known(frame: Frame, texts: Mapping[str, Any], people: Mapping[str, Sequence
         last = fixes[0]
         others = tuple(Row((_who(frame, f.handle), place(f), texts.get(f.coords_ref, FORGOTTEN), When(f.fixed_at)))
                        for f in fixes[1:])
-        detail = (Table(("adresse", "lieu", "coordonnées", Column("mesurée", "fit")), others,
+        detail = (Table(("moyen de communication", "lieu", "coordonnées", Column("mesurée", "fit")), others,
                         title="Ses autres téléphones"),) if others else ()
         rows.append(Row((_person(frame, person), place(last), texts.get(last.coords_ref, FORGOTTEN),
                          _accuracy(last.accuracy_m), When(last.fixed_at),
@@ -109,7 +109,7 @@ def _journal(ctx: InspectContext, frame: Frame, person: str = "") -> Table:
     sent = ctx.events([c.LOCATED, c.CLEARED], SHOWN, before=before, where=("person", person) if person else None)
     older = (("avant", str(sent[-1].seq)),) if len(sent) == SHOWN else ()
     return Table(
-        (Column("quand", "fit"), "adresse", "lieu", "coordonnées", Column("précision", "fit"),
+        (Column("quand", "fit"), "moyen de communication", "lieu", "coordonnées", Column("précision", "fit"),
          Column("journal", "fit")),
         tuple(_sent(e, frame) for e in sent), title="Ce que son téléphone lui a dit" if person else
         "Ce que les téléphones lui ont dit" + (" — plus anciens" if before else ""), empty="rien pour l'instant",
@@ -163,7 +163,8 @@ def _person_tab(s: LocationState, frame: Frame, ctx: InspectContext) -> list[Blo
                                                   clamp=200),
                       texts.get(f.coords_ref, FORGOTTEN), _accuracy(f.accuracy_m), When(f.fixed_at),
                       Ref("event", str(f.seq), f"#{f.seq}"))) for f in fixes)
-    return [Table((Column("adresse", role="title"), "lieu", "coordonnées", Column("précision", "fit"),
+    return [Table((Column("moyen de communication", role="title"), "lieu", "coordonnées",
+                   Column("précision", "fit"),
                    Column("mesurée", "fit"), Column("journal", "fit")), rows,
                   title="Sa dernière position", empty="aucune"),
             _journal(ctx, frame, person)]

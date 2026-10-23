@@ -551,10 +551,10 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
     # une garantie pèse ce que dit la politique : en public, elle ne franchit pas la barre seule
     assert not out["view"].bound and 0.5 < out["view"].claim_certainty < 0.7
     assert not out["vouch again"].ok and "qu'une fois" in out["vouch again"].errors["kind"]
-    assert not out["deny other"].ok and "ne connaît pas cette adresse sous ce nom" in out["deny other"].errors["name"]
+    assert not out["deny other"].ok and "ne connaît pas ce moyen de communication sous ce nom" in out["deny other"].errors["name"]
     assert not out["deny nameless"].ok and out["deny nameless"].errors["name"] == "Indique le nom démenti."
     assert out["deny"].ok and not out["denied view"].claim
-    assert out["tg vouch"].ok and "confirmée : elle parle désormais pour Alice" in out["tg vouch"].message
+    assert out["tg vouch"].ok and "confirmée : il parle désormais pour Alice" in out["tg vouch"].message
     assert out["tg view"].bound and out["tg view"].person == "user_1" and 0.7 <= out["tg view"].certainty < 0.85
     ops = [e for e in out["evidence"] if e.data.by == "operator"]
     notes = [out["notes"].get(e.data.note.ref, "") if e.data.note else "" for e in ops]

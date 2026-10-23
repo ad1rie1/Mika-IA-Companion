@@ -175,8 +175,9 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
                          link.channel or "—", Text(connection, "mono"), When(since) if since else "—",
                          _audience(link, view.trust)), href=person))
     return [
-        Stats((Stat("connexions vivantes", len(s.links)), Stat("adresses présentes", len(_handles(s))))),
-        Table(("personne", "adresse", "nom", "canal", "connexion", "présente depuis", "audience"), tuple(rows),
+        Stats((Stat("connexions vivantes", len(s.links)), Stat("moyens de communication présents", len(_handles(s))))),
+        Table(("personne", "moyen de communication", "nom", "canal", "connexion", "présente depuis", "audience"),
+              tuple(rows),
               title="Présents", pager=pager, empty="personne n'est connecté"),
     ]
 

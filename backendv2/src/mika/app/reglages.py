@@ -658,7 +658,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         )
         return [Note("Les connexions et le comportement des plugins se règlent ici. Les réglages propres à une "
                      "app forgée restent dans sa fiche, dans la Forge."),
-                Table(("Plugin", "Ce qui se règle", "Configuration", "Comportement", "Utiliser / consulter"),
+                Table(("Plugin", "Ce qui se règle", "Configuration", "Paramètres avancés", "Utiliser / consulter"),
                       tuple((label, help_, Ref("local", f"/inspecteur/reglages/{settings_page}", "Configurer"),
                              Ref("local", f"/inspecteur/reglages/comportement-{owner}", "Paramètres") if owner else "—",
                              Ref("local", f"/inspecteur/{usage}", "Ouvrir"))
@@ -753,7 +753,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         prefill=lambda query: temper.prefill(live.persona().temperament, query),
                         description="Sa matrice de personnalité : des curseurs rangés en familles, une humeur de "
                                     "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
-                                    "ses paramètres (Comportement), et ce qui s'écarte du milieu se dit au modèle "
+                                    "ses paramètres (Paramètres avancés), et ce qui s'écarte du milieu se dit au modèle "
                                     "(ADR 0100).",
                         blocks=drives, preview=temperament_effect,
                         pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(

@@ -1,4 +1,4 @@
-"""La console des serveurs MCP (ADR 0064) : dans « Ses outils », la liste des serveurs branchés, puis la fiche de
+"""La console des serveurs MCP (ADR 0064) : dans « Outils › Venus d'ailleurs », la liste des serveurs branchés, puis la fiche de
 chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses appels.
 
 Les connexions (adresse, jeton, commande, pour qui, quand) se règlent dans Réglages › Plugins › Outils

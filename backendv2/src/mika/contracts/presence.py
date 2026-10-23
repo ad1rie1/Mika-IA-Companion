@@ -67,10 +67,10 @@ COMPOSE = event_type("presence.composing", OWNER, Composing, public=True, subjec
 ALL = (CONNECTED, DISCONNECTED, READ, COMPOSE)
 
 #: Les adresses connectées, triées.
-PRESENT = FactKey("presence.present", type=tuple, doc="adresses avec au moins une connexion vivante")
+PRESENT = FactKey("presence.present", type=tuple, doc="moyens de communication avec au moins une connexion vivante")
 #: Depuis quand cette adresse est là (début de la présence en cours), ou None.
 SINCE = FactFamily("presence.since", arg=str, type=int)
 #: Depuis quand la personne derrière cette adresse écrit un message (début de la saisie en cours), ou None — aussi
 #: au-delà de ``COMPOSING_MAX_US`` de saisie continue.
 COMPOSING = FactFamily("presence.composing", arg=str, type=int, time_varying=True,
-                       doc="début de la saisie en cours d'une adresse (bornée)")
+                       doc="début de la saisie en cours d'un moyen de communication (bornée)")

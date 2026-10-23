@@ -376,15 +376,6 @@ archivés. Copie les archives ailleurs que sur la machine.
 
 ## Restaurer
 
-**Attention, avec ces chemins** : la restauration prépare l'archive à côté du
-dossier de données, puis échange les deux dossiers ; elle doit donc écrire dans
-`/var/lib`, ce que l'utilisateur `mika` ne peut pas. Telle quelle, la commande
-`restore` ci-dessous échoue sur un refus de permission, avant d'avoir rien
-touché. Sur fichiers SQLite, lance-la en root avec l'environnement chargé, puis
-rends le dossier à `mika` (`sudo chown -R mika:mika /var/lib/mika`). Sur
-MariaDB, root ne se connecte pas sous le compte `mika` (`unix_socket`) : il n'y
-a pas encore de chemin propre.
-
 ```bash
 sudo systemctl stop mika
 mika restore /var/backups/mika/mika-AAAAMMJJ-HHMMSS.tar.gz --force
@@ -394,9 +385,12 @@ curl -s localhost:8001/health
 ```
 
 La restauration vérifie les sommes et rejoue la copie **avant** de toucher au
-dossier ; l'ancien dossier est mis de côté (`/var/lib/mika.avant-restauration-…`),
-jamais effacé. Sur MariaDB, ses bases en service sont d'abord copiées dans
-`bases/` de ce dossier mis de côté, puis chaque copie de l'archive est rechargée
+dossier. Elle travaille dans le dossier même (l'utilisateur `mika` n'écrit pas
+dans `/var/lib`) : l'ancien contenu est mis de côté dans
+`/var/lib/mika/.avant-restauration-…`, jamais effacé, et n'entre dans aucune
+archive suivante — supprime-le à la main quand tu n'en as plus besoin. Le modèle
+de plongements (`cache/`) reste en place. Sur MariaDB, ses bases en service sont
+d'abord copiées dans `bases/` de ce dossier mis de côté, puis chaque copie de l'archive est rechargée
 à sa place ; `mika_views` est vidée. Une archive faite sur fichiers ne se
 restaure pas sur un serveur, ni l'inverse. Au démarrage, les vues se
 reconstruisent (le rappel est moins bon quelques minutes, le temps de réindexer
@@ -428,7 +422,8 @@ sudo systemctl start mika
 ```
 
 Ses contenus sont effacés de `mind.db`, des vues et des journaux WAL ; les
-**archives** plus anciennes les contiennent encore, jusqu'à leur rotation. Sur
+**archives** plus anciennes les contiennent encore, jusqu'à leur rotation, comme
+les dossiers `.avant-restauration-…` qu'une restauration a laissés. Sur
 MariaDB, ils disparaissent des tables tout de suite (la place est remise à zéro :
 `innodb_immediate_scrub_data_uncompressed`), et des journaux de reprise et
 d'annulation d'InnoDB à leur rotation, sous peu.

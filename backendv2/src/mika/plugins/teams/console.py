@@ -1,4 +1,4 @@
-"""La console de Teams (Ses canaux › Teams) : ses conversations, ses réponses, l'extension.
+"""La console de Teams (Relations & échanges › Teams) : ses conversations, ses réponses, l'extension.
 
 Sur la fiche d'une réponse, **exactement ce qui partira** (la signature comprise) ; quand elle attend ton accord
 (mode « après ton accord »), tu peux l'envoyer telle quelle, la retoucher (c'est alors ta version qui part : ce que

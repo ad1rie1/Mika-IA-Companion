@@ -32,7 +32,7 @@ bases ne sont pas des fichiers du dossier : l'archive porte, à côté du dossie
 (``backup_server``). La vérification recharge ``mind`` dans une base de
 travail et l'y rejoue. La restauration vérifie les sommes et rejoue ``mind``
 rechargé dans une base de travail, **copie les bases en service** dans le
-dossier mis de côté (``<dossier>.avant-restauration-…/bases/``), puis recharge
+dossier mis de côté (``<dossier>/.avant-restauration-…/bases/``), puis recharge
 chaque copie à sa place ; ``views`` est vidée (elle se reconstruit). Une copie
 qui ne se rechargerait pas en route laisse les bases en service à portée de
 main, dans ce dossier mis de côté. Une archive faite sur
@@ -44,8 +44,14 @@ dépend du code autant que des données (un champ de tranche, un réducteur
 corrigé, un upcaster la changent) : elle ne se compare que sous le code qui a
 écrit l'archive. Sous un autre (une mise à jour depuis), la copie est rejouée
 depuis la genèse et doit retomber sur la même tête sans qu'aucun réducteur ne
-lève ; c'est dit dans les remarques. L'ancien dossier est
-mis de côté, jamais effacé. Restaurer prend le verrou du dossier
+lève ; c'est dit dans les remarques. L'ancien contenu est
+mis de côté, jamais effacé. Tout se passe **dans** le dossier de données :
+l'archive y est préparée (``.restauration-…``), l'ancien contenu y est mis de
+côté (``.avant-restauration-…``), puis chaque entrée prend sa place — en
+service, l'utilisateur ``mika`` ne peut écrire que dans ``/var/lib/mika``, pas
+dans ``/var/lib``. Ces dossiers cachés n'entrent dans aucune archive, et ce que
+la sauvegarde ne prend pas (``SKIPPED_DIRS`` : le modèle de plongements) reste
+en place. Restaurer prend le verrou du dossier
 (``datadir``) : sous un serveur en marche, c'est refusé — il écrirait encore,
 par ses descripteurs ouverts, dans le dossier mis de côté.
 """
@@ -95,6 +101,9 @@ SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.js
 #: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR ; ``cache`` (``HF_HOME`` de l'unité : le modèle
 #: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109)
 SKIPPED_DIRS = frozenset({"claude-code", "cache"})
+#: dans le dossier de données, ce qu'une restauration prépare et ce qu'elle met de côté (cachés : aucune archive ne
+#: les prend, une restauration suivante ne les remplace pas)
+STAGING, ASIDE, KEPT = ".restauration-", ".avant-restauration-", ".avant-bases-"
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 ARCHIVE_PREFIX = "mika-"
 #: ce que la console lit des sauvegardes : la dernière, la dernière vérification (dans le dossier de données)
@@ -422,7 +431,7 @@ def _us(now: datetime | None) -> int:
 
 def note(data: Path, kind: str, fields: dict[str, Any]) -> None:
     """Note dans le dossier de données ce qu'une sauvegarde ou une vérification a donné (la console
-    le lit : Système › Stockage). Écrit d'un coup, jamais à moitié ; un échec d'écriture ne fait pas
+    le lit : Système › Stockage et sauvegardes). Écrit d'un coup, jamais à moitié ; un échec d'écriture ne fait pas
     échouer la sauvegarde."""
     path = Path(data) / RECORD
     try:
@@ -513,11 +522,11 @@ def verify(archive: Path, *, record: Path | None = None, now: datetime | None = 
 
 def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | None = None) -> Summary:
     """Restaure dans ``data`` (et, sur un serveur, dans ses bases). Un dossier non vide — ou des bases en service —
-    n'est remplacé qu'avec ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``, les bases copiées
-    dans son ``bases/``).
+    n'est remplacé qu'avec ``force`` ; son contenu est alors mis de côté (``<data>/.avant-restauration-…``, les
+    bases copiées dans son ``bases/``).
 
     Le verrou du dossier est pris d'abord : un Mika qui tourne dessus (``DataDirBusy``) ne voit
-    rien bouger. Il passe au dossier restauré avec son fichier, tenu jusqu'au bout."""
+    rien bouger. Il reste en place, tenu jusqu'au bout. Rien ne s'écrit hors du dossier (voir plus haut)."""
     data = data.resolve()
     server = schema.server_url()
     fresh = not data.exists()
@@ -525,14 +534,15 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
     lock = data / datadir.LOCK_NAME
     done = False
     try:
-        occupied = any(p.name != datadir.LOCK_NAME for p in data.iterdir())
+        old = _replaced(data)
+        occupied = bool(old)
         if server:
             occupied = occupied or _server_occupied(*_server())
         if occupied and not force:
             raise BackupError(f"{data} n'est pas vide{' (ou ses bases sur le serveur)' if server else ''} : relance "
-                              f"avec --force (l'ancien dossier sera mis de côté)")
+                              f"avec --force (l'ancien contenu sera mis de côté)")
         stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
-        stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
+        stage_root = Path(tempfile.mkdtemp(prefix=STAGING, dir=data))
         try:
             manifest = _extract(archive, stage_root)
             from_server = manifest.get("engine") == "mariadb"
@@ -548,9 +558,9 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             except (BackupError, backup_server.ServerError, SQLAlchemyError) as exc:
                 raise BackupError(f"{exc} : rien n'est touché") from exc
             (stage / MANIFEST).unlink()
-            aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
+            aside = data / f"{ASIDE}{stamp}"
             # hors du dossier de travail : la copie survit à son nettoyage si un rechargement échoue en route
-            kept = data.parent / f".{data.name}.avant-bases-{stamp}"
+            kept = data / f"{KEPT}{stamp}"
             if server:
                 if occupied:  # les bases en service, copiées avant d'être remplacées
                     try:
@@ -563,14 +573,10 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                     _reload_bases(*_server(), manifest, stage_root)
                 except (backup_server.ServerError, SQLAlchemyError, OSError) as exc:
                     raise BackupError(_reload_failed(exc, kept, aside)) from exc
-            lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
-            if any(data.iterdir()):
-                data.rename(aside)
-                warnings.append(f"ancien dossier mis de côté : {aside}")
-            else:
-                data.rmdir()
-            stage.rename(data)
+            _swap(data, stage, old, aside, reloaded=server)
             done = True
+            if old:
+                warnings.append(f"ancien contenu mis de côté : {aside}")
             if kept.exists():
                 aside.mkdir(exist_ok=True)
                 kept.rename(aside / BASES)
@@ -594,6 +600,46 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             except OSError:
                 pass
     return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size, tuple(warnings))
+
+
+def _ours(name: str) -> bool:
+    """Ce qu'une restauration ne remplace ni ne pose : le verrou, ses propres dossiers de travail et de mise de côté,
+    et ce que la sauvegarde ne prend pas (``SKIPPED_DIRS``)."""
+    return name == datadir.LOCK_NAME or name in SKIPPED_DIRS or name.startswith((STAGING, ASIDE, KEPT))
+
+
+def _replaced(data: Path) -> list[Path]:
+    """Ce que le dossier tient et qu'une restauration remplace."""
+    return sorted(p for p in data.iterdir() if not _ours(p.name))
+
+
+def _swap(data: Path, stage: Path, old: list[Path], aside: Path, *, reloaded: bool) -> None:
+    """Met l'ancien contenu de côté (``aside``), puis pose ce que l'archive rend, entrée par entrée, sans jamais
+    écrire dans le dossier parent. Un ancien contenu qui ne se déplace pas est remis à sa place."""
+    bases = " ; les bases du serveur, elles, sont déjà rechargées depuis l'archive" if reloaded else ""
+    if old:
+        moved: list[Path] = []
+        try:
+            aside.mkdir()
+            for path in old:
+                path.rename(aside / path.name)
+                moved.append(path)
+        except OSError as exc:
+            for path in reversed(moved):
+                with contextlib.suppress(OSError):
+                    (aside / path.name).rename(path)
+            with contextlib.suppress(OSError):
+                aside.rmdir()
+            raise BackupError(f"mise de côté de l'ancien contenu impossible ({exc}) : le dossier est laissé tel "
+                              f"quel{bases}") from exc
+    try:
+        for path in sorted(stage.iterdir()):
+            if not _ours(path.name):
+                path.rename(data / path.name)
+    except OSError as exc:
+        where = f" ; l'ancien contenu est dans {aside}" if old else ""
+        raise BackupError(f"pose de l'archive interrompue ({exc}) : le dossier est incomplet{where}{bases} — "
+                          f"relance la restauration") from exc
 
 
 def _server_occupied(url: str, prefix: str) -> bool:

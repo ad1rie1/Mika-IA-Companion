@@ -101,7 +101,7 @@ EFFECT_DETAIL = 4000
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
-APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les approbations")
+APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les actions à autoriser")
 
 #: ``project`` : un ancien projet, d'avant les projets à part (ADR 0031), relu au rejeu
 KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "ancien projet"}
@@ -674,7 +674,7 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
             ("d'où il vient", g.source or "—"),
         ), title="Pour qui, et ce qu'elle peut en dire", columns=2),
         Note("Les réglages communs à tous les buts (espacement, séances par heure, pannes avant échec…) se changent "
-             "dans Réglages › Comportement › Buts ; ce but-ci se pilote ici et par les actions en haut de sa "
+             "dans Réglages › Paramètres avancés › Buts ; ce but-ci se pilote ici et par les actions en haut de sa "
              "fiche (avancer, pause, consigne, rouvrir, clore).", "muted"),
     ]
     return blocks
@@ -944,7 +944,7 @@ def _decisions_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Blo
                   empty="plus rien avant" if before else "l'arbitre ne l'a encore jamais pesé (ou pas dans les "
                                                           "sélections gardées au journal)",
                   caption="Une ligne par tirage où ce but était parmi les premiers en lice : « choisi » a donné une "
-                          "séance de travail (ou un rappel, un récit). La table complète du moment : Décisions › Ses choix.")]
+                          "séance de travail (ou un rappel, un récit). La table complète du moment : Activité › Ses choix.")]
 
 
 # ── Sur la fiche d'une personne ───────────────────────────────────────────

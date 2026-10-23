@@ -344,7 +344,7 @@ PERSON_KIND = "person"
 
 
 @AFFECT.inspect("affect", title="Affect", subject=PERSON_KIND, order=60,
-                description="Ce qu'elle ressent envers cette personne, sur toutes ses adresses.")
+                description="Ce qu'elle ressent envers cette personne, sur tous ses moyens de communication.")
 def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -375,7 +375,7 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
                      sub=f"{stored.days} jour(s) de contact" if r.anchor is not None else ""),
                 Stat("dernière balise", _swatch(last.emotion, last.intensity) if last else "—",
                      sub=ctx.when(stored.declared_at) if stored.declared_at else ""),
-            ), title="Envers elle" if key == person else f"Envers l'adresse {key} (avant d'être reliée)"),
+            ), title="Envers elle" if key == person else f"Envers le moyen de communication {key} (avant d'être relié)"),
             Note(_stance_prose(frame, r, p) or "Rien de particulier envers cette personne."),
         ]
     tags, pager = _declared_page(ctx, handles)

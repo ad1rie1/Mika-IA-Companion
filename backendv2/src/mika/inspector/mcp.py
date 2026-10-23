@@ -76,7 +76,8 @@ TOOLS = (
          "prompt, les souvenirs rappelés, les outils.",
          {"type": "object", "properties": {"seq": {"type": "integer", "description": "le numéro de la parole"}},
           "required": ["seq"]}, read_only=True),
-    Tool("chercher", "Chercher un objet (personne, adresse, but, app, mail…) par un mot : rend les fiches trouvées.",
+    Tool("chercher", "Chercher un objet (personne, moyen de communication, but, app, mail…) par un mot : rend les "
+                     "fiches trouvées.",
          {"type": "object", "properties": {"texte": {"type": "string"}, "sorte": {"type": "string"}},
           "required": ["texte"]}, read_only=True),
     Tool("fiche", "Lire la fiche d'un objet : son en-tête, ses onglets, et un onglet (le premier par défaut).",

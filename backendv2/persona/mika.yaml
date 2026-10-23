@@ -146,7 +146,8 @@ facts:
 
 # Sa matrice de personnalité (ADR 0100) : des curseurs entre 0 et 1 (0,5 = comme la plupart des gens ; la console
 # s'arrête à 0,1 et 0,9), une humeur de fond, sa réaction quand on la blesse, sa défense quand on la touche.
-# Mika par défaut : le profil « Réfléchie » (Réglages › Personnalité › Profil en applique d'autres).
+# Mika par défaut : le profil « Réfléchie » (Réglages › Personnage › Tempérament, « partir d'un profil », en applique
+# d'autres).
 temperament:
   reactivity: 0.4
   resilience: 0.5
