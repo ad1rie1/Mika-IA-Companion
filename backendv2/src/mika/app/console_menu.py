@@ -60,6 +60,7 @@ MENU = (
     MenuGroup("Outils", "tools", (
         MenuLink("Ce qu'elle peut faire", "outils"),
         MenuLink("Venus d'ailleurs", "outils/serveurs", ("reglages/serveurs-mcp",)),
+        MenuLink("Droits", "outils/droits"),
         MenuLink("Prêter à un agent", "outils/expose"),
         MenuLink("Apps forgées", "apps"),
     )),

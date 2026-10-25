@@ -48,9 +48,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("Outils", (
         Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
-                    "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
-                    builtin=("outils.tous", "outils.expose"), order=("tous", "serveurs", "expose"),
-                    subjects=("serveur",)),
+                    "(les services branchés, ses apps), qui peut quoi, et ce que tu prêtes à un agent.",
+                    builtin=("outils.tous", "outils.droits", "outils.expose"),
+                    order=("tous", "serveurs", "droits", "expose"), subjects=("serveur",)),
     )),
     NavGroup("À valider", (
         Destination("approbations", "À valider", "Ce qu'elle voudrait faire sortir de la machine, et ce "
@@ -146,7 +146,7 @@ SECTION_LABELS: dict[str, str] = {
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
-    "services": "Ce que ses services extérieurs lui ont rendu",
+    "services": "Ce que ses services extérieurs lui ont rendu", "app_calls": "Ce que ses apps lui ont rendu après un accord",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
     # ADR 0068
@@ -170,7 +170,7 @@ REASON_LABELS: dict[str, str] = {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_news": "Dire ce qu'une app a trouvé", "app_alert": "Prévenir d'une urgence qu'une app a trouvée", "app_triage": "Lire la file de signaux d'une app",
+    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_answered": "Dire ce qu'une app a rendu après un accord", "app_news": "Dire ce qu'une app a trouvé", "app_alert": "Prévenir d'une urgence qu'une app a trouvée", "app_triage": "Lire la file de signaux d'une app",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "rss_for": "Partager un titre qui lui a fait penser à cette personne",
@@ -225,6 +225,7 @@ PROCESS_LABELS: dict[str, str] = {
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
     "mcp.expire": "Refuser les accords restés sans réponse",
+    "forge.calls_expire": "Refuser les appels d'apps restés sans accord",
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
@@ -295,6 +296,8 @@ EVENT_LABELS: dict[str, str] = {
     "rss.noticed": "Un article remarqué", "rss.thought_of": "Un article qui lui a fait penser à quelqu'un",
     "camera.seen": "Ce que la caméra a vu",
     "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
+    "forge.answered": "Ce qu'une app a rendu après un accord", "projects.access_set": "Les accès d'un projet réglés",
+    "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
     "forge.queued": "Un signal d'app mis en file", "forge.judged": "Une file d'app lue",

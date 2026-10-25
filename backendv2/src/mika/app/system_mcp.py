@@ -15,7 +15,7 @@ from typing import Any
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.mcp.system import Provided
 from mika.plugins import web
-from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER
+from mika.ports.mcp import OWNER, WHO_ACCOUNTS, WORK
 
 #: les plugins qui apportent un serveur : quand leurs paramètres changent, le client MCP se reconfigure
 OWNERS = frozenset({web.WEB.name})
@@ -32,7 +32,7 @@ def provided(params_of: Callable[[str], Any]) -> dict[str, Provided]:
 
 #: ses lignes d'accès tant qu'on ne les a pas réglées sur sa fiche (ADR 0131) : avec toi quand elle répond et quand
 #: elle travaille ; elle lit seule, te demande avant d'agir, et ce qu'elle y lit est public (une recherche, des pages)
-WEB_ACCESS = (AccessRule(who=WHO_OWNER, when=("conversation", "travail"), read="seule", act="toi", keep="public"),)
+WEB_ACCESS = (AccessRule(who=(OWNER, WORK), when=("conversation",), read="seule", act="toi", keep="public"),)
 
 
 #: ce que la recherche web réglait avant l'ADR 0131, comme surcharges de son plugin : devenu ses lignes d'accès
@@ -47,10 +47,10 @@ def access_before(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[
     accounts, work = old.get("audience") == "comptes", bool(old.get("in_work", True))
     if not accounts and work:
         return {}
-    mine = ("conversation", "travail") if work else ("conversation",)
-    rows = [AccessRule(who=WHO_OWNER, when=mine, read="seule", act="toi", keep="public")]
-    if accounts:
-        rows.append(AccessRule(who=WHO_ACCOUNTS, when=("conversation",), read="seule", act="toi", keep="public"))
+    rows = [AccessRule(who=(OWNER, WORK) if work else (OWNER,), when=("conversation",), read="seule", act="toi",
+                       keep="public")]
+    if accounts:  # « aussi une personne authentifiée » : les comptes d'avant, lisibles tant qu'on ne les change pas
+        rows.append(AccessRule(who=(WHO_ACCOUNTS,), when=("conversation",), read="seule", act="toi", keep="public"))
     return {web.SERVER: {"access": [r.model_dump(mode="json") for r in rows]}}
 
 

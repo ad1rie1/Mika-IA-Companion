@@ -20,7 +20,7 @@ from mika.adapters.mcp.config import AccessRule, McpConfig, McpServer, StoredRev
 from mika.adapters.mcp.http import HttpTransport
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi
-from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON, Access
+from mika.ports.mcp import OWNER, PERSON, WHO_ACCOUNTS, Access
 
 TOKEN = "jeton-canari-7f3a"
 URL = "http://127.0.0.1:9100/mcp"
@@ -133,7 +133,7 @@ class Store:
 
 
 #: une ligne d'accès : toi, quand elle répond — elle demande à chaque appel, en confidence
-MINE = AccessRule(who=WHO_OWNER, when=("conversation",), read="carte", act="carte", keep="prive")
+MINE = AccessRule(who=(OWNER,), when=("conversation",), read="carte", act="carte", keep="prive")
 
 
 def _server(**kw: Any) -> McpServer:
@@ -381,9 +381,9 @@ async def test_each_tool_carries_the_rows_that_concern_it_and_the_moments_they_o
     défaut ; ce qu'on lui offre au plus, ce sont les moments où l'une d'elles l'ouvre, selon qu'il lit ou agit. Changer
     les lignes change l'offre : le noyau recalcule ses outils."""
     fake = FakeServer()
-    rows = (AccessRule(who=WHO_PERSON + "user_9", read="seule", act="non", tools=("echo",)),
-            AccessRule(who=WHO_OWNER, when=("conversation",), read="seule", act="toi", keep="public"),
-            AccessRule(who=WHO_ACCOUNTS, when=("initiative",), read="carte", act="non", keep="rien"))
+    rows = (AccessRule(who=(PERSON + "user_9",), read="seule", act="non", tools=("echo",)),
+            AccessRule(who=(OWNER,), when=("conversation",), read="seule", act="toi", keep="public"),
+            AccessRule(who=(WHO_ACCOUNTS,), when=("initiative",), read="carte", act="non", keep="rien"))
     store = Store(meteo=_server(access=rows, default_read="non", default_act="carte"))
     hub, client = _hub(fake, store)
     changes: list[int] = []
@@ -392,17 +392,18 @@ async def test_each_tool_carries_the_rows_that_concern_it_and_the_moments_they_o
     await hub.decide("meteo", {"echo": "lecture", "boom": "action"}, by="op")
     tools = {t.remote: t for t in hub.offered()}
     echo, boom = tools["echo"], tools["boom"]
-    assert [a.who for a in echo.access] == [WHO_PERSON + "user_9", WHO_OWNER, WHO_ACCOUNTS]
-    assert [a.who for a in boom.access] == [WHO_OWNER, WHO_ACCOUNTS]  # la première ligne ne nomme que « echo »
-    assert echo.default == Access(who="", read="non", act="carte", keep="rien") == boom.default
-    # une lecture : quand elle répond (toi, la personne nommée) ou d'elle-même (les comptes) ; une action : ta ligne
-    # quand elle répond, et la ligne par défaut à tout moment
-    assert echo.episodes == frozenset({"conversation", "initiative", "travail"})
+    assert [a.who for a in echo.access] == [(PERSON + "user_9",), (OWNER,), (WHO_ACCOUNTS,)]
+    assert [a.who for a in boom.access] == [(OWNER,), (WHO_ACCOUNTS,)]  # la première ligne ne nomme que « echo »
+    assert echo.default == Access(who=(), read="non", act="carte", keep="rien") == boom.default
+    # une lecture : quand elle répond (toi, la personne nommée) ou d'elle-même (la personne nommée, les comptes) —
+    # jamais au travail, qu'aucune ligne ne coche ; une action : ta ligne quand elle répond, et la ligne par défaut à
+    # tout moment
+    assert echo.episodes == frozenset({"conversation", "initiative"})
     assert boom.episodes == frozenset({"conversation", "initiative", "travail"})
     before = len(changes)
     await hub.settle("meteo", {"access": [MINE.model_dump()], "default_act": "non"})
     echo = next(t for t in hub.offered() if t.remote == "echo")
-    assert echo.access == (Access(who=WHO_OWNER, when=("conversation",), read="carte", act="carte", keep="prive"),)
+    assert echo.access == (Access(who=(OWNER,), when=("conversation",), read="carte", act="carte", keep="prive"),)
     assert echo.episodes == frozenset({"conversation"}) and len(changes) > before
     assert hub.status("meteo").access == echo.access
     await hub.aclose()

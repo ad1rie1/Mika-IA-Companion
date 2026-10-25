@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from mika.contracts import identity as identity_c
+from mika.contracts import social as social_c
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience, Frame
@@ -42,6 +43,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.kernel.operate import Done, Refused
+from mika.kernel.rights import Grant, RuleTable, why_words
 from mika.plugins.mcp import (
     ALONE,
     ANSWERED,
@@ -64,11 +66,21 @@ from mika.ports.mcp import (
     NATURES,
     POLICIES,
     STATES,
-    WHO_ACCOUNTS,
-    WHO_OWNER,
-    WHO_PERSON,
     Access,
 )
+from mika.vocab.access import (
+    OWNER,
+    PERSON,
+    SOURCE_WORDS,
+    WORK,
+    checked,
+    in_order,
+    sources,
+    verdict,
+    when_words,
+    who_words,
+)
+from mika.vocab.access import POLICY_WORDS as POLICY_WORDS
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
 
@@ -78,15 +90,11 @@ NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche."
 STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "connecte": "ok", "erreur": "warn",
                "panne": "danger"}
-#: ce qu'une ligne d'accès fait d'un outil, en mots (ADR 0131)
-POLICY_WORDS = {"seule": "seule", "carte": "demande à la personne", "toi": "ton accord", "non": "non"}
-#: quand une ligne vaut, en mots
-WHEN_WORDS = dict(MOMENTS)
 #: ce qu'elle garde, en mots courts
 KEEP_WORDS = {"public": "ce qu'elle sait", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
 #: la ligne qu'on ajoute : toi, tout le temps, fermée — enregistrée dès le clic, elle n'ouvre rien de plus tant qu'on
 #: ne l'a pas réglée (un pare-feu, ADR 0131)
-NEW_ROW: dict[str, Any] = {"who": WHO_OWNER, "when": [], "read": "non", "act": "non", "keep": "rien", "tools": []}
+NEW_ROW: dict[str, Any] = {"who": [OWNER], "when": [], "read": "non", "act": "non", "keep": "rien", "tools": []}
 #: au plus tant de lignes (un tableau que l'on lit d'un regard)
 MAX_ROWS = 40
 
@@ -97,23 +105,13 @@ def name_of(frame: Frame | None, person: str) -> str:
     return str(getattr(view, "name", "") or person)
 
 
-def who_label(who: str, frame: Frame | None = None) -> str:
-    """Qui une ligne d'accès désigne, en mots : toi, les comptes, une personne par son nom ; la ligne par défaut."""
-    if not who:
-        return "Comportement par défaut"
-    if who == WHO_OWNER:
-        return "Toi"
-    if who == WHO_ACCOUNTS:
-        return "Les comptes"
-    return name_of(frame, who[len(WHO_PERSON):]) if who.startswith(WHO_PERSON) else who
+def who_label(who: str | Sequence[str], frame: Frame | None = None) -> str:
+    """Qui une ligne d'accès désigne, en mots (``vocab.access.who_words``), une personne par son nom."""
+    return who_words(who, lambda person: name_of(frame, person))
 
 
-def when_label(when: Sequence[str]) -> str:
-    """Quand une ligne vaut, en mots : « toujours », ou ses moments."""
-    if not when:
-        return "toujours"
-    words = [WHEN_WORDS.get(w, w) for w in when]
-    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " ou " + words[-1]
+#: quand une ligne vaut, en mots (``vocab.access``)
+when_label = when_words
 
 
 def _opens(a: Access) -> bool:
@@ -130,8 +128,8 @@ def who_said(st: Any, frame: Frame | None = None) -> str:
     """Avec qui, en quelques mots : qui ses lignes ouvrent (et « tout le monde » si la ligne par défaut l'est)."""
     if _opens(st.default):
         return "tout le monde (en tête-à-tête)"
-    parts = list(dict.fromkeys(who_label(a.who, frame).lower() if a.who in (WHO_OWNER, WHO_ACCOUNTS)
-                               else who_label(a.who, frame) for a in st.access if _opens(a)))
+    parts = list(dict.fromkeys(who_words((w,), lambda person: name_of(frame, person)) if w.startswith(PERSON)
+                               else SOURCE_WORDS.get(w, w) for a in st.access if _opens(a) for w in a.who))
     if not parts:
         return "personne"
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " et " + parts[-1]
@@ -164,12 +162,19 @@ WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTr
 @dataclass(frozen=True, slots=True)
 class Face:
     """Une colonne de « qui peut quoi » : qui est en face, et à quel moment — ou personne quand elle travaille
-    seule."""
+    seule ; ``close`` : une personne type qui lui est proche."""
 
     key: str
     label: str
     audience: Audience
     kind: str
+    close: bool = False
+
+
+def closeness(face: Face, frame: Frame | None) -> Any:
+    """Qui est proche, devant cette colonne : une personne type proche l'est ; une personne nommée, selon son lien."""
+    real = social_c.is_close(frame) if frame is not None else None
+    return lambda person: face.close or (real is not None and real(person))
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,12 +193,13 @@ def tool_view(st: Any, remote: str, nature: str) -> ToolView:
 
 def faces(st: Any, frame: Frame | None = None) -> list[Face]:
     """Les colonnes de « qui peut quoi » : toi quand elle te répond, toi quand elle te parle d'elle-même, chaque
-    personne que nomme une ligne, les autres comptes, et quand elle travaille seule pour toi."""
-    named = list(dict.fromkeys(a.who[len(WHO_PERSON):] for a in st.access if a.who.startswith(WHO_PERSON)))
+    personne que nomme une ligne, un proche, un autre compte, et quand elle travaille seule pour toi."""
+    named = list(dict.fromkeys(w[len(PERSON):] for a in st.access for w in a.who if w.startswith(PERSON)))
     out = [Face("toi", "Toi", _facing(owner=True), Kind.REPLY),
            Face("toi-parle", "Toi, quand elle te parle d'elle-même", _facing(owner=True), Kind.INITIATIVE)]
     out += [Face(f"p:{p}", name_of(frame, p), _facing(p), Kind.REPLY) for p in named]
-    out.append(Face("comptes", "Les autres comptes" if named else "Les comptes", _facing(), Kind.REPLY))
+    out.append(Face("proche", "Un proche", _facing("proche"), Kind.REPLY, close=True))
+    out.append(Face("comptes", "Un autre compte", _facing(), Kind.REPLY))
     out.append(Face("travail", "Elle travaille seule", WORKING, Kind.STEP))
     return out
 
@@ -564,7 +570,10 @@ class AccessArgs(BaseModel):
     (``prend.<numéro>|<outil>``, ou ``tous.<numéro>``), la ligne par défaut, et ce qu'un bouton demande en plus
     d'enregistrer (``faire`` : ajouter une ligne, en monter, en descendre ou en retirer une)."""
 
-    qui: Annotated[dict[str, str], Knob(label="Qui", advanced=False)] = Field(default_factory=dict)
+    #: une entrée par ligne envoyée (``ligne.<numéro>``) : leur ordre ; ses sources et ses personnes cochées
+    #: (``qui.<numéro>|<source>``, ``qui.<numéro>|personne:<clé>``)
+    ligne: Annotated[dict[str, str], Knob(label="Ligne", advanced=False)] = Field(default_factory=dict)
+    qui: Annotated[dict[str, bool], Knob(label="Qui", advanced=False)] = Field(default_factory=dict)
     toujours: Annotated[dict[str, bool], Knob(label="Toujours", advanced=False)] = Field(default_factory=dict)
     moments: Annotated[dict[str, bool], Knob(label="Quand", advanced=False)] = Field(default_factory=dict)
     lecture: Annotated[dict[str, _Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
@@ -591,19 +600,23 @@ def _number(key: str) -> int:
 
 
 def access_rows(args: AccessArgs, known: Sequence[str]) -> list[dict[str, Any]]:
-    """Les lignes du tableau envoyé, dans leur ordre ; refuse une ligne sans « qui » lisible ou sans outil."""
+    """Les lignes du tableau envoyé, dans leur ordre ; refuse une ligne sans source lisible, sans moment (sauf au
+    travail, qui n'en a pas) ou sans outil."""
     rows = []
-    for n, key in enumerate(sorted(args.qui, key=_number), start=1):
-        who = args.qui[key].strip()
-        if not (who in (WHO_OWNER, WHO_ACCOUNTS) or (who.startswith(WHO_PERSON) and who[len(WHO_PERSON):].strip())):
-            raise Refused(f"Ligne {n} : choisis qui.")
-        when = [] if args.toujours.get(key) else [m for m, _ in MOMENTS if args.moments.get(f"{key}|{m}")]
-        if not args.toujours.get(key) and not when:
+    for n, key in enumerate(sorted(args.ligne, key=_number), start=1):
+        try:
+            who = in_order(sources(checked(args.qui, key)))
+        except ValueError:
+            raise Refused(f"Ligne {n} : coche qui.") from None
+        talks = any(w != WORK for w in who)
+        when = [] if args.toujours.get(key) or not talks else [m for m in checked(args.moments, key)
+                                                                if m in dict(MOMENTS)]
+        if talks and not args.toujours.get(key) and not when:
             raise Refused(f"Ligne {n} : coche au moins un moment, ou « toujours ».")
         tools = [] if args.tous.get(key) else [r for r in known if args.prend.get(f"{key}|{r}")]
         if not args.tous.get(key) and not tools:
             raise Refused(f"Ligne {n} : coche au moins un outil, ou « tous ».")
-        rows.append({"who": who, "when": when, "read": args.lecture.get(key, NO),
+        rows.append({"who": list(who), "when": when, "read": args.lecture.get(key, NO),
                      "act": args.action.get(key, NO), "keep": args.garde.get(key, "rien"), "tools": tools})
     return rows
 
@@ -766,3 +779,50 @@ def _vital(s: McpState, frame: Frame) -> Vital | None:
     text = f"{len(broken)} en panne" if broken else f"{n} à revoir"
     return Vital(text, tone, hint=", ".join(broken) or "des outils attendent ton regard",
                  href=Ref("local", LIST, "Venus d'ailleurs"))
+
+
+# ── Qui peut quoi, sur la page « Droits » (ADR 0133) ──────────────────────
+
+#: ce qu'aucune ligne d'un service n'ouvre
+FLOORS = ("jamais dans un salon, avec une inconnue, ni sans personne", "un outil ne sert qu'approuvé, tel que tu "
+          "l'as approuvé (changé, il est suspendu)")
+COLUMNS = ("qui", "quand", "lecture", "action", "ce qu'elle en garde", "outils")
+
+
+def _row(a: Access, frame: Frame | None) -> tuple[str, ...]:
+    return (who_label(a.who, frame), when_label(a.when), POLICY_WORDS[a.read], POLICY_WORDS[a.act],
+            KEEP_WORDS[a.keep], _tools_of(a))
+
+
+def _service_grants(s: McpState, frame: Frame, ctx: Any, audience: Any, kind: str) -> list[Grant]:
+    """Ce qu'elle fait de chaque outil servi devant cette audience, à ce moment, et la ligne qui en décide."""
+    port = ctx.ports.get("mcp")
+    if port is None:
+        return []
+    statuses = {st.name: st for st in port.statuses()}
+    out = []
+    for t in port.offered():
+        st = statuses.get(t.server)
+        got = verdict(st.access, st.default, audience, kind, lambda a, r=t.remote: a.concerns(r),
+                      close=social_c.is_close(frame)) if st is not None else None
+        if got is None:
+            continue
+        level = got.line.level(t.nature)
+        out.append(Grant(f"mcp:{t.server}", f"« {t.server} » · {t.remote}",
+                         (("lit" if t.nature == "lecture" else "agit", POLICY_WORDS[level]),
+                          ("garde", KEEP_WORDS[got.line.keep] if level != NO else "—")),
+                         why_words(got.index), href=_fiche(t.server, "fait"), closed=level == NO))
+    return out
+
+
+@MCP.rights("services", title="Services branchés", order=20, grants=_service_grants,
+            description="Qui peut se servir des outils de chaque service, quand, ce qu'elle en fait et ce qu'elle "
+                        "en garde (ADR 0131).")
+def _service_tables(s: McpState, frame: Frame, ctx: Any) -> list[RuleTable]:
+    port = ctx.ports.get("mcp")
+    if port is None:
+        return []
+    return [RuleTable(f"mcp:{st.name}", f"Le service « {st.name} »", COLUMNS,
+                      tuple(_row(a, frame) for a in st.access), _row(st.default, frame),
+                      href=_fiche(st.name, "fait"), floors=FLOORS)
+            for st in port.statuses()]

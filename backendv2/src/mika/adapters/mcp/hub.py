@@ -39,7 +39,6 @@ from mika.adapters.mcp.config import (
 from mika.adapters.mcp.http import HttpTransport
 from mika.adapters.mcp.stdio import Launcher, Sandbox, StdioTransport
 from mika.ports.mcp import (
-    MOMENTS,
     NATURES,
     Access,
     CallResult,
@@ -49,6 +48,7 @@ from mika.ports.mcp import (
     ToolReview,
 )
 from mika.ports.preprocess import inert
+from mika.vocab.access import families
 from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.mcp")
@@ -496,19 +496,15 @@ def _review(remote: str, v: StoredReview, name: str = "") -> ToolReview:
 
 def access_of(spec: McpServer) -> tuple[tuple[Access, ...], Access]:
     """Les lignes d'accès d'un serveur, dans leur ordre, et sa ligne par défaut (ADR 0131)."""
-    rows = tuple(Access(who=a.who, when=tuple(a.when), read=a.read, act=a.act, keep=a.keep, tools=tuple(a.tools))
+    rows = tuple(Access(who=tuple(a.who), when=tuple(a.when), read=a.read, act=a.act, keep=a.keep, tools=tuple(a.tools))
                  for a in spec.access)
-    return rows, Access(who="", read=spec.default_read, act=spec.default_act, keep=spec.default_keep)
-
-
-#: tous les moments : ceux d'une ligne qui vaut toujours
-_ALWAYS = frozenset(k for k, _ in MOMENTS)
+    return rows, Access(who=(), read=spec.default_read, act=spec.default_act, keep=spec.default_keep)
 
 
 def granted(rows: tuple[Access, ...], default: Access, nature: str) -> frozenset[str]:
     """Les familles d'épisodes où une de ses lignes (ou la ligne par défaut) peut le laisser servir : ce qu'on lui
     offre au plus. Qui l'a vraiment se décide devant chaque audience (``plugins.mcp.access_for``)."""
-    return frozenset().union(*(frozenset(a.when) or _ALWAYS for a in (*rows, default) if a.level(nature) != "non"))
+    return frozenset().union(*(families(a.who, a.when) for a in (*rows, default) if a.level(nature) != "non"))
 
 
 def _said(exc: BaseException) -> str:

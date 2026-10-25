@@ -61,6 +61,9 @@ class AppTool:
     description: str
     args: tuple[ArgSpec, ...] = ()
     timeout: float = 0.0
+    #: il lit, rien ne change ailleurs (``lit: true``) : la colonne « lecture » des lignes d'accès de son projet
+    #: s'applique ; sinon « action » (ADR 0133)
+    reads: bool = False
 
 
 #: la file de signaux d'une app qui n'en dit rien (ADR 0105) : 20 signaux au plus, lus un par un, 12 appels par jour
@@ -225,6 +228,13 @@ class CallResult:
 
 class ForgePort(Protocol):
     def apps(self) -> list[AppInfo]: ...
+
+    def keep(self, request: str, result: CallResult) -> None:
+        """Garder en mémoire, le temps qu'il soit journalisé comme un contenu, ce qu'a rendu un appel fait après
+        accord (ADR 0133 : le résultat d'un effet n'est pas effaçable)."""
+        ...
+
+    def take(self, request: str) -> CallResult | None: ...
 
     def info(self, app: str) -> AppInfo | None: ...
 

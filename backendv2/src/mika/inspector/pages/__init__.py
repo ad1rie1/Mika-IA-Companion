@@ -7,6 +7,7 @@ from mika.inspector.pages import (  # noqa: F401 — enregistrement
     decisions,
     home,
     reglages,
+    rights,
     settings_directory,
     system,
     tools,

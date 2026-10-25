@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import replace
 from types import SimpleNamespace
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
@@ -32,14 +31,12 @@ from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Origin
-from mika.kernel.state import FrozenDict
-from mika.plugins.teams import RECEIVED, Seen, TeamsParams, TeamsState, mode_of, prepares
+from mika.plugins.teams import RECEIVED
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.episodes import Kind
-from mika.vocab.sending import Sending, SendRule
 from tests.fixtures.mika import DOC, at_paris, build, connect
 
 START = at_paris(2026, 10, 6, 10, 0)
@@ -391,15 +388,6 @@ def test_a_rule_that_stops_her_preparing_holds_for_a_message_already_noticed(tmp
     started, [noticed], tasks, proposed = live(tmp_path, Model(), scenario)
     assert started == [] and noticed.data.prepare  # remarqué quand elle préparait encore
     assert tasks and proposed == []  # la tâche est partie, mais rien ne se propose : la règle a changé
-
-
-def test_a_message_noticed_before_the_rules_follows_the_rule_of_its_conversation():
-    p = TeamsParams(sending=Sending(rules=(SendRule(canal="teams", dest="rh", prepare=False, send="seule"),
-                                           SendRule(canal="teams", prepare=True, send="brouillon"))))
-    old = Seen(1, HR, "Eve", "8:e", "group", 0.5, True, False, 0, "")  # ni « prepare » ni « send » au journal
-    s = TeamsState(messages=FrozenDict({"t1": old, "t2": replace(old, conversation=DM, author="Alice Martin")}))
-    assert not prepares(p, old) and mode_of(p, s, "t1", HR) == "autonome"
-    assert prepares(p, s.messages["t2"]) and mode_of(p, s, "t2", DM) == "brouillon"
 
 
 def test_the_signature_is_added_by_the_server_never_written_by_her(tmp_path):

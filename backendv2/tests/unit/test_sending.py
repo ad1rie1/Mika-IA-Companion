@@ -11,6 +11,7 @@ from mika.adapters.store_sql import SqlStore
 from mika.adapters.teams import TeamsConfig
 from mika.app.settings import EMAIL_KEY, OVERRIDES_KEY, SENDING_KEY, TEAMS_KEY, SecretBox, Settings
 from mika.inspector.pages.sending import NEW_RULE, moved, parse
+from mika.vocab.access import OWNER, WHO_ACCOUNTS
 from mika.vocab.sending import (
     DEFAULT,
     MAIL,
@@ -128,7 +129,8 @@ async def test_old_overrides_are_translated_then_never_written_back(tmp_path):
                                             "web": {"audience": "comptes", "in_work": False, "max_calls": 2}})
         # tant que rien n'est réécrit, les anciennes valeurs se lisent déjà sous leur forme neuve
         web = settings.mcp_system_access()["web"]["access"]
-        assert [(a["who"], tuple(a["when"])) for a in web] == [("toi", ("conversation",)), ("comptes", ("conversation",))]
+        assert [(tuple(a["who"]), tuple(a["when"])) for a in web] == [((OWNER,), ("conversation",)),
+                                                                       ((WHO_ACCOUNTS,), ("conversation",))]
         # une autre surcharge enregistrée, avec celles qu'on avait lues
         await settings.save_overrides({**settings.overrides(), "teams": {"drafts_per_day": 2}})
         assert settings.overrides() == {"email": {"max_per_day": 3}, "web": {"max_calls": 2},

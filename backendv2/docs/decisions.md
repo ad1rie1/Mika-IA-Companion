@@ -21,7 +21,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059 |
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
-| Identité et divulgation | 0012, 0035, 0075, 0092 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
@@ -499,6 +499,25 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0058 (en partie), 0091 (en partie).*
 
+### 0133 — Qui peut quoi : un moteur, des types de règles, une page
+
+- **Un moteur** (`vocab.access.decide`) : un tableau est fait de lignes lues de haut en bas, comme les règles d'un pare-feu, et d'une **ligne par défaut**, obligatoire ; la première ligne qui correspond décide, et la décision dit sa ligne (le pourquoi). Ce qui correspond dépend du type de règles : la personne en face et le moment (`facing` : les sources que la ligne coche, et quand elle vaut), ou le destinataire d'un envoi (`vocab.sending`).
+- **Les sources** : une ligne en coche une ou plusieurs — toi ; elle, quand elle travaille seule (pour toi) ; tes proches (un lien « proche »), authentifiés, en privé ; tout le monde ; des personnes par leur nom, authentifiées. **Quand** ne dit plus que des moments (quand elle répond, quand elle prend la parole ; aucun : toujours) : le travail est une source, plus un moment. Une ligne d'avant se traduit à l'identique (`upgrade`) : « toi » devient toi et elle qui travaille, selon ses moments ; « les comptes » (toute personne authentifiée en tête-à-tête) reste lisible tant qu'on ne l'a pas changée, et ne se coche plus.
+- **Des types de règles**, chacun chez son propriétaire et déclaré (`Faculty.rights`) : ses tableaux en mots, et ce qu'ils accordent à qui est en face. Aujourd'hui : les services (0131), ce qu'elle envoie à ta place (0132), les projets et leurs apps. La grille des règles d'outils par situation (0122) reste à part : elle ne fait que restreindre.
+- **Une porte pour les outils** : celle d'offre (`runtime.tools.offer`), dont la condition `ToolSpec.fits(audience, kind, frame)` lit ces règles, journal compris ; le gestionnaire revérifie par la même règle. Prêter à un agent suit aussi les règles d'outils de l'opératrice qui prête. La garde `min_level` des outils, qu'aucun n'employait, est retirée.
+- **Des planchers**, dans le code, qu'aucune ligne n'ouvre : agir (un outil, piloter, se servir d'une app) jamais dans un salon, avec une inconnue ni sans personne — « tout le monde » n'y ouvre qu'à voir un projet ; une app qui a des secrets ne sert en conversation que promue ; un `[À COMPLÉTER` attend toujours un accord ; ce que le téléphone envoie, c'est toujours ton geste ; le plancher des images (0063). À qui elle rend compte (une annonce de courrier, un compte rendu de réveil ou de projet) reste une affaire de propriétaire et de confidentialité, pas de règles.
+- **Ce que le code réserve à sa propriétaire** est un seul plancher (`vocab.access.owner_here`), pour le courrier, Teams, la caméra, les flux et la Forge (écrire et régler ses apps) : toi en privé — jamais dans un salon, même toi —, ou elle qui travaille pour toi ; un projet ou un réveil seulement s'il a pris ce lot, une tâche seulement si c'est l'une des siennes (un brouillon, la lecture de la file d'une app). La page « Droits » lit ces outils sur eux-mêmes (`owner_only`, `when`), jamais une liste recopiée.
+- **Un projet** a ses lignes d'accès, journalisées (`projects.access_set`), réglées sur sa fiche (onglet « Accès », `projects.acces`) : ses sources, quand, le voir, le piloter (seule, ton accord, non), ce qu'elle fait d'un outil de ses apps qui lit et d'un outil qui agit (seule, demande à la personne, ton accord, non), et à quels outils (tous, ou une sélection `<app>_<outil>`). Voir et piloter valent quelle que soit la sélection d'outils.
+- **Voir** : elle peut en parler à cette personne, sa confidentialité filtrant encore ce qu'elle en dit ; dans un salon ou devant une inconnue, seules « tout le monde » et la ligne par défaut le disent — en parler n'est pas agir. **Piloter** : une consigne, un objectif, une pause, une reprise, « vas-y maintenant » (`project_steer`), jamais son cadre (titre, outils, accord), qui reste à la console ; « seule » écrit le geste aussitôt, au nom de qui l'a demandé ; « ton accord » le propose (`projects.steer`, son aperçu exact) : une carte dans ton chat si c'est toi en face, sinon la console, et il s'écrit une fois accepté.
+- Un projet jamais réglé : toi et elle qui travaille, tout ; les autres l'entendent selon sa confidentialité, sans le piloter ni se servir de ses apps. Une ligne ajoutée est fermée.
+- **Les apps suivent leur projet** : un outil d'app (`<app>_<outil>`, `<app>_pages`) est offert selon la ligne de son projet qui le concerne — sa colonne « lecture » si l'app le déclare (`lit: true` dans son manifeste ; ses pages lisent toujours), « action » sinon. Une app sans projet : toi et elle qui travaille, toujours, seule. Sur accord, l'appel est proposé (`forge.call`, son aperçu exact : l'app, sa version, l'outil, les arguments) ; exécuté, ce qu'il a rendu revient comme un contenu (`forge.answered`) qu'elle dit à qui l'a demandé. Les planchers de l'app (arrêtée, cassée, des secrets sans promotion en conversation) restent.
+- **La page « Droits »** (Outils) lit ces déclarations, jamais une recopie : par ressource (chaque tableau, ses planchers, où il se règle), par personne (toi quand elle répond ou prend la parole, chaque personne qui a un compte avec son lien tel qu'il est, un autre compte, une inconnue, un salon, quand elle travaille seule : ce qu'elle a, et la ligne qui en décide), les règles d'outils par situation, et ce que le code fixe.
+- Le journal d'avant n'est pas repris : sa mémoire repart de zéro (2026-10-25) — un message Teams remarqué dit seulement `prepare`. Les réglages d'avant (les services, la recherche web, les surcharges), eux, se traduisent encore à la lecture.
+
+*Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », et cinq vérifications « propriétaire » écrites chacune à sa façon.
+
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie).*
+
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
 ### 0013 — Les liens se vivent : proximité, rythme, manque, réconfort, retenue
@@ -867,7 +886,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* chaque étape de son travail existait, mais aucune ne passait le relais : elle ne se fabriquait jamais rien.
 
-*Révisée par 0105.*
+*Révisée par 0105, 0133.*
 
 ### 0105 — Une Forge libre et outillée : le web au travail, des outils déclarés, un réseau libre, une confiance par app
 
@@ -1102,7 +1121,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « on peut combiner les droits comme on veut » : avec qui, quand, l'accord et ce qu'elle garde, réglés à part au service puis corrigés outil par outil, ne se lisaient qu'en recomposant cinq réglages ; un tableau ordonné se lit d'un regard, et sa dernière ligne dit ce qui arrive à tout le reste.
 
-*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie).*
+*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie). Révisée par 0133.*
 
 ### 0132 — Envoyer à ta place : des règles lues de haut en bas
 
@@ -1115,7 +1134,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* comme pour les services (0131), ce qui part à sa place se lisait en recomposant des réglages épars — une case par boîte, une liste d'exclusions, une surcharge cachée, un mode Teams pour toutes les conversations ; un tableau ordonné se lit d'un regard et règle une personne ou une conversation à part.
 
-*Révise 0027 (en partie), 0069 (en partie).*
+*Révise 0027 (en partie), 0069 (en partie). Révisée par 0133.*
 
 ## Les fournisseurs de modèles
 
@@ -1502,7 +1521,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* la console montrait ses outils sous tous les angles sans permettre de rien décider.
 
-*Révisée par 0123, 0126, 0128.*
+*Révisée par 0123, 0126, 0128, 0133.*
 
 ### 0123 — Le bloc Outils, redessiné
 

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
 from mika.ports.mcp import KEEPS, MOMENTS, POLICIES, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
+from mika.vocab.access import sources, upgrade
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -46,24 +47,42 @@ _REMOTE = ((("transport", ("distant",)),))
 
 _Policy = Literal["seule", "carte", "toi", "non"]
 _Keep = Literal["public", "perso", "prive", "rien"]
+#: « travail » : d'avant l'ADR 0133, où le travail était un moment (une ligne qui ne valait qu'au travail pour qui n'y
+#: est jamais le garde : il ne correspond à rien)
 _Moment = Literal["conversation", "initiative", "travail"]
-#: qui une ligne désigne : toi, les comptes, ou une personne nommée par sa clé
-WHO = re.compile(rf"(?:{WHO_OWNER}|{WHO_ACCOUNTS}|{WHO_PERSON}\S{{1,200}})")
 
 
 class AccessRule(BaseModel):
-    """Une ligne d'accès aux outils d'un serveur (ADR 0131), telle qu'elle est rangée : qui, quand, ce qu'elle fait
-    d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, et ses outils (vide : tous)."""
+    """Une ligne d'accès aux outils d'un serveur (ADR 0131, 0133), telle qu'elle est rangée : ses sources
+    (``vocab.access``), quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, et ses
+    outils (vide : tous)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    who: str = Field(pattern=f"^{WHO.pattern}$")
+    who: tuple[str, ...]
     #: ses moments ; vide (ou tous) : toujours
     when: tuple[_Moment, ...] = ()
     read: _Policy = "non"
     act: _Policy = "non"
     keep: _Keep = "rien"
     tools: tuple[str, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _before_0133(cls, data: Any) -> Any:
+        """Une ligne d'avant (``who`` : « toi », « comptes », « personne:<clé> », le moment « travail ») : ses sources
+        et ses moments qui font la même chose (``vocab.access.upgrade``)."""
+        if not isinstance(data, dict) or not isinstance(data.get("who"), str):
+            return data
+        when = data.get("when") or ()
+        when = (() if when == "toujours" else (when,)) if isinstance(when, str) else tuple(when)
+        who, when = upgrade(data["who"], when)
+        return {**data, "who": who, "when": when}
+
+    @field_validator("who")
+    @classmethod
+    def _sources(cls, who: tuple[str, ...]) -> tuple[str, ...]:
+        return sources(who)
 
     @field_validator("when", mode="before")
     @classmethod

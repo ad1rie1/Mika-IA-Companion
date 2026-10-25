@@ -40,7 +40,8 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind, task_of
+from mika.vocab.access import owner_here
+from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
 from mika.vocab.sending import Sending, teams_rule
 
@@ -125,8 +126,7 @@ class Seen:
     #: qui y a répondu (« toi » : la personne elle-même ; « elle » : sa réponse est partie)
     answered: str = ""
     #: ce que sa règle d'envoi en disait au tri (ADR 0132) : préparer d'elle-même, comment une réponse partirait
-    #: (``None``, vide : remarqué avant les règles)
-    prepare: bool | None = None
+    prepare: bool = True
     send: str = ""
 
 
@@ -221,20 +221,12 @@ MODE_OF = {"brouillon": "brouillon", "accord": "validation", "seule": "autonome"
 
 def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str) -> str:
     """Le mode d'une réponse à ce message, là où le nom de sa conversation n'est pas connu (le brief d'une tâche, sa
-    voix) : ce que sa règle en disait au tri, sinon la règle de son identifiant et de qui écrit (ADR 0132). Ce qui
-    part relit la règle d'aujourd'hui (``triage.rule_of``)."""
+    voix) : ce que sa règle en disait au tri (un message qu'elle n'a pas en tête : la règle de son identifiant et de
+    qui écrit, ADR 0132). Ce qui part relit la règle d'aujourd'hui (``triage.rule_of``)."""
     seen = s.messages.get(ref)
     send = seen.send if seen is not None and seen.send else teams_rule(
         p.sending.rules, p.sending.default, conversation, seen.author if seen is not None else "").send
     return MODE_OF.get(send, "validation")
-
-
-def prepares(p: TeamsParams, m: Seen) -> bool:
-    """Elle prépare d'elle-même une réponse à ce message : ce que sa règle en disait au tri ; remarqué avant les
-    règles (ADR 0132), la règle de sa conversation et de qui écrit."""
-    if m.prepare is not None:
-        return m.prepare
-    return teams_rule(p.sending.rules, p.sending.default, m.conversation, m.author).prepare
 
 
 def params_of(frame: Frame) -> TeamsParams:
@@ -387,22 +379,10 @@ def drafted(s: TeamsState, message: str) -> bool:
 
 
 def for_owner(frame: Frame) -> bool:
-    """Ses conversations Teams : pour ses propriétaires **en privé**, et pour elle quand elle travaille (une
-    tâche, un pas). Devant un salon, jamais."""
-    ep = frame.episode
-    if ep is None:
-        return False
-    if ep.kind in PROJECT_KINDS | WAKE_KINDS:
-        args = ep.attrs.get("args") or {}
-        return BUNDLE in {b.strip() for b in str(args.get("bundles") or "").split(",")}
-    if ep.kind in WORKING or ep.kind == Kind.TASK:
-        return True
-    if not ep.target:
-        return False
-    audience = frame.audience
-    if audience is None or audience.public or audience.room:
-        return False
-    return bool(audience.owner)
+    """Ses conversations Teams : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
+    ADR 0133) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
+    ce lot ; ses tâches à elle (une réponse à préparer)."""
+    return owner_here(frame, BUNDLE, lambda target: (task_of(target) or ("", ""))[0] == TEAMS.name)
 
 
 #: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)

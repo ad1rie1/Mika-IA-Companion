@@ -56,6 +56,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
 from mika.ports.preprocess import inert
+from mika.vocab.access import owner_here
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -197,18 +198,10 @@ class Look:
 
 
 def _for_owner(frame: Frame) -> bool:
-    """Ce que voit la caméra : pour ses propriétaires en privé (jamais devant un salon, même quand c'est
-    sa propriétaire qui y parle), ou pour elle quand elle travaille."""
-    ep = frame.episode
-    if ep is None:
-        return False
-    if ep.kind in WORKING:
-        return True
-    audience = frame.audience
-    if not ep.target or audience is None or audience.public or audience.room:
-        return False
-    # l'audience dit si qui écrit en a les droits : l'adresse qui parle, pas une autre adresse de la personne
-    return bool(audience.owner)
+    """Ce que voit la caméra : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
+    ADR 0133) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
+    la caméra."""
+    return owner_here(frame, BUNDLE)
 
 
 def _ago(us: int) -> str:

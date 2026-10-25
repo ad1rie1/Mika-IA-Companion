@@ -28,7 +28,7 @@ Trois règles tiennent toute la console :
 | **Sa rubrique**, à son nom | En ce moment · Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient · Pensées · Ce qu'elle remarque · Attentes · Journal et rêves · Mémoire · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
 | **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Envoyer à ta place · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
-| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
+| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Droits · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
 | **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Historique des réglages | « Que décide l'opératrice ? » |
 | **Système** | Santé générale · Processus · Anomalies · File de sortie · Moteur des modèles · Écrans du monde · Appels et coûts · Stockage et sauvegardes · Journal d'événements · Actions des opérateurs · Diagnostic avancé · Contributions · Toutes les vues · Simulations | « La machine tient-elle ? » |
@@ -125,7 +125,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 ### Activité
 
-**Projets** (ADR 0031) : un projet est une boîte noire qu'on pilote, distincte d'un but.
+**Projets** (ADR 0031, 0133) : un projet est une boîte noire qu'on pilote, distincte d'un but.
 
 - **Ses projets** : cadres (actifs, en pause, objectifs ouverts, exécutions sur 24 h, accords en attente,
   archivés), puis la liste — mode (Mika ou impersonnel), pour qui, état, objectifs, prochaine exécution, dernier
@@ -141,8 +141,11 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   durée) · *Décisions* (contexte, options, raison ; remplacer, retirer) · *Fichiers* (dossiers à parcourir, lire,
   télécharger, déposer) · *Dépôt git* (historique paginé, un commit en diff coloré, ce qui n'est pas enregistré, le
   dépôt distant : pousser, récupérer, régler) · *Comportement et outils* (modifier le projet, ce que veut dire son
-  mode, son rythme, ses outils et leurs noms) · *Carnet* (consignes, ses notes, ce qu'on en a fait, ce qui sort de
-  la machine). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
+  mode, son rythme, ses outils et leurs noms) · *Accès* (dessiné, ADR 0133, `app/handmade/projects.py` : un tableau
+  de lignes lues de haut en bas — qui (les mêmes sources à cocher qu'un service), quand, voir, piloter, ce qu'elle fait d'un outil de ses apps qui lit et d'un
+  outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
+  retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (consignes,
+  ses notes, ce qu'on en a fait, ce qui sort de la machine). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
   d'onglet (`inline`) et les actions de ligne n'y sont jamais.
 
 **Buts et rappels** : les buts vivants (rappels, explorations) et les buts clos. La fiche d'un but : Résumé, Cadre
@@ -184,7 +187,7 @@ Les clés techniques sont dans « Détails techniques ».
   répondu ? » : la fin d'épisode qui l'a réglé et sa cause en mots (un silence choisi, ce qui l'a fait taire, trop
   tard, une panne), puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en échec.
 
-### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130, 0131)
+### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130, 0131, 0133)
 
 - **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses familles d'outils en lignes, chacune
   s'ouvre sur ses outils (ce qu'il fait, son nom, ses appels des 14 derniers jours) ; les situations en colonnes,
@@ -200,10 +203,11 @@ Les clés techniques sont dans « Détails techniques ».
   Forge, dessous). Brancher un service : à quoi il lui sert, comment le joindre ; il est fermé tant qu'aucune ligne
   d'accès ne l'ouvre. La fiche d'un serveur a trois onglets : *En bref* (son état, ses outils servis, à revoir, ses
   appels ; ses lignes d'accès d'un regard ; ce qu'elle en lit ; *qui peut quoi* — ses outils servis devant toi, toi
-  quand elle te parle d'elle-même, chaque personne que nomme une ligne, les autres comptes, quand elle travaille
-  seule, et ce qu'elle en garde, par la règle du moteur ; pour qui et quand ; le côté technique replié), *Accès aux
-  outils* (dessiné, ADR 0131 : un tableau de lignes lues de haut en bas comme les règles d'un pare-feu — qui, quand
-  (toujours, ou des moments à cocher), politique de lecture, d'action, de mémorisation, ses outils —, « + Ajouter un accès aux outils » en haut à droite,
+  quand elle te parle d'elle-même, chaque personne que nomme une ligne, un proche, un autre compte, quand elle
+  travaille seule, et ce qu'elle en garde, par la règle du moteur ; pour qui et quand ; le côté technique replié), *Accès aux
+  outils* (dessiné, ADR 0131 : un tableau de lignes lues de haut en bas comme les règles d'un pare-feu — qui (des
+  sources à cocher : toi, elle quand elle travaille seule, tes proches en privé, tout le monde, puis chaque personne qui
+  a un compte, ADR 0133), quand (toujours, ou des moments à cocher), politique de lecture, d'action, de mémorisation, ses outils —, « + Ajouter un accès aux outils » en haut à droite,
   chaque ligne montée, descendue ou retirée ; dernière ligne, obligatoire, le comportement par défaut), *Ses outils*
   (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce qui lit et ce
   qui agit, chacun avec ce qu'il fait devant qui d'après ses lignes ; une ligne se déplie sur son réglage — servi, lit
@@ -211,6 +215,15 @@ Les clés techniques sont dans « Détails techniques ».
   qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion ») et
   *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé). La connexion se règle par « Modifier la
   connexion ». Une alerte dit un service qui ne sert à personne.
+- **Droits** (`outils/droits`, ADR 0133, `app/handmade/rights.py`) : qui peut quoi, lu des types de règles que chaque
+  propriétaire déclare, jamais une recopie. *Par personne* (`?qui=` : toi quand elle te répond, toi quand elle te
+  parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, un salon, elle quand elle
+  travaille seule) : ce qu'elle a
+  — chaque outil de service et d'app, chaque projet (le voir, le piloter) — et la ligne qui en décide ; ce qui est
+  fermé se compte sans se lister. *Par ressource* : chaque tableau (un service, un projet, les apps sans projet, ce
+  qu'elle envoie à ta place), ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler »
+  vers sa page. Puis tes règles d'outils par situation (ADR 0122), et ce que le code fixe. Une lecture : rien ne s'y
+  règle.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses

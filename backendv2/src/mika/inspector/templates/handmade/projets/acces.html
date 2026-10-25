@@ -2,6 +2,7 @@
    règles d'un pare-feu — qui, quand, le voir, le piloter, ce qu'elle fait d'un outil de ses apps qui lit et d'un outil
    qui agit, à quels outils —, puis le comportement par défaut, obligatoire. Le formulaire est celui de l'action
    ``projects.acces`` : chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie tout le tableau. #}
+{% from "_navigation.html" import pager as pages %}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -14,19 +15,19 @@
 {%- endmacro %}
 {% set locked = not form %}
 <div class="now-page service">
-  {% if never_set %}<p class="server-alert info">Jamais réglés : ses accès font ce qu'il faisait avant — toi, tout ; les autres l'entendent selon sa confidentialité, sans le piloter ni se servir de ses apps. Enregistrer écrit ce tableau tel qu'il est.</p>{% endif %}
+  {% if never_set %}<p class="server-alert info">Jamais réglés : toi et elle qui travaille, tout ; les autres l'entendent selon sa confidentialité, sans le piloter ni se servir de ses apps. Enregistrer écrit ce tableau tel qu'il est.</p>{% endif %}
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
-    {% for p in ("qui", "toujours", "moments", "voir", "piloter", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("ligne", "qui", "toujours", "moments", "voir", "piloter", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
     {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
     <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
     {% endif %}
-    <section class="now-card access-card" aria-labelledby="project-access-title">
+    <section class="now-card access-card table-block" aria-labelledby="project-access-title">
       <header class="access-head">
         <div>
           <h2 id="project-access-title">Accès au projet</h2>
-          <p>De haut en bas : pour qui est en face, <b>la première ligne qui le désigne</b> (qui, quand) décide s'il voit le projet et s'il le pilote ; pour un outil de ses apps, la première qui le concerne aussi (l'outil dans sa colonne « Outils »). Aucune : le comportement par défaut. Jamais dans un salon ni avec une inconnue.</p>
+          <p>De haut en bas : pour qui est en face, <b>la première ligne qui le désigne</b> (ses sources, quand) décide s'il voit le projet et s'il le pilote ; pour un outil de ses apps, la première qui le concerne aussi (l'outil dans sa colonne « Outils »). Aucune : le comportement par défaut. Le piloter et ses apps : jamais dans un salon ni avec une inconnue ; « tout le monde » ne les y laisse que le voir.</p>
         </div>
         {% if not locked %}<button class="btn" name="faire" value="ajouter">+ Ajouter un accès</button>{% endif %}
       </header>
@@ -44,7 +45,15 @@
             {% for r in rows %}
             <tr>
               <td class="access-n">{{ r.n }}</td>
-              <td>{{ pick("qui." ~ r.n, r.whos, r.who, "Qui, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
+                <details class="access-tools access-who">
+                  <summary>{{ r.who.said }}</summary>
+                  <div class="access-tools-list">
+                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {{ c.label }}</label>{% endfor %}
+                  </div>
+                </details>
+              </td>
               <td>
                 <details class="access-tools access-when" data-exclusive data-all="Toujours" data-many="moments" data-none="Aucun moment">
                   <summary>{{ r.when_said }}</summary>
@@ -93,6 +102,7 @@
           </tbody>
         </table>
       </div>
+      <div class="hm-pager single">{{ pages(pager) }}</div>
       {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès » ouvre une ligne fermée, que tu règles.</p>{% endif %}
       {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">« Comportement et outils »</a>).</p>{% endif %}
       {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
@@ -102,7 +112,7 @@
   <section class="now-card access-legend" aria-labelledby="project-access-legend">
     <h2 id="project-access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
-      <div><dt>Qui</dt><dd><b>Toi</b> : en tête-à-tête, et quand elle travaille seule pour toi · <b>Les comptes</b> : toute personne qui a un compte chez elle, en tête-à-tête · une personne par son nom, reconnue seulement connectée. Jamais un salon ni une inconnue.</dd></div>
+      <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b>, en tête-à-tête · <b>Elle, quand elle travaille seule</b> (sur ce projet) · <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre) · <b>Tout le monde</b> · des personnes par leur nom, reconnues seulement connectées. Le piloter et ses apps, jamais dans un salon ni avec une inconnue ; en parler, « tout le monde » le peut aussi là.</dd></div>
       <div><dt>Voir</dt><dd>Elle peut en parler à cette personne : son titre, où il en est. Sa confidentialité filtre encore le détail.</dd></div>
       <div><dt>Piloter</dt><dd>Une consigne, un objectif, une pause, une reprise, « vas-y maintenant ». <b>Seule</b> : c'est fait aussitôt, au nom de la personne · <b>Ton accord</b> : la demande t'attend (une carte dans ton chat si c'est toi en face, sinon la console) · <b>Non</b>. Jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
       <div><dt>Apps : lecture, action</dt><dd>Ce qu'elle fait d'un outil de ses apps : un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> : sans demander · <b>Demande à la personne</b> : une carte dans son chat · <b>Ton accord</b> : une carte dans ton chat quand c'est toi en face, sinon la console · <b>Non</b> : l'outil ne lui est pas offert.</dd></div>

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "forge"
 APP_SIGNAL, APP_BROKEN = "app", "broken"
@@ -29,6 +29,12 @@ APP_ALERT = "app_alert"
 
 #: la raison d'une tâche : lire ce qu'une app a mis dans sa file de signaux, juger, et prévenir (ADR 0105)
 TRIAGE = "app_triage"
+#: appeler un outil d'app après un accord (ADR 0133), et la raison de l'initiative due qui dit ce qu'il a rendu, à qui
+#: l'avait demandé (comme un service extérieur, ``mcp.ANSWERED_REASON``)
+CALL = "forge.call"
+ANSWERED_REASON = "app_answered"
+#: un appel d'app sur accord dont l'issue n'est pas encore dite (par proposition)
+UNTOLD = FactFamily("forge.untold", arg=int, type=bool, doc="l'issue d'un appel d'app sur accord pas encore dite")
 
 
 class AppSignaled(Signal):
@@ -62,10 +68,21 @@ class SignalsJudged(Payload):
     urgent: bool = False
 
 
+class AppAnswered(Payload):
+    """Ce qu'un appel d'outil d'app fait après accord a rendu : un contenu (l'oubli l'atteint), pour qu'elle le dise à
+    qui l'avait demandé."""
+
+    proposal: int
+    ok: bool
+    text: Content
+    about: tuple[str, ...] = ()
+
+
 SIGNALED = event_type("forge.signaled", OWNER, AppSignaled, public=True, content=("summary",))
 QUEUED = event_type("forge.queued", OWNER, SignalQueued, content=("summary",), subjects=("about",))
 JUDGED = event_type("forge.judged", OWNER, SignalsJudged, content=("tell", "keep"), subjects=("about",))
-ALL = (SIGNALED, QUEUED, JUDGED)
+ANSWERED = event_type("forge.answered", OWNER, AppAnswered, content=("text",), subjects=("about",))
+ALL = (SIGNALED, QUEUED, JUDGED, ANSWERED)
 
 
 @dataclass(frozen=True, slots=True)

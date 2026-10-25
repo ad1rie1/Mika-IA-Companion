@@ -9,7 +9,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import blocks, conversations, mail, nights, running, senses, system, tools
+from mika.app.handmade import blocks, conversations, mail, nights, rights, running, senses, system, tools
 from mika.inspector.ui import UI, Drawn
 
 
@@ -76,6 +76,7 @@ DRAWN: dict[str, Drawn] = {
     # Outils, puis Connexions extérieures
     "outils/tous": tools.Catalogue(), "outils/serveurs": tools.Elsewhere(),
     "outils/expose": Blocks("cards", "handmade/tools.css"),
+    "outils/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False),
     **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils")},
     "sens/messages": Shaped(senses.messages, "handmade/senses.css"),
     "sens/positions": Shaped(senses.positions, "handmade/senses.css"),

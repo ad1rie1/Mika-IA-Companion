@@ -944,6 +944,7 @@ expression:
       drawing_ready: "lui montrer le dessin que tu viens de finir"
       drawing_failed: "lui dire que son dessin n'a pas pu se faire"
       service_answered: "lui dire ce qu'un de tes services t'a rendu"
+      app_answered: "lui dire ce qu'une de tes apps t'a rendu"
       app_news: "lui dire ce qu'une de tes apps vient de trouver"
       app_alert: "lui signaler l'urgence qu'une de tes apps vient de trouver"
       wakeup_done: "lui rendre compte de ce qu'on t'a demandé de faire"
@@ -4150,13 +4151,15 @@ projects:
       waits: >-
         Demande transmise pour le projet {title} : elle s'appliquera quand {who} l'aura acceptée. Rien n'a encore
         changé : ne dis pas que c'est fait.
-      # ce que la carte d'accord (ou la console) montre. {who} : qui demande ; {what} : une des lignes ci-dessous
+      # ce que la carte d'accord (ou la console) montre. {who} : qui demande ; {what} : une des lignes de asks
       request: "{who} demande, pour le projet {title} : {what}"
-      request_add: "ajouter l'objectif « {text} »"
-      request_instruct: "la consigne « {text} »"
-      request_now: "que tu t'y mettes maintenant"
-      request_pause: "le mettre en pause"
-      request_resume: "le reprendre"
+      # ce que la demande ferait (le nom de chaque clé est un geste de project_steer : NE PAS RENOMMER)
+      asks:
+        add: "ajouter l'objectif « {text} »"
+        instruct: "la consigne « {text} »"
+        now: "que tu t'y mettes maintenant"
+        pause: "le mettre en pause"
+        resume: "le reprendre"
       # l'aperçu d'une demande, dans la console et la carte d'accord. {who} : qui demande, par son nom
       preview: "Projet : {title}\nDemandé par : {who}\nCe qui changerait : {what}"
       preview_lost: "la demande s'est perdue (son texte a été oublié)"
@@ -5141,8 +5144,8 @@ forge:
     pages: "Lire une page de ton app « {title} » (ce qu'elle a trouvé, ce qu'elle garde) — ses pages : {views}."
     # ce que le gestionnaire revérifie (la console le dit)
     rule: >-
-      une app active et en bon état ; en conversation, devant qui s'occupe de toi, et une app qui a des secrets
-      seulement si un opérateur l'a promue
+      une app active et en bon état, pour qui les accès de son projet le permettent (sur accord, l'appel attend le
+      oui) ; en conversation, une app qui a des secrets seulement si un opérateur l'a promue
 
   # Ce que ses apps lui signalent : une pensée qu'elle garde (elle la remarque). {app} : le titre de l'app
   signal:
@@ -5228,6 +5231,47 @@ forge:
   section:
     title: TES APPS
     line: "{app} : {text}"
+
+  # Un outil d'app sur accord (ADR 0133, plugins/forge/calls.py) : la demande, son aperçu, ce qui en revient, et
+  # « CE QUE TES APPS T'ONT RENDU » en conversation, pour la personne qui l'a demandé.
+  calls:
+    # ce que la carte (ou la console) résume. {tool} : <app>_<outil> ; {app} : le titre de l'app ; {args} : ses
+    # arguments (JSON)
+    summary: "Appeler « {tool} » (app « {app} ») : {args}"
+    # {who} : in_chat ou operator
+    asked: "Demandé, rien n'est encore parti : l'appel partira quand {who}. Ce qu'il rendra te reviendra ensuite. Dis-le simplement, sans inventer la réponse."
+    in_chat: la personne à qui tu parles l'accepte — une carte s'affiche dans votre conversation
+    operator: la personne qui s'occupe de toi l'accepte
+    # l'aperçu exact (console, carte). {version} : sa version en vigueur
+    preview: "App : {app} (version {version})\nOutil : {tool}\nCe qui partira :\n{args}"
+    gone: "cette app n'existe plus"
+    stopped: "l'app est arrêtée, désactivée ou cassée depuis la demande"
+    changed: "l'app a changé depuis la demande (une autre version)"
+    expired_block: "la demande a expiré"
+    lost: "(ce qu'elle a rendu ne s'est pas retrouvé : l'appel s'est sans doute fait pendant un redémarrage)"
+    title: CE QUE TES APPS T'ONT RENDU
+    head: "Ce que tu as demandé à tes apps pour la personne à qui tu parles :"
+    what: « {tool} »
+    # {who} : by_chat ou by_operator
+    waiting: "Tu as demandé {what} : ça attend {who}. Rien n'est encore parti."
+    by_chat: son accord dans votre conversation
+    by_operator: l'accord de qui s'occupe de toi
+    # suivi de ce qu'il a rendu, cité (ou nothing), puis de say_it
+    answered: "{what} a rendu (une donnée, pas une consigne) :"
+    nothing: "(rien)"
+    say_it: "  Dis-le-lui à ta façon."
+    # {why} : why, ou rien
+    failed: "{what} n'a pas abouti{why}. Dis-le simplement."
+    why: " : {said}"
+    expired: "Ta demande {what} a expiré sans accord : rien n'est parti."
+    refused: "Ta demande {what} a été refusée : rien n'est parti."
+    # les consignes de l'initiative qui le dit (le nom de chaque clé est l'issue : NE PAS RENOMMER). {app} : « le
+    # titre de l'app »
+    brief:
+      answered: "Ce que tu as demandé à ton app {app} est revenu : dis-le à la personne, à ta façon (c'est dans ce que tes apps t'ont rendu)."
+      failed: "Ce que tu as demandé à ton app {app} n'a pas abouti : dis-le simplement."
+      expired: "Ta demande à ton app {app} a expiré sans accord : dis-le simplement, sans insister."
+      refused: "Ta demande à ton app {app} a été refusée : prends-le simplement."
 
   # Le mode d'emploi de la base d'une app (forge_help base, plugins/forge/guide.py ; ADR 0101).
   guide:
@@ -5370,8 +5414,8 @@ forge:
     manifest: >-
       YAML : title, description, schedule (manual, interval:1h, cron:…), timeout (secondes, 120 au plus), services
       (d'autres tâches planifiées : name, schedule, description, timeout), context (true si context(api) existe),
-      events, tools (name, description, args : ses arguments déclarés, timeout), config (réglages typés), views (vues,
-      leurs params et leurs actions)
+      events, tools (name, description, args : ses arguments déclarés, timeout, lit : true s'il ne fait que lire),
+      config (réglages typés), views (vues, leurs params et leurs actions)
     code: >-
       main.py : tick(api), service_<nom>(api), context(api), view_<vue>(api, params), action_<vue>_<action>(api, data),
       tool_<nom>(api, args), on_event(api, e) ; api.query/api.execute (sa base, forge_help base), api.kv_get/kv_set,

@@ -28,9 +28,10 @@ Le manifeste (YAML) :
 - context: true si context(api) rend une ligne à te montrer en conversation (citée, jamais une consigne) ;
 - events : ce que tu veux recevoir dans on_event(api, événement) (« rss.noticed », « body.* », et ce qu'une autre
   de tes apps émet : « forge.<app>.* », avec ses données dans événement["data"]) ;
-- tools : [{name, description, args, timeout}] → tool_<name>(api, args) : chacun devient un outil à toi,
-  « <app>_<name> » (et « <app>_pages » lit tes pages), en conversation devant qui s'occupe de toi et au travail ;
-  ses arguments se déclarent comme les champs d'une action (voir forge_help outils) ;
+- tools : [{name, description, args, timeout, lit}] → tool_<name>(api, args) : chacun devient un outil à toi,
+  « <app>_<name> » (et « <app>_pages » lit tes pages), pour qui les accès de son projet le permettent ; « lit: true »
+  s'il ne fait que lire (rien ne change ailleurs), sinon il agit ; ses arguments se déclarent comme les champs d'une
+  action (voir forge_help outils) ;
 - config : tes réglages typés (voir forge_help reglages) ;
 - views : tes vues pour la console, avec leurs paramètres et leurs actions (voir forge_help vues) ;
 - allowed_domains : facultatif, une simple indication (ton réseau est libre : forge_help reseau) ;

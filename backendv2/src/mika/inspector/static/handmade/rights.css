@@ -1,0 +1,7 @@
+/* Outils › Droits (handmade/droits/page.html, ADR 0133) : qui peut quoi, par personne et par ressource. Les tableaux
+   reprennent ceux des accès (tools.css : access-table, access-head) ; ici, ce qui n'est qu'à cette page. */
+.rights-pick { display: flex; align-items: center; gap: 8px; }
+.rights-chosen { margin: 4px 0 12px; font-size: 15px; color: var(--text); }
+.rights-group { margin: 14px 0 0; }
+.rights-group h4 { margin: 0 0 6px; font-size: 14px; }
+.rights-group .now-tag { margin-right: 4px; }

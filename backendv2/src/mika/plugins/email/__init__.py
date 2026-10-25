@@ -49,7 +49,8 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
-from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind, task_of
+from mika.vocab.access import owner_here
+from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
 from mika.vocab.sending import Sending
@@ -443,25 +444,10 @@ def _drafts(s: EmailState, cx) -> tuple[c.DraftView, ...]:
 
 
 def for_owner(frame: Frame) -> bool:
-    """Sa boîte : pour ses propriétaires **en privé**, et pour elle quand elle travaille (un pas,
-    une tâche). Devant un salon (un groupe), jamais : ce qui s'y dit part au salon, même
-    quand c'est sa propriétaire qui parle."""
-    ep = frame.episode
-    if ep is None:
-        return False
-    if ep.kind in PROJECT_KINDS | WAKE_KINDS:
-        # une exécution de projet, un réveil par API : seulement s'il a sa boîte dans ses outils
-        args = ep.attrs.get("args") or {}
-        return BUNDLE in {b.strip() for b in str(args.get("bundles") or "").split(",")}
-    if ep.kind in WORKING or ep.kind == Kind.TASK:
-        return True  # elle travaille : c'est sa boîte
-    if not ep.target:
-        return False
-    audience = frame.audience
-    if audience is None or audience.public or audience.room:
-        return False
-    # l'audience dit si qui écrit en a les droits : l'adresse qui parle, pas une autre adresse de la personne
-    return bool(audience.owner)
+    """Sa boîte : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``, ADR 0133) —
+    toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris sa boîte ;
+    ses tâches à elle (un brouillon de réponse)."""
+    return owner_here(frame, BUNDLE, lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
 
 
 def keeper() -> str:

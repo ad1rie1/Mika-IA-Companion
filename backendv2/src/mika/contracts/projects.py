@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.guards import workshop
+from mika.vocab.access import OWNER as YOU
+from mika.vocab.access import WORK
 from mika.vocab.privacy import Sensitivity
 
 OWNER = "projects"
@@ -77,12 +79,12 @@ STEERS = ((STEER_ALONE, "seule — aussitôt"), (STEER_ASK, "ton accord"), (STEE
 
 class ProjectAccess(Payload):
     """Une ligne d'accès à un projet (ADR 0133), lue de haut en bas comme celles d'un service (``vocab.access``) :
-    qui (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter, ce qu'elle fait
-    d'un outil de ses apps qui lit et d'un outil qui agit (``vocab.access.POLICIES``), et à quels outils de ses apps
-    ces deux colonnes s'appliquent (``<app>_<outil>`` ; vide : tous). Voir et piloter valent quelle que soit la
-    sélection d'outils."""
+    ses sources (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter, ce
+    qu'elle fait d'un outil de ses apps qui lit et d'un outil qui agit (``vocab.access.POLICIES``), et à quels outils
+    de ses apps ces deux colonnes s'appliquent (``<app>_<outil>`` ; vide : tous). Voir et piloter valent quelle que
+    soit la sélection d'outils."""
 
-    who: str = ""
+    who: tuple[str, ...] = ()
     when: tuple[str, ...] = ()
     see: bool = False
     steer: str = STEER_NO
@@ -93,10 +95,10 @@ class ProjectAccess(Payload):
 
 #: la ligne par défaut fermée : personne d'autre ne le voit, ne le pilote ni ne se sert de ses apps
 CLOSED = ProjectAccess()
-#: un projet dont on n'a jamais réglé les accès fait ce qu'il faisait avant l'ADR 0133 : toi, tout ; les autres
-#: l'entendent selon ce que permet sa confidentialité, sans le piloter ni se servir de ses apps
-BEFORE_0133 = (ProjectAccess(who="toi", see=True, steer=STEER_ALONE, read="seule", act="seule"),)
-BEFORE_0133_DEFAULT = ProjectAccess(see=True)
+#: un projet dont on n'a pas réglé les accès : toi (et elle quand elle y travaille), tout ; les autres l'entendent
+#: selon ce que permet sa confidentialité, sans le piloter ni se servir de ses apps
+UNSET = (ProjectAccess(who=(YOU, WORK), see=True, steer=STEER_ALONE, read="seule", act="seule"),)
+UNSET_DEFAULT = ProjectAccess(see=True)
 
 
 class ProjectCreated(Payload):
@@ -209,10 +211,10 @@ class ProjectView:
     #: ses dernières consignes (références, la plus récente en dernier) : ce que qui suit le projet a demandé — ce
     #: qui en dépend (le tri de la file d'une de ses apps) les suit aussi
     instructions: tuple[str, ...] = ()
-    #: ses lignes d'accès, dans leur ordre, et sa ligne par défaut (ADR 0133) : celles d'avant l'ADR quand on ne les
-    #: a jamais réglées — ses apps les suivent
-    access: tuple[ProjectAccess, ...] = BEFORE_0133
-    default_access: ProjectAccess = BEFORE_0133_DEFAULT
+    #: ses lignes d'accès, dans leur ordre, et sa ligne par défaut (ADR 0133 ; jamais réglées : ``UNSET``) — ses apps
+    #: les suivent
+    access: tuple[ProjectAccess, ...] = UNSET
+    default_access: ProjectAccess = UNSET_DEFAULT
 
 
 #: Les projets vivants (actifs ou en pause, pas archivés), du plus ancien au plus récent.

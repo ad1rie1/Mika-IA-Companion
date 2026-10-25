@@ -16,11 +16,16 @@ from typing import Any, Protocol
 
 # qui une ligne d'accès désigne, quand elle vaut, ce qu'elle laisse faire d'un outil : ceux de ``vocab.access``,
 # partagés avec les projets et leurs apps (ADR 0131, 0133)
+from mika.vocab.access import CLOSE as CLOSE
+from mika.vocab.access import EVERYONE as EVERYONE
 from mika.vocab.access import MOMENTS as MOMENTS
+from mika.vocab.access import OWNER as OWNER
+from mika.vocab.access import PERSON as PERSON
 from mika.vocab.access import POLICIES as POLICIES
 from mika.vocab.access import WHO_ACCOUNTS as WHO_ACCOUNTS
 from mika.vocab.access import WHO_OWNER as WHO_OWNER
 from mika.vocab.access import WHO_PERSON as WHO_PERSON
+from mika.vocab.access import WORK as WORK
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
@@ -36,12 +41,12 @@ EPISODES = MOMENTS
 
 @dataclass(frozen=True, slots=True)
 class Access:
-    """Une ligne d'accès aux outils d'un serveur (ADR 0131) : qui, quand, ce qu'elle fait d'un outil qui lit et d'un
-    outil qui agit, ce qu'elle garde de ce qu'ils rendent, et à quels outils elle s'applique (vide : tous). Les
-    lignes se lisent de haut en bas : pour un outil, la première qui le concerne décide ; aucune, c'est la ligne par
-    défaut."""
+    """Une ligne d'accès aux outils d'un serveur (ADR 0131, 0133) : ses sources (``vocab.access`` ; vide : la ligne
+    par défaut), quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle garde de ce qu'ils
+    rendent, et à quels outils elle s'applique (vide : tous). Les lignes se lisent de haut en bas : pour un outil, la
+    première qui le concerne décide ; aucune, c'est la ligne par défaut."""
 
-    who: str
+    who: tuple[str, ...]
     #: ses moments (``MOMENTS``) ; vide : toujours
     when: tuple[str, ...] = ()
     read: str = "non"
@@ -58,7 +63,7 @@ class Access:
 
 
 #: la ligne par défaut d'un service qu'on branche : fermé, comme un pare-feu
-CLOSED = Access(who="", read="non", act="non", keep="rien")
+CLOSED = Access(who=(), read="non", act="non", keep="rien")
 
 
 #: l'état d'un serveur, du plus calme au plus grave

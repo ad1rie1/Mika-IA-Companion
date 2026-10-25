@@ -31,6 +31,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel
 
 from mika.contracts import forge as c
+from mika.contracts import social as social_c
 from mika.kernel.forms import FormField, Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -58,6 +59,7 @@ from mika.kernel.inspect import (
     paginate,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
+from mika.kernel.rights import Grant, RuleTable, why_words
 from mika.plugins.forge import (
     EMITTED,
     FORGE,
@@ -69,6 +71,7 @@ from mika.plugins.forge import (
     ForgeState,
     NoArgs,
     _next_tick,
+    app_lines,
     calls_today,
     concerns,
     has_secrets,
@@ -103,6 +106,7 @@ from mika.ports.forge import (
     said_args,
     ui_load,
 )
+from mika.vocab.access import NO, POLICY_WORDS, verdict
 
 #: une page de ses apps, de ce qu'une app a vécu (au journal), des lignes de son journal
 APPS_PAGE = 25
@@ -1057,3 +1061,57 @@ async def _settle(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) ->
 FORGE.action("regler", title="Enregistrer les réglages", args=NoArgs, emits=[SWITCHED], fields=_settings_fields,
              description="Les secrets laissés vides restent inchangés ; un champ vidé revient au défaut du "
                          "manifeste.")(_settle)
+
+
+# ── Qui peut quoi, sur la page « Droits » (ADR 0133) ──────────────────────
+
+#: une app sans projet, en mots : à toi seule, sans demander
+ALONE_ROW = ("Toi et elle quand elle travaille seule", "toujours", "seule", "seule", "tous")
+APP_COLUMNS = ("qui", "quand", "lecture", "action", "outils")
+#: ce qu'aucune ligne n'ouvre pour une app
+APP_FLOORS = ("jamais dans un salon, avec une inconnue, ni sans personne",
+              "arrêtée, désactivée ou cassée : elle ne sert à personne",
+              "en conversation, une app qui a des secrets seulement promue")
+
+
+def _app_tools(port: Any, name: str) -> list[tuple[str, bool]]:
+    info = port.info(name) if port is not None else None
+    if info is None:
+        return []
+    return [*((f"{name}_{t.name}", t.reads) for t in info.tools), *(((f"{name}_pages", True),) if info.views else ())]
+
+
+def _app_grants(s: ForgeState, frame: Frame, ctx: Any, audience: Any, kind: str) -> list[Grant]:
+    """Ce qu'elle fait de chaque outil de ses apps devant cette audience, à ce moment : la ligne de son projet qui le
+    concerne (ou, sans projet, toi seule)."""
+    port = ctx.ports.get("forge")
+    out = []
+    for name, app in sorted(s.apps.items()):
+        if app.held or not app.enabled or app.broken:
+            continue
+        rows, default = app_lines(frame, app)
+        for tool, reads in _app_tools(port, name):
+            got = verdict(rows, default, audience, kind, lambda a, t=tool: not a.tools or t in a.tools,
+                          close=social_c.is_close(frame))
+            if got is None:
+                continue
+            level = got.line.read if reads else got.line.act
+            where = f"de son projet n° {app.project}" if app.project else "(une app sans projet)"
+            out.append(Grant(f"project:{app.project}" if app.project else "forge:sans-projet", tool,
+                             (("lit" if reads else "agit", POLICY_WORDS.get(level, level)),),
+                             f"{why_words(got.index)} {where}",
+                             href=Ref.subject("project", str(app.project), str(app.project), "acces")
+                             if app.project else Ref.subject("app", name, app.title), closed=level == NO))
+    return out
+
+
+@FORGE.rights("apps", title="Apps sans projet", order=35, grants=_app_grants,
+              description="Une app suit les lignes d'accès de son projet ; sans projet, elle est à toi seule "
+                          "(ADR 0133).")
+def _app_tables(s: ForgeState, frame: Frame, ctx: Any) -> list[RuleTable]:
+    alone = sorted(app.title or name for name, app in s.apps.items() if not app.project)
+    if not alone:
+        return []
+    return [RuleTable("forge:sans-projet", "Apps sans projet", APP_COLUMNS, (ALONE_ROW,),
+                      ("Comportement par défaut", "toujours", "non", "non", "tous"), floors=APP_FLOORS,
+                      note="Fixé : une app sans projet n'a pas de lignes à elle. " + ", ".join(alone) + ".")]

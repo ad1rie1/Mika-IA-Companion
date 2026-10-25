@@ -272,8 +272,6 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
             continue
         if rule_of(spec, rules) == OFF:
             continue
-        if spec.min_level is not None and audience.level < spec.min_level:
-            continue
         if spec.owner_only and not audience.owner:
             continue
         if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:

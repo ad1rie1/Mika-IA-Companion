@@ -84,6 +84,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.feeds import feed_name, tokenless
 from mika.ports.preprocess import cite, inert
+from mika.vocab.access import owner_here
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.interests import NOTICE_WEIGHT, matches, pertinence, topic_words
 from mika.vocab.people import is_identifiable
@@ -494,22 +495,10 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 
 
 def _may_read(frame: Frame) -> bool:
-    """Lire va sur le réseau : pour ses propriétaires en privé, ou pour elle quand elle travaille."""
-    ep = frame.episode
-    if ep is None:
-        return False
-    if ep.kind in WORKING:
-        return True
-    audience = frame.audience
-    return audience is not None and audience.owner and not audience.public and not audience.room
+    """Lire va sur le réseau : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
+    ADR 0133) — toi en privé, ou elle qui travaille (un projet ou un réveil seulement s'il a pris ses flux)."""
+    return owner_here(frame, BUNDLE)
 
-
-# ── Inspection ────────────────────────────────────────────────────────────
-#
-# Lecture seule : le cache du lecteur de flux (jamais un relevé), ce qu'elle a
-# remarqué, le journal. Un titre est un texte venu d'ailleurs : il ne
-# s'affiche qu'en texte ; seul le lien d'un article (http(s)) devient un lien,
-# revérifié par la console.
 
 #: la console ne relit pas plus que ceci du cache des flux (filtres, pages)
 PAGE = 25

@@ -172,8 +172,6 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
         return "pas prévu dans cette situation"
     if not admitted(policy.tool_bundles, spec.bundle):
         return "sa famille n'est pas prévue dans cette situation"
-    if spec.min_level is not None and s.audience.level < spec.min_level:
-        return "il faut plus de confiance"
     if spec.owner_only and not s.audience.owner:
         return "réservé à sa propriétaire"
     if spec.when is not None or spec.fits is not None:

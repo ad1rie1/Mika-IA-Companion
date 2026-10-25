@@ -32,6 +32,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.faculties.projects.access import steering
 from mika.faculties.projects.faculty import (
     AMENDED,
@@ -608,10 +609,11 @@ class SteerArgs(BaseModel):
     objective: str = Field(default="", max_length=200, description=phrase("projects.tools.steer.objective"))
 
 
-def steerable(p: Project, audience: Any) -> str:
+def steerable(p: Project, audience: Any, close: Any = None) -> str:
     """Ce que qui est en face peut faire de ce projet en le pilotant, en réponse (ADR 0133) : ``seule``, ``toi``
-    (sur ton accord) ou ``non`` — un projet vivant, que ses lignes d'accès lui laissent voir et piloter."""
-    return steering(p, audience, Kind.REPLY) if live(p) else c.STEER_NO
+    (sur ton accord) ou ``non`` — un projet vivant, que ses lignes d'accès lui laissent voir et piloter (``close`` : qui
+    est proche d'elle)."""
+    return steering(p, audience, Kind.REPLY, close) if live(p) else c.STEER_NO
 
 
 def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
@@ -621,7 +623,8 @@ def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
     if frame is None:
         return False
     s: ProjectsState = frame.state("projects")
-    return any(steering(p, audience, kind) != c.STEER_NO for p in s.projects.values() if live(p))
+    close = social_c.is_close(frame)
+    return any(steering(p, audience, kind, close) != c.STEER_NO for p in s.projects.values() if live(p))
 
 
 def _contents(ctx: Any, refs: list[str]) -> Mapping[str, str]:
@@ -685,7 +688,8 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     s: ProjectsState = frame.state("projects")
     # ceux que ses lignes d'accès lui laissent piloter et dont le détail peut s'entendre ici (la règle de « TES
     # PROJETS ») : on ne pilote pas à l'aveugle
-    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud) != c.STEER_NO
+    close = social_c.is_close(frame)
+    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud, close) != c.STEER_NO
             and hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok)]
     if not mine:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
@@ -698,7 +702,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     p = s.projects[pid]
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
         phrase("projects.tools.steer.numbered", id=p.id)
-    if steerable(p, aud) == c.STEER_ASK:
+    if steerable(p, aud, close) == c.STEER_ASK:
         return await _ask_steer(args, ctx, p, person, title)
     if args.what == NOW:
         return await _steer_now(args, ctx, s, p, person, title)
@@ -783,6 +787,19 @@ async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, pe
 # ── Piloter sur ton accord (ADR 0133) ─────────────────────────────────────
 
 
+def asks_words(what: str, text: str) -> str:
+    """Ce qu'une demande de pilotage ferait, en mots (la carte d'accord, son aperçu)."""
+    if what == ADD:
+        return phrase("projects.tools.steer.asks.add", text=text[:300])
+    if what == INSTRUCT:
+        return phrase("projects.tools.steer.asks.instruct", text=text[:300])
+    if what == NOW:
+        return phrase("projects.tools.steer.asks.now")
+    if what == PAUSE:
+        return phrase("projects.tools.steer.asks.pause")
+    return phrase("projects.tools.steer.asks.resume")
+
+
 async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: str) -> Any:
     """Sur ton accord : la demande est gardée (son texte, un contenu effaçable) puis proposée (``projects.steer``) ;
     son geste s'écrit quand tu l'acceptes — une carte dans ton chat si c'est toi en face, sinon la console."""
@@ -814,7 +831,7 @@ async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: 
     if frame.audience is not None and frame.audience.owner and target:
         payload[rt.DECIDER] = target  # c'est toi en face : une carte dans ton chat
     view = frame.get(identity_c.IDENTITY(person))
-    what = phrase(f"projects.tools.steer.request_{args.what}", text=text[:300])
+    what = asks_words(args.what, text)
     summary = phrase("projects.tools.steer.request", who=str(getattr(view, "name", "") or person), title=title,
                      what=what)
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
@@ -836,7 +853,7 @@ def _steer_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview
     texts = store.content(refs) if store is not None and refs else {}
     text = texts.get(a.text_ref, "") if a is not None and a.text_ref else ""
     title = texts.get(p.title_ref, "") if p is not None else ""
-    what = phrase(f"projects.tools.steer.request_{a.what}", text=text[:300]) if a is not None else ""
+    what = asks_words(a.what, text) if a is not None else ""
     view = frame_of().get(identity_c.IDENTITY(a.by)) if frame_of is not None and a is not None and a.by else None
     shown = phrase("projects.tools.steer.preview", title=title or str(args.get("project") or ""),
                    who=str(getattr(view, "name", "") or (a.by if a is not None else "")), what=what)

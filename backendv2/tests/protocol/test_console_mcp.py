@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from mika.adapters.mcp.http import HttpTransport
+from mika.vocab.access import CLOSE, EVERYONE, OWNER, WORK
 from tests.contract.test_mcp_client import TOKEN, URL, FakeServer
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -106,16 +107,18 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert added.status_code == 200 and "Ligne 1 ajoutée, fermée" in html_of(added)
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
-        ("toi", (), "non", "non", "rien", ())]
+        ((OWNER,), (), "non", "non", "rien", ())]
     assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
-    # la propriétaire n'est jamais une « personne choisie » : sa ligne, c'est « Toi »
+    # la propriétaire n'est jamais une « personne choisie » : sa source, c'est « Toi », cochée (ADR 0133)
     made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
-    assert '<option value="personne:adrien"' not in made and '<option value="toi" selected>Toi</option>' in made
-    # deux lignes, de haut en bas : toi quand elle répond ; les comptes, sur « echo » seulement, sur accord
-    rows = {"qui.1": "toi", "moments.1|conversation": "on", "moments.1|travail": "on", "lecture.1": "seule",
-            "action.1": "toi", "garde.1": "prive", "tous.1": "on", "qui.2": "comptes", "toujours.2": "on",
-            "lecture.2": "carte", "action.2": "non", "garde.2": "rien", "prend.2|echo": "on", "defaut_lecture": "non",
-            "defaut_action": "non", "defaut_garde": "rien"}
+    assert "qui.1|personne:adrien" not in made and 'name="qui.1|proprietaire" checked' in made
+    assert all(f'name="qui.1|{s}"' in made for s in (WORK, CLOSE, EVERYONE))
+    # deux lignes, de haut en bas : toi quand elle répond, et elle quand elle travaille ; tes proches, sur « echo »
+    # seulement, sur accord
+    rows = {"ligne.1": "1", "qui.1|proprietaire": "on", "qui.1|travail": "on", "moments.1|conversation": "on",
+            "lecture.1": "seule", "action.1": "toi", "garde.1": "prive", "tous.1": "on", "ligne.2": "2",
+            "qui.2|proches": "on", "toujours.2": "on", "lecture.2": "carte", "action.2": "non", "garde.2": "rien",
+            "prend.2|echo": "on", "defaut_lecture": "non", "defaut_action": "non", "defaut_garde": "rien"}
 
     def access_page() -> str:  # un formulaire ne sert qu'une fois (son jeton) : la page relue avant chaque envoi
         return html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
@@ -124,7 +127,11 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert saved.status_code == 200 and "Accès enregistrés." in html_of(saved)
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
-        ("toi", ("conversation", "travail"), "seule", "toi", "prive", ()), ("comptes", (), "carte", "non", "rien", ("echo",))]
+        ((OWNER, WORK), ("conversation",), "seule", "toi", "prive", ()), ((CLOSE,), (), "carte", "non", "rien", ("echo",))]
+    # une ligne sans source se refuse
+    refused = submit(client, access_page(), "mcp.acces", faire="",
+                     **{k: v for k, v in rows.items() if k != "qui.2|proches"})
+    assert "Ligne 2 : coche qui." in html_of(refused)
     assert live.kernel.registry.is_dynamic("mcp_meteo_echo")  # réglée, la ligne l'ouvre
     # « quand » se coche : une ligne sans moment se refuse
     refused = submit(client, access_page(), "mcp.acces", faire="",
@@ -139,7 +146,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # monter la seconde : l'ordre change, rien d'autre
     moved = submit(client, access_page(), "mcp.acces", faire="monter:2", **rows)
     assert "Ligne 2 montée." in html_of(moved)
-    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == ["comptes", "toi"]
+    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == [(CLOSE,), (OWNER, WORK)]
     submit(client, access_page(), "mcp.acces", faire="", **rows)
     # « En bref » : ses lignes d'un regard, qui peut quoi, et la grille où l'on retire un outil, ouverte sur sa famille
     served = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
@@ -162,7 +169,8 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # un outil se règle sur sa ligne : servi, il lit ou il agit, ce qu'elle lit de lui — plus d'exception (ADR 0131)
     opened = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils", "outil": "echo"}))
     assert '<details class="tool-edit" open>' in opened and "Ajouter une exception" not in opened
-    assert "Toi : <b>seule</b>" in opened and "Les comptes : <b>lui demande</b> · rien" in opened
+    assert "Toi : <b>seule</b>" in opened and "Elle travaille seule : <b>seule</b>" in opened
+    assert "Un proche : <b>lui demande</b> · rien" in opened
     done = submit(client, opened, "mcp.regler", outil="echo", actif="1", nature="lecture", description="")
     assert done.status_code == 200 and "echo : servi, il lit." in html_of(done)
     assert live.kernel.registry.bundles["mcp.meteo"].startswith("la météo et les prévisions d'une ville")
@@ -215,12 +223,12 @@ def test_the_web_search_access_is_set_on_its_page_and_kept_apart(world):  # noqa
     client, live, _ = world
     bootstrap(client)
     assert "web" in client.portal.call(live.mcp.statuses).__repr__()
-    rows = [{"who": "toi", "when": ["conversation"], "read": "seule", "act": "non", "keep": "public", "tools": []}]
+    rows = [{"who": [OWNER], "when": ["conversation"], "read": "seule", "act": "non", "keep": "public", "tools": []}]
     client.portal.call(live.mcp.settle, "web", {"access": rows, "default_read": "non", "default_act": "non",
                                                 "default_keep": "rien"})
     assert client.portal.call(live.settings.mcp_system_access)["web"]["access"] == rows
     (row,) = client.portal.call(live.mcp.status, "web").access
-    assert (row.who, row.when, row.act) == ("toi", ("conversation",), "non")
+    assert (row.who, row.when, row.act) == ((OWNER,), ("conversation",), "non")
     with pytest.raises(ValueError):
         client.portal.call(live.mcp.settle, "web", {"command": "sh"})
     assert "web" not in client.portal.call(live.settings.mcp).servers  # pas rangé comme un serveur de l'opérateur

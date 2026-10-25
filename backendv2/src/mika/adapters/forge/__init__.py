@@ -356,6 +356,10 @@ def fingerprint(manifest: str, code: str) -> str:
     return hashlib.sha256(manifest.encode() + b"\x00" + code.encode()).hexdigest()[:16]
 
 
+#: les résultats d'appels gardés le temps d'être journalisés, au plus
+KEPT_MAX = 200
+
+
 class ForgeHost:
     def __init__(self, root: Path, *, limits: Limits = Limits(), bwrap: str | None = None,
                  http_get: Callable[[str], str] | None = None, public: Callable[[str], bool] | None = None,
@@ -387,9 +391,19 @@ class ForgeHost:
         #: sienne, comme ses rythmes (un bac à sable en UTC lui faisait croire ses relevés décalés, sonde du
         #: 2026-10-13) ; ``None`` : UTC
         self.zone: Callable[[], str] | None = None
+        #: ce qu'ont rendu des appels faits après accord, le temps d'être journalisés comme contenus (bornés)
+        self._kept: dict[str, CallResult] = {}
 
     def on_change(self, fn: Callable[[], Any]) -> None:
         self._listeners.append(fn)
+
+    def keep(self, request: str, result: CallResult) -> None:
+        self._kept[request] = result
+        while len(self._kept) > KEPT_MAX:
+            self._kept.pop(next(iter(self._kept)))
+
+    def take(self, request: str) -> CallResult | None:
+        return self._kept.pop(request, None)
 
     def _zone(self) -> str:
         """Son fuseau, s'il se lit (un nom de la base IANA) ; vide sinon."""
@@ -466,7 +480,7 @@ class ForgeHost:
             version=self._version(app), schedule=manifest.get("schedule", "manual"),
             context=bool(manifest.get("context")) and "context" in functions,
             tools=tuple(AppTool(t["name"], t["description"], arg_specs(t.get("args") or ()),
-                                float(t.get("timeout") or 0.0))
+                                float(t.get("timeout") or 0.0), reads=bool(t.get("lit")))
                         for t in manifest.get("tools", []) if t["name"] in tools),
             services=tuple(AppService(s["name"], s["schedule"], s["description"], float(s.get("timeout") or 0.0))
                            for s in manifest.get("services", []) if f"service_{s['name']}" in functions),

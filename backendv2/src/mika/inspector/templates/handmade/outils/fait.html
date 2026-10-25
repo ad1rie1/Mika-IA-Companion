@@ -3,6 +3,7 @@
    qu'elle en garde, à quels outils —, puis le comportement par défaut, obligatoire. Pour un outil, la première ligne qui
    le concerne décide. Le formulaire est celui de l'action ``mcp.acces`` : chaque bouton (ajouter, monter, descendre,
    retirer, enregistrer) envoie tout le tableau, rien de ce qu'on a changé ne se perd. #}
+{% from "_navigation.html" import pager as pages %}
 {% macro plumbing(f) -%}
 <input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
 <input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
@@ -20,11 +21,11 @@
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
-    {% for p in ("qui", "toujours", "moments", "lecture", "action", "garde", "tous", "prend", "defaut_lecture", "defaut_action", "defaut_garde", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("ligne", "qui", "toujours", "moments", "lecture", "action", "garde", "tous", "prend", "defaut_lecture", "defaut_action", "defaut_garde", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
     {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
     <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
     {% endif %}
-    <section class="now-card access-card" aria-labelledby="access-title">
+    <section class="now-card access-card table-block" aria-labelledby="access-title">
       <header class="access-head">
         <div>
           <h2 id="access-title">Accès aux outils</h2>
@@ -46,7 +47,15 @@
             {% for r in rows %}
             <tr>
               <td class="access-n">{{ r.n }}</td>
-              <td>{{ pick("qui." ~ r.n, r.whos, r.who, "Qui, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
+                <details class="access-tools access-who">
+                  <summary>{{ r.who.said }}</summary>
+                  <div class="access-tools-list">
+                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {{ c.label }}</label>{% endfor %}
+                  </div>
+                </details>
+              </td>
               <td>
                 <details class="access-tools access-when" data-exclusive data-all="Toujours" data-none="Aucun moment">
                   <summary>{% if r.always %}Toujours{% else %}{% for m in r.moments if m.on %}<span class="access-chip">{{ m.label }}</span>{% else %}Aucun moment{% endfor %}{% endif %}</summary>
@@ -93,6 +102,7 @@
           </tbody>
         </table>
       </div>
+      <div class="hm-pager single">{{ pages(pager) }}</div>
       {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès aux outils » ouvre une ligne, que tu règles.</p>{% endif %}
       {% if not known %}<p class="now-muted">La liste de ses outils n'est pas connue : « Tester la connexion » la charge, puis choisis-les dans <a href="{{ tools_tab }}">« Ses outils »</a>.</p>{% endif %}
       {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
@@ -102,7 +112,7 @@
   <section class="now-card access-legend" aria-labelledby="access-legend">
     <h2 id="access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
-      <div><dt>Qui</dt><dd><b>Toi</b> : en tête-à-tête, et quand elle travaille seule pour toi · <b>Les comptes</b> : toute personne qui a un compte chez elle, en tête-à-tête · une personne par son nom, reconnue seulement connectée. Jamais un salon ni une inconnue.</dd></div>
+      <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b>, en tête-à-tête · <b>Elle, quand elle travaille seule</b> (pour toi) · <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre) · <b>Tout le monde</b> · des personnes par leur nom, reconnues seulement connectées. Agir, jamais dans un salon ni avec une inconnue, même pour « tout le monde ».</dd></div>
       <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la politique de lecture, un outil qui agit (créer, envoyer, exécuter, supprimer) celle d'action — c'est réglé outil par outil dans <a href="{{ tools_tab }}">« Ses outils »</a>.</dd></div>
       <div><dt>Seule</dt><dd>Elle s'en sert sans demander : l'appel part aussitôt.</dd></div>
       <div><dt>Demande à la personne</dt><dd>Une carte dans le chat de la personne en face ; quand elle travaille seule, la demande t'attend dans la console.</dd></div>

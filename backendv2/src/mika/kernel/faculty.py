@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from mika.kernel.events import EventType, Payload, Upcaster
 from mika.kernel.facts import Declared, FactSpec
 from mika.kernel.inspect import Param
+from mika.kernel.rights import RightsSpec
 
 S = TypeVar("S")
 Pm = TypeVar("Pm")
@@ -186,7 +187,6 @@ class ToolSpec:
     handler: Callable[..., Any]
     bundle: str
     episodes: frozenset[str]
-    min_level: int | None = None
     effect: EffectClass = EffectClass.NONE
     max_calls_per_episode: int | None = None
     #: réservé à ses propriétaires : pas offert à quelqu'un d'autre, sauf quand
@@ -472,6 +472,8 @@ class Faculty(Generic[S, Pm]):
     actions: list[ActionSpec] = field(default_factory=list)
     vitals: list[VitalSpec] = field(default_factory=list)
     series_specs: list[SeriesSpec] = field(default_factory=list)
+    #: ses types de règles (ADR 0133) : ce que la page « Droits » rassemble
+    rights_specs: list[RightsSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.namespaces:
@@ -647,7 +649,6 @@ class Faculty(Generic[S, Pm]):
         args: type[BaseModel],
         bundle: str | None = None,
         episodes: Iterable[str],
-        min_level: int | None = None,
         effect: EffectClass = EffectClass.NONE,
         max_calls_per_episode: int | None = None,
         owner_only: bool = False,
@@ -660,7 +661,7 @@ class Faculty(Generic[S, Pm]):
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
-                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when, ends_loop,
+                    frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
                     rule, fits=fits,
                 )
             )
@@ -774,6 +775,18 @@ class Faculty(Generic[S, Pm]):
             self.actions.append(ActionSpec(
                 self.name, name, title, args, fn, frozenset(e if isinstance(e, str) else e.name for e in emits),
                 subject, section, description, confirm, danger, retype, available, order, fields, initial, inline))
+            return fn
+
+        return deco
+
+    def rights(self, key: str, *, title: str, description: str = "", order: int = 100,
+               grants: Callable[..., Any] | None = None):
+        """Un type de règles (ADR 0133) : ``fn(tranche, frame, ctx) -> [RuleTable]`` ses tableaux, en mots ;
+        ``grants(tranche, frame, ctx, audience, kind) -> [Grant]`` ce qu'ils accordent à qui est en face."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.rights_specs.append(RightsSpec(self.name, f"{self.name}.{key}", title, description, fn, grants,
+                                                order))
             return fn
 
         return deco

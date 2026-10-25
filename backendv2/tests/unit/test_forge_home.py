@@ -73,7 +73,7 @@ from tests.fixtures.harness import events_of
 from tests.fixtures.memory import seq_of, token
 from tests.fixtures.mika import boot, build, connect, disconnect, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
-from tests.unit.test_forge_console import FakeApi, _content, _her_tool
+from tests.unit.test_forge_console import ADRIEN, WORKING, FakeApi, _content, _her_tool
 from tests.unit.test_projects import MONDAY, _context, create, events, live
 from tests.unit.test_promises_and_moments import Script, chat
 from tests.unit.test_promises_and_moments import events as named
@@ -338,7 +338,7 @@ def _same_episode(kernel, episode: str):
     n = iter(range(1000))
 
     def call(name, args):
-        frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, Audience(owner=True), ref)
+        frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, ADRIEN, ref)
         spec = mind.registry.tools[name]
         return spec.handler(spec.args(**args), ToolContext(mind, spec, f"{episode}-{next(n)}", episode, frame,
                                                            ports=kernel.ports))
@@ -398,7 +398,7 @@ def test_an_app_written_during_a_run_lives_there_and_its_breakage_asks_for_a_rep
             await start_project(StartArgs(title="Suivre la bourse", objectives=["Une app qui relève le CAC 40"],
                                           tools=["forge"]), reply)
             pid = events(kernel, c.PROJECT_CREATED)[-1].seq
-            run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True))
+            run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
             wrote = await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST, code=VEILLE_CODE), run)
             frame = kernel.mind.frame()
             app = next(a for a in frame.get(forge_c.APPS) if a.name == "cours")
@@ -488,12 +488,13 @@ def test_each_app_announces_itself_and_its_actions_are_her_tools(tmp_path):
             await here("forge_write", {"app": "cours", "manifest": VEILLE_MANIFEST, "code": VEILLE_CODE})
             await here("forge_write", {"app": "coffre", "manifest": SECRET_MANIFEST, "code": VEILLE_CODE})
             registry = kernel.mind.registry
-            owner = offer(registry.tools, policies()[Kind.REPLY], Kind.REPLY, Audience(owner=True))
-            stranger = offer(registry.tools, policies()[Kind.REPLY], Kind.REPLY, Audience(owner=False))
+            frame = kernel.mind.frame()
+            owner = offer(registry.tools, policies()[Kind.REPLY], Kind.REPLY, ADRIEN, frame=frame)
+            stranger = offer(registry.tools, policies()[Kind.REPLY], Kind.REPLY, Audience(owner=False), frame=frame)
             talk = _same_episode(kernel, "ep-parler")
             out = {"agir": await talk("cours_maintenant", {}), "lire": await talk("cours_pages", {}),
                    "coffre": await talk("coffre_maintenant", {})}
-            work = _context(kernel, "coffre_maintenant", Kind.WORK, project_target(1), Audience(owner=True))
+            work = _context(kernel, "coffre_maintenant", Kind.WORK, project_target(1), WORKING)
             out["coffre au travail"] = await registry.tools["coffre_maintenant"].handler(
                 registry.tools["coffre_maintenant"].args(), work)
             await here("forge_command", {"app": "coffre", "command": "erase"})

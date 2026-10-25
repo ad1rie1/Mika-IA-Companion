@@ -261,12 +261,15 @@ def test_in_her_mode_she_works_with_her_persona_and_her_mood(tmp_path):
 _CALLS = iter(range(1, 1_000_000))
 
 
-def _context(kernel, name: str, kind: str, target: str | None, audience: Audience) -> ToolContext:
-    """Le contexte d'un appel d'outil pendant un épisode (un appel distinct à chaque fois)."""
+def _context(kernel, name: str, kind: str, target: str | None, audience: Audience, bundles: str = "") -> ToolContext:
+    """Le contexte d'un appel d'outil pendant un épisode (un appel distinct à chaque fois) ; ``bundles`` : les lots
+    qu'une exécution de projet a pris, comme ses arguments les portent."""
     mind = kernel.mind
     base = mind.frame()
     n = next(_CALLS)
-    frame = Frame(base.root, mind.clock.now(), mind.registry, audience, EpisodeRef(f"ep-{n}", kind, target=target))
+    attrs = FrozenDict({"args": FrozenDict({"bundles": bundles})}) if bundles else FrozenDict()
+    frame = Frame(base.root, mind.clock.now(), mind.registry, audience,
+                  EpisodeRef(f"ep-{n}", kind, target=target, attrs=attrs))
     return ToolContext(mind, mind.registry.tools[name], f"appel-{n}", f"ep-{n}", frame, ports=kernel.ports)
 
 

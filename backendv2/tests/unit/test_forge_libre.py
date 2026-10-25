@@ -403,7 +403,7 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
             await start_project(StartArgs(title="Suivre la bourse", objectives=["Une app qui relève le cours"],
                                           tools=["forge"]), here)
             pid = events(kernel, projects_c.PROJECT_CREATED)[-1].seq
-            run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True))
+            run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
             await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST.replace("interval:1h", "manual"),
                                         code=VEILLE_CODE), run)
             frame = kernel.mind.frame()

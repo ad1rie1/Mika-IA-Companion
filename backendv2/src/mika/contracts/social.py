@@ -42,7 +42,7 @@ proximité fixée par un opérateur, le plancher d'une propriétaire) est relev�
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
@@ -187,6 +187,12 @@ GREETED = FactFamily("social.greeted", arg=str, type=int)
 #: Une des ``CLOSENESS_LEVELS`` (elle varie avec le temps : un long silence la fait descendre).
 CLOSENESS = FactFamily("social.closeness", arg=str, type=str, time_varying=True)
 CONTACT = FactFamily("social.contact", arg=str, type=ContactReading, time_varying=True)
+
+
+def is_close(frame: Any) -> Callable[[str], bool]:
+    """Qui est proche d'elle maintenant (le lien « proche » ; un long silence le fait descendre) : ce que lit la source
+    « tes proches » d'une ligne d'accès (ADR 0133)."""
+    return lambda person: frame.get(CLOSENESS(person)) == CLOSE
 #: Les sujets délicats avec cette personne (repliés), d'après un profil d'avant
 #: la version 2, gardés en clair. Les profils récents gardent les leurs à part :
 #: ``SENSITIVE_REF``.

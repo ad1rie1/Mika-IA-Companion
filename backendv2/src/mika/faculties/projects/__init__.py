@@ -5,6 +5,7 @@ from mika.faculties.projects import (  # noqa: F401 — contributions
     access,
     actions,
     atelier,
+    console_access,
     inspect,
     prompt,
     tend,

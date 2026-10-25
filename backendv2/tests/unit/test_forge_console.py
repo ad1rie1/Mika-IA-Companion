@@ -73,6 +73,7 @@ from mika.runtime.operations import dynamic_fields, offered, perform
 from mika.runtime.tools import ToolContext
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
+from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.mika import boot, build, connect, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -708,9 +709,15 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp
 
 
 _CALLS = iter(range(1, 1000))
+#: Adrien, qui s'occupe d'elle, en tête-à-tête, comme le moteur le voit : une personne, authentifiée (les outils de
+#: ses apps suivent les lignes d'accès de leur projet, ADR 0133 — « propriétaire » seul n'y suffit pas)
+ADRIEN = Audience(persons=("user_1",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
+                  owner=True, person="user_1")
+#: elle travaille seule : personne n'écoute
+WORKING = Audience(trust=ChannelTrust.INTERNAL.value, owner=True)
 
 
-def _her_tool(kernel, name: str, args, audience: Audience = Audience(owner=True)):
+def _her_tool(kernel, name: str, args, audience: Audience = ADRIEN):
     """Elle appelle un outil de la Forge en répondant à Adrien (qui s'occupe d'elle) — un épisode par appel."""
     mind = kernel.mind
     n = next(_CALLS)

@@ -20,8 +20,13 @@
 - **Influence bornée** : ce qu'une app veut lui signaler passe par
   l'attention (dosé, habitué, un signal par app toutes les dix minutes au
   plus) ; son contexte est une section **citée**, en zone volatile, coupée
-  en premier ; ses outils ne sont offerts que quand elle travaille, ou si un
-  opérateur les a promus.
+  en premier.
+- **Ses outils suivent son projet** (ADR 0133) : ``<app>_<outil>`` et
+  ``<app>_pages`` sont offerts selon la ligne d'accès de son projet qui les
+  concerne — lecture s'il le déclare (``lit``), action sinon ; une app sans
+  projet est à sa propriétaire seule. Sur accord, l'appel est proposé
+  (``calls.py``). Une app qui a des secrets ne sert en conversation que
+  promue.
 - **La console** (``console.py``) : chaque app a sa fiche (type d'objet
   ``app``) — état, ses vues déclarées rendues depuis le bac à sable (jamais
   journalisées, jamais comptées par le disjoncteur), ses réglages typés, son
@@ -52,6 +57,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -74,6 +80,8 @@ from mika.plugins.forge.views import (
     view_params,
 )
 from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args
+from mika.vocab.access import ALONE, NO, OWNER, WORK, owner_here
+from mika.vocab.access import first as first_line
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, hearable
@@ -214,6 +222,29 @@ class ForgeState:
     #: les dernières trouvailles de chaque app vraiment dites (``SAID_KEPT`` au plus) : app → ((texte, quand, niveau),
     #: …) — une trouvaille pas encore dite peut en remplacer une autre, ce qui a été dit reste su (on ne le redit pas)
     said: FrozenDict[str, tuple[tuple[str, int, int], ...]] = field(default_factory=FrozenDict)
+    #: les appels d'outils d'app qui attendaient un accord (ADR 0133), par proposition (``calls.py``)
+    calls: FrozenDict[int, AppCall] = field(default_factory=FrozenDict)
+
+
+@dataclass(frozen=True, slots=True)
+class AppCall:
+    """Un appel d'outil d'app qui demandait un accord, de la proposition à ce qu'elle en a dit (ADR 0133)."""
+
+    proposal: int
+    app: str
+    #: l'outil tel qu'elle le nomme (``<app>_<outil>``, ``<app>_pages``)
+    tool: str
+    #: l'adresse de la personne de l'épisode (à qui le dire) ; vide en travail
+    target: str
+    approval: str
+    at: int
+    expires: int
+    args_json: str = "{}"
+    status: str = "attend"
+    by: str = ""
+    done_at: int = 0
+    text_ref: str = ""
+    told: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,7 +326,8 @@ class Emitted(Payload):
 
 #: v5 : ce qui a été dit de chaque app reste su (``said``), même quand une trouvaille nouvelle remplace la précédente.
 #: v6 : une trouvaille sait si elle est urgente (``News.urgent``).
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=6,
+#: v7 : les appels d'outils d'app qui attendent un accord (``calls``, ADR 0133).
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=7,
                retired_params=("signal_spacing_us",))
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
@@ -1096,16 +1128,10 @@ def _section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
 
 
 def _may_build(ctx: Any) -> bool:
-    """Elle écrit ou utilise ses apps quand elle travaille, ou devant quelqu'un qui s'occupe d'elle — jugé sur
-    l'adresse qui parle (``audience.owner`` : jamais dans un groupe public ni un salon), pas sur « une adresse de la
-    personne est propriétaire » (l'offre le filtre déjà ; le gestionnaire le revérifie)."""
-    ep = ctx.frame.episode
-    if ep is None:
-        return False
-    if ep.kind in WORKING or (ep.kind == Kind.TASK and sifting_app(ep.target)):
-        return True
-    aud = ctx.frame.audience
-    return bool(ep.target) and aud is not None and aud.owner
+    """Écrire et régler ses apps : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
+    ADR 0133) — toi en privé, jamais dans un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris la
+    Forge ; la lecture de la file d'une app."""
+    return owner_here(ctx.frame, BUNDLE, lambda target: bool(sifting_app(target)))
 
 
 def _caretaker(frame: Frame) -> str:
@@ -1780,22 +1806,76 @@ async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
 APP_EPISODES = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.TASK, *WORKING})
 
 
-def _usable(ctx: Any, name: str, port: Any) -> tuple[App | None, str]:
-    """L'app et pourquoi elle ne sert pas ici (vide : elle sert). Au travail toujours ; en conversation, devant sa
-    propriétaire, une app sans secret — une app qui a des secrets seulement si un opérateur l'a promue (ADR 0104)."""
+#: une app sans projet n'a pas de lignes d'accès à elle : à toi seule, sans demander (ADR 0133)
+ALONE_ACCESS = (projects_c.ProjectAccess(who=(OWNER, WORK), read=ALONE, act=ALONE),)
+
+
+def app_lines(frame: Frame, app: App | None) -> tuple[tuple[projects_c.ProjectAccess, ...], projects_c.ProjectAccess]:
+    """Les lignes d'accès qui valent pour une app (ADR 0133) : celles de son projet ; sans projet, toi seule ; son
+    projet archivé ou disparu, personne."""
+    if app is None:
+        return (), projects_c.CLOSED
+    if not app.project:
+        return ALONE_ACCESS, projects_c.CLOSED
+    view = next((v for v in frame.get(projects_c.LIVE) if v.id == app.project), None)
+    return (view.access, view.default_access) if view is not None else ((), projects_c.CLOSED)
+
+
+def app_level(frame: Frame, name: str, tool: str, reads: bool, audience: Any, kind: str) -> str:
+    """Ce qu'elle fait de cet outil d'app devant qui est en face, à ce moment : la ligne de son projet qui le concerne
+    (``tool`` : ``<app>_<outil>``), sa colonne « lecture » ou « action » ; ``non`` jamais dans un salon, avec une
+    inconnue, ni sans personne."""
+    rows, default = app_lines(frame, frame.state("forge").apps.get(name))
+    line = first_line(rows, default, audience, kind, lambda a: not a.tools or tool in a.tools,
+                      close=social_c.is_close(frame))
+    if line is None:
+        return NO
+    return line.read if reads else line.act
+
+
+def app_tool_names(frame: Frame, ports: Mapping[str, Any], project: int) -> list[tuple[str, str]]:
+    """Les outils des apps d'un projet, tels qu'elle les nomme (``<app>_<outil>``, ``<app>_pages``), et ce qu'ils
+    font (« lit », « agit ») : ce qu'une ligne d'accès de ce projet peut cocher."""
+    port = ports.get("forge")
+    out: list[tuple[str, str]] = []
+    for name, app in sorted(frame.state("forge").apps.items()):
+        info = port.info(name) if port is not None and app.project == project else None
+        if info is None:
+            continue
+        out += [(f"{name}_{t.name}", "lit" if t.reads else "agit") for t in info.tools]
+        if info.views:
+            out.append((f"{name}_pages", "lit"))
+    return out
+
+
+def _app_gate(name: str, tool: str, reads: bool) -> Any:
+    def allowed(audience: Any, kind: str, frame: Any = None) -> bool:
+        """Seulement là où les lignes d'accès de son projet l'ouvrent, devant cette personne, à ce moment (ADR 0133).
+
+        Jamais dans un salon, avec une inconnue, ni sans ce qu'elle vit (une console qui juge hors de sa vie)."""
+        return frame is not None and app_level(frame, name, tool, reads, audience, kind) != NO
+
+    return allowed
+
+
+def _usable(ctx: Any, name: str, port: Any, tool: str, reads: bool) -> tuple[App | None, str, str]:
+    """L'app, pourquoi elle ne sert pas ici (vide : elle sert) et ce qu'elle en fait (``seule``, ``carte``, ``toi``) :
+    les lignes d'accès de son projet (ADR 0133) ; en conversation, une app qui a des secrets seulement si un
+    opérateur l'a promue (ADR 0104)."""
     app = ctx.frame.state("forge").apps.get(name)
     if port is None or app is None:
-        return None, phrase("forge.tools.call.unavailable")
+        return None, phrase("forge.tools.call.unavailable"), NO
     if app.held or not app.enabled or app.broken:
-        return app, phrase("forge.tools.call.stopped", why=stopped(app))
-    if not _may_build(ctx):
-        # une app peut sortir ce qu'on lui passe vers ses domaines : pas devant n'importe qui
-        return app, phrase("forge.tools.call.not_here", who=_caretaker(ctx.frame))
+        return app, phrase("forge.tools.call.stopped", why=stopped(app)), NO
     ep = ctx.frame.episode
+    level = app_level(ctx.frame, name, tool, reads, ctx.frame.audience, ep.kind if ep is not None else "")
+    if level == NO:
+        # une app peut sortir ce qu'on lui passe vers le réseau : seulement pour qui ses lignes d'accès le permettent
+        return app, phrase("forge.tools.call.not_here", who=_caretaker(ctx.frame)), NO
     working = ep is not None and (ep.kind in WORKING or (ep.kind == Kind.TASK and bool(sifting_app(ep.target))))
     if not working and not app.promoted and has_secrets(ctx.ports, port.info(name)):
-        return app, phrase("forge.tools.call.secrets")
-    return app, ""
+        return app, phrase("forge.tools.call.secrets"), NO
+    return app, "", level
 
 
 def app_tool(name: str, tool: str) -> Any:
@@ -1804,16 +1884,18 @@ def app_tool(name: str, tool: str) -> Any:
 
     async def handler(args: AppToolArgs, ctx: Any) -> ToolResult:
         port = _port(ctx)
-        app, why = _usable(ctx, name, port)
+        info = port.info(name) if port is not None else None
+        spec = next((t for t in info.tools if t.name == tool), None) if info is not None else None
+        app, why, level = _usable(ctx, name, port, f"{name}_{tool}", bool(spec is not None and spec.reads))
         if why or app is None:
             return ToolResult(ok=False, content=why)
-        info = port.info(name)
-        spec = next((t for t in info.tools if t.name == tool), None) if info is not None else None
         if spec is None:
             return ToolResult(ok=False, content=phrase("forge.tools.call.no_tool"))
         values, errors = check_args(spec.args, args.model_dump())  # l'hôte vérifie avant l'app (ADR 0105)
         if errors:
             return ToolResult(ok=False, content=bad_args(spec, errors))
+        if level != ALONE:  # sur accord (ADR 0133) : rien ne part avant le oui
+            return await calls.ask(ctx, app, name, f"{name}_{tool}", f"tool_{tool}", values, level)
         frame: Frame = ctx.frame
         r = await port.call(name, f"tool_{tool}", values,
                             timeout_s=timeout_of(info, f"tool_{tool}", params(frame.env.params_of("forge",
@@ -1837,7 +1919,7 @@ def app_pages(name: str) -> Any:
 
     async def handler(args: PagesArgs, ctx: Any) -> ToolResult:
         port = _port(ctx)
-        app, why = _usable(ctx, name, port)
+        app, why, level = _usable(ctx, name, port, f"{name}_pages", True)
         if why or app is None:
             return ToolResult(ok=False, content=why)
         info = port.info(name)
@@ -1848,6 +1930,8 @@ def app_pages(name: str) -> Any:
                                                        views=", ".join(v.key for v in views)))
         values, notes = view_params(spec, {k: str(v).lower() if isinstance(v, bool) else str(v)
                                           for k, v in args.params.items()})
+        if level != ALONE:  # sur accord (ADR 0133) : rien ne se lit avant le oui
+            return await calls.ask(ctx, app, name, f"{name}_pages", spec.function, values, level)
         r = await port.call(name, spec.function, values, timeout_s=VIEW_TIMEOUT_S, max_result=VIEW_MAX_BYTES,
                             secrets=trusted(app))
         if not r.ok:
@@ -1883,13 +1967,14 @@ def _app_tools(ports: Mapping[str, Any]) -> tuple[list[ToolSpec], dict[str, str]
                 FORGE.name, f"{info.name}_{t.name}", phrase("forge.apps.tool", title=info.title,
                                                             description=t.description[:300]),
                 AppToolArgs, app_tool(info.name, t.name), bundle, APP_EPISODES, max_calls_per_episode=3,
-                owner_only=True, rule=phrase("forge.apps.rule"), schema=args_schema(t.args), in_hand=True))
+                fits=_app_gate(info.name, f"{info.name}_{t.name}", t.reads), rule=phrase("forge.apps.rule"),
+                schema=args_schema(t.args), in_hand=True))
         if info.views:
             tools.append(ToolSpec(
                 FORGE.name, f"{info.name}_pages", phrase("forge.apps.pages", title=info.title,
                                                          views=", ".join(v.key for v in info.views)),
-                PagesArgs, app_pages(info.name), bundle, APP_EPISODES, max_calls_per_episode=4, owner_only=True,
-                rule=phrase("forge.apps.rule"), in_hand=True))
+                PagesArgs, app_pages(info.name), bundle, APP_EPISODES, max_calls_per_episode=4,
+                fits=_app_gate(info.name, f"{info.name}_pages", True), rule=phrase("forge.apps.rule"), in_hand=True))
     return tools, bundles
 
 
@@ -2021,11 +2106,16 @@ async def _install_refused(ev: Any, ports: Mapping[str, Any]) -> list[Any] | Non
 
 @FORGE.effect(rt.EFFECT_EXECUTED)
 async def _installed(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
-    """Une version installée après accord entre dans sa vie, validée : un opérateur l'a lue."""
+    """Une version installée après accord entre dans sa vie, validée : un opérateur l'a lue. Un appel d'outil fait
+    après accord revient comme un contenu (``calls.came_back``)."""
     frame_of, port = ports.get("frame"), ports.get("forge")
-    if frame_of is None or port is None or not ev.data.ok:
+    if frame_of is None or port is None:
         return None
     state = frame_of().state("forge")
+    if ev.data.proposal in state.calls:
+        return calls.came_back(ev, state, frame_of(), port)
+    if not ev.data.ok:
+        return None
     app = state.installs.get(ev.data.proposal)
     info = port.info(app) if app else None
     current = state.apps.get(app) if app else None
@@ -2033,5 +2123,6 @@ async def _installed(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
         if info is not None else None
 
 
-# ── La console (fiche d'une app, ses onglets, les commandes d'un opérateur) ──
+# ── La console (fiche d'une app, ses onglets, les commandes d'un opérateur) ; ses appels sur accord ──
+from mika.plugins.forge import calls as calls  # noqa: E402 — s'enregistre sur FORGE
 from mika.plugins.forge import console as console  # noqa: E402 — s'enregistre sur FORGE

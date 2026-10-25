@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mika.kernel.forms import Knob
+from mika.vocab.access import Verdict, decide
 
 MAIL, TEAMS = "courrier", "teams"
 #: un canal : tout (la règle par défaut), le courrier (toutes ses boîtes), une boîte (``courrier:<clé>``), Teams
@@ -78,14 +79,16 @@ def _addressed(dest: str, address: str) -> bool:
     return dest == address or (dest.startswith("@") and dest == domain)
 
 
+def mail_verdict(rules: Sequence[SendRule], default: SendRule, account: str, address: str) -> Verdict[SendRule]:
+    """La règle d'un courrier de (ou vers) cette adresse, depuis cette boîte, et sa place : le moteur commun
+    (``vocab.access.decide``), son destinataire pour sélecteur."""
+    return decide(rules, default, lambda r: r.canal in (MAIL, f"{MAIL}:{account}")
+                  and (not r.dest or _addressed(r.dest, address)))
+
+
 def mail_rule(rules: Sequence[SendRule], default: SendRule, account: str, address: str) -> SendRule:
     """La règle d'un courrier de (ou vers) cette adresse, depuis cette boîte : la première qui correspond."""
-    for r in rules:
-        if r.canal not in (MAIL, f"{MAIL}:{account}"):
-            continue
-        if not r.dest or _addressed(r.dest, address):
-            return r
-    return default
+    return mail_verdict(rules, default, account, address).line
 
 
 def mail_rule_for_all(rules: Sequence[SendRule], default: SendRule, account: str,
@@ -95,14 +98,16 @@ def mail_rule_for_all(rules: Sequence[SendRule], default: SendRule, account: str
     return next((r for r in found if mail_send(r) != "seule"), found[0])
 
 
-def teams_rule(rules: Sequence[SendRule], default: SendRule, *about: str) -> SendRule:
-    """La règle d'un message Teams : ``about`` — l'identifiant de la conversation, son nom, qui écrit ; la première
-    règle de Teams dont le destinataire en est un morceau (ou vide)."""
+def teams_verdict(rules: Sequence[SendRule], default: SendRule, *about: str) -> Verdict[SendRule]:
+    """La règle d'un message Teams et sa place : ``about`` — l'identifiant de la conversation, son nom, qui écrit ; la
+    première règle de Teams dont le destinataire en est un morceau (ou vide)."""
     hay = "\n".join(a.lower() for a in about if a)
-    for r in rules:
-        if r.canal == TEAMS and (not r.dest or r.dest in hay):
-            return r
-    return default
+    return decide(rules, default, lambda r: r.canal == TEAMS and (not r.dest or r.dest in hay))
+
+
+def teams_rule(rules: Sequence[SendRule], default: SendRule, *about: str) -> SendRule:
+    """La règle d'un message Teams : la première de Teams dont le destinataire correspond (``teams_verdict``)."""
+    return teams_verdict(rules, default, *about).line
 
 
 class Sending(BaseModel):

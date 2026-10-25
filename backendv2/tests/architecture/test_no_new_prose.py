@@ -38,7 +38,9 @@ CEILING = {
     "faculties/presence/__init__.py": 2,  # panneau de console
     "faculties/projects/atelier.py": 13,  # résumés d'effets que l'opératrice approuve
     "faculties/projects/tend.py": 2,  # raison de pause, gardée au journal
-    "faculties/projects/tools.py": 3,  # raisons de clôture, gardées au journal ; règle de project_steer (console)
+    # raisons de clôture, gardées au journal ; règle de project_steer (console) ; +1 le 2026-10-25 : la description
+    # de la capacité projects.steer, piloter sur ton accord (console, ADR 0133)
+    "faculties/projects/tools.py": 4,
     "faculties/projects/work.py": 8,  # « pourquoi pas maintenant » (console)
     "faculties/transcript/__init__.py": 10,  # inspection du fil (console)
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
@@ -50,6 +52,7 @@ CEILING = {
     # la voix, forge.guide.veille)
     "plugins/forge/guide.py": 11,
     "plugins/forge/views.py": 6,  # rendus de console, aussi lus par forge_test — à migrer
+    "plugins/forge/calls.py": 2,  # capacité forge.call et note d'un refus au délai (console, ADR 0133)
     "plugins/mcp/__init__.py": 2,  # aperçu d'une capacité (console)
     "plugins/mcp/calls.py": 5,  # capacité et résumé (console)
     "plugins/rss/__init__.py": 16,  # panneaux de console

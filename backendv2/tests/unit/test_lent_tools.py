@@ -134,3 +134,23 @@ def test_the_door_of_a_point(tmp_path, monkeypatch):
     far, wrong, unknown, tokenless, ok, flooded = run_virtual(clock, main)
     assert far[0] == 403 and wrong[0] == 401 and unknown[0] == 404 and tokenless[0] == 404
     assert all(status == 200 for status, _ in ok) and flooded[0] == 429
+
+
+def test_a_point_lends_nothing_her_operator_took_away_in_conversation(tmp_path):
+    """2026-10-25 : un outil retiré par une règle d'outil, en tête-à-tête avec sa propriétaire, restait prêtable
+    (ADR 0122, 0133 : un point agit avec ses droits à elle, ses règles comprises)."""
+    kernel, clock, _, _ = _kernel(tmp_path)
+    lending = Lending(kernel, lambda: {})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            before = set(lending.candidates("user_1"))
+            kernel.runner.tool_rules = lambda situation: {"goal_remind": "off"} if situation == "proprietaire" else {}
+            return before, set(lending.candidates("user_1"))
+        finally:
+            await kernel.stop()
+
+    before, after = run_virtual(clock, main)
+    assert "goal_remind" in before and "goal_remind" not in after and "memory_search" in after

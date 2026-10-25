@@ -66,9 +66,9 @@ SECOND_THOUGHTS = "second_thoughts"
 #: ne répond pas, ni l'heure où la personne répond d'habitude ne s'y appliquent ; une rancune non plus — elle
 #: colore le ton, elle ne reprend pas la promesse. Un dessin promis aussi : le montrer quand il est prêt, ou dire
 #: qu'il n'a pas pu se faire (``imaging``, ADR 0063). Rendre compte de ce qu'un réveil par API lui a fait faire, à
-#: qui il le dit (``wakeup``, ADR 0068).
+#: qui il le dit (``wakeup``, ADR 0068). Dire ce qu'un service ou une app a rendu après un accord (ADR 0064, 0133).
 OWED = frozenset({goals_c.REMIND, memory_c.KEEP_PROMISE, imaging_c.DELIVER, imaging_c.COULD_NOT,
-                  mcp_c.ANSWERED_REASON, wakeup_c.DONE})
+                  mcp_c.ANSWERED_REASON, forge_c.ANSWERED_REASON, wakeup_c.DONE})
 #: Ce qui **prévient** : ce qui ne peut pas attendre et regarde la personne au premier chef — un mail important
 #: arrivé pour sa propriétaire, un projet qu'elle lui a confié qui n'avance plus sans elle, ce qu'une de ses apps
 #: vient de trouver pour la personne que son projet concerne (ADR 0105). Prévenir n'est pas

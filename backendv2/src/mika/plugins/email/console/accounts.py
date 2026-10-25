@@ -29,6 +29,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.kernel.operate import Done, Refused
+from mika.kernel.rights import RuleTable
 from mika.plugins.email import EMAIL, POLL_ASKED, EmailState, params_of
 from mika.plugins.email.console.common import (
     NO_PORT,
@@ -40,7 +41,7 @@ from mika.plugins.email.console.common import (
 )
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import AccountInfo
-from mika.vocab.sending import mail_rule
+from mika.vocab.sending import MAIL, TEAMS, SendRule, mail_rule
 
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
 
@@ -221,3 +222,38 @@ def _poll(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Done:
         raise Refused("Ce compte n'est pas prêt à relever.")
     return Done(drafts=(POLL_ASKED.draft(by=ctx.by),), message="Relève demandée : les nouveaux mails arrivent dans "
                 "quelques secondes.")
+
+
+# ── Ce qu'elle envoie à ta place, sur la page « Droits » (ADR 0132, 0133) ──
+
+SEND_WORDS = {"brouillon": "brouillon (tu l'envoies)", "accord": "ton accord", "seule": "seule"}
+#: ce qu'aucune règle d'envoi n'ouvre
+SENDING_FLOORS = ("un passage [À COMPLÉTER] attend toujours ton accord",
+                  "le courrier n'a pas de brouillon que tu envoies toi-même : « brouillon » y vaut « ton accord »",
+                  "un courrier à plusieurs ne part seul que si la règle de chacun le permet",
+                  "une boîte décochée ne prépare rien d'elle-même", "le téléphone : c'est toujours ton geste")
+
+
+def _canal(canal: str) -> str:
+    if not canal:
+        return "tout"
+    if canal == MAIL:
+        return "le courrier (toutes les boîtes)"
+    if canal.startswith(f"{MAIL}:"):
+        return f"la boîte « {canal.partition(':')[2]} »"
+    return "Teams" if canal == TEAMS else canal
+
+
+def _sending_row(r: SendRule) -> tuple[str, ...]:
+    return (_canal(r.canal), r.dest or "tout le monde", "oui" if r.prepare else "non", SEND_WORDS.get(r.send, r.send))
+
+
+@EMAIL.rights("envoi", title="Ce qu'elle envoie à ta place", order=50,
+              description="Courrier et Teams : ce qu'elle prépare d'elle-même et comment ça part, selon le "
+                          "destinataire (ADR 0132).")
+def _sending_tables(s: EmailState, frame: Frame, ctx: Any) -> list[RuleTable]:
+    sending = params_of(frame).sending
+    return [RuleTable("envoi", "Ce qu'elle envoie à ta place", ("canal", "destinataire", "préparer d'elle-même",
+                                                               "envoi"),
+                      tuple(_sending_row(r) for r in sending.rules), _sending_row(sending.default),
+                      href=Ref("local", SENDING_PAGE, "Envoyer à ta place"), floors=SENDING_FLOORS)]

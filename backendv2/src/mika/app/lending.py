@@ -95,12 +95,15 @@ class Lending:
 
     def candidates(self, handle: str) -> dict[str, ToolSpec]:
         """Ce qu'un point déclaré par cette opératrice peut prêter : ce que la porte lui offre en conversation, en
-        tête-à-tête, moins ce qui clôt une boucle."""
-        policy = self.kernel.runner.policies.get(Kind.REPLY)
+        tête-à-tête — ses règles d'outils comprises (ce qu'elle a retiré dans cette situation ne se prête pas, ADR
+        0133) —, moins ce qui clôt une boucle."""
+        runner = self.kernel.runner
+        policy = runner.policies.get(Kind.REPLY)
         if policy is None:
             return {}
-        return lendable(offer(self.kernel.mind.registry.tools, policy, Kind.REPLY, self.audience(handle),
-                              frame=self.kernel.mind.frame()))
+        audience = self.audience(handle)
+        return lendable(offer(self.kernel.mind.registry.tools, policy, Kind.REPLY, audience,
+                              rules=runner.rules_of(Kind.REPLY, audience), frame=self.kernel.mind.frame()))
 
     def offered(self, entry: Mapping[str, Any]) -> dict[str, ToolSpec]:
         """Les outils que ce point sert maintenant : ceux qu'il prête, parmi ce qu'il peut prêter."""

@@ -437,6 +437,8 @@ class Registry:
             if a.subject and a.subject not in self.subjects:
                 problems.append(f"action {a.key} : type d'objet inconnu {a.subject}")
         self.vitals: list[VitalSpec] = sorted((x for f in facs for x in f.vitals), key=lambda x: (x.order, x.key))
+        #: les types de règles (ADR 0133), dans l'ordre où la page « Droits » les montre
+        self.rights = sorted((x for f in facs for x in f.rights_specs), key=lambda x: (x.order, x.key))
         if len({x.key for x in self.vitals}) != len(self.vitals):
             problems.append("vital déclaré deux fois")
         self.series: dict[str, SeriesSpec] = {}

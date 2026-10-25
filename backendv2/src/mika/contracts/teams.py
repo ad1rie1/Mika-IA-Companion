@@ -41,9 +41,8 @@ class TeamsNoticed(Signal):
     mentions_me: bool = False
     #: ce que sa règle d'envoi dit de sa conversation au tri (ADR 0132), pour ce qui ne connaît pas son nom (ses
     #: tâches, sa voix) : préparer d'elle-même une réponse ; comment elle partirait (``brouillon``, ``accord``,
-    #: ``seule``). ``None``, vide : un message remarqué avant les règles, la règle de son identifiant vaut. Ce qui part
-    #: relit la règle d'aujourd'hui.
-    prepare: bool | None = None
+    #: ``seule``). Ce qui part relit la règle d'aujourd'hui.
+    prepare: bool = True
     send: str = ""
 
 

@@ -51,7 +51,7 @@ FIELD_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 HANDLERS = ("tick", "context", "view", "action", "on_event")
 #: ses outils au plus, et leurs clés (ADR 0105 : chacun déclare ses arguments, dans le vocabulaire des champs d'action)
 MAX_TOOLS = 8
-_TOOL_KEYS = frozenset({"name", "description", "args", "timeout"})
+_TOOL_KEYS = frozenset({"name", "description", "args", "timeout", "lit"})
 #: la file de ses signaux (ADR 0105) : ses clés et leurs bornes
 _SIGNALS_KEYS = frozenset({"queue", "per_call", "quota", "instructions"})
 SIGNALS_BOUNDS = {"queue": (1, 100), "per_call": (1, 20), "quota": (1, 96)}
@@ -504,7 +504,7 @@ def _tools(p: _Problems, raw: Any) -> list[dict[str, Any]]:
     if raw is None or raw == []:
         return []
     if not isinstance(raw, list):
-        p.append("« tools » : une liste d'outils {name, description, args, timeout}")
+        p.append("« tools » : une liste d'outils {name, description, args, timeout, lit}")
         return []
     if len(raw) > MAX_TOOLS:
         p.append(f"« tools » : {MAX_TOOLS} outils au plus")
@@ -530,8 +530,12 @@ def _tools(p: _Problems, raw: Any) -> list[dict[str, Any]]:
             args_raw = []
         keys: set[str] = set()
         args = [x for x in (_field(p, f"{path}.args[{j}]", a, keys) for j, a in enumerate(args_raw)) if x is not None]
+        reads = t.get("lit", False)
+        if not isinstance(reads, bool):
+            p.at(path, "« lit » : true (il lit, rien ne change ailleurs) ou false (il agit)")
+            reads = False
         out.append({"name": name, "description": str(t.get("description") or "")[:300], "args": args,
-                    "timeout": _timeout(p, path, t.get("timeout"), MAX_TOOL_TIMEOUT)})
+                    "timeout": _timeout(p, path, t.get("timeout"), MAX_TOOL_TIMEOUT), "lit": reads})
     return out
 
 

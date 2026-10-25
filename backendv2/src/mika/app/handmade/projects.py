@@ -13,16 +13,15 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.contracts import identity as identity_c
-from mika.faculties.identity.faculty import known_as
-from mika.faculties.identity.inspect import people as people_of
-from mika.faculties.projects.access import STEER_WORDS, when_words, who_words
+from mika.app.handmade.access import people_with_accounts, who_choices
+from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.faculty import access_of, project_at
+from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview, env
+from mika.kernel.inspect import Pager
 from mika.plugins.forge import app_tool_names
-from mika.vocab.access import MOMENTS, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
-from mika.vocab.people import ACCOUNT_PREFIX
+from mika.vocab.access import MOMENTS, PERSON, when_words
 
 KIND = "project"
 #: ce qu'une ligne fait, dans un sélecteur du tableau
@@ -34,20 +33,6 @@ MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENT
 def _form(forms: Any, action: str) -> Any:
     """Le formulaire que la console a préparé pour une action de l'onglet (son jeton, son retour)."""
     return next((v for k, v in dict(forms or {}).items() if k.split("|", 1)[0] == action), None)
-
-
-def _people(ui: UI) -> list[dict[str, str]]:
-    """Les personnes qu'une ligne peut nommer : celles qui ont un compte (seules à pouvoir être authentifiées), par
-    leur nom — jamais une propriétaire, que sa propre ligne (« Toi ») règle déjà."""
-    frame = ui.kernel.mind.frame()
-    try:
-        s = frame.state("identity")
-    except KeyError:
-        return []
-    out = [{"key": person, "name": known_as(s, person)} for person, handles in people_of(s, frame).items()
-           if any(str(h).startswith(ACCOUNT_PREFIX) for h in (*handles, person))
-           and not frame.get(identity_c.IS_OWNER(person))]
-    return sorted(out, key=lambda p: p["name"].casefold())
 
 
 class ProjectFiche(Overview):
@@ -69,8 +54,7 @@ class ProjectFiche(Overview):
         if p is None:
             return None
         lines, default = access_of(p)
-        whos = [(WHO_OWNER, "Toi"), (WHO_ACCOUNTS, "Les comptes"),
-                *((WHO_PERSON + x["key"], x["name"]) for x in _people(ui))]
+        people = people_with_accounts(ui)
         # les outils de ses apps (``<app>_<outil>``), ce qu'ils font ; et ceux qu'une ligne nomme encore sans qu'une
         # app les propose (une app effacée, renommée) : on les voit, on peut les décocher
         tools = app_tool_names(frame, ui.kernel.ports, p.id)
@@ -78,9 +62,9 @@ class ProjectFiche(Overview):
         natures = dict(tools)
         rows = []
         for n, a in enumerate(lines, start=1):
-            options = whos if any(k == a.who for k, _ in whos) else [*whos, (a.who, who_words(frame, a.who))]
             rows.append({
-                "n": n, "who": a.who, "whos": options, "always": not a.when,
+                "n": n, "who": who_choices(a.who, people, lambda person: who_named(frame, (PERSON + person,))),
+                "always": not a.when,
                 "when_said": "Toujours" if not a.when else (when_words(a.when).capitalize() if len(a.when) == 1
                                                              else f"{len(a.when)} moments"),
                 "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
@@ -91,4 +75,5 @@ class ProjectFiche(Overview):
         return Markup(env.get_template("handmade/projets/acces.html").render(
             rows=rows, default=default, steers=STEER_CHOICES, policies=POLICY_CHOICES, steer_words=STEER_WORDS,
             form=_form(forms, "projects.acces"), never_set=p.access is None, has_apps=bool(tools),
+            pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
             behaviour_tab=fiche_url(KIND, key, "comportement")))

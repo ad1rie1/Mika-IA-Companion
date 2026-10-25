@@ -17,9 +17,7 @@ from urllib.parse import quote, urlencode
 from markupsafe import Markup
 
 from mika.adapters.mcp.system import BY as SYSTEM_BY
-from mika.contracts import identity as identity_c
-from mika.faculties.identity.faculty import known_as
-from mika.faculties.identity.inspect import people as people_of
+from mika.app.handmade.access import people_with_accounts, who_choices
 from mika.inspector import render
 from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.subjects import fiche_url
@@ -31,6 +29,7 @@ from mika.plugins.mcp.console import (
     POLICY_WORDS,
     STATE_TONES,
     access_said,
+    closeness,
     edit_server,
     faces,
     said_level,
@@ -41,10 +40,9 @@ from mika.plugins.mcp.console import (
     who_label,
     who_said,
 )
-from mika.ports.mcp import MOMENTS, STATES, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
+from mika.ports.mcp import MOMENTS, PERSON, STATES
 from mika.runtime.tools import deferred
 from mika.vocab.episodes import Kind
-from mika.vocab.people import ACCOUNT_PREFIX
 
 KIND = "serveur"
 #: ce qu'une ligne fait d'un outil, dans un sélecteur du tableau
@@ -77,20 +75,6 @@ def _short(text: str, size: int = SHORT) -> tuple[str, str]:
 def _form(forms: Any, action: str) -> Any:
     """Le formulaire que la console a préparé pour une action de l'onglet (son jeton, son retour)."""
     return next((v for k, v in dict(forms or {}).items() if k.split("|", 1)[0] == action), None)
-
-
-def _people(ui: UI) -> list[dict[str, str]]:
-    """Les personnes qu'on peut nommer : celles qui ont un compte (seules à pouvoir être authentifiées), par leur
-    nom — jamais une propriétaire, que sa propre ligne (« Toi ») règle déjà."""
-    frame = ui.kernel.mind.frame()
-    try:
-        s = frame.state("identity")
-    except KeyError:
-        return []
-    out = [{"key": person, "name": known_as(s, person)} for person, handles in people_of(s, frame).items()
-           if any(str(h).startswith(ACCOUNT_PREFIX) for h in (*handles, person))
-           and not frame.get(identity_c.IS_OWNER(person))]
-    return sorted(out, key=lambda p: p["name"].casefold())
 
 
 def _refused(key: str) -> str:
@@ -135,12 +119,12 @@ def _where(ui: UI, st: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _cells(st: Any, remote: str, nature: str, columns: list[Any]) -> list[dict[str, str]]:
+def _cells(st: Any, remote: str, nature: str, columns: list[Any], frame: Any) -> list[dict[str, str]]:
     """Ce qu'un outil fait devant chaque colonne, et ce qu'elle en garde : la règle du moteur, en mots."""
     tool = tool_view(st, remote, nature)
     out = []
     for f in columns:
-        level, keep = access_for(tool, f.audience, f.kind)
+        level, keep = access_for(tool, f.audience, f.kind, closeness(f, frame))
         word, note, tone = said_level(level, f)
         out.append({"label": f.label, "word": word, "note": note, "tone": tone,
                     "keep": KEEP_WORDS[keep] if level != NO else ""})
@@ -247,7 +231,7 @@ class ServerOverview(Overview):
         live = {t.remote: t for t in st.live}
         served_tools = [(r, v) for r, v in st.reviews.items() if tool_state(st, r)[0] == "servi"]
         columns = faces(st, frame)
-        grid_cells = {r: _cells(st, r, v.nature, columns) for r, v in served_tools}
+        grid_cells = {r: _cells(st, r, v.nature, columns, frame) for r, v in served_tools}
         kept = [i for i in range(len(columns)) if any(cells[i]["word"] != "non" for cells in grid_cells.values())]
         matrix = []
         for remote, decided in served_tools:
@@ -272,6 +256,7 @@ class ServerOverview(Overview):
             state=STATES.get(st.state, st.state), state_tone=STATE_TONES.get(st.state, ""),
             joined=ago(st.last_ok_at), served=served, live=len(st.live), review=review,
             calls=st.calls, failures=st.failures, alerts=alerts, access=_summary(st, frame),
+            access_pager=render._pager(Pager(size=len(st.access) + 1, total=len(st.access) + 1), {}),
             access_said=access_said(st), access_tab=access_tab,
             purpose=_capital(st.purpose.strip()), when_to_use=_capital(st.when_to_use.strip()),
             columns=[columns[i].label for i in kept], matrix=matrix, states=sorted(states.items()),
@@ -330,7 +315,7 @@ class ServerOverview(Overview):
             slot = json.dumps(remote)
             form = next((v for k, v in dict(forms or {}).items()
                          if k.startswith("mcp.regler|") and f'"outil": {slot}' in k), None)
-            cells = [c for c in _cells(st, remote, nature, columns) if c["word"] != "non"] if served else []
+            cells = [c for c in _cells(st, remote, nature, columns, frame) if c["word"] != "non"] if served else []
             groups[nature].append({
                 "name": remote, "what": what, "full": full, "state": word, "tone": tone, "cells": cells,
                 "closed": served and not cells, "open": remote == wanted,
@@ -356,16 +341,14 @@ class ServerOverview(Overview):
         d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, à quels outils —, puis le comportement par
         défaut, obligatoire. Chaque bouton envoie tout le tableau (rien de ce qu'on a changé ne se perd)."""
         frame = ui.kernel.mind.frame()
-        people = _people(ui)
+        people = people_with_accounts(ui)
         known = list(dict.fromkeys([*(t.remote for t in st.live), *st.reviews]))
-        whos = [(WHO_OWNER, "Toi"), (WHO_ACCOUNTS, "Les comptes"),
-                *((WHO_PERSON + p["key"], p["name"]) for p in people)]
         rows = []
         for n, a in enumerate(st.access, start=1):
-            options = whos if any(k == a.who for k, _ in whos) else [*whos, (a.who, who_label(a.who, frame))]
             chosen = set(a.tools)
             rows.append({
-                "n": n, "who": a.who, "whos": options, "always": not a.when,
+                "n": n, "who": who_choices(a.who, people, lambda person: who_label((PERSON + person,), frame)),
+                "always": not a.when,
                 "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
                 "read": a.read, "act": a.act, "keep": a.keep, "all": not a.tools,
                 "tools": [{"name": r, "nature": "lit" if _nature_of(st, r) == "lecture" else "agit",
@@ -374,5 +357,6 @@ class ServerOverview(Overview):
         system = bool(st.reviews) and all(v.by == SYSTEM_BY for v in st.reviews.values())
         return Markup(env.get_template("handmade/outils/fait.html").render(
             rows=rows, default=st.default, policies=POLICY_CHOICES, keeps=KEEP_CHOICES,
+            pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
             form=_form(forms, "mcp.acces"), system=system, known=bool(known),
             alerts=_alerts(st, ""), tools_tab=fiche_url(KIND, st.name, "outils")))

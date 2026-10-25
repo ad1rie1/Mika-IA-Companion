@@ -1410,10 +1410,10 @@ def view(p: Project) -> c.ProjectView:
 
 
 def access_of(p: Project) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
-    """Ses lignes d'accès et sa ligne par défaut (ADR 0133) ; jamais réglées : celles d'avant l'ADR, qui font ce qu'il
-    faisait — toi, tout ; les autres l'entendent selon sa confidentialité, sans plus."""
+    """Ses lignes d'accès et sa ligne par défaut (ADR 0133) ; jamais réglées : toi, tout ; les autres l'entendent selon
+    sa confidentialité, sans plus (``UNSET``)."""
     if p.access is None:
-        return c.BEFORE_0133, c.BEFORE_0133_DEFAULT
+        return c.UNSET, c.UNSET_DEFAULT
     return p.access, p.default_access
 
 
