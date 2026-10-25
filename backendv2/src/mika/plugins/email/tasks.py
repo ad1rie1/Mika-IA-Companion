@@ -58,7 +58,7 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
         account = m.account or account_of(m.mail)
         if seen is None or not m.needs_reply or m.mail in s.asked or frame.now - m.at > p.draft_within_us:
             continue
-        if not mail_rule(rules, default, account, seen.address).prepare:
+        if account in p.boxes_off or not mail_rule(rules, default, account, seen.address).prepare:
             continue
         if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max:
             continue

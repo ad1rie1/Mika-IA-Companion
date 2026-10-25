@@ -49,7 +49,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "25"
+ASSET_VERSION = "26"
 
 log = logging.getLogger("mika.console")
 
@@ -164,6 +164,7 @@ class Overview:
     dessine l'en-tête de la fiche sur tous ses onglets (son titre principal compris) — la console y ajoute ses
     actions ; ``None`` : l'en-tête de la faculté qui déclare l'objet."""
 
+    #: son onglet à elle, en tête de la fiche ; vide : elle ne dessine que des onglets des facultés (``tabs``)
     slug = "ensemble"
     title = "Vue d'ensemble"
     description = ""

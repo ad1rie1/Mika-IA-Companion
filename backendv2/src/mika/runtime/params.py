@@ -104,11 +104,19 @@ def _touches(path: str, layer: Layer) -> bool:
     return any(p and _related(path, p) for p in layer)
 
 
+def unretired(layer: Layer | None, retired: tuple[str, ...]) -> dict[str, Any]:
+    """Une couche sans les paramètres que la faculté a retirés (``Faculty.retired_params``) : une surcharge d'un
+    paramètre retiré se lit sans effet, comme sa valeur journalisée — jamais une raison de refuser les autres
+    (2026-10-25 : « un envoi attend un accord », devenu une règle d'envoi, bloquait tout le formulaire du courrier)."""
+    return {k: v for k, v in (layer or {}).items() if k.split(".", 1)[0] not in retired}
+
+
 def planned(fac: Faculty[Any, Any], temperament: Temperament, overrides: Layer | None = None,
             inputs: Layer | None = None) -> Planned | None:
     """Le plan d'une faculté (``None`` si elle n'a pas de paramètres)."""
     if fac.params is None:
         return None
+    overrides, inputs = unretired(overrides, fac.retired_params), unretired(inputs, fac.retired_params)
     model = fac.params
     base = _default(fac, temperament)
     derived = fac.derive(temperament, None) if fac.derive is not None else base
@@ -294,7 +302,9 @@ class Parameters:
         if errors:
             return errors
         natural = forms.flatten(p.natural)
-        layer = dict(self.overrides().get(owner) or {})
+        fac = self.kernel.registry.faculties[owner]
+        # ce qu'un paramètre retiré avait de surcharge s'en va avec cet enregistrement
+        layer = unretired(self.overrides().get(owner), fac.retired_params)
         for path, value in values.items():
             if _close(value, current.get(path)) and not _plain_eq(value, current.get(path)):
                 continue  # la valeur montrée arrondie, renvoyée telle quelle : rien n'a changé
@@ -302,7 +312,6 @@ class Parameters:
             if _plain_eq(value, natural.get(path)) or _close(value, natural.get(path)):
                 continue
             layer[path] = _jsonable(value)
-        fac = self.kernel.registry.faculties[owner]
         check = planned(fac, self.temperament(), layer, self.inputs().get(owner))
         if check is None or check.refused:
             return dict(check.refused) if check is not None else {"": "refusé"}

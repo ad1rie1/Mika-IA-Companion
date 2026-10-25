@@ -297,16 +297,20 @@ def _tool_rows(raw: Mapping[str, Any], owner: bool, accounts: bool, named: list[
     situations = dict(raw.get("situations") or {})
     people = dict(raw.get("people") or {})
     talks = [e for e in episodes if e != "travail"]
+    compte = situations.get("compte") or base
     out: list[dict[str, Any]] = []
 
-    def add(who: str, whens: list[str] | None, level: str) -> None:
-        if whens is not None and (level, kept) != (service, keep):
+    def add(who: str, whens: list[str] | None, level: str, below: tuple[str, str] = (service, keep)) -> None:
+        """Une ligne, sauf si celle qui la suivrait pour cette personne fait déjà la même chose (``below``)."""
+        if whens is not None and (level, kept) != below:
             out.append({"who": who, "when": whens, "read": level, "act": level, "keep": kept})
 
+    # une personne nommée de l'outil a sa ligne au-dessus de celle des comptes de l'outil, qui la suivrait sinon :
+    # « comme le service » pour elle ne l'est plus quand l'outil règle les comptes autrement (2026-10-25)
+    after_person = (compte, kept) if accounts else (service, keep)
     for person, level in people.items():
         if accounts or person in named:
-            add(WHO_PERSON + person, _whens(talks, False), level)
-    compte = situations.get("compte") or base
+            add(WHO_PERSON + person, _whens(talks, False), level, after_person)
     if accounts:
         add(WHO_ACCOUNTS, _whens(talks, False), compte)
     for person in named:

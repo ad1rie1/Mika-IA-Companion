@@ -1,0 +1,112 @@
+{# Un projet › « Accès » (app/handmade/projects.py, ADR 0133) : un tableau de lignes lues de haut en bas, comme les
+   règles d'un pare-feu — qui, quand, le voir, le piloter, ce qu'elle fait d'un outil de ses apps qui lit et d'un outil
+   qui agit, à quels outils —, puis le comportement par défaut, obligatoire. Le formulaire est celui de l'action
+   ``projects.acces`` : chaque bouton (ajouter, monter, descendre, retirer, enregistrer) envoie tout le tableau. #}
+{% macro plumbing(f) -%}
+<input type="hidden" name="csrf" value="{{ f.csrf }}"><input type="hidden" name="_op" value="{{ f.nonce }}">
+<input type="hidden" name="_retour" value="{{ f.back }}"><input type="hidden" name="_sujet" value="{{ f.subject }}">
+{% for k, v in f.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+{%- endmacro %}
+{% macro pick(name, options, current, label, locked) -%}
+<select name="{{ name }}" aria-label="{{ label }}" class="access-select {{ current }}"{{ ' disabled' if locked }}>
+  {% for k, text in options %}<option value="{{ k }}"{{ ' selected' if k == current }}>{{ text }}</option>{% endfor %}
+</select>
+{%- endmacro %}
+{% set locked = not form %}
+<div class="now-page service">
+  {% if never_set %}<p class="server-alert info">Jamais réglés : ses accès font ce qu'il faisait avant — toi, tout ; les autres l'entendent selon sa confidentialité, sans le piloter ni se servir de ses apps. Enregistrer écrit ce tableau tel qu'il est.</p>{% endif %}
+  <form method="post" action="{{ form.url if form else '' }}" class="access-form">
+    {% if not locked %}
+    {{ plumbing(form) }}
+    {% for p in ("qui", "toujours", "moments", "voir", "piloter", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
+    <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
+    {% endif %}
+    <section class="now-card access-card" aria-labelledby="project-access-title">
+      <header class="access-head">
+        <div>
+          <h2 id="project-access-title">Accès au projet</h2>
+          <p>De haut en bas : pour qui est en face, <b>la première ligne qui le désigne</b> (qui, quand) décide s'il voit le projet et s'il le pilote ; pour un outil de ses apps, la première qui le concerne aussi (l'outil dans sa colonne « Outils »). Aucune : le comportement par défaut. Jamais dans un salon ni avec une inconnue.</p>
+        </div>
+        {% if not locked %}<button class="btn" name="faire" value="ajouter">+ Ajouter un accès</button>{% endif %}
+      </header>
+      <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Accès au projet">
+        <table class="access-table">
+          <thead>
+            <tr>
+              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Quand</th>
+              <th scope="col">Voir</th><th scope="col">Piloter</th>
+              <th scope="col">Apps : lecture</th><th scope="col">Apps : action</th><th scope="col">Outils</th>
+              {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="access-n">{{ r.n }}</td>
+              <td>{{ pick("qui." ~ r.n, r.whos, r.who, "Qui, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <details class="access-tools access-when" data-exclusive data-all="Toujours" data-many="moments" data-none="Aucun moment">
+                  <summary>{{ r.when_said }}</summary>
+                  <div class="access-tools-list">
+                    <label class="access-tool all"><input type="checkbox" name="toujours.{{ r.n }}"{{ ' checked' if r.always }}{{ ' disabled' if locked }}> <b>Toujours</b><span>à tout moment</span></label>
+                    {% for m in r.moments %}
+                    <label class="access-tool"><input type="checkbox" name="moments.{{ r.n }}|{{ m.key }}"{{ ' checked' if m.on }}{{ ' disabled' if locked }}> {{ m.label }}</label>
+                    {% endfor %}
+                  </div>
+                </details>
+              </td>
+              <td><label class="access-tool"><input type="checkbox" name="voir.{{ r.n }}"{{ ' checked' if r.see }}{{ ' disabled' if locked }}> oui</label></td>
+              <td>{{ pick("piloter." ~ r.n, steers, r.steer, "Le piloter, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("lecture." ~ r.n, policies, r.read, "Apps : un outil qui lit, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("action." ~ r.n, policies, r.act, "Apps : un outil qui agit, ligne " ~ r.n, locked) }}</td>
+              <td>
+                <details class="access-tools" data-exclusive data-all="Tous" data-one="outil" data-many="outils" data-none="Aucun outil">
+                  <summary>{{ r.said }}</summary>
+                  <div class="access-tools-list">
+                    <label class="access-tool all"><input type="checkbox" name="tous.{{ r.n }}"{{ ' checked' if r.all }}{{ ' disabled' if locked }}> <b>Tous ses outils</b><span>même ceux que ses apps proposeront plus tard</span></label>
+                    {% for t in r.tools %}
+                    <label class="access-tool"><input type="checkbox" name="prend.{{ r.n }}|{{ t.name }}"{{ ' checked' if t.on }}{{ ' disabled' if locked }}> <code>{{ t.name }}</code>{% if t.nature %} <span class="now-tag {{ 'info' if t.nature == 'lit' else 'warn' }}">{{ t.nature }}</span>{% else %} <span class="now-tag muted">plus proposé</span>{% endif %}</label>
+                    {% endfor %}
+                  </div>
+                </details>
+              </td>
+              {% if not locked %}
+              <td class="access-move">
+                <button class="btn quiet" name="faire" value="monter:{{ r.n }}"{{ ' disabled' if r.first }} aria-label="Monter la ligne {{ r.n }}" title="Monter">↑</button>
+                <button class="btn quiet" name="faire" value="descendre:{{ r.n }}"{{ ' disabled' if r.last }} aria-label="Descendre la ligne {{ r.n }}" title="Descendre">↓</button>
+                <button class="btn quiet danger" name="faire" value="retirer:{{ r.n }}" aria-label="Retirer la ligne {{ r.n }}" title="Retirer">✕</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+            <tr class="access-default">
+              <td class="access-n"></td>
+              <th scope="row" colspan="2">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
+              <td><label class="access-tool"><input type="checkbox" name="defaut_voir"{{ ' checked' if default.see }}{{ ' disabled' if locked }}> oui</label></td>
+              <td>{{ pick("defaut_piloter", steers, default.steer, "Par défaut, le piloter", locked) }}</td>
+              <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, un outil qui lit", locked) }}</td>
+              <td>{{ pick("defaut_action", policies, default.act, "Par défaut, un outil qui agit", locked) }}</td>
+              <td class="access-all">Tous</td>
+              {% if not locked %}<td></td>{% endif %}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {% if not rows %}<p class="now-muted">Aucune ligne : seul le comportement par défaut s'applique. « Ajouter un accès » ouvre une ligne fermée, que tu règles.</p>{% endif %}
+      {% if not has_apps %}<p class="now-muted">Ce projet n'a pas encore d'app : les colonnes « Apps » vaudront pour celles qu'elle y forgera. Qu'elle s'en serve pendant le projet dépend aussi de ses lots d'outils (<a href="{{ behaviour_tab }}">« Comportement et outils »</a>).</p>{% endif %}
+      {% if not locked %}<div class="form-actions-inline"><button class="btn" name="faire" value="">Enregistrer</button> <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span></div>{% endif %}
+    </section>
+  </form>
+
+  <section class="now-card access-legend" aria-labelledby="project-access-legend">
+    <h2 id="project-access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
+    <dl>
+      <div><dt>Qui</dt><dd><b>Toi</b> : en tête-à-tête, et quand elle travaille seule pour toi · <b>Les comptes</b> : toute personne qui a un compte chez elle, en tête-à-tête · une personne par son nom, reconnue seulement connectée. Jamais un salon ni une inconnue.</dd></div>
+      <div><dt>Voir</dt><dd>Elle peut en parler à cette personne : son titre, où il en est. Sa confidentialité filtre encore le détail.</dd></div>
+      <div><dt>Piloter</dt><dd>Une consigne, un objectif, une pause, une reprise, « vas-y maintenant ». <b>Seule</b> : c'est fait aussitôt, au nom de la personne · <b>Ton accord</b> : la demande t'attend (une carte dans ton chat si c'est toi en face, sinon la console) · <b>Non</b>. Jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
+      <div><dt>Apps : lecture, action</dt><dd>Ce qu'elle fait d'un outil de ses apps : un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> : sans demander · <b>Demande à la personne</b> : une carte dans son chat · <b>Ton accord</b> : une carte dans ton chat quand c'est toi en face, sinon la console · <b>Non</b> : l'outil ne lui est pas offert.</dd></div>
+      <div><dt>Outils</dt><dd>À quels outils de ses apps s'appliquent les deux colonnes « Apps » ; « Voir » et « Piloter » valent quelle que soit la sélection.</dd></div>
+    </dl>
+  </section>
+</div>

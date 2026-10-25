@@ -38,7 +38,7 @@
               <td>{{ pick("canal." ~ r.n, r.channels, r.canal, "Canal, règle " ~ r.n) }}</td>
               <td><input name="dest.{{ r.n }}" value="{{ r.dest }}" class="access-select" placeholder="tout le monde" aria-label="Destinataire, règle {{ r.n }}" maxlength="200"{{ ' disabled' if not writable }}></td>
               <td><label class="access-tool"><input type="checkbox" name="prepare.{{ r.n }}"{{ ' checked' if r.prepare }}{{ ' disabled' if not writable }}> oui</label></td>
-              <td>{{ pick("send." ~ r.n, sends, r.send, "Envoi, règle " ~ r.n) }}{% if r.mail and r.send == 'brouillon' %}<span class="now-muted"> (courrier : ton accord)</span>{% endif %}</td>
+              <td>{{ pick("send." ~ r.n, sends, r.send, "Envoi, règle " ~ r.n) }}</td>
               {% if writable %}
               <td class="access-move">
                 <button class="btn quiet" name="faire" value="monter:{{ r.n }}"{{ ' disabled' if r.first }} aria-label="Monter la règle {{ r.n }}" title="Monter">↑</button>

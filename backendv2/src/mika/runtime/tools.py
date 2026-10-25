@@ -253,7 +253,7 @@ def deferred(spec: ToolSpec, core: frozenset[str] | None, rules: Mapping[str, st
 
 
 def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audience: Audience,
-          only: Any = None, rules: Mapping[str, str] | None = None) -> dict[str, ToolSpec]:
+          only: Any = None, rules: Mapping[str, str] | None = None, frame: Any = None) -> dict[str, ToolSpec]:
     """Les outils offerts : les lots de la politique — restreints, quand le
     candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
     lot est offert entier ou pas du tout, moins les outils réservés à ses
@@ -261,7 +261,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
     qu'un opérateur a retirés dans cette situation (``rules`` : ``OFF``).
 
     La seule porte : le pipeline l'applique à chaque épisode, la console à des
-    audiences de synthèse (« qui reçoit quoi ») — jamais une recopie."""
+    audiences de synthèse (« qui reçoit quoi ») — jamais une recopie. ``frame`` :
+    ce qu'elle vit, pour une condition qui lit son journal (``fits``, ADR 0133)."""
     bundles = policy.tool_bundles
     if only:
         bundles = frozenset(b for b in (x.strip() for x in str(only).split(",")) if b and admitted(policy.tool_bundles, b))
@@ -277,7 +278,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
             continue
         if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:
             continue
-        if spec.fits is not None and boundary.call(spec.fits, audience, kind, label=f"offre de {name}") is not True:
+        if spec.fits is not None and boundary.call(spec.fits, audience, kind, frame,
+                                                   label=f"offre de {name}") is not True:
             continue
         out[name] = spec
     return out

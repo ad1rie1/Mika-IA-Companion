@@ -114,6 +114,10 @@ class EmailParams(BaseModel):
         label="Ce qu'elle envoie à ta place", group="Envoyer", readonly=True,
         help="Réglé dans Relations & échanges › Envoyer à ta place (ADR 0132) : des règles lues de haut en bas — "
              "canal, destinataire, préparer d'elle-même, comment envoyer — puis la règle par défaut.")] = Sending()
+    boxes_off: Annotated[tuple[str, ...], Knob(
+        label="Boîtes décochées", group="Envoyer", readonly=True,
+        help="Réglées dans Réglages › Plugins › Boîtes aux lettres : elle n'y prépare rien d'elle-même, quelles que "
+             "soient ses règles d'envoi.")] = ()
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "

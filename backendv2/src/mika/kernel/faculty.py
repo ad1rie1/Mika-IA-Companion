@@ -209,10 +209,12 @@ class ToolSpec:
     #: ce qu'elle met dans ses arguments part de la machine, ce qu'il rend vient d'ailleurs (la règle de ses mains
     #: le lui dit)
     outside: bool = False
-    #: la condition d'offre quand elle dépend aussi de la sorte d'épisode (``fn(audience, kind) -> bool``) : un outil
-    #: venu d'ailleurs que ses lignes d'accès ouvrent quand elle répond, pas quand elle prend la parole (ADR 0131).
-    #: Le dernier champ : le décorateur ``tool`` construit les outils du code par position.
-    fits: Callable[[Any, str], bool] | None = None
+    #: la condition d'offre quand elle dépend aussi de la sorte d'épisode et de ce qu'elle vit
+    #: (``fn(audience, kind, frame) -> bool`` ; ``frame`` peut manquer : une console qui juge sans lui) : un outil
+    #: que des lignes d'accès ouvrent quand elle répond, pas quand elle prend la parole — celles d'un service (ADR
+    #: 0131), celles d'un projet, lues dans son journal (ADR 0133). Le dernier champ : le décorateur ``tool``
+    #: construit les outils du code par position.
+    fits: Callable[[Any, str, Any], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -652,13 +654,14 @@ class Faculty(Generic[S, Pm]):
         when: Callable[[Any], bool] | None = None,
         ends_loop: bool = False,
         rule: str = "",
+        fits: Callable[[Any, str, Any], bool] | None = None,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule,
+                    rule, fits=fits,
                 )
             )
             return fn

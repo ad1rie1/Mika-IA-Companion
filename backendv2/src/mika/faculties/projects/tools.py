@@ -21,6 +21,7 @@ un seul verdict).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -31,6 +32,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.faculties.projects.access import steering
 from mika.faculties.projects.faculty import (
     AMENDED,
     ARCHIVED,
@@ -47,9 +49,11 @@ from mika.faculties.projects.faculty import (
     REFRAMED,
     RESUMED,
     SELF_BUNDLES,
+    STEER_ASKED,
     Objective,
     Project,
     ProjectsState,
+    SteerAsk,
     busy,
     cadence,
     check_schedule,
@@ -65,11 +69,14 @@ from mika.faculties.projects.faculty import (
     pick,
     written,
 )
+from mika.faculties.projects.faculty import STEER as STEER_CAPABILITY
 from mika.kernel.clock import HOUR
+from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
+from mika.kernel.operate import Preview
 from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, project_of, project_target
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
@@ -601,11 +608,20 @@ class SteerArgs(BaseModel):
     objective: str = Field(default="", max_length=200, description=phrase("projects.tools.steer.objective"))
 
 
-def steers(p: Project, person: str | None) -> bool:
-    """Cette personne pilote-t-elle ce projet avec elle ? Un projet vivant qu'elle lui a confié, ou un projet à elle
-    (qui s'occupe d'elle le pilote aussi). Qu'elle s'occupe d'elle et parle en privé se juge à part
-    (``audience.owner``)."""
-    return live(p) and bool(person) and (p.owner == person or p.authority == c.SELF)
+def steerable(p: Project, audience: Any) -> str:
+    """Ce que qui est en face peut faire de ce projet en le pilotant, en réponse (ADR 0133) : ``seule``, ``toi``
+    (sur ton accord) ou ``non`` — un projet vivant, que ses lignes d'accès lui laissent voir et piloter."""
+    return steering(p, audience, Kind.REPLY) if live(p) else c.STEER_NO
+
+
+def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
+    """Seulement devant qui une ligne d'accès laisse piloter un de ses projets vivants (ADR 0133).
+
+    Jamais dans un salon ni avec une inconnue ; sans ce qu'elle vit (une console qui juge hors de sa vie), non."""
+    if frame is None:
+        return False
+    s: ProjectsState = frame.state("projects")
+    return any(steering(p, audience, kind) != c.STEER_NO for p in s.projects.values() if live(p))
 
 
 def _contents(ctx: Any, refs: list[str]) -> Mapping[str, str]:
@@ -656,19 +672,20 @@ def _changed() -> ToolResult:
 
 
 @PROJECTS.tool(STEER, description=phrase("projects.tools.steer.description"), args=SteerArgs, bundle="projects",
-               episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True,
-               rule="seulement en privé avec qui s'occupe d'elle, sur un projet vivant qu'elle lui a confié ou un "
-                    "projet à elle")
+               episodes=[Kind.REPLY], max_calls_per_episode=2, fits=may_steer,
+               rule="seulement en privé, sur un projet vivant que les lignes d'accès laissent piloter à la personne en "
+                    "face ; sur ton accord, la demande attend")
 async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     who = _person(frame)
     aud = frame.audience
-    if who is None or aud is None or not owner_speaks(frame):
+    if who is None or aud is None:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.not_owner", who=caretaker(frame)))
     person = who[1]
     s: ProjectsState = frame.state("projects")
-    # ceux dont le détail peut s'entendre ici (la règle de « TES PROJETS ») : on ne pilote pas à l'aveugle
-    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steers(p, person)
+    # ceux que ses lignes d'accès lui laissent piloter et dont le détail peut s'entendre ici (la règle de « TES
+    # PROJETS ») : on ne pilote pas à l'aveugle
+    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud) != c.STEER_NO
             and hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok)]
     if not mine:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
@@ -681,6 +698,8 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     p = s.projects[pid]
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
         phrase("projects.tools.steer.numbered", id=p.id)
+    if steerable(p, aud) == c.STEER_ASK:
+        return await _ask_steer(args, ctx, p, person, title)
     if args.what == NOW:
         return await _steer_now(args, ctx, s, p, person, title)
     if args.what == PAUSE:
@@ -759,3 +778,120 @@ async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, pe
         return _changed()
     on = phrase("projects.tools.steer.on_objective", id=o.id) if o is not None else ""
     return phrase("projects.tools.steer.asked", title=title, on=on)
+
+
+# ── Piloter sur ton accord (ADR 0133) ─────────────────────────────────────
+
+
+async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: str) -> Any:
+    """Sur ton accord : la demande est gardée (son texte, un contenu effaçable) puis proposée (``projects.steer``) ;
+    son geste s'écrit quand tu l'acceptes — une carte dans ton chat si c'est toi en face, sinon la console."""
+    frame: Frame = ctx.frame
+    text = args.text.strip()
+    if args.what in (ADD, INSTRUCT) and not text:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.no_objective") if args.what == ADD
+                          else phrase("projects.tools.steer.no_instruction"))
+    if args.what == ADD and len(text) > 500:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.too_long"))
+    objective = 0
+    if args.what == NOW and args.objective.strip():
+        opened = [x for x in p.objectives if x.status == c.OPEN]
+        texts = _contents(ctx, [x.text_ref for x in opened])
+        rows = [(x.id, texts.get(x.text_ref, "")) for x in opened]
+        found = _which(args.objective, rows) if rows else None
+        if found is None:
+            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=_listed(
+                rows, phrase("projects.tools.steer.forgotten"))) if rows else
+                phrase("projects.tools.steer.no_open", title=title))
+        objective = found
+    request = f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}"
+    await ctx.emit(STEER_ASKED.draft(
+        project=p.id, request=request, what=args.what, text=Content.of(text, level=written(p)) if text else None,
+        kind=args.kind, cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, objective=objective,
+        by=person, owner=p.owner, about=p.about))
+    payload: dict[str, Any] = {"project": p.id, "asked": request}
+    target = (frame.episode.target if frame.episode is not None else "") or ""
+    if frame.audience is not None and frame.audience.owner and target:
+        payload[rt.DECIDER] = target  # c'est toi en face : une carte dans ton chat
+    view = frame.get(identity_c.IDENTITY(person))
+    what = phrase(f"projects.tools.steer.request_{args.what}", text=text[:300])
+    summary = phrase("projects.tools.steer.request", who=str(getattr(view, "name", "") or person), title=title,
+                     what=what)
+    await ctx.propose(rt.EFFECT_PROPOSED.draft(
+        capability=STEER_CAPABILITY, owner=PROJECTS.name, context=project_target(p.id), approval=True,
+        args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        summary=Content.of(summary[:400], level=written(p)), about=tuple(x for x in (person, p.owner, *p.about) if x)))
+    return phrase("projects.tools.steer.waits", title=title, who=caretaker(frame))
+
+
+def _steer_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
+    """Exactement ce qui changerait : le projet, qui le demande, le geste et son texte ; bloqué si le projet n'est
+    plus vivant ou si la demande s'est perdue (son texte oublié)."""
+    frame_of, store = ports.get("frame"), ports.get("store")
+    s: ProjectsState | None = frame_of().state("projects") if frame_of is not None else None
+    asked = str(args.get("asked") or "")
+    a = s.steers.get(asked) if s is not None else None
+    p = s.projects.get(a.project) if s is not None and a is not None else None
+    refs = [r for r in ((a.text_ref if a else ""), (p.title_ref if p else "")) if r]
+    texts = store.content(refs) if store is not None and refs else {}
+    text = texts.get(a.text_ref, "") if a is not None and a.text_ref else ""
+    title = texts.get(p.title_ref, "") if p is not None else ""
+    what = phrase(f"projects.tools.steer.request_{a.what}", text=text[:300]) if a is not None else ""
+    view = frame_of().get(identity_c.IDENTITY(a.by)) if frame_of is not None and a is not None and a.by else None
+    shown = phrase("projects.tools.steer.preview", title=title or str(args.get("project") or ""),
+                   who=str(getattr(view, "name", "") or (a.by if a is not None else "")), what=what)
+    digest = hashlib.sha256(canonical_json({"asked": asked, "what": a.what if a else "", "text": text}).encode()
+                            ).hexdigest()[:32]
+    blocked = ""
+    if a is None or p is None or (a.what in (ADD, INSTRUCT) and not text):
+        blocked = phrase("projects.tools.steer.preview_lost")
+    elif p.status not in STEERABLE:
+        blocked = phrase("projects.tools.steer.preview_closed")
+    return Preview(shown, digest, blocked)
+
+
+@PROJECTS.capability("steer", description="Piloter un projet sur ton accord : son geste s'écrit une fois accepté.",
+                     preview=_steer_preview)
+async def _steer_capability(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
+    """Rien ne sort de la machine : l'accord suffit, le geste s'écrit après (``_steer_accepted``)."""
+    return True, "accepté"
+
+
+def accepted(p: Project, a: SteerAsk, text: str) -> list[Any]:
+    """Le geste d'une demande acceptée, s'il vaut encore (le projet a pu changer entre-temps) ; son texte oublié
+    entre-temps, rien."""
+    who: dict[str, Any] = {"by": a.by, "owner": p.owner, "about": p.about}
+    if a.what == PAUSE:
+        return [PAUSED.draft(project=p.id, reason=PAUSED_IN_TALK, **who)] if p.status == c.ACTIVE else []
+    if a.what == RESUME:
+        return [RESUMED.draft(project=p.id, **who)] if p.status == c.PAUSED else []
+    if a.what == NOW:
+        if p.status != c.ACTIVE:
+            return []
+        o = objective_at(p, a.objective) if a.objective else None
+        return [NUDGED.draft(project=p.id, objective=o.id if o is not None and o.status == c.OPEN else 0, **who)]
+    if not text:
+        return []
+    if a.what == INSTRUCT:
+        return [AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), **who)]
+    if a.what == ADD and living(p) < OBJECTIVES_KEPT:
+        return [OBJECTIVE_ADDED.draft(project=p.id, objective=p.objective_seq + 1,
+                                      text=Content.of(text, level=written(p)), kind=a.kind, cadence_us=a.cadence_us,
+                                      author="owner", **who)]
+    return []
+
+
+@PROJECTS.effect(rt.EFFECT_EXECUTED)
+async def _steer_accepted(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
+    """Une demande de pilotage acceptée : son geste s'écrit, au nom de qui l'a demandée."""
+    frame_of, store = ports.get("frame"), ports.get("store")
+    if frame_of is None or not ev.data.ok:
+        return None
+    s: ProjectsState = frame_of().state("projects")
+    asked = s.steer_proposals.get(ev.data.proposal)
+    a = s.steers.get(asked) if asked else None
+    p = s.projects.get(a.project) if a is not None else None
+    if a is None or p is None or p.status not in STEERABLE:
+        return None
+    text = (store.content([a.text_ref]).get(a.text_ref) or "") if a.text_ref and store is not None else ""
+    return accepted(p, a, text)

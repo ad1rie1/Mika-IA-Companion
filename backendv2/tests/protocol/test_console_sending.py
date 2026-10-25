@@ -25,10 +25,12 @@ def test_an_operator_writes_her_sending_rules_and_she_follows_them(world):  # no
     page = html.unescape(client.get(PAGE).text)
     assert "Envoyer à ta place" in page and "Comportement par défaut" in page and "+ Ajouter une règle" in page
     assert 'href="/inspecteur/envoi"' in html.unescape(client.get("/inspecteur").text)  # dans le menu
-    # ajouter : une règle ouverte (le courrier, tout le monde, elle prépare, ton accord), à régler
-    assert "Règle 1 ajoutée" in send(client, "ajouter", defaut_send="accord")
-    (added,) = client.portal.call(live.settings.sending).rules
-    assert added == SendRule(canal="courrier", prepare=True, send="accord")
+    # ajouter : une règle prudente (le courrier, tout le monde, elle ne prépare rien, ton accord), à régler — rien ne
+    # se prépare ni ne part de plus avant qu'on l'ait réglée (2026-10-25)
+    assert "Règle 1 ajoutée, la plus prudente" in send(client, "ajouter", defaut_send="accord")
+    (new,) = client.portal.call(live.settings.sending).rules
+    assert new == SendRule(canal="courrier", prepare=False, send="accord")
+    added = SendRule(canal="courrier", prepare=True, send="accord")
     # régler deux règles d'un envoi, puis monter la seconde : l'ordre décide
     done = send(client, "monter:2", **{"canal.1": "courrier", "prepare.1": "on", "send.1": "accord",
                                        "canal.2": TEAMS, "dest.2": "RH", "send.2": "seule",

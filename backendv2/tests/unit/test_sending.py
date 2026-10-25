@@ -113,3 +113,27 @@ async def test_the_old_settings_are_kept_when_mail_or_teams_is_rewritten(tmp_pat
         assert settings.sending() == Sending()
     finally:
         await store.close()
+
+
+async def test_old_overrides_are_translated_then_never_written_back(tmp_path):
+    """2026-10-25 : enregistrer une autre surcharge traduisait « un envoi attend un accord », puis le réécrivait —
+    et « Pour qui » de la recherche web (ADR 0131) se perdait sans traduction."""
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    await store.open()
+    try:
+        settings = Settings(store, SecretBox.for_data(tmp_path))
+        await settings.open()
+        await settings._put(EMAIL_KEY, {"accounts": {"perso": {}}})
+        await settings._put(OVERRIDES_KEY, {"email": {"send_needs_approval": False, "max_per_day": 3},
+                                            "web": {"audience": "comptes", "in_work": False, "max_calls": 2}})
+        # tant que rien n'est réécrit, les anciennes valeurs se lisent déjà sous leur forme neuve
+        web = settings.mcp_system_access()["web"]["access"]
+        assert [(a["who"], tuple(a["when"])) for a in web] == [("toi", ("conversation",)), ("comptes", ("conversation",))]
+        # une autre surcharge enregistrée, avec celles qu'on avait lues
+        await settings.save_overrides({**settings.overrides(), "teams": {"drafts_per_day": 2}})
+        assert settings.overrides() == {"email": {"max_per_day": 3}, "web": {"max_calls": 2},
+                                        "teams": {"drafts_per_day": 2}}
+        assert settings.sending().rules[0] == SendRule(canal="courrier:perso", send="seule")
+        assert settings.mcp_system_access()["web"]["access"] == web  # écrites à part, elles restent
+    finally:
+        await store.close()

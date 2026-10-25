@@ -68,6 +68,37 @@ NEED = "project_need"
 RUN_CAP = "run_cap"
 
 
+# ── qui peut quoi sur un projet et ses apps (ADR 0133) ──
+#: piloter un projet (une consigne, un objectif, une pause, « vas-y maintenant ») : seule (aussitôt), sur ton accord
+#: (une demande qui t'attend), ou non — jamais son cadre (titre, outils, accord), qui reste dans la console
+STEER_ALONE, STEER_ASK, STEER_NO = "seule", "toi", "non"
+STEERS = ((STEER_ALONE, "seule — aussitôt"), (STEER_ASK, "ton accord"), (STEER_NO, "non"))
+
+
+class ProjectAccess(Payload):
+    """Une ligne d'accès à un projet (ADR 0133), lue de haut en bas comme celles d'un service (``vocab.access``) :
+    qui (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter, ce qu'elle fait
+    d'un outil de ses apps qui lit et d'un outil qui agit (``vocab.access.POLICIES``), et à quels outils de ses apps
+    ces deux colonnes s'appliquent (``<app>_<outil>`` ; vide : tous). Voir et piloter valent quelle que soit la
+    sélection d'outils."""
+
+    who: str = ""
+    when: tuple[str, ...] = ()
+    see: bool = False
+    steer: str = STEER_NO
+    read: str = "non"
+    act: str = "non"
+    tools: tuple[str, ...] = ()
+
+
+#: la ligne par défaut fermée : personne d'autre ne le voit, ne le pilote ni ne se sert de ses apps
+CLOSED = ProjectAccess()
+#: un projet dont on n'a jamais réglé les accès fait ce qu'il faisait avant l'ADR 0133 : toi, tout ; les autres
+#: l'entendent selon ce que permet sa confidentialité, sans le piloter ni se servir de ses apps
+BEFORE_0133 = (ProjectAccess(who="toi", see=True, steer=STEER_ALONE, read="seule", act="seule"),)
+BEFORE_0133_DEFAULT = ProjectAccess(see=True)
+
+
 class ProjectCreated(Payload):
     title: Content
     description: Content | None = None
@@ -178,6 +209,10 @@ class ProjectView:
     #: ses dernières consignes (références, la plus récente en dernier) : ce que qui suit le projet a demandé — ce
     #: qui en dépend (le tri de la file d'une de ses apps) les suit aussi
     instructions: tuple[str, ...] = ()
+    #: ses lignes d'accès, dans leur ordre, et sa ligne par défaut (ADR 0133) : celles d'avant l'ADR quand on ne les
+    #: a jamais réglées — ses apps les suivent
+    access: tuple[ProjectAccess, ...] = BEFORE_0133
+    default_access: ProjectAccess = BEFORE_0133_DEFAULT
 
 
 #: Les projets vivants (actifs ou en pause, pas archivés), du plus ancien au plus récent.

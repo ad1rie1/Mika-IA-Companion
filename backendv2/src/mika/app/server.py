@@ -277,7 +277,8 @@ class Live:
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
         # ce qu'elle envoie à ta place (ADR 0132) : les mêmes règles pour le courrier et pour Teams
         sending = self.settings.sending().model_dump(mode="json")
-        out["email"] = {"sending": sending}
+        off = sorted(k for k, a in self.settings.email().accounts.items() if not a.enabled)
+        out["email"] = {"sending": sending, "boxes_off": off}
         out["teams"] = {"enabled": self.settings.teams().enabled, "sending": sending}
         return out
 

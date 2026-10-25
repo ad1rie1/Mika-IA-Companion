@@ -125,7 +125,8 @@ class Seen:
     #: qui y a répondu (« toi » : la personne elle-même ; « elle » : sa réponse est partie)
     answered: str = ""
     #: ce que sa règle d'envoi en disait au tri (ADR 0132) : préparer d'elle-même, comment une réponse partirait
-    prepare: bool = True
+    #: (``None``, vide : remarqué avant les règles)
+    prepare: bool | None = None
     send: str = ""
 
 
@@ -218,13 +219,22 @@ def params(p: TeamsParams | None) -> TeamsParams:
 MODE_OF = {"brouillon": "brouillon", "accord": "validation", "seule": "autonome"}
 
 
-def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str, *about: str) -> str:
-    """Le mode d'une réponse à ce message (ADR 0132) : ce que sa règle en disait au tri, sinon la règle de sa
-    conversation (son identifiant, et ``about`` : son nom, qui écrit, quand on les a), sinon la règle par défaut."""
+def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str) -> str:
+    """Le mode d'une réponse à ce message, là où le nom de sa conversation n'est pas connu (le brief d'une tâche, sa
+    voix) : ce que sa règle en disait au tri, sinon la règle de son identifiant et de qui écrit (ADR 0132). Ce qui
+    part relit la règle d'aujourd'hui (``triage.rule_of``)."""
     seen = s.messages.get(ref)
-    send = seen.send if seen is not None and seen.send else \
-        teams_rule(p.sending.rules, p.sending.default, conversation, *about).send
+    send = seen.send if seen is not None and seen.send else teams_rule(
+        p.sending.rules, p.sending.default, conversation, seen.author if seen is not None else "").send
     return MODE_OF.get(send, "validation")
+
+
+def prepares(p: TeamsParams, m: Seen) -> bool:
+    """Elle prépare d'elle-même une réponse à ce message : ce que sa règle en disait au tri ; remarqué avant les
+    règles (ADR 0132), la règle de sa conversation et de qui écrit."""
+    if m.prepare is not None:
+        return m.prepare
+    return teams_rule(p.sending.rules, p.sending.default, m.conversation, m.author).prepare
 
 
 def params_of(frame: Frame) -> TeamsParams:

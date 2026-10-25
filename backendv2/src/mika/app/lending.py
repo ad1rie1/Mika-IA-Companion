@@ -99,7 +99,8 @@ class Lending:
         policy = self.kernel.runner.policies.get(Kind.REPLY)
         if policy is None:
             return {}
-        return lendable(offer(self.kernel.mind.registry.tools, policy, Kind.REPLY, self.audience(handle)))
+        return lendable(offer(self.kernel.mind.registry.tools, policy, Kind.REPLY, self.audience(handle),
+                              frame=self.kernel.mind.frame()))
 
     def offered(self, entry: Mapping[str, Any]) -> dict[str, ToolSpec]:
         """Les outils que ce point sert maintenant : ceux qu'il prête, parmi ce qu'il peut prêter."""

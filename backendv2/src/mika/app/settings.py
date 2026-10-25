@@ -29,6 +29,7 @@ from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mcp.config import LEGACY_KEYS, McpConfig, McpServer, StoredReview, access_from_0128
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
+from mika.app import system_mcp
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
 from mika.ports.imaging import ROLES as IMAGE_ROLES
@@ -80,6 +81,8 @@ WAKEUP_KEYS_KEY = "wakeup_keys"
 TEAMS_KEY = "teams"
 #: ce qu'elle envoie à ta place, courrier et Teams : ses règles (ADR 0132)
 SENDING_KEY = "envoi"
+#: des surcharges d'avant, devenues des règles d'envoi (ADR 0132) : retirées une fois traduites
+MIGRATED_OVERRIDES = {"email": ("send_needs_approval",)}
 TEAMS_KEYS_KEY = "teams_key"
 #: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
 TOOL_RULES_KEY = "tool_rules"
@@ -354,8 +357,9 @@ class Settings:
                                         for s, tools in reviews.items()})
 
     def mcp_system_access(self) -> dict[str, dict[str, Any]]:
-        """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut."""
-        raw = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
+        """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut. Rien d'enregistré
+        sur sa fiche : ce que faisaient les surcharges de son plugin d'avant l'ADR 0131, s'il y en a."""
+        raw = {**system_mcp.access_before(self.overrides()), **dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})}
         return {str(k): {f: v[f] for f in SYSTEM_ACCESS_FIELDS if f in v} for k, v in raw.items()
                 if isinstance(v, dict)}
 
@@ -672,8 +676,22 @@ class Settings:
         return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict) and v}
 
     async def save_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
-        await self._keep_sending()  # « un envoi attend un accord » était une surcharge du courrier (ADR 0132)
-        await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
+        """Les surcharges. « Un envoi attend un accord » du courrier (ADR 0132), « Pour qui » et « Quand elle
+        travaille » de la recherche web (ADR 0131) en étaient : traduits d'abord sous leur forme neuve, ils ne se
+        réécrivent plus (une réécriture les remettait derrière la migration qui venait de les retirer)."""
+        await self._keep_sending()
+        await self._keep_system_access()
+        gone = {**MIGRATED_OVERRIDES, **system_mcp.BEFORE_0131}
+        kept = {k: {p: v for p, v in dict(layer).items() if p not in gone.get(k, ())} for k, layer in overrides.items()}
+        await self._put(OVERRIDES_KEY, {k: v for k, v in kept.items() if v})
+
+    async def _keep_system_access(self) -> None:
+        """Les accès d'un serveur du système d'avant l'ADR 0131 se lisent dans les surcharges de son plugin, que leur
+        réécriture efface : ils sont d'abord écrits à part, sauf si sa fiche en a déjà enregistré."""
+        stored = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
+        missing = {k: v for k, v in system_mcp.access_before(self.overrides()).items() if k not in stored}
+        if missing:
+            await self._put(MCP_SYSTEM_ACCESS_KEY, {**stored, **missing})
 
     # ── Réglages des apps forgées (valeurs simples, surchargent le manifeste) ──
     def forge_config(self, app: str | None = None) -> dict[str, Any]:

@@ -48,8 +48,8 @@
               <td class="access-n">{{ r.n }}</td>
               <td>{{ pick("qui." ~ r.n, r.whos, r.who, "Qui, ligne " ~ r.n, locked) }}</td>
               <td>
-                <details class="access-tools access-when">
-                  <summary>{{ r.when_said }}</summary>
+                <details class="access-tools access-when" data-exclusive data-all="Toujours" data-none="Aucun moment">
+                  <summary>{% if r.always %}Toujours{% else %}{% for m in r.moments if m.on %}<span class="access-chip">{{ m.label }}</span>{% else %}Aucun moment{% endfor %}{% endif %}</summary>
                   <div class="access-tools-list">
                     <label class="access-tool all"><input type="checkbox" name="toujours.{{ r.n }}"{{ ' checked' if r.always }}{{ ' disabled' if locked }}> <b>Toujours</b><span>à tout moment</span></label>
                     {% for m in r.moments %}
@@ -62,8 +62,8 @@
               <td>{{ pick("action." ~ r.n, policies, r.act, "Politique d'action, ligne " ~ r.n, locked) }}</td>
               <td>{{ pick("garde." ~ r.n, keeps, r.keep, "Politique de mémorisation, ligne " ~ r.n, locked) }}</td>
               <td>
-                <details class="access-tools">
-                  <summary>{{ r.said }}</summary>
+                <details class="access-tools" data-exclusive data-all="Tous" data-none="Aucun outil">
+                  <summary>{% if r.all %}Tous{% else %}{% for t in r.tools if t.on %}<code class="access-chip">{{ t.name }}</code>{% else %}Aucun outil{% endfor %}{% endif %}</summary>
                   <div class="access-tools-list">
                     <label class="access-tool all"><input type="checkbox" name="tous.{{ r.n }}"{{ ' checked' if r.all }}{{ ' disabled' if locked }}> <b>Tous ses outils</b><span>même ceux qu'il proposera plus tard</span></label>
                     {% for t in r.tools %}

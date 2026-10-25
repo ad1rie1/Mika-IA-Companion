@@ -314,6 +314,33 @@
       });
     });
 
+    // Accès aux outils : « toujours » (ou « tous ») et les cases une à une s'excluent, comme à l'enregistrement, et le
+    // bouton de la liste montre aussitôt ce qui est coché, comme le rend le serveur (``data-all``, ``data-none``).
+    document.querySelectorAll("details.access-tools").forEach(function (d) {
+      var said = d.querySelector("summary");
+      var all = d.querySelector(".access-tool.all input");
+      var items = Array.from(d.querySelectorAll(".access-tool:not(.all) input"));
+      if (!all) return;
+      function say() {
+        var on = all.checked ? [] : items.filter(function (i) { return i.checked; });
+        said.textContent = all.checked ? d.getAttribute("data-all") : on.length ? "" : d.getAttribute("data-none");
+        // un moment par son libellé, un outil par son nom
+        on.forEach(function (i) {
+          var code = i.parentNode.querySelector("code");
+          var chip = document.createElement(code ? "code" : "span");
+          chip.className = "access-chip";
+          chip.textContent = code ? code.textContent : i.parentNode.textContent.trim();
+          said.appendChild(chip);
+        });
+      }
+      say();  // un navigateur qui rend, au rechargement, les cases cochées avant l'envoi
+      d.addEventListener("change", function (ev) {
+        if (ev.target === all && all.checked) items.forEach(function (i) { i.checked = false; });
+        else if (ev.target !== all && ev.target.checked) all.checked = false;
+        say();
+      });
+    });
+
     // Curseurs : la valeur à côté.
     document.querySelectorAll("input[type=range][data-out]").forEach(function (r) {
       var out = document.getElementById(r.getAttribute("data-out"));

@@ -25,6 +25,7 @@ from mika.kernel.operate import Preview
 from mika.plugins.teams import (
     BUNDLE,
     GONE,
+    MODE_OF,
     SETTLED,
     TEAMS,
     decider,
@@ -32,11 +33,11 @@ from mika.plugins.teams import (
     her,
     keepers,
     latest,
-    mode_of,
     params_of,
     task_message,
     under_way,
 )
+from mika.plugins.teams.triage import rule_of
 from mika.plugins.teams.voice import voice_text
 from mika.ports.preprocess import cite, inert
 from mika.ports.teams import DRAFT, SEND, Draft, person_handle, to_fill
@@ -127,7 +128,7 @@ async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     title = inert(port.title(m.conversation), 80) or "sans nom"
     text = "\n".join(_line(ctx.frame, x) for x in [*before, *after])
     out = f"{DATA}\nConversation « {title} » :\n{cite(text, 8000)}"
-    mode = mode_of(params_of(ctx.frame), ctx.frame.state("teams"), m.ref, m.conversation, title, m.author)
+    mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.conversation, m.author).send, "validation")
     return out + f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n{voice_text(port.voice(), mode)}"
 
 
@@ -158,6 +159,12 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     if under_way(frame.state("teams"), m.conversation):
         return ToolResult(ok=False, content="Une réponse est déjà en chemin dans cette conversation.")
     p = params_of(frame)
+    # sa règle d'envoi telle qu'elle est maintenant (ADR 0132) : une règle resserrée depuis le tri vaut déjà — elle ne
+    # prépare plus d'elle-même là où elle ne le doit plus, et rien ne part plus librement qu'elle ne le dit
+    rule = rule_of(p, port, m.conversation, m.author)
+    if task and m.ref not in frame.state("teams").asked and not rule.prepare:
+        return ToolResult(ok=False, content="Ta règle d'envoi ne te fait plus préparer de réponse d'elle-même dans "
+                                            "cette conversation : n'en propose pas.")
     # récrite par l'autrice de Teams, s'il y en a une (ADR 0124)
     body = await flows.written(ctx, flows.TEAMS, args.body.strip(), f"{inert(m.author, 80)} :\n{cite(m.text, 2000)}")
     draft = port.save_draft(Draft(id="", conversation=m.conversation, body=body.strip(), reply_to=m.ref))
@@ -167,7 +174,7 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content=f"Cette réponse ne peut pas partir : {shown.blocked if shown else 'erreur'}.")
     # comment elle partira : la règle d'envoi de sa conversation (ADR 0132)
-    mode = mode_of(p, frame.state("teams"), m.ref, m.conversation, shown.title, m.author)
+    mode = MODE_OF.get(rule.send, "validation")
     if shown.blocked and mode != "brouillon":
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content="Elle ne peut pas partir avec des passages [À COMPLÉTER] : écris-la sans "

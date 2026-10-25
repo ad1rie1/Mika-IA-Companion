@@ -297,12 +297,18 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
   background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 .access-select.non { color: var(--muted); }
 .access-select.seule { border-color: color-mix(in srgb, var(--ok, var(--accent)) 50%, var(--border-strong)); }
-.access-tools { position: relative; }
-.access-tools > summary { min-height: 36px; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; cursor: pointer; list-style: none; white-space: nowrap; }
+/* le bouton montre ce qui est coché, une étiquette par moment ou par outil, qui passent à la ligne plutôt que d'élargir
+   le tableau */
+.access-tools > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 300px; min-height: 36px;
+  padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; cursor: pointer; list-style: none; }
+.access-when > summary { max-width: 240px; }
+.access-chip { padding: 0 7px; border-radius: 999px; background: var(--sunken); color: var(--text-2); font-size: 12px;
+  line-height: 20px; white-space: nowrap; }
 .access-tools > summary::-webkit-details-marker { display: none; }
 .access-tools > summary::after { content: " ▾"; color: var(--muted); }
 .access-tools[open] > summary { border-color: var(--accent); }
-/* la liste se déplie dans la ligne : un menu flottant serait coupé par le cadre défilant du tableau */
+/* sans ancres CSS, la liste se déplie dans la ligne et l'agrandit (un menu flottant serait coupé par le cadre défilant du
+   tableau) ; avec elles, voir plus bas */
 .access-tools-list { display: grid; gap: 2px; min-width: 260px; max-height: 320px; margin-top: 6px;
   padding: 8px; overflow: auto; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); }
 .access-tool { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 2px; cursor: pointer; }
@@ -310,12 +316,23 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
 .access-tool.all { padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
 .access-tool.all span { width: 100%; padding-left: 22px; color: var(--muted); font-size: 12px; }
 .access-when .access-tools-list { min-width: 220px; }
+/* avec les ancres, elle flotte sous son bouton sans agrandir la ligne : fixe, elle échappe au cadre défilant du tableau,
+   suit son bouton quand le tableau ou la page défile, et s'ouvre vers le haut au bas de l'écran. Sous « Outils », près du
+   bord droit, elle s'étend vers la gauche ; sous « Quand », vers la droite. Un clic ailleurs la ferme (data-exclusive) */
+@supports (position-area: bottom) and (anchor-scope: all) {
+  .access-tools { anchor-scope: --access-tools; }
+  .access-tools > summary { anchor-name: --access-tools; }
+  .access-tools-list { position: fixed; z-index: 9; position-anchor: --access-tools; position-area: bottom span-left;
+    position-try-fallbacks: flip-block; box-shadow: var(--shadow); }
+  .access-when .access-tools-list { position-area: bottom span-right; }
+}
 .access-move { white-space: nowrap; }
 .access-move .btn { min-width: 32px; padding: 0 8px; }
 .access-default th, .access-default td { background: var(--sunken); }
 .access-default th { font-weight: 650; }
 .access-default th span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
 .access-all { color: var(--text-2); }
+.access-card .form-actions-inline { margin-top: 14px; }
 .access-legend dl { display: grid; gap: 6px; margin: 0; }
 .access-legend dl > div { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 12px; }
 .access-legend dt { font-weight: 600; }

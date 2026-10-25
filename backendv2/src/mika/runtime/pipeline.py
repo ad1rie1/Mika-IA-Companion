@@ -439,7 +439,8 @@ class EpisodeRunner:
                     policy.role is not None and policy.voice and self.persona) else None
                 rules = self.rules_of(req.kind, audience)
                 tools = self._tools(policy, req.kind, audience,
-                                    req.selected.args.get("bundles") if req.selected is not None else None, rules)
+                                    req.selected.args.get("bundles") if req.selected is not None else None, rules,
+                                    frame)
                 offered = list(tools.values())
                 core = _in_hand(policy, req)
                 if core is not None and policy.role is not None and not _defers(self.gateway, policy.role):
@@ -753,9 +754,9 @@ class EpisodeRunner:
         return out
 
     def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None,
-               rules: Mapping[str, str] | None = None) -> dict[str, Any]:
+               rules: Mapping[str, str] | None = None, frame: Frame | None = None) -> dict[str, Any]:
         """Les outils offerts (``tools.offer``, la seule porte)."""
-        return offer(self.mind.registry.tools, policy, kind, audience, only, rules)
+        return offer(self.mind.registry.tools, policy, kind, audience, only, rules, frame)
 
     def rules_of(self, kind: str, audience: Audience) -> Mapping[str, str] | None:
         """Les règles d'outils d'un opérateur pour la situation de cet épisode ; une lecture qui échoue n'en

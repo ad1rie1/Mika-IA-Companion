@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import replace
 from types import SimpleNamespace
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
@@ -31,12 +32,14 @@ from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Origin
-from mika.plugins.teams import RECEIVED
+from mika.kernel.state import FrozenDict
+from mika.plugins.teams import RECEIVED, Seen, TeamsParams, TeamsState, mode_of, prepares
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.episodes import Kind
+from mika.vocab.sending import Sending, SendRule
 from tests.fixtures.mika import DOC, at_paris, build, connect
 
 START = at_paris(2026, 10, 6, 10, 0)
@@ -343,6 +346,60 @@ def test_without_initiative_she_only_drafts_when_asked(tmp_path):
     text = prompt_text(task[0])
     assert "CE QU'ON TE DEMANDE D'Y RÉPONDRE" in text and "Fais court." in text
     assert len(outbox) == 1
+
+
+def test_a_rule_tightened_after_the_triage_holds_for_what_she_writes(tmp_path):
+    """2026-10-25 : le mode décidé au tri l'emportait — une règle resserrée depuis laissait partir seul ce qu'elle
+    écrivait ensuite. Ce qui part relit la règle d'aujourd'hui (ADR 0132)."""
+    accord = {"enabled": True, "sending": {"rules": [{"canal": "teams", "send": "accord"}]}}
+
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        await sleep(HOUR)
+        [noticed] = events(kernel, teams_c.NOTICED)
+        await composition.configure(kernel, DOC, {"teams": {"draft_evidence": 12.0}}, {"teams": accord})
+        ref = message_ref(DM, "1759000000001")
+        asked = await perform(kernel, "teams.rediger", {"_champs": ["instruction"], "instruction": ["Fais court."],
+                                                        "_fixes": ["message"], "message": [ref]},
+                              by="user_1", subject=DM, nonce="a1")
+        await sleep(30 * MINUTE)
+        return noticed, asked, events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
+
+    noticed, asked, proposed, outbox = live(tmp_path, Model(), scenario, mode="autonome", autodraft=False)
+    assert noticed.data.send == "seule" and asked.ok  # au tri, elle l'aurait envoyée seule
+    [proposal] = proposed
+    assert proposal.data.approval and json.loads(proposal.data.args_json)["mode"] == "validation"
+    assert outbox == []  # rien ne part sans l'accord
+
+
+def test_a_rule_that_stops_her_preparing_holds_for_a_message_already_noticed(tmp_path):
+    stop = {"enabled": True, "sending": {"rules": [{"canal": "teams", "prepare": False, "send": "brouillon"}]}}
+
+    async def scenario(kernel, llm, desk, store, clock):
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        for _ in range(120):  # dès qu'elle l'a remarqué, avant qu'elle n'y réponde
+            if events(kernel, teams_c.NOTICED):
+                break
+            await sleep(5 * US)
+        started = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+        await composition.configure(kernel, DOC, {"teams": {"draft_evidence": 12.0}}, {"teams": stop})
+        await sleep(HOUR)
+        tasks = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+        return started, events(kernel, teams_c.NOTICED), tasks, events(kernel, rt.EFFECT_PROPOSED)
+
+    started, [noticed], tasks, proposed = live(tmp_path, Model(), scenario)
+    assert started == [] and noticed.data.prepare  # remarqué quand elle préparait encore
+    assert tasks and proposed == []  # la tâche est partie, mais rien ne se propose : la règle a changé
+
+
+def test_a_message_noticed_before_the_rules_follows_the_rule_of_its_conversation():
+    p = TeamsParams(sending=Sending(rules=(SendRule(canal="teams", dest="rh", prepare=False, send="seule"),
+                                           SendRule(canal="teams", prepare=True, send="brouillon"))))
+    old = Seen(1, HR, "Eve", "8:e", "group", 0.5, True, False, 0, "")  # ni « prepare » ni « send » au journal
+    s = TeamsState(messages=FrozenDict({"t1": old, "t2": replace(old, conversation=DM, author="Alice Martin")}))
+    assert not prepares(p, old) and mode_of(p, s, "t1", HR) == "autonome"
+    assert prepares(p, s.messages["t2"]) and mode_of(p, s, "t2", DM) == "brouillon"
 
 
 def test_the_signature_is_added_by_the_server_never_written_by_her(tmp_path):

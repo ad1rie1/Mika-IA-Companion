@@ -100,14 +100,14 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert "Pour aller vite : un genre" not in made and "1. Avec qui ?" not in made
     closed = "aucune ligne d'accès ne l'ouvre, et le comportement par défaut est fermé"
     assert closed in made and closed in html_of(client.get("/inspecteur/fiche/serveur/meteo"))
-    # ajouter une ligne : toi, toujours ; elle lit seule, te demande avant d'agir, garde en confidence
+    # ajouter une ligne : toi, toujours, fermée — enregistrée, elle n'ouvre rien avant qu'on la règle (2026-10-25)
     added = submit(client, made, "mcp.acces", faire="ajouter", defaut_lecture="non", defaut_action="non",
                    defaut_garde="rien")
-    assert added.status_code == 200 and "Ligne 1 ajoutée" in html_of(added)
+    assert added.status_code == 200 and "Ligne 1 ajoutée, fermée" in html_of(added)
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
-        ("toi", (), "seule", "toi", "prive", ())]
-    assert live.kernel.registry.is_dynamic("mcp_meteo_echo")
+        ("toi", (), "non", "non", "rien", ())]
+    assert not live.kernel.registry.is_dynamic("mcp_meteo_echo")
     # la propriétaire n'est jamais une « personne choisie » : sa ligne, c'est « Toi »
     made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
     assert '<option value="personne:adrien"' not in made and '<option value="toi" selected>Toi</option>' in made
@@ -125,6 +125,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
         ("toi", ("conversation", "travail"), "seule", "toi", "prive", ()), ("comptes", (), "carte", "non", "rien", ("echo",))]
+    assert live.kernel.registry.is_dynamic("mcp_meteo_echo")  # réglée, la ligne l'ouvre
     # « quand » se coche : une ligne sans moment se refuse
     refused = submit(client, access_page(), "mcp.acces", faire="",
                      **{k: v for k, v in rows.items() if k != "toujours.2"})

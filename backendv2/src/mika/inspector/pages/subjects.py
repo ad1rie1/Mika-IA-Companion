@@ -75,8 +75,9 @@ class Subjects:
         asked = request.query_params.get("onglet", "")
         # une vue d'ensemble dessinée à la main (ADR 0121) : le premier onglet, ouvert par défaut
         overview = self.ui.deps.overviews.get(kind) if isinstance(head, Head) else None
+        # sans ``slug``, elle ne dessine que des onglets (``tabs``) : pas de vue d'ensemble à elle
         shown = call(overview.render, self.ui, key, label=f"vue d'ensemble {kind}") \
-            if overview is not None and asked in ("", overview.slug) else None
+            if overview is not None and overview.slug and asked in ("", overview.slug) else None
         if isinstance(shown, Failed):  # elle a échoué : la fiche retombe sur ses onglets (l'échec est au journal)
             shown = None
         drawn = call(overview.head, self.ui, key, label=f"en-tête {kind}") if overview is not None else None
@@ -104,9 +105,10 @@ class Subjects:
                    and not is_page_param(k) and not k.startswith(("avant", "pg", "pile"))}
         tab_list, gear = self.tab_bar(request, kind, key, tabs, current, head, context)
         tabs_more: list[dict[str, Any]] = []
-        if overview is not None:
+        if overview is not None and overview.slug:
             tab_list.insert(0, {"title": overview.title, "href": fiche_url(kind, key),
                                 "on": shown is not None and current is None, "badge": 0})
+        if overview is not None:
             # ce qu'elle résume : au bout de la barre, sous un seul menu
             folded = [{"name": t.name, "title": t.title} for t in tabs if t.name in overview.folded]
             tabs_more = [{"title": f["title"], "href": fiche_url(kind, key, f["name"]),

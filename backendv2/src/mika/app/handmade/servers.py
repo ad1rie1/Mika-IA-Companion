@@ -366,12 +366,8 @@ class ServerOverview(Overview):
             chosen = set(a.tools)
             rows.append({
                 "n": n, "who": a.who, "whos": options, "always": not a.when,
-                "when_said": "Toujours" if not a.when else _capital(when_label(a.when)) if len(a.when) == 1
-                else f"{len(a.when)} moments", "moments": [{"key": k, "label": label, "on": k in a.when}
-                                                           for k, label in MOMENT_CHOICES],
-                "read": a.read, "act": a.act, "keep": a.keep,
-                "all": not a.tools, "said": "Tous" if not a.tools else
-                f"{len(a.tools)} outil{'s' if len(a.tools) > 1 else ''}",
+                "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
+                "read": a.read, "act": a.act, "keep": a.keep, "all": not a.tools,
                 "tools": [{"name": r, "nature": "lit" if _nature_of(st, r) == "lecture" else "agit",
                            "on": r in chosen, "state": tool_state(st, r)[0]} for r in known],
                 "first": n == 1, "last": n == len(st.access)})

@@ -142,6 +142,42 @@ def test_console_changes_are_bounded_reverted_and_kept_apart_from_settings(tmp_p
     assert out["final"].gain == 0.5 and out["final"].owners == ("ext_7",)  # le réglage survit
 
 
+RETIRING = Faculty("retiring", state=Toy, init=lambda p: Toy(), params=ToyParams, retired_params=("old",))
+
+
+def test_an_override_of_a_retired_parameter_is_read_without_effect_and_leaves_with_the_next_save(tmp_path):
+    """2026-10-25 : « un envoi attend un accord », retiré du courrier (ADR 0132), restait une surcharge refusée — et
+    tout enregistrement du formulaire du courrier se refusait avec elle."""
+    p = params.planned(RETIRING, Temperament(), {"old": False, "gain": 0.7})
+    assert p is not None and not p.refused and p.value.gain == 0.7
+    kernel, clock, _ = build(tmp_path, [RETIRING])
+    stored: dict[str, dict[str, Any]] = {"retiring": {"old": False}}
+
+    async def save(value: dict[str, dict[str, Any]]) -> None:
+        stored.clear()
+        stored.update(value)
+
+    async def apply() -> list[str]:
+        planned = params.plan([RETIRING], Temperament(), stored, {})
+        for owner, value in params.to_journal(kernel, planned, stored, {}):
+            await kernel.set_params(owner, value)
+        return []
+
+    ps = Parameters(kernel, temperament=Temperament, overrides=lambda: stored, save_overrides=save,
+                    inputs=dict, apply=apply)
+    rendered = [f.path for f in ps.fields("retiring") if f.kind not in ("group",)]
+
+    async def main():
+        await kernel.start()
+        got = await ps.change("retiring", {forms.RENDERED: rendered, "gain": ["0,9"], "steps": ["3"],
+                                           "inner.tau_h": ["6 h"]})
+        await kernel.stop()
+        return got
+
+    assert run_virtual(clock, main) == (True, {})
+    assert stored == {"retiring": {"gain": 0.9}}
+
+
 def test_configure_keeps_owners_through_a_reconfiguration(tmp_path):
     kernel, clock, _ = build(tmp_path, composition.faculties())
     doc = composition.load(composition.PERSONA)

@@ -39,10 +39,11 @@ class TeamsNoticed(Signal):
     #: une question à laquelle elle peut aider à répondre (elle peut préparer une réponse)
     needs_reply: bool = False
     mentions_me: bool = False
-    #: ce que sa règle d'envoi dit de sa conversation, décidé au tri (ADR 0132 : le nom de la conversation n'est connu
-    #: que là) : préparer d'elle-même une réponse ; comment elle partirait (``brouillon``, ``accord``, ``seule`` ; vide :
-    #: un message remarqué avant les règles, la règle de son identifiant vaut)
-    prepare: bool = True
+    #: ce que sa règle d'envoi dit de sa conversation au tri (ADR 0132), pour ce qui ne connaît pas son nom (ses
+    #: tâches, sa voix) : préparer d'elle-même une réponse ; comment elle partirait (``brouillon``, ``accord``,
+    #: ``seule``). ``None``, vide : un message remarqué avant les règles, la règle de son identifiant vaut. Ce qui part
+    #: relit la règle d'aujourd'hui.
+    prepare: bool | None = None
     send: str = ""
 
 

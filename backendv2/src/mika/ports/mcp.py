@@ -14,25 +14,22 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+# qui une ligne d'accès désigne, quand elle vaut, ce qu'elle laisse faire d'un outil : ceux de ``vocab.access``,
+# partagés avec les projets et leurs apps (ADR 0131, 0133)
+from mika.vocab.access import MOMENTS as MOMENTS
+from mika.vocab.access import POLICIES as POLICIES
+from mika.vocab.access import WHO_ACCOUNTS as WHO_ACCOUNTS
+from mika.vocab.access import WHO_OWNER as WHO_OWNER
+from mika.vocab.access import WHO_PERSON as WHO_PERSON
+
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
            ("action", "action — ça change quelque chose ailleurs"))
-#: ce qu'une ligne d'accès lui laisse faire d'un outil (ADR 0131) : seule, l'appel part aussitôt ; sur accord de la
-#: personne en face (une carte dans son chat ; sans personne en face, l'opérateur) ; sur ton accord à toi (une carte
-#: dans ton chat quand c'est toi en face, sinon la console) ; ou non : l'outil ne lui est pas offert
-POLICIES = (("seule", "seule — sans demander"), ("carte", "demande à la personne en face"),
-            ("toi", "demande ton accord"), ("non", "non"))
 #: ce qu'elle garde de ce qu'un serveur lui rend (ADR 0128), du plus ouvert au plus serré
 KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"),
          ("perso", "un souvenir — comme ce qu'on lui raconte"),
          ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
          ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
-#: qui une ligne d'accès désigne (ADR 0131) : sa propriétaire, toute personne qui a un compte chez elle, ou une
-#: personne nommée (``personne:<clé>``, reconnue seulement authentifiée). Jamais un salon ni une inconnue.
-WHO_OWNER, WHO_ACCOUNTS, WHO_PERSON = "toi", "comptes", "personne:"
-#: les moments où une ligne d'accès vaut (plusieurs à la fois ; aucun : toujours)
-MOMENTS = (("conversation", "quand elle répond"), ("initiative", "quand elle prend la parole"),
-           ("travail", "quand elle travaille seule"))
 #: les familles d'épisodes où un serveur peut servir
 EPISODES = MOMENTS
 

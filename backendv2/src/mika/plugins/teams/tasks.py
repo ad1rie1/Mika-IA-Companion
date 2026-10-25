@@ -29,6 +29,7 @@ from mika.plugins.teams import (
     keepers,
     mode_of,
     params_of,
+    prepares,
     under_way,
 )
 from mika.vocab.episodes import Kind, task_target
@@ -93,7 +94,7 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
             break
         if ref in s.asked or under_way(s, m.conversation) or drafted(s, ref):
             continue
-        if s.attempts.get(ref, 0) >= p.draft_attempts_max or not m.prepare:
+        if s.attempts.get(ref, 0) >= p.draft_attempts_max or not prepares(p, m):
             continue  # sa règle d'envoi (ADR 0132) ne lui fait pas préparer de réponse ici
         brief = BRIEF_AUTO.replace("{who}", who).replace("{fate}", fate(mode_of(p, s, ref, m.conversation), who))
         out.append(_candidate(ref, m.conversation, p.draft_evidence, brief))

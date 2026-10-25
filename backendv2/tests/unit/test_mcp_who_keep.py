@@ -125,6 +125,66 @@ def test_the_exceptions_of_her_tools_become_rows_above_the_service():
     assert not any("coupe" in a.tools for a in rows)  # un outil coupé n'a pas de ligne
 
 
+def _before_0131(spec: dict, raw: dict, nature: str, who: str) -> tuple[str, str]:
+    """La règle d'avant l'ADR 0131 (``level_of``, ``tool_autonomy``, ``tool_keep``), figée ici comme témoin."""
+    aud, kind = EVERYONE[who], KINDS[who]
+    where = situation(aud)
+    episodes = {"conversation": spec["in_conversation"], "initiative": spec["in_initiative"], "travail": spec["in_work"]}
+    family = "travail" if kind == Kind.STEP else "conversation"
+    if where is None or not episodes[family]:
+        return "non", "rien"
+    person = aud.person if where == "compte" else ""
+    if (where != "compte" and not spec["with_owner"]) or (
+            where == "compte" and not (spec["with_accounts"] or person in spec["with_people"])):
+        return "non", "rien"
+    own, service = raw["autonomy"], spec["autonomy"]
+    autonomy = own if own != "service" else (
+        ("seule" if nature == "lecture" else "carte") if service == "lit" else service)
+    keep = spec["keep"] if raw["keep"] == "service" else raw["keep"]
+    level = raw["people"].get(person) if person in raw["people"] else raw["situations"].get(where) or autonomy
+    return (level, keep) if level != "non" else ("non", "rien")
+
+
+def test_a_tool_rule_for_a_named_person_survives_the_rule_of_the_accounts():
+    """2026-10-25 : une personne nommée réglée « comme le service » passait sous la ligne des comptes de l'outil —
+    « carte » devenait « non », ou « seule » sans demander."""
+    spec = {"purpose": "la météo", "url": URL, "with_accounts": True, "autonomy": "carte", "keep": "prive"}
+    for compte in ("non", "seule"):
+        tools = {"t1": {"enabled": True, "nature": "lecture", "situations": {"compte": compte},
+                        "people": {"user_3": "carte"}}}
+        rows, _ = access_of(McpServer.model_validate(access_from_0128(spec, tools)))
+        t1 = tool(*rows, remote="t1")
+        assert access_for(t1, NAMED, Kind.REPLY) == ("carte", "prive")
+        assert access_for(t1, ACCOUNT, Kind.REPLY)[0] == compte
+    # toutes les combinaisons : la fiche traduite fait ce que faisait la règle d'avant, devant chacun
+    levels_ = ("seule", "carte", "toi", "non")
+    for accounts in (False, True):
+        for people in ((), ("user_3",)):
+            for work in (False, True):
+                spec = {"purpose": "la météo", "url": URL, "with_owner": True, "with_accounts": accounts,
+                        "with_people": list(people), "in_conversation": True, "in_initiative": False,
+                        "in_work": work, "autonomy": "lit", "keep": "perso"}
+                for nature in ("lecture", "action"):
+                    for own in ("service", "seule", "toi"):
+                        for keep in ("service", "rien"):
+                            for compte in (None, *levels_):
+                                for named in (None, *levels_):
+                                    for mine in (None, "non", "seule"):
+                                        raw = {"enabled": True, "nature": nature, "autonomy": own, "keep": keep,
+                                               "situations": {k: v for k, v in (("compte", compte),
+                                                                                ("proprietaire", mine)) if v},
+                                               "people": {"user_3": named} if named else {}}
+                                        rows, _ = access_of(McpServer.model_validate(
+                                            access_from_0128(spec, {"t1": raw})))
+                                        t1 = tool(*rows, nature=nature, remote="t1")
+                                        for who in EVERYONE:
+                                            want = _before_0131(spec, raw, nature, who)
+                                            got = access_for(t1, EVERYONE[who], KINDS[who])
+                                            # « non » : ce qu'elle garderait ne compte pas
+                                            assert got[0] == want[0] and (got[0] == "non" or got == want), (
+                                                who, got, want, spec, raw)
+
+
 def test_a_review_keeps_only_what_is_hers_and_a_bad_row_is_refused():
     review = StoredReview.model_validate({"fingerprint": "f", "nature": "action", "approval": "aucun",
                                           "autonomy": "toi", "keep": "rien", "situations": {"compte": "non"}})

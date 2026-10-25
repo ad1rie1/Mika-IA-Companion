@@ -17,7 +17,7 @@ import re
 import secrets as _secrets
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -104,6 +104,9 @@ class Situation:
     label: str
     kind: str
     audience: Audience
+    #: ce qu'elle vit maintenant, pour une condition qui lit son journal (``fits`` : les lignes d'un projet, ADR
+    #: 0133) ; ``None`` : une situation type, hors de toute vie
+    frame: Any = None
 
 
 def _person(key: str, *, trust: str, owner: bool = False, public: bool = False, room: str | None = None,
@@ -138,9 +141,9 @@ SITUATIONS: tuple[Situation, ...] = (
 
 
 def situations(ui: Any) -> list[Situation]:
-    """Les situations dont la sorte d'épisode existe dans cette composition."""
-    policies = ui.kernel.runner.policies
-    return [s for s in SITUATIONS if s.kind in policies]
+    """Les situations dont la sorte d'épisode existe dans cette composition, avec ce qu'elle vit maintenant."""
+    policies, frame = ui.kernel.runner.policies, ui.kernel.mind.frame()
+    return [replace(s, frame=frame) for s in SITUATIONS if s.kind in policies]
 
 
 def rules(ui: Any, s: Situation) -> Mapping[str, str]:
@@ -152,7 +155,7 @@ def offered_in(ui: Any, s: Situation, ruled: bool = True) -> dict[str, ToolSpec]
     """Ce que la porte d'offre du pipeline lui donnerait dans cette situation ; ``ruled`` faux : ce que le code lui
     offre, avant les règles d'un opérateur."""
     return offer(ui.kernel.registry.tools, ui.kernel.runner.policies[s.kind], s.kind, s.audience,
-                 rules=rules(ui, s) if ruled else None)
+                 rules=rules(ui, s) if ruled else None, frame=s.frame)
 
 
 def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
@@ -176,7 +179,7 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
     if spec.when is not None or spec.fits is not None:
         try:
             ok = (spec.when is None or spec.when(s.audience) is True) and (
-                spec.fits is None or spec.fits(s.audience, s.kind) is True)
+                spec.fits is None or spec.fits(s.audience, s.kind, s.frame) is True)
         except Exception:  # noqa: BLE001 — la porte compte une panne comme un refus
             ok = False
         if not ok:

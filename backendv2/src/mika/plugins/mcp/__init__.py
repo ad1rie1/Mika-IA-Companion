@@ -41,21 +41,21 @@ from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.ports.mcp import WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
 from mika.ports.preprocess import cite, inert
-from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind, is_work_target
+from mika.vocab.access import KINDS_OF, first
+
+# où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
+from mika.vocab.access import moment as moment
+from mika.vocab.access import situation as situation
+from mika.vocab.access import who_is as who_is
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 
 FAMILY = "mcp"
-#: quand une famille d'épisodes d'un serveur sert
-EPISODES: Mapping[str, frozenset[str]] = {
-    "conversation": frozenset({Kind.REPLY}),
-    "initiative": frozenset({Kind.INITIATIVE}),
-    # une tâche aussi (lire la file d'une app, ADR 0105) : ses lots sont ceux que la tâche choisit — un brouillon de
-    # mail ou de Teams n'en prend aucun
-    "travail": frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB, Kind.TASK}),
-}
+#: quand une famille d'épisodes d'un serveur sert (``vocab.access``) ; une tâche prend les lots qu'elle choisit — un
+#: brouillon de mail ou de Teams n'en prend aucun
+EPISODES: Mapping[str, frozenset[str]] = KINDS_OF
 #: les serveurs sont rejoints et relistés à ce rythme (ce qu'ils proposent a pu changer)
 WATCH_EVERY = 15 * MINUTE
 FIRST_WATCH = MINUTE
@@ -119,7 +119,7 @@ class Request:
     request: str
     args_json: str = "{}"
     context: str = ""
-    #: ce qu'elle garde de ce que le service rendra (``keep`` de son serveur, au moment de la demande)
+    #: ce qu'elle garde de ce que le service rendra (``keep`` de la ligne d'accès qui a permis la demande)
     keep: str = ""
     status: str = WAITING
     by: str = ""
@@ -244,50 +244,12 @@ class ExternalArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-def situation(audience: Any) -> str | None:
-    """Où elle s'en servirait (ADR 0128) : avec sa propriétaire, avec une personne authentifiée en tête-à-tête, quand
-    elle travaille seule ; jamais dans un salon, avec une inconnue, ni sans personne."""
-    if audience is None:
-        return None
-    if audience.trust == ChannelTrust.INTERNAL.value:
-        return "travail"
-    if not audience.persons or audience.public or audience.room:
-        return None
-    if audience.owner:
-        return "proprietaire"
-    return "compte" if audience.trust == ChannelTrust.AUTHENTICATED.value else None
-
-
-def who_is(who: str, where: str, person: str) -> bool:
-    """Une ligne d'accès désigne-t-elle qui est en face ? Toi (et quand elle travaille seule, pour toi), toute
-    personne qui a un compte, une personne nommée (authentifiée) ; la ligne par défaut (``who`` vide) : tout le
-    monde."""
-    if not who:
-        return True
-    if who == WHO_OWNER:
-        return where in ("proprietaire", "travail")
-    if who == WHO_ACCOUNTS:
-        return where == "compte"
-    return where == "compte" and bool(person) and who == WHO_PERSON + person
-
-
-def moment(when: tuple[str, ...], kind: str) -> bool:
-    """Une ligne d'accès vaut-elle dans cette sorte d'épisode ? Sans moment : toujours."""
-    return not when or any(kind in EPISODES.get(w, frozenset()) for w in when)
-
-
 def access_for(tool: Any, audience: Any, kind: str) -> tuple[str, str]:
     """Ce qu'elle fait d'un outil devant cette audience, dans cette sorte d'épisode, et ce qu'elle garde de ce qu'il
     rend : la première de ses lignes d'accès qui les désigne, sinon la ligne par défaut (ADR 0131). ``non`` hors de
     toute situation : jamais dans un salon, avec une inconnue, ni sans personne."""
-    where = situation(audience)
-    if where is None:
-        return NO, "rien"
-    person = (audience.person or "") if where == "compte" else ""
-    for a in (*tool.access, tool.default):
-        if who_is(a.who, where, person) and moment(a.when, kind):
-            return a.level(tool.nature), a.keep
-    return NO, "rien"
+    line = first(tool.access, tool.default, audience, kind)
+    return (line.level(tool.nature), line.keep) if line is not None else (NO, "rien")
 
 
 def can_approve(audience: Any) -> bool:
@@ -395,7 +357,7 @@ def _handler(t: Any) -> Any:
 
 
 def _gate(t: Any) -> Any:
-    def served(audience: Any, kind: str) -> bool:
+    def served(audience: Any, kind: str, frame: Any = None) -> bool:
         """Seulement quand une ligne d'accès de son service le laisse servir devant cette personne, à ce moment-là.
 
         ADR 0131 : la première ligne qui la désigne décide, sinon la ligne par défaut ; jamais dans un salon ni avec

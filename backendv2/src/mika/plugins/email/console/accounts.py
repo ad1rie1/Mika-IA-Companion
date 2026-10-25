@@ -63,9 +63,10 @@ SENDING_PAGE = "/inspecteur/envoi"
 
 
 def _prepares(frame: Frame, account: str) -> bool:
-    """Elle prépare d'elle-même des réponses depuis cette boîte, à tout le monde (sa règle sans destinataire)."""
+    """Elle prépare d'elle-même des réponses depuis cette boîte, à tout le monde (sa règle sans destinataire), si la
+    boîte n'est pas décochée."""
     p = params_of(frame)
-    return mail_rule(p.sending.rules, p.sending.default, account, "").prepare
+    return account not in p.boxes_off and mail_rule(p.sending.rules, p.sending.default, account, "").prepare
 
 
 @EMAIL.inspect("comptes", title="Comptes", hidden=True, order=50,

@@ -29,8 +29,9 @@ BASE = f"{PREFIX}/envoi"
 SEND_CHOICES = (("brouillon", "Brouillon (tu l'envoies)"), ("accord", "Ton accord"), ("seule", "Seule"))
 #: au plus tant de règles (un tableau qu'on lit d'un regard)
 MAX_RULES = 40
-#: la règle qu'on ajoute : le courrier, tout le monde, elle prépare, ton accord
-NEW_RULE = SendRule(canal=MAIL, prepare=True, send="accord")
+#: la règle qu'on ajoute : le courrier, tout le monde, elle ne prépare rien, ton accord — enregistrée dès le clic,
+#: elle ne fait rien préparer ni partir de plus tant qu'on ne l'a pas réglée
+NEW_RULE = SendRule(canal=MAIL, prepare=False, send="accord")
 
 
 def _channels(settings: Any) -> list[tuple[str, str]]:
@@ -59,7 +60,7 @@ async def rules_page(ui: Any, request: Request) -> Any:
     for n, r in enumerate(cfg.rules, start=1):
         options = channels if r.canal in known else [*channels, (r.canal, r.canal)]
         rows.append({"n": n, "canal": r.canal, "channels": options, "dest": r.dest, "prepare": r.prepare,
-                     "send": r.send, "mail": r.canal.startswith(MAIL), "first": n == 1, "last": n == len(cfg.rules)})
+                     "send": r.send, "first": n == 1, "last": n == len(cfg.rules)})
     return {"blocks": [], "panel": Panel("handmade/envoi/regles.html", {
         "rows": rows, "default": cfg.default, "sends": SEND_CHOICES, "action": f"{BASE}/regler",
         # une seule page (au plus ``MAX_RULES`` règles), que la pagination dit comme partout
@@ -103,7 +104,7 @@ def moved(rules: Sequence[SendRule], faire: str) -> tuple[list[SendRule], str]:
         if len(out) >= MAX_RULES:
             raise ValueError(f"{MAX_RULES} règles au plus.")
         out.append(NEW_RULE)
-        return out, f"Règle {len(out)} ajoutée : règle-la, puis enregistre."
+        return out, f"Règle {len(out)} ajoutée, la plus prudente (elle ne prépare rien, ton accord) : règle-la, puis enregistre."
     if op == "monter" and 0 < i < len(out):
         out[i - 1], out[i] = out[i], out[i - 1]
         return out, f"Règle {i + 1} montée."

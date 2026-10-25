@@ -49,7 +49,7 @@ from tests.fixtures.atelier import Atelier
 from tests.unit.test_goals_console import field, flat, nested
 from tests.unit.test_projects import create, events, form, live, wait
 
-TABS = ["apercu", "objectifs", "executions", "decisions", "fichiers", "git", "comportement", "carnet"]
+TABS = ["apercu", "objectifs", "executions", "decisions", "fichiers", "git", "comportement", "acces", "carnet"]
 
 
 def row_form(fixed: dict[str, str], **values: str) -> dict[str, list[str]]:

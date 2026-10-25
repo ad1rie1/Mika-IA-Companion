@@ -310,6 +310,10 @@ class Project:
     #: ce que le réseau a rendu à sa dernière commande (une donnée : citée dans le prompt, jamais une consigne)
     network_out: str = ""
     network_out_at: int = 0
+    #: qui peut quoi sur lui et ses apps (ADR 0133) : ses lignes d'accès et sa ligne par défaut ; ``None`` : jamais
+    #: réglées, celles d'avant l'ADR valent (``access_of``)
+    access: tuple[c.ProjectAccess, ...] | None = None
+    default_access: c.ProjectAccess = c.CLOSED
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +340,29 @@ class ProjectsState:
     proposals: FrozenDict[int, tuple[int, str]] = field(default_factory=FrozenDict)
     #: ce qu'une proposition qui attend un accord ferait (ses arguments) : la fiche en montre l'aperçu exact
     awaiting: FrozenDict[int, str] = field(default_factory=FrozenDict)
+    #: les demandes de pilotage sur ton accord (ADR 0133), par demande, et la proposition qui les porte
+    steers: FrozenDict[str, SteerAsk] = field(default_factory=FrozenDict)
+    steer_proposals: FrozenDict[int, str] = field(default_factory=FrozenDict)
+
+
+@dataclass(frozen=True, slots=True)
+class SteerAsk:
+    """Une demande de pilotage qui attend ton accord (ADR 0133) : ce qu'elle ferait, pour qui, son texte (un contenu
+    effaçable) ; ``applied`` une fois acceptée."""
+
+    project: int
+    what: str
+    by: str
+    at: int
+    text_ref: str = ""
+    kind: str = c.ONCE
+    cadence_us: int = 0
+    objective: int = 0
+    applied: bool = False
+
+
+#: les demandes de pilotage qu'on garde, au plus (les plus anciennes, déjà tranchées, s'effacent d'abord)
+STEERS_KEPT = 50
 
 
 #: v3 : un récit, un appel à l'aide devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
@@ -344,8 +371,9 @@ class ProjectsState:
 #: v6 : une consigne reçue pendant un besoin y répond (``steered_at``) — elle ne l'attend plus, ne le redemande pas.
 #: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois ;
 #:     un objectif qui bloque après cette réponse se dit aussi (« ça bloque »).
+#: v8 : ses accès (ADR 0133) et les demandes de pilotage sur ton accord (``access``, ``steers``).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=7)
+                   state_version=8)
 PROJECTS.declare(*c.ALL)
 
 
@@ -468,6 +496,33 @@ class Noted(Payload):
     about: tuple[str, ...] = ()
 
 
+class SteerAsked(Payload):
+    """Une demande de pilotage faite de vive voix, qui attend ton accord (ADR 0133) : la proposition qui la porte
+    (``projects.steer``) la nomme par ``request``."""
+
+    project: int
+    request: str
+    #: ``add`` | ``instruct`` | ``now`` | ``pause`` | ``resume``
+    what: str
+    text: Content | None = None
+    kind: str = c.ONCE
+    cadence_us: int = 0
+    objective: int = 0
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class AccessSet(Payload):
+    """Ses lignes d'accès, réglées d'un coup par un opérateur (ADR 0133) : tout le tableau, dans son ordre, et la ligne
+    par défaut."""
+
+    project: int
+    rows: tuple[c.ProjectAccess, ...] = ()
+    default: c.ProjectAccess = c.CLOSED
+    by: str = ""
+
+
 class Amended(Payload):
     """Une consigne d'un opérateur, ou de vive voix de qui s'occupe d'elle (``project_steer``) : elle la lit à
     l'exécution suivante (la plus récente prime)."""
@@ -541,6 +596,8 @@ DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=(
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
 NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",), subjects=("owner", "about"))
 ANSWERED = PROJECTS.event("answered", Answered, subjects=("owner", "about", "person"))
+ACCESS_SET = PROJECTS.event("access_set", AccessSet, subjects=("by",))
+STEER_ASKED = PROJECTS.event("steer_asked", SteerAsked, content=("text",), subjects=("owner", "about", "by"))
 #: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet
 OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
               DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED)
@@ -917,6 +974,28 @@ def _nudged(s: ProjectsState, e, cx) -> ProjectsState:
     return _set(s, replace(p, nudged_at=e.at, nudged_objective=d.objective if o is not None else 0))
 
 
+@PROJECTS.reducer(ACCESS_SET)
+def _access_set(s: ProjectsState, e, cx) -> ProjectsState:
+    d = e.data
+    p = s.projects.get(d.project)
+    if p is None:
+        return s
+    return _set(s, replace(p, access=tuple(d.rows), default_access=d.default))
+
+
+@PROJECTS.reducer(STEER_ASKED)
+def _steer_asked(s: ProjectsState, e, cx) -> ProjectsState:
+    d = e.data
+    if d.project not in s.projects:
+        return s
+    asked = SteerAsk(project=d.project, what=d.what, by=d.by, at=e.at, text_ref=(d.text.ref or "") if d.text is not None else "",
+                     kind=d.kind, cadence_us=d.cadence_us, objective=d.objective)
+    steers = s.steers.set(d.request, asked)
+    while len(steers) > STEERS_KEPT:  # les tranchées d'abord, puis les plus anciennes
+        steers = steers.delete(min(steers.items(), key=lambda kv: (not kv[1].applied, kv[1].at))[0])
+    return replace(s, steers=steers)
+
+
 @PROJECTS.reducer(NOTED)
 def _noted(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
@@ -1192,10 +1271,33 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
     if not e.data.approval:  # elle part aussitôt : l'atelier est occupé jusqu'à ce qu'elle revienne
         p = replace(p, outgoing=(*p.outgoing, (e.seq, e.at))[-8:])
     awaiting = s.awaiting.set(e.seq, e.data.args_json) if e.data.approval else s.awaiting
-    return replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
+    s = replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
+    if e.data.capability == STEER:
+        asked = _asked_of(e.data.args_json)
+        if asked in s.steers:
+            s = replace(s, steer_proposals=_kept(s.steer_proposals.set(e.seq, asked)))
+    return s
 
 
 PUSH, PULL, NETWORKED = f"{c.OWNER}.push", f"{c.OWNER}.pull", f"{c.OWNER}.networked"
+#: piloter un projet sur ton accord (ADR 0133) : rien ne sort de la machine, le geste s'écrit une fois accepté
+STEER = f"{c.OWNER}.steer"
+
+
+def _asked_of(args_json: str) -> str:
+    """La demande de pilotage qu'une proposition porte (vide : aucune)."""
+    try:
+        data = json.loads(args_json)
+    except ValueError:
+        return ""
+    value = data.get("asked") if isinstance(data, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def _kept(items: FrozenDict[int, str]) -> FrozenDict[int, str]:
+    while len(items) > STEERS_KEPT:
+        items = items.delete(min(items))
+    return items
 
 
 def effect_words(capability: str, default: str) -> str:
@@ -1206,6 +1308,8 @@ def effect_words(capability: str, default: str) -> str:
         return phrase("projects.effect.pull")
     if capability == NETWORKED:
         return phrase("projects.effect.networked")
+    if capability == STEER:
+        return phrase("projects.effect.steer")
     return default
 
 
@@ -1227,8 +1331,14 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     if got is None or got[0] not in s.projects:
         return s
     p = s.projects[got[0]]
-    if e.data.approved:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
+    if got[1] == STEER and not e.data.approved:  # refusée : elle ne s'appliquera jamais
+        asked = s.steer_proposals.get(e.data.proposal, "")
+        s = replace(s, steers=s.steers.delete(asked) if asked in s.steers else s.steers,
+                    steer_proposals=s.steer_proposals.delete(e.data.proposal))
+    if e.data.approved and got[1] != STEER:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
         return _set(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
+    if e.data.approved:
+        return s
     # la note de qui refuse est gardée à part (l'oubli l'atteint) : seule celle d'un journal ancien est en clair
     note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
     if e.data.note is not None and e.data.note.ref:
@@ -1253,6 +1363,9 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     if got[1] in (PUSH, PULL):
         p = replace(p, remote_at=e.at, remote_ok=e.data.ok,
                     remote_line=f"{effect_words(got[1], '')} : {result[:400]}")
+    asked = s.steer_proposals.get(e.data.proposal, "") if got[1] == STEER else ""
+    if asked in s.steers:  # acceptée : son geste s'écrit (l'effet ``tools._steer_accepted``)
+        s = replace(s, steers=s.steers.set(asked, replace(s.steers[asked], applied=True)))
     return _set(s, p)
 
 
@@ -1292,7 +1405,16 @@ def view(p: Project) -> c.ProjectView:
         blocked_once=sum(1 for o in once if o.status == c.BLOCKED),
         constants=sum(1 for o in p.objectives if o.kind == c.CONSTANT and o.status == c.OPEN),
         blocked=sum(1 for o in p.objectives if o.status == c.BLOCKED), runs=p.runs, last_run_at=p.last_run_at,
-        last_summary_ref=p.summary_ref, written=written(p), instructions=p.instructions[-3:])
+        last_summary_ref=p.summary_ref, written=written(p), instructions=p.instructions[-3:],
+        access=access_of(p)[0], default_access=access_of(p)[1])
+
+
+def access_of(p: Project) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
+    """Ses lignes d'accès et sa ligne par défaut (ADR 0133) ; jamais réglées : celles d'avant l'ADR, qui font ce qu'il
+    faisait — toi, tout ; les autres l'entendent selon sa confidentialité, sans plus."""
+    if p.access is None:
+        return c.BEFORE_0133, c.BEFORE_0133_DEFAULT
+    return p.access, p.default_access
 
 
 @PROJECTS.fact(c.LIVE)

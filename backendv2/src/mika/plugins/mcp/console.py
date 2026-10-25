@@ -84,9 +84,9 @@ POLICY_WORDS = {"seule": "seule", "carte": "demande à la personne", "toi": "ton
 WHEN_WORDS = dict(MOMENTS)
 #: ce qu'elle garde, en mots courts
 KEEP_WORDS = {"public": "ce qu'elle sait", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
-#: la ligne qu'on ajoute : toi, tout le temps ; elle lit seule, te demande avant d'agir, garde en confidence
-NEW_ROW: dict[str, Any] = {"who": WHO_OWNER, "when": [], "read": "seule", "act": "toi", "keep": "prive",
-                           "tools": []}
+#: la ligne qu'on ajoute : toi, tout le temps, fermée — enregistrée dès le clic, elle n'ouvre rien de plus tant qu'on
+#: ne l'a pas réglée (un pare-feu, ADR 0131)
+NEW_ROW: dict[str, Any] = {"who": WHO_OWNER, "when": [], "read": "non", "act": "non", "keep": "rien", "tools": []}
 #: au plus tant de lignes (un tableau que l'on lit d'un regard)
 MAX_ROWS = 40
 
@@ -618,7 +618,7 @@ def moved(rows: list[dict[str, Any]], faire: str) -> tuple[list[dict[str, Any]],
         if len(rows) >= MAX_ROWS:
             raise Refused(f"{MAX_ROWS} lignes au plus.")
         rows.append(dict(NEW_ROW))
-        return rows, f"Ligne {len(rows)} ajoutée : règle-la, puis enregistre."
+        return rows, f"Ligne {len(rows)} ajoutée, fermée : règle-la, puis enregistre."
     if op == "monter" and 0 < i < len(rows):
         rows[i - 1], rows[i] = rows[i], rows[i - 1]
         return rows, f"Ligne {i + 1} montée."

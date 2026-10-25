@@ -3782,6 +3782,7 @@ projects:
     push: pousser vers le dépôt distant
     pull: récupérer du dépôt distant
     networked: commande avec le réseau
+    steer: piloter le projet (une demande de vive voix)
     # une demande d'une autre sorte, une fois faite
     other: commande
     # une demande d'une autre sorte, dans « TES PROJETS »
@@ -4077,13 +4078,15 @@ projects:
       dropped: "C'est fait : tu le laisses de côté."
 
     steer:
-      # L'outil project_steer : piloter un projet de vive voix, en réponse et en privé, avec qui s'occupe d'elle — un
-      # projet qu'elle lui a confié, ou un projet à elle (un objectif de plus, une consigne, s'y mettre maintenant,
-      # la pause, la reprise). Son cadre (titre, mode, outils, accord, dépôt, plage) reste à la console.
+      # L'outil project_steer : piloter un projet de vive voix, en réponse et en privé, avec qui ses accès le
+      # permettent (ADR 0133 : sa propriétaire, ou une personne à qui une ligne d'accès l'ouvre) — un objectif de
+      # plus, une consigne, s'y mettre maintenant, la pause, la reprise. Son cadre (titre, mode, outils, accord,
+      # dépôt, plage) reste à la console.
       description: >-
-        Piloter un projet quand la personne qui s'occupe de toi te le demande : lui ajouter un objectif, lui donner
-        une consigne pour la suite, t'y mettre maintenant, le mettre en pause ou le reprendre — un projet qu'elle t'a
-        confié, ou un projet à toi. Son cadre (titre, mode, outils, accord) ne se change pas ici.
+        Piloter un projet quand la personne en face te le demande et que ses accès le lui permettent : lui ajouter un
+        objectif, lui donner une consigne pour la suite, t'y mettre maintenant, le mettre en pause ou le reprendre.
+        Selon ses accès, c'est fait aussitôt, ou la demande attend l'accord de qui s'occupe de toi. Son cadre (titre,
+        mode, outils, accord) ne se change pas ici.
       # ses paramètres (les noms add, instruct, now, pause, resume, once, constant et « text » sont ceux du code : NE
       # PAS LES TRADUIRE)
       project: "de quel projet il s'agit : son numéro, ou quelques mots de son titre"
@@ -4098,8 +4101,8 @@ projects:
       # quelqu'un d'autre, ou pas en privé. {who} : « Adrien », ou projects.caretaker
       not_owner: "Seul(e) {who} pilote tes projets avec toi : rien n'y a changé, ne promets pas que ce sera fait."
       none: >-
-        Tu n'as aucun projet en cours à piloter avec cette personne (ni qu'elle t'a confié, ni à toi) : rien n'a
-        changé. Un nouveau travail : create_project.
+        Tu n'as aucun projet en cours que cette personne puisse piloter avec toi : rien n'a changé. Un nouveau
+        travail, seulement avec qui s'occupe de toi : create_project.
       # elle n'a pas su duquel il s'agit. {listed} : les projets (ou les objectifs), un par ligne (item)
       which_project: "Je ne sais pas de quel projet il s'agit :\n{listed}\nRien n'a changé : demande-lui lequel, puis recommence (son numéro suffit)."
       which_objective: "Je ne sais pas quel objectif viser :\n{listed}\nRien n'a changé : recommence avec son numéro (ou sans objectif : celui qui vient)."
@@ -4142,6 +4145,22 @@ projects:
       asked: "C'est demandé : tu te mets au projet {title} dès que possible{on}."
       # {id} : l'objectif visé
       on_objective: ", sur l'objectif n° {id}"
+      # sur l'accord de qui s'occupe d'elle (ADR 0133) : la demande attend, rien n'a encore changé. {who} :
+      # projects.caretaker, ou son nom
+      waits: >-
+        Demande transmise pour le projet {title} : elle s'appliquera quand {who} l'aura acceptée. Rien n'a encore
+        changé : ne dis pas que c'est fait.
+      # ce que la carte d'accord (ou la console) montre. {who} : qui demande ; {what} : une des lignes ci-dessous
+      request: "{who} demande, pour le projet {title} : {what}"
+      request_add: "ajouter l'objectif « {text} »"
+      request_instruct: "la consigne « {text} »"
+      request_now: "que tu t'y mettes maintenant"
+      request_pause: "le mettre en pause"
+      request_resume: "le reprendre"
+      # l'aperçu d'une demande, dans la console et la carte d'accord. {who} : qui demande, par son nom
+      preview: "Projet : {title}\nDemandé par : {who}\nCe qui changerait : {what}"
+      preview_lost: "la demande s'est perdue (son texte a été oublié)"
+      preview_closed: "le projet est archivé"
 
   # ── L'atelier ───────────────────────────────────────────────────────────────────────────────────────────────
   # Les outils de l'atelier d'un projet (lot « workshop », projects/atelier.py) : lire, écrire, lancer des programmes

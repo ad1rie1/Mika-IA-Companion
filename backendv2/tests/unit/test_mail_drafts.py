@@ -255,6 +255,23 @@ def test_she_prepares_replies_only_where_allowed_and_never_endlessly(tmp_path):
     assert all(n <= 2 for n in state.attempts.values())
 
 
+def test_a_box_you_turned_off_gets_no_reply_prepared(tmp_path):
+    """Une boîte décochée : elle n'y prépare rien d'elle-même, même quand une règle le dit pour toutes (2026-10-25 :
+    perdu avec l'ADR 0132, où « préparer d'elle-même » ne valait que pour une boîte active)."""
+    box = FakeMail(boxes=[PERSO, PRO])
+    box.deliver(mail(1, "Un café jeudi ?", "On se voit jeudi ?"))
+    box.deliver(mail(2, "Devis", "Pouvez-vous m'envoyer un devis ?", account="pro", sender="Bob <bob@client.fr>"))
+
+    async def scenario(kernel, llm):
+        await sleep(8 * HOUR)
+        return [e.data.target for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+
+    everywhere = {"rules": [{"canal": "courrier", "prepare": True}]}
+    targets = live(tmp_path, box, Model(draft_in_tasks=False), scenario,
+                   inputs={"email": {"sending": everywhere, "boxes_off": ["pro"]}})
+    assert targets and all(t.endswith("<m1@exemple.fr>") for t in targets)
+
+
 def test_a_reply_you_ask_for_goes_first_and_redoing_it_is_learnt(tmp_path):
     box = FakeMail(boxes=[PERSO])
     box.deliver(mail(1, "Un café jeudi ?", "On se voit jeudi ?"))

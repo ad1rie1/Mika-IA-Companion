@@ -30,6 +30,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
+from mika.faculties.projects.access import sees
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
     PROJECTS,
@@ -49,7 +50,7 @@ from mika.faculties.projects.faculty import (
     pick,
     run_bundles,
 )
-from mika.faculties.projects.tools import RUNS, steers, written
+from mika.faculties.projects.tools import RUNS, steerable, written
 from mika.faculties.projects.work import FULL, MENTION, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
@@ -471,9 +472,12 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     owner = bool(person) and aud.owner  # l'adresse qui parle, là où elle parle (jamais un groupe public)
     lines, level, witness, steering = [], 0, False, False
+    kind = ep.kind if ep is not None else ""
     for p in _recent(s)[-SHOWN * 2:]:
         title = texts.get(p.title_ref)
-        if not title or not hearable(p.about, p.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
+        # ses lignes d'accès disent à qui elle en parle (ADR 0133) ; sa confidentialité, ce qu'elle en dit
+        if not title or not sees(p, aud, kind) or \
+                not hearable(p.about, p.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
             continue
         whose = phrase("projects.live.own") if p.authority == c.SELF else \
             phrase("projects.live.for", who=_who(frame, p.address or p.owner))
@@ -498,7 +502,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
                 line += f"\n  {nxt}"
             if any(a != person for a in p.about):
                 level = max(level, written(p))
-            steering = steering or (owner and steers(p, person))
+            steering = steering or steerable(p, aud) != c.STEER_NO
         waiting = _awaiting(frame, p, person) if owner and person else ""
         if waiting:
             line += f"\n  {waiting}"
