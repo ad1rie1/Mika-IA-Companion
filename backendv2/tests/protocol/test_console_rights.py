@@ -23,18 +23,24 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
         level=0, source="operator")], emitter="projects", correlation="genese", origin=Origin.GENESIS))
     pid = created.seqs[-1]
     page = html_of(client.get(PAGE))
-    for part in ("Par personne", "Toi, par le chat web, quand elle te répond", "Par ressource", "Le projet « Le site »",
-                 "Canaux", "Ses propres outils", "Ce que le code fixe"):
+    for part in ("Qui peut quoi", "Vie interne", "Apps de la Forge", "Services MCP", "Projets", "Canaux",
+                 "Le projet « Le site »", "détail des accès", "<code>memory_search</code>", "Ce que le code fixe"):
         assert part in page, part
-    assert "piloter projet : modification" in page and "ligne 1" in page  # jamais réglé : toi, tout, par sa ligne
+    assert "Droits exacts" not in page  # sans qui ni canal choisis, pas de droits exacts
     home = html_of(client.get("/inspecteur"))
     assert 'href="/inspecteur/reglages/droits"' in home and "/inspecteur/outils/droits" not in home  # menu Réglages
-    # un autre compte : il l'entend selon sa confidentialité, en lecture seule
-    other = html_of(client.get(PAGE, params={"qui": "comptes"}))
+    # les droits exacts : toi par le chat web — jamais réglé : toi, tout, par sa ligne
+    mine = html_of(client.get(PAGE, params={"qui": "toi", "canal": "web:prive"}))
+    assert "Droits exacts" in mine and "piloter projet : modification" in mine and "ligne 1" in mine
+    assert "memory_search" in mine and "lit : seule" in mine
+    # un autre compte : il l'entend selon sa confidentialité, en lecture seule ; dans un salon, pas plus
+    other = html_of(client.get(PAGE, params={"qui": "compte", "canal": "web:prive"}))
     assert "piloter projet : lecture seule" in other and "comportement par défaut" in other
-    assert 'class="rights-face on" title="Un autre compte, quand elle lui répond"' in other  # sa colonne soulignée
-    # un salon : le voir et le lire, jamais y changer quelque chose (la ligne par défaut, qui vaut pour tous)
-    assert "piloter projet : lecture seule" in html_of(client.get(PAGE, params={"qui": "salon"}))
+    assert "piloter projet : lecture seule" in html_of(client.get(PAGE, params={"qui": "compte", "canal": "web:salon"}))
+    # le détail des accès d'un projet : son tableau, « Modifier » vers sa fiche, « Retour »
+    shown = html_of(client.get(PAGE, params={"detail": f"project:{pid}"}))
+    assert "Le projet « Le site »" in shown and "Comportement par défaut" in shown and "← Retour" in shown
+    assert f'href="/inspecteur/fiche/project/{pid}?onglet=acces"' in shown and "Modifier" in shown
     # l'onglet « Accès » du projet, dessiné, sa ligne d'avant réglage cochée comme elle vaut ; ajouter : une ligne
     # fermée, enregistrée (le navigateur envoie ce qui est coché, le test le dit)
     tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))
@@ -60,6 +66,7 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     assert view.access == (c.UNSET[1], c.ProjectAccess(who=(OWNER,)))
     # la page le lit aussitôt : pour toi, plus rien (la ligne fermée) ; elle seule garde tout — chaque case le dit,
     # avec les deux lignes qui en décident (la ressource, le canal)
-    after = html_of(client.get(PAGE))
-    assert "Toi, par le chat web, quand elle te répond — le voir : non (ligne 2 ; canal « web » : ligne 1)" in after
-    assert "Elle, quand elle travaille seule — piloter projet : modification (ligne 1 ; canal « interne » : ligne 1)" in after
+    after = html_of(client.get(PAGE, params={"qui": "toi", "canal": "web:prive"}))
+    assert "le voir : non · piloter projet : aucun pilotage · ses fichiers : non — ligne 2" in after
+    alone = html_of(client.get(PAGE, params={"qui": "seule", "canal": "interne"}))
+    assert "le voir : oui · piloter projet : modification · ses fichiers : oui — ligne 1" in alone

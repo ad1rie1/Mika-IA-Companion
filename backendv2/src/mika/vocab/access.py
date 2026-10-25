@@ -77,12 +77,13 @@ class Canal:
         return self.instance == TOGETHER
 
 
-def canal_of(audience: Any) -> Canal | None:
-    """Le canal d'une audience : elle seule (rien n'écoute), le chat web (en privé ou en salon), l'app Android, le
-    courrier, Teams, ou Internet (tout autre moyen : son réseau pour instance) ; ``None`` sans audience."""
+def canal_of(audience: Any, kind: str = "") -> Canal | None:
+    """Le canal d'une audience : elle seule (rien n'écoute — ou une sorte d'épisode de travail sans personne), le chat
+    web (en privé ou en salon), l'app Android, le courrier, Teams, ou Internet (tout autre moyen : son réseau pour
+    instance) ; ``None`` sans audience."""
     if audience is None:
         return None
-    if audience.trust == ChannelTrust.INTERNAL.value:
+    if audience.trust == ChannelTrust.INTERNAL.value or (not audience.persons and kind in WORK_KINDS):
         return Canal(INTERNAL)
     name = normalize_channel(audience.channel)
     together = bool(audience.public or audience.room)
@@ -151,14 +152,15 @@ KINDS_OF: Mapping[str, frozenset[str]] = {
 AT_OWNER, ACCOUNT, STRANGER, ROOM, WORK = "proprietaire", "compte", "inconnue", "salon", "travail"
 
 
-def situation(audience: Any) -> str | None:
-    """Où elle est ; ``None`` sans personne en face hors du travail."""
+def situation(audience: Any, kind: str = "") -> str | None:
+    """Où elle est ; ``None`` sans personne en face hors du travail (une sorte d'épisode de travail sans personne :
+    elle seule, quoi que dise l'audience)."""
     if audience is None:
         return None
     if audience.trust == ChannelTrust.INTERNAL.value:
         return WORK
     if not audience.persons:
-        return None
+        return WORK if kind in WORK_KINDS else None
     if audience.public or audience.room:
         return ROOM
     if audience.owner:
@@ -241,9 +243,9 @@ CEILINGS: Mapping[str, Ceiling] = {
 }
 
 
-def ceiling(audience: Any) -> Ceiling | None:
+def ceiling(audience: Any, kind: str = "") -> Ceiling | None:
     """Le plafond de qui est en face ; ``None`` sans personne hors du travail (rien, jamais)."""
-    where = situation(audience)
+    where = situation(audience, kind)
     return CEILINGS.get(where) if where is not None else None
 
 
@@ -394,10 +396,10 @@ def facing(audience: Any, kind: str, concerns: Callable[[Any], bool] | None = No
     """Ce qui fait correspondre une ligne à qui est en face, par où, à ce moment : elle le désigne (``who``), elle
     vaut par ce canal (``canal``), à ce moment (``when``, sauf au travail), et le concerne (``concerns`` : un outil
     dans sa colonne). ``None`` sans personne hors du travail. Les plafonds sont à part (``ceiling``)."""
-    where = situation(audience)
+    where = situation(audience, kind)
     if where is None:
         return None
-    here = canal_of(audience)
+    here = canal_of(audience, kind)
     person = (audience.person or "") if where == ACCOUNT else ""
 
     def matches(line: Any) -> bool:

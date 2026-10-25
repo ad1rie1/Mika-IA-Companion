@@ -23,8 +23,8 @@ APP_TOOLS = ("forge", "outils_apps")
 
 
 class Catalogue(Drawn):
-    """Outils › Ce qu'elle peut faire : la grille est le panneau de l'onglet ; la fiche d'un outil (``?outil=``),
-    ses blocs dessinés."""
+    """Outils › Ce qu'elle peut faire : les tableaux de droits de ses familles sont le panneau de l'onglet
+    (``inspector/pages/families.py``, ADR 0134) ; la fiche d'un outil (``?outil=``), ses blocs dessinés."""
 
     styles = ("handmade/tools.css",)
 

@@ -6,7 +6,7 @@
 <section class="now-card can-where" aria-labelledby="can-where-title">
   <header class="now-card-head">
     <h2 id="can-where-title">Où elle peut s'en servir</h2>
-    <p>Ce que ses droits lui laissent, situation par situation (ADR 0134). {% if tool_dynamic %}Il vient d'un service ou d'une app : ses lignes se règlent sur leur fiche.{% else %}Ses lignes se règlent sur le tableau de sa famille : <a href="{{ PREFIX }}/outils/familles?famille={{ tool_bundle | urlencode }}">{{ tool_family }}</a>.{% endif %}</p>
+    <p>Ce que ses droits lui laissent, situation par situation (ADR 0134). {% if tool_dynamic %}Il vient d'un service ou d'une app : ses lignes se règlent sur leur fiche.{% else %}Ses lignes se règlent sur le tableau de sa famille : <a href="{{ PREFIX }}/outils/tous?famille={{ tool_bundle | urlencode }}#f-{{ tool_bundle | replace('.', '-') }}">{{ tool_family }}</a>.{% endif %}</p>
   </header>
   <ul class="can-where-list" role="list">
     {% for w in where %}

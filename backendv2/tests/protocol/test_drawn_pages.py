@@ -109,20 +109,31 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
     assert night.index("Une soirée au bureau") < night.index("Un toit où chaque note")  # son journal, puis ses rêves
 
 
-def test_what_she_can_do_is_a_grid_of_families_and_situations(world):  # noqa: F811
-    """Outils › Ce qu'elle peut faire : ses familles en lignes (leurs outils dessous), les situations en colonnes
-    rangées par ce qui se passe ; une famille dit, situation par situation, si tous ses outils lui sont offerts, une
-    partie ou aucun ; un outil a une coche là où ses droits l'offrent, un tiret ailleurs (ses droits se règlent par
-    famille : Ses propres outils, ADR 0134)."""
-    client, _, _ = world
+def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
+    """Outils › Ce qu'elle peut faire (ADR 0134) : ses familles d'outils, chacune avec son tableau de droits né du
+    minimum vital ; une recherche ne garde que les familles qui répondent ; un tableau s'enregistre d'un envoi, et
+    « remettre » revient au minimum vital."""
+    client, live, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/tous")
-    head = page.split('class="can-row can-head can-moments"')[1].split("</div>")[0]
-    assert head.index("Elle répond à") < head.index("D'elle-même") < head.index("Elle travaille seule")
-    memory = page.split("<b>Mémoire</b>")[1].split("</summary>")[0]
-    assert 'class="can-sum can-on can-start"' in memory  # sa mémoire, toute à elle quand elle répond
-    assert page.count('<details class="can-family"') > 10 and 'type="checkbox" name="o"' not in page
-    assert 'class="can-cell can-none' in page and "<b>workshop</b>" not in page  # chaque famille a son nom
+    for part in ("Ses propres outils", 'id="f-memory-title">Mémoire', "minimum vital", "Comportement par défaut",
+                 "Régler les droits", "Ce que son prompt dit de ses outils"):
+        assert part in page, part
+    assert 'name="qui.1|proprietaire" checked' in page and 'name="canal.2|interne" checked' in page
+    assert 'type="checkbox" name="o"' not in page  # plus de grille à cocher
+    only = drawn(client, "/inspecteur/outils/tous?q=memory_search")
+    assert 'id="f-memory-title"' in only and 'id="f-email-title"' not in only and "tout voir" in only
+    # régler la mémoire : toi seule ; puis revenir au minimum vital
+    csrf = client.cookies.get("csrftoken")
+    done = client.post("/inspecteur/outils/familles/regler", data={
+        "csrf": csrf, "cle": "memory", "faire": "", "ligne.1": "1", "qui.1|proprietaire": "on", "toujours.1": "on",
+        "lecture.1": "seule", "action.1": "seule", "garde.1": "public", "tous.1": "on",
+        "defaut_lecture": "non", "defaut_action": "non", "defaut_garde": "rien"})
+    assert done.status_code == 200 and "enregistrés" in html.unescape(done.text)
+    table = client.portal.call(live.settings.families)["memory"]
+    assert [(a.who, a.read) for a in table.lines] == [(("proprietaire",), "seule")] and table.default.read == "non"
+    back = client.post("/inspecteur/outils/familles/regler", data={"csrf": csrf, "cle": "memory", "faire": "remettre"})
+    assert "minimum vital" in html.unescape(back.text) and "memory" not in client.portal.call(live.settings.families)
 
 
 def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811

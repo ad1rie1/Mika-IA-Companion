@@ -8,6 +8,7 @@ Les tableaux se rangent dans les réglages (``Settings.save_family``) ; la porte
 from __future__ import annotations
 
 import secrets as _secrets
+import unicodedata
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -17,7 +18,6 @@ from starlette.responses import RedirectResponse, Response
 
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.droits_tables import choices, one_page, rows_of, table_args
-from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
@@ -41,7 +41,8 @@ from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import tool_allowance, vital_family
 
-BASE = f"{PREFIX}/outils/familles"
+BASE = f"{PREFIX}/outils/tous"
+REGLER = f"{PREFIX}/outils/familles/regler"
 MAX_ROWS = 40
 #: la ligne qu'on ajoute : toi, par tous les canaux, toujours, fermée
 NEW_ROW = ToolRule(who=(OWNER,))
@@ -72,6 +73,11 @@ def family_rows(args: FamilyArgs, known: list[str]) -> list[ToolRule]:
     sent = args.rows(tools=True, read=args.lecture, act=args.action, keep=args.garde)
     return [ToolRule(who=r["who"], canal=r["canal"], when=r["when"], read=r["read"] or NO, act=r["act"] or NO,
                      keep=r["keep"] or "rien", tools=tuple(t for t in known if t in r["tools"])) for r in sent]
+
+
+def _fold(text: str) -> str:
+    """Sans accents ni majuscules : ce que cherche un opérateur."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
 
 
 def _values(a: ToolRule) -> dict[str, Any]:
@@ -108,7 +114,8 @@ def entries(ui: Any) -> list[dict[str, Any]]:
         out.append({
             "key": bundle, "id": bundle.replace(".", "-"), "label": ui.names.bundle(bundle), "set": table is not None,
             "reserved": any(s.owner_only for s in specs),
-            "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit"} for s in specs],
+            "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit", "description": s.description,
+                       "href": f"{BASE}?outil={s.name}"} for s in specs],
             "lines": lines, "default": default,
             "columns": [
                 {"key": "lecture", "label": "Un outil qui lit", "kind": "pick", "choices": choices(POLICIES, locked_policies),
@@ -122,30 +129,49 @@ def entries(ui: Any) -> list[dict[str, Any]]:
     return out
 
 
-@TABS.tab("outils.familles", title="Ses propres outils", order=15,
-          description="Ses outils internes, famille par famille, chacune avec son tableau de droits : qui, par où, "
-                      "quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit — né du minimum vital, "
-                      "modifiable.")
-async def families_page(ui: Any, request: Request) -> Any:
-    focus = str(request.query_params.get("famille", "") or "")
+def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: Any = None) -> Panel:
+    """Le panneau de « Ce qu'elle peut faire » : ses familles et leurs tableaux ; ``query`` ne garde que les familles
+    dont un outil correspond, ``lot`` une seule ; ``prompts`` : ce que son prompt dit de ses outils, situation par
+    situation, replié en bas."""
+    focus = str(request.query_params.get("famille", "") or "") or lot
     account = ui.operator(request)
     csrf = request.cookies.get("csrftoken", "")
+    terms = _fold(query).split()
+    context = urlencode({k: v for k, v in (("q", query), ("lot", lot)) if v})
     shown = []
     for e in entries(ui):
+        if lot and e["key"] != lot:
+            continue
+        if terms and not any(all(x in _fold(f"{t['name']} {t['description']} {e['label']}") for x in terms)
+                             for t in e["tools"]):
+            continue
+        for x in e["tools"]:
+            x["href"] = f"{BASE}?outil={x['name']}" + (f"&{context}" if context else "")
         tools = [(x["name"], x["nature"]) for x in e["tools"]]
         rows = rows_of(ui, e["lines"], _values, tools=tools)
-        shown.append({**e, "t": {
+        shown.append({**e, "external": False, "t": {
             "id": e["id"], "key": e["key"], "title": e["label"],
             "intro": "De haut en bas : pour un outil, la première ligne qui le concerne (qui, par où, quand, l'outil "
                      "dans sa colonne) décide ; aucune, le comportement par défaut — après le tableau du canal, sous "
                      "le plafond de qui est en face.",
             "note": "Son minimum vital, tel que le code le déclare, tant qu'on ne l'a pas réglé." if not e["set"] else "",
-            "below": e["below"], "action": f"{BASE}/regler", "csrf": csrf, "rows": rows,
+            "below": e["below"], "action": REGLER, "csrf": csrf, "rows": rows,
             "default": _values(e["default"]), "columns": e["columns"], "show_canal": True, "show_tools": True,
             "pager": one_page(len(rows) + 1), "floors": FLOORS, "set": e["set"]},
-            "open": e["key"] == focus})
-    return {"blocks": [], "panel": Panel("handmade/droits/familles.html", {
-        "families": shown, "focus": focus, "locked": account is None}, styles=("handmade/tools.css", "handmade/rights.css"))}
+            "open": e["key"] == focus or bool(terms)})
+    registry = ui.kernel.registry
+    if lot and not shown and any(s.bundle == lot for s in registry.tools.values()):
+        kind, _, name = lot.partition(".")
+        href = (f"{PREFIX}/fiche/serveur/{name}?onglet=fait" if kind == "mcp" else
+                f"{PREFIX}/fiche/app/{name}?onglet=acces" if kind == "forge_apps" else "")
+        shown.append({"key": lot, "id": lot.replace(".", "-"), "label": ui.names.bundle(lot), "external": True,
+                      "href": href, "set": False, "below": "", "reserved": False, "open": True,
+                      "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit",
+                                 "description": s.description, "href": f"{BASE}?outil={s.name}"}
+                                for s in sorted(registry.tools.values(), key=lambda t: t.name) if s.bundle == lot]})
+    return Panel("handmade/droits/familles.html", {
+        "families": shown, "focus": focus, "locked": account is None, "query": query, "lot": lot,
+        "prompts": prompts or [], "all_url": BASE}, styles=("handmade/tools.css", "handmade/rights.css"))
 
 
 async def families_post(ui: Any, request: Request) -> Response:
@@ -181,4 +207,4 @@ async def families_post(ui: Any, request: Request) -> Response:
                                    status_code=303))
 
 
-__all__ = ["ALONE", "families_page", "families_post"]
+__all__ = ["ALONE", "families_post", "panel"]

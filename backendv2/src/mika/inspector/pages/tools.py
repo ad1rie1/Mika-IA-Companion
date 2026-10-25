@@ -16,7 +16,7 @@ import inspect
 import re
 import secrets as _secrets
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlencode
@@ -28,6 +28,7 @@ from mika.inspector import mcp as console_mcp
 from mika.inspector import names
 from mika.inspector.catalog import Panel
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
+from mika.inspector.pages import families
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY
@@ -231,114 +232,45 @@ def _prompt(ui: Any, s: Situation) -> str:
                                      catalogue(offered, in_hand(ui, policy), ui.kernel.registry.bundles, rights))))
 
 
-def _summary(s: Situation, cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """La case d'une famille dans une situation : tous ses outils, une partie, aucun — et ce qu'un opérateur a
-    retiré."""
-    total = len(cells)
-    usable = sum(1 for c in cells if c["state"] in ("on", "ask", "fixed"))
-    off = sum(1 for c in cells if c["state"] == "off")
-    asked = usable > 0 and all(c["state"] == "ask" for c in cells if c["state"] in ("on", "ask", "fixed"))
-    removed = f", {off} retiré{'s' if off > 1 else ''} par un opérateur" if off else ""
-    if usable == total:
-        state, text, title = "on", "✓", f"{s.label} : tous ses outils"
-    elif usable:
-        state, text, title = "part", f"{usable}/{total}", f"{s.label} : {usable} de ses {total} outils{removed}"
-    elif off:
-        state, text, title = "off", "✕", f"{s.label} : retiré par un opérateur"
-    else:
-        state, text, title = "none", "—", f"{s.label} : pas prévu"
-    return {"state": state, "text": text, "title": title, "ask": asked, "off": bool(off) and usable > 0}
-
-
-def can_do(ui: Any, query: str = "", lot: str = "") -> dict[str, Any]:
-    """La grille « Ce qu'elle peut faire » : ses familles d'outils en lignes (leurs outils dessous), les situations
-    en colonnes. Une case dit ce que la porte d'offre lui donne : offert (coché ; à chercher, si le fournisseur
-    diffère), retiré par un opérateur (décoché), pas prévu par le code (un tiret, et pourquoi) ; un outil qui clôt
-    sa boucle ne se retire pas. ``query`` : une recherche ; ``lot`` : une seule famille."""
-    registry, policies = ui.kernel.registry, ui.kernel.runner.policies
-    sits = situations(ui)
-    by_code = {s.key: offered_in(ui, s) for s in sits}
-    cores = {s.key: in_hand(ui, policies[s.kind]) for s in sits}
-    rights, _close = gate_of(ui.kernel.registry)
-    usage = _usage(ui)
-    terms = _fold(query).split()
-    specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
-             if (not lot or spec.bundle == lot)
-             and all(t in _fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for t in terms)]
-    keep = {k: v for k, v in (("q", query), ("lot", lot)) if v}
-    where: dict[str, str] = {}
-    families: dict[str, list[dict[str, Any]]] = {}
-    for spec in specs:
-        cells: list[dict[str, Any]] = []
-        for s in sits:
-            if spec.name not in by_code[s.key]:
-                why = why_not(spec, policies[s.kind], s, registry.tools, *gate_of(ui.kernel.registry, s.frame))
-                cell: dict[str, Any] = {"state": "none", "why": why}
-            elif spec.ends_loop:
-                cell = {"state": "fixed"}
-            else:
-                cell = {"state": "ask" if deferred(spec, cores[s.key], rights) else "on"}
-            cells.append({**cell, "situation": s.label, "value": f"{s.key}:{spec.name}"})
-        where[spec.name] = "; ".join(s.label for s, c in zip(sits, cells, strict=True)
-                                     if c["state"] not in ("none", "off")) or "nulle part"
-        used = usage.get(spec.name)
-        families.setdefault(spec.bundle, []).append({
-            "name": spec.name, "lead": _lead(spec.description), "description": spec.description, "cells": cells,
-            "href": f"{BASE}/tous?" + urlencode({**keep, "outil": spec.name}),
-            "calls": used.calls if used else 0, "failures": used.failures if used else 0})
-    rows = []
-    for bundle, tools in families.items():
-        summary = [_summary(s, [t["cells"][i] for t in tools]) for i, s in enumerate(sits)]
-        rows.append({"bundle": bundle, "label": ui.names.bundle(bundle), "tools": tools, "cells": summary,
-                     "open": bool(terms or lot), "external": any(registry.is_dynamic(t["name"]) for t in tools)})
-    rows.sort(key=lambda r: _fold(r["label"]))
-    groups: list[dict[str, Any]] = []
-    starts = set()  # la première colonne de chaque groupe : un filet la sépare de la précédente
-    for i, s in enumerate(sits):
-        label = MOMENTS.get(s.kind, ALONE)
-        if not groups or groups[-1]["label"] != label:
-            groups.append({"label": label, "count": 0})
-            starts.add(i)
-        groups[-1]["count"] += 1
-    return {
-        "situations": sits, "groups": groups, "starts": starts, "rows": rows, "specs": specs, "where": where,
-        "query": query, "lot": lot, "lot_label": ui.names.bundle(lot) if lot else "",
-        "total": len(registry.tools), "families": len({x.bundle for x in registry.tools.values()}),
-        "shown": len(specs),
-        "failures": sum(u.failures for n, u in usage.items() if n in registry.tools),
-        "any_ask": any(c["state"] == "ask" for r in rows for t in r["tools"] for c in t["cells"]),
-        "prompts": [{"label": s.label, "text": _prompt(ui, s)} for s in sits],
-    }
-
-
 @TABS.tab("outils.tous", title="Ce qu'elle peut faire",
-          description="Ses outils famille par famille, et les situations où elle peut s'en servir. Décoche une case "
-                      "pour lui retirer un outil dans cette situation ; un outil ouvre sa fiche.")
+          description="Ses propres outils, famille par famille, chacune avec son tableau de droits : qui, par où, "
+                      "quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde — né du "
+                      "minimum vital, modifiable (ADR 0134). Un outil ouvre sa fiche.")
 async def all_tools(ui: Any, request: Request) -> Any:
     name = str(request.query_params.get("outil", "") or "")
     if name:
         return _fiche(ui, request, name)
     params = _params(ui)
     values, notes = read_params(params, request.query_params)
-    grid = can_do(ui, str(values.get("q") or ""), str(request.query_params.get("lot", "") or ""))
+    query, lot = str(values.get("q") or ""), str(request.query_params.get("lot", "") or "")
+    registry = ui.kernel.registry
+    terms = _fold(query).split()
+    specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
+             if (not lot or spec.bundle == lot)
+             and all(x in _fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for x in terms)]
+    where = {}
+    for spec in specs:
+        sits = [s for s in situations(ui) if spec.name in offered_in(ui, s)]
+        where[spec.name] = "; ".join(s.label for s in sits) or "nulle part"
     # la même chose en liste, pour qui lit sans panneau (la console en MCP) : la grille est le panneau
     usage = _usage(ui)
     ctx = ui.inspection.context(request.query_params)
-    page, pager = paginate(grid["specs"], ctx.pager(size=TOOLS_PAGE))
+    page, pager = paginate(specs, ctx.pager(size=TOOLS_PAGE))
     rows = []
     for s in page:
         used = usage.get(s.name)
         calls = Text(num_fr(used.calls), "num", "danger" if used.failures * 2 > used.calls else "",
                      hint=f"{used.failures} en échec") if used else Text("0", "num", "muted")
         rows.append(Row((Text(s.name, "mono"), Text(ui.names.bundle(s.bundle)), Text(s.description, clamp=220),
-                         Text(grid["where"][s.name]), calls), href=_tool_ref(s.name, context=request.query_params)))
+                         Text(where[s.name]), calls), href=_tool_ref(s.name, context=request.query_params)))
     blocks: list[Any] = [
         *[Note(n, "warn") for n in notes],
         Table((Column("Outil", "fit", role="title"), Column("Famille", "fit"), Column("Ce qu'il fait", role="body"),
                Column("Où elle peut s'en servir"), Column(f"Appels sur {USAGE_DAYS} j", "num")),
               tuple(rows), title="Ses outils", empty="Aucun outil ne correspond.", pager=pager),
     ]
-    return {"blocks": blocks, "filters": params, "panel": Panel("handmade/outils/peut.html", grid)}
+    prompts = [{"label": s.label, "text": _prompt(ui, s)} for s in situations(ui)]
+    return {"blocks": blocks, "filters": params, "panel": families.panel(ui, request, query, lot, prompts)}
 
 
 def _fiche(ui: Any, request: Request, name: str) -> Any:

@@ -114,12 +114,13 @@ def test_two_doors_the_stricter_wins_and_the_decision_says_both():
     lines, default = _tools(ToolRule(who=(EVERYONE,), read=ALONE, act=ALONE, keep="public"))
     wide = Rights(canals=Canals())  # les minimums vitaux : le chat web laisse tout
     got = tool_allowance(lines, default, YOU, Kind.REPLY, False, wide)
-    assert (got.level, got.keep) == (ALONE, "public") and "ligne 1" in got.why and "canal « web »" in got.why
-    # le canal serre : par le chat web, un outil qui agit demande ton accord, et elle ne garde rien
+    assert (got.level, got.keep) == (ALONE, "public") and got.why == "ligne 1" and got.canal_key == WEB
+    # le canal serre : par le chat web, un outil qui agit demande ton accord, et elle ne garde rien — dit comme tel
     canals = Canals(tables={WEB: CanalTable(lines=(CanalRule(who=(EVERYONE,), reply="seule", read=ALONE, act=OWNER_OK,
                                                              steer=STEER_EDIT, files=True, keep="rien"),))})
     got = tool_allowance(lines, default, YOU, Kind.REPLY, True, Rights(canals=canals))
-    assert (got.level, got.keep) == (OWNER_OK, "rien")
+    assert (got.level, got.keep) == (OWNER_OK, "rien") and got.narrowed
+    assert got.why == "ligne 1 — serré par le canal Chat web (ligne 1)"
     # l'instance passe avant le type : en salon, le chat web est fermé — et de toute façon rien venu d'ailleurs
     canals = Canals(tables={f"{WEB}:{TOGETHER}": CanalTable()})
     got = tool_allowance(lines, default, ROOM, Kind.REPLY, False, Rights(canals=canals), outside=True)

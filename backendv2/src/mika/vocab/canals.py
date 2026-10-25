@@ -125,7 +125,7 @@ class Canals(BaseModel):
 def canal_verdict(canals: Canals, audience: Any, kind: str, *, close: Any = None) -> tuple[Verdict[CanalRule], str] | None:
     """La ligne du canal par où cette audience arrive, sa place, et la clé du tableau ; ``None`` hors de toute
     situation."""
-    from_ = canal_of(audience)
+    from_ = canal_of(audience, kind)
     matches = facing(audience, kind, close=close)
     if from_ is None or matches is None:
         return None

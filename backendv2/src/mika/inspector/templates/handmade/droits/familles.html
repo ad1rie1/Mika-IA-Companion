@@ -1,4 +1,4 @@
-{# Outils › Ses propres outils (inspector/pages/families.py, ADR 0134) : ses outils internes, famille par famille,
+{# Outils › Ce qu'elle peut faire (inspector/pages/families.py, ADR 0134) : ses outils internes, famille par famille,
    chacune avec son tableau de droits — né du minimum vital que le code déclare, modifiable, et « Revenir au minimum
    vital ». Une case grisée (🔒) dit ce que l'outil ne sait pas faire (attendre un accord) ou ce qui n'a pas de sens
    pour lui (garder ce qui est déjà à elle). #}
@@ -6,6 +6,7 @@
 <div class="now-page service">
   <section class="now-card access-legend" aria-labelledby="families-title">
     <h2 id="families-title">Ses propres outils</h2>
+    {% if lot or query %}<p class="server-alert info">{% if lot %}Seulement la famille « {{ lot }} »{% else %}Seulement les familles dont un outil répond à « {{ query }} »{% endif %} · <a href="{{ all_url }}">tout voir</a></p>{% endif %}
     <p>Ce qu'elle sait faire par elle-même — sa mémoire, ses fichiers, ses dessins, ton courrier, Teams, la caméra, ses flux, la Forge, ses projets… — rangé par famille. Chaque famille naît avec le <b>minimum vital</b> que le code déclare : sans lui, elle ne fonctionne pas. Tu peux le changer ; la page te prévient si tu descends en dessous.</p>
     <dl>
       <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> ou <b>non</b> ; « ton accord » et « demande à la personne » seulement pour un outil qui sait attendre (un effet proposé) — sinon la case est grisée : il agit dans la conversation même.</dd></div>
@@ -14,10 +15,35 @@
     </dl>
   </section>
   {% for f in families %}
-  <details class="now-card access-canal-entry"{{ ' open' if f.open }} id="f-{{ f.id }}">
-    <summary><b>{{ f.label }}</b> <span class="now-muted">{{ f.tools | length }} outil{{ 's' if f.tools | length > 1 }}</span>{% if f.set %} <span class="now-tag info">réglé</span>{% else %} <span class="now-tag muted">minimum vital</span>{% endif %}{% if f.below %} <span class="now-tag warn">⚠ en dessous du minimum vital</span>{% endif %}{% if f.reserved %} <span class="now-tag" title="Le code le réserve à toi : sa famille naît à toi et elle seule">à toi</span>{% endif %}
-      <span class="now-muted"> — {% for x in f.tools %}<code>{{ x.name }}</code>{% if not loop.last %} {% endif %}{% endfor %}</span></summary>
-    {{ tableau(f.t, locked) }}
-  </details>
+  <section class="now-card access-family" id="f-{{ f.id }}" aria-labelledby="f-{{ f.id }}-title">
+    <header class="access-head">
+      <div>
+        <h2 id="f-{{ f.id }}-title">{{ f.label }} <span class="now-muted">{{ f.tools | length }} outil{{ 's' if f.tools | length > 1 }}</span></h2>
+        <p>{% if f.external %}Venu d'ailleurs : ses droits se règlent sur sa fiche{% if f.href %}, <a href="{{ f.href }}">« Accès »</a>{% endif %} — un tableau lu de haut en bas, comme ceux-ci.{% elif f.set %}<span class="now-tag info">réglé</span> ses droits ont leur tableau, réglé par un opérateur.{% else %}<span class="now-tag muted">minimum vital</span> ses droits sont ceux que le code déclare{% if f.reserved %} — <b>à toi et elle seule</b>{% else %} — à tout le monde, et elle seule{% endif %}.{% endif %}{% if f.below %} <span class="now-tag warn">⚠ en dessous du minimum vital</span>{% endif %}</p>
+      </div>
+    </header>
+    <ul class="access-tool-list" role="list">
+      {% for x in f.tools %}
+      <li><a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span> <span class="access-tool-desc">{{ x.description }}</span></li>
+      {% endfor %}
+    </ul>
+    {% if not f.external %}
+    <details class="access-rules"{{ ' open' if f.open }}>
+      <summary class="btn">Régler les droits</summary>
+      {{ tableau(f.t, locked) }}
+    </details>
+    {% endif %}
+  </section>
+  {% else %}
+  <p class="now-muted">Aucune famille ne correspond.</p>
   {% endfor %}
+  {% if prompts %}
+  <details class="now-card can-prompts">
+    <summary>Ce que son prompt dit de ses outils, situation par situation</summary>
+    <p class="now-muted">Le texte exact qu'elle lit sur ses outils, ses droits compris.</p>
+    {% for p in prompts %}
+    <details class="can-prompt"><summary>{{ p.label }}</summary><pre>{{ p.text or "(rien : aucun outil ici, ou tous sous la main sans règle à dire)" }}</pre></details>
+    {% endfor %}
+  </details>
+  {% endif %}
 </div>

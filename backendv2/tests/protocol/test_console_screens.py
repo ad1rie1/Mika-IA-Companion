@@ -50,7 +50,7 @@ PARITY: dict[str, tuple[str, str]] = {
     "Réglages › Personnalité": ("/inspecteur/reglages/personnalite", "Personnage"),
     "Réglages › Tempérament": ("/inspecteur/reglages/temperament", "Ce que pilote chaque curseur"),
     "Réglages › Réglages internes": ("/inspecteur/reglages/parametres", "Les facultés"),
-    "Réglages › Canaux": ("/inspecteur/reglages/canaux", "Dépôts git"),
+    "Réglages › Canaux": ("/inspecteur/reglages/canaux", "Par où ça lui arrive"),
     "Réglages › Comptes": ("/inspecteur/reglages/comptes", "Comptes"),
     "Système › Santé": ("/inspecteur/systeme/sante", "Santé"),
     "Système › Quotas et cache": ("/inspecteur/systeme/appels", "Appels et coûts"),

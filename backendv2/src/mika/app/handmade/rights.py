@@ -1,19 +1,14 @@
-"""Réglages › Droits, dessiné (ADR 0121, 0133) : qui peut quoi, par personne et par ressource.
-
-- *Par personne* : une grille — en colonnes, les audiences types (toi quand elle te répond ou quand elle prend la
-  parole, chaque personne qui a un compte, un autre compte, une inconnue, un salon, elle quand elle travaille seule) ;
-  en lignes, chaque ressource et chacune de ses actions ; dans chaque case, ce qu'elle en fait et la ligne qui en
-  décide (``inspector.pages.rights.grants``). Des outils d'une même ressource qui reçoivent partout la même réponse
-  tiennent sur une ligne ; ``?qui=`` souligne une colonne ;
-- *Par ressource* : chaque tableau tel qu'il est écrit, replié, ce qu'aucune ligne n'ouvre et où il se règle
-  (``rights.tables``) ;
-- les règles d'outils par situation (ADR 0122), qui ne font que restreindre, et ce que le code fixe.
-
-Tout se lit des déclarations des propriétaires, du moteur qu'ils appliquent : jamais une recopie.
+"""Réglages › Droits, dessiné (ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie interne (ses
+familles d'outils), les apps de la Forge, les services MCP, ses projets, ses canaux —, chaque outil avec sa
+description, et pour chaque ressource un lien vers **le détail de ses accès** : son tableau de règles, lu tel qu'il est
+écrit, avec « Modifier » vers la page qui le règle et « Retour ». Les droits exacts, outil par outil, seulement quand
+on a choisi **qui** et **par quel canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux
+portes, le plafond) — jamais une recopie.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -21,8 +16,7 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade.access import people_with_accounts
-from mika.contracts import projects as projects_c
-from mika.faculties.projects.access import STEER_WORDS
+from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
@@ -30,20 +24,10 @@ from mika.inspector.ui import UI, env
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Pager
 from mika.kernel.rights import Grant
-from mika.runtime.tools import ASK, HAND
-from mika.vocab.access import ALONE, CARD, MOMENTS, NO, OWNER_OK, POLICY_WORDS
+from mika.vocab.access import INTERNAL, INTERNET, MOBILE, PRIVATE, TOGETHER, WEB, canal_key
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 
-#: ce qu'une règle d'outil fait, en mots (ADR 0122)
-RULE_WORDS = {HAND: "en main", ASK: "à chercher"}
-#: le ton d'une réponse dans la grille : elle le fait (on), en partie (part), en demandant (ask), jamais (off) ; une
-#: autre (ce qu'elle en garde) reste neutre. « oui » et « — » : le voir d'un projet, ce que garde un outil fermé.
-TONES = {POLICY_WORDS[ALONE]: "on", POLICY_WORDS[CARD]: "ask", POLICY_WORDS[OWNER_OK]: "ask", POLICY_WORDS[NO]: "off",
-         STEER_WORDS[projects_c.STEER_EDIT]: "on", STEER_WORDS[projects_c.STEER_READ]: "part",
-         STEER_WORDS[projects_c.STEER_ASK]: "ask", STEER_WORDS[projects_c.STEER_NO]: "off", "oui": "on", "—": "off"}
-#: la légende de la grille, dans l'ordre des tons
-LEGEND = (("on", "elle le fait"), ("part", "en partie"), ("ask", "en demandant"), ("off", "jamais"))
 #: ce que le code fixe et qui n'est pas un outil (les outils, eux, se lisent : ``fixed_tools``)
 FIXED = (
     "Ce que le téléphone envoie : toujours ton geste.",
@@ -52,13 +36,182 @@ FIXED = (
     "et tes règles d'outils.",
     "Une carte d'accord : la personne à qui elle est adressée la tranche dans son chat ; un opérateur, toutes, dans "
     "la console (« À valider »).",
+    "Les plafonds : une inconnue n'obtient au plus que des outils qui lisent, jamais une action ; à plusieurs, un de "
+    "ses outils qui lit au plus, rien venu d'ailleurs ; un projet s'y lit, sans plus ; sans personne en face, rien.",
 )
+#: les canaux qu'on peut choisir pour lire les droits exacts
+CANAL_CHOICES = ((f"{WEB}:{PRIVATE}", "le chat web, en privé"), (f"{WEB}:{TOGETHER}", "le chat web, en salon"),
+                 (MOBILE, "l'app Android"), (INTERNET, "Internet (un moyen que rien ne prouve)"),
+                 (INTERNAL, "elle seule (elle travaille)"))
+#: elle travaille seule : personne n'écoute (l'audience d'un pas, d'une exécution, d'une tâche)
+WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
+_UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+@dataclass(frozen=True, slots=True)
+class Who:
+    """Une personne type : qui est en face, et à quel moment."""
+
+    key: str
+    label: str
+    person: str = ""
+    owner: bool = False
+    kind: str = Kind.REPLY
+    unknown: bool = False
+
+
+def whos(ui: UI) -> list[Who]:
+    """Qui on peut choisir : toi (quand elle te répond, quand elle te parle d'elle-même), chaque personne qui a un
+    compte, un autre compte, une inconnue, elle seule."""
+    out = [Who("toi", "toi, quand elle te répond", "toi", True),
+           Who("toi-parle", "toi, quand elle te parle d'elle-même", "toi", True, Kind.INITIATIVE)]
+    out += [Who(f"p:{x['key']}", x["name"], x["key"]) for x in people_with_accounts(ui)]
+    out += [Who("compte", "un autre compte", "compte"), Who("inconnue", "une inconnue", "", unknown=True),
+            Who("seule", "elle seule, quand elle travaille", kind=Kind.WORK)]
+    return out
+
+
+def audience_for(who: Who, canal: str) -> tuple[Audience, str]:
+    """L'audience qu'une personne type a par ce canal, et la sorte d'épisode : la règle du moteur la lira comme le
+    pipeline. Elle seule, par tout canal, c'est elle qui travaille ; dans un salon, personne n'est reconnu, même
+    toi ; par Internet ou sans session, rien ne prouve qui parle, sauf un moyen relié à toi."""
+    kind_, instance = canal_key(canal)
+    if who.key == "seule" or kind_ == INTERNAL:
+        return WORKING, Kind.WORK
+    together = instance == TOGETHER
+    channel = {WEB: "web", MOBILE: "mobile"}.get(kind_, "external")
+    if who.unknown:
+        trust = ChannelTrust.PUBLIC if kind_ == WEB else ChannelTrust.ACCOUNT
+    else:
+        trust = ChannelTrust.AUTHENTICATED if kind_ in (WEB, MOBILE) else ChannelTrust.ACCOUNT
+    if together:
+        trust = ChannelTrust.PUBLIC
+    return Audience(persons=(f"droits:{who.key}",), channel=channel, room="salon" if together else None,
+                    public=together, trust=trust.value, owner=who.owner and not together,
+                    person="" if who.unknown else who.person), who.kind
+
+
+def _tool_of(ui: UI, spec: Any, g: Grant) -> str:
+    """Le nom chez elle de l'outil qu'un droit désigne : ses familles (« Mémoire · memory_search »), un service
+    (« « meteo » · echo » : ``mcp_<serveur>_<outil>``), une app (le nom même)."""
+    kind = spec.key.rsplit(".", 1)[-1]
+    if kind == "familles":
+        return g.title.rsplit(" · ", 1)[-1]
+    if kind == "services":
+        server, remote = g.resource.partition(":")[2], g.title.rsplit(" · ", 1)[-1]
+        base = f"mcp_{server}_{_UNSAFE.sub('_', remote)}"
+        if base in ui.kernel.registry.tools:
+            return base
+        return next((n for n in ui.kernel.registry.tools if n.startswith(f"mcp_{server}_")
+                     and n.endswith(_UNSAFE.sub("_", remote)[-20:])), base)
+    return g.title
+
+
+def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
+    """Les droits exacts de cette personne par ce canal : par outil (son niveau, sa garde, pourquoi), par projet, et
+    ce que le canal laisse au plus."""
+    audience, kind = audience_for(who, canal)
+    tools: dict[str, Grant] = {}
+    projects: dict[str, Grant] = {}
+    through: Grant | None = None
+    for spec, found in rights.grants(ui, audience, kind):
+        sort = spec.key.rsplit(".", 1)[-1]
+        for g in found:
+            if sort == "canaux":
+                through = g
+            elif sort == "projets":
+                projects[g.resource] = g
+            else:
+                tools[_tool_of(ui, spec, g)] = g
+    return {"tools": tools, "projects": projects, "canal": through, "kind": kind}
+
+
+def _what(g: Grant | None) -> str:
+    """Un droit en une phrase : ses actions et leurs réponses, et la ligne qui en décide."""
+    if g is None:
+        return "rien ici"
+    said = " · ".join(f"{k} : {v}" for k, v in g.what)
+    return f"{said} — {g.why}" if g.why else said
+
+
+def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, Any]:
+    return {"name": spec.name, "description": spec.description, "nature": "agit" if spec.acts else "lit",
+            "href": f"{catalog.BASE}/tous?outil={spec.name}",
+            "exact": _what(got.get(spec.name)) if got is not None else "",
+            "closed": got is not None and (got.get(spec.name) is None or got[spec.name].closed)}
+
+
+def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str, Any]]:
+    """Les ressources, par sorte : sa vie interne (ses familles, par lot), les apps de la Forge, les services MCP,
+    ses projets, ses canaux — chacune avec ses outils décrits et le lien de son détail."""
+    registry, frame = ui.kernel.registry, ui.kernel.mind.frame()
+    tables = {t.resource: t for _spec, found in rights.tables(ui) for t in found}
+    apps = {a.name: a for a in frame.get(forge_c.APPS)}
+    by_bundle: dict[str, list[Any]] = {}
+    for spec in sorted(registry.tools.values(), key=lambda t: t.name):
+        by_bundle.setdefault(spec.bundle, []).append(spec)
+    tools_got = got["tools"] if got else None
+
+    def entry(key: str, label: str, description: str, specs: Sequence[Any], detail: str,
+              exact_: str = "") -> dict[str, Any]:
+        table = tables.get(detail)
+        return {"key": key, "label": label, "description": description,
+                "tools": [_tool_row(ui, s, tools_got) for s in specs],
+                "detail": "?" + "&".join(filter(None, (f"detail={detail}", query))) if table is not None else "",
+                "edit": render.href(table.href) if table is not None and table.href is not None else "",
+                "exact": exact_}
+
+    internal = [entry(b, ui.names.bundle(b), registry.bundles.get(b, ""), specs, f"famille:{b}")
+                for b, specs in sorted(by_bundle.items(), key=lambda kv: ui.names.bundle(kv[0]).casefold())
+                if not any(registry.is_dynamic(s.name) for s in specs)]
+    forged = []
+    for b, specs in sorted(by_bundle.items()):
+        if not b.startswith("forge_apps."):
+            continue
+        name = b.partition(".")[2]
+        app = apps.get(name)
+        detail = f"project:{app.project}" if app is not None and app.project else f"forge:{name}"
+        label = (app.title if app is not None and app.title else name)
+        forged.append(entry(b, f"App « {label} »", registry.bundles.get(b, ""), specs, detail))
+    services = [entry(b, f"Service « {b.partition('.')[2]} »", registry.bundles.get(b, ""), specs,
+                      f"mcp:{b.partition('.')[2]}")
+                for b, specs in sorted(by_bundle.items()) if b.startswith("mcp.")]
+    projects_got = got["projects"] if got else {}
+    projects = [entry(t.resource, t.title, t.note, (), t.resource, _what(projects_got.get(t.resource)) if got else "")
+                for t in tables.values() if t.resource.startswith("project:")]
+    canals = [entry(t.resource, t.title, t.note, (), t.resource) for t in tables.values()
+              if t.resource.startswith("canal:")]
+    out = [{"title": "Vie interne", "hint": "ses propres outils, famille par famille", "rows": internal},
+           {"title": "Apps de la Forge", "hint": "une app suit son projet ; sans projet, ses propres lignes",
+            "rows": forged},
+           {"title": "Services MCP", "hint": "les outils venus d'ailleurs, service par service", "rows": services},
+           {"title": "Projets", "hint": "le voir, le piloter, ses fichiers, ses apps", "rows": projects},
+           {"title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus", "rows": canals}]
+    for s in out:
+        s["pager"] = _one_page(sum(1 + len(r["tools"]) for r in s["rows"]))
+    return out
+
+
+def _one_page(rows: int) -> Any:
+    return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
+
+
+def detail(ui: UI, key: str) -> dict[str, Any] | None:
+    """Le détail des accès d'une ressource : son tableau tel qu'il est écrit, ses planchers, où il se règle."""
+    for spec, found in rights.tables(ui):
+        for t in found:
+            if t.resource == key:
+                return {"kind": spec.title, "title": t.title, "columns": t.columns,
+                        "rows": [(str(i), *r) for i, r in enumerate(t.rows, start=1)], "default": t.default,
+                        "floors": t.floors, "note": t.note,
+                        "edit": render.href(t.href) if t.href is not None else "",
+                        "pager": _one_page(len(t.rows) + 1)}
+    return None
 
 
 def fixed_tools(ui: UI) -> dict[str, Any]:
-    """Ce que le code déclare, lu des outils mêmes, jamais une recopie : ceux dont le minimum vital est à toi et elle
-    seule (``owner_only`` — une ligne de leur famille peut l'ouvrir, ADR 0134), par famille ; ceux qu'une condition
-    garde (``when``), regroupés par sa phrase."""
+    """Ce que le code déclare, lu des outils mêmes : ceux dont le minimum vital est à toi et elle seule
+    (``owner_only``), par famille ; ceux qu'une condition garde (``when``), regroupés par sa phrase."""
     reserved: dict[str, list[str]] = {}
     guarded: dict[str, list[str]] = {}
     for spec in sorted(ui.kernel.registry.tools.values(), key=lambda t: t.name):
@@ -70,130 +223,18 @@ def fixed_tools(ui: UI) -> dict[str, Any]:
             "count": sum(len(n) for n in reserved.values()), "guarded_count": sum(len(n) for n in guarded.values())}
 
 
-@dataclass(frozen=True, slots=True)
-class Face:
-    """Une audience type : qui est en face, et à quel moment ; ``short`` et ``hint`` : son en-tête de colonne."""
-
-    key: str
-    label: str
-    audience: Audience
-    kind: str
-    short: str
-    hint: str
-
-
-def _facing(key: str, person: str = "", *, owner: bool = False, channel: str = "web") -> Audience:
-    return Audience(persons=(f"droits:{key}",), channel=channel, public=False, trust=ChannelTrust.AUTHENTICATED.value,
-                    owner=owner, person=person)
-
-
-#: elle travaille seule : personne n'écoute (l'audience d'un pas, d'une exécution, d'une tâche)
-WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
-
-
-def faces(ui: UI) -> list[Face]:
-    """Les audiences types : toi (quand elle te répond, quand elle prend la parole), chaque personne qui a un compte
-    (son lien tel qu'il est), un autre compte, une inconnue, un salon, et quand elle travaille seule."""
-    replying, speaking = dict(MOMENTS)["conversation"], dict(MOMENTS)["initiative"]
-    out = [Face("toi", "Toi, par le chat web, quand elle te répond", _facing("toi", owner=True), Kind.REPLY, "Toi",
-                "chat web · " + replying),
-           Face("toi-mobile", "Toi, par l'app Android, quand elle te répond",
-                _facing("toi", owner=True, channel="mobile"), Kind.REPLY, "Toi", "app Android · " + replying),
-           Face("toi-parle", "Toi, quand elle te parle d'elle-même", _facing("toi", owner=True), Kind.INITIATIVE,
-                "Toi", speaking)]
-    out += [Face(f"p:{x['key']}", x["name"], _facing(x["key"], x["key"]), Kind.REPLY, x["name"], replying)
-            for x in people_with_accounts(ui)]
-    out.append(Face("comptes", "Un autre compte, quand elle lui répond", _facing("compte"), Kind.REPLY,
-                    "Un autre compte", replying))
-    out.append(Face("inconnue", "Une inconnue, par Internet (un moyen de communication que rien ne prouve)",
-                    Audience(persons=("droits:inconnue",), channel="external", public=False,
-                             trust=ChannelTrust.ACCOUNT.value), Kind.REPLY, "Une inconnue", "Internet · non reconnue"))
-    out.append(Face("salon", "Un salon, devant plusieurs personnes",
-                    Audience(persons=("droits:salon",), channel="web", room="salon", public=True,
-                             trust=ChannelTrust.PUBLIC.value), Kind.REPLY, "Un salon", "plusieurs personnes"))
-    out.append(Face("travail", "Elle, quand elle travaille seule", WORKING, Kind.WORK, "Elle seule",
-                    "quand elle travaille"))
-    return out
-
-
-def _href(ref: Any) -> str:
-    return render.href(ref) if ref is not None else ""
-
-
-def _one_page(rows: int) -> Any:
-    """La pagination d'un tableau qui tient en une page, dite comme partout."""
-    return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
-
-
-def _named(titles: Sequence[str]) -> tuple[str, list[str]]:
-    """Un libellé et les noms qu'il regroupe : « « web » · read » et « « web » · search » font « « web » » et
-    ``[read, search]`` ; un titre seul reste entier."""
-    heads = {t.rpartition(" · ")[0] for t in titles}
-    if len(heads) == 1 and "" not in heads:
-        return heads.pop(), [t.rpartition(" · ")[2] for t in titles]
-    return ("", list(titles)) if len(titles) > 1 else (titles[0], [])
-
-
-def _cell(face: Face, g: Grant | None, action: str) -> dict[str, str]:
-    """Une case : ce qu'elle fait de cette action devant cette audience, son ton, et la phrase entière au survol."""
-    if g is None:
-        return {"word": "—", "tone": "none", "title": f"{face.label} — rien ici"}
-    word = dict(g.what).get(action, "—")
-    return {"word": word, "tone": TONES.get(word, "plain"), "title": f"{face.label} — {action} : {word} ({g.why})"}
-
-
-def grid(ui: UI, all_faces: Sequence[Face]) -> list[dict[str, Any]]:
-    """La grille, par type de règles : chaque ressource, ses actions, une case par audience, et la ligne qui en décide.
-    Les ressources dans l'ordre où elles apparaissent ; des outils voisins d'une même ressource qui ont partout la même
-    réponse et la même ligne n'en font qu'une."""
-    answered = [rights.grants(ui, f.audience, f.kind) for f in all_faces]
-    per_face = [{spec.key: found for spec, found in got} for got in answered]
-    out = []
-    for spec, _found in answered[0] if answered else ():
-        keys: dict[tuple[str, str], Any] = {}
-        for got in per_face:
-            for g in got.get(spec.key, ()):
-                keys.setdefault((g.resource, g.title), g.href)
-        rows: list[dict[str, Any]] = []
-        for (resource, title), href in keys.items():
-            cells = [next((g for g in got.get(spec.key, ()) if (g.resource, g.title) == (resource, title)), None)
-                     for got in per_face]
-            actions = list(dict.fromkeys(k for g in cells if g is not None for k, _ in g.what))
-            same = (resource, _href(href), tuple(actions),
-                    tuple(None if g is None else (g.what, g.why) for g in cells))
-            if rows and rows[-1]["same"] == same:
-                rows[-1]["titles"].append(title)
-                continue
-            rows.append({"same": same, "titles": [title], "href": _href(href), "actions": actions, "cells": cells})
-        shown = []
-        for r in rows:
-            label, names = _named(r["titles"])
-            shown.append({
-                "label": label, "names": names, "href": r["href"],
-                "closed": all(g is None or g.closed for g in r["cells"]),
-                "actions": [{"name": a, "cells": [_cell(f, g, a) for f, g in zip(all_faces, r["cells"], strict=True)]}
-                            for a in r["actions"]],
-                "why": [g.why if g is not None else "" for g in r["cells"]]})
-        if shown:
-            out.append({"title": spec.title, "description": spec.description, "rows": shown})
-    return out
-
-
 def page(ui: UI, items: Sequence[Any], query: Mapping[str, str]) -> Markup:
-    """La page : par personne (la grille, ``?qui=`` souligne une colonne), par ressource (repliée), les règles
-    d'outils, ce que le code fixe."""
-    all_faces = faces(ui)
-    chosen = next((f for f in all_faces if f.key == query.get("qui", "")), None)
-    tables = [{"title": spec.title, "description": spec.description,
-               "tables": [{"title": t.title, "columns": t.columns,
-                           "rows": [(str(i), *r) for i, r in enumerate(t.rows, start=1)], "default": t.default,
-                           "floors": t.floors, "note": t.note, "href": _href(t.href),
-                           "pager": _one_page(len(t.rows) + 1)} for t in found]}
-              for spec, found in rights.tables(ui) if found]
-    ruled: list[dict[str, Any]] = []
-    kinds = grid(ui, all_faces)
+    """La page : les ressources et leurs outils ; le détail d'une (``?detail=``) ; les droits exacts quand on a choisi
+    qui (``?qui=``) et par quel canal (``?canal=``)."""
+    all_whos = whos(ui)
+    who = next((w for w in all_whos if w.key == query.get("qui", "")), None)
+    canal = query.get("canal", "") if query.get("canal", "") in dict(CANAL_CHOICES) else ""
+    got = exact(ui, who, canal) if who is not None and canal else None
+    kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
+    shown = detail(ui, query["detail"]) if query.get("detail") else None
     return Markup(env.get_template("handmade/droits/page.html").render(
-        faces=[{"key": f.key, "label": f.label, "short": f.short, "hint": f.hint, "on": f is chosen}
-               for f in all_faces],
-        grid=kinds, pager=_one_page(sum(len(k["rows"]) for k in kinds)), legend=LEGEND, tables=tables, ruled=ruled,
-        fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous"))
+        whos=[{"key": w.key, "label": w.label, "on": w is who} for w in all_whos],
+        canals=[{"key": k, "label": label, "on": k == canal} for k, label in CANAL_CHOICES],
+        chosen=(who.label if who else "", dict(CANAL_CHOICES).get(canal, "")), got=got,
+        canal_said=_what(got["canal"]) if got else "", sections=sections(ui, got, kept), kept=kept,
+        detail=shown, fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous"))

@@ -28,7 +28,7 @@ Trois règles tiennent toute la console :
 | **Sa rubrique**, à son nom | En ce moment · Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient · Pensées · Ce qu'elle remarque · Attentes · Journal et rêves · Mémoire · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
 | **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
-| **Outils** | Ce qu'elle peut faire · Ses propres outils · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
+| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
 | **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Canaux · Historique des réglages | « Que décide l'opératrice ? » |
 | **Système** | Santé générale · Processus · Anomalies · File de sortie · Moteur des modèles · Écrans du monde · Appels et coûts · Stockage et sauvegardes · Journal d'événements · Actions des opérateurs · Diagnostic avancé · Contributions · Toutes les vues · Simulations | « La machine tient-elle ? » |
@@ -185,22 +185,17 @@ Les clés techniques sont dans « Détails techniques ».
 
 ### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130, 0131, 0133)
 
-- **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`) : une grille. Ses familles d'outils en lignes, chacune
-  s'ouvre sur ses outils (ce qu'il fait, son nom, ses appels des 14 derniers jours) ; les situations en colonnes,
-  par ce qui se passe (elle répond à sa propriétaire, un compte, une inconnue, un salon ; d'elle-même, à sa
-  propriétaire ; seule sur un but, un projet, un brouillon). Une case cochée : elle peut s'en servir là ; la
-  décocher le lui retire (restreindre seulement) ; un tiret : pas prévu, et pourquoi au survol. Dessous, replié, le
-  texte exact que son prompt porte sur ses outils. `?outil=<nom>` ouvre sa fiche : où elle peut s'en servir,
-  réglable par situation (comme prévu, retiré ; sous la main ou à chercher quand le fournisseur diffère), ses
-  derniers appels vers leur épisode, ses arguments lus du schéma, sa condition d'offre et la règle vérifiée à
-  l'exécution.
-- **Ses propres outils** (`outils/familles`, `inspector/pages/families.py`, ADR 0134) : ses outils internes, famille par
-  famille (un lot), chacune avec son tableau de droits (`handmade/droits/tableau.html`) — qui, par où, quand, un
-  outil qui lit, un outil qui agit, ce qu'elle en garde, ses outils —, né du minimum vital que le code déclare
-  (`owner_only` : à toi et elle seule ; sinon à tout le monde et elle seule), modifiable ; « Revenir au minimum
-  vital » ; un avertissement quand un tableau descend en dessous. Une case grisée (🔒) dit ce que l'outil ne sait
-  pas faire (attendre un accord) ou ce qui n'a pas de sens pour lui (garder ce qui est déjà à elle). `?famille=`
-  ouvre un tableau. Chaque bouton envoie tout le tableau (`/outils/familles/regler`).
+- **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`, `inspector/pages/families.py`, ADR 0134) : ses outils
+  internes, famille par famille (un lot) : chaque outil avec sa description (lit ou agit, le lien de sa fiche), et
+  « Régler les droits » qui ouvre le tableau de la famille (`handmade/droits/tableau.html`) — qui,
+  par où, quand, un outil qui lit, un outil qui agit, ce qu'elle en garde, ses outils —, né du minimum vital que le
+  code déclare (`owner_only` : à toi et elle seule ; sinon à tout le monde et elle seule), modifiable ; « Revenir au
+  minimum vital » ; un avertissement quand un tableau descend en dessous. Une case grisée (🔒) dit ce que l'outil ne
+  sait pas faire (attendre un accord) ou ce qui n'a pas de sens pour lui (garder ce qui est déjà à elle). `?famille=`
+  ouvre un tableau ; chaque bouton envoie tout le tableau (`/outils/familles/regler`). Dessous, replié, le texte exact
+  que son prompt porte sur ses outils, situation par situation. `?outil=<nom>` ouvre sa fiche : où elle peut s'en
+  servir, par ses droits (le tableau de sa famille, ou de son service ou de son app), ses arguments, ses derniers
+  appels. Ce qui vient d'ailleurs (un service, une app) a ses tableaux sur sa propre fiche.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
   proposés, à revoir, avec qui et ses accès — badge et vitale), puis les outils que ses apps lui donnent (la vue de la
   Forge, dessous). Brancher un service : à quoi il lui sert, comment le joindre ; il est fermé tant qu'aucune ligne
@@ -294,7 +289,7 @@ rôle par rôle (`CallLog.profile`).
 | Paramètres avancés | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
 | | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
 | Comptes opérateurs | Comptes | liste paginée ; deux boutons, « Ajouter un utilisateur » (le chat, sans la console) et « Ajouter un opérateur » (la console aussi), chaque compte une personne dès l'ajout, sa fiche liée depuis la page du compte ; modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, et « révoquer » — audité (ADR 0062) |
-| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/rights.py`) : qui peut quoi, lu des six sortes de tableaux (les canaux, ses propres outils, les services, les apps sans projet, les projets, tes comptes), jamais une recopie. *Par personne*, une grille : en colonnes, les audiences types par leur canal (toi par le chat web, toi par l'app Android, toi quand elle te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue par Internet, un salon, elle seule ; `?qui=` en souligne une) ; en lignes, chaque ressource et ses actions — le canal (ce qu'il laisse au plus), chacun de ses propres outils, un outil de service ou d'app (lit ou agit, ce qu'elle en garde), un projet (le voir, le piloter, ses fichiers) ; dans chaque case, ce qu'elle en fait, en couleur, et les lignes qui en décident (les deux portes, le plafond), la phrase entière au survol. *Par ressource*, replié : chaque tableau, ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler » vers sa page. Puis ce que le code fixe, replié. Une lecture : rien ne s'y règle |
+| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/rights.py`) : ce qu'elle a, ressource par ressource — *Vie interne* (ses familles d'outils), *Apps de la Forge*, *Services MCP*, *Projets*, *Canaux* —, chaque ressource avec sa description et ses outils décrits (lit ou agit, le lien de sa fiche), et « détail des accès » (`?detail=<ressource>`) : son tableau de règles lu tel qu'il est écrit, ses planchers, « Modifier » vers la page qui le règle, « ← Retour ». Les droits exacts, outil par outil, seulement quand on a choisi qui (`?qui=` : toi quand elle te répond ou te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, elle seule) et par quel canal (`?canal=` : le chat web en privé ou en salon, l'app Android, Internet, elle seule) : une colonne « Droits exacts » dit ce qu'elle en fait et les lignes qui en décident (la ressource ; le canal ou le plafond s'ils ont serré), et ce que le canal laisse au plus. Replié, ce que le code fixe. Une lecture : rien ne s'y règle |
 | Droits | Canaux | dessiné (`reglages/canaux`, `inspector/pages/canals.py`, ADR 0134) : par où ça lui arrive — chaque type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule), puis ses instances (le chat web en privé ou en salon, chaque boîte, un réseau), chacun avec son tableau (`handmade/droits/tableau.html`) : ce qu'il laisse passer au plus (répondre, outils qui lisent et qui agissent, projets, fichiers, garde) ; sur tes comptes, préparer d'elle-même et comment ça part (l'ADR 0132 s'y fond : qui écrit, c'est tout le monde ou une adresse). Un canal qu'on n'a pas réglé montre son minimum vital ; « Revenir au minimum vital ». `?canal=` ouvre un tableau ; chaque bouton envoie tout le tableau (`/reglages/canaux/regler`) et rejournalise le courrier et Teams |
 | Historique des réglages | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 

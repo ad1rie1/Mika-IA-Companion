@@ -66,7 +66,8 @@ def _canal_row(a: Any, ui: Any) -> tuple[str, ...]:
 def canal_tables(ui: Any) -> list[RuleTable]:
     return [RuleTable(f"canal:{e['key']}", f"Le canal « {e['label']} »", CANAL_COLUMNS,
                       tuple(_canal_row(a, ui) for a in e["table"].lines), _canal_row(e["table"].default, ui),
-                      href=Ref("local", f"{canals_page.BASE}?canal={e['key']}", "Réglages › Canaux"),
+                      href=Ref("local", f"{canals_page.BASE}?canal={e['key']}#c-{e['key'].replace(':', '-')}",
+                               "Réglages › Canaux"),
                       floors=canals_page.FLOORS,
                       note="" if e["set"] else "Son minimum vital, tant qu'on ne l'a pas réglé.")
             for e in canals_page.entries(ui)]
@@ -82,7 +83,7 @@ def _family_row(a: Any, ui: Any) -> tuple[str, ...]:
 def family_tables(ui: Any) -> list[RuleTable]:
     return [RuleTable(f"famille:{e['key']}", f"Ses outils « {e['label']} »", FAMILY_COLUMNS,
                       tuple(_family_row(a, ui) for a in e["lines"]), _family_row(e["default"], ui),
-                      href=Ref("local", f"{families_page.BASE}?famille={e['key']}", "Ses propres outils"),
+                      href=Ref("local", f"{families_page.BASE}?famille={e['key']}#f-{e['id']}", "Ce qu'elle peut faire"),
                       floors=families_page.FLOORS,
                       note="" if e["set"] else "Son minimum vital, tel que le code le déclare.")
             for e in families_page.entries(ui)]
@@ -123,7 +124,8 @@ def family_grants(ui: Any, audience: Any, kind: str) -> list[Grant]:
         out.append(Grant(f"famille:{spec.bundle}", f"{ui.names.bundle(spec.bundle)} · {spec.name}",
                          (("agit" if spec.acts else "lit", POLICY_WORDS.get(got.level, got.level)),
                           ("garde", KEEP_WORDS.get(got.keep, got.keep) if got.level != NO and spec.outside else "—")),
-                         got.why, href=Ref("local", f"{families_page.BASE}?famille={spec.bundle}", "Ses propres outils"),
+                         got.why, href=Ref("local", f"{families_page.BASE}?famille={spec.bundle}#f-{spec.bundle.replace('.', '-')}",
+                                           "Ce qu'elle peut faire"),
                          closed=got.level == NO))
     return out
 

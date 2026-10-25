@@ -297,15 +297,19 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
   background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 .access-select.non { color: var(--muted); }
 .access-select.seule { border-color: color-mix(in srgb, var(--ok, var(--accent)) 50%, var(--border-strong)); }
+/* menus et listes à cases se ressemblent : la même flèche, peinte au bord droit, qui ne passe jamais à la ligne */
+.access-select, .access-tools > summary { appearance: none; padding-right: 28px; background-repeat: no-repeat;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 15px center, right 10px center; background-size: 5px 5px; }
 /* le bouton montre ce qui est coché, une étiquette par moment ou par outil, qui passent à la ligne plutôt que d'élargir
    le tableau */
 .access-tools > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 300px; min-height: 36px;
-  padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; cursor: pointer; list-style: none; }
+  padding: 4px 28px 4px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background-color: var(--surface);
+  font-size: 13.5px; cursor: pointer; list-style: none; }
 .access-when > summary { max-width: 240px; }
 .access-chip { padding: 0 7px; border-radius: 999px; background: var(--sunken); color: var(--text-2); font-size: 12px;
   line-height: 20px; white-space: nowrap; }
 .access-tools > summary::-webkit-details-marker { display: none; }
-.access-tools > summary::after { content: " ▾"; color: var(--muted); }
 .access-tools[open] > summary { border-color: var(--accent); }
 /* sans ancres CSS, la liste se déplie dans la ligne et l'agrandit (un menu flottant serait coupé par le cadre défilant du
    tableau) ; avec elles, voir plus bas */

@@ -100,3 +100,26 @@ tbody:first-of-type .rights-kind th { padding-top: 12px; }
 .access-canal-entry > summary .now-muted { font-weight: 400; font-size: 13px; }
 .access-canal-entry > form { padding: 0 8px 8px; }
 .access-tool.sub { padding-left: 22px; color: var(--text-2); }
+
+/* Outils › Ce qu'elle peut faire : une famille, ses outils décrits, « Régler les droits » qui ouvre son tableau */
+.access-family .access-head { padding: 14px 16px 6px; }
+.access-tool-list { list-style: none; margin: 0; padding: 4px 16px 12px; display: grid; gap: 6px; }
+.access-tool-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13.5px; }
+.access-tool-list code { font-size: 12.5px; }
+.access-tool-desc { color: var(--text-2); flex: 1 1 320px; }
+.access-rules { margin: 0 8px 8px; }
+.access-rules > summary { display: inline-block; list-style: none; cursor: pointer; margin: 0 8px 8px; }
+.access-rules > summary::-webkit-details-marker { display: none; }
+.access-rules[open] > summary { display: none; }
+
+/* la liste des ressources et de leurs outils, le détail d'une ressource */
+.rights-list th[scope=row] { font-weight: 650; white-space: nowrap; }
+.rights-list .rights-tool td { color: var(--text-2); font-size: 13px; }
+.rights-list .rights-tool-name { padding-left: 18px; white-space: nowrap; }
+.rights-list .rights-tool.shut td { color: var(--muted); }
+.rights-list .rights-link { text-align: right; white-space: nowrap; }
+.rights-actions { display: flex; gap: 8px; align-items: center; }
+.rights-pick { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 6px 0 4px; }
+.rights-pick .access-select { width: auto; min-width: 200px; }
+.rights-fixed > summary { cursor: pointer; padding: 12px 16px; font-weight: 650; }
+.rights-fixed-list { margin: 4px 16px 12px; padding-left: 18px; font-size: 13.5px; color: var(--text-2); }

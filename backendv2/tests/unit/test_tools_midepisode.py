@@ -14,11 +14,13 @@ from pydantic import BaseModel
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Payload
 from mika.kernel.faculty import EffectClass, Faculty, Zone
+from mika.kernel.frame import Audience
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tools import ToolResult
 from mika.sim.clock import run_virtual
+from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.harness import build, events_of
 
 
@@ -168,7 +170,10 @@ def _reply(tmp_path, calls: list[dict]):
 
     async def main():
         await kernel.start()
-        report = await kernel.lanes.submit(EpisodeRequest(kind="REPLY", target="user_1", message="re"))
+        # un noyau nu, sans identité : l'audience se donne à la main — sa propriétaire, par le chat web
+        report = await kernel.lanes.submit(EpisodeRequest(kind="REPLY", target="user_1", message="re", audience=Audience(
+            persons=("user_1",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value, owner=True,
+            person="user_1")))
         uttered = events_of(kernel, "episode.utterance")
         await kernel.stop()
         return report, uttered

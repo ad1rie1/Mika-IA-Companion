@@ -30,6 +30,7 @@ from mika.vocab.access import (
     ToolRule,
     Verdict,
     at_work_with,
+    canal_words,
     ceiling,
     situation,
     tighten,
@@ -94,11 +95,19 @@ class Allowance:
     canal_key: str
     ceiling: Ceiling
     capped: bool = False
+    #: le canal a serré ce que la ressource laissait
+    narrowed: bool = False
 
 
-def _why(canal_key: str, got: Verdict[Any], through: Verdict[Any], cap: Ceiling, capped: bool) -> str:
-    said = f"{why_words(got.index)} ; canal « {canal_key} » : {why_words(through.index)}"
-    return f"{said} ; plafond : {cap.why}" if capped and cap.why else said
+def _why(canal_key: str, got: Verdict[Any], through: Verdict[Any], narrowed: bool, cap: Ceiling, capped: bool) -> str:
+    """Les lignes qui ont décidé, en mots : celle de la ressource (« ligne 2 », « comportement par défaut ») ; le
+    canal, seulement s'il a serré (sa ligne) ; le plafond, seulement s'il a serré (sa raison)."""
+    said = why_words(got.index)
+    if narrowed:
+        said += f" — serré par le canal {canal_words((canal_key,))} ({why_words(through.index)})"
+    if capped and cap.why:
+        said += f" — plafond : {cap.why}"
+    return said
 
 
 def tool_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str, acts: bool, rights: Rights,
@@ -108,8 +117,8 @@ def tool_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str,
     en garde : la ligne de la ressource qui le concerne, serrée par la ligne du canal et par le plafond ; ``None``
     hors de toute situation. Ce qui vient du dehors (``outside`` : un service, une app) ne se lit pas devant des
     témoins : à plusieurs, rien."""
-    cap = ceiling(audience)
-    if outside and cap is not None and situation(audience) == ROOM:
+    cap = ceiling(audience, kind)
+    if outside and cap is not None and situation(audience, kind) == ROOM:
         cap = Ceiling(read=NO, act=NO, keep="rien", steer=cap.steer, files=cap.files,
                       why="venu d'ailleurs, devant des témoins")
     through = canal_verdict(rights.canals or Canals(), audience, kind, close=close)
@@ -122,8 +131,10 @@ def tool_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: str,
     top = cap.act if acts else cap.read
     level = tighten(tighten(mine, yours, POLICY_RANK), top, POLICY_RANK)
     keep = tighten(tighten(getattr(got.line, "keep", "public"), canal_line.line.keep, KEEP_RANK), cap.keep, KEEP_RANK)
+    narrowed = POLICY_RANK[yours] < POLICY_RANK[mine]
     capped = POLICY_RANK[top] < POLICY_RANK[tighten(mine, yours, POLICY_RANK)]
-    return Allowance(level, keep, _why(key, got, canal_line, cap, capped), got, canal_line, key, cap, capped)
+    return Allowance(level, keep, _why(key, got, canal_line, narrowed, cap, capped), got, canal_line, key, cap,
+                     capped, narrowed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +164,7 @@ def project_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: s
                       close: Callable[[str], bool] | None = None) -> ProjectAllowance | None:
     """Ce qu'un projet laisse à qui est en face, à ce moment : sa ligne, serrée par celle du canal et par le
     plafond (jamais piloter au-delà de la lecture seule, ni un fichier, dans un salon ou avec une inconnue)."""
-    cap = ceiling(audience)
+    cap = ceiling(audience, kind)
     through = canal_verdict(rights.canals or Canals(), audience, kind, close=close)
     got = verdict(tuple(lines), default, audience, kind, concerns, close=close)
     if cap is None or through is None or got is None:
@@ -165,9 +176,11 @@ def project_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: s
     files = bool(line.files) and via.files and cap.files and see
     read = tighten(tighten(line.read, via.read, POLICY_RANK), cap.read, POLICY_RANK)
     act = tighten(tighten(line.act, via.act, POLICY_RANK), cap.act, POLICY_RANK)
-    capped = see and STEER_RANK[cap.steer] < STEER_RANK[tighten(line.steer, via.steer, STEER_RANK)]
-    return ProjectAllowance(see, steer, files, read, act, _why(key, got, canal_line, cap, capped), got, canal_line,
-                            key, cap)
+    narrowed = see and (STEER_RANK[via.steer] < STEER_RANK[line.steer] or (bool(line.files) and not via.files))
+    capped = see and (STEER_RANK[cap.steer] < STEER_RANK[tighten(line.steer, via.steer, STEER_RANK)]
+                      or (bool(line.files) and via.files and not cap.files))
+    return ProjectAllowance(see, steer, files, read, act, _why(key, got, canal_line, narrowed, cap, capped), got,
+                            canal_line, key, cap)
 
 
 def here_allowed(frame: Any, bundle: str, tool: str = "", acts: bool = False,
