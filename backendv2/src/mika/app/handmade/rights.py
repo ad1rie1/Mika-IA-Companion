@@ -1,4 +1,4 @@
-"""Outils › Droits, dessiné (ADR 0121, 0133) : qui peut quoi, par personne et par ressource.
+"""Réglages › Droits, dessiné (ADR 0121, 0133) : qui peut quoi, par personne et par ressource.
 
 - *Par personne* : une audience type à la fois — toi quand elle te répond ou quand elle te parle d'elle-même, une
   personne qui a un compte (par son nom), les autres comptes, quand elle travaille seule — et ce que chaque type de

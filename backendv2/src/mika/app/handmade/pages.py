@@ -76,7 +76,6 @@ DRAWN: dict[str, Drawn] = {
     # Outils, puis Connexions extérieures
     "outils/tous": tools.Catalogue(), "outils/serveurs": tools.Elsewhere(),
     "outils/expose": Blocks("cards", "handmade/tools.css"),
-    "outils/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False),
     **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils")},
     "sens/messages": Shaped(senses.messages, "handmade/senses.css"),
     "sens/positions": Shaped(senses.positions, "handmade/senses.css"),
@@ -90,8 +89,9 @@ DRAWN: dict[str, Drawn] = {
     # Approbations : leur historique (les demandes en attente : leur panneau, dans le même vocabulaire)
     "approbations/historique": CARDS,
     # Réglages : les chiffres et les groupes au-dessus du formulaire des paramètres de chaque faculté (son panneau,
-    # dans le même vocabulaire), la vue d'ensemble, les comptes, le journal des modifications
+    # dans le même vocabulaire), la vue d'ensemble, les comptes, le journal des modifications, qui peut quoi
     "reglages/comportement": CARDS, "reglages/comportement-*": CARDS, "reglages/comptes": CARDS,
     "reglages/journal": TABLES,
+    "reglages/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False),
     # l'accueil est une page à lui (home.py) ; la Forge garde ses contrats d'interface
 }

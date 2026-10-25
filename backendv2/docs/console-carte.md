@@ -28,9 +28,9 @@ Trois règles tiennent toute la console :
 | **Sa rubrique**, à son nom | En ce moment · Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient · Pensées · Ce qu'elle remarque · Attentes · Journal et rêves · Mémoire · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
 | **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Envoyer à ta place · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
-| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Droits · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
+| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
-| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Historique des réglages | « Que décide l'opératrice ? » |
+| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Historique des réglages | « Que décide l'opératrice ? » |
 | **Système** | Santé générale · Processus · Anomalies · File de sortie · Moteur des modèles · Écrans du monde · Appels et coûts · Stockage et sauvegardes · Journal d'événements · Actions des opérateurs · Diagnostic avancé · Contributions · Toutes les vues · Simulations | « La machine tient-elle ? » |
 
 Le menu regroupe les destinations de `app/console.py` sans changer leurs adresses : liens, fiches, vues des
@@ -215,15 +215,6 @@ Les clés techniques sont dans « Détails techniques ».
   qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion ») et
   *Appels* (pour qui, seule ou sur accord, l'issue, qui a décidé). La connexion se règle par « Modifier la
   connexion ». Une alerte dit un service qui ne sert à personne.
-- **Droits** (`outils/droits`, ADR 0133, `app/handmade/rights.py`) : qui peut quoi, lu des types de règles que chaque
-  propriétaire déclare, jamais une recopie. *Par personne* (`?qui=` : toi quand elle te répond, toi quand elle te
-  parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, un salon, elle quand elle
-  travaille seule) : ce qu'elle a
-  — chaque outil de service et d'app, chaque projet (le voir, le piloter) — et la ligne qui en décide ; ce qui est
-  fermé se compte sans se lister. *Par ressource* : chaque tableau (un service, un projet, les apps sans projet, ce
-  qu'elle envoie à ta place), ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler »
-  vers sa page. Puis tes règles d'outils par situation (ADR 0122), et ce que le code fixe. Une lecture : rien ne s'y
-  règle.
 - **Prêter à un agent** (`outils/expose`) : la console en lecture — créer, renouveler ou fermer son jeton (montré
   une seule fois, avec sa ligne `claude mcp add`), l'ouvrir au réseau ou l'y fermer (ADR 0126 : sa ligne prend alors
   l'adresse par laquelle on lit la console), choisir ce qu'elle montre (ses pages d'office et d'autres, ses
@@ -299,6 +290,7 @@ rôle par rôle (`CallLog.profile`).
 | Paramètres avancés | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
 | | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
 | Comptes opérateurs | Comptes | liste paginée, créer, modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, et « révoquer » — audité (ADR 0062) |
+| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, `app/handmade/rights.py`) : qui peut quoi, lu des types de règles que chaque propriétaire déclare, jamais une recopie. *Par personne* (`?qui=` : toi quand elle te répond, toi quand elle te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, un salon, elle quand elle travaille seule) : ce qu'elle a — chaque outil de service et d'app, chaque projet (le voir, le piloter) — et la ligne qui en décide ; ce qui est fermé se compte sans se lister. *Par ressource* : chaque tableau (un service, un projet, les apps sans projet, ce qu'elle envoie à ta place), ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler » vers sa page. Puis tes règles d'outils par situation (ADR 0122), et ce que le code fixe. Une lecture : rien ne s'y règle |
 | Historique des réglages | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 
 ### Système

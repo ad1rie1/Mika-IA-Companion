@@ -48,9 +48,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("Outils", (
         Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
-                    "(les services branchés, ses apps), qui peut quoi, et ce que tu prêtes à un agent.",
-                    builtin=("outils.tous", "outils.droits", "outils.expose"),
-                    order=("tous", "serveurs", "droits", "expose"), subjects=("serveur",)),
+                    "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
+                    builtin=("outils.tous", "outils.expose"),
+                    order=("tous", "serveurs", "expose"), subjects=("serveur",)),
     )),
     NavGroup("À valider", (
         Destination("approbations", "À valider", "Ce qu'elle voudrait faire sortir de la machine, et ce "

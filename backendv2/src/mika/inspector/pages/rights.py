@@ -1,4 +1,4 @@
-"""Outils › Droits (ADR 0133) : qui peut quoi, lu des types de règles que chaque propriétaire déclare
+"""Réglages › Droits (ADR 0133) : qui peut quoi, lu des types de règles que chaque propriétaire déclare
 (``Faculty.rights``) — jamais une recopie.
 
 - ``tables`` : chaque tableau de règles, par ressource (un service, un projet, ce qu'elle envoie), en mots ;
@@ -40,7 +40,7 @@ def grants(ui: Any, audience: Any, kind: str) -> list[tuple[RightsSpec, list[Gra
             if spec.grants is not None]
 
 
-@TABS.tab("outils.droits", title="Droits",
+@TABS.tab("reglages.droits", title="Droits", group="Droits", order=2500,
           description="Qui peut quoi : les services, les projets et leurs apps, ce qu'elle envoie à ta place — par "
                       "personne et par ressource, avec la ligne qui en décide.")
 async def rights_page(ui: Any, request: Request) -> Any:

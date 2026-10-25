@@ -12,7 +12,7 @@ from mika.vocab.access import OWNER
 from tests.protocol.test_console_mcp import html_of, submit
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
-PAGE = "/inspecteur/outils/droits"
+PAGE = "/inspecteur/reglages/droits"
 
 
 def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
@@ -27,7 +27,8 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
                  "Ce qu'elle envoie à ta place", "Tes règles d'outils", "Ce que le code fixe"):
         assert part in page, part
     assert "le piloter : seule" in page and "ligne 1" in page  # jamais réglé : toi, tout, par sa ligne
-    assert 'href="/inspecteur/outils/droits"' in html_of(client.get("/inspecteur"))  # dans le menu
+    home = html_of(client.get("/inspecteur"))
+    assert 'href="/inspecteur/reglages/droits"' in home and "/inspecteur/outils/droits" not in home  # menu Réglages
     # un autre compte : il l'entend selon sa confidentialité, sans le piloter
     other = html_of(client.get(PAGE, params={"qui": "comptes"}))
     assert "le piloter : non" in other and "comportement par défaut" in other
