@@ -21,7 +21,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059 |
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
@@ -516,7 +516,23 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », cinq vérifications « propriétaire » écrites chacune à sa façon, et « Piloter projet : lecture seule, accord du propriétaire, modification, aucun pilotage ».
 
-*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie).*
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134.*
+
+### 0134 — Qui, par où, quand : deux portes, six sortes de tableaux
+
+- **Un cadre pour toute règle** (`vocab.access`) : une ligne dit **qui** est en face (toi ; tes proches ; une personne par son nom ; tout le monde — pour un canal de messagerie, aussi une adresse ou un @domaine), **par où** ça arrive (un canal : le chat web, l'app Android, Teams, le courrier, Internet, elle seule — un type, ou une instance `type:clé` pour une exception, « tous » sinon) et **quand** (elle répond, elle prend la parole ; rien : toujours). Lues de haut en bas, la première qui correspond décide, sinon la ligne par défaut, fermée. « Elle, quand elle travaille seule » n'est plus un « qui » : c'est le canal « elle seule » (`interne`), sans personne ni moment.
+- **Ce qu'un canal prouve tient au moyen de communication, pas au type** : reconnu = une session du chat web, le jeton de l'app Android, ou un moyen qu'un opérateur a relié à la personne (une adresse mail aussi : permis, signalé — une adresse s'usurpe). Non reconnu = une inconnue. Dans un salon ou à plusieurs, personne n'est reconnu, même toi.
+- **Des plafonds, dans le code, que la page montre en cases grisées** (jamais une phrase ailleurs) : une inconnue n'obtient au plus que des outils qui lisent, jamais une action, une garde « rien », un projet en lecture seule, pas de fichier ; à plusieurs, un de ses propres outils qui lit au plus, rien de ce qui vient d'ailleurs (des témoins), un projet en lecture seule au plus ; sans personne en face hors du travail, rien. Seule « tout le monde » désigne une inconnue ou un salon.
+- **Deux portes** : une demande passe par le tableau du **canal** par où elle arrive, puis par celui de la **ressource** qu'elle touche ; la plus stricte gagne (`vocab.access.tighten`), et la décision dit les deux lignes.
+- **Six sortes de tableaux**, un moteur : les **canaux** (`vocab.canals`, rangés dans les réglages ; ses colonnes sont des plafonds : répondre, outils qui lisent, qui agissent, projets, fichiers, garde — et, pour tes comptes de courrier et Teams, préparer d'elle-même et comment ça part : « Envoyer à ta place » est le tableau de canal de tes comptes, l'ADR 0132 s'y fond) ; **ses propres outils**, un tableau par famille (lot), pré-rempli du **minimum vital** que le code déclare (`owner_only` : la famille naît à toi et elle seule ; sinon à tout le monde et elle seule), modifiable, avec « Revenir au minimum vital » et un avertissement en dessous (l'ADR 0122 s'y fond : « retiré » est une ligne à « non » ; « en main / à chercher » devient un réglage de l'outil, plus une grille par situation) ; les **services** (0131, avec « par où ») ; les **apps sans projet**, un tableau par app, journalisé (`forge.access_set`), né à toi et elle seule, avec une garde ; les **projets** (0133, avec « par où » et une colonne **fichiers**, qui remplace « toi, ou qui l'a confié ») ; et les apps d'un projet, qui le suivent.
+- **Un outil dit s'il lit ou s'il agit** (`ToolSpec.acts`) : sa colonne. Un accord (« ton accord », « demande à la personne ») ne se règle que pour un outil qui se diffère (un effet proposé) ; les autres ont la case grisée : « cet outil ne se diffère pas ». La garde est grisée pour ce qui est déjà à elle (sa mémoire, ses fichiers).
+- **La porte d'offre reste la seule** (`runtime.tools.offer`) : plafond, canal, famille, puis la condition de la ressource (`fits`). `owner_only` et `when=offered` n'y sont plus des planchers : le premier déclare le minimum vital, le second disparaît (le plafond le dit). Un gestionnaire revérifie par la même règle.
+- **Restent hors tableau** : le plancher légal des images (0063), le geste du téléphone, `[À COMPLÉTER` → un accord, la confidentialité qui filtre ce qu'elle dit, le cadre d'un projet (la console), le lot qu'un projet ou un réveil doit avoir pris pour qu'elle seule s'en serve (dit sur la ligne « elle seule »), l'état d'un objet (outil suspendu, app cassée, app à secrets non promue : une raison affichée). Les délégations (un réveil par API, un agent prêté : tes droits, dans ce qu'ils déclarent) se lisent en lignes dérivées.
+- **La page Réglages › Droits** lit les six sortes et la règle du moteur sur des personnes types (toi par le chat web ou l'app, un proche, une personne, tout le monde, une inconnue par Internet, un salon, elle seule), avec les deux lignes qui décident, les cases grisées et leur raison, les minimums vitaux manquants.
+
+*Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
+
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -1121,7 +1137,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « on peut combiner les droits comme on veut » : avec qui, quand, l'accord et ce qu'elle garde, réglés à part au service puis corrigés outil par outil, ne se lisaient qu'en recomposant cinq réglages ; un tableau ordonné se lit d'un regard, et sa dernière ligne dit ce qui arrive à tout le reste.
 
-*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie). Révisée par 0133.*
+*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie). Révisée par 0133., 0134.*
 
 ### 0132 — Envoyer à ta place : des règles lues de haut en bas
 
@@ -1134,7 +1150,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* comme pour les services (0131), ce qui part à sa place se lisait en recomposant des réglages épars — une case par boîte, une liste d'exclusions, une surcharge cachée, un mode Teams pour toutes les conversations ; un tableau ordonné se lit d'un regard et règle une personne ou une conversation à part.
 
-*Révise 0027 (en partie), 0069 (en partie). Révisée par 0133.*
+*Révise 0027 (en partie), 0069 (en partie). Révisée par 0133., 0134.*
 
 ## Les fournisseurs de modèles
 
@@ -1521,7 +1537,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* la console montrait ses outils sous tous les angles sans permettre de rien décider.
 
-*Révisée par 0123, 0126, 0128, 0133.*
+*Révisée par 0123, 0126, 0128, 0133, 0134.*
 
 ### 0123 — Le bloc Outils, redessiné
 

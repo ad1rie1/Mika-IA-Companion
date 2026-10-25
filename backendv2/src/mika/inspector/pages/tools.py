@@ -53,19 +53,17 @@ from mika.kernel.inspect import (
 )
 from mika.runtime import operations as ops
 from mika.runtime.tools import (
-    ASK,
-    HAND,
-    OFF,
-    RULES,
     acting,
     admitted,
+    allowed,
     catalogue,
     declare,
     deferred,
     defers_tools,
+    gate_of,
     offer,
-    rule_of,
 )
+from mika.vocab.access import NO
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import EVERYTHING, ChannelTrust
 
@@ -76,13 +74,6 @@ TOOLS_PAGE = 24
 BASE = f"{PREFIX}/outils"
 #: ce que la fiche d'un outil garde de la grille pour y revenir (plus le choix « Tableau », ``is_table_choice``)
 CATALOG_PARAMS = ("q", "lot", "page")
-#: la règle d'un outil sur sa fiche, situation par situation : « r.<situation> » ; « » : ce que prévoit le code
-RULE_FIELD = "r."
-#: dans la grille, la case d'un outil dans une situation (« <situation>:<outil> », cochée s'il y est offert), et les
-#: outils que la grille montrait (une recherche en cache : ceux-là seuls changent)
-CELL_FIELD, SEEN_FIELD = "o", "vu"
-#: ce qu'a fait une règle, dans le message qui suit l'enregistrement
-DONE = {None: "rendu comme prévu", OFF: "retiré", HAND: "mis sous la main", ASK: "mis à chercher"}
 #: les situations rangées par ce qui se passe, en tête de la grille ; les autres : elle travaille seule
 MOMENTS = {Kind.REPLY: "Elle répond à…", Kind.INITIATIVE: "D'elle-même"}
 ALONE = "Elle travaille seule sur…"
@@ -146,16 +137,11 @@ def situations(ui: Any) -> list[Situation]:
     return [replace(s, frame=frame) for s in SITUATIONS if s.kind in policies]
 
 
-def rules(ui: Any, s: Situation) -> Mapping[str, str]:
-    """Les règles d'un opérateur pour cette situation, telles que le pipeline les lit à chaque épisode."""
-    return ui.kernel.runner.rules_of(s.kind, s.audience) or {}
-
-
-def offered_in(ui: Any, s: Situation, ruled: bool = True) -> dict[str, ToolSpec]:
-    """Ce que la porte d'offre du pipeline lui donnerait dans cette situation ; ``ruled`` faux : ce que le code lui
-    offre, avant les règles d'un opérateur."""
-    return offer(ui.kernel.registry.tools, ui.kernel.runner.policies[s.kind], s.kind, s.audience,
-                 rules=rules(ui, s) if ruled else None, frame=s.frame)
+def offered_in(ui: Any, s: Situation) -> dict[str, ToolSpec]:
+    """Ce que la porte d'offre du pipeline lui donnerait dans cette situation, ses droits compris (ADR 0134)."""
+    rights, close = gate_of(ui.kernel.registry, s.frame)
+    return offer(ui.kernel.registry.tools, ui.kernel.runner.policies[s.kind], s.kind, s.audience, frame=s.frame,
+                 rights=rights, close=close)
 
 
 def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
@@ -165,15 +151,14 @@ def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
     return policy.core_bundles
 
 
-def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[str, str] | None = None) -> str:
+def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, tools: Mapping[str, ToolSpec] | None = None,
+            rights: Any = None, close: Any = None) -> str:
     """Pourquoi la porte ne l'offre pas ici, en mots (vide : elle l'offre). Un test vérifie que ce récit et la
     porte disent la même chose, situation par situation."""
     if s.kind not in spec.episodes:
         return "pas prévu dans cette situation"
     if not admitted(policy.tool_bundles, spec.bundle):
         return "sa famille n'est pas prévue dans cette situation"
-    if spec.owner_only and not s.audience.owner:
-        return "réservé à sa propriétaire"
     if spec.when is not None or spec.fits is not None:
         try:
             ok = (spec.when is None or spec.when(s.audience) is True) and (
@@ -182,8 +167,12 @@ def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, ruled: Mapping[
             ok = False
         if not ok:
             return condition(spec) or "sa condition n'est pas remplie"
-    if rule_of(spec, ruled) == OFF:
-        return "retiré par un opérateur"
+    if spec.fits is None and tools is not None:
+        got = allowed(tools, spec, s.audience, s.kind, rights, close)
+        if got is None:
+            return "personne en face"
+        if got.level == NO:
+            return f"fermé par ses droits ({got.why})"
     return ""
 
 
@@ -237,9 +226,9 @@ def _prompt(ui: Any, s: Situation) -> str:
     """Ce que son prompt dit de ses outils dans cette situation, mot pour mot."""
     policy = ui.kernel.runner.policies[s.kind]
     offered = list(offered_in(ui, s).values())
+    rights, _close = gate_of(ui.kernel.registry)
     return "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
-                                     catalogue(offered, in_hand(ui, policy), ui.kernel.registry.bundles,
-                                               rules(ui, s)))))
+                                     catalogue(offered, in_hand(ui, policy), ui.kernel.registry.bundles, rights))))
 
 
 def _summary(s: Situation, cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -268,9 +257,9 @@ def can_do(ui: Any, query: str = "", lot: str = "") -> dict[str, Any]:
     sa boucle ne se retire pas. ``query`` : une recherche ; ``lot`` : une seule famille."""
     registry, policies = ui.kernel.registry, ui.kernel.runner.policies
     sits = situations(ui)
-    by_code = {s.key: offered_in(ui, s, ruled=False) for s in sits}
-    ruled = {s.key: rules(ui, s) for s in sits}
+    by_code = {s.key: offered_in(ui, s) for s in sits}
     cores = {s.key: in_hand(ui, policies[s.kind]) for s in sits}
+    rights, _close = gate_of(ui.kernel.registry)
     usage = _usage(ui)
     terms = _fold(query).split()
     specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
@@ -282,15 +271,13 @@ def can_do(ui: Any, query: str = "", lot: str = "") -> dict[str, Any]:
     for spec in specs:
         cells: list[dict[str, Any]] = []
         for s in sits:
-            rule = rule_of(spec, ruled[s.key])
             if spec.name not in by_code[s.key]:
-                cell: dict[str, Any] = {"state": "none", "why": why_not(spec, policies[s.kind], s)}
+                why = why_not(spec, policies[s.kind], s, registry.tools, *gate_of(ui.kernel.registry, s.frame))
+                cell: dict[str, Any] = {"state": "none", "why": why}
             elif spec.ends_loop:
                 cell = {"state": "fixed"}
-            elif rule == OFF:
-                cell = {"state": "off"}
             else:
-                cell = {"state": "ask" if deferred(spec, cores[s.key], ruled[s.key]) else "on", "set": bool(rule)}
+                cell = {"state": "ask" if deferred(spec, cores[s.key], rights) else "on"}
             cells.append({**cell, "situation": s.label, "value": f"{s.key}:{spec.name}"})
         where[spec.name] = "; ".join(s.label for s, c in zip(sits, cells, strict=True)
                                      if c["state"] not in ("none", "off")) or "nulle part"
@@ -313,17 +300,14 @@ def can_do(ui: Any, query: str = "", lot: str = "") -> dict[str, Any]:
             groups.append({"label": label, "count": 0})
             starts.add(i)
         groups[-1]["count"] += 1
-    removed = sum(1 for s in sits for name, r in ruled[s.key].items()
-                  if r == OFF and name in by_code[s.key] and not by_code[s.key][name].ends_loop)
     return {
         "situations": sits, "groups": groups, "starts": starts, "rows": rows, "specs": specs, "where": where,
         "query": query, "lot": lot, "lot_label": ui.names.bundle(lot) if lot else "",
         "total": len(registry.tools), "families": len({x.bundle for x in registry.tools.values()}),
-        "shown": len(specs), "removed": removed, "ruled": sum(len(r) for r in ruled.values()),
+        "shown": len(specs),
         "failures": sum(u.failures for n, u in usage.items() if n in registry.tools),
         "any_ask": any(c["state"] == "ask" for r in rows for t in r["tools"] for c in t["cells"]),
         "prompts": [{"label": s.label, "text": _prompt(ui, s)} for s in sits],
-        "action": f"{BASE}/regler", "cell_field": CELL_FIELD, "seen_field": SEEN_FIELD,
     }
 
 
@@ -367,22 +351,18 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
     label, tone = origin(ui, spec)
     policies = ui.kernel.runner.policies
     where = []
+    rights, _close = gate_of(registry)
     for s in situations(ui):
-        policy, ruled = policies[s.kind], rules(ui, s)
-        if spec.name not in offered_in(ui, s, ruled=False):
-            where.append({"key": s.key, "label": s.label, "state": "none", "why": why_not(spec, policy, s)})
+        policy = policies[s.kind]
+        if spec.name not in offered_in(ui, s):
+            why = why_not(spec, policy, s, registry.tools, *gate_of(registry, s.frame))
+            where.append({"key": s.key, "label": s.label, "state": "none", "why": why})
             continue
         core = in_hand(ui, policy)
-        rule = rule_of(spec, ruled)
-        planned = f" ({'à chercher' if deferred(spec, core) else 'sous la main'})" if core is not None else ""
-        choices = [("", f"Oui, comme prévu{planned}")]
-        if core is not None:
-            choices += [(HAND, "Oui, toujours sous la main"), (ASK, "Oui, à chercher quand il lui faut")]
-        choices.append((OFF, "Non, retiré"))
-        where.append({"key": s.key, "label": s.label, "locked": spec.ends_loop, "rule": rule or "",
-                      "state": "off" if rule == OFF else ("ask" if deferred(spec, core, ruled) else "on"),
-                      "choices": choices, "field": f"{RULE_FIELD}{s.key}"})
-    reserved = ("à sa propriétaire (et quand elle travaille, personne n'écoutant)" if spec.owner_only else "non")
+        where.append({"key": s.key, "label": s.label, "locked": spec.ends_loop,
+                      "state": "ask" if deferred(spec, core, rights) else "on"})
+    reserved = ("à toi et elle seule, par le minimum vital de sa famille (une ligne peut l'ouvrir)"
+                if spec.owner_only else "non")
     dynamic = registry.is_dynamic(spec.name)
     pairs: list[tuple[str, Any]] = [
         ("nom", Text(spec.name, "mono")),
@@ -418,10 +398,8 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
     return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/outils/outil.html", {
         "page_heading": spec.name, "page_subtitle": spec.description,
         "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
-        "tool_family": ui.names.bundle(spec.bundle), "tool_reserved": spec.owner_only,
-        "where": where, "editable": any(w["state"] != "none" and not w.get("locked") for w in where),
-        "fine": any(len(w.get("choices", ())) > 2 for w in where),
-        "context": context, "action": f"{BASE}/regler",
+        "tool_family": ui.names.bundle(spec.bundle), "tool_bundle": spec.bundle, "tool_reserved": spec.owner_only,
+        "where": where, "context": context,
     })}
 
 
@@ -472,83 +450,6 @@ def arguments(schema: Mapping[str, Any]) -> list[Row]:
                          Text(str(prop.get("description") or prop.get("title") or ""), clamp=200),
                          _constraints(prop))))
     return rows
-
-
-def _grid_changes(ui: Any, lists: Mapping[str, Sequence[Any]]) -> dict[str, dict[str, str | None]]:
-    """Ce que la grille change : un outil montré (``vu``) et décoché est retiré ; recoché, il revient (sa place
-    choisie sur sa fiche reste). Seuls comptent les outils que le code offre ici et qui ne closent pas la boucle."""
-    seen = {str(x) for x in lists.get(SEEN_FIELD, [])}
-    on = {str(x) for x in lists.get(CELL_FIELD, [])}
-    changes: dict[str, dict[str, str | None]] = {}
-    for s in situations(ui):
-        ruled = rules(ui, s)
-        for name, spec in offered_in(ui, s, ruled=False).items():
-            if name not in seen or spec.ends_loop:
-                continue
-            kept, off = f"{s.key}:{name}" in on, rule_of(spec, ruled) == OFF
-            if kept == off:
-                changes.setdefault(s.key, {})[name] = None if kept else OFF
-    return changes
-
-
-def _fiche_changes(ui: Any, name: str, data: Mapping[str, Any]) -> dict[str, dict[str, str | None]]:
-    """Ce que la fiche d'un outil change, situation par situation (« r.<situation> ») : ce que prévoit le code
-    n'est pas une règle ; tout en main (un fournisseur qui ne diffère pas), seul « retiré » en est une."""
-    spec = ui.kernel.registry.tools.get(name)
-    changes: dict[str, dict[str, str | None]] = {}
-    if spec is None or spec.ends_loop:
-        return changes
-    for s in situations(ui):
-        chosen = str(data.get(f"{RULE_FIELD}{s.key}", "\0"))
-        if chosen not in ("", *RULES) or name not in offered_in(ui, s, ruled=False):
-            continue
-        core = in_hand(ui, ui.kernel.runner.policies[s.kind])
-        code = ASK if deferred(spec, core) else HAND
-        changes[s.key] = {name: None if chosen in ("", code) or (core is None and chosen != OFF) else chosen}
-    return changes
-
-
-async def rules_post(ui: Any, request: Request) -> Response:
-    """Ses outils réglés (``Settings.save_tool_rules``), audités situation par situation. Depuis la grille : ses
-    cases ; depuis la fiche d'un outil (``outil``) : sa place dans chaque situation ; « Tout remettre comme prévu »
-    efface toutes les règles. Un outil que le code n'offre pas dans une situation, ou qui clôt la boucle, est
-    ignoré : une règle ne fait que restreindre."""
-    got = await ui.form_lists(request)
-    account = ui.operator(request)
-    token = _secrets.token_urlsafe(9)
-    data, lists = got if got is not None else ({}, {})
-    tool = str(data.get("outil", ""))
-    keep = {k: str(data[k]) for k in ("q", "lot") if data.get(k)}
-    back = {**keep, **({"outil": tool} if tool else {})}
-    settings = ui.deps.settings
-    if got is None or account is None:
-        ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
-    elif settings is None:
-        ui.flash(token, "warn", "Les réglages ne sont pas joignables : rien n'a été enregistré.")
-    else:
-        sits = {s.key: s for s in situations(ui)}
-        if data.get("faire") == "remettre":
-            changes = {k: dict.fromkeys(rules(ui, s)) for k, s in sits.items()}
-        elif tool:
-            changes = _fiche_changes(ui, tool, data)
-        else:
-            changes = _grid_changes(ui, lists)
-        done: list[str] = []
-        for key, wanted in changes.items():
-            before = dict(rules(ui, sits[key]))
-            kept = await settings.save_tool_rules(key, wanted)
-            moved = sorted(n for n in {*before, *kept} if before.get(n) != kept.get(n))
-            if moved:
-                await ops.audit(ui.kernel, "console.outils.regler", by=account.handle, subject_kind="situation",
-                                subject=key)
-                said = sits[key].label[0].lower() + sits[key].label[1:]
-                done += [f"{n} {DONE[kept.get(n)]} ({said})" for n in moved]
-        if done:
-            more = f", et {len(done) - 6} autres" if len(done) > 6 else ""
-            ui.flash(token, "ok", "; ".join(done[:6]) + more + ". Vaut dès son prochain épisode.")
-        else:
-            ui.flash(token, "info", "Rien n'a changé.")
-    return secure(RedirectResponse(f"{BASE}/tous?" + urlencode({**back, "flash": token}), status_code=303))
 
 
 @TABS.tab("outils.expose", title="Prêter à un agent",

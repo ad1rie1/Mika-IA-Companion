@@ -56,10 +56,10 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
 from mika.ports.preprocess import inert
-from mika.vocab.access import owner_here
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.rights import here_allowed
 
 BUNDLE = "camera"
 
@@ -201,7 +201,7 @@ def _for_owner(frame: Frame) -> bool:
     """Ce que voit la caméra : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
     ADR 0133) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
     la caméra."""
-    return owner_here(frame, BUNDLE)
+    return here_allowed(frame, BUNDLE)
 
 
 def _ago(us: int) -> str:

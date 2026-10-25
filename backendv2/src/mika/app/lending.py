@@ -29,7 +29,16 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.tools import ReadingContext, ReadOnly, ToolContext, checked_args, declare, lendable, offer
+from mika.runtime.tools import (
+    ReadingContext,
+    ReadOnly,
+    ToolContext,
+    checked_args,
+    declare,
+    gate_of,
+    lendable,
+    offer,
+)
 from mika.vocab.episodes import Kind
 
 PREFIX = "/mcp/pret"
@@ -102,8 +111,9 @@ class Lending:
         if policy is None:
             return {}
         audience = self.audience(handle)
-        return lendable(offer(self.kernel.mind.registry.tools, policy, Kind.REPLY, audience,
-                              rules=runner.rules_of(Kind.REPLY, audience), frame=self.kernel.mind.frame()))
+        registry, frame = self.kernel.mind.registry, self.kernel.mind.frame()
+        rights, close = gate_of(registry, frame)
+        return lendable(offer(registry.tools, policy, Kind.REPLY, audience, frame=frame, rights=rights, close=close))
 
     def offered(self, entry: Mapping[str, Any]) -> dict[str, ToolSpec]:
         """Les outils que ce point sert maintenant : ceux qu'il prête, parmi ce qu'il peut prêter."""

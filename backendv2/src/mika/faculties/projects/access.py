@@ -1,9 +1,10 @@
-"""Qui peut quoi sur un projet et ses apps (ADR 0133) : ses lignes d'accès, lues de haut en bas comme celles d'un
-service (ADR 0131, ``vocab.access``), puis sa ligne par défaut.
+"""Qui peut quoi sur un projet et ses apps (ADR 0133, 0134) : ses lignes d'accès, lues de haut en bas comme celles
+d'un service (``vocab.access``), puis sa ligne par défaut — après le tableau du canal par où ça arrive, sous le
+plafond de qui est en face (``vocab.rights.project_allowance``).
 
-``line_for`` : la ligne qui décide pour qui est en face, à ce moment — le voir, le piloter ; pour un outil d'une de ses
-apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Y changer quelque chose : jamais dans un salon,
-avec une inconnue, ni sans personne. Sa fiche (l'onglet « Accès », l'action ``projects.acces``) et la page « Droits » : ``console_access``.
+``allowance`` : ce qu'il laisse à qui est en face, à ce moment — le voir, le piloter, ses fichiers ; pour un outil
+d'une de ses apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Sa fiche (l'onglet « Accès »,
+l'action ``projects.acces``) et la page « Droits » : ``console_access``.
 """
 
 from __future__ import annotations
@@ -15,11 +16,11 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects.faculty import Project, access_of
 from mika.kernel.frame import Frame
-from mika.vocab.access import OWNER, first, situation, who_words
+from mika.kernel.rights import Rights
+from mika.vocab.access import AT_OWNER, STEER_WORDS, situation, who_words
+from mika.vocab.rights import ProjectAllowance, closeness_of, project_allowance, rights_of
 
-#: ce que « piloter » permet, en mots courts
-STEER_WORDS = {c.STEER_READ: "lecture seule", c.STEER_ASK: "accord du propriétaire", c.STEER_EDIT: "modification",
-               c.STEER_NO: "aucun pilotage"}
+__all__ = ["STEER_WORDS", "allowance", "lines", "of_frame", "reads", "sees", "shares_files", "steering", "who_named"]
 
 
 def lines(p: Project | c.ProjectView) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
@@ -27,38 +28,55 @@ def lines(p: Project | c.ProjectView) -> tuple[tuple[c.ProjectAccess, ...], c.Pr
     return access_of(p) if isinstance(p, Project) else (p.access, p.default_access)
 
 
-def line_for(p: Project | c.ProjectView, audience: Any, kind: str, tool: str = "", *,
-             close: Callable[[str], bool] | None = None, acting: bool = True) -> c.ProjectAccess | None:
-    """La ligne qui décide pour qui est en face, dans cette sorte d'épisode (``close`` : qui est proche d'elle) ;
-    ``tool`` : pour un outil d'une de ses apps, la première qui le concerne aussi. ``None`` : jamais ici (personne ;
-    pour agir, un salon ou une inconnue non plus)."""
+def allowance(p: Project | c.ProjectView, audience: Any, kind: str, tool: str = "", *,
+              rights: Rights | None = None, close: Callable[[str], bool] | None = None) -> ProjectAllowance | None:
+    """Ce que ce projet laisse à qui est en face, dans cette sorte d'épisode (``rights`` : les tableaux réglés ;
+    ``close`` : qui est proche d'elle) ; ``tool`` : pour un outil d'une de ses apps, la première ligne qui le concerne
+    aussi. ``None`` : personne en face, hors du travail."""
     rows, default = lines(p)
     concerns = (lambda a: not a.tools or tool in a.tools) if tool else None
-    return first(rows, default, audience, kind, concerns, close=close, acting=acting)
+    return project_allowance(rows, default, audience, kind, rights or Rights(), concerns, close=close)
 
 
-def sees(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[str], bool] | None = None) -> bool:
+def of_frame(frame: Frame | None) -> tuple[Rights, Callable[[str], bool] | None]:
+    """Ce que la règle lit de ce qu'elle vit : ses tableaux et qui est proche d'elle ; rien sans vie à lire."""
+    if frame is None:
+        return Rights(), None
+    return rights_of(frame.env), closeness_of(frame.env, frame)
+
+
+def sees(p: Project | c.ProjectView, audience: Any, kind: str, frame: Frame | None = None) -> bool:
     """Peut-elle en parler à qui est en face ? Sa confidentialité filtre encore ce qu'elle en dit. Dans un salon ou
-    devant une inconnue, seules « tout le monde » et la ligne par défaut le disent : en parler n'est pas agir — rien ne
-    s'y pilote ni ne s'y sert de ses apps."""
-    line = line_for(p, audience, kind, close=close, acting=False)
-    return line is not None and line.see
+    devant une inconnue, seules « tout le monde » et la ligne par défaut le disent : en parler n'est pas agir."""
+    rights, close = of_frame(frame)
+    got = allowance(p, audience, kind, rights=rights, close=close)
+    return got is not None and got.see
 
 
-def reads(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[str], bool] | None = None) -> bool:
+def reads(p: Project | c.ProjectView, audience: Any, kind: str, frame: Frame | None = None) -> bool:
     """Peut-elle lui en dire le détail (son dernier compte rendu, ce qui vient) ? Le voir, et le piloter au moins en
-    lecture seule ; lire n'est pas agir (un salon, une inconnue : comme le voir). Sa confidentialité filtre encore."""
-    line = line_for(p, audience, kind, close=close, acting=False)
-    return line is not None and line.see and line.steer != c.STEER_NO
+    lecture seule. Sa confidentialité filtre encore."""
+    rights, close = of_frame(frame)
+    got = allowance(p, audience, kind, rights=rights, close=close)
+    return got is not None and got.reads
 
 
-def steering(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[str], bool] | None = None) -> str:
+def steering(p: Project | c.ProjectView, audience: Any, kind: str, frame: Frame | None = None) -> str:
     """Ce que qui est en face peut faire de ce projet en le pilotant (``STEERS``) — jamais sans le voir, ni y changer
     quoi que ce soit dans un salon ou devant une inconnue. Toi en face, l'accord du propriétaire, c'est le tien : ta
     demande s'applique aussitôt."""
-    line = line_for(p, audience, kind, close=close)
-    level = line.steer if line is not None and line.see else c.STEER_NO
-    return c.STEER_EDIT if level == c.STEER_ASK and situation(audience) == OWNER else level
+    rights, close = of_frame(frame)
+    got = allowance(p, audience, kind, rights=rights, close=close)
+    level = got.steer if got is not None else c.STEER_NO
+    return c.STEER_EDIT if level == c.STEER_ASK and situation(audience) == AT_OWNER else level
+
+
+def shares_files(p: Project | c.ProjectView, audience: Any, kind: str, frame: Frame | None = None) -> bool:
+    """Peut-elle lui envoyer les fichiers de ce projet ? Sa colonne « fichiers », jamais dans un salon ni à une
+    inconnue."""
+    rights, close = of_frame(frame)
+    got = allowance(p, audience, kind, rights=rights, close=close)
+    return got is not None and got.files
 
 
 def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:
@@ -68,5 +86,3 @@ def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:
         return str(getattr(view, "name", "") or person)
 
     return who_words(who, name)
-
-

@@ -17,11 +17,12 @@ from __future__ import annotations
 import asyncio
 import itertools
 from dataclasses import replace
+from types import SimpleNamespace as NS
 
 from mika.app.mindport import KernelPort
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects.access import line_for, reads, sees, steering
+from mika.faculties.projects.access import allowance, reads, sees, steering
 from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, PAUSED
 from mika.faculties.projects.prompt import _live_section
 from mika.faculties.projects.tools import SteerArgs, may_steer, project_steer
@@ -34,8 +35,10 @@ from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.mika import connect
 from tests.unit.test_projects import create, events, live
 
-FIELDS = ["ligne", "qui", "toujours", "moments", "voir", "piloter", "lecture", "action", "tous", "prend", "defaut_voir",
-          "defaut_piloter", "defaut_lecture", "defaut_action", "faire"]
+FIELDS = ["ligne", "qui", "canal", "toujours", "moments", "voir", "piloter", "fichiers", "lecture", "action", "tous",
+          "prend", "defaut_voir", "defaut_piloter", "defaut_fichiers", "defaut_lecture", "defaut_action", "faire"]
+#: ce qu'elle vit, réduit à qui lui est proche (user_3) : la règle lit ses tableaux et ce lien par le cadre
+NEAR = NS(env=NS(closeness=lambda frame: {"user_3"}.__contains__, access_tables=None), episode=None, audience=None)
 
 
 def access_form(*rows: dict, faire: str = "", **default: str) -> dict[str, list[str]]:
@@ -52,6 +55,8 @@ def access_form(*rows: dict, faire: str = "", **default: str) -> dict[str, list[
             data[f"toujours.{n}"] = ["on"]
         if r.get("see"):
             data[f"voir.{n}"] = ["on"]
+        if r.get("files"):
+            data[f"fichiers.{n}"] = ["on"]
         data[f"piloter.{n}"] = [r.get("steer", "non")]
         data[f"lecture.{n}"] = [r.get("read", "non")]
         data[f"action.{n}"] = [r.get("act", "non")]
@@ -103,9 +108,13 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
 
     pid, out = live(tmp_path, scenario)
     before = out["before"]
-    assert (before.access, before.default_access) == (c.UNSET, c.UNSET_DEFAULT)
+    # jamais réglé : toi et elle seule, tout ; la personne qui l'a confié (ici, toi aussi) le voit, le pilote sur
+    # ton accord et en reçoit les fichiers (ADR 0134)
+    confider = c.ProjectAccess(who=(PERSON + "user_1",), see=True, steer=c.STEER_ASK, files=True)
+    assert (before.access, before.default_access) == ((*c.UNSET, confider), c.UNSET_DEFAULT)
     owner, friend = facing("user_1", owner=True), facing("user_2")
     assert steering(before, owner, Kind.REPLY) == "modification" and steering(before, friend, Kind.REPLY) == "lecture"
+    assert allowance(before, owner, Kind.REPLY).files and not allowance(before, friend, Kind.REPLY).files
     assert sees(before, friend, Kind.REPLY) and reads(before, friend, Kind.REPLY)  # sa confidentialité filtre
     # ajouter : une ligne fermée, enregistrée aussitôt
     assert out["added"].ok and "fermée" in out["added"].message
@@ -115,32 +124,34 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
     after = out["after"]
     assert out["saved"].ok and [a.who for a in after.access] == [(PERSON + "user_2",), (CLOSE,)]
     assert steering(after, friend, Kind.REPLY) == "modification"
-    near, user_3 = {"user_3"}.__contains__, facing("user_3")
-    assert steering(after, user_3, Kind.REPLY, near) == "non" and sees(after, user_3, Kind.REPLY, near)
+    user_3 = facing("user_3")
+    assert steering(after, user_3, Kind.REPLY, NEAR) == "non" and sees(after, user_3, Kind.REPLY, NEAR)
     assert not sees(after, user_3, Kind.REPLY)  # sans lien « proche » : la ligne par défaut, fermée
-    assert not sees(after, user_3, Kind.INITIATIVE, near)  # « quand elle répond » seulement
+    assert not sees(after, user_3, Kind.INITIATIVE, NEAR)  # « quand elle répond » seulement
     assert not sees(after, owner, Kind.REPLY)  # toi n'a plus de ligne : la ligne par défaut, fermée
-    # jamais dans un salon ni avec une inconnue, quelles que soient les lignes
-    assert line_for(after, facing("user_2", room="salon"), Kind.REPLY) is None
-    assert line_for(after, facing("web_x", trust=ChannelTrust.ACCOUNT.value), Kind.REPLY) is None
+    # dans un salon ou avec une inconnue, seule « tout le monde » désigne : ces lignes-là, non
+    assert not sees(after, facing("user_2", room="salon"), Kind.REPLY)
+    assert not sees(after, facing("web_x", trust=ChannelTrust.ACCOUNT.value), Kind.REPLY)
     # tout le monde : chacun en tête-à-tête ; le voir et le lire, aussi dans un salon ou avec une inconnue — y
-    # changer quelque chose, jamais
+    # changer quelque chose, jamais (le plafond : lecture seule au plus)
     everyone, room = out["everyone"], facing("user_2", room="salon")
     stranger = facing("web_x", trust=ChannelTrust.ACCOUNT.value)
     assert steering(everyone, user_3, Kind.REPLY) == steering(everyone, owner, Kind.REPLY) == "modification"
     assert sees(everyone, room, Kind.REPLY) and sees(everyone, stranger, Kind.REPLY)
     assert reads(everyone, room, Kind.REPLY) and reads(everyone, stranger, Kind.REPLY)
-    assert steering(everyone, room, Kind.REPLY) == steering(everyone, stranger, Kind.REPLY) == "non"
+    assert steering(everyone, room, Kind.REPLY) == steering(everyone, stranger, Kind.REPLY) == "lecture"
+    assert not allowance(everyone, room, Kind.REPLY).files and not allowance(everyone, stranger, Kind.REPLY).files
     # lecture seule : elle en dit le détail, rien ne s'y change ; aucun pilotage : le titre seulement ; l'accord du
     # propriétaire, toi en face, c'est le tien
     reader = replace(after, access=(c.ProjectAccess(who=(PERSON + "user_2",), see=True, steer="lecture"),
                                     c.ProjectAccess(who=(OWNER,), see=True, steer="accord"),
                                     c.ProjectAccess(who=(EVERYONE,), see=True)))
     assert reads(reader, friend, Kind.REPLY) and steering(reader, friend, Kind.REPLY) == "lecture"
+    assert not allowance(reader, friend, Kind.REPLY).files and allowance(reader, owner, Kind.REPLY).why
     assert sees(reader, user_3, Kind.REPLY) and not reads(reader, user_3, Kind.REPLY)
     assert steering(reader, owner, Kind.REPLY) == "modification"
     # une ligne illisible : refusée, rien n'est écrit
-    assert not out["refused"].ok and "Ligne 1 : coche qui." in out["refused"].message
+    assert not out["refused"].ok and "Ligne 1 : source inconnue" in out["refused"].message
     assert not out["no_moment"].ok and "coche au moins un moment" in out["no_moment"].message
 
 

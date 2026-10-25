@@ -135,7 +135,7 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
 
 
-@PROJECTS.tool("ws_write", description=phrase("projects.workshop.write"), args=WriteArgs, bundle=BUNDLE,
+@PROJECTS.tool("ws_write", acts=True, description=phrase("projects.workshop.write"), args=WriteArgs, bundle=BUNDLE,
                episodes=RUNS)
 async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
@@ -149,7 +149,7 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     return wrap_up(ctx, phrase("projects.workshop.written", path=rel, size=len(args.content)))
 
 
-@PROJECTS.tool("ws_edit", description=phrase("projects.workshop.edit"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_edit", acts=True, description=phrase("projects.workshop.edit"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -173,7 +173,7 @@ def program_time_left(ctx: Any) -> float:
     return max(0.0, (run.started + pm.run_programs_us - ctx.frame.now) / 1_000_000)
 
 
-@PROJECTS.tool("ws_run", description=phrase("projects.workshop.run"), args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
+@PROJECTS.tool("ws_run", acts=True, description=phrase("projects.workshop.run"), args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
 async def ws_run(args: RunArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -224,7 +224,7 @@ def _already(frame: Any, p: Project, argv: list[str]) -> bool:
     return False
 
 
-@PROJECTS.tool("ws_network", description=phrase("projects.workshop.network"), args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
+@PROJECTS.tool("ws_network", acts=True, description=phrase("projects.workshop.network"), args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
                max_calls_per_episode=2)
 async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     got = current(ctx)
@@ -246,7 +246,7 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     return wrap_up(ctx, phrase("projects.workshop.proposed"))
 
 
-@PROJECTS.tool("project_push", description=phrase("projects.workshop.push"), args=PushArgs, bundle=BUNDLE,
+@PROJECTS.tool("project_push", acts=True, description=phrase("projects.workshop.push"), args=PushArgs, bundle=BUNDLE,
                episodes=RUNS, max_calls_per_episode=1)
 async def project_push(args: PushArgs, ctx: Any) -> Any:
     got = current(ctx)

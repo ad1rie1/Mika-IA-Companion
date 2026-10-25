@@ -30,13 +30,13 @@ from mika.inspector.ui import UI, env
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Pager
 from mika.kernel.rights import Grant
-from mika.runtime.tools import ASK, HAND, OFF
+from mika.runtime.tools import ASK, HAND
 from mika.vocab.access import ALONE, CARD, MOMENTS, NO, OWNER_OK, POLICY_WORDS
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 
 #: ce qu'une règle d'outil fait, en mots (ADR 0122)
-RULE_WORDS = {OFF: "retiré", HAND: "en main", ASK: "à chercher"}
+RULE_WORDS = {HAND: "en main", ASK: "à chercher"}
 #: le ton d'une réponse dans la grille : elle le fait (on), en partie (part), en demandant (ask), jamais (off) ; une
 #: autre (ce qu'elle en garde) reste neutre. « oui » et « — » : le voir d'un projet, ce que garde un outil fermé.
 TONES = {POLICY_WORDS[ALONE]: "on", POLICY_WORDS[CARD]: "ask", POLICY_WORDS[OWNER_OK]: "ask", POLICY_WORDS[NO]: "off",
@@ -56,9 +56,9 @@ FIXED = (
 
 
 def fixed_tools(ui: UI) -> dict[str, Any]:
-    """Ce que le code fixe, lu des outils mêmes, jamais une recopie : ceux qu'il réserve à sa propriétaire
-    (``owner_only`` — toi en privé, ou elle qui travaille pour toi, ``vocab.access.owner_here``), par famille ; ceux
-    qu'une condition garde (``when``), regroupés par sa phrase."""
+    """Ce que le code déclare, lu des outils mêmes, jamais une recopie : ceux dont le minimum vital est à toi et elle
+    seule (``owner_only`` — une ligne de leur famille peut l'ouvrir, ADR 0134), par famille ; ceux qu'une condition
+    garde (``when``), regroupés par sa phrase."""
     reserved: dict[str, list[str]] = {}
     guarded: dict[str, list[str]] = {}
     for spec in sorted(ui.kernel.registry.tools.values(), key=lambda t: t.name):
@@ -82,8 +82,8 @@ class Face:
     hint: str
 
 
-def _facing(key: str, person: str = "", *, owner: bool = False) -> Audience:
-    return Audience(persons=(f"droits:{key}",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
+def _facing(key: str, person: str = "", *, owner: bool = False, channel: str = "web") -> Audience:
+    return Audience(persons=(f"droits:{key}",), channel=channel, public=False, trust=ChannelTrust.AUTHENTICATED.value,
                     owner=owner, person=person)
 
 
@@ -95,16 +95,19 @@ def faces(ui: UI) -> list[Face]:
     """Les audiences types : toi (quand elle te répond, quand elle prend la parole), chaque personne qui a un compte
     (son lien tel qu'il est), un autre compte, une inconnue, un salon, et quand elle travaille seule."""
     replying, speaking = dict(MOMENTS)["conversation"], dict(MOMENTS)["initiative"]
-    out = [Face("toi", "Toi, quand elle te répond", _facing("toi", owner=True), Kind.REPLY, "Toi", replying),
+    out = [Face("toi", "Toi, par le chat web, quand elle te répond", _facing("toi", owner=True), Kind.REPLY, "Toi",
+                "chat web · " + replying),
+           Face("toi-mobile", "Toi, par l'app Android, quand elle te répond",
+                _facing("toi", owner=True, channel="mobile"), Kind.REPLY, "Toi", "app Android · " + replying),
            Face("toi-parle", "Toi, quand elle te parle d'elle-même", _facing("toi", owner=True), Kind.INITIATIVE,
                 "Toi", speaking)]
     out += [Face(f"p:{x['key']}", x["name"], _facing(x["key"], x["key"]), Kind.REPLY, x["name"], replying)
             for x in people_with_accounts(ui)]
     out.append(Face("comptes", "Un autre compte, quand elle lui répond", _facing("compte"), Kind.REPLY,
                     "Un autre compte", replying))
-    out.append(Face("inconnue", "Une inconnue (un moyen de communication sans compte)",
+    out.append(Face("inconnue", "Une inconnue, par Internet (un moyen de communication que rien ne prouve)",
                     Audience(persons=("droits:inconnue",), channel="external", public=False,
-                             trust=ChannelTrust.ACCOUNT.value), Kind.REPLY, "Une inconnue", "sans compte"))
+                             trust=ChannelTrust.ACCOUNT.value), Kind.REPLY, "Une inconnue", "Internet · non reconnue"))
     out.append(Face("salon", "Un salon, devant plusieurs personnes",
                     Audience(persons=("droits:salon",), channel="web", room="salon", public=True,
                              trust=ChannelTrust.PUBLIC.value), Kind.REPLY, "Un salon", "plusieurs personnes"))
@@ -187,12 +190,7 @@ def page(ui: UI, items: Sequence[Any], query: Mapping[str, str]) -> Markup:
                            "floors": t.floors, "note": t.note, "href": _href(t.href),
                            "pager": _one_page(len(t.rows) + 1)} for t in found]}
               for spec, found in rights.tables(ui) if found]
-    ruled = []
-    for s in catalog.situations(ui):
-        got = catalog.rules(ui, s)
-        if got:
-            ruled.append({"label": s.label, "rules": sorted((tool, RULE_WORDS.get(rule, rule))
-                                                            for tool, rule in got.items())})
+    ruled: list[dict[str, Any]] = []
     kinds = grid(ui, all_faces)
     return Markup(env.get_template("handmade/droits/page.html").render(
         faces=[{"key": f.key, "label": f.label, "short": f.short, "hint": f.hint, "on": f is chosen}

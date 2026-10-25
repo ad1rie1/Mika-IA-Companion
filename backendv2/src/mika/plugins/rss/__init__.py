@@ -84,12 +84,12 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.feeds import feed_name, tokenless
 from mika.ports.preprocess import cite, inert
-from mika.vocab.access import owner_here
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.interests import NOTICE_WEIGHT, matches, pertinence, topic_words
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.rights import here_allowed
 from mika.vocab.words import fold
 
 KEEP = 50
@@ -497,7 +497,7 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 def _may_read(frame: Frame) -> bool:
     """Lire va sur le réseau : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
     ADR 0133) — toi en privé, ou elle qui travaille (un projet ou un réveil seulement s'il a pris ses flux)."""
-    return owner_here(frame, BUNDLE)
+    return here_allowed(frame, BUNDLE, "rss_read")
 
 
 #: la console ne relit pas plus que ceci du cache des flux (filtres, pages)

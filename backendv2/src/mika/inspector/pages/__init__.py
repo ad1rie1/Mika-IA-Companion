@@ -4,7 +4,9 @@ bord, décisions, approbations, configuration, système) et ses routes."""
 from mika.inspector.pages import (  # noqa: F401 — enregistrement
     accounts,
     approvals,
+    canals,
     decisions,
+    families,
     home,
     reglages,
     rights,

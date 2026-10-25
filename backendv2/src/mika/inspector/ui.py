@@ -84,6 +84,8 @@ class InspectorDeps:
     calls: Any = None
     #: après une décision d'approbation (rafraîchit les panneaux du frontend)
     after_decision: Callable[[], Awaitable[Any]] | None = None
+    #: rejournalise les paramètres des facultés après un réglage qu'ils lisent (les tableaux des canaux, ADR 0134)
+    reconfigure: Callable[[], Awaitable[Any]] | None = None
     #: les rapports de simulation (``mika sim run --report``)
     reports: Path | None = None
     #: la carte de la console (``app/console.py``)

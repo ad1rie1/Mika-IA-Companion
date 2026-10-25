@@ -142,9 +142,12 @@ def live(tmp_path, box: FakeMail, model, scenario, *, inputs=None, overrides=Non
 
 
 def drafting(box: str, *never: str) -> dict:
-    """Ses règles d'envoi (ADR 0132) : elle prépare d'elle-même les réponses de cette boîte, jamais à ``never``."""
-    rules = [{"canal": f"courrier:{box}", "dest": d, "prepare": False} for d in never]
-    return {"rules": [*rules, {"canal": f"courrier:{box}", "prepare": True}]}
+    """Le tableau de cette boîte (ADR 0132, 0134) : elle prépare d'elle-même ses réponses, jamais à ``never`` ; rien ne
+    part sans ton accord."""
+    key = f"courrier:{box}"
+    lines = [{"who": [f"adresse:{d}"], "canal": [key], "prepare": False, "reply": "accord"} for d in never]
+    lines.append({"who": ["tous"], "canal": [key], "prepare": True, "reply": "accord"})
+    return {"tables": {key: {"lines": lines, "default": {}}}}
 
 
 def sleep(seconds_us: int):
@@ -190,7 +193,7 @@ def test_she_drafts_in_the_voice_of_the_box_and_only_what_you_read_leaves(tmp_pa
         out["reply"] = [c for c in llm.calls if c.role == "reply"][-1]
         return out
 
-    out = live(tmp_path, box, Model(), scenario, inputs={"email": {"sending": drafting("perso")}})
+    out = live(tmp_path, box, Model(), scenario, inputs={"email": {"canaux": drafting("perso")}})
     # une tâche silencieuse, dans la voix de la boîte ; le mail cité, les consignes de confiance
     task = prompt_text(out["tasks"][0])
     assert "à la place** de Adrien Dupont" in task and "Ne jamais promettre de date ferme." in task
@@ -246,7 +249,7 @@ def test_she_prepares_replies_only_where_allowed_and_never_endlessly(tmp_path):
         return [e.data.target for e in starts], kernel.mind.frame().state("email")
 
     targets, state = live(tmp_path, box, Model(draft_in_tasks=False), scenario,
-                          inputs={"email": {"sending": drafting("perso", "@shop.fr")}},
+                          inputs={"email": {"canaux": drafting("perso", "@shop.fr")}},
                           overrides={"email": {"drafts_per_day": 1}})
     mails = {t.rsplit(":", 1)[-1] for t in targets}
     assert mails <= {"<m1@exemple.fr>", "<m5@exemple.fr>"}  # ni la boîte pro, ni la masse, ni une adresse exclue
@@ -266,9 +269,10 @@ def test_a_box_you_turned_off_gets_no_reply_prepared(tmp_path):
         await sleep(8 * HOUR)
         return [e.data.target for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
 
-    everywhere = {"rules": [{"canal": "courrier", "prepare": True}]}
+    everywhere = {"tables": {"courrier": {"lines": [{"who": ["tous"], "canal": ["courrier"], "prepare": True,
+                                                     "reply": "accord"}], "default": {}}}}
     targets = live(tmp_path, box, Model(draft_in_tasks=False), scenario,
-                   inputs={"email": {"sending": everywhere, "boxes_off": ["pro"]}})
+                   inputs={"email": {"canaux": everywhere, "boxes_off": ["pro"]}})
     assert targets and all(t.endswith("<m1@exemple.fr>") for t in targets)
 
 
@@ -385,7 +389,7 @@ def test_a_faculty_decides_only_its_own_proposals_and_what_changed_is_reread(tmp
                 await port.resolve_effect(mine.seq, True, by="user_1", seen=box.preview(draft.id).digest))
 
     foreign, stale, fresh = live(tmp_path, box, Model(bodies=("Oui pour jeudi.",)), scenario,
-                                 inputs={"email": {"sending": drafting("perso")}})
+                                 inputs={"email": {"canaux": drafting("perso")}})
     assert foreign.status == decisions.UNKNOWN and foreign.draft is None
     assert stale == decisions.CHANGED and fresh == decisions.APPROVED
 
@@ -416,7 +420,7 @@ def test_the_draft_actions_are_placed_on_the_fiche_with_what_was_read(tmp_path):
         return draft, view(kernel, "brouillon", subject=draft.id), view(kernel, "brouillons")
 
     draft, fiche, listing = live(tmp_path, box, Model(bodies=("Oui pour jeudi.",)), scenario,
-                                 inputs={"email": {"sending": drafting("perso")}})
+                                 inputs={"email": {"canaux": drafting("perso")}})
     slots = {s.action: dict(s.initial) for s in walk(fiche) if isinstance(s, ActionSlot)}
     assert slots["email.envoyer_brouillon"]["seen"] == box.preview(draft.id).digest
     assert slots["email.retoucher"]["body"] == "Oui pour jeudi." and "email.refuser_brouillon" in slots

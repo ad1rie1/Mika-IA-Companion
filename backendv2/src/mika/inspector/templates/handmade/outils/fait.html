@@ -21,7 +21,7 @@
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
-    {% for p in ("ligne", "qui", "toujours", "moments", "lecture", "action", "garde", "tous", "prend", "defaut_lecture", "defaut_action", "defaut_garde", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("ligne", "qui", "canal", "toujours", "moments", "lecture", "action", "garde", "tous", "prend", "defaut_lecture", "defaut_action", "defaut_garde", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
     {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
     <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
     {% endif %}
@@ -37,7 +37,7 @@
         <table class="access-table">
           <thead>
             <tr>
-              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Quand</th>
+              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Par où</th><th scope="col">Quand</th>
               <th scope="col">Politique de lecture</th><th scope="col">Politique d'action</th>
               <th scope="col">Politique de mémorisation</th><th scope="col">Outils</th>
               {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
@@ -53,6 +53,14 @@
                   <summary>{{ r.who.said }}</summary>
                   <div class="access-tools-list">
                     {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }} data-word="{{ c.word }}"> {{ c.label }}</label>{% endfor %}
+                  </div>
+                </details>
+              </td>
+              <td>
+                <details class="access-tools access-canal" data-exclusive data-all="Tous" data-none="Aucun canal">
+                  <summary>{{ r.canal.said }}</summary>
+                  <div class="access-tools-list">
+                    {% for c in r.canal.boxes %}<label class="access-tool{{ ' all' if c.all }}{{ ' sub' if c.sub }}"><input type="checkbox" name="canal.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {% if c.all %}<b>{{ c.label }}</b><span>par tous les canaux</span>{% else %}{{ c.label }}{% endif %}</label>{% endfor %}
                   </div>
                 </details>
               </td>
@@ -92,7 +100,7 @@
             {% endfor %}
             <tr class="access-default">
               <td class="access-n"></td>
-              <th scope="row" colspan="2">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
+              <th scope="row" colspan="3">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
               <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, politique de lecture", locked) }}</td>
               <td>{{ pick("defaut_action", policies, default.act, "Par défaut, politique d'action", locked) }}</td>
               <td>{{ pick("defaut_garde", keeps, default.keep, "Par défaut, politique de mémorisation", locked) }}</td>

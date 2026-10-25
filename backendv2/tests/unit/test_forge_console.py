@@ -171,7 +171,7 @@ def test_an_app_is_an_object_with_a_head_a_search_and_its_tabs(tmp_path):
     assert head.badges == (Badge("active", "ok"),) and dict(head.facts)["version"] == 1
     assert got["inconnue"] is None and got["évasion"] is None
     assert [f.key for f in got["cherche"]] == ["meteo"] and {f.key for f in got["tout"]} == {"meteo", "veille"}
-    assert got["onglets"] == ["etat", "vues", "reglages", "code", "base", "journal", "vecu"]
+    assert got["onglets"] == ["etat", "vues", "reglages", "acces", "code", "base", "journal", "vecu"]
     for name, blocks in got["rendus"].items():
         assert blocks and not [n for n in of(blocks, Note) if n.tone == "danger"], name
     assert "Carnet météo" in repr(got["rendus"]["etat"]) and of(got["rendus"]["code"], Code)

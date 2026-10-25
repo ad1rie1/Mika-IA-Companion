@@ -1,0 +1,22 @@
+{# Réglages › Canaux (inspector/pages/canals.py, ADR 0134) : par où ça lui arrive, et ce que chaque canal laisse
+   passer au plus — un tableau par canal, replié sauf celui qu'on regarde ; sur tes comptes, préparer d'elle-même et
+   comment ça part. Un canal qu'on n'a pas réglé montre son minimum vital. #}
+{% from "handmade/droits/tableau.html" import tableau %}
+<div class="now-page service">
+  <section class="now-card access-legend" aria-labelledby="canals-title">
+    <h2 id="canals-title">Par où ça lui arrive</h2>
+    <p>Une demande passe <b>deux portes</b> : le tableau du canal par où elle arrive, puis celui de la ressource qu'elle touche (un service, une app, un projet, une famille de ses outils). La plus stricte gagne. Un canal est un type — ou une instance, pour une exception (une boîte, le chat web en salon, un réseau) : l'instance réglée passe avant son type.</p>
+    <dl>
+      <div><dt>Ce qui est reconnu</dt><dd>Une session du chat web, le jeton de l'app Android, ou un moyen de communication qu'un opérateur a relié à la personne (une adresse mail aussi : permis, signalé — une adresse s'usurpe). Non reconnu : une inconnue, que seule « Tout le monde » désigne ; dans un salon, personne n'est reconnu, même toi.</dd></div>
+      <div><dt>Tes comptes</dt><dd>Le courrier et Teams : elle écrit à ta place. « Qui » y est tout le monde, ou une adresse, un @domaine (le courrier), un morceau du nom d'une conversation ou de qui écrit (Teams) — à cocher comme « Une adresse… ».</dd></div>
+      <div><dt>Elle seule</dt><dd>Personne en face : une exécution de projet, un pas, une tâche. Son tableau n'a ni « qui » ni « quand ».</dd></div>
+    </dl>
+  </section>
+  {% for c in canals %}
+  <details class="now-card access-canal-entry"{{ ' open' if c.open }} id="c-{{ c.key | replace(':', '-') }}">
+    <summary><b>{{ c.label }}</b>{% if c.instance %} <span class="now-tag muted">exception</span>{% endif %}{% if c.set %} <span class="now-tag info">réglé</span>{% else %} <span class="now-tag muted">minimum vital</span>{% endif %}{% if c.below %} <span class="now-tag warn">⚠ en dessous du minimum vital</span>{% endif %}
+      <span class="now-muted"> — {{ c.table.lines | length }} ligne{{ 's' if c.table.lines | length > 1 }}{% if c.words %} : {{ c.words[0] }}{% if c.words | length > 1 %}, …{% endif %}{% endif %}</span></summary>
+    {{ tableau(c.t, locked) }}
+  </details>
+  {% endfor %}
+</div>

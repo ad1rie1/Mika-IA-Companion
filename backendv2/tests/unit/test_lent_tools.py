@@ -19,8 +19,11 @@ from mika.app import lending as lending_mod
 from mika.app.lending import Lending
 from mika.contracts import goals as goals_c
 from mika.inspector.mcp import ConsoleHost
+from mika.kernel.rights import Rights
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
+from mika.vocab.access import ALONE, INTERNAL, OWNER, Table, ToolRule
+from mika.vocab.canals import Canals
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, boot, build, connect
 
@@ -137,8 +140,8 @@ def test_the_door_of_a_point(tmp_path, monkeypatch):
 
 
 def test_a_point_lends_nothing_her_operator_took_away_in_conversation(tmp_path):
-    """2026-10-25 : un outil retiré par une règle d'outil, en tête-à-tête avec sa propriétaire, restait prêtable
-    (ADR 0122, 0133 : un point agit avec ses droits à elle, ses règles comprises)."""
+    """2026-10-25 : un outil fermé par le tableau de sa famille, en tête-à-tête avec sa propriétaire, restait prêtable
+    (ADR 0122, 0133, 0134 : un point agit avec ses droits à elle, ses tableaux compris)."""
     kernel, clock, _, _ = _kernel(tmp_path)
     lending = Lending(kernel, lambda: {})
 
@@ -147,7 +150,10 @@ def test_a_point_lends_nothing_her_operator_took_away_in_conversation(tmp_path):
         try:
             await connect(kernel, "user_1", "Adrien", operator=True)
             before = set(lending.candidates("user_1"))
-            kernel.runner.tool_rules = lambda situation: {"goal_remind": "off"} if situation == "proprietaire" else {}
+            closed = (ToolRule(who=(OWNER,), tools=("goal_remind",)), ToolRule(who=(OWNER,), read=ALONE, act=ALONE),
+                      ToolRule(canal=(INTERNAL,), read=ALONE, act=ALONE))
+            kernel.mind.registry.access_tables = lambda: Rights(
+                canals=Canals(), families={"goals": Table[ToolRule](lines=closed, default=ToolRule())})
             return before, set(lending.candidates("user_1"))
         finally:
             await kernel.stop()

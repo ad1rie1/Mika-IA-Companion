@@ -40,6 +40,7 @@ from mika.plugins.teams import (
 )
 from mika.ports.preprocess import inert
 from mika.ports.teams import Voice
+from mika.vocab.canals import teams_rule
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.privacy import Sensitivity
 
@@ -186,7 +187,8 @@ def _voice(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         return None
     p = params_of(frame)
     seen = s.messages.get(task) if task else None
-    mode = mode_of(p, s, task, seen.conversation) if seen is not None else MODE_OF.get(p.sending.default.send, "")
+    mode = mode_of(p, s, task, seen.conversation) if seen is not None else MODE_OF.get(
+        teams_rule(p.canaux, "", "").reply, "")
     return SectionBody(voice_text(voice, mode))
 
 

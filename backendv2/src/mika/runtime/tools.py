@@ -43,14 +43,15 @@ from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, combine
+from mika.kernel.rights import Rights
 from mika.kernel.schema import problems as schema_problems
 from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
 from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
-from mika.vocab.episodes import Kind
+from mika.vocab.access import NO
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import ChannelTrust
+from mika.vocab.rights import closeness_of, family_table, rights_of, tool_allowance
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Commit, Mind
@@ -212,73 +213,77 @@ class LoopResult:
         return list(dict.fromkeys(cid for cid, _ in self.exchanges))
 
 
-#: ce qu'un opérateur décide d'un outil dans une situation (ADR 0122) : le retirer, le mettre en main, le laisser à
-#: la demande. Il ne fait que restreindre : un outil que la porte n'offre pas ne s'offre pas par une règle, et un
-#: outil qui clôt la boucle (``ends_loop`` : rendre compte d'un pas) ne se règle pas.
-OFF, HAND, ASK = "off", "hand", "ask"
-RULES = (OFF, HAND, ASK)
-#: les situations où une règle s'applique (les mêmes que la console : « qui reçoit quoi »)
-SITUATIONS = ("proprietaire", "compte", "inconnue", "salon", "initiative", "pas", "projet", "tache")
+#: l'offre réglée d'un outil (ADR 0122, 0134) : en main (dans son prompt), ou à chercher quand il lui faut — un
+#: réglage de l'outil, plus une grille par situation ; un outil qui clôt la boucle (``ends_loop`` : rendre compte
+#: d'un pas) ne se règle pas
+HAND, ASK = "hand", "ask"
+RULES = (HAND, ASK)
 
 
-def situation_of(kind: str, audience: Audience) -> str | None:
-    """La situation d'un épisode, pour ses règles d'outils : à qui elle répond (sa propriétaire, une personne qui a
-    un compte, une inconnue, un salon), quand elle prend la parole, quand personne n'écoute (un pas sur un but, une
-    exécution de projet, une tâche). ``None`` : une sorte d'épisode qu'aucune règle ne touche (un réveil, un
-    murmure)."""
-    if kind == Kind.REPLY:
-        if audience.public:
-            return "salon"
-        if audience.owner:
-            return "proprietaire"
-        return "compte" if audience.trust == ChannelTrust.AUTHENTICATED.value else "inconnue"
-    return {Kind.INITIATIVE: "initiative", Kind.STEP: "pas", Kind.WORK: "projet", Kind.JOB: "projet",
-            Kind.TASK: "tache"}.get(kind)
+def rule_of(spec: ToolSpec, rights: Rights | None) -> str | None:
+    """L'offre réglée de cet outil, s'il y en a une qui compte (aucune sur un outil qui clôt la boucle)."""
+    return None if rights is None or spec.ends_loop else rights.in_hand.get(spec.name)
 
 
-def rule_of(spec: ToolSpec, rules: Mapping[str, str] | None) -> str | None:
-    """La règle d'un opérateur pour cet outil, s'il y en a une qui compte (aucune sur un outil qui clôt la boucle)."""
-    return None if rules is None or spec.ends_loop else rules.get(spec.name)
-
-
-def deferred(spec: ToolSpec, core: frozenset[str] | None, rules: Mapping[str, str] | None = None) -> bool:
-    """Cet outil offert est-il à la demande ? Pas quand tout est en main (``core`` vide de sens : ``None``) ; sinon la
-    règle de l'opérateur s'il y en a une, et à défaut son lot ou l'outil lui-même (``in_hand``)."""
+def deferred(spec: ToolSpec, core: frozenset[str] | None, rights: Rights | None = None) -> bool:
+    """Cet outil offert est-il à la demande ? Pas quand tout est en main (``core`` vide de sens : ``None``) ; sinon
+    son offre réglée s'il y en a une, et à défaut son lot ou l'outil lui-même (``in_hand``)."""
     if core is None:
         return False
-    rule = rule_of(spec, rules)
+    rule = rule_of(spec, rights)
     if rule in (HAND, ASK):
         return rule == ASK
     return spec.bundle not in core and not spec.in_hand
 
 
-def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audience: Audience,
-          only: Any = None, rules: Mapping[str, str] | None = None, frame: Any = None) -> dict[str, ToolSpec]:
-    """Les outils offerts : les lots de la politique — restreints, quand le
-    candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
-    lot est offert entier ou pas du tout, moins les outils réservés à ses
-    propriétaires quand quelqu'un d'autre écoute (``owner_only``), et moins ceux
-    qu'un opérateur a retirés dans cette situation (``rules`` : ``OFF``).
+def gate_of(registry: Any, frame: Any = None) -> tuple[Rights, Callable[[str], bool] | None]:
+    """Ce que la porte lit du registre (ADR 0134) : les tableaux réglés (``access_tables``) et qui est proche
+    d'elle, devant ce qu'elle vit (``closeness``)."""
+    return rights_of(registry), closeness_of(registry, frame)
 
-    La seule porte : le pipeline l'applique à chaque épisode, la console à des
-    audiences de synthèse (« qui reçoit quoi ») — jamais une recopie. ``frame`` :
-    ce qu'elle vit, pour une condition qui lit son journal (``fits``, ADR 0133)."""
+
+def family_of(tools: Mapping[str, ToolSpec], rights: Rights, bundle: str) -> tuple[tuple[Any, ...], Any]:
+    """Le tableau d'une famille de ses propres outils : réglé, sinon le minimum vital que ses outils déclarent."""
+    return family_table(rights, bundle, [s for s in tools.values() if s.bundle == bundle])
+
+
+def allowed(tools: Mapping[str, ToolSpec], spec: ToolSpec, audience: Audience, kind: str, rights: Rights,
+            close: Callable[[str], bool] | None = None) -> Any:
+    """Ce que les deux portes laissent de cet outil de ses familles (``vocab.rights.tool_allowance``) ; ``None`` hors
+    de toute situation."""
+    lines, default = family_of(tools, rights, spec.bundle)
+    return tool_allowance(lines, default, audience, kind, spec.acts, rights, lambda r: r.concerns(spec.name),
+                          close=close, outside=spec.outside)
+
+
+def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audience: Audience,
+          only: Any = None, frame: Any = None, rights: Rights | None = None,
+          close: Callable[[str], bool] | None = None) -> dict[str, ToolSpec]:
+    """Les outils offerts : les lots de la politique — restreints, quand le candidat le dit (``bundles`` :
+    « goals,workshop »), à ceux-là seuls. Un lot est offert entier ou pas du tout, moins ce que ses droits ferment
+    (ADR 0134) : pour un outil venu d'ailleurs, sa condition (``fits`` : les lignes de son service, de son projet) ;
+    pour un des siens, le tableau de sa famille, serré par celui du canal et par le plafond de qui est en face.
+
+    La seule porte : le pipeline l'applique à chaque épisode, la console à des audiences de synthèse (« qui reçoit
+    quoi ») — jamais une recopie. ``frame`` : ce qu'elle vit, pour une condition qui lit son journal ; ``rights``
+    et ``close`` : ce que ``gate_of`` lit du registre."""
     bundles = policy.tool_bundles
     if only:
         bundles = frozenset(b for b in (x.strip() for x in str(only).split(",")) if b and admitted(policy.tool_bundles, b))
+    rights = rights if rights is not None else Rights()
     out = {}
     for name, spec in tools.items():
         if kind not in spec.episodes or not admitted(bundles, spec.bundle):
             continue
-        if rule_of(spec, rules) == OFF:
-            continue
-        if spec.owner_only and not audience.owner:
-            continue
         if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:
             continue
-        if spec.fits is not None and boundary.call(spec.fits, audience, kind, frame,
-                                                   label=f"offre de {name}") is not True:
-            continue
+        if spec.fits is not None:
+            if boundary.call(spec.fits, audience, kind, frame, label=f"offre de {name}") is not True:
+                continue
+        else:
+            got = allowed(tools, spec, audience, kind, rights, close)
+            if got is None or got.level == NO:
+                continue
         out[name] = spec
     return out
 
@@ -303,13 +308,13 @@ def defers_tools(gateway: Any, role: str) -> bool:
 
 
 def declare(specs: Sequence[ToolSpec], core: frozenset[str] | None = None,
-            rules: Mapping[str, str] | None = None) -> tuple[ToolDecl, ...]:
+            rights: Rights | None = None) -> tuple[ToolDecl, ...]:
     """Déclarations triées par nom : un préfixe stable pour le cache. Un outil
     dont le lot n'est pas « en main » (``core``) est déclaré à la demande, sauf
     règle d'un opérateur (``deferred``)."""
     return tuple(
         ToolDecl(s.name, s.description, dict(s.schema) if s.schema is not None else s.args.model_json_schema(),
-                 deferred=deferred(s, core, rules))
+                 deferred=deferred(s, core, rights))
         for s in sorted(specs, key=lambda s: s.name)
     )
 
@@ -377,7 +382,7 @@ ENDED_BY_TOOL = "tool_end"
 
 
 def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str],
-              rules: Mapping[str, str] | None = None) -> str:
+              rights: Rights | None = None) -> str:
     """Les lots offerts mais pas en main, une ligne chacun : ce qu'elle peut
     aller chercher. Vide quand tout est en main. Stable d'un tour à l'autre
     (trié), donc à sa place dans le préfixe en cache."""
@@ -385,7 +390,7 @@ def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described:
         return ""
     away: dict[str, list[str]] = {}
     for s in specs:
-        if deferred(s, core, rules):
+        if deferred(s, core, rights):
             away.setdefault(s.bundle, []).append(s.name)
     if not away:
         return ""

@@ -49,11 +49,11 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
-from mika.vocab.access import owner_here
+from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
-from mika.vocab.sending import Sending
+from mika.vocab.rights import here_allowed
 
 KEEP = 100
 BUNDLE = "email"
@@ -111,10 +111,10 @@ class EmailParams(BaseModel):
              "ou qui échoue compte comme un essai ; après autant d'essais, elle ne l'annonce plus d'elle-même (il "
              "reste dans ses mails). Une annonce devancée (on lui écrit pendant qu'elle compose), interrompue, ou "
              "dont elle s'est ravisée (« pas maintenant ») ne compte pas.")] = 2
-    sending: Annotated[Sending, Knob(
-        label="Ce qu'elle envoie à ta place", group="Envoyer", readonly=True,
-        help="Réglé dans Relations & échanges › Envoyer à ta place (ADR 0132) : des règles lues de haut en bas — "
-             "canal, destinataire, préparer d'elle-même, comment envoyer — puis la règle par défaut.")] = Sending()
+    canaux: Annotated[Canals, Knob(
+        label="Les tableaux de ses canaux", group="Envoyer", readonly=True,
+        help="Réglés dans Réglages › Canaux (ADR 0134) : chaque boîte a son tableau, lu de haut en bas — qui écrit, "
+             "préparer d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
     boxes_off: Annotated[tuple[str, ...], Knob(
         label="Boîtes décochées", group="Envoyer", readonly=True,
         help="Réglées dans Réglages › Plugins › Boîtes aux lettres : elle n'y prépare rien d'elle-même, quelles que "
@@ -444,7 +444,7 @@ def for_owner(frame: Frame) -> bool:
     """Sa boîte : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``, ADR 0133) —
     toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris sa boîte ;
     ses tâches à elle (un brouillon de réponse)."""
-    return owner_here(frame, BUNDLE, lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
+    return here_allowed(frame, BUNDLE, tasks=lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
 
 
 def keeper() -> str:

@@ -17,7 +17,7 @@ from urllib.parse import quote, urlencode
 from markupsafe import Markup
 
 from mika.adapters.mcp.system import BY as SYSTEM_BY
-from mika.app.handmade.access import people_with_accounts, who_choices
+from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
 from mika.inspector import render
 from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.subjects import fiche_url
@@ -41,7 +41,7 @@ from mika.plugins.mcp.console import (
     who_said,
 )
 from mika.ports.mcp import MOMENTS, PERSON, STATES
-from mika.runtime.tools import deferred
+from mika.runtime.tools import deferred, gate_of
 from mika.vocab.episodes import Kind
 
 KIND = "serveur"
@@ -101,17 +101,18 @@ def _where(ui: UI, st: Any) -> list[dict[str, Any]]:
         moment = catalog.MOMENTS.get(s.kind, catalog.ALONE)
         if not out or out[-1]["moment"] != moment:
             out.append({"moment": moment, "rows": []})
-        offered, ruled = catalog.offered_in(ui, s), catalog.rules(ui, s)
+        offered = catalog.offered_in(ui, s)
+        rights, _close = gate_of(ui.kernel.registry)
         got = [x for x in specs if x.name in offered]
         core = catalog.in_hand(ui, policies[s.kind])
         if got:
-            asked = sum(1 for x in got if deferred(x, core, ruled))
+            asked = sum(1 for x in got if deferred(x, core, rights))
             how = "" if core is None else "à chercher" if asked == len(got) else \
                 "sous la main" if not asked else f"{asked} à chercher"
             how = ", ".join(filter(None, (how, TAKEN.get(s.kind, ""))))
             row = {"yes": True, "said": f"{len(got)} outil{'s' if len(got) > 1 else ''}", "how": how}
         else:
-            why = catalog.why_not(specs[0], policies[s.kind], s, ruled) if specs else "aucun outil servi"
+            why = catalog.why_not(specs[0], policies[s.kind], s) if specs else "aucun outil servi"
             if specs and why == catalog.condition(specs[0]):
                 why = _refused(s.key)
             row = {"yes": False, "said": "non", "how": why}
@@ -341,14 +342,14 @@ class ServerOverview(Overview):
         d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, à quels outils —, puis le comportement par
         défaut, obligatoire. Chaque bouton envoie tout le tableau (rien de ce qu'on a changé ne se perd)."""
         frame = ui.kernel.mind.frame()
-        people = people_with_accounts(ui)
+        people, instances = people_with_accounts(ui), canal_instances(ui)
         known = list(dict.fromkeys([*(t.remote for t in st.live), *st.reviews]))
         rows = []
         for n, a in enumerate(st.access, start=1):
             chosen = set(a.tools)
             rows.append({
                 "n": n, "who": who_choices(a.who, people, lambda person: who_label((PERSON + person,), frame)),
-                "always": not a.when,
+                "canal": canal_choices(a.canal, instances), "always": not a.when,
                 "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
                 "read": a.read, "act": a.act, "keep": a.keep, "all": not a.tools,
                 "tools": [{"name": r, "nature": "lit" if _nature_of(st, r) == "lecture" else "agit",

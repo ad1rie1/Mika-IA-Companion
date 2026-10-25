@@ -23,12 +23,28 @@ bloqué, avec son mode — l'estime et l'attention ne réagissent qu'au mode
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Annotated
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.forms import Knob
 from mika.kernel.guards import workshop
+from mika.vocab.access import (
+    ALONE,
+    INTERNAL,
+    NO,
+    POLICIES,
+    STEER_EDIT,
+    STEER_NO,
+    STEER_READ,
+    STEERS,
+    Policy,
+    Rule,
+    Steer,
+)
+from mika.vocab.access import CHANGES as CHANGES
 from mika.vocab.access import OWNER as YOU
-from mika.vocab.access import WORK
+from mika.vocab.access import STEER_ASK as STEER_ASK
 from mika.vocab.privacy import Sensitivity
 
 OWNER = "projects"
@@ -70,40 +86,37 @@ NEED = "project_need"
 RUN_CAP = "run_cap"
 
 
-# ── qui peut quoi sur un projet et ses apps (ADR 0133) ──
+# ── qui peut quoi sur un projet et ses apps (ADR 0133, 0134) ──
 #: piloter un projet : en lecture seule (elle en dit le détail — son dernier compte rendu, ce qui vient — sans rien y
 #: changer) ; ses demandes (une consigne, un objectif, une pause, « vas-y maintenant ») sur l'accord du propriétaire, ou
 #: appliquées aussitôt (modification) ; ou aucun pilotage — jamais son cadre (titre, outils, accord), qui reste dans la
-#: console
-STEER_READ, STEER_ASK, STEER_EDIT, STEER_NO = "lecture", "accord", "modification", "non"
-STEERS = ((STEER_READ, "Lecture seule"), (STEER_ASK, "Accord du propriétaire"), (STEER_EDIT, "Modification"),
-          (STEER_NO, "Aucun pilotage"))
-#: ce qui laisse y changer quelque chose
-CHANGES = frozenset({STEER_ASK, STEER_EDIT})
+#: console (``vocab.access.STEERS``)
 
 
-class ProjectAccess(Payload):
-    """Une ligne d'accès à un projet (ADR 0133), lue de haut en bas comme celles d'un service (``vocab.access``) :
-    ses sources (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter
-    (``STEERS``), ce
-    qu'elle fait d'un outil de ses apps qui lit et d'un outil qui agit (``vocab.access.POLICIES``), et à quels outils
-    de ses apps ces deux colonnes s'appliquent (``<app>_<outil>`` ; vide : tous). Voir et piloter valent quelle que
-    soit la sélection d'outils."""
+class ProjectAccess(Rule):
+    """Une ligne d'accès à un projet (ADR 0133, 0134), dans le cadre commun (``vocab.access.Rule`` : qui, par où,
+    quand) : le voir (en entendre parler), le piloter (``STEERS``), ses fichiers (en recevoir), ce qu'elle fait d'un
+    outil de ses apps qui lit et d'un outil qui agit (``POLICIES``), et à quels outils de ses apps ces deux colonnes
+    s'appliquent (``<app>_<outil>`` ; vide : tous). Voir, piloter et fichiers valent quelle que soit la sélection
+    d'outils."""
 
-    who: tuple[str, ...] = ()
-    when: tuple[str, ...] = ()
-    see: bool = False
-    steer: str = STEER_NO
-    read: str = "non"
-    act: str = "non"
-    tools: tuple[str, ...] = ()
+    see: Annotated[bool, Knob(label="Le voir", advanced=False)] = False
+    steer: Annotated[Steer, Knob(label="Piloter projet", choices=STEERS, advanced=False)] = STEER_NO
+    files: Annotated[bool, Knob(label="Ses fichiers", advanced=False)] = False
+    read: Annotated[Policy, Knob(label="Apps : un outil qui lit", choices=POLICIES, advanced=False)] = NO
+    act: Annotated[Policy, Knob(label="Apps : un outil qui agit", choices=POLICIES, advanced=False)] = NO
+    tools: Annotated[tuple[str, ...], Knob(label="Ses outils", advanced=False)] = ()
+
+    def concerns(self, tool: str) -> bool:
+        return not self.tools or tool in self.tools
 
 
 #: la ligne par défaut fermée : personne d'autre ne le voit, ne le pilote ni ne se sert de ses apps
 CLOSED = ProjectAccess()
-#: un projet dont on n'a pas réglé les accès : toi (et elle quand elle y travaille), tout ; les autres l'entendent
-#: selon ce que permet sa confidentialité, en lecture seule, sans se servir de ses apps
-UNSET = (ProjectAccess(who=(YOU, WORK), see=True, steer=STEER_EDIT, read="seule", act="seule"),)
+#: un projet dont on n'a pas réglé les accès : toi, tout ; elle seule, tout ; les autres l'entendent selon ce que
+#: permet sa confidentialité, en lecture seule, sans fichier ni ses apps
+UNSET = (ProjectAccess(who=(YOU,), see=True, steer=STEER_EDIT, files=True, read=ALONE, act=ALONE),
+         ProjectAccess(canal=(INTERNAL,), see=True, steer=STEER_EDIT, files=True, read=ALONE, act=ALONE))
 UNSET_DEFAULT = ProjectAccess(see=True, steer=STEER_READ)
 
 

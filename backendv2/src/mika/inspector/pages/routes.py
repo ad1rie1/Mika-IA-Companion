@@ -17,6 +17,8 @@ from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
 from mika.inspector.formview import action_view, visible_fields
 from mika.inspector.pages import accounts, reglages
+from mika.inspector.pages.canals import canals_post
+from mika.inspector.pages.families import families_post
 from mika.inspector.pages.journal import (
     EPISODE_TABS,
     episode_head,
@@ -25,10 +27,9 @@ from mika.inspector.pages.journal import (
     replay_blocks,
     replay_panel,
 )
-from mika.inspector.pages.sending import rules_post as sending_post
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
-from mika.inspector.pages.tools import expose_post, rules_post
+from mika.inspector.pages.tools import expose_post
 from mika.inspector.pages.why import silence_page, why_page
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, Forms, secure, wants_table
 from mika.kernel.faculty import InspectSpec
@@ -50,7 +51,7 @@ from mika.runtime.operations import dynamic_fields, fixed_values, initial_values
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
          "sante": "systeme/sante", "appels": "systeme/appels", "rapports": "systeme/simulations",
          "facultes": "systeme/vues", "modeles": "reglages/fournisseurs", "persona": "reglages/identite",
-         "parametres": "reglages/comportement", "canaux": "reglages/depots", "forge": "apps",
+         "parametres": "reglages/comportement", "forge": "apps",
          "comptes": "reglages/comptes"}
 
 
@@ -58,7 +59,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
               ("courrier", "comptes"): "reglages/boites",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
-              ("reglages", "canaux"): "reglages/depots", ("reglages", "sens"): "reglages/plugins",
+              ("reglages", "sens"): "reglages/plugins",
               ("reglages", "parametres"): "reglages/comportement",
               # le bloc Outils redessiné : la grille dit qui reçoit quoi et s'y règle ; ses apps, sous les services
               ("outils", "qui"): "outils/tous", ("outils", "texte"): "outils/tous",
@@ -401,13 +402,13 @@ class Pages:
         """Système › File de sortie : relancer un effet en échec, ou le marquer comme vu."""
         return await outbox_post(self.ui, request)
 
-    async def tool_rules(self, request: Request) -> Response:
-        """Outils › Ce qu'elle peut faire : ses outils réglés, depuis la grille ou la fiche d'un outil (ADR 0122)."""
-        return await rules_post(self.ui, request)
+    async def canals(self, request: Request) -> Response:
+        """Réglages › Canaux : le tableau d'un canal, enregistré d'un coup (ADR 0134)."""
+        return await canals_post(self.ui, request)
 
-    async def sending(self, request: Request) -> Response:
-        """Ses règles d'envoi, courrier et Teams (ADR 0132)."""
-        return await sending_post(self.ui, request)
+    async def families(self, request: Request) -> Response:
+        """Outils › Ses propres outils : le tableau d'une famille, enregistré d'un coup (ADR 0134)."""
+        return await families_post(self.ui, request)
 
     async def expose(self, request: Request) -> Response:
         """Outils › Prêter à un agent : la console en MCP, ses points de prêt (ADR 0122)."""
@@ -636,9 +637,9 @@ class Pages:
             Route(PREFIX + "/parole/{seq:str}", g(self.why)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
-            Route(PREFIX + "/outils/regler", g(self.tool_rules), methods=["POST"]),
             Route(PREFIX + "/outils/exposer", g(self.expose), methods=["POST"]),
-            Route(PREFIX + "/envoi/regler", g(self.sending), methods=["POST"]),
+            Route(PREFIX + "/outils/familles/regler", g(self.families), methods=["POST"]),
+            Route(PREFIX + "/reglages/canaux/regler", g(self.canals), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),
         ]

@@ -82,6 +82,7 @@ from mika.app.wakeups import WakeupDesk
 from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
+from mika.contracts import social as social_c
 from mika.contracts.self_ import PersonaDoc, name_of
 from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
@@ -275,11 +276,11 @@ class Live:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
-        # ce qu'elle envoie à ta place (ADR 0132) : les mêmes règles pour le courrier et pour Teams
-        sending = self.settings.sending().model_dump(mode="json")
+        # les tableaux de ses canaux (ADR 0134) : le courrier et Teams y lisent ce qu'elle envoie à ta place
+        canaux = self.settings.canals().model_dump(mode="json")
         off = sorted(k for k, a in self.settings.email().accounts.items() if not a.enabled)
-        out["email"] = {"sending": sending, "boxes_off": off}
-        out["teams"] = {"enabled": self.settings.teams().enabled, "sending": sending}
+        out["email"] = {"canaux": canaux, "boxes_off": off}
+        out["teams"] = {"enabled": self.settings.teams().enabled, "canaux": canaux}
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -418,7 +419,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp", settle=settle_mcp)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "activity": hub, "vectors": vectors, **world},
-                                     tool_rules=settings.tool_rules_for, authors=settings.author_for, **deps))
+                                     access_tables=settings.access_tables, closeness=social_c.is_close,
+                                     authors=settings.author_for, **deps))
 
     reconfiguring: set[asyncio.Task[None]] = set()
 
@@ -527,7 +529,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
         InspectorDeps(kernel, live.accounts, live.settings, gateway.traces, port=port, calls=live.calls,
-                      after_decision=hub.refresh_panels,
+                      after_decision=hub.refresh_panels, reconfigure=live.reconfigure,
                       reports=reports, navigation=NAVIGATION, menu=MENU,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,
                       parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,

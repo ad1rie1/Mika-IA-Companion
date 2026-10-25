@@ -12,7 +12,7 @@ import heapq
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
@@ -439,6 +439,12 @@ class Registry:
         self.vitals: list[VitalSpec] = sorted((x for f in facs for x in f.vitals), key=lambda x: (x.order, x.key))
         #: les types de règles (ADR 0133), dans l'ordre où la page « Droits » les montre
         self.rights = sorted((x for f in facs for x in f.rights_specs), key=lambda x: (x.order, x.key))
+        #: les tableaux de droits réglés (ADR 0134 : canaux, familles d'outils, outils en main), donnés par
+        #: l'application (``kernel.rights.Rights``) ; ``None`` : les minimums vitaux seuls
+        self.access_tables: Callable[[], Any] | None = None
+        #: qui est proche d'elle, devant ce qu'elle vit (``fn(frame) -> fn(personne) -> bool``) : les lignes « tes
+        #: proches » s'en servent ; donné par l'application, jamais nommé ici
+        self.closeness: Callable[[Any], Callable[[str], bool]] | None = None
         if len({x.key for x in self.vitals}) != len(self.vitals):
             problems.append("vital déclaré deux fois")
         self.series: dict[str, SeriesSpec] = {}

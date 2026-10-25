@@ -26,12 +26,12 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mika.contracts import forge as c
-from mika.contracts import social as social_c
+from mika.contracts import identity as identity_c
 from mika.kernel.forms import FormField, Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -59,8 +59,9 @@ from mika.kernel.inspect import (
     paginate,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
-from mika.kernel.rights import Grant, RuleTable, why_words
+from mika.kernel.rights import Grant, RuleTable
 from mika.plugins.forge import (
+    ACCESS_SET,
     EMITTED,
     FORGE,
     HANDLED,
@@ -106,7 +107,21 @@ from mika.ports.forge import (
     said_args,
     ui_load,
 )
-from mika.vocab.access import NO, POLICY_WORDS, verdict
+from mika.vocab.access import (
+    KEEP_WORDS,
+    KEEPS,
+    NO,
+    OWNER,
+    POLICIES,
+    POLICY_WORDS,
+    TableArgs,
+    ToolRule,
+    canal_words,
+    moved,
+    when_words,
+    who_words,
+)
+from mika.vocab.rights import closeness_of, rights_of, tool_allowance
 
 #: une page de ses apps, de ce qu'une app a vécu (au journal), des lignes de son journal
 APPS_PAGE = 25
@@ -1063,15 +1078,18 @@ FORGE.action("regler", title="Enregistrer les réglages", args=NoArgs, emits=[SW
                          "manifeste.")(_settle)
 
 
-# ── Qui peut quoi, sur la page « Droits » (ADR 0133) ──────────────────────
+# ── Qui peut quoi (ADR 0133, 0134) : l'onglet « Accès » d'une app sans projet, la page « Droits » ──────────
 
-#: une app sans projet, en mots : à toi seule, sans demander
-ALONE_ROW = ("Toi et elle quand elle travaille seule", "toujours", "seule", "seule", "tous")
-APP_COLUMNS = ("qui", "quand", "lecture", "action", "outils")
+APP_COLUMNS = ("qui", "par où", "quand", "lecture", "action", "garde", "outils")
 #: ce qu'aucune ligne n'ouvre pour une app
-APP_FLOORS = ("jamais dans un salon, avec une inconnue, ni sans personne",
+APP_FLOORS = ("un outil, jamais dans un salon (des témoins), ni une action avec une inconnue, ni sans personne",
               "arrêtée, désactivée ou cassée : elle ne sert à personne",
               "en conversation, une app qui a des secrets seulement promue")
+#: la ligne qu'on ajoute : toi, par tous les canaux, toujours, fermée
+NEW_APP_ROW = ToolRule(who=(OWNER,))
+MAX_APP_ROWS = 40
+_Policy = Literal["seule", "carte", "toi", "non"]
+_Keep = Literal["public", "perso", "prive", "rien"]
 
 
 def _app_tools(port: Any, name: str) -> list[tuple[str, bool]]:
@@ -1081,37 +1099,130 @@ def _app_tools(port: Any, name: str) -> list[tuple[str, bool]]:
     return [*((f"{name}_{t.name}", t.reads) for t in info.tools), *(((f"{name}_pages", True),) if info.views else ())]
 
 
+def _app_row(frame: Frame, a: Any) -> tuple[str, ...]:
+    return (who_label(a.who, frame), canal_words(a.canal), when_words(a.when), POLICY_WORDS.get(a.read, a.read),
+            POLICY_WORDS.get(a.act, a.act), KEEP_WORDS.get(getattr(a, "keep", "public"), "—"),
+            "tous" if not a.tools else ", ".join(a.tools))
+
+
+def who_label(who: Any, frame: Frame | None) -> str:
+    def name(person: str) -> str:
+        view = frame.get(identity_c.IDENTITY(person)) if frame is not None and person else None
+        return str(getattr(view, "name", "") or person)
+
+    return who_words(who, name)
+
+
+@FORGE.inspect("acces", title="Accès", subject="app", order=35,
+               description="Pour une app sans projet : qui peut se servir de ses outils, par où, quand, ce qu'elle "
+                           "en fait et ce qu'elle en garde — des lignes lues de haut en bas, puis la ligne par "
+                           "défaut. Une app d'un projet suit son projet.")
+def _tab_access(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    app = s.apps.get(ctx.subject)
+    if app is None:
+        return [Note("Cette app n'existe plus.", tone="muted")]
+    if app.project:
+        return [Note(f"Cette app vit dans le projet n° {app.project} : ses accès sont ceux du projet.", tone="info",
+                     refs=(Ref.subject("project", str(app.project), f"projet n° {app.project}", "acces"),))]
+    rows, default = app_lines(frame, app)
+    shown = [Row((str(i), *_app_row(frame, a))) for i, a in enumerate((*rows, default), start=1)]
+    blocks: list[Block] = [
+        Table((Column("#", "fit"), *APP_COLUMNS), tuple(shown), title="Accès",
+              caption="De haut en bas : pour un outil, la première ligne qui le concerne (qui, par où, quand, l'outil "
+                      "dans sa colonne) décide ; aucune, le comportement par défaut — après le tableau du canal, sous "
+                      "le plafond de qui est en face."),
+        ActionSlot("forge.acces", (), title="Enregistrer"),
+    ]
+    if app.access is None:
+        blocks.insert(0, Note("Jamais réglés : son minimum vital — toi et elle seule, sans demander, gardé comme un "
+                              "souvenir ; personne d'autre.", tone="info"))
+    return blocks
+
+
+class AppAccessArgs(TableArgs):
+    """Le tableau « Accès » d'une app sans projet, d'un seul envoi (``vocab.access.TableArgs``) et ses colonnes :
+    ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde ; la ligne par défaut à part."""
+
+    lecture: Annotated[dict[str, _Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
+        Field(default_factory=dict)
+    action: Annotated[dict[str, _Policy], Knob(label="Un outil qui agit", choices=POLICIES, advanced=False)] = \
+        Field(default_factory=dict)
+    garde: Annotated[dict[str, _Keep], Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = \
+        Field(default_factory=dict)
+    defaut_lecture: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
+                                            advanced=False)] = "non"
+    defaut_action: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
+                                           advanced=False)] = "non"
+    defaut_garde: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
+                                        advanced=False)] = "rien"
+
+
+def app_access_rows(args: AppAccessArgs) -> list[ToolRule]:
+    """Les lignes du tableau envoyé, dans leur ordre (``vocab.access.rows_sent``)."""
+    try:
+        sent = args.rows(tools=True, read=args.lecture, act=args.action, keep=args.garde)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    return [ToolRule(who=r["who"], canal=r["canal"], when=r["when"], read=r["read"] or NO, act=r["act"] or NO,
+                     keep=r["keep"] or "rien", tools=r["tools"]) for r in sent]
+
+
+@FORGE.action("acces", title="Accès à l'app", args=AppAccessArgs, emits=[ACCESS_SET], subject="app", order=15,
+              inline=True, description="Ses lignes d'accès, lues de haut en bas, et la ligne par défaut : qui, par "
+                                       "où, quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce "
+                                       "qu'elle en garde, à quels outils.")
+def _access(s: ForgeState, frame: Frame, args: AppAccessArgs, ctx: ActionContext) -> Done:
+    app = s.apps.get(ctx.subject)
+    if app is None:
+        raise Refused(f"Aucune app « {ctx.subject} ».")
+    if app.project:
+        raise Refused(f"Cette app vit dans le projet n° {app.project} : ses accès se règlent sur le projet.")
+    try:
+        rows, said = moved(app_access_rows(args), args.faire.strip(), NEW_APP_ROW, MAX_APP_ROWS)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    default = ToolRule(read=args.defaut_lecture, act=args.defaut_action, keep=args.defaut_garde)
+    return Done(drafts=(ACCESS_SET.draft(app=ctx.subject, rows=tuple(rows), default=default, by=ctx.by),),
+                message=said)
+
+
 def _app_grants(s: ForgeState, frame: Frame, ctx: Any, audience: Any, kind: str) -> list[Grant]:
-    """Ce qu'elle fait de chaque outil de ses apps devant cette audience, à ce moment : la ligne de son projet qui le
-    concerne (ou, sans projet, toi seule)."""
+    """Ce qu'elle fait de chaque outil de ses apps devant cette audience, à ce moment, et ce qu'elle en garde : les
+    deux portes (le canal, puis la ligne de son projet — ou la sienne — qui le concerne)."""
     port = ctx.ports.get("forge")
+    rights, close = rights_of(frame.env), closeness_of(frame.env, frame)
     out = []
     for name, app in sorted(s.apps.items()):
         if app.held or not app.enabled or app.broken:
             continue
         rows, default = app_lines(frame, app)
         for tool, reads in _app_tools(port, name):
-            got = verdict(rows, default, audience, kind, lambda a, t=tool: not a.tools or t in a.tools,
-                          close=social_c.is_close(frame))
+            got = tool_allowance(rows, default, audience, kind, not reads, rights,
+                                 lambda a, t=tool: not a.tools or t in a.tools, close=close, outside=True)
             if got is None:
                 continue
-            level = got.line.read if reads else got.line.act
-            where = f"de son projet n° {app.project}" if app.project else "(une app sans projet)"
-            out.append(Grant(f"project:{app.project}" if app.project else "forge:sans-projet", tool,
-                             (("lit" if reads else "agit", POLICY_WORDS.get(level, level)),),
-                             f"{why_words(got.index)} {where}",
+            where = f"de son projet n° {app.project}" if app.project else f"de l'app « {name} »"
+            out.append(Grant(f"project:{app.project}" if app.project else f"forge:{name}", tool,
+                             (("lit" if reads else "agit", POLICY_WORDS.get(got.level, got.level)),
+                              ("garde", KEEP_WORDS.get(got.keep, got.keep))),
+                             f"{got.why} ({where})",
                              href=Ref.subject("project", str(app.project), str(app.project), "acces")
-                             if app.project else Ref.subject("app", name, app.title), closed=level == NO))
+                             if app.project else Ref.subject("app", name, app.title, "acces"), closed=got.level == NO))
     return out
 
 
 @FORGE.rights("apps", title="Apps sans projet", order=35, grants=_app_grants,
-              description="Une app suit les lignes d'accès de son projet ; sans projet, elle est à toi seule "
-                          "(ADR 0133).")
+              description="Une app suit les lignes d'accès de son projet ; sans projet, elle a les siennes, nées du "
+                          "minimum vital (ADR 0134).")
 def _app_tables(s: ForgeState, frame: Frame, ctx: Any) -> list[RuleTable]:
-    alone = sorted(app.title or name for name, app in s.apps.items() if not app.project)
-    if not alone:
-        return []
-    return [RuleTable("forge:sans-projet", "Apps sans projet", APP_COLUMNS, (ALONE_ROW,),
-                      ("Comportement par défaut", "toujours", "non", "non", "tous"), floors=APP_FLOORS,
-                      note="Fixé : une app sans projet n'a pas de lignes à elle. " + ", ".join(alone) + ".")]
+    out = []
+    for name, app in sorted(s.apps.items()):
+        if app.project:
+            continue
+        rows, default = app_lines(frame, app)
+        out.append(RuleTable(f"forge:{name}", f"L'app « {app.title or name} »", APP_COLUMNS,
+                             tuple(_app_row(frame, a) for a in rows), _app_row(frame, default),
+                             href=Ref.subject("app", name, app.title, "acces"), floors=APP_FLOORS,
+                             note="Jamais réglés : son minimum vital (toi et elle seule, sans demander)."
+                             if app.access is None else ""))
+    return out

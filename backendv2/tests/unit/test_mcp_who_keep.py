@@ -36,15 +36,15 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy
-from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for, situation
+from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for
 from mika.plugins.mcp.console import closeness, faces, said_level, serves_nobody, tool_view
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import CLOSE, CLOSED, PERSON, Access
+from mika.ports.mcp import CLOSE, CLOSED, INTERNAL, PERSON, Access
 from mika.ports.mcp import EVERYONE as ALL
 from mika.ports.mcp import OWNER as YOU
-from mika.ports.mcp import WORK as AT_WORK
 from mika.runtime.tools import run_tool_loop
 from mika.sim.clock import run_virtual
+from mika.vocab.access import situation
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
@@ -99,7 +99,7 @@ def test_a_review_and_a_row_keep_only_their_own_fields():
     for bad in ({"who": "toi"}, {"who": ["comptes"]}, {"who": [YOU], "when": ["travail"]}):  # d'avant l'ADR 0133
         with pytest.raises(ValidationError):
             AccessRule.model_validate(bad)
-    for bad in ({"who": ["salon"]}, {"who": [PERSON]}, {"who": []}, {"who": [YOU], "when": ["parfois"]},
+    for bad in ({"who": ["salon"]}, {"who": [PERSON]}, {"who": [YOU], "when": ["parfois"]},
                 {"who": [YOU], "read": "jamais"}, {"who": [YOU], "keep": "tout"}):
         with pytest.raises(ValidationError):
             AccessRule.model_validate(bad)
@@ -120,18 +120,19 @@ def test_where_she_would_use_a_service():
 def test_without_a_row_the_default_decides_and_it_starts_closed():
     assert set(levels(tool()).values()) == {"non"}
     opened = tool(default=Access(who=(), read="carte", act="toi", keep="prive"))
-    # la ligne par défaut vaut pour tous, mais un outil jamais dans un salon, avec une inconnue, ni sans personne
+    # la ligne par défaut vaut pour tous ; une inconnue sur le chat web lit au plus (le plafond), une inconnue par
+    # Internet rien (le minimum vital de ce canal), un salon rien venu d'ailleurs, personne rien
     assert levels(opened) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
-                              "stranger": "non", "room": "non", "work": "carte", "none": "non"}
+                              "stranger": "carte", "room": "non", "work": "carte", "none": "non"}
 
 
 def test_you_she_at_work_and_named_people_only_authenticated():
-    assert levels(tool(Access(who=(YOU, AT_WORK), read="seule"))) == {
+    assert levels(tool(Access(who=(YOU,), read="seule"), Access(who=(), canal=(INTERNAL,), read="seule"))) == {
         "owner": "seule", "account": "non", "named": "non", "unproven": "non", "stranger": "non", "room": "non",
         "work": "seule", "none": "non"}
-    # elle qui travaille est une source à elle : toi seule ne l'ouvre pas au travail, ni l'inverse
+    # elle seule est un canal, sans personne : toi seule ne l'ouvre pas au travail, ni l'inverse
     assert levels(tool(Access(who=(YOU,), read="seule")))["work"] == "non"
-    assert {k for k, v in levels(tool(Access(who=(AT_WORK,), read="seule"))).items() if v != "non"} == {"work"}
+    assert {k for k, v in levels(tool(Access(who=(), canal=(INTERNAL,), read="seule"))).items() if v != "non"} == {"work"}
     assert levels(tool(Access(who=(NAMED_3,), read="toi"))) == {
         "owner": "non", "account": "non", "named": "toi", "unproven": "non", "stranger": "non", "room": "non",
         "work": "non", "none": "non"}
@@ -149,7 +150,12 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
     # plusieurs sources sur une ligne : l'une suffit
     assert {k for k, v in levels(tool(Access(who=(CLOSE, NAMED_3), read="seule")), is_close).items()
             if v != "non"} == {"account", "named"}
+    # une inconnue sur le chat web lit au plus (le plafond), jamais une action ; par Internet, rien (le minimum vital
+    # de ce canal) ; dans un salon, rien venu d'ailleurs (des témoins)
     assert levels(tool(Access(who=(ALL,), read="seule"))) == {
+        "owner": "seule", "account": "seule", "named": "seule", "unproven": "non", "stranger": "seule",
+        "room": "non", "work": "non", "none": "non"}
+    assert levels(tool(Access(who=(ALL,), act="seule"), nature="action")) == {
         "owner": "seule", "account": "seule", "named": "seule", "unproven": "non", "stranger": "non", "room": "non",
         "work": "non", "none": "non"}
 
@@ -157,10 +163,10 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
 def test_the_first_row_that_matches_decides():
     near = {"user_2", "user_3"}.__contains__  # ses deux comptes lui sont proches
     rows = (Access(who=(NAMED_3,), read="non"), Access(who=(CLOSE,), read="seule"),
-            Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(YOU, AT_WORK), read="toi"))
+            Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(YOU,), read="toi"), Access(who=(), canal=(INTERNAL,), read="toi"))
     t = tool(*rows, default=Access(who=(), read="carte"))
     assert levels(t, near) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "non",
-                               "stranger": "non", "room": "non", "work": "toi", "none": "non"}
+                               "stranger": "carte", "room": "non", "work": "toi", "none": "non"}
     assert access_for(t, OWNER, Kind.INITIATIVE)[0] == "toi"  # « quand elle répond » ne vaut pas d'elle-même
     # dans l'autre ordre, la ligne des proches passe avant celle de la personne nommée : elle n'y vaut plus rien
     assert access_for(tool(rows[1], rows[0]), NAMED, Kind.REPLY, near)[0] == "seule"
@@ -189,7 +195,7 @@ def test_what_she_has_at_hand_is_every_tool_a_row_opens():
 
 
 def test_the_moments_she_may_be_offered_it_come_from_the_rows_that_open_it():
-    rows = (Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(AT_WORK,), act="toi"))
+    rows = (Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(), canal=(INTERNAL,), act="toi"))
     assert granted(rows, CLOSED, "lecture") == frozenset({"conversation"})
     assert granted(rows, CLOSED, "action") == frozenset({"travail"})
     assert granted((), Access(who=(), read="carte"), "lecture") == frozenset({"conversation", "initiative", "travail"})
@@ -213,7 +219,7 @@ def facing(st, nature: str = "action", remote: str = "prevision") -> dict[str, s
 def test_who_can_do_what_is_the_engine_rule_on_typical_people():
     # « carte » : toi, une carte dans ton chat ; une personne, la sienne ; personne en face, la console
     st = service(Access(who=(NAMED_3,), act="carte"), Access(who=(CLOSE,), act="carte"),
-                 Access(who=(YOU, AT_WORK), act="carte"))
+                 Access(who=(YOU,), act="carte"), Access(who=(), canal=(INTERNAL,), act="carte"))
     assert facing(st) == {
         "Toi": "te demande / une carte dans ton chat",
         "Toi, quand elle te parle d'elle-même": "te demande / une carte dans ton chat",
@@ -242,7 +248,7 @@ class Ctx:
 
     def __init__(self, audience, target, kind=Kind.REPLY, port=None):
         self.ports = {"mcp": port if port is not None else FakePort()}
-        self.frame = NS(audience=audience, episode=NS(kind=kind, target=target), now=1_000,
+        self.frame = NS(audience=audience, episode=NS(kind=kind, target=target), now=1_000, env=None,
                         get=lambda key, default=None: default)
         self.episode_id, self.call_key, self.call_id = "ep1", "k1", "c1"
         self.emitted: list = []
@@ -263,8 +269,9 @@ async def call(t, ctx) -> ToolResult:
     return await _handler(t)(ExternalArgs(ville="Lyon"), ctx)
 
 
-def asking(level: str, who: tuple[str, ...] = (YOU, AT_WORK), keep: str = "prive", **kw):
-    return offered_tool(access=(Access(who=who, read=level, act=level, keep=keep),), **kw)
+def asking(level: str, who: tuple[str, ...] = (YOU,), keep: str = "prive", **kw):
+    return offered_tool(access=(Access(who=who, read=level, act=level, keep=keep),
+                                Access(who=(), canal=(INTERNAL,), read=level, act=level, keep=keep)), **kw)
 
 
 async def test_alone_the_call_leaves_and_what_it_returns_carries_what_she_keeps():
@@ -279,7 +286,7 @@ async def test_alone_the_call_leaves_and_what_it_returns_carries_what_she_keeps(
 
 async def test_what_she_keeps_comes_from_the_row_that_matched():
     t = offered_tool(access=(Access(who=(YOU,), when=("conversation",), read="seule", keep="rien"),
-                             Access(who=(YOU, AT_WORK), read="seule", keep="public")))
+                             Access(who=(YOU,), read="seule", keep="public"), Access(who=(), canal=(INTERNAL,), read="seule", keep="public")))
     got = await call(t, Ctx(OWNER, "user_1"))
     assert got.unkept
     got = await call(t, Ctx(WORK, None, kind=Kind.STEP))
@@ -319,7 +326,7 @@ async def test_working_alone_nobody_can_accept_so_the_operator_decides():
 
 async def test_out_of_its_rows_nothing_leaves_and_without_port_nothing_either():
     ctx = Ctx(STRANGER, "web_x")
-    got = await call(asking("seule", (ALL,)), ctx)
+    got = await call(asking("seule", (CLOSE,)), ctx)  # tes proches : une inconnue n'en est pas
     assert not got.ok and got.content == phrase("mcp.tools.closed")
     assert ctx.ports["mcp"].calls == [] and ctx.proposed == []
     ctx = Ctx(OWNER, "user_1")

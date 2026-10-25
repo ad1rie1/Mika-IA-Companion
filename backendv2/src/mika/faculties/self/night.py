@@ -942,7 +942,7 @@ class JournalArgs(BaseModel):
     days_ago: int = Field(ge=2, le=KEEP_JOURNALS, description=phrase("self.night.journal_tool.days_ago"))
 
 
-@SELF.tool("self_journal", description=phrase("self.night.journal_tool.description"), args=JournalArgs,
+@SELF.tool("self_journal", acts=True, description=phrase("self.night.journal_tool.description"), args=JournalArgs,
            bundle="self", episodes=CONVERSATIONAL)
 async def self_journal(args: JournalArgs, ctx: Any) -> str:
     frame: Frame = ctx.frame

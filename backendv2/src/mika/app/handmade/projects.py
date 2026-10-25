@@ -13,7 +13,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade.access import people_with_accounts, who_choices
+from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
 from mika.contracts import projects as c
 from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.faculty import access_of, project_at
@@ -54,7 +54,7 @@ class ProjectFiche(Overview):
         if p is None:
             return None
         lines, default = access_of(p)
-        people = people_with_accounts(ui)
+        people, instances = people_with_accounts(ui), canal_instances(ui)
         # les outils de ses apps (``<app>_<outil>``), ce qu'ils font ; et ceux qu'une ligne nomme encore sans qu'une
         # app les propose (une app effacée, renommée) : on les voit, on peut les décocher
         tools = app_tool_names(frame, ui.kernel.ports, p.id)
@@ -64,11 +64,12 @@ class ProjectFiche(Overview):
         for n, a in enumerate(lines, start=1):
             rows.append({
                 "n": n, "who": who_choices(a.who, people, lambda person: who_named(frame, (PERSON + person,))),
+                "canal": canal_choices(a.canal, instances),
                 "always": not a.when,
                 "when_said": "Toujours" if not a.when else (when_words(a.when).capitalize() if len(a.when) == 1
                                                              else f"{len(a.when)} moments"),
                 "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
-                "see": a.see, "steer": a.steer, "read": a.read, "act": a.act, "all": not a.tools,
+                "see": a.see, "steer": a.steer, "files": a.files, "read": a.read, "act": a.act, "all": not a.tools,
                 "said": "Tous" if not a.tools else f"{len(a.tools)} outil{'s' if len(a.tools) > 1 else ''}",
                 "tools": [{"name": t, "nature": natures.get(t, ""), "on": t in a.tools} for t in known],
                 "first": n == 1, "last": n == len(lines)})

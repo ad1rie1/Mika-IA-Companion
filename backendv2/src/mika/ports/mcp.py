@@ -16,13 +16,15 @@ from typing import Any, Protocol
 
 # qui une ligne d'accès désigne, quand elle vaut, ce qu'elle laisse faire d'un outil : ceux de ``vocab.access``,
 # partagés avec les projets et leurs apps (ADR 0131, 0133)
+from mika.vocab.access import ANY as ANY
+from mika.vocab.access import CANALS as CANALS
 from mika.vocab.access import CLOSE as CLOSE
 from mika.vocab.access import EVERYONE as EVERYONE
+from mika.vocab.access import INTERNAL as INTERNAL
 from mika.vocab.access import MOMENTS as MOMENTS
 from mika.vocab.access import OWNER as OWNER
 from mika.vocab.access import PERSON as PERSON
 from mika.vocab.access import POLICIES as POLICIES
-from mika.vocab.access import WORK as WORK
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
@@ -44,6 +46,8 @@ class Access:
     première qui le concerne décide ; aucune, c'est la ligne par défaut."""
 
     who: tuple[str, ...]
+    #: ses canaux (``vocab.access.CANALS``) ; vide : tous
+    canal: tuple[str, ...] = ()
     #: ses moments (``MOMENTS``) ; vide : toujours
     when: tuple[str, ...] = ()
     read: str = "non"
@@ -57,6 +61,11 @@ class Access:
     def level(self, nature: str) -> str:
         """Ce qu'elle fait d'un outil de cette nature (``lecture`` ou ``action``)."""
         return self.read if nature == "lecture" else self.act
+
+    @property
+    def alone(self) -> bool:
+        """Une ligne d'elle seule : sans personne, par le seul canal « elle seule »."""
+        return not self.who and self.canal == (INTERNAL,)
 
 
 #: la ligne par défaut d'un service qu'on branche : fermé, comme un pare-feu

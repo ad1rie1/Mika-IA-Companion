@@ -39,13 +39,21 @@ from mika.faculties.attachments.faculty import (
     files_table,
     links_table,
 )
-from mika.faculties.memory.extraction import Extraction, Line, Piece, XCroyance, XSouvenir, pieces_of, pieces_words
+from mika.faculties.memory.extraction import (
+    Extraction,
+    Line,
+    Piece,
+    XCroyance,
+    XSouvenir,
+    pieces_of,
+    pieces_words,
+)
 from mika.kernel.events import Content, Origin
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import Studied
 from mika.sim.clock import run_virtual
 from mika.vocab.privacy import INTERNAL, Sensitivity
-from tests.fixtures.mika import build, boot, connect, said
+from tests.fixtures.mika import boot, build, connect, said
 from tests.unit.test_knowledge_coherence import Store, drafts
 from tests.unit.test_knowledge_coherence import alice_says as _alice_line
 from tests.unit.test_shares import call, journal, quiet

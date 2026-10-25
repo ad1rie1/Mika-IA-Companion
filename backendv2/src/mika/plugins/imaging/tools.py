@@ -65,7 +65,7 @@ def _quality(asked: str, default: str, allow_high: bool) -> str:
     return "normal" if quality == "high" and not allow_high else quality
 
 
-@IMAGING.tool(DRAW_TOOL, description=phrase("imaging.tools.draw.description"), args=DrawArgs, bundle=c.BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=2, when=offered)
+@IMAGING.tool(DRAW_TOOL, acts=True, description=phrase("imaging.tools.draw.description"), args=DrawArgs, bundle=c.BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=2)
 async def draw(args: DrawArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -119,7 +119,7 @@ def _ready_for(ctx: Any, person: str) -> list[Job]:
     return [j for j in of_person(ctx.state, person, handles) if j.status == c.READY and j.file]
 
 
-@IMAGING.tool(SHOW_TOOL, description=phrase("imaging.tools.show.description"), args=ShowArgs, bundle=c.BUNDLE, episodes=[Kind.REPLY, Kind.INITIATIVE], max_calls_per_episode=3, when=offered)
+@IMAGING.tool(SHOW_TOOL, acts=True, description=phrase("imaging.tools.show.description"), args=ShowArgs, bundle=c.BUNDLE, episodes=[Kind.REPLY, Kind.INITIATIVE], max_calls_per_episode=3)
 async def show_drawing(args: ShowArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):

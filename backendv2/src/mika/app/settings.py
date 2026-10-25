@@ -31,12 +31,13 @@ from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
+from mika.kernel.rights import Rights
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
-from mika.runtime.tools import SITUATIONS as TOOL_SITUATIONS
-from mika.vocab.sending import Sending
+from mika.vocab.access import Table, ToolRule
+from mika.vocab.canals import Canals, CanalTable
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal
@@ -78,16 +79,16 @@ WAKEUP_KEY = "wakeup"
 WAKEUP_KEYS_KEY = "wakeup_keys"
 #: Teams (ADR 0069) : ce qu'un opérateur règle ; la clé de l'extension à part, dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
-#: ce qu'elle envoie à ta place, courrier et Teams : ses règles (ADR 0132)
-SENDING_KEY = "envoi"
+#: ses droits (ADR 0134) : les tableaux de ses canaux, de ses familles d'outils, et l'offre réglée de ses outils
+CANALS_KEY = "canaux"
+FAMILIES_KEY = "outils_familles"
+IN_HAND_KEY = "outils_en_main"
 TEAMS_KEYS_KEY = "teams_key"
-#: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
-TOOL_RULES_KEY = "tool_rules"
 #: ses autrices et le flux de chacune (ADR 0124)
 AUTHORS_KEY = "authors"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
-RETIRED_KEYS = ("telegram",)
+RETIRED_KEYS = ("telegram", "envoi", "tool_rules")
 
 
 class SettingRow(MindBase):
@@ -158,8 +159,8 @@ class Settings:
         #: lus depuis les fils de la Forge : tenus en mémoire (une connexion SQLite
         #: appartient à son fil)
         self._forge: dict[str, dict[str, Any]] = {}
-        #: lues à chaque épisode : tenues en mémoire, relues à l'ouverture
-        self._tool_rules: dict[str, dict[str, str]] = {}
+        #: ses droits (ADR 0134), lus à chaque épisode : tenus en mémoire, relus à l'ouverture
+        self._rights = Rights(canals=Canals())
         #: ses autrices enregistrées, lues à chaque épisode (et à chaque brouillon) : tenues en mémoire ; ``None`` :
         #: rien d'enregistré (celles par défaut)
         self._authors: authors_m.Authors | None = None
@@ -174,9 +175,7 @@ class Settings:
         await self.store.run_mind(create)
         data = self._get(FORGE_CONFIG_KEY) or {}
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
-        rules = self._get(TOOL_RULES_KEY) or {}
-        self._tool_rules = {str(s): {str(t): str(r) for t, r in v.items() if r in TOOL_RULES}
-                            for s, v in rules.items() if s in TOOL_SITUATIONS and isinstance(v, dict)}
+        self._rights = self._read_rights()
         self._authors = self._read_authors()
 
     def _get(self, key: str) -> Any:
@@ -439,22 +438,71 @@ class Settings:
         return True
 
     # ── Teams (``/api/teams/…``, ADR 0069) ──
-    # ── Ce qu'elle envoie à ta place (ADR 0132) ──
-    def sending(self) -> Sending:
-        """Ses règles d'envoi ; rien d'enregistré ou illisibles : la règle par défaut seule."""
-        raw = self._get(SENDING_KEY)
-        if not isinstance(raw, dict):
-            return Sending()
+    # ── Ses droits (ADR 0134) : les canaux, ses familles d'outils, l'offre réglée ──
+    def _read_rights(self) -> Rights:
+        """Ce qui est rangé ; un tableau illisible est écarté (son minimum vital vaut), jamais bloquant."""
         try:
-            return Sending.model_validate(raw)
+            canals = Canals.model_validate(self._get(CANALS_KEY) or {"tables": {}})
         except ValueError:
-            log.warning("envoi : règles illisibles, la règle par défaut seule")
-            return Sending()
+            log.warning("droits : les tableaux des canaux sont illisibles, les minimums vitaux valent")
+            canals = Canals()
+        families: dict[str, Table[ToolRule]] = {}
+        for bundle, raw in dict(self._get(FAMILIES_KEY) or {}).items():
+            try:
+                families[str(bundle)] = Table[ToolRule].model_validate(raw)
+            except ValueError:
+                log.warning("droits : le tableau de la famille « %s » est illisible, son minimum vital vaut",
+                            str(bundle)[:40])
+        raw_hand = dict(self._get(IN_HAND_KEY) or {})
+        in_hand = {str(k): str(v) for k, v in raw_hand.items() if v in TOOL_RULES}
+        return Rights(canals=canals, families=families, in_hand=in_hand)
 
-    async def save_sending(self, cfg: Sending) -> Sending:
-        cfg = Sending.model_validate(cfg.model_dump())
-        await self._put(SENDING_KEY, cfg.model_dump(mode="json"))
-        return cfg
+    def access_tables(self) -> Rights:
+        """Ses droits tels que le registre les lit à chaque épisode (``Registry.access_tables``)."""
+        return self._rights
+
+    def canals(self) -> Canals:
+        return self._rights.canals or Canals()
+
+    async def save_canal(self, key: str, table: CanalTable | None) -> Canals:
+        """Le tableau d'un canal, enregistré ; ``None`` : retiré, son minimum vital vaut de nouveau."""
+        tables = dict(self._rights.canals.tables)
+        if table is None:
+            tables.pop(key, None)
+        else:
+            tables[key] = CanalTable.model_validate(table.model_dump())
+        canals = Canals(tables=tables)
+        await self._put(CANALS_KEY, canals.model_dump(mode="json"))
+        self._rights = Rights(canals=canals, families=self._rights.families, in_hand=self._rights.in_hand)
+        return canals
+
+    def families(self) -> dict[str, Table[ToolRule]]:
+        return dict(self._rights.families)
+
+    async def save_family(self, bundle: str, table: Table[ToolRule] | None) -> None:
+        """Le tableau d'une famille de ses outils, enregistré ; ``None`` : retiré, son minimum vital vaut."""
+        families = dict(self._rights.families)
+        if table is None:
+            families.pop(bundle, None)
+        else:
+            families[bundle] = Table[ToolRule].model_validate(table.model_dump())
+        await self._put(FAMILIES_KEY, {k: v.model_dump(mode="json") for k, v in families.items()})
+        self._rights = Rights(canals=self._rights.canals, families=families, in_hand=self._rights.in_hand)
+
+    def in_hand(self) -> dict[str, str]:
+        return dict(self._rights.in_hand)
+
+    async def save_in_hand(self, tool: str, rule: str | None) -> None:
+        """L'offre réglée d'un outil : en main, à chercher ; ``None`` : ce que prévoit le code."""
+        if rule is not None and rule not in TOOL_RULES:
+            raise ValueError(f"offre inconnue : {rule}")
+        kept = dict(self._rights.in_hand)
+        if rule is None:
+            kept.pop(tool, None)
+        else:
+            kept[tool] = rule
+        await self._put(IN_HAND_KEY, kept)
+        self._rights = Rights(canals=self._rights.canals, families=self._rights.families, in_hand=kept)
 
     def teams(self) -> TeamsConfig:
         """Ce qu'un opérateur a réglé de Teams ; illisible, les valeurs par défaut (jamais bloquant)."""
@@ -575,33 +623,6 @@ class Settings:
             return False
         await self._put(LENT_KEY, entries)
         return True
-
-    # ── Ses outils, situation par situation (ADR 0122) ──
-    def tool_rules(self) -> dict[str, dict[str, str]]:
-        """Les règles d'outils d'un opérateur : par situation, « outil → off, hand ou ask »."""
-        return {s: dict(r) for s, r in self._tool_rules.items()}
-
-    def tool_rules_for(self, situation: str) -> dict[str, str]:
-        """Les règles d'une situation (``runtime.tools.situation_of``) : ce que lit le pipeline à chaque épisode."""
-        return self._tool_rules.get(situation, {})
-
-    async def save_tool_rules(self, situation: str, rules: Mapping[str, str | None]) -> dict[str, str]:
-        """Les règles d'une situation, mises à jour : une règle ``None`` rend l'outil à ce que dit le code."""
-        if situation not in TOOL_SITUATIONS:
-            raise ValueError(f"situation inconnue : {situation}")
-        kept = dict(self._tool_rules.get(situation, {}))
-        for tool, rule in rules.items():
-            if rule is None:
-                kept.pop(tool, None)
-            elif rule in TOOL_RULES:
-                kept[tool] = rule
-            else:
-                raise ValueError(f"règle inconnue : {rule}")
-        everything = {**self._tool_rules, situation: kept}
-        everything = {s: r for s, r in everything.items() if r}
-        await self._put(TOOL_RULES_KEY, everything)
-        self._tool_rules = everything
-        return kept
 
     # ── Ses autrices et leurs flux (ADR 0124) ──
     def _read_authors(self) -> authors_m.Authors | None:

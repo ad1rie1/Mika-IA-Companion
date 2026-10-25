@@ -422,7 +422,7 @@ class ReportArgs(BaseModel):
 WAKEUP.bundle("wakeup", phrase("wakeup.bundle"))
 
 
-@WAKEUP.tool(REPORT, description=phrase("wakeup.tools.report.description"), args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
+@WAKEUP.tool(REPORT, acts=True, description=phrase("wakeup.tools.report.description"), args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
 async def report_wake(args: ReportArgs, ctx: Any) -> Any:
     call = current(ctx)
     if call is None:

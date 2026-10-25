@@ -1,0 +1,23 @@
+{# Outils › Ses propres outils (inspector/pages/families.py, ADR 0134) : ses outils internes, famille par famille,
+   chacune avec son tableau de droits — né du minimum vital que le code déclare, modifiable, et « Revenir au minimum
+   vital ». Une case grisée (🔒) dit ce que l'outil ne sait pas faire (attendre un accord) ou ce qui n'a pas de sens
+   pour lui (garder ce qui est déjà à elle). #}
+{% from "handmade/droits/tableau.html" import tableau %}
+<div class="now-page service">
+  <section class="now-card access-legend" aria-labelledby="families-title">
+    <h2 id="families-title">Ses propres outils</h2>
+    <p>Ce qu'elle sait faire par elle-même — sa mémoire, ses fichiers, ses dessins, ton courrier, Teams, la caméra, ses flux, la Forge, ses projets… — rangé par famille. Chaque famille naît avec le <b>minimum vital</b> que le code déclare : sans lui, elle ne fonctionne pas. Tu peux le changer ; la page te prévient si tu descends en dessous.</p>
+    <dl>
+      <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> ou <b>non</b> ; « ton accord » et « demande à la personne » seulement pour un outil qui sait attendre (un effet proposé) — sinon la case est grisée : il agit dans la conversation même.</dd></div>
+      <div><dt>Garde</dt><dd>Ce qu'elle garde de ce qu'un outil rend. Grisée quand le résultat est déjà à elle (sa mémoire, ses fichiers) ; active pour ce qui vient du dehors.</dd></div>
+      <div><dt>Elle seule</dt><dd>La ligne « elle seule » vaut quand elle travaille : un projet ou un réveil seulement s'il a pris ce lot d'outils, une tâche seulement si c'est la sienne.</dd></div>
+    </dl>
+  </section>
+  {% for f in families %}
+  <details class="now-card access-canal-entry"{{ ' open' if f.open }} id="f-{{ f.id }}">
+    <summary><b>{{ f.label }}</b> <span class="now-muted">{{ f.tools | length }} outil{{ 's' if f.tools | length > 1 }}</span>{% if f.set %} <span class="now-tag info">réglé</span>{% else %} <span class="now-tag muted">minimum vital</span>{% endif %}{% if f.below %} <span class="now-tag warn">⚠ en dessous du minimum vital</span>{% endif %}{% if f.reserved %} <span class="now-tag" title="Le code le réserve à toi : sa famille naît à toi et elle seule">à toi</span>{% endif %}
+      <span class="now-muted"> — {% for x in f.tools %}<code>{{ x.name }}</code>{% if not loop.last %} {% endif %}{% endfor %}</span></summary>
+    {{ tableau(f.t, locked) }}
+  </details>
+  {% endfor %}
+</div>

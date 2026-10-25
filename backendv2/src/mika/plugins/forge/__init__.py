@@ -57,7 +57,6 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
-from mika.contracts import social as social_c
 from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -80,11 +79,11 @@ from mika.plugins.forge.views import (
     view_params,
 )
 from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args
-from mika.vocab.access import ALONE, NO, OWNER, WORK, owner_here
-from mika.vocab.access import first as first_line
+from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, ToolRule
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, hearable
+from mika.vocab.rights import closeness_of, here_allowed, rights_of, tool_allowance
 
 BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
 
@@ -177,6 +176,10 @@ class App:
     instructions: str = ""
     dropped: int = 0
     calls_at: tuple[int, ...] = ()
+    #: ses lignes d'accès (ADR 0134), pour une app sans projet : réglées d'un coup (``access_set``) ; ``None`` :
+    #: jamais réglées, son minimum vital vaut (``APP_VITAL``) ; une app d'un projet suit son projet
+    access: tuple[ToolRule, ...] | None = None
+    default_access: ToolRule = CLOSED_TOOLS
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,10 +327,21 @@ class Emitted(Payload):
     data: str
 
 
+class AppAccessSet(Payload):
+    """Les lignes d'accès d'une app sans projet, réglées d'un coup par un opérateur (ADR 0134) : tout le tableau,
+    dans son ordre, et la ligne par défaut."""
+
+    app: str
+    rows: tuple[ToolRule, ...] = ()
+    default: ToolRule = CLOSED_TOOLS
+    by: str = ""
+
+
 #: v5 : ce qui a été dit de chaque app reste su (``said``), même quand une trouvaille nouvelle remplace la précédente.
 #: v6 : une trouvaille sait si elle est urgente (``News.urgent``).
 #: v7 : les appels d'outils d'app qui attendent un accord (``calls``, ADR 0133).
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=7,
+#: v8 : les lignes d'accès d'une app sans projet (``App.access``, ADR 0134).
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=8,
                retired_params=("signal_spacing_us",))
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
@@ -336,6 +350,7 @@ SWITCHED = FORGE.event("switched", Switched)
 TICKED = FORGE.event("ticked", Ticked)
 EMITTED = FORGE.event("emitted", Emitted)
 HANDLED = FORGE.event("handled", Handled)
+ACCESS_SET = FORGE.event("access_set", AppAccessSet, subjects=("by",))
 INBOX_MAX = 16
 
 
@@ -376,8 +391,19 @@ def _written(s: ForgeState, e, cx) -> ForgeState:
                               if k in {name for name, _ in d.services}}),
               # sa file traverse les versions : ce qu'elle lui a signalé reste à lire
               queue=old.queue if old else (), dropped=old.dropped if old else 0,
-              calls_at=old.calls_at if old else (), rules=tuple(d.signals), instructions=d.instructions)
+              calls_at=old.calls_at if old else (), rules=tuple(d.signals), instructions=d.instructions,
+              # ses lignes d'accès suivent l'app, pas sa version (ADR 0134)
+              access=old.access if old else None, default_access=old.default_access if old else CLOSED_TOOLS)
     return replace(s, apps=s.apps.set(d.app, app))
+
+
+@FORGE.reducer(ACCESS_SET)
+def _access_set(s: ForgeState, e, cx) -> ForgeState:
+    d = e.data
+    app = s.apps.get(d.app)
+    if app is None:
+        return s
+    return replace(s, apps=s.apps.set(d.app, replace(app, access=tuple(d.rows), default_access=d.default)))
 
 
 @FORGE.reducer(SWITCHED)
@@ -1052,7 +1078,7 @@ class SignalsDoneArgs(BaseModel):
     urgent: bool = Field(default=False, description=phrase("forge.triage.urgent"))
 
 
-@FORGE.tool("forge_signals_done", description=phrase("forge.triage.description"), args=SignalsDoneArgs,
+@FORGE.tool("forge_signals_done", acts=True, description=phrase("forge.triage.description"), args=SignalsDoneArgs,
             bundle=TRIAGE_BUNDLE, episodes=[Kind.TASK], max_calls_per_episode=1, ends_loop=True)
 async def forge_signals_done(args: SignalsDoneArgs, ctx: Any) -> Any:
     """Son verdict sur le lot lu : ce qu'elle dira (une trouvaille à dire, de son initiative ou à la prochaine
@@ -1131,7 +1157,7 @@ def _may_build(ctx: Any) -> bool:
     """Écrire et régler ses apps : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
     ADR 0133) — toi en privé, jamais dans un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris la
     Forge ; la lecture de la file d'une app."""
-    return owner_here(ctx.frame, BUNDLE, lambda target: bool(sifting_app(target)))
+    return here_allowed(ctx.frame, BUNDLE, acts=True, tasks=lambda target: bool(sifting_app(target)))
 
 
 def _caretaker(frame: Frame) -> str:
@@ -1384,7 +1410,7 @@ async def _save(ctx: Any, port: Any, name: str, manifest: str, code: str, asked_
     return _nothing(phrase("forge.tools.write.done", version=version))  # la preuve viendra de son essai
 
 
-@FORGE.tool("forge_write", description=phrase("forge.tools.write.description"), args=WriteArgs,
+@FORGE.tool("forge_write", acts=True, description=phrase("forge.tools.write.description"), args=WriteArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3, owner_only=True)
 async def forge_write(args: WriteArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1432,7 +1458,7 @@ def _around(text: str, spans: Sequence[tuple[int, int]], margin: int = 2, most: 
     return "\n".join(out)
 
 
-@FORGE.tool("forge_edit", description=phrase("forge.tools.edit.description"), args=EditArgs,
+@FORGE.tool("forge_edit", acts=True, description=phrase("forge.tools.edit.description"), args=EditArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_edit(args: EditArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1609,7 +1635,7 @@ def stopped(app: App | None) -> str:
     return ""
 
 
-@FORGE.tool("forge_test", description=phrase("forge.tools.test.description"), args=TestArgs, bundle=BUNDLE,
+@FORGE.tool("forge_test", acts=True, description=phrase("forge.tools.test.description"), args=TestArgs, bundle=BUNDLE,
             episodes=BUILD, max_calls_per_episode=8, owner_only=True)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1689,7 +1715,7 @@ async def forge_logs(args: AppArgs, ctx: Any) -> Any:
     return _nothing("\n".join(port.logs(args.app, 30)) or phrase("forge.tools.logs.empty"))
 
 
-@FORGE.tool("forge_command", description=phrase("forge.tools.command.description"), args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
+@FORGE.tool("forge_command", acts=True, description=phrase("forge.tools.command.description"), args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
             owner_only=True)
 async def forge_command(args: CommandArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1787,7 +1813,7 @@ async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
 
 
-@FORGE.tool("forge_db_execute", description=phrase("forge.tools.db_execute.description"), args=DbArgs,
+@FORGE.tool("forge_db_execute", acts=True, description=phrase("forge.tools.db_execute.description"), args=DbArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=6, owner_only=True)
 async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1806,31 +1832,33 @@ async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
 APP_EPISODES = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.TASK, *WORKING})
 
 
-#: une app sans projet n'a pas de lignes d'accès à elle : à toi seule, sans demander (ADR 0133)
-ALONE_ACCESS = (projects_c.ProjectAccess(who=(OWNER, WORK), read=ALONE, act=ALONE),)
+#: le minimum vital d'une app sans projet, tant qu'on ne l'a pas réglée (ADR 0134) : à toi, et elle seule, sans
+#: demander, ce qu'elle rend gardé comme un souvenir ; personne d'autre
+APP_VITAL = (ToolRule(who=(OWNER,), read=ALONE, act=ALONE, keep="perso"),
+             ToolRule(canal=(INTERNAL,), read=ALONE, act=ALONE, keep="perso"))
+#: ce qu'un outil d'app rend porte ce qu'elle en garde (``ToolResult.floor``, ``unkept``), comme un service
+KEEP_FLOORS = {"prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
 
 
-def app_lines(frame: Frame, app: App | None) -> tuple[tuple[projects_c.ProjectAccess, ...], projects_c.ProjectAccess]:
-    """Les lignes d'accès qui valent pour une app (ADR 0133) : celles de son projet ; sans projet, toi seule ; son
-    projet archivé ou disparu, personne."""
+def app_lines(frame: Frame, app: App | None) -> tuple[tuple[Any, ...], Any]:
+    """Les lignes d'accès qui valent pour une app (ADR 0133, 0134) : celles de son projet ; sans projet, les siennes
+    (ou son minimum vital) ; son projet archivé ou disparu, personne."""
     if app is None:
         return (), projects_c.CLOSED
     if not app.project:
-        return ALONE_ACCESS, projects_c.CLOSED
+        return (tuple(app.access), app.default_access) if app.access is not None else (APP_VITAL, CLOSED_TOOLS)
     view = next((v for v in frame.get(projects_c.LIVE) if v.id == app.project), None)
     return (view.access, view.default_access) if view is not None else ((), projects_c.CLOSED)
 
 
-def app_level(frame: Frame, name: str, tool: str, reads: bool, audience: Any, kind: str) -> str:
-    """Ce qu'elle fait de cet outil d'app devant qui est en face, à ce moment : la ligne de son projet qui le concerne
-    (``tool`` : ``<app>_<outil>``), sa colonne « lecture » ou « action » ; ``non`` jamais dans un salon, avec une
-    inconnue, ni sans personne."""
+def app_level(frame: Frame, name: str, tool: str, reads: bool, audience: Any, kind: str) -> tuple[str, str]:
+    """Ce qu'elle fait de cet outil d'app devant qui est en face, à ce moment, et ce qu'elle en garde : la ligne de
+    son projet (ou la sienne) qui le concerne (``tool`` : ``<app>_<outil>``), sa colonne « lecture » ou « action »,
+    serrée par le canal et le plafond (ADR 0134) ; ``non`` sans personne."""
     rows, default = app_lines(frame, frame.state("forge").apps.get(name))
-    line = first_line(rows, default, audience, kind, lambda a: not a.tools or tool in a.tools,
-                      close=social_c.is_close(frame))
-    if line is None:
-        return NO
-    return line.read if reads else line.act
+    got = tool_allowance(rows, default, audience, kind, not reads, rights_of(frame.env),
+                         lambda a: not a.tools or tool in a.tools, close=closeness_of(frame.env, frame), outside=True)
+    return (got.level, got.keep) if got is not None else (NO, "rien")
 
 
 def app_tool_names(frame: Frame, ports: Mapping[str, Any], project: int) -> list[tuple[str, str]]:
@@ -1853,29 +1881,29 @@ def _app_gate(name: str, tool: str, reads: bool) -> Any:
         """Seulement là où les lignes d'accès de son projet l'ouvrent, devant cette personne, à ce moment (ADR 0133).
 
         Jamais dans un salon, avec une inconnue, ni sans ce qu'elle vit (une console qui juge hors de sa vie)."""
-        return frame is not None and app_level(frame, name, tool, reads, audience, kind) != NO
+        return frame is not None and app_level(frame, name, tool, reads, audience, kind)[0] != NO
 
     return allowed
 
 
-def _usable(ctx: Any, name: str, port: Any, tool: str, reads: bool) -> tuple[App | None, str, str]:
-    """L'app, pourquoi elle ne sert pas ici (vide : elle sert) et ce qu'elle en fait (``seule``, ``carte``, ``toi``) :
-    les lignes d'accès de son projet (ADR 0133) ; en conversation, une app qui a des secrets seulement si un
-    opérateur l'a promue (ADR 0104)."""
+def _usable(ctx: Any, name: str, port: Any, tool: str, reads: bool) -> tuple[App | None, str, str, str]:
+    """L'app, pourquoi elle ne sert pas ici (vide : elle sert), ce qu'elle en fait (``seule``, ``carte``, ``toi``) et
+    ce qu'elle en garde : ses lignes d'accès (ADR 0133, 0134) ; en conversation, une app qui a des secrets seulement
+    si un opérateur l'a promue (ADR 0104)."""
     app = ctx.frame.state("forge").apps.get(name)
     if port is None or app is None:
-        return None, phrase("forge.tools.call.unavailable"), NO
+        return None, phrase("forge.tools.call.unavailable"), NO, "rien"
     if app.held or not app.enabled or app.broken:
-        return app, phrase("forge.tools.call.stopped", why=stopped(app)), NO
+        return app, phrase("forge.tools.call.stopped", why=stopped(app)), NO, "rien"
     ep = ctx.frame.episode
-    level = app_level(ctx.frame, name, tool, reads, ctx.frame.audience, ep.kind if ep is not None else "")
+    level, keep = app_level(ctx.frame, name, tool, reads, ctx.frame.audience, ep.kind if ep is not None else "")
     if level == NO:
         # une app peut sortir ce qu'on lui passe vers le réseau : seulement pour qui ses lignes d'accès le permettent
-        return app, phrase("forge.tools.call.not_here", who=_caretaker(ctx.frame)), NO
+        return app, phrase("forge.tools.call.not_here", who=_caretaker(ctx.frame)), NO, "rien"
     working = ep is not None and (ep.kind in WORKING or (ep.kind == Kind.TASK and bool(sifting_app(ep.target))))
     if not working and not app.promoted and has_secrets(ctx.ports, port.info(name)):
-        return app, phrase("forge.tools.call.secrets"), NO
-    return app, "", level
+        return app, phrase("forge.tools.call.secrets"), NO, "rien"
+    return app, "", level, keep
 
 
 def app_tool(name: str, tool: str) -> Any:
@@ -1886,7 +1914,7 @@ def app_tool(name: str, tool: str) -> Any:
         port = _port(ctx)
         info = port.info(name) if port is not None else None
         spec = next((t for t in info.tools if t.name == tool), None) if info is not None else None
-        app, why, level = _usable(ctx, name, port, f"{name}_{tool}", bool(spec is not None and spec.reads))
+        app, why, level, keep = _usable(ctx, name, port, f"{name}_{tool}", bool(spec is not None and spec.reads))
         if why or app is None:
             return ToolResult(ok=False, content=why)
         if spec is None:
@@ -1908,7 +1936,8 @@ def app_tool(name: str, tool: str) -> Any:
         if not r.ok:
             return ToolResult(ok=False, content=phrase("forge.tools.call.failed", error=r.error[:500]))
         return ToolResult(content=phrase("forge.tools.call.result",
-                                         value=json.dumps(r.value, ensure_ascii=False, default=str)[:3000]))
+                                         value=json.dumps(r.value, ensure_ascii=False, default=str)[:3000]),
+                          floor=KEEP_FLOORS.get(keep, 0), unkept=keep == "rien")
 
     return handler
 
@@ -1919,7 +1948,7 @@ def app_pages(name: str) -> Any:
 
     async def handler(args: PagesArgs, ctx: Any) -> ToolResult:
         port = _port(ctx)
-        app, why, level = _usable(ctx, name, port, f"{name}_pages", True)
+        app, why, level, _keep = _usable(ctx, name, port, f"{name}_pages", True)
         if why or app is None:
             return ToolResult(ok=False, content=why)
         info = port.info(name)

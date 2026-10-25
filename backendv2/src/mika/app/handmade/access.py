@@ -4,14 +4,11 @@ sources à cocher."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import Any
-
 from mika.contracts import identity as identity_c
 from mika.faculties.identity.faculty import known_as
 from mika.faculties.identity.inspect import people as people_of
+from mika.inspector.pages.droits_tables import canal_choices, canal_instances, who_choices
 from mika.inspector.ui import UI
-from mika.vocab.access import PERSON, SOURCE_WORDS, SOURCES, who_words
 from mika.vocab.people import ACCOUNT_PREFIX
 
 
@@ -29,15 +26,4 @@ def people_with_accounts(ui: UI) -> list[dict[str, str]]:
     return sorted(out, key=lambda p: p["name"].casefold())
 
 
-def who_choices(who: Sequence[str], people: Sequence[dict[str, str]], name: Callable[[str], str]) -> dict[str, Any]:
-    """Les cases « qui » d'une ligne : ses sources, puis les personnes qui ont un compte ; une personne qu'elle coche
-    et qui n'a plus de compte reste là, cochée, pour qu'on puisse la décocher. Chaque case porte aussi son mot dans
-    ``who_words`` (``word``), que la console recompose quand on coche."""
-    got = set(who)
-    boxes = [{"value": k, "label": label, "word": SOURCE_WORDS[k], "on": k in got} for k, label in SOURCES]
-    listed = {PERSON + p["key"] for p in people}
-    boxes += [{"value": PERSON + p["key"], "label": p["name"], "word": p["name"], "on": PERSON + p["key"] in got}
-              for p in people]
-    boxes += [{"value": w, "label": name(w[len(PERSON):]), "word": name(w[len(PERSON):]), "on": True}
-              for w in sorted(got) if w.startswith(PERSON) and w not in listed]
-    return {"boxes": boxes, "said": who_words(who, name) if who else "Personne"}
+__all__ = ["canal_choices", "canal_instances", "people_with_accounts", "who_choices"]

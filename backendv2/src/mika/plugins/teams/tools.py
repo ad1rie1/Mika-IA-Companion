@@ -128,7 +128,7 @@ async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     title = inert(port.title(m.conversation), 80) or "sans nom"
     text = "\n".join(_line(ctx.frame, x) for x in [*before, *after])
     out = f"{DATA}\nConversation « {title} » :\n{cite(text, 8000)}"
-    mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.conversation, m.author).send, "validation")
+    mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.conversation, m.author).reply, "validation")
     return out + f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n{voice_text(port.voice(), mode)}"
 
 
@@ -138,7 +138,7 @@ def _asker(ctx: Any) -> tuple[str, ...]:
     return (target,) if target and is_identifiable(target) and not is_work_target(target) else ()
 
 
-@TEAMS.tool("teams_draft", description="Préparer une réponse à un message Teams, à la place de la personne qui "
+@TEAMS.tool("teams_draft", acts=True, description="Préparer une réponse à un message Teams, à la place de la personne qui "
             "s'occupe de toi (selon son réglage, elle est posée dans Teams pour qu'elle l'envoie, envoyée après son "
             "accord, ou envoyée telle quelle).", args=DraftArgs, bundle=BUNDLE, episodes=EPISODES,
             max_calls_per_episode=2, owner_only=True)
@@ -174,7 +174,7 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content=f"Cette réponse ne peut pas partir : {shown.blocked if shown else 'erreur'}.")
     # comment elle partira : la règle d'envoi de sa conversation (ADR 0132)
-    mode = MODE_OF.get(rule.send, "validation")
+    mode = MODE_OF.get(rule.reply, "validation")
     if shown.blocked and mode != "brouillon":
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content="Elle ne peut pas partir avec des passages [À COMPLÉTER] : écris-la sans "

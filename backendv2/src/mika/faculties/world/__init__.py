@@ -564,7 +564,7 @@ async def _start_intent(ctx: Any, steps: list[w.Step]) -> w.Intent:
     return intent
 
 
-@WORLD.tool("go_to", description=phrase("world.tools.go_to.description"), args=GoArgs, bundle="world",
+@WORLD.tool("go_to", acts=True, description=phrase("world.tools.go_to.description"), args=GoArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=1)
 async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame
@@ -597,7 +597,7 @@ async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     return ToolResult(content=phrase("world.tools.go_to.going", where=_where_phrase(s.definition, target.id, want)))
 
 
-@WORLD.tool("interact", description=phrase("world.tools.interact.description"), args=InteractArgs, bundle="world",
+@WORLD.tool("interact", acts=True, description=phrase("world.tools.interact.description"), args=InteractArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=3)
 async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame

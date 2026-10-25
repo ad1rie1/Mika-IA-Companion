@@ -8,8 +8,8 @@ personne, pousse ce que le client reçoit (``POST /api/teams/inbox``) ; l'adapta
   une heuristique : son importance, et s'il pose une question **à laquelle elle peut aider**. Il devient un signal
   (``teams.noticed``) que l'attention dose et habitue.
 - **Préparer une réponse d'elle-même** (une tâche silencieuse, ``Kind.TASK``) : au dernier message d'une conversation
-  qui pose une telle question, s'il est récent, si la personne n'y a pas déjà répondu et si sa règle d'envoi le veut
-  (« Envoyer à ta place », ``vocab.sending``, ADR 0132).
+  qui pose une telle question, s'il est récent, si la personne n'y a pas déjà répondu et si la ligne de Teams le veut
+  (le tableau de son canal, Réglages › Canaux, ``vocab.canals``, ADR 0132, 0134).
   Elle écrit **à la place** de la personne (le message part de son compte, sous son nom), avec le fil de la
   conversation et ses consignes — jamais avec sa mémoire, qui contient la vie de la personne et ce que d'autres lui
   ont confié.
@@ -40,10 +40,10 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.vocab.access import owner_here
+from mika.vocab.canals import Canals, teams_rule
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
-from mika.vocab.sending import Sending, teams_rule
+from mika.vocab.rights import here_allowed
 
 BUNDLE = "teams"
 #: les messages remarqués qu'elle garde en tête (le texte, lui, est dans l'adaptateur)
@@ -76,10 +76,10 @@ class TeamsParams(BaseModel):
     enabled: Annotated[bool, Knob(
         label="Teams actif", group="Écrire", readonly=True,
         help="Réglé dans Réglages › Plugins › Teams : désactivé, elle ne prépare ni ne propose plus rien.")] = True
-    sending: Annotated[Sending, Knob(
-        label="Ce qu'elle envoie à ta place", group="Écrire", readonly=True,
-        help="Réglé dans Relations & échanges › Envoyer à ta place (ADR 0132) : des règles lues de haut en bas — "
-             "canal, destinataire, préparer d'elle-même, comment envoyer — puis la règle par défaut.")] = Sending()
+    canaux: Annotated[Canals, Knob(
+        label="Les tableaux de ses canaux", group="Écrire", readonly=True,
+        help="Réglés dans Réglages › Canaux (ADR 0134) : le tableau de Teams, lu de haut en bas — qui écrit, préparer "
+             "d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
     drafts_per_day: Annotated[int, Knob(
         label="Réponses d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -222,7 +222,7 @@ def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str) -> str:
     qui écrit, ADR 0132). Ce qui part relit la règle d'aujourd'hui (``triage.rule_of``)."""
     seen = s.messages.get(ref)
     send = seen.send if seen is not None and seen.send else teams_rule(
-        p.sending.rules, p.sending.default, conversation, seen.author if seen is not None else "").send
+        p.canaux, "", conversation, seen.author if seen is not None else "").reply
     return MODE_OF.get(send, "validation")
 
 
@@ -379,7 +379,7 @@ def for_owner(frame: Frame) -> bool:
     """Ses conversations Teams : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
     ADR 0133) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
     ce lot ; ses tâches à elle (une réponse à préparer)."""
-    return owner_here(frame, BUNDLE, lambda target: (task_of(target) or ("", ""))[0] == TEAMS.name)
+    return here_allowed(frame, BUNDLE, tasks=lambda target: (task_of(target) or ("", ""))[0] == TEAMS.name)
 
 
 #: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)

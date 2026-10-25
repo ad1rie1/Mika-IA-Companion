@@ -41,9 +41,10 @@ from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
+from mika.kernel.rights import Rights
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert
-from mika.vocab.access import KINDS_OF, can_approve, first
+from mika.vocab.access import KINDS_OF, can_approve
 
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
 from mika.vocab.access import moment as moment
@@ -51,6 +52,7 @@ from mika.vocab.access import situation as situation
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.rights import grants_of, rights_of, tool_allowance
 
 FAMILY = "mcp"
 #: quand une famille d'épisodes d'un serveur sert (``vocab.access``) ; une tâche prend les lots qu'elle choisit — un
@@ -244,12 +246,14 @@ class ExternalArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-def access_for(tool: Any, audience: Any, kind: str, close: Any = None) -> tuple[str, str]:
+def access_for(tool: Any, audience: Any, kind: str, close: Any = None, rights: Rights | None = None) -> tuple[str, str]:
     """Ce qu'elle fait d'un outil devant cette audience, dans cette sorte d'épisode, et ce qu'elle garde de ce qu'il
     rend : la première de ses lignes d'accès qui les désigne (``close`` : qui est proche d'elle), sinon la ligne par
-    défaut (ADR 0131, 0133). ``non`` jamais dans un salon, avec une inconnue, ni sans personne."""
-    line = first(tool.access, tool.default, audience, kind, close=close)
-    return (line.level(tool.nature), line.keep) if line is not None else (NO, "rien")
+    défaut, serrée par le tableau du canal et par le plafond (ADR 0131, 0133, 0134 : ``rights``, ce que le registre
+    donne). ``non`` sans personne."""
+    got = tool_allowance(tool.access, tool.default, audience, kind, tool.nature != "lecture", rights or Rights(),
+                         close=close, outside=True)
+    return grants_of(got)
 
 
 def bundle_line(tool: Any) -> str:
@@ -338,7 +342,8 @@ def _handler(t: Any) -> Any:
         if ctx.ports.get("mcp") is None:
             return ToolResult(ok=False, content=phrase("mcp.unavailable"))
         ep = ctx.frame.episode
-        level, keep = access_for(t, ctx.frame.audience, ep.kind if ep is not None else "", social_c.is_close(ctx.frame))
+        level, keep = access_for(t, ctx.frame.audience, ep.kind if ep is not None else "", social_c.is_close(ctx.frame),
+                                 rights_of(ctx.frame.env))
         if level == NO:
             return ToolResult(ok=False, content=phrase("mcp.tools.closed"))
         if level == ALONE:
@@ -355,7 +360,7 @@ def _gate(t: Any) -> Any:
         ADR 0131 : la première ligne qui la désigne décide, sinon la ligne par défaut ; jamais dans un salon ni avec
         une inconnue."""
         close = social_c.is_close(frame) if frame is not None else None
-        return access_for(t, audience, kind, close)[0] != NO
+        return access_for(t, audience, kind, close, rights_of(frame.env) if frame is not None else None)[0] != NO
 
     return served
 

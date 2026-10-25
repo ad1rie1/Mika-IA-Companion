@@ -46,6 +46,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import causes
+from mika.vocab.access import PERSON
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import PROJECT_KINDS, Kind, project_of
 from mika.vocab.phrasebook import phrase
@@ -1410,9 +1411,13 @@ def view(p: Project) -> c.ProjectView:
 
 
 def access_of(p: Project) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
-    """Ses lignes d'accès et sa ligne par défaut (ADR 0133) ; jamais réglées : toi, tout ; les autres l'entendent selon
-    sa confidentialité, sans plus (``UNSET``)."""
+    """Ses lignes d'accès et sa ligne par défaut (ADR 0133, 0134) ; jamais réglées : toi et elle seule, tout ; la
+    personne qui l'a confié le voit, le pilote sur ton accord et en reçoit les fichiers ; les autres l'entendent selon
+    sa confidentialité, en lecture seule (``UNSET``)."""
     if p.access is None:
+        if p.authority == c.USER and p.owner:
+            return (*c.UNSET, c.ProjectAccess(who=(PERSON + p.owner,), see=True, steer=c.STEER_ASK, files=True)), \
+                c.UNSET_DEFAULT
         return c.UNSET, c.UNSET_DEFAULT
     return p.access, p.default_access
 

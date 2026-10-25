@@ -1,0 +1,120 @@
+{# Un tableau de droits (ADR 0134), le même dessin pour un canal (Réglages › Canaux) et une famille de ses outils
+   (Outils › Ses propres outils) : des lignes lues de haut en bas — qui, par où, quand, ses colonnes, ses outils —, puis
+   le comportement par défaut, obligatoire. Chaque bouton envoie tout le tableau (``t.action``, ``cle`` : sa clé). #}
+{% from "_navigation.html" import pager as pages %}
+{% macro tableau(t, locked) -%}
+<form method="post" action="{{ t.action }}" class="access-form" id="t-{{ t.id }}">
+  {% if not locked %}<input type="hidden" name="csrf" value="{{ t.csrf }}"><input type="hidden" name="cle" value="{{ t.key }}">
+  <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>{% endif %}
+  <section class="now-card access-card table-block" aria-labelledby="t-{{ t.id }}-title">
+    <header class="access-head">
+      <div>
+        <h2 id="t-{{ t.id }}-title">{{ t.title }}</h2>
+        <p>{{ t.intro }}</p>
+        {% if t.note %}<p class="now-muted">{{ t.note }}</p>{% endif %}
+        {% if t.below %}<p class="server-alert warn">⚠ En dessous du minimum vital : {{ t.below }}</p>{% endif %}
+      </div>
+      {% if not locked %}<button class="btn" name="faire" value="ajouter">+ Ajouter une ligne</button>{% endif %}
+    </header>
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ t.title }}">
+      <table class="access-table">
+        <thead>
+          <tr>
+            <th scope="col" class="access-n">#</th><th scope="col">Qui</th>
+            {% if t.show_canal %}<th scope="col">Par où</th>{% endif %}<th scope="col">Quand</th>
+            {% for c in t.columns %}<th scope="col" title="{{ c.help }}">{{ c.label }}</th>{% endfor %}
+            {% if t.show_tools %}<th scope="col">Outils</th>{% endif %}
+            {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in t.rows %}
+          <tr>
+            <td class="access-n">{{ r.n }}</td>
+            <td>
+              <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
+              {% if r.alone %}<span class="now-muted" title="Elle seule : personne en face">—</span>{% else %}
+              <details class="access-tools access-who" data-exclusive data-none="Personne">
+                <summary>{{ r.who.said }}</summary>
+                <div class="access-tools-list">
+                  {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }} data-word="{{ c.word }}"> {{ c.label }}</label>{% endfor %}
+                </div>
+              </details>{% endif %}
+            </td>
+            {% if t.show_canal %}
+            <td>
+              <details class="access-tools access-canal" data-exclusive data-all="Tous" data-none="Aucun canal">
+                <summary>{{ r.canal.said }}</summary>
+                <div class="access-tools-list">
+                  {% for c in r.canal.boxes %}<label class="access-tool{{ ' all' if c.all }}{{ ' sub' if c.sub }}"><input type="checkbox" name="canal.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {% if c.all %}<b>{{ c.label }}</b><span>par tous les canaux</span>{% else %}{{ c.label }}{% endif %}</label>{% endfor %}
+                </div>
+              </details>
+            </td>
+            {% endif %}
+            <td>
+              {% if r.alone %}<span class="now-muted" title="Au travail, les moments ne comptent pas">—</span>{% else %}
+              <details class="access-tools access-when" data-exclusive data-all="Toujours" data-none="Aucun moment">
+                <summary>{{ r.when_said }}</summary>
+                <div class="access-tools-list">
+                  <label class="access-tool all"><input type="checkbox" name="toujours.{{ r.n }}"{{ ' checked' if r.always }}{{ ' disabled' if locked }}> <b>Toujours</b><span>à tout moment</span></label>
+                  {% for m in r.moments %}<label class="access-tool"><input type="checkbox" name="moments.{{ r.n }}|{{ m.key }}"{{ ' checked' if m.on }}{{ ' disabled' if locked }}> {{ m.label }}</label>{% endfor %}
+                </div>
+              </details>{% endif %}
+            </td>
+            {% for c in t.columns %}
+            <td>
+              {% if c.kind == 'bool' %}<label class="access-tool"><input type="checkbox" name="{{ c.key }}.{{ r.n }}"{{ ' checked' if r.values[c.key] }}{{ ' disabled' if locked or c.locked }}> oui</label>
+              {% else %}<select name="{{ c.key }}.{{ r.n }}" class="access-select {{ r.values[c.key] }}" aria-label="{{ c.label }}, ligne {{ r.n }}"{{ ' disabled' if locked }} title="{{ c.help }}">
+                {% for k, text, off in c.choices %}<option value="{{ k }}"{{ ' selected' if k == r.values[c.key] }}{{ ' disabled' if off and k != r.values[c.key] }}>{{ text }}{% if off %} 🔒{% endif %}</option>{% endfor %}
+              </select>{% endif %}
+            </td>
+            {% endfor %}
+            {% if t.show_tools %}
+            <td>
+              <details class="access-tools" data-exclusive data-all="Tous" data-one="outil" data-many="outils" data-none="Aucun outil">
+                <summary>{{ r.tools_said }}</summary>
+                <div class="access-tools-list">
+                  <label class="access-tool all"><input type="checkbox" name="tous.{{ r.n }}"{{ ' checked' if r.all }}{{ ' disabled' if locked }}> <b>Tous ses outils</b><span>même ceux de demain</span></label>
+                  {% for x in r.tools %}<label class="access-tool"><input type="checkbox" name="prend.{{ r.n }}|{{ x.name }}"{{ ' checked' if x.on }}{{ ' disabled' if locked }}> <code>{{ x.name }}</code> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span></label>{% endfor %}
+                </div>
+              </details>
+            </td>
+            {% endif %}
+            {% if not locked %}
+            <td class="access-move">
+              <button class="btn quiet" name="faire" value="monter:{{ r.n }}"{{ ' disabled' if r.first }} aria-label="Monter la ligne {{ r.n }}" title="Monter">↑</button>
+              <button class="btn quiet" name="faire" value="descendre:{{ r.n }}"{{ ' disabled' if r.last }} aria-label="Descendre la ligne {{ r.n }}" title="Descendre">↓</button>
+              <button class="btn quiet danger" name="faire" value="retirer:{{ r.n }}" aria-label="Retirer la ligne {{ r.n }}" title="Retirer">✕</button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+          <tr class="access-default">
+            <td class="access-n"></td>
+            <th scope="row" colspan="{{ 3 if t.show_canal else 2 }}">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
+            {% for c in t.columns %}
+            <td>
+              {% if c.kind == 'bool' %}<label class="access-tool"><input type="checkbox" name="defaut_{{ c.key }}"{{ ' checked' if t.default[c.key] }}{{ ' disabled' if locked or c.locked }}> oui</label>
+              {% else %}<select name="defaut_{{ c.key }}" class="access-select {{ t.default[c.key] }}" aria-label="Par défaut, {{ c.label }}"{{ ' disabled' if locked }}>
+                {% for k, text, off in c.choices %}<option value="{{ k }}"{{ ' selected' if k == t.default[c.key] }}{{ ' disabled' if off and k != t.default[c.key] }}>{{ text }}{% if off %} 🔒{% endif %}</option>{% endfor %}
+              </select>{% endif %}
+            </td>
+            {% endfor %}
+            {% if t.show_tools %}<td class="access-all">Tous</td>{% endif %}
+            {% if not locked %}<td></td>{% endif %}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hm-pager single">{{ pages(t.pager) }}</div>
+    {% if t.floors %}<p class="now-muted">Ce qu'aucune ligne n'ouvre : {{ t.floors | join(' · ') }}.</p>{% endif %}
+    {% if not locked %}
+    <div class="form-actions-inline">
+      <button class="btn" name="faire" value="">Enregistrer</button>
+      {% if t.set %}<button class="btn quiet" name="faire" value="remettre" data-confirm="Revenir au minimum vital de ce tableau ? Tes lignes seront retirées.">Revenir au minimum vital</button>{% endif %}
+      <span class="now-muted">Les flèches et la croix enregistrent aussi ce que tu as changé.</span>
+    </div>
+    {% endif %}
+  </section>
+</form>
+{%- endmacro %}

@@ -169,7 +169,7 @@ def _gone() -> ToolResult:
     return ToolResult(ok=False, content=phrase("goals.tools.gone"))
 
 
-@GOALS.tool(REPORT, description=phrase("goals.tools.report.description"), args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
+@GOALS.tool(REPORT, acts=True, description=phrase("goals.tools.report.description"), args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
 async def report_step(args: ReportArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -221,7 +221,7 @@ class NoteArgs(BaseModel):
     text: str = Field(min_length=1, max_length=2000, description=phrase("goals.tools.note.text"))
 
 
-@GOALS.tool(NOTE, description=phrase("goals.tools.note.description"), args=NoteArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=4)
+@GOALS.tool(NOTE, acts=True, description=phrase("goals.tools.note.description"), args=NoteArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=4)
 async def goal_note(args: NoteArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -239,7 +239,7 @@ def _words(text: str) -> set[str]:
     return {w.lower().strip("'") for w in _WORD.findall(text) if len(w.strip("'")) > 2}
 
 
-@GOALS.tool(REFLECT, description=phrase("goals.tools.reflect.description"), args=ReflectArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=2)
+@GOALS.tool(REFLECT, acts=True, description=phrase("goals.tools.reflect.description"), args=ReflectArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=2)
 async def goal_reflect(args: ReflectArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -270,7 +270,7 @@ class TaskUpdateArgs(BaseModel):
     note: str = Field(default="", max_length=1000, description=phrase("goals.tools.task_update.note"))
 
 
-@GOALS.tool(TASK_ADD, description=phrase("goals.tools.task_add.description"), args=TaskAddArgs,
+@GOALS.tool(TASK_ADD, acts=True, description=phrase("goals.tools.task_add.description"), args=TaskAddArgs,
             bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=5)
 async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
     g = _goal(ctx)
@@ -284,7 +284,7 @@ async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
     return phrase("goals.tools.task_add.done", number=number)
 
 
-@GOALS.tool(TASK_UPDATE, description=phrase("goals.tools.task_update.description"), args=TaskUpdateArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=8)
+@GOALS.tool(TASK_UPDATE, acts=True, description=phrase("goals.tools.task_update.description"), args=TaskUpdateArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=8)
 async def goal_task_update(args: TaskUpdateArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -302,7 +302,7 @@ class DropArgs(BaseModel):
     why: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.drop.why"))
 
 
-@GOALS.tool(DROP, description=phrase("goals.tools.drop.description"), args=DropArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
+@GOALS.tool(DROP, acts=True, description=phrase("goals.tools.drop.description"), args=DropArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
 async def goal_drop(args: DropArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -346,7 +346,7 @@ class RemindArgs(BaseModel):
     urgent: bool = Field(default=False, description=phrase("goals.tools.remind.urgent"))
 
 
-@GOALS.tool("goal_remind", description=phrase("goals.tools.remind.description"), args=RemindArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3)
+@GOALS.tool("goal_remind", acts=True, description=phrase("goals.tools.remind.description"), args=RemindArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3)
 async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None:
@@ -402,7 +402,7 @@ class PlanReminderArgs(BaseModel):
     urgent: bool = Field(default=False, description=phrase("goals.tools.remind.urgent"))
 
 
-@GOALS.tool("goal_plan_reminder", description=phrase("goals.tools.plan_reminder.description"), args=PlanReminderArgs,
+@GOALS.tool("goal_plan_reminder", acts=True, description=phrase("goals.tools.plan_reminder.description"), args=PlanReminderArgs,
             bundle="goals", episodes=sorted(WAKE_KINDS), max_calls_per_episode=3)
 async def goal_plan_reminder(args: PlanReminderArgs, ctx: Any) -> Any:
     person, source = _wake_person(ctx.frame), _wake_source(ctx.frame)
@@ -427,7 +427,7 @@ class PlanExplorationArgs(BaseModel):
     details: str = Field(default="", max_length=600, description=phrase("goals.tools.plan_exploration.details"))
 
 
-@GOALS.tool("goal_plan_exploration", description=phrase("goals.tools.plan_exploration.description"),
+@GOALS.tool("goal_plan_exploration", acts=True, description=phrase("goals.tools.plan_exploration.description"),
             args=PlanExplorationArgs, bundle="goals", episodes=[Kind.WAKE], max_calls_per_episode=1)
 async def goal_plan_exploration(args: PlanExplorationArgs, ctx: Any) -> Any:
     frame = ctx.frame
@@ -493,7 +493,7 @@ def _shown(g: Goal, texts: Mapping[str, str], frame: Frame, person: str) -> str:
     return when
 
 
-@GOALS.tool("goal_remind_change", description=phrase("goals.tools.remind_change.description"),
+@GOALS.tool("goal_remind_change", acts=True, description=phrase("goals.tools.remind_change.description"),
             args=RemindChangeArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3,
             rule="seulement un rappel encore à dire, demandé par la personne à qui elle parle")
 async def goal_remind_change(args: RemindChangeArgs, ctx: Any) -> Any:

@@ -26,11 +26,11 @@ Trois règles tiennent toute la console :
 | **Accueil** | — | « Tout va bien ? Que dois-je faire ? » |
 | **À valider** | Actions à autoriser · Brouillons de courrier · Réponses Teams · Identités à confirmer · Noms à relier · Historique des autorisations | « Qu'est-ce qui attend ma décision ? » |
 | **Sa rubrique**, à son nom | En ce moment · Humeur · Postures · Besoins · Sommeil et rythme · Monde et corps · Estime et récit · Qui elle devient · Pensées · Ce qu'elle remarque · Attentes · Journal et rêves · Mémoire · Constellation | « Comment va-t-elle, à quoi pense-t-elle, que retient-elle ? » |
-| **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Envoyer à ta place · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
+| **Relations & échanges** | Personnes · Conversations · Courrier · Teams · Identités et moyens de communication | « Qui connaît-elle, qu'a-t-on dit ? » |
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
-| **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
+| **Outils** | Ce qu'elle peut faire · Ses propres outils · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
-| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Historique des réglages | « Que décide l'opératrice ? » |
+| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Canaux · Historique des réglages | « Que décide l'opératrice ? » |
 | **Système** | Santé générale · Processus · Anomalies · File de sortie · Moteur des modèles · Écrans du monde · Appels et coûts · Stockage et sauvegardes · Journal d'événements · Actions des opérateurs · Diagnostic avancé · Contributions · Toutes les vues · Simulations | « La machine tient-elle ? » |
 
 Le menu regroupe les destinations de `app/console.py` sans changer leurs adresses : liens, fiches, vues des
@@ -107,10 +107,6 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   lettres.
 - **Teams** (ADR 0069) : Conversations, Réponses (ses réponses rédigées à la place de la personne et leur sort),
   Extension (la clé).
-- **Envoyer à ta place** (`/inspecteur/envoi`, `inspector/pages/sending.py`, ADR 0132) : ce qu'elle prépare d'elle-même
-  et comment ça part, courrier et Teams, en un tableau lu de haut en bas — canal, destinataire, préparer d'elle-même,
-  envoi (brouillon, ton accord, seule) —, puis la règle par défaut, obligatoire. « + Ajouter une règle », ↑ ↓ ✕ :
-  chaque bouton envoie tout le tableau. Le téléphone n'y est pas (son geste vaut accord).
 - **Identités et moyens de communication** : Moyens de communication, Identités à confirmer, Noms à relier (un nom
   dont on lui a parlé, porté par une personne qu'elle connaît : relié depuis sa fiche, ou écarté — jamais deviné,
   ADR 0048), Règles de divulgation.
@@ -142,7 +138,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   télécharger, déposer) · *Dépôt git* (historique paginé, un commit en diff coloré, ce qui n'est pas enregistré, le
   dépôt distant : pousser, récupérer, régler) · *Comportement et outils* (modifier le projet, ce que veut dire son
   mode, son rythme, ses outils et leurs noms) · *Accès* (dessiné, ADR 0133, `app/handmade/projects.py` : un tableau
-  de lignes lues de haut en bas — qui (les mêmes sources à cocher qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), ce qu'elle fait d'un outil de ses apps qui lit et d'un
+  de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
   retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (consignes,
   ses notes, ce qu'on en a fait, ce qui sort de la machine). En tête : lancer maintenant, pause, reprendre, consigne, archiver, restaurer — les formulaires
@@ -198,6 +194,13 @@ Les clés techniques sont dans « Détails techniques ».
   réglable par situation (comme prévu, retiré ; sous la main ou à chercher quand le fournisseur diffère), ses
   derniers appels vers leur épisode, ses arguments lus du schéma, sa condition d'offre et la règle vérifiée à
   l'exécution.
+- **Ses propres outils** (`outils/familles`, `inspector/pages/families.py`, ADR 0134) : ses outils internes, famille par
+  famille (un lot), chacune avec son tableau de droits (`handmade/droits/tableau.html`) — qui, par où, quand, un
+  outil qui lit, un outil qui agit, ce qu'elle en garde, ses outils —, né du minimum vital que le code déclare
+  (`owner_only` : à toi et elle seule ; sinon à tout le monde et elle seule), modifiable ; « Revenir au minimum
+  vital » ; un avertissement quand un tableau descend en dessous. Une case grisée (🔒) dit ce que l'outil ne sait
+  pas faire (attendre un accord) ou ce qui n'a pas de sens pour lui (garder ce qui est déjà à elle). `?famille=`
+  ouvre un tableau. Chaque bouton envoie tout le tableau (`/outils/familles/regler`).
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
   proposés, à revoir, avec qui et ses accès — badge et vitale), puis les outils que ses apps lui donnent (la vue de la
   Forge, dessous). Brancher un service : à quoi il lui sert, comment le joindre ; il est fermé tant qu'aucune ligne
@@ -206,8 +209,9 @@ Les clés techniques sont dans « Détails techniques ».
   quand elle te parle d'elle-même, chaque personne que nomme une ligne, un proche, un autre compte, quand elle
   travaille seule, et ce qu'elle en garde, par la règle du moteur ; pour qui et quand ; le côté technique replié), *Accès aux
   outils* (dessiné, ADR 0131 : un tableau de lignes lues de haut en bas comme les règles d'un pare-feu — qui (des
-  sources à cocher : toi, elle quand elle travaille seule, tes proches en privé, tout le monde, puis chaque personne qui
-  a un compte, ADR 0133), quand (toujours, ou des moments à cocher), politique de lecture, d'action, de mémorisation, ses outils —, « + Ajouter un accès aux outils » en haut à droite,
+  sources à cocher : toi, tes proches, tout le monde, puis chaque personne qui a un compte, ADR 0133), par où (des
+  canaux à cocher : tous, un type, une instance ; « elle seule » pour une ligne sans personne, ADR 0134), quand
+  (toujours, ou des moments à cocher), politique de lecture, d'action, de mémorisation, ses outils —, « + Ajouter un accès aux outils » en haut à droite,
   chaque ligne montée, descendue ou retirée ; dernière ligne, obligatoire, le comportement par défaut), *Ses outils*
   (dessiné : « À regarder », un choix par outil nouveau ou changé — coupé, lecture, action —, puis ce qui lit et ce
   qui agit, chacun avec ce qu'il fait devant qui d'après ses lignes ; une ligne se déplie sur son réglage — servi, lit
@@ -280,8 +284,8 @@ rôle par rôle (`CallLog.profile`).
 | Canaux | Dépôts git | le jeton de ses dépôts distants (aussi : Connexions extérieures › Dépôts Git) |
 | | Notifications du téléphone | la clé Firebase (collée ici ou posée en fichier), d'où elle vient, les téléphones notifiables, ce qui est parti, le dernier échec (ADR 0077) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
-| | Boîtes aux lettres | chaque boîte a sa page (la boîte, lire, envoyer, sa voix ; ce qu'elle prépare d'elle-même : « Envoyer à ta place ») |
-| | Teams | la clé de l'extension, son nom, son ton, sa signature (comment ses réponses partent : « Envoyer à ta place ») |
+| | Boîtes aux lettres | chaque boîte a sa page (la boîte, lire, envoyer, sa voix ; ce qu'elle prépare d'elle-même : le tableau de sa boîte, Réglages › Canaux) |
+| | Teams | la clé de l'extension, son nom, son ton, sa signature (comment ses réponses partent : le tableau de Teams, Réglages › Canaux) |
 | | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; en main ; bornes (qui peut quoi : sur sa fiche, « Accès aux outils »). Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128, 0131 |
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |
@@ -290,7 +294,8 @@ rôle par rôle (`CallLog.profile`).
 | Paramètres avancés | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
 | | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
 | Comptes opérateurs | Comptes | liste paginée ; deux boutons, « Ajouter un utilisateur » (le chat, sans la console) et « Ajouter un opérateur » (la console aussi), chaque compte une personne dès l'ajout, sa fiche liée depuis la page du compte ; modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, et « révoquer » — audité (ADR 0062) |
-| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, `app/handmade/rights.py`) : qui peut quoi, lu des types de règles que chaque propriétaire déclare, jamais une recopie. *Par personne*, une grille : en colonnes, les audiences types (toi quand elle te répond, toi quand elle te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, un salon, elle quand elle travaille seule ; `?qui=` en souligne une) ; en lignes, chaque ressource et ses actions — un outil de service ou d'app (lit ou agit, ce qu'elle en garde), un projet (le voir, le piloter) ; dans chaque case, ce qu'elle en fait, en couleur (elle le fait, en partie, en demandant, jamais), et la ligne qui en décide, la phrase entière au survol. Des outils d'une même ressource qui ont partout la même réponse tiennent sur une ligne. *Par ressource*, replié : chaque tableau (un service, un projet, les apps sans projet, ce qu'elle envoie à ta place), ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler » vers sa page. Puis tes règles d'outils par situation (ADR 0122), et ce que le code fixe, replié (les outils gardés par une condition, regroupés par sa phrase). Une lecture : rien ne s'y règle |
+| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/rights.py`) : qui peut quoi, lu des six sortes de tableaux (les canaux, ses propres outils, les services, les apps sans projet, les projets, tes comptes), jamais une recopie. *Par personne*, une grille : en colonnes, les audiences types par leur canal (toi par le chat web, toi par l'app Android, toi quand elle te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue par Internet, un salon, elle seule ; `?qui=` en souligne une) ; en lignes, chaque ressource et ses actions — le canal (ce qu'il laisse au plus), chacun de ses propres outils, un outil de service ou d'app (lit ou agit, ce qu'elle en garde), un projet (le voir, le piloter, ses fichiers) ; dans chaque case, ce qu'elle en fait, en couleur, et les lignes qui en décident (les deux portes, le plafond), la phrase entière au survol. *Par ressource*, replié : chaque tableau, ses lignes numérotées et sa ligne par défaut, ce qu'aucune ligne n'ouvre, et « Régler » vers sa page. Puis ce que le code fixe, replié. Une lecture : rien ne s'y règle |
+| Droits | Canaux | dessiné (`reglages/canaux`, `inspector/pages/canals.py`, ADR 0134) : par où ça lui arrive — chaque type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule), puis ses instances (le chat web en privé ou en salon, chaque boîte, un réseau), chacun avec son tableau (`handmade/droits/tableau.html`) : ce qu'il laisse passer au plus (répondre, outils qui lisent et qui agissent, projets, fichiers, garde) ; sur tes comptes, préparer d'elle-même et comment ça part (l'ADR 0132 s'y fond : qui écrit, c'est tout le monde ou une adresse). Un canal qu'on n'a pas réglé montre son minimum vital ; « Revenir au minimum vital ». `?canal=` ouvre un tableau ; chaque bouton envoie tout le tableau (`/reglages/canaux/regler`) et rejournalise le courrier et Teams |
 | Historique des réglages | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 
 ### Système

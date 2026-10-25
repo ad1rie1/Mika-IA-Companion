@@ -14,7 +14,7 @@ from mika.app.composition import policies
 from mika.faculties.identity import audience_for
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import EVERYONE, OWNER, WORK, Access, CallResult, OfferedTool
+from mika.ports.mcp import EVERYONE, INTERNAL, OWNER, Access, CallResult, OfferedTool
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
@@ -30,21 +30,23 @@ SCHEMA = {"type": "object", "properties": {"ville": {"type": "string", "descript
 
 
 def offered_tool(**kw) -> OfferedTool:
-    """Un outil offert : par défaut, une ligne d'accès « toi et elle qui travaille, toujours, seule » (ce qu'elle
-    garde : ``keep``)."""
+    """Un outil offert : par défaut, deux lignes d'accès — toi, toujours, seule ; elle seule — (ce qu'elle garde :
+    ``keep``)."""
     keep = kw.pop("keep", "perso")
     base = dict(server="meteo", remote="prevision", name=NAME, description="Les prévisions d'une ville.",
                 schema=SCHEMA, nature="lecture",
                 episodes=frozenset({"conversation"}), in_hand=False, max_calls=3, max_result_chars=4000,
                 purpose="la météo et les prévisions d'une ville", when_to_use="quand on parle d'une sortie",
-                local=False, access=(Access(who=(OWNER, WORK), read="seule", act="seule", keep=keep),))
+                local=False, access=(Access(who=(OWNER,), read="seule", act="seule", keep=keep),
+                                     Access(who=(), canal=(INTERNAL,), read="seule", act="seule", keep=keep)))
     return OfferedTool(**{**base, **kw})
 
 
 def ruled(level: str, *, accounts: bool = False, keep: str = "perso", **kw) -> OfferedTool:
     """Un outil dont la ligne d'accès dit ``level`` (en lecture comme en action) à toi, et à tout le monde
     (``accounts`` : toute personne connectée, en tête-à-tête)."""
-    rows = (Access(who=(OWNER, WORK), read=level, act=level, keep=keep),)
+    rows = (Access(who=(OWNER,), read=level, act=level, keep=keep),
+            Access(who=(), canal=(INTERNAL,), read=level, act=level, keep=keep))
     if accounts:
         rows += (Access(who=(EVERYONE,), read=level, act=level, keep=keep),)
     return offered_tool(access=rows, **kw)
@@ -137,7 +139,7 @@ def test_an_approved_tool_becomes_hers_and_its_answer_is_cited(tmp_path):
 
 
 def test_a_server_for_everyone_never_serves_a_room_nor_a_stranger(tmp_path):
-    port = FakePort(offered_tool(access=(Access(who=(OWNER, WORK), read="seule", act="seule", keep="perso"),
+    port = FakePort(offered_tool(access=(Access(who=(OWNER,), read="seule", act="seule", keep="perso"),
                                          Access(who=(EVERYONE,), read="seule", act="seule", keep="perso"))))
 
     async def scenario(kernel, llm):

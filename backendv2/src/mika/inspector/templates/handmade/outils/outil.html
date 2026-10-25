@@ -1,30 +1,22 @@
-{# La fiche d'un outil (inspector/pages/tools.py, ADR 0121, 0122) : d'où il vient, et où elle peut s'en servir —
-   réglable situation par situation là où le code le prévoit (retiré ; sous la main ou à chercher, quand le
-   fournisseur sait différer). #}
+{# La fiche d'un outil (inspector/pages/tools.py, ADR 0121, 0122, 0134) : d'où il vient, et où elle peut s'en
+   servir, par ses droits (le tableau de sa famille, ou de son service ou de son app). #}
 <div class="hm-tool-intro">
   <p class="person-entry-tags"><span class="now-tag">{{ tool_family }}</span>{% if tool_dynamic %}<span class="now-tag {{ tool_tone }}">{{ tool_origin }}</span>{% endif %}{% if tool_reserved %}<span class="now-tag warn">réservé à sa propriétaire</span>{% endif %}</p>
 </div>
-<form method="post" action="{{ action }}" class="now-card can-where" aria-labelledby="can-where-title">
-  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="outil" value="{{ tool_name }}">
-  {% for k, v in context.items() %}{% if k in ('q', 'lot') %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+<section class="now-card can-where" aria-labelledby="can-where-title">
   <header class="now-card-head">
     <h2 id="can-where-title">Où elle peut s'en servir</h2>
-    <p>{% if editable %}Là où le code le prévoit, tu peux le lui retirer{% if fine %}, ou choisir s'il est toujours sous sa main ou si elle va le chercher quand il lui faut{% endif %}.{% else %}Le code ne le prévoit dans aucune situation que tu puisses régler.{% endif %}</p>
+    <p>Ce que ses droits lui laissent, situation par situation (ADR 0134). {% if tool_dynamic %}Il vient d'un service ou d'une app : ses lignes se règlent sur leur fiche.{% else %}Ses lignes se règlent sur le tableau de sa famille : <a href="{{ PREFIX }}/outils/familles?famille={{ tool_bundle | urlencode }}">{{ tool_family }}</a>.{% endif %}</p>
   </header>
   <ul class="can-where-list" role="list">
     {% for w in where %}
     <li class="can-where-{{ w.state }}">
       <span class="can-where-sit">{{ w.label }}</span>
       {% if w.state == 'none' %}<span class="can-where-no">non — {{ w.why }}</span>
-      {% elif w.locked %}<span>oui, toujours (il clôt sa boucle : il ne se retire pas)</span>
-      {% else %}
-      <label class="sr" for="regle-{{ w.key }}">{{ w.label }}</label>
-      <select id="regle-{{ w.key }}" name="{{ w.field }}">
-        {% for value, label in w.choices %}<option value="{{ value }}"{{ ' selected' if value == w.rule }}>{{ label }}</option>{% endfor %}
-      </select>
+      {% elif w.locked %}<span>oui, toujours (il clôt sa boucle)</span>
+      {% else %}<span>oui{{ ', à chercher quand il lui faut' if w.state == 'ask' else ', sous la main' }}</span>
       {% endif %}
     </li>
     {% endfor %}
   </ul>
-  {% if editable %}<div class="can-actions"><button class="btn" type="submit">Enregistrer</button><span class="now-muted">Vaut dès son prochain épisode.</span></div>{% endif %}
-</form>
+</section>

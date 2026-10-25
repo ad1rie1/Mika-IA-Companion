@@ -189,8 +189,8 @@ class ToolSpec:
     episodes: frozenset[str]
     effect: EffectClass = EffectClass.NONE
     max_calls_per_episode: int | None = None
-    #: réservé à ses propriétaires : pas offert à quelqu'un d'autre, sauf quand
-    #: elle travaille (STEP, personne n'écoute). Le gestionnaire garde sa garde.
+    #: le minimum vital de sa famille le réserve à sa propriétaire (ADR 0134) : sa famille naît à toi et elle seule
+    #: pour cet outil ; une ligne d'un opérateur peut l'ouvrir — ce n'est plus un plancher
     owner_only: bool = False
     #: offert seulement devant une audience qui le rend utile (``fn(audience) -> bool``) :
     #: un outil qui ne peut rien y faire n'invite pas le modèle à essayer
@@ -215,6 +215,11 @@ class ToolSpec:
     #: 0131), celles d'un projet, lues dans son journal (ADR 0133). Le dernier champ : le décorateur ``tool``
     #: construit les outils du code par position.
     fits: Callable[[Any, str, Any], bool] | None = None
+    #: il change quelque chose (sa colonne « action » dans un tableau de droits) ; sinon il lit
+    acts: bool = False
+    #: il sait attendre un accord (un effet proposé, exécuté une fois accepté) : « ton accord » et « demande à la
+    #: personne » se règlent pour lui ; sinon ces cases sont grisées (il agit dans la conversation même)
+    deferrable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -656,13 +661,15 @@ class Faculty(Generic[S, Pm]):
         ends_loop: bool = False,
         rule: str = "",
         fits: Callable[[Any, str, Any], bool] | None = None,
+        acts: bool = False,
+        deferrable: bool = False,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits,
+                    rule, fits=fits, acts=acts, deferrable=deferrable,
                 )
             )
             return fn

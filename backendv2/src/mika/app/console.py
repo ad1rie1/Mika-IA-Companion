@@ -47,10 +47,10 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     subjects=("project",)),
     )),
     NavGroup("Outils", (
-        Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ce qui lui vient d'ailleurs "
-                    "(les services branchés, ses apps), et ce que tu prêtes à un agent.",
-                    builtin=("outils.tous", "outils.expose"),
-                    order=("tous", "serveurs", "expose"), subjects=("serveur",)),
+        Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ses propres outils et leurs droits, ce "
+                    "qui lui vient d'ailleurs (les services branchés, ses apps), et ce que tu prêtes à un agent.",
+                    builtin=("outils.tous", "outils.familles", "outils.expose"),
+                    order=("tous", "familles", "serveurs", "expose"), subjects=("serveur",)),
     )),
     NavGroup("À valider", (
         Destination("approbations", "À valider", "Ce qu'elle voudrait faire sortir de la machine, et ce "
@@ -62,8 +62,6 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
                     subjects=("conversation_teams", "reponse_teams")),
-        Destination("envoi", "Envoyer à ta place", "Ce qu'elle prépare d'elle-même et comment ça part, courrier "
-                    "et Teams : des règles lues de haut en bas (ADR 0132).", builtin=("envoi.regles",)),
     )),
     NavGroup("Connexions extérieures", (
         Destination("sens", "Connexions extérieures", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
@@ -297,6 +295,7 @@ EVENT_LABELS: dict[str, str] = {
     "camera.seen": "Ce que la caméra a vu",
     "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
     "forge.answered": "Ce qu'une app a rendu après un accord", "projects.access_set": "Les accès d'un projet réglés",
+    "forge.access_set": "Les accès d'une app sans projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",

@@ -162,7 +162,7 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     return out
 
 
-@MEMORY.tool("memory_promise_done", description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,
+@MEMORY.tool("memory_promise_done", acts=True, description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,
              bundle="memory", episodes=CONVERSATIONAL)
 async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     state = ctx.frame.state("memory")

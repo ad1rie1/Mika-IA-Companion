@@ -14,12 +14,12 @@ import re
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
-from mika.ports.mcp import KEEPS, MOMENTS, POLICIES
-from mika.vocab.access import sources
+from mika.ports.mcp import KEEPS, POLICIES
+from mika.vocab.access import ToolRule
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -44,39 +44,14 @@ _LOCAL = ((("transport", ("local",)),))
 _REMOTE = ((("transport", ("distant",)),))
 
 
+class AccessRule(ToolRule):
+    """Une ligne d'accès aux outils d'un serveur (ADR 0131, 0133, 0134), telle qu'elle est rangée : qui, par où,
+    quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, et ses outils (vide :
+    tous) — le cadre commun (``vocab.access.ToolRule``)."""
+
+
 _Policy = Literal["seule", "carte", "toi", "non"]
 _Keep = Literal["public", "perso", "prive", "rien"]
-_Moment = Literal["conversation", "initiative"]
-
-
-class AccessRule(BaseModel):
-    """Une ligne d'accès aux outils d'un serveur (ADR 0131, 0133), telle qu'elle est rangée : ses sources
-    (``vocab.access``), quand, ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, et ses
-    outils (vide : tous)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    who: tuple[str, ...]
-    #: ses moments ; vide (ou tous) : toujours
-    when: tuple[_Moment, ...] = ()
-    read: _Policy = "non"
-    act: _Policy = "non"
-    keep: _Keep = "rien"
-    tools: tuple[str, ...] = ()
-
-    @field_validator("who")
-    @classmethod
-    def _sources(cls, who: tuple[str, ...]) -> tuple[str, ...]:
-        return sources(who)
-
-    @field_validator("when", mode="before")
-    @classmethod
-    def _moments(cls, value: Any) -> Any:
-        """Un seul moment écrit seul, « toujours », ou tous les moments : la même chose qu'une liste, ou que rien."""
-        if isinstance(value, str):
-            value = () if value == "toujours" else (value,)
-        got = tuple(dict.fromkeys(value or ()))
-        return () if {k for k, _ in MOMENTS} <= set(got) else got
 
 
 class McpServer(BaseModel):

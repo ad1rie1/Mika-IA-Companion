@@ -67,6 +67,7 @@ from mika.runtime.tools import ToolContext, offer
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab.episodes import Kind, goal_target, project_target
+from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.atelier import Atelier
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.harness import events_of
@@ -82,8 +83,8 @@ from tests.unit.test_promises_and_moments import run as converse
 
 def _run_offer(kernel, project) -> set[str]:
     """Ce qu'une exécution de ce projet aurait en main : la politique ``WORK``, restreinte à ses lots."""
-    tools = offer(kernel.mind.registry.tools, policies()[Kind.WORK], Kind.WORK, Audience(owner=True),
-                  only=",".join(project.bundles))
+    working = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
+    tools = offer(kernel.mind.registry.tools, policies()[Kind.WORK], Kind.WORK, working, only=",".join(project.bundles))
     return set(tools)
 
 
@@ -733,7 +734,7 @@ def test_an_apps_pages_are_its_tabs_and_its_settings_sit_behind_the_gear(world):
     draft = written_draft(forge.info("deux"))
     client.portal.call(lambda: kernel.mind.append([draft], emitter="forge", correlation="t", origin=Origin.GENESIS))
     first = html.unescape(client.get("/inspecteur/fiche/app/deux").text)
-    assert _tabs(first) == ["Le cours", "Son histoire"]  # ses pages sont ses onglets…
+    assert _tabs(first) == ["Le cours", "Son histoire", "Accès"]  # ses pages sont ses onglets…
     assert "page du cours" in first
     assert _gear(first) == ["Réglages", "État", "Code", "Base", "Journal", "Vécu"]  # …le reste derrière la roue
     second = html.unescape(client.get("/inspecteur/fiche/app/deux?onglet=vues&vue=histoire").text)

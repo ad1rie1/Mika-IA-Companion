@@ -9,8 +9,8 @@ console les rassemble sur une page ; ce n'est jamais une recopie : chacun les ti
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -57,6 +57,18 @@ class RightsSpec:
     tables: Callable[..., Any]
     grants: Callable[..., Any] | None = None
     order: int = 100
+
+
+@dataclass(frozen=True, slots=True)
+class Rights:
+    """Les tableaux de droits qu'un opérateur a réglés (ADR 0134), tels que l'application les donne au registre
+    (``Registry.access_tables``) : ``canals`` (les tableaux des canaux, ``vocab.canals.Canals``), ``families``
+    (famille d'outils → tableau, ``vocab.access.Table[ToolRule]``), ``in_hand`` (outil → « hand » ou « ask »,
+    l'offre réglée). Des valeurs du vocabulaire, inconnues ici."""
+
+    canals: Any = None
+    families: Mapping[str, Any] = field(default_factory=dict)
+    in_hand: Mapping[str, str] = field(default_factory=dict)
 
 
 def why_words(index: int) -> str:

@@ -81,7 +81,7 @@ async def doubt(args: DoubtArgs, ctx: Any) -> str:
     return phrase("identity.tools.doubt.done")
 
 
-@IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"), args=NoArgs,
+@IDENTITY.tool("identity_forget_binding", acts=True, description=phrase("identity.tools.forget.description"), args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def forget_binding(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)

@@ -112,7 +112,8 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
 def test_what_she_can_do_is_a_grid_of_families_and_situations(world):  # noqa: F811
     """Outils › Ce qu'elle peut faire : ses familles en lignes (leurs outils dessous), les situations en colonnes
     rangées par ce qui se passe ; une famille dit, situation par situation, si tous ses outils lui sont offerts, une
-    partie ou aucun ; un outil a une case à cocher là où le code l'offre, un tiret ailleurs."""
+    partie ou aucun ; un outil a une coche là où ses droits l'offrent, un tiret ailleurs (ses droits se règlent par
+    famille : Ses propres outils, ADR 0134)."""
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/tous")
@@ -120,7 +121,7 @@ def test_what_she_can_do_is_a_grid_of_families_and_situations(world):  # noqa: F
     assert head.index("Elle répond à") < head.index("D'elle-même") < head.index("Elle travaille seule")
     memory = page.split("<b>Mémoire</b>")[1].split("</summary>")[0]
     assert 'class="can-sum can-on can-start"' in memory  # sa mémoire, toute à elle quand elle répond
-    assert page.count('<details class="can-family"') > 10 and page.count('type="checkbox" name="o"') > 50
+    assert page.count('<details class="can-family"') > 10 and 'type="checkbox" name="o"' not in page
     assert 'class="can-cell can-none' in page and "<b>workshop</b>" not in page  # chaque famille a son nom
 
 

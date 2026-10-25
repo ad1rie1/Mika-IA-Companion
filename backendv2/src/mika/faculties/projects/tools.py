@@ -32,7 +32,6 @@ from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.contracts import social as social_c
 from mika.faculties.projects.access import steering
 from mika.faculties.projects.faculty import (
     AMENDED,
@@ -177,7 +176,7 @@ def commit_message(p: Project, o: Objective | None) -> str:
         phrase("projects.commit.run", run=p.runs)
 
 
-@PROJECTS.tool(REPORT, description=phrase("projects.tools.report.description"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3)
+@PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3)
 async def report_run(args: ReportArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -286,7 +285,7 @@ class NoteArgs(BaseModel):
     text: str = Field(min_length=1, max_length=2000, description=phrase("projects.tools.note.text"))
 
 
-@PROJECTS.tool(NOTE, description=phrase("projects.tools.note.description"), args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
+@PROJECTS.tool(NOTE, acts=True, description=phrase("projects.tools.note.description"), args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_note(args: NoteArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -306,7 +305,7 @@ class DecideArgs(BaseModel):
     replaces: int = Field(default=0, ge=0, description=phrase("projects.tools.decide.replaces"))
 
 
-@PROJECTS.tool(DECIDE, description=phrase("projects.tools.decide.description"), args=DecideArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
+@PROJECTS.tool(DECIDE, acts=True, description=phrase("projects.tools.decide.description"), args=DecideArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_decide(args: DecideArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -341,7 +340,7 @@ class ObjectiveArgs(BaseModel):
                                description=phrase("projects.tools.objective_add.cadence_hours"))
 
 
-@PROJECTS.tool(OBJECTIVE_ADD, description=phrase("projects.tools.objective_add.description"), args=ObjectiveArgs,
+@PROJECTS.tool(OBJECTIVE_ADD, acts=True, description=phrase("projects.tools.objective_add.description"), args=ObjectiveArgs,
                bundle="projects", episodes=RUNS, max_calls_per_episode=3)
 async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     got = current(ctx)
@@ -365,7 +364,7 @@ class EquipArgs(BaseModel):
     why: str = Field(min_length=1, max_length=300, description=phrase("projects.tools.equip.why"))
 
 
-@PROJECTS.tool(EQUIP, description=phrase("projects.tools.equip.description"), args=EquipArgs, bundle="projects",
+@PROJECTS.tool(EQUIP, acts=True, description=phrase("projects.tools.equip.description"), args=EquipArgs, bundle="projects",
                episodes=RUNS, max_calls_per_episode=2)
 async def project_equip(args: EquipArgs, ctx: Any) -> Any:
     """Se donner un lot de plus, sur un projet à elle (``SELF_BUNDLES``) : en main à l'exécution suivante — les
@@ -448,7 +447,7 @@ class CreateArgs(BaseModel):
     schedule: str = Field(default="asap", description=phrase("projects.tools.create.schedule"))
 
 
-@PROJECTS.tool("create_project", description=phrase("projects.tools.create.description"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
+@PROJECTS.tool("create_project", acts=True, description=phrase("projects.tools.create.description"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
 async def create_project(args: CreateArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None or not owner_speaks(ctx.frame):
@@ -514,7 +513,7 @@ def _talking_to_owner(frame: Frame) -> bool:
     return _person(frame) is not None and owner_speaks(frame)
 
 
-@PROJECTS.tool("start_project", description=phrase("projects.tools.start.description"), args=StartArgs, bundle="projects",
+@PROJECTS.tool("start_project", acts=True, description=phrase("projects.tools.start.description"), args=StartArgs, bundle="projects",
                episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=1, owner_only=True)
 async def start_project(args: StartArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
@@ -565,7 +564,7 @@ class CloseArgs(BaseModel):
 ENDING_REASON = {"done": "clos par elle : il a fait son temps", "dropped": "clos par elle : elle y renonce"}
 
 
-@PROJECTS.tool("project_close", description=phrase("projects.tools.close.description"), args=CloseArgs, bundle="projects", episodes=[Kind.REPLY, Kind.STEP, *RUNS],
+@PROJECTS.tool("project_close", acts=True, description=phrase("projects.tools.close.description"), args=CloseArgs, bundle="projects", episodes=[Kind.REPLY, Kind.STEP, *RUNS],
                max_calls_per_episode=1, owner_only=True)
 async def project_close(args: CloseArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
@@ -609,10 +608,10 @@ class SteerArgs(BaseModel):
     objective: str = Field(default="", max_length=200, description=phrase("projects.tools.steer.objective"))
 
 
-def steerable(p: Project, audience: Any, close: Any = None) -> str:
+def steerable(p: Project, audience: Any, frame: Any = None) -> str:
     """Ce que qui est en face peut faire de ce projet en le pilotant, en réponse (ADR 0133, ``STEERS``) — un projet
     vivant, que ses lignes d'accès lui laissent voir et piloter (``close`` : qui est proche d'elle)."""
-    return steering(p, audience, Kind.REPLY, close) if live(p) else c.STEER_NO
+    return steering(p, audience, Kind.REPLY, frame) if live(p) else c.STEER_NO
 
 
 def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
@@ -623,8 +622,7 @@ def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
     if frame is None:
         return False
     s: ProjectsState = frame.state("projects")
-    close = social_c.is_close(frame)
-    return any(steering(p, audience, kind, close) in c.CHANGES for p in s.projects.values() if live(p))
+    return any(steering(p, audience, kind, frame) in c.CHANGES for p in s.projects.values() if live(p))
 
 
 def _contents(ctx: Any, refs: list[str]) -> Mapping[str, str]:
@@ -674,7 +672,7 @@ def _changed() -> ToolResult:
     return ToolResult(ok=False, content=phrase("projects.tools.steer.changed"))
 
 
-@PROJECTS.tool(STEER, description=phrase("projects.tools.steer.description"), args=SteerArgs, bundle="projects",
+@PROJECTS.tool(STEER, acts=True, description=phrase("projects.tools.steer.description"), args=SteerArgs, bundle="projects",
                episodes=[Kind.REPLY], max_calls_per_episode=2, fits=may_steer,
                rule="seulement en privé, sur un projet vivant que les lignes d'accès laissent piloter à la personne en "
                     "face ; sur ton accord, la demande attend")
@@ -688,8 +686,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     s: ProjectsState = frame.state("projects")
     # ceux que ses lignes d'accès lui laissent piloter et dont le détail peut s'entendre ici (la règle de « TES
     # PROJETS ») : on ne pilote pas à l'aveugle
-    close = social_c.is_close(frame)
-    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud, close) in c.CHANGES
+    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud, frame) in c.CHANGES
             and hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok)]
     if not mine:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
@@ -702,7 +699,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     p = s.projects[pid]
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
         phrase("projects.tools.steer.numbered", id=p.id)
-    if steerable(p, aud, close) == c.STEER_ASK:
+    if steerable(p, aud, frame) == c.STEER_ASK:
         return await _ask_steer(args, ctx, p, person, title)
     if args.what == NOW:
         return await _steer_now(args, ctx, s, p, person, title)

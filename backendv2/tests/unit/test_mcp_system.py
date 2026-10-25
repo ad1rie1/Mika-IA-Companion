@@ -22,7 +22,7 @@ from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
 from mika.kernel.clock import MINUTE, US
 from mika.plugins import web
 from mika.plugins.web import serveur
-from mika.ports.mcp import CLOSE, OWNER, WORK
+from mika.ports.mcp import CLOSE, OWNER
 
 
 def _system(p: web.WebParams | None) -> SystemServers:
@@ -41,8 +41,8 @@ def test_active_the_web_plugin_brings_its_server_into_the_mcp_client():
     assert not srv.in_hand and "DuckDuckGo" in srv.purpose
     # toi quand elle répond, et elle quand elle travaille ; elle lit seule, te demande avant d'agir, et ce qu'elle lit
     # sur le web peut devenir un savoir (ADR 0085, 0128) ; personne d'autre : la ligne par défaut est fermée (ADR 0131)
-    assert [(a.who, a.when, a.read, a.act, a.keep) for a in srv.access] == [
-        ((OWNER, WORK), ("conversation",), "seule", "toi", "public")]
+    assert [(a.who, a.canal, a.when, a.read, a.act, a.keep) for a in srv.access] == [
+        ((OWNER,), (), ("conversation",), "seule", "toi", "public"), ((), ("interne",), (), "seule", "toi", "public")]
     assert (srv.default_read, srv.default_act) == ("non", "non")
 
 

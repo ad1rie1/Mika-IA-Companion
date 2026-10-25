@@ -19,7 +19,7 @@
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
-    {% for p in ("ligne", "qui", "toujours", "moments", "voir", "piloter", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
+    {% for p in ("ligne", "qui", "canal", "toujours", "moments", "voir", "piloter", "fichiers", "lecture", "action", "tous", "prend", "defaut_voir", "defaut_piloter", "defaut_fichiers", "defaut_lecture", "defaut_action", "faire") %}<input type="hidden" name="_champs" value="{{ p }}">{% endfor %}
     {# la touche Entrée enregistre (le premier bouton du formulaire), elle n'ajoute pas de ligne #}
     <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>
     {% endif %}
@@ -35,8 +35,8 @@
         <table class="access-table">
           <thead>
             <tr>
-              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Quand</th>
-              <th scope="col">Voir</th><th scope="col">Piloter projet</th>
+              <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Par où</th><th scope="col">Quand</th>
+              <th scope="col">Voir</th><th scope="col">Piloter projet</th><th scope="col">Fichiers</th>
               <th scope="col">Apps : lecture</th><th scope="col">Apps : action</th><th scope="col">Outils</th>
               {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
             </tr>
@@ -55,6 +55,14 @@
                 </details>
               </td>
               <td>
+                <details class="access-tools access-canal" data-exclusive data-all="Tous" data-none="Aucun canal">
+                  <summary>{{ r.canal.said }}</summary>
+                  <div class="access-tools-list">
+                    {% for c in r.canal.boxes %}<label class="access-tool{{ ' all' if c.all }}{{ ' sub' if c.sub }}"><input type="checkbox" name="canal.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {% if c.all %}<b>{{ c.label }}</b><span>par tous les canaux</span>{% else %}{{ c.label }}{% endif %}</label>{% endfor %}
+                  </div>
+                </details>
+              </td>
+              <td>
                 <details class="access-tools access-when" data-exclusive data-all="Toujours" data-many="moments" data-none="Aucun moment">
                   <summary>{{ r.when_said }}</summary>
                   <div class="access-tools-list">
@@ -67,6 +75,7 @@
               </td>
               <td><label class="access-tool"><input type="checkbox" name="voir.{{ r.n }}"{{ ' checked' if r.see }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("piloter." ~ r.n, steers, r.steer, "Piloter projet, ligne " ~ r.n, locked) }}</td>
+              <td><label class="access-tool"><input type="checkbox" name="fichiers.{{ r.n }}"{{ ' checked' if r.files }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("lecture." ~ r.n, policies, r.read, "Apps : un outil qui lit, ligne " ~ r.n, locked) }}</td>
               <td>{{ pick("action." ~ r.n, policies, r.act, "Apps : un outil qui agit, ligne " ~ r.n, locked) }}</td>
               <td>
@@ -91,9 +100,10 @@
             {% endfor %}
             <tr class="access-default">
               <td class="access-n"></td>
-              <th scope="row" colspan="2">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
+              <th scope="row" colspan="3">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
               <td><label class="access-tool"><input type="checkbox" name="defaut_voir"{{ ' checked' if default.see }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("defaut_piloter", steers, default.steer, "Par défaut, piloter projet", locked) }}</td>
+              <td><label class="access-tool"><input type="checkbox" name="defaut_fichiers"{{ ' checked' if default.files }}{{ ' disabled' if locked }}> oui</label></td>
               <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, un outil qui lit", locked) }}</td>
               <td>{{ pick("defaut_action", policies, default.act, "Par défaut, un outil qui agit", locked) }}</td>
               <td class="access-all">Tous</td>
@@ -113,8 +123,10 @@
     <h2 id="project-access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
       <div><dt>Qui</dt><dd>Une ou plusieurs sources. <b>Toi</b> : en tête-à-tête. <b>Elle, quand elle travaille seule</b> : sur ce projet ; pour elle, seules les colonnes « Apps » comptent (elle y travaille déjà : ni « Voir » ni « Piloter projet » ne la concernent). <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre). <b>Tout le monde</b> : toute personne connectée, en tête-à-tête ; pour seulement le voir et le lire, aussi un salon ou une inconnue. <b>Une personne</b>, par son nom : reconnue seulement connectée.</dd></div>
+      <div><dt>Par où</dt><dd>Le canal par où ça arrive : <b>Tous</b>, ou un type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule), ou une instance pour une exception (le chat web en privé ou en salon, une boîte, un réseau). Chaque canal a aussi son tableau (Réglages › Canaux) : ce qu'il laisse passer au plus.</dd></div>
       <div><dt>Voir</dt><dd>Elle peut en parler à cette personne : son titre, où il en est. Sa confidentialité filtre encore le détail.</dd></div>
       <div><dt>Piloter projet</dt><dd><b>Lecture seule</b> : elle lui en dit le détail (son dernier compte rendu, ce qui vient), sans rien y changer · <b>Accord du propriétaire</b> : ses demandes (une consigne, un objectif, une pause, une reprise, « vas-y maintenant ») t'attendent — une carte dans la console ; les tiennes, quand c'est toi en face, s'appliquent aussitôt · <b>Modification</b> : ses demandes s'appliquent aussitôt, à son nom · <b>Aucun pilotage</b>. Toujours avec « Voir » ; seulement quand elle lui répond, quel que soit « Quand » ; jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
+      <div><dt>Fichiers</dt><dd>Elle peut lui envoyer les fichiers de ce projet (<code>project_files</code>, <code>share_project_file</code>). Jamais dans un salon ni à une inconnue.</dd></div>
       <div><dt>Apps : lecture, action</dt><dd>Ce qu'elle fait d'un outil de ses apps : un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> : sans demander · <b>Demande à la personne</b> : une carte dans son chat · <b>Ton accord</b> : une carte dans ton chat quand c'est toi en face, sinon la console · <b>Non</b> : l'outil ne lui est pas offert.</dd></div>
       <div><dt>Outils</dt><dd>À quels outils de ses apps s'appliquent les deux colonnes « Apps » ; « Voir » et « Piloter » valent quelle que soit la sélection.</dd></div>
     </dl>

@@ -348,7 +348,7 @@ async def _element(ctx: Any, here: Here, text: str, among: Sequence[int] | None 
     return best[1] if best is not None else None
 
 
-@ATTACHMENTS.tool(LINK, description=phrase("attachments.tools.link.description"), args=LinkArgs, bundle=BUNDLE,
+@ATTACHMENTS.tool(LINK, acts=True, description=phrase("attachments.tools.link.description"), args=LinkArgs, bundle=BUNDLE,
                   episodes=[*CONVERSATIONAL, *WORKING], max_calls_per_episode=3)
 async def attachment_link(args: LinkArgs, ctx: Any) -> Any:
     store = ctx.ports.get("store")

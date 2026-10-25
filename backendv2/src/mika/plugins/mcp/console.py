@@ -43,7 +43,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.kernel.operate import Done, Refused
-from mika.kernel.rights import Grant, RuleTable, why_words
+from mika.kernel.rights import Grant, RuleTable
 from mika.plugins.mcp import (
     ALONE,
     ANSWERED,
@@ -62,7 +62,6 @@ from mika.plugins.mcp import (
 )
 from mika.ports.mcp import (
     KEEPS,
-    MOMENTS,
     NATURES,
     POLICIES,
     STATES,
@@ -72,17 +71,15 @@ from mika.vocab.access import (
     OWNER,
     PERSON,
     SOURCE_WORDS,
-    WORK,
-    checked,
-    in_order,
-    sources,
-    verdict,
+    TableArgs,
+    canal_words,
     when_words,
     who_words,
 )
 from mika.vocab.access import POLICY_WORDS as POLICY_WORDS
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
+from mika.vocab.rights import closeness_of, rights_of, tool_allowance
 
 SETTINGS = "/inspecteur/reglages/serveurs-mcp"
 LIST = "/inspecteur/outils/serveurs"
@@ -94,7 +91,8 @@ STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "conn
 KEEP_WORDS = {"public": "ce qu'elle sait", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
 #: la ligne qu'on ajoute : toi, tout le temps, fermée — enregistrée dès le clic, elle n'ouvre rien de plus tant qu'on
 #: ne l'a pas réglée (un pare-feu, ADR 0131)
-NEW_ROW: dict[str, Any] = {"who": [OWNER], "when": [], "read": "non", "act": "non", "keep": "rien", "tools": []}
+NEW_ROW: dict[str, Any] = {"who": [OWNER], "canal": [], "when": [], "read": "non", "act": "non", "keep": "rien",
+                           "tools": []}
 #: au plus tant de lignes (un tableau que l'on lit d'un regard)
 MAX_ROWS = 40
 
@@ -564,18 +562,11 @@ _Policy = Literal["seule", "carte", "toi", "non"]
 _Keep = Literal["public", "perso", "prive", "rien"]
 
 
-class AccessArgs(BaseModel):
-    """Le tableau « Accès à ses outils », d'un seul envoi (ADR 0131) : une ligne par numéro (``<champ>.<numéro>``),
-    ses moments cochés (``moments.<numéro>|<moment>``, ou ``toujours.<numéro>``), ses outils cochés
-    (``prend.<numéro>|<outil>``, ou ``tous.<numéro>``), la ligne par défaut, et ce qu'un bouton demande en plus
-    d'enregistrer (``faire`` : ajouter une ligne, en monter, en descendre ou en retirer une)."""
+class AccessArgs(TableArgs):
+    """Le tableau « Accès à ses outils », d'un seul envoi (ADR 0131, 0134 : ``vocab.access.TableArgs`` — ses lignes,
+    qui, par où, quand, ses outils) et ses colonnes : ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce
+    qu'elle en garde ; la ligne par défaut à part."""
 
-    #: une entrée par ligne envoyée (``ligne.<numéro>``) : leur ordre ; ses sources et ses personnes cochées
-    #: (``qui.<numéro>|<source>``, ``qui.<numéro>|personne:<clé>``)
-    ligne: Annotated[dict[str, str], Knob(label="Ligne", advanced=False)] = Field(default_factory=dict)
-    qui: Annotated[dict[str, bool], Knob(label="Qui", advanced=False)] = Field(default_factory=dict)
-    toujours: Annotated[dict[str, bool], Knob(label="Toujours", advanced=False)] = Field(default_factory=dict)
-    moments: Annotated[dict[str, bool], Knob(label="Quand", advanced=False)] = Field(default_factory=dict)
     lecture: Annotated[dict[str, _Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
         Field(default_factory=dict)
     action: Annotated[dict[str, _Policy], Knob(label="Un outil qui agit", choices=POLICIES, advanced=False)] = \
@@ -590,35 +581,18 @@ class AccessArgs(BaseModel):
                                            advanced=False)] = "non"
     defaut_garde: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
                                         advanced=False)] = "rien"
-    #: la valeur du bouton pressé (un champ ordinaire : un champ caché ne se lit que dans les valeurs fixées)
-    faire: Annotated[str, Knob(label="Et", help="ajouter, monter:n, descendre:n ou retirer:n ; vide : enregistrer")] = \
-        Field("", max_length=40)
-
-
-def _number(key: str) -> int:
-    return int(key) if key.isdigit() else 10**6
 
 
 def access_rows(args: AccessArgs, known: Sequence[str]) -> list[dict[str, Any]]:
-    """Les lignes du tableau envoyé, dans leur ordre ; refuse une ligne sans source lisible, sans moment (sauf au
-    travail, qui n'en a pas) ou sans outil."""
-    rows = []
-    for n, key in enumerate(sorted(args.ligne, key=_number), start=1):
-        try:
-            who = in_order(sources(checked(args.qui, key)))
-        except ValueError:
-            raise Refused(f"Ligne {n} : coche qui.") from None
-        talks = any(w != WORK for w in who)
-        when = [] if args.toujours.get(key) or not talks else [m for m in checked(args.moments, key)
-                                                                if m in dict(MOMENTS)]
-        if talks and not args.toujours.get(key) and not when:
-            raise Refused(f"Ligne {n} : coche au moins un moment, ou « toujours ».")
-        tools = [] if args.tous.get(key) else [r for r in known if args.prend.get(f"{key}|{r}")]
-        if not args.tous.get(key) and not tools:
-            raise Refused(f"Ligne {n} : coche au moins un outil, ou « tous ».")
-        rows.append({"who": list(who), "when": when, "read": args.lecture.get(key, NO),
-                     "act": args.action.get(key, NO), "keep": args.garde.get(key, "rien"), "tools": tools})
-    return rows
+    """Les lignes du tableau envoyé, dans leur ordre (``vocab.access.rows_sent``) ; un outil que le serveur ne
+    propose plus n'est pas gardé."""
+    try:
+        sent = args.rows(tools=True, read=args.lecture, act=args.action, keep=args.garde)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    return [{"who": list(r["who"]), "canal": list(r["canal"]), "when": list(r["when"]), "read": r["read"] or NO,
+             "act": r["act"] or NO, "keep": r["keep"] or "rien", "tools": [t for t in known if t in r["tools"]]}
+            for r in sent]
 
 
 def moved(rows: list[dict[str, Any]], faire: str) -> tuple[list[dict[str, Any]], str]:
@@ -784,14 +758,14 @@ def _vital(s: McpState, frame: Frame) -> Vital | None:
 # ── Qui peut quoi, sur la page « Droits » (ADR 0133) ──────────────────────
 
 #: ce qu'aucune ligne d'un service n'ouvre
-FLOORS = ("jamais dans un salon, avec une inconnue, ni sans personne", "un outil ne sert qu'approuvé, tel que tu "
-          "l'as approuvé (changé, il est suspendu)")
-COLUMNS = ("qui", "quand", "lecture", "action", "ce qu'elle en garde", "outils")
+FLOORS = ("jamais dans un salon (des témoins), ni une action avec une inconnue, ni sans personne",
+          "un outil ne sert qu'approuvé, tel que tu l'as approuvé (changé, il est suspendu)")
+COLUMNS = ("qui", "par où", "quand", "lecture", "action", "ce qu'elle en garde", "outils")
 
 
 def _row(a: Access, frame: Frame | None) -> tuple[str, ...]:
-    return (who_label(a.who, frame), when_label(a.when), POLICY_WORDS[a.read], POLICY_WORDS[a.act],
-            KEEP_WORDS[a.keep], _tools_of(a))
+    return (who_label(a.who, frame), canal_words(a.canal), when_label(a.when), POLICY_WORDS[a.read],
+            POLICY_WORDS[a.act], KEEP_WORDS[a.keep], _tools_of(a))
 
 
 def _service_grants(s: McpState, frame: Frame, ctx: Any, audience: Any, kind: str) -> list[Grant]:
@@ -800,18 +774,18 @@ def _service_grants(s: McpState, frame: Frame, ctx: Any, audience: Any, kind: st
     if port is None:
         return []
     statuses = {st.name: st for st in port.statuses()}
+    rights, close = rights_of(frame.env), closeness_of(frame.env, frame)
     out = []
     for t in port.offered():
         st = statuses.get(t.server)
-        got = verdict(st.access, st.default, audience, kind, lambda a, r=t.remote: a.concerns(r),
-                      close=social_c.is_close(frame)) if st is not None else None
+        got = tool_allowance(st.access, st.default, audience, kind, t.nature != "lecture", rights,
+                             lambda a, r=t.remote: a.concerns(r), close=close, outside=True) if st is not None else None
         if got is None:
             continue
-        level = got.line.level(t.nature)
         out.append(Grant(f"mcp:{t.server}", f"« {t.server} » · {t.remote}",
-                         (("lit" if t.nature == "lecture" else "agit", POLICY_WORDS[level]),
-                          ("garde", KEEP_WORDS[got.line.keep] if level != NO else "—")),
-                         why_words(got.index), href=_fiche(t.server, "fait"), closed=level == NO))
+                         (("lit" if t.nature == "lecture" else "agit", POLICY_WORDS[got.level]),
+                          ("garde", KEEP_WORDS[got.keep] if got.level != NO else "—")),
+                         got.why, href=_fiche(t.server, "fait"), closed=got.level == NO))
     return out
 
 

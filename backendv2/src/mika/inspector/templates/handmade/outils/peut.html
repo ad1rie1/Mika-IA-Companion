@@ -1,23 +1,21 @@
-{# Outils › Ce qu'elle peut faire (inspector/pages/tools.py, ADR 0122) : ses familles d'outils en lignes, leurs outils
-   dessous, les situations en colonnes rangées par ce qui se passe. Une case cochée : elle peut s'en servir là ;
-   décochée : un opérateur le lui a retiré ; un tiret : le code ne le prévoit pas là (pourquoi, au survol). #}
+{# Outils › Ce qu'elle peut faire (inspector/pages/tools.py, ADR 0122, 0134) : ses familles d'outils en lignes, leurs
+   outils dessous, les situations en colonnes rangées par ce qui se passe. Une coche : elle peut s'en servir là, par ses
+   droits ; un tiret : rien ne le prévoit là (pourquoi, au survol). Une lecture : ses droits se règlent famille par
+   famille (Ses propres outils) ; ce qui vient d'ailleurs, sur la fiche de son service ou de son app. #}
 <div class="now-page can">
   <section class="now-card can-intro" aria-label="Comment lire cette page">
-    <p>Chaque ligne est une famille d'outils : ouvre-la pour voir ses outils. Chaque colonne est une situation. <b>Décoche une case</b> pour lui retirer un outil dans cette situation, recoche-la pour le lui rendre, puis enregistre. Un tiret veut dire que ce n'est pas prévu là (survole-le pour savoir pourquoi) : tu ne peux pas le lui donner. Un outil ouvre sa fiche : ce qu'il fait, ses derniers appels.</p>
+    <p>Chaque ligne est une famille d'outils : ouvre-la pour voir ses outils. Chaque colonne est une situation. Ce que tu vois est ce que ses droits lui laissent (ADR 0134) : pour le changer, règle le tableau de la famille sur <a href="{{ PREFIX }}/outils/familles">Ses propres outils</a>, ou la fiche de son service ou de son app pour ce qui vient d'ailleurs.</p>
     <ul class="can-legend">
       <li><span class="can-mark can-on" aria-hidden="true">✓</span>elle peut s'en servir</li>
       {% if any_ask %}<li><span class="can-mark can-on can-ask" aria-hidden="true">✓</span>à chercher : elle sait qu'il existe et le prend quand il lui faut</li>{% endif %}
       <li><span class="can-mark can-part" aria-hidden="true">2/5</span>une partie de la famille</li>
-      <li><span class="can-mark can-off" aria-hidden="true">✕</span>retiré par un opérateur</li>
-      <li><span class="can-mark can-none" aria-hidden="true">—</span>pas prévu</li>
+      <li><span class="can-mark can-none" aria-hidden="true">—</span>pas prévu, ou fermé par ses droits</li>
     </ul>
-    <p class="can-facts">{{ total }} outils en {{ families }} familles{% if removed %} · <b>{{ removed }} retiré{{ 's' if removed > 1 }} par un opérateur</b>{% endif %}{% if failures %} · <span class="can-warn">{{ failures }} appel{{ 's' if failures > 1 }} en échec ces deux dernières semaines</span>{% endif %}</p>
+    <p class="can-facts">{{ total }} outils en {{ families }} familles{% if failures %} · <span class="can-warn">{{ failures }} appel{{ 's' if failures > 1 }} en échec sur 14 jours</span>{% endif %}</p>
   </section>
 
-  <form method="post" action="{{ action }}" class="now-card can-card" aria-label="Ses outils, situation par situation">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
-    {% if lot %}<input type="hidden" name="lot" value="{{ lot }}"><p class="can-scope">Seulement la famille « {{ lot_label }} » · <a href="{{ PREFIX }}/outils/tous">tout voir</a></p>{% endif %}
+  <section class="now-card can-card" aria-label="Ses outils, situation par situation">
+    {% if lot %}<p class="can-scope">Seulement la famille « {{ lot_label }} » · <a href="{{ PREFIX }}/outils/tous">tout voir</a></p>{% endif %}
     {% if rows %}
     <div class="can-wrap" tabindex="0" role="region" aria-label="La grille de ses outils">
       <div class="can-grid can-cols-{{ situations|length }}">
@@ -32,13 +30,12 @@
         {% for f in rows %}
         <details class="can-family"{{ ' open' if f.open }}>
           <summary class="can-row">
-            <span class="can-name"><b>{{ f.label }}</b><span class="can-count">{{ f.tools|length }} outil{{ 's' if f.tools|length > 1 }}</span></span>
-            {% for c in f.cells %}<span class="can-sum can-{{ c.state }}{{ ' can-ask' if c.ask }}{{ ' has-off' if c.off }}{{ ' can-start' if loop.index0 in starts }}" title="{{ c.title }}">{{ c.text }}</span>{% endfor %}
+            <span class="can-name"><b>{{ f.label }}</b><span class="can-count">{{ f.tools|length }} outil{{ 's' if f.tools|length > 1 }}</span>{% if not f.external %} <a class="can-rule" href="{{ PREFIX }}/outils/familles?famille={{ f.bundle | urlencode }}" title="Régler les droits de cette famille">régler</a>{% endif %}</span>
+            {% for c in f.cells %}<span class="can-sum can-{{ c.state }}{{ ' can-ask' if c.ask }}{{ ' can-start' if loop.index0 in starts }}" title="{{ c.title }}">{{ c.text }}</span>{% endfor %}
           </summary>
           {% for t in f.tools %}
           <div class="can-row can-tool">
             <span class="can-name">
-              <input type="hidden" name="{{ seen_field }}" value="{{ t.name }}">
               <a href="{{ t.href }}" title="{{ t.description }}">{{ t.lead }}</a>
               <span class="can-id"><code>{{ t.name }}</code>{% if t.calls %} · {{ t.calls }} appel{{ 's' if t.calls > 1 }}{% if t.failures %}, <span class="can-warn">{{ t.failures }} en échec</span>{% endif %}{% endif %}</span>
             </span>
@@ -46,7 +43,7 @@
             <span class="can-cell can-{{ c.state }}{{ ' can-start' if loop.index0 in starts }}">
               {% if c.state == 'none' %}<span title="{{ c.situation }} : {{ c.why }}">—</span>
               {% elif c.state == 'fixed' %}<span title="{{ c.situation }} : toujours là (il clôt sa boucle)">✓</span>
-              {% else %}<input type="checkbox" name="{{ cell_field }}" value="{{ c.value }}"{{ ' checked' if c.state != 'off' }} aria-label="{{ t.name }} — {{ c.situation }}" title="{{ c.situation }}{{ ' : à chercher' if c.state == 'ask' }}{{ ' : retiré par un opérateur' if c.state == 'off' }}">{% endif %}
+              {% else %}<span class="can-mark can-on{{ ' can-ask' if c.state == 'ask' }}" title="{{ c.situation }}{{ ' : à chercher' if c.state == 'ask' }}">✓</span>{% endif %}
             </span>
             {% endfor %}
           </div>
@@ -55,19 +52,14 @@
         {% endfor %}
       </div>
     </div>
-    <div class="can-actions">
-      <button class="btn" type="submit">Enregistrer</button>
-      {% if ruled %}<button class="btn quiet" type="submit" name="faire" value="remettre" data-confirm="Remettre tous ses outils comme prévu, dans toutes les situations ?">Tout remettre comme prévu</button>{% endif %}
-      <span class="now-muted">Vaut dès son prochain épisode.</span>
-    </div>
     {% else %}
     <p class="now-muted">Aucun outil ne correspond.</p>
     {% endif %}
-  </form>
+  </section>
 
   <details class="now-card can-prompts">
     <summary>Ce que son prompt dit de ses outils, situation par situation</summary>
-    <p class="now-muted">Le texte exact qu'elle lit sur ses outils, tes réglages compris.</p>
+    <p class="now-muted">Le texte exact qu'elle lit sur ses outils, ses droits compris.</p>
     {% for p in prompts %}
     <details class="can-prompt"><summary>{{ p.label }}</summary><pre>{{ p.text or "(rien : aucun outil ici, ou tous sous la main sans règle à dire)" }}</pre></details>
     {% endfor %}

@@ -40,6 +40,7 @@ from mika.runtime.operations import perform
 from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tools import ToolContext
 from mika.sim.clock import run_virtual
+from mika.vocab.access import PERSON
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -293,19 +294,25 @@ def test_project_files_go_to_who_has_the_right_and_only_them(tmp_path):
 
 
 def _view(**kw) -> projects_c.ProjectView:
+    """Une vue de projet jamais réglé : ses lignes d'accès telles que ``access_of`` les donne — toi et elle seule, et
+    la personne qui l'a confié (ADR 0134)."""
     base = {"id": 1, "title_ref": "", "authority": projects_c.USER, "mode": projects_c.PERSONA,
             "status": projects_c.ACTIVE, "owner": "user_2", "about": ("user_2",), "sensitivity": 1,
             "created_at": 0}
-    return projects_c.ProjectView(**{**base, **kw})
+    got = {**base, **kw}
+    if "access" not in got and got["authority"] == projects_c.USER and got.get("owner"):
+        got["access"] = (*projects_c.UNSET, projects_c.ProjectAccess(who=(PERSON + got["owner"],), see=True,
+                                                                     steer=projects_c.STEER_ASK, files=True))
+    return projects_c.ProjectView(**got)
 
 
 def test_who_may_receive_a_project_file():
-    owner = Audience(persons=("user_1",), public=False, level=1, witness_level=2, private_ok=True, owner=True,
+    owner = Audience(persons=("user_1",), channel="web", public=False, level=1, witness_level=2, private_ok=True, owner=True,
                      trust="authenticated")
-    friend = Audience(persons=("user_3",), public=False, level=1, witness_level=2, private_ok=True,
-                      trust="authenticated")
-    confider = Audience(persons=("user_2",), public=False, level=1, witness_level=2, private_ok=True,
-                        trust="authenticated")
+    friend = Audience(persons=("user_3",), channel="web", public=False, level=1, witness_level=2, private_ok=True,
+                      trust="authenticated", person="user_3")
+    confider = Audience(persons=("user_2",), channel="web", public=False, level=1, witness_level=2,
+                        private_ok=True, trust="authenticated", person="user_2")
     mine = _view(owner="user_1", about=("user_1",))
     assert may_share(mine, "user_1", owner)
     assert may_share(_view(), "user_2", confider)  # c'est elle qui l'a confié
@@ -315,7 +322,7 @@ def test_who_may_receive_a_project_file():
     assert not may_share(_view(owner="user_2", about=("user_9",)), "user_2", confider)
     assert not may_share(_view(owner="user_1", about=("user_9",)), "user_1", owner)
     assert may_share(_view(owner="user_1", about=("user_9",)), "user_1", Audience(
-        persons=("user_1",), public=False, level=2, witness_level=2, private_ok=True, owner=True))
+        persons=("user_1",), channel="web", public=False, level=2, witness_level=2, private_ok=True, owner=True))
     # une confiée par l'opérateur à elle-même (autorité « self ») n'ouvre rien à une amie
     assert not may_share(_view(authority=projects_c.SELF), "user_2", confider)
 

@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from mika.adapters.mcp.http import HttpTransport
-from mika.vocab.access import CLOSE, EVERYONE, OWNER, WORK
+from mika.vocab.access import CLOSE, EVERYONE, OWNER
 from tests.contract.test_mcp_client import TOKEN, URL, FakeServer
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -112,10 +112,9 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # la propriétaire n'est jamais une « personne choisie » : sa source, c'est « Toi », cochée (ADR 0133)
     made = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "fait"}))
     assert "qui.1|personne:adrien" not in made and 'name="qui.1|proprietaire" checked' in made
-    assert all(f'name="qui.1|{s}"' in made for s in (WORK, CLOSE, EVERYONE))
-    # deux lignes, de haut en bas : toi quand elle répond, et elle quand elle travaille ; tes proches, sur « echo »
-    # seulement, sur accord
-    rows = {"ligne.1": "1", "qui.1|proprietaire": "on", "qui.1|travail": "on", "moments.1|conversation": "on",
+    assert all(f'name="qui.1|{s}"' in made for s in (CLOSE, EVERYONE)) and 'name="canal.1|interne"' in made
+    # deux lignes, de haut en bas : toi quand elle répond ; tes proches, sur « echo » seulement, sur accord
+    rows = {"ligne.1": "1", "qui.1|proprietaire": "on", "moments.1|conversation": "on",
             "lecture.1": "seule", "action.1": "toi", "garde.1": "prive", "tous.1": "on", "ligne.2": "2",
             "qui.2|proches": "on", "toujours.2": "on", "lecture.2": "carte", "action.2": "non", "garde.2": "rien",
             "prend.2|echo": "on", "defaut_lecture": "non", "defaut_action": "non", "defaut_garde": "rien"}
@@ -127,11 +126,11 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert saved.status_code == 200 and "Accès enregistrés." in html_of(saved)
     spec = client.portal.call(live.settings.mcp).servers["meteo"]
     assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in spec.access] == [
-        ((OWNER, WORK), ("conversation",), "seule", "toi", "prive", ()), ((CLOSE,), (), "carte", "non", "rien", ("echo",))]
+        ((OWNER,), ("conversation",), "seule", "toi", "prive", ()), ((CLOSE,), (), "carte", "non", "rien", ("echo",))]
     # une ligne sans source se refuse
     refused = submit(client, access_page(), "mcp.acces", faire="",
                      **{k: v for k, v in rows.items() if k != "qui.2|proches"})
-    assert "Ligne 2 : coche qui." in html_of(refused)
+    assert "Ligne 2 : coche qui" in html_of(refused)
     assert live.kernel.registry.is_dynamic("mcp_meteo_echo")  # réglée, la ligne l'ouvre
     # « quand » se coche : une ligne sans moment se refuse
     refused = submit(client, access_page(), "mcp.acces", faire="",
@@ -146,7 +145,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # monter la seconde : l'ordre change, rien d'autre
     moved = submit(client, access_page(), "mcp.acces", faire="monter:2", **rows)
     assert "Ligne 2 montée." in html_of(moved)
-    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == [(CLOSE,), (OWNER, WORK)]
+    assert [a.who for a in client.portal.call(live.settings.mcp).servers["meteo"].access] == [(CLOSE,), (OWNER,)]
     submit(client, access_page(), "mcp.acces", faire="", **rows)
     # « En bref » : ses lignes d'un regard, qui peut quoi, et la grille où l'on retire un outil, ouverte sur sa famille
     served = html_of(client.get("/inspecteur/fiche/serveur/meteo"))
@@ -169,7 +168,7 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     # un outil se règle sur sa ligne : servi, il lit ou il agit, ce qu'elle lit de lui — plus d'exception (ADR 0131)
     opened = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils", "outil": "echo"}))
     assert '<details class="tool-edit" open>' in opened and "Ajouter une exception" not in opened
-    assert "Toi : <b>seule</b>" in opened and "Elle travaille seule : <b>seule</b>" in opened
+    assert "Toi : <b>seule</b>" in opened and "Elle travaille seule" not in opened  # aucune ligne « elle seule »
     assert "Un proche : <b>lui demande</b> · rien" in opened
     done = submit(client, opened, "mcp.regler", outil="echo", actif="1", nature="lecture", description="")
     assert done.status_code == 200 and "echo : servi, il lit." in html_of(done)

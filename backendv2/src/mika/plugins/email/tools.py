@@ -41,11 +41,11 @@ from mika.plugins.email.voice import voice_text
 from mika.ports.mail import Draft, addresses, reply_recipients, reply_subject, to_fill
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
+from mika.vocab.canals import mail_rule_for_all, mail_send
 from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.sending import mail_rule_for_all, mail_send
 
 EPISODES = [Kind.REPLY, *WORKING, Kind.TASK]
 BODY_SHOWN = 6000
@@ -212,7 +212,7 @@ def _asker(ctx: Any) -> tuple[str, ...]:
     return (target,) if target and is_identifiable(target) and not is_work_target(target) else ()
 
 
-@EMAIL.tool("email_draft", description=phrase("email.tools.draft.description"), args=DraftArgs,
+@EMAIL.tool("email_draft", acts=True, description=phrase("email.tools.draft.description"), args=DraftArgs,
             bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True)
 async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -252,9 +252,9 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("email.tools.draft.blocked",
                                                    why=shown.blocked if shown else phrase("email.tools.draft.error")))
     p = params_of(ctx.frame)
-    # sa règle d'envoi (ADR 0132) : il ne part seul que si chaque destinataire le permet, et jamais avec un passage
-    # à compléter
-    rule = mail_rule_for_all(p.sending.rules, p.sending.default, info.key, (a for _, a in addresses(f"{to},{cc}")))
+    # la ligne de sa boîte (ADR 0132, 0134) : il ne part seul que si chaque destinataire le permet, et jamais avec
+    # un passage à compléter
+    rule = mail_rule_for_all(p.canaux, info.key, (a for _, a in addresses(f"{to},{cc}")))
     needs_approval = mail_send(rule) != "seule" or bool(shown.blocked)
     about = tuple(dict.fromkeys((*_asker(ctx), *(c.address_handle(a) for _, a in addresses(to)[:3]))))
     what = f"Répondre à {inert(to, 200)}" if parent is not None else f"Écrire à {inert(to, 200)}"

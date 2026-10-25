@@ -43,7 +43,6 @@ MENU = (
         MenuLink("Conversations", "fil"),
         MenuLink("Courrier", "courrier", ("reglages/boites",)),
         MenuLink("Teams", "teams", ("reglages/teams",)),
-        MenuLink("Envoyer à ta place", "envoi"),
         MenuLink("Identités et moyens de communication", "identites"),
     )),
     MenuGroup("Activité", "activity", (
@@ -59,6 +58,7 @@ MENU = (
     )),
     MenuGroup("Outils", "tools", (
         MenuLink("Ce qu'elle peut faire", "outils"),
+        MenuLink("Ses propres outils", "outils/familles"),
         MenuLink("Venus d'ailleurs", "outils/serveurs", ("reglages/serveurs-mcp",)),
         MenuLink("Prêter à un agent", "outils/expose"),
         MenuLink("Apps forgées", "apps"),
@@ -85,6 +85,7 @@ MENU = (
         MenuLink("Paramètres avancés", "reglages/comportement"),
         MenuLink("Comptes opérateurs", "reglages/comptes"),
         MenuLink("Droits", "reglages/droits"),
+        MenuLink("Canaux", "reglages/canaux"),
         MenuLink("Historique des réglages", "reglages/journal"),
     )),
     MenuGroup("Système", "system", (

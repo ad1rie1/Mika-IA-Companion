@@ -15,7 +15,7 @@ from typing import Any
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.mcp.system import Provided
 from mika.plugins import web
-from mika.ports.mcp import OWNER, WORK
+from mika.ports.mcp import INTERNAL, OWNER
 
 #: les plugins qui apportent un serveur : quand leurs paramètres changent, le client MCP se reconfigure
 OWNERS = frozenset({web.WEB.name})
@@ -30,9 +30,10 @@ def provided(params_of: Callable[[str], Any]) -> dict[str, Provided]:
     return out
 
 
-#: ses lignes d'accès tant qu'on ne les a pas réglées sur sa fiche (ADR 0131) : avec toi quand elle répond et quand
-#: elle travaille ; elle lit seule, te demande avant d'agir, et ce qu'elle y lit est public (une recherche, des pages)
-WEB_ACCESS = (AccessRule(who=(OWNER, WORK), when=("conversation",), read="seule", act="toi", keep="public"),)
+#: ses lignes d'accès tant qu'on ne les a pas réglées sur sa fiche (ADR 0131, 0134) : toi quand elle répond, et elle
+#: seule ; elle lit seule, te demande avant d'agir, et ce qu'elle y lit est public (une recherche, des pages)
+WEB_ACCESS = (AccessRule(who=(OWNER,), when=("conversation",), read="seule", act="toi", keep="public"),
+              AccessRule(canal=(INTERNAL,), read="seule", act="toi", keep="public"))
 
 
 def spec(s: web.SystemServer) -> McpServer:

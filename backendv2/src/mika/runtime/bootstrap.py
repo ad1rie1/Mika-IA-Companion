@@ -111,9 +111,11 @@ class KernelDeps:
     #: attente, sans épisode) ou l'instant d'où elle est due — son réveil, d'où la
     #: reprise au démarrage compte l'âge de la question.
     reply_wait: Callable[[Frame, int], int | None] | None = None
-    #: les règles d'outils d'un opérateur, par situation (ADR 0122) : ``tool_rules(situation)`` rend « outil → off,
-    #: hand ou ask » ; ``None`` : aucune règle, ses outils sont ceux du code
-    tool_rules: Callable[[str], Mapping[str, str]] | None = None
+    #: les tableaux de droits réglés (ADR 0134 : ``kernel.rights.Rights``), posés sur le registre ; ``None`` : les
+    #: minimums vitaux seuls
+    access_tables: Callable[[], Any] | None = None
+    #: qui est proche d'elle, devant ce qu'elle vit (``fn(frame) -> fn(personne) -> bool``), posé sur le registre
+    closeness: Callable[[Any], Callable[[str], bool]] | None = None
     #: l'autrice de chaque flux (``vocab.flows``, ADR 0124) : ``fn(flux) -> Author | None`` ; absente, le chat garde son
     #: autrice d'avant elles et un brouillon n'en a pas
     authors: Callable[[str], Any] | None = None
@@ -179,9 +181,11 @@ class Kernel:
             audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
             polishers=deps.polishers, polished=deps.polished, reannotators=deps.reannotators, modes=deps.modes,
             budget=deps.budget, ports=ports,
-            traces=self.traces, tool_rules=deps.tool_rules, authors=deps.authors,
+            traces=self.traces, authors=deps.authors,
             draft_polishers=deps.draft_polishers,
         )
+        self.mind.registry.access_tables = deps.access_tables
+        self.mind.registry.closeness = deps.closeness
         self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
         self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed, held=self._held_kind)

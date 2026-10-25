@@ -122,9 +122,10 @@ def live(tmp_path, model, scenario, *, cfg: TeamsConfig | None = None, inputs: d
     kernel, clock, llm, _ = build(tmp_path, model, clock=clock, ports={"teams": store}, **built)
     desk = TeamsDesk(Settings(cfg), clock.now, store)
     desk.port = SimpleNamespace(kernel=kernel)
-    rules = [{"canal": "teams", "dest": d, "prepare": False, "send": SENDS[mode]} for d in skip]
-    rules.append({"canal": "teams", "prepare": autodraft, "send": SENDS[mode]})
-    teams_inputs = {"enabled": cfg.enabled, "sending": {"rules": rules}, **(inputs or {})}
+    lines = [{"who": [f"adresse:{d}"], "canal": ["teams"], "prepare": False, "reply": SENDS[mode]} for d in skip]
+    lines.append({"who": ["tous"], "canal": ["teams"], "prepare": autodraft, "reply": SENDS[mode]})
+    teams_inputs = {"enabled": cfg.enabled, "canaux": {"tables": {"teams": {"lines": lines, "default": {}}}},
+                    **(inputs or {})}
 
     # l'envie de rédiger au plus haut : la tâche part en quelques minutes, quel que soit le tirage de l'arbitre
     overrides = {**(overrides or {}), "teams": {"draft_evidence": 12.0, **(overrides or {}).get("teams", {})}}
@@ -348,7 +349,8 @@ def test_without_initiative_she_only_drafts_when_asked(tmp_path):
 def test_a_rule_tightened_after_the_triage_holds_for_what_she_writes(tmp_path):
     """2026-10-25 : le mode décidé au tri l'emportait — une règle resserrée depuis laissait partir seul ce qu'elle
     écrivait ensuite. Ce qui part relit la règle d'aujourd'hui (ADR 0132)."""
-    accord = {"enabled": True, "sending": {"rules": [{"canal": "teams", "send": "accord"}]}}
+    accord = {"enabled": True, "canaux": {"tables": {"teams": {"lines": [
+        {"who": ["tous"], "canal": ["teams"], "prepare": True, "reply": "accord"}], "default": {}}}}}
 
     async def scenario(kernel, llm, desk, store, clock):
         await connect(kernel, "user_1", "Adrien", operator=True)
@@ -371,7 +373,8 @@ def test_a_rule_tightened_after_the_triage_holds_for_what_she_writes(tmp_path):
 
 
 def test_a_rule_that_stops_her_preparing_holds_for_a_message_already_noticed(tmp_path):
-    stop = {"enabled": True, "sending": {"rules": [{"canal": "teams", "prepare": False, "send": "brouillon"}]}}
+    stop = {"enabled": True, "canaux": {"tables": {"teams": {"lines": [
+        {"who": ["tous"], "canal": ["teams"], "prepare": False, "reply": "brouillon"}], "default": {}}}}}
 
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])

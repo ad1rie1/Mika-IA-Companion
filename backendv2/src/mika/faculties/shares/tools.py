@@ -37,9 +37,10 @@ from mika.kernel.guards import Superseded
 from mika.kernel.inspect import num_fr
 from mika.ports.workshop import OutsideWorkshop
 from mika.vocab.days import when_fr
-from mika.vocab.episodes import CONVERSATIONAL, is_work_target
+from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity, hearable
+from mika.vocab.rights import closeness_of, project_allowance, rights_of
 
 BUNDLE = "shares"
 SHARE_TEXT, PROJECT_FILES, SHARE_PROJECT_FILE = "share_text", "project_files", "share_project_file"
@@ -163,14 +164,16 @@ def _budget(ctx: Any, target: str) -> ToolResult | None:
     return None
 
 
-def may_share(v: projects_c.ProjectView, person: str, aud: Audience) -> bool:
-    """Un projet dont elle peut envoyer les fichiers à qui l'écoute : vivant, la personne en a les droits (elle parle
-    en propriétaire, ou c'est elle qui l'a confié) et peut entendre ce dont il parle (ce qui s'écrit dans un projet
-    est au moins personnel)."""
+def may_share(v: projects_c.ProjectView, person: str, aud: Audience, frame: Frame | None = None) -> bool:
+    """Un projet dont elle peut envoyer les fichiers à qui l'écoute : vivant, sa colonne « fichiers » le lui laisse
+    (ses lignes d'accès, après le canal et le plafond : jamais dans un salon ni à une inconnue, ADR 0134), et la
+    personne peut entendre ce dont il parle (ce qui s'écrit dans un projet est au moins personnel)."""
     if v.status not in (projects_c.ACTIVE, projects_c.PAUSED):
         return False
-    confided = v.authority == projects_c.USER and v.owner is not None and v.owner == person
-    if not (aud.owner or confided):
+    env = frame.env if frame is not None else None
+    kind = frame.episode.kind if frame is not None and frame.episode is not None else Kind.REPLY
+    got = project_allowance(v.access, v.default_access, aud, kind, rights_of(env), close=closeness_of(env, frame))
+    if got is None or not got.files:
         return False
     return hearable(v.about, v.written, person, aud.level, aud.witness_level, aud.private_ok,
                     tied_level=aud.tied_level, ties=aud.ties)
@@ -180,7 +183,7 @@ def _visible(frame: Frame, person: str) -> list[projects_c.ProjectView]:
     aud = frame.audience
     if aud is None:
         return []
-    return [v for v in frame.get(projects_c.LIVE) if may_share(v, person, aud)]
+    return [v for v in frame.get(projects_c.LIVE) if may_share(v, person, aud, frame)]
 
 
 def _file_id(ctx: Any, target: str) -> str:
@@ -222,7 +225,7 @@ class TextArgs(BaseModel):
     content: str = Field(description=phrase("shares.tools.share_text.content"))
 
 
-@SHARES.tool(SHARE_TEXT, description=phrase("shares.tools.share_text.description"), args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE, when=offered)
+@SHARES.tool(SHARE_TEXT, acts=True, description=phrase("shares.tools.share_text.description"), args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
 async def share_text(args: TextArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -272,7 +275,7 @@ def _entries(tree: list[str]) -> list[str]:
     return [line for line in tree if not line.startswith("[")]
 
 
-@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
+@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4)
 async def project_files(args: FilesArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -319,8 +322,7 @@ class ProjectFileArgs(BaseModel):
     path: str = Field(description=phrase("shares.tools.share_project_file.path"))
 
 
-@SHARES.tool(SHARE_PROJECT_FILE, description=phrase("shares.tools.share_project_file.description"), args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE,
-             when=offered)
+@SHARES.tool(SHARE_PROJECT_FILE, acts=True, description=phrase("shares.tools.share_project_file.description"), args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
 async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -368,7 +370,7 @@ def _named(raw: Any, name: str) -> bool:
     return bool(wanted) and wanted in (name.casefold(), name.rpartition(".")[0].casefold())
 
 
-@SHARES.tool(REREAD_SENT_FILE, description=phrase("shares.tools.reread.description"), args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
+@SHARES.tool(REREAD_SENT_FILE, description=phrase("shares.tools.reread.description"), args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4)
 async def reread_sent_file(args: RereadArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
