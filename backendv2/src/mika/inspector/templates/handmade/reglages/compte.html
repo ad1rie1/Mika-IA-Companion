@@ -1,10 +1,19 @@
-{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : le créer, le modifier (qui
-   c'est, ses droits, son mot de passe), ses applications connectées. Champs, noms et boutons : ceux de la console. #}
+{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : les deux boutons d'ajout au-dessus
+   de la liste, ajouter un utilisateur ou un opérateur, le modifier (qui c'est, ses droits, son mot de passe), ses
+   applications connectées. Champs, noms et boutons : ceux de la console. #}
 {% from "_navigation.html" import pager %}
-{% if mode == "create" %}
+{% if mode == "list" %}
+<nav class="hm-actions" aria-label="Ajouter un compte">
+  <a class="btn" href="{{ add_user }}">＋ Ajouter un utilisateur</a>
+  <a class="btn quiet" href="{{ add_operator }}">＋ Ajouter un opérateur</a>
+</nav>
+{% elif mode == "create" %}
 <form method="post" action="{{ action }}" class="form now-card hm-form record-form">
-  <h2 class="hm-form-title">Créer un compte</h2>
+  <h2 class="hm-form-title">{{ 'Un opérateur' if operator_role else 'Un utilisateur' }}</h2>
+  <p class="help">{% if operator_role %}Parle avec elle, et ouvre aussi la console : tout ce qu'elle vit, sa configuration, les approbations et les apps. Un opérateur compte parmi ses propriétaires.{% else %}Se connecte au chat (le web, le téléphone) et parle avec elle, sans ouvrir la console.{% endif %}
+    Le compte est une personne qu'elle connaît dès sa création, sous son nom affiché. <a href="{{ switch }}">{{ "Ajouter plutôt un utilisateur" if operator_role else "Ajouter plutôt un opérateur" }}</a></p>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="create">
+  <input type="hidden" name="role" value="{{ role }}">
   <fieldset class="group hm-group">
     <legend>Le compte</legend>
     <div class="field"><label for="acc-username">Identifiant</label>
@@ -15,11 +24,9 @@
       <span class="help">Le nom sous lequel elle connaîtra cette personne (vide : l'identifiant).</span></div>
     <div class="field"><label for="acc-password">Mot de passe</label>
       <input id="acc-password" name="password" type="password" autocomplete="new-password" required>
-      <span class="help">8 caractères au moins, pas seulement des chiffres, sans l'identifiant dedans.</span></div>
-    <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if values.operator }}> Opérateur</label>
-      <span class="help">Ouvre la console (tout ce qu'elle vit, sa configuration), décide des approbations et des apps. Sans : le frontend seulement.</span></div>
+      <span class="help">8 caractères au moins, pas seulement des chiffres, sans l'identifiant dedans. À lui transmettre : il ne se réaffiche jamais.</span></div>
   </fieldset>
-  <div class="form-actions"><button class="btn">Créer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
+  <div class="form-actions"><button class="btn">{{ "Ajouter l'opérateur" if operator_role else "Ajouter l'utilisateur" }}</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
 {% elif mode == "edit" %}
 <div class="now">
@@ -32,6 +39,7 @@
     <div class="field"><label for="acc-edit-full-name">Nom affiché (prénom, nom)</label>
       <input id="acc-edit-full-name" name="full_name" value="{{ account.full_name }}" maxlength="80">
       <span class="help">Le nom sous lequel elle connaît cette personne, partout dans la console et dans ce qu'elle dit (vide : l'identifiant, « {{ account.username }} »).</span></div>
+    {% if person_url %}<p class="help">Tout ce qu'elle en sait : <a href="{{ person_url }}">sa fiche de personne</a>.</p>{% endif %}
   </fieldset>
   <fieldset class="group hm-group">
     <legend>Droits</legend>

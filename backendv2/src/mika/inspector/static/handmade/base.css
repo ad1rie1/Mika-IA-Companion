@@ -385,6 +385,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-chip.danger { color: var(--danger); }
 .hm-chip.warn { color: var(--warn); }
 .hm-toolbar { align-items: center; }
+.hm-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
 .now-page form.action-card.card { padding: 20px 22px; border-radius: 18px; }
 .now-page form.action-card.card > h3 { font-family: var(--now-serif); font-size: 1.15rem; font-weight: 600; }
 

@@ -88,10 +88,7 @@ class WebState:
     pass
 
 
-#: « pour qui » et « quand elle travaille » sont devenus les lignes d'accès de son serveur, réglées sur sa fiche (ADR
-#: 0131) : leurs valeurs journalisées se lisent sans effet
-WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams,
-              retired_params=("audience", "in_work"))
+WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams)
 
 
 def params(p: WebParams | None) -> WebParams:

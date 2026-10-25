@@ -270,7 +270,8 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/systeme/processus?vue_pg1=table", "/inspecteur/systeme/processus?pg1=2",
                      "/inspecteur/systeme/processus?pg1=2&vue_pg1=table",
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
-                     "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a",
+                     "/inspecteur/reglages/comptes?nouveau=utilisateur",
+                     "/inspecteur/reglages/comptes?nouveau=operateur", "/inspecteur/recherche?q=a",
                      "/inspecteur/action/projects.creer?retour=/inspecteur/projets"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)

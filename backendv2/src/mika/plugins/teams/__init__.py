@@ -199,11 +199,8 @@ class Settled(Payload):
     reason: str = ""
 
 
-#: ce qu'elle fait de ses réponses, ce qu'elle prépare d'elle-même et où jamais sont devenus ses règles d'envoi
-#: (ADR 0132) : leurs valeurs journalisées se lisent sans effet
 #: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``)
-TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=2,
-                retired_params=("mode", "autodraft", "skip"))
+TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=2)
 TEAMS.declare(*c.ALL)
 TEAMS.bundle(BUNDLE, "les conversations Teams de la personne qui s'occupe de toi : les lister, relire un fil, "
                      "préparer une réponse à sa place")

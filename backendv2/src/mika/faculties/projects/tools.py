@@ -610,21 +610,21 @@ class SteerArgs(BaseModel):
 
 
 def steerable(p: Project, audience: Any, close: Any = None) -> str:
-    """Ce que qui est en face peut faire de ce projet en le pilotant, en réponse (ADR 0133) : ``seule``, ``toi``
-    (sur ton accord) ou ``non`` — un projet vivant, que ses lignes d'accès lui laissent voir et piloter (``close`` : qui
-    est proche d'elle)."""
+    """Ce que qui est en face peut faire de ce projet en le pilotant, en réponse (ADR 0133, ``STEERS``) — un projet
+    vivant, que ses lignes d'accès lui laissent voir et piloter (``close`` : qui est proche d'elle)."""
     return steering(p, audience, Kind.REPLY, close) if live(p) else c.STEER_NO
 
 
 def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
-    """Seulement devant qui une ligne d'accès laisse piloter un de ses projets vivants (ADR 0133).
+    """Seulement devant qui une ligne d'accès laisse changer un de ses projets vivants (ADR 0133) : sur l'accord du
+    propriétaire ou en modification — la lecture seule n'y change rien.
 
     Jamais dans un salon ni avec une inconnue ; sans ce qu'elle vit (une console qui juge hors de sa vie), non."""
     if frame is None:
         return False
     s: ProjectsState = frame.state("projects")
     close = social_c.is_close(frame)
-    return any(steering(p, audience, kind, close) != c.STEER_NO for p in s.projects.values() if live(p))
+    return any(steering(p, audience, kind, close) in c.CHANGES for p in s.projects.values() if live(p))
 
 
 def _contents(ctx: Any, refs: list[str]) -> Mapping[str, str]:
@@ -689,7 +689,7 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     # ceux que ses lignes d'accès lui laissent piloter et dont le détail peut s'entendre ici (la règle de « TES
     # PROJETS ») : on ne pilote pas à l'aveugle
     close = social_c.is_close(frame)
-    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud, close) != c.STEER_NO
+    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steerable(p, aud, close) in c.CHANGES
             and hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok)]
     if not mine:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
@@ -801,8 +801,8 @@ def asks_words(what: str, text: str) -> str:
 
 
 async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: str) -> Any:
-    """Sur ton accord : la demande est gardée (son texte, un contenu effaçable) puis proposée (``projects.steer``) ;
-    son geste s'écrit quand tu l'acceptes — une carte dans ton chat si c'est toi en face, sinon la console."""
+    """Sur l'accord du propriétaire : la demande est gardée (son texte, un contenu effaçable) puis proposée
+    (``projects.steer``, dans la console) ; son geste s'écrit quand tu l'acceptes."""
     frame: Frame = ctx.frame
     text = args.text.strip()
     if args.what in (ADD, INSTRUCT) and not text:
@@ -826,10 +826,8 @@ async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: 
         project=p.id, request=request, what=args.what, text=Content.of(text, level=written(p)) if text else None,
         kind=args.kind, cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, objective=objective,
         by=person, owner=p.owner, about=p.about))
+    # jamais toi en face (ta demande s'applique aussitôt, ``access.steering``) : la console décide
     payload: dict[str, Any] = {"project": p.id, "asked": request}
-    target = (frame.episode.target if frame.episode is not None else "") or ""
-    if frame.audience is not None and frame.audience.owner and target:
-        payload[rt.DECIDER] = target  # c'est toi en face : une carte dans ton chat
     view = frame.get(identity_c.IDENTITY(person))
     what = asks_words(args.what, text)
     summary = phrase("projects.tools.steer.request", who=str(getattr(view, "name", "") or person), title=title,

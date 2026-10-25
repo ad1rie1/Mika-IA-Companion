@@ -3,9 +3,9 @@ ce qu'elle prépare d'elle-même. La clé de l'extension se génère à part (se
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 from mika.kernel.forms import Knob
 from mika.ports.teams import Voice
@@ -39,16 +39,6 @@ class TeamsConfig(BaseModel):
     signature: Annotated[str, Knob(label="La signature", group="Écrire", order=31,
                                    help="Le texte ajouté quand la case ci-dessus est cochée ; « {elle} » y devient "
                                         "son nom.")] = SIGNATURE
-
-    @model_validator(mode="before")
-    @classmethod
-    def _before_0132(cls, data: Any) -> Any:
-        """Ce qu'elle fait de ses réponses, ce qu'elle prépare d'elle-même et où jamais (« mode », « autodraft »,
-        « skip ») se règlent dans ses règles d'envoi (ADR 0132) : des réglages d'avant restent lisibles, ces champs
-        sans effet (ils y sont traduits)."""
-        if isinstance(data, dict) and {"mode", "autodraft", "skip"} & set(data):
-            data = {k: v for k, v in data.items() if k not in ("mode", "autodraft", "skip")}
-        return data
 
     def voice(self, fallback_name: str = "") -> Voice:
         return Voice(display_name=self.display_name.strip() or fallback_name, tone=self.tone,

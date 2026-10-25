@@ -1,59 +1,80 @@
-{# Réglages › Droits (app/handmade/rights.py, ADR 0133) : qui peut quoi — par personne (une audience type à la fois, ce
-   que chaque type de règles lui accorde et la ligne qui en décide), par ressource (chaque tableau, ce qu'aucune ligne
-   n'ouvre, où il se règle), les règles d'outils par situation et ce que le code fixe. Une lecture : tout se règle sur
-   la page de chaque ressource. #}
+{# Réglages › Droits (app/handmade/rights.py, ADR 0133) : qui peut quoi — par personne (une grille : chaque ressource
+   et ses actions en lignes, les audiences types en colonnes, ce qu'elle en fait et la ligne qui en décide), par
+   ressource (chaque tableau tel qu'il est écrit, replié, ce qu'aucune ligne n'ouvre, où il se règle), les règles
+   d'outils par situation et ce que le code fixe. Une lecture : tout se règle sur la page de chaque ressource. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page service">
-  <section class="now-card access-card" aria-labelledby="rights-who">
-    <header class="access-head">
+  <section class="now-card rights-card" id="rights-who" aria-labelledby="rights-who-title">
+    <header class="rights-head">
       <div>
-        <h2 id="rights-who">Par personne</h2>
-        <p>Ce qu'elle a devant une personne, à un moment, et <b>la ligne qui en décide</b>. Dans un salon ou devant une inconnue, rien ne s'y fait, quelles que soient les lignes : seule « tout le monde » y laisse voir un projet.</p>
+        <h2 id="rights-who-title">Par personne</h2>
+        <p>Ce qu'elle fait de chaque chose devant chacun, et <b>la ligne qui en décide</b>. Une case survolée dit sa phrase entière ; un en-tête met sa colonne en avant.</p>
       </div>
-      <form method="get" class="rights-pick">
-        <label for="rights-face" class="service-hidden">Qui, et quand</label>
-        <select id="rights-face" name="qui" class="access-select">
-          {% for f in faces %}<option value="{{ f.key }}"{{ ' selected' if f.on }}>{{ f.label }}</option>{% endfor %}
-        </select>
-        <button class="btn quiet">Voir</button>
-      </form>
+      <ul class="rights-legend" aria-label="Légende">
+        {% for tone, said in legend %}<li><span class="rights-swatch {{ tone }}" aria-hidden="true"></span>{{ said }}</li>{% endfor %}
+      </ul>
     </header>
-    <h3 class="rights-chosen">{{ chosen }}</h3>
-    {% for g in groups %}
-    <div class="rights-group">
-      <h4>{{ g.title }}</h4>
-      {% if g.grants %}
-      <div class="table-block">
-      <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ g.title }}">
-        <table class="access-table">
-          <thead><tr><th scope="col">Quoi</th><th scope="col">Ce qu'elle en fait</th><th scope="col">Ce qui en décide</th></tr></thead>
-          <tbody>
-            {% for x in g.grants %}
-            <tr>
-              <td>{% if x.href %}<a href="{{ x.href }}">{{ x.title }}</a>{% else %}{{ x.title }}{% endif %}</td>
-              <td>{% for k, v in x.what %}<span class="now-tag {{ 'muted' if v in ('non', '—') else 'info' }}">{{ k }} : {{ v }}</span> {% endfor %}</td>
-              <td class="now-muted">{{ x.why }}</td>
-            </tr>
+    {% if grid %}
+    <div class="table-block">
+    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Qui a quoi">
+      <table class="rights-grid">
+        <thead>
+          <tr>
+            <th scope="col" class="rights-res">Ressource</th>
+            <th scope="col" class="rights-act">Action</th>
+            {% for f in faces %}
+            <th scope="col" class="rights-face{{ ' on' if f.on }}" title="{{ f.label }}"><a href="{{ '?' if f.on else '?qui=' ~ (f.key | urlencode) }}#rights-who"{{ ' aria-current="true"' if f.on }}>{{ f.short }}<span>{{ f.hint }}</span></a></th>
             {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <div class="hm-pager single">{{ pages(g.pager) }}</div>
-      </div>
-      {% endif %}
-      {% if g.closed %}<p class="now-muted">{{ g.closed }} autre{{ 's' if g.closed > 1 }} fermé{{ 's' if g.closed > 1 }} ici.</p>{% elif not g.grants %}<p class="now-muted">Rien ici.</p>{% endif %}
+          </tr>
+        </thead>
+        {% for g in grid %}
+        <tbody>
+          <tr class="rights-kind"><th scope="rowgroup" colspan="{{ faces | length + 2 }}" title="{{ g.description }}">{{ g.title }}</th></tr>
+          {% for r in g.rows %}
+          {% for a in r.actions %}
+          <tr class="rights-row{{ ' shut' if r.closed }}">
+            {% if loop.first %}
+            <th scope="rowgroup" rowspan="{{ r.actions | length + 1 }}" class="rights-res">
+              {% if r.label %}{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{% endif %}
+              {% if r.names %}<span class="rights-names">{% for n in r.names %}<code>{{ n }}</code>{% endfor %}</span>{% endif %}
+            </th>
+            {% endif %}
+            <th scope="row" class="rights-act">{{ a.name }}</th>
+            {% for c in a.cells %}<td class="rights-cell{{ ' on' if faces[loop.index0].on }}" title="{{ c.title }}"><span class="rights-v {{ c.tone }}">{{ c.word }}</span></td>{% endfor %}
+          </tr>
+          {% endfor %}
+          <tr class="rights-why{{ ' shut' if r.closed }}">
+            <th scope="row" class="rights-act">décidé par</th>
+            {% for w in r.why %}<td class="rights-cell{{ ' on' if faces[loop.index0].on }}">{{ w }}</td>{% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        {% endfor %}
+      </table>
     </div>
-    {% endfor %}
-    <p class="now-muted">Ses autres outils, situation par situation : <a href="{{ catalogue }}">« Ce qu'elle peut faire »</a>.</p>
+    <div class="hm-pager single">{{ pages(pager) }}</div>
+    </div>
+    {% else %}
+    <p class="now-empty">aucune ressource n'a encore de règles.</p>
+    {% endif %}
+    <p class="rights-foot">Dans un salon ou devant une inconnue, elle ne se sert de rien, quelles que soient les lignes ; ce qu'aucune ligne n'ouvre est dit sous chaque ressource, plus bas. Ses autres outils, situation par situation : <a href="{{ catalogue }}">« Ce qu'elle peut faire »</a>.</p>
   </section>
 
-  <section class="now-card access-card" aria-labelledby="rights-what">
-    <h2 id="rights-what">Par ressource</h2>
-    <p class="now-muted">De haut en bas : la première ligne qui correspond décide ; aucune, la dernière, le comportement par défaut. Chaque tableau se règle sur sa page.</p>
+  <section class="now-card rights-card" aria-labelledby="rights-what">
+    <header class="rights-head">
+      <div>
+        <h2 id="rights-what">Par ressource</h2>
+        <p>Les règles telles qu'elles sont écrites. De haut en bas : la première ligne qui correspond décide ; aucune, la ligne par défaut. Chacune se règle sur sa page.</p>
+      </div>
+    </header>
     {% for kind in tables %}
     {% for t in kind.tables %}
-    <div class="rights-group">
-      <h4>{{ t.title }}{% if t.href %} · <a href="{{ t.href }}">Régler</a>{% endif %}</h4>
+    <details class="rights-fold">
+      <summary>
+        <span class="rights-fold-title">{{ t.title }}</span>
+        {% set n = t.rows | length %}<span class="rights-fold-meta">{{ n ~ ' ligne' ~ ('s' if n > 1 else '') ~ ' et le défaut' if n else 'le défaut seul' }}</span>
+        {% if t.href %}<a class="rights-set" href="{{ t.href }}">Régler</a>{% endif %}
+      </summary>
       <div class="table-block">
       <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ t.title }}">
         <table class="access-table">
@@ -66,33 +87,53 @@
       </div>
       <div class="hm-pager single">{{ pages(t.pager) }}</div>
       </div>
-      {% if t.note %}<p class="now-muted">{{ t.note }}</p>{% endif %}
-      {% if t.floors %}<p class="now-muted">Ce qu'aucune ligne n'ouvre : {{ t.floors | join(' ; ') }}.</p>{% endif %}
-    </div>
+      {% if t.note %}<p class="rights-note">{{ t.note }}</p>{% endif %}
+      {% if t.floors %}
+      <div class="rights-floors">
+        <p>Ce qu'aucune ligne n'ouvre</p>
+        <ul>{% for f in t.floors %}<li>{{ f }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+    </details>
     {% endfor %}
     {% endfor %}
   </section>
 
-  <section class="now-card access-card" aria-labelledby="rights-rules">
-    <h2 id="rights-rules">Tes règles d'outils</h2>
-    <p class="now-muted">Par situation, elles ne font que restreindre (<a href="{{ catalogue }}">« Ce qu'elle peut faire »</a>).</p>
+  <section class="now-card rights-card" aria-labelledby="rights-rules">
+    <header class="rights-head">
+      <div>
+        <h2 id="rights-rules">Tes règles d'outils</h2>
+        <p>Par situation, elles ne font que restreindre (<a href="{{ catalogue }}">« Ce qu'elle peut faire »</a>).</p>
+      </div>
+    </header>
     {% for s in ruled %}
-    <div class="rights-group"><h4>{{ s.label }}</h4><p>{% for tool, word in s.rules %}<code>{{ tool }}</code> : {{ word }}{{ ' · ' if not loop.last }}{% endfor %}</p></div>
+    <div class="rights-ruled"><p>{{ s.label }}</p><ul>{% for tool, word in s.rules %}<li><code>{{ tool }}</code> {{ word }}</li>{% endfor %}</ul></div>
     {% else %}
-    <p class="now-muted">Aucune : chaque outil sert là où le code et ses accès le permettent.</p>
+    <p class="now-empty">aucune : chaque outil sert là où le code et ses accès le permettent.</p>
     {% endfor %}
   </section>
 
-  <section class="now-card access-legend" aria-labelledby="rights-fixed">
-    <h2 id="rights-fixed">Ce que le code fixe</h2>
-    <p class="now-muted">Aucune ligne ne les ouvre ni ne les ferme.</p>
-    <div class="rights-group"><h4>Seulement avec toi, en privé, ou quand elle travaille pour toi</h4>
-      <p class="now-muted">Jamais dans un salon, même quand c'est toi qui y parles ; un projet ou un réveil seulement s'il a pris la famille.</p>
-      <dl>{% for family, names in tools.reserved %}<div><dt>{{ family }}</dt><dd>{% for n in names %}<code>{{ n }}</code>{{ ' · ' if not loop.last }}{% endfor %}</dd></div>{% endfor %}</dl>
-    </div>
-    {% if tools.guarded %}<div class="rights-group"><h4>Sous condition</h4>
-      <dl>{% for name, said in tools.guarded %}<div><dt><code>{{ name }}</code></dt><dd>{{ said or '—' }}</dd></div>{% endfor %}</dl>
-    </div>{% endif %}
-    <div class="rights-group"><h4>Et encore</h4><ul>{% for f in fixed %}<li>{{ f }}</li>{% endfor %}</ul></div>
+  <section class="now-card rights-card" aria-labelledby="rights-fixed">
+    <header class="rights-head">
+      <div>
+        <h2 id="rights-fixed">Ce que le code fixe</h2>
+        <p>Aucune ligne ne les ouvre ni ne les ferme.</p>
+      </div>
+    </header>
+    <details class="rights-fold">
+      <summary><span class="rights-fold-title">Seulement avec toi, en privé, ou quand elle travaille pour toi</span><span class="rights-fold-meta">{{ tools.count }} outil{{ 's' if tools.count > 1 }}</span></summary>
+      <p class="rights-note">Jamais dans un salon, même quand c'est toi qui y parles ; un projet ou un réveil seulement s'il a pris la famille.</p>
+      <dl class="rights-tools">{% for family, names in tools.reserved %}<div><dt>{{ family }}</dt><dd>{% for n in names %}<code>{{ n }}</code>{% endfor %}</dd></div>{% endfor %}</dl>
+    </details>
+    {% if tools.guarded %}
+    <details class="rights-fold">
+      <summary><span class="rights-fold-title">Sous condition</span><span class="rights-fold-meta">{{ tools.guarded_count }} outil{{ 's' if tools.guarded_count > 1 }}</span></summary>
+      <dl class="rights-tools wide">{% for said, names in tools.guarded %}<div><dt>{{ said or '—' }}</dt><dd>{% for n in names %}<code>{{ n }}</code>{% endfor %}</dd></div>{% endfor %}</dl>
+    </details>
+    {% endif %}
+    <details class="rights-fold">
+      <summary><span class="rights-fold-title">Et encore</span><span class="rights-fold-meta">{{ fixed | length }} règles</span></summary>
+      <ul class="rights-list">{% for f in fixed %}<li>{{ f }}</li>{% endfor %}</ul>
+    </details>
   </section>
 </div>

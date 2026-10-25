@@ -31,7 +31,7 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.projects.access import sees
+from mika.faculties.projects.access import reads, sees
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
     PROJECTS,
@@ -491,8 +491,10 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
         if p.schedule == ON_DEMAND and p.status == c.ACTIVE:
             state += phrase("projects.live.on_demand")
         line = "- " + phrase("projects.live.line", title=title, whose=whose, how=how, state=state)
-        # le détail (son dernier compte rendu, ce qui vient) est au moins personnel : seulement à qui peut l'entendre
-        if hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok):
+        # le détail (son dernier compte rendu, ce qui vient) : à qui le pilote, au moins en lecture seule (ADR 0133) —
+        # et il est au moins personnel : seulement à qui peut l'entendre
+        if reads(p, aud, kind, close) and hearable(p.about, written(p), person, aud.level, aud.witness_level,
+                                                   aud.private_ok):
             if p.last_run_at:
                 summary = texts.get(p.summary_ref, "")
                 since = ago(frame.now - p.last_run_at)
@@ -503,7 +505,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
                 line += f"\n  {nxt}"
             if any(a != person for a in p.about):
                 level = max(level, written(p))
-            steering = steering or steerable(p, aud, close) != c.STEER_NO
+            steering = steering or steerable(p, aud, close) in c.CHANGES
         waiting = _awaiting(frame, p, person) if owner and person else ""
         if waiting:
             line += f"\n  {waiting}"

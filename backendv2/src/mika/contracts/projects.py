@@ -71,15 +71,21 @@ RUN_CAP = "run_cap"
 
 
 # ── qui peut quoi sur un projet et ses apps (ADR 0133) ──
-#: piloter un projet (une consigne, un objectif, une pause, « vas-y maintenant ») : seule (aussitôt), sur ton accord
-#: (une demande qui t'attend), ou non — jamais son cadre (titre, outils, accord), qui reste dans la console
-STEER_ALONE, STEER_ASK, STEER_NO = "seule", "toi", "non"
-STEERS = ((STEER_ALONE, "seule — aussitôt"), (STEER_ASK, "ton accord"), (STEER_NO, "non"))
+#: piloter un projet : en lecture seule (elle en dit le détail — son dernier compte rendu, ce qui vient — sans rien y
+#: changer) ; ses demandes (une consigne, un objectif, une pause, « vas-y maintenant ») sur l'accord du propriétaire, ou
+#: appliquées aussitôt (modification) ; ou aucun pilotage — jamais son cadre (titre, outils, accord), qui reste dans la
+#: console
+STEER_READ, STEER_ASK, STEER_EDIT, STEER_NO = "lecture", "accord", "modification", "non"
+STEERS = ((STEER_READ, "Lecture seule"), (STEER_ASK, "Accord du propriétaire"), (STEER_EDIT, "Modification"),
+          (STEER_NO, "Aucun pilotage"))
+#: ce qui laisse y changer quelque chose
+CHANGES = frozenset({STEER_ASK, STEER_EDIT})
 
 
 class ProjectAccess(Payload):
     """Une ligne d'accès à un projet (ADR 0133), lue de haut en bas comme celles d'un service (``vocab.access``) :
-    ses sources (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter, ce
+    ses sources (vide : la ligne par défaut), quand (vide : toujours), le voir (en entendre parler), le piloter
+    (``STEERS``), ce
     qu'elle fait d'un outil de ses apps qui lit et d'un outil qui agit (``vocab.access.POLICIES``), et à quels outils
     de ses apps ces deux colonnes s'appliquent (``<app>_<outil>`` ; vide : tous). Voir et piloter valent quelle que
     soit la sélection d'outils."""
@@ -96,9 +102,9 @@ class ProjectAccess(Payload):
 #: la ligne par défaut fermée : personne d'autre ne le voit, ne le pilote ni ne se sert de ses apps
 CLOSED = ProjectAccess()
 #: un projet dont on n'a pas réglé les accès : toi (et elle quand elle y travaille), tout ; les autres l'entendent
-#: selon ce que permet sa confidentialité, sans le piloter ni se servir de ses apps
-UNSET = (ProjectAccess(who=(YOU, WORK), see=True, steer=STEER_ALONE, read="seule", act="seule"),)
-UNSET_DEFAULT = ProjectAccess(see=True)
+#: selon ce que permet sa confidentialité, en lecture seule, sans se servir de ses apps
+UNSET = (ProjectAccess(who=(YOU, WORK), see=True, steer=STEER_EDIT, read="seule", act="seule"),)
+UNSET_DEFAULT = ProjectAccess(see=True, steer=STEER_READ)
 
 
 class ProjectCreated(Payload):

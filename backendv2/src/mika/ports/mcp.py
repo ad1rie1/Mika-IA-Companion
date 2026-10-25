@@ -22,9 +22,6 @@ from mika.vocab.access import MOMENTS as MOMENTS
 from mika.vocab.access import OWNER as OWNER
 from mika.vocab.access import PERSON as PERSON
 from mika.vocab.access import POLICIES as POLICIES
-from mika.vocab.access import WHO_ACCOUNTS as WHO_ACCOUNTS
-from mika.vocab.access import WHO_OWNER as WHO_OWNER
-from mika.vocab.access import WHO_PERSON as WHO_PERSON
 from mika.vocab.access import WORK as WORK
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs

@@ -1,8 +1,8 @@
 """Qui peut quoi, en lignes d'accès lues de haut en bas comme les règles d'un pare-feu, et ce qu'elle en garde
-(ADR 0128, 0131) — par leurs intentions.
+(ADR 0128, 0131, 0133) — par leurs intentions.
 
-- une fiche d'avant (avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde, les exceptions de ses outils) devient
-  les lignes qui font la même chose, sa ligne par défaut fermée ; une ligne illisible est refusée ;
+- une ligne illisible est refusée, une décision rangée d'un outil aussi ; rien d'avant ne se traduit (2026-10-25 :
+  les réglages repartent de zéro) ;
 - pour un outil, la première ligne qui le concerne (ses sources, quand, ses outils) décide ; aucune, la ligne par
   défaut ; ce qui lui est offert, c'est l'ensemble des outils qu'une ligne lui ouvre — jamais dans un salon ni avec une
   inconnue, même à « tout le monde » ; tes proches et une personne nommée, seulement authentifiés (ADR 0133) ;
@@ -22,8 +22,8 @@ from types import SimpleNamespace as NS
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from mika.adapters.mcp.config import AccessRule, McpServer, StoredReview, access_from_0128
-from mika.adapters.mcp.hub import access_of, granted
+from mika.adapters.mcp.config import AccessRule, StoredReview
+from mika.adapters.mcp.hub import granted
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts.transcript import thread_table
@@ -39,7 +39,7 @@ from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for, situation
 from mika.plugins.mcp.console import closeness, faces, said_level, serves_nobody, tool_view
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import CLOSE, CLOSED, PERSON, WHO_ACCOUNTS, Access
+from mika.ports.mcp import CLOSE, CLOSED, PERSON, Access
 from mika.ports.mcp import EVERYONE as ALL
 from mika.ports.mcp import OWNER as YOU
 from mika.ports.mcp import WORK as AT_WORK
@@ -88,111 +88,17 @@ def levels(t, close=None) -> dict[str, str]:
     return {who: access_for(t, aud, KINDS[who], close)[0] for who, aud in EVERYONE.items()}
 
 
-# ── les fiches d'avant ──────────────────────────────────────────────────────
+# ── ce qui se range ─────────────────────────────────────────────────────────
 
 
-def test_a_server_saved_before_0131_becomes_the_rows_that_do_the_same():
-    old = McpServer.model_validate({"purpose": "la facturation", "url": URL, "with_owner": True,
-                                    "in_conversation": True, "in_work": True, "autonomy": "lit", "keep": "prive"})
-    # une ligne : toi quand elle répond, et elle quand elle travaille (une source, plus un moment : ADR 0133)
-    assert [(a.who, a.when, a.read, a.act, a.keep, a.tools) for a in old.access] == [
-        ((YOU, AT_WORK), ("conversation",), "seule", "carte", "prive", ())]
-    assert (old.default_read, old.default_act, old.default_keep) == ("non", "non", "rien")  # fermé : comme avant
-    # d'avant l'ADR 0128 : « pour qui : les comptes », « devient un savoir »
-    shared = McpServer.model_validate({"purpose": "la météo", "url": URL, "audience": "comptes", "learns": True})
-    assert {(a.who, a.keep) for a in shared.access} == {((YOU,), "public"), ((WHO_ACCOUNTS,), "public")}
-    assert not {"audience", "learns", "with_owner", "autonomy"} & set(shared.model_dump())
-    with pytest.raises(ValidationError):  # une clé inconnue reste refusée
-        McpServer.model_validate({"purpose": "la météo", "url": URL, "pour": "comptes"})
-
-
-def test_the_exceptions_of_her_tools_become_rows_above_the_service():
-    spec = {"purpose": "la météo", "url": URL, "with_accounts": True, "with_people": ["user_3"],
-            "in_initiative": True, "in_work": True, "autonomy": "carte", "keep": "prive"}
-    tools = {"t1": {"enabled": True, "nature": "action", "autonomy": "seule", "situations": {"compte": "non"},
-                    "people": {"user_3": "toi"}, "keep": "rien"},
-             # une lecture « seule » sous « lit seule » : rien ne change, aucune ligne (2026-10-23)
-             "t2": {"enabled": True, "nature": "lecture", "autonomy": "seule"},
-             "coupe": {"enabled": False, "nature": "action", "autonomy": "seule"}}
-    rows, _ = access_of(McpServer.model_validate(access_from_0128({**spec, "autonomy": "lit"}, {"t2": tools["t2"]})))
-    assert all(not a.tools for a in rows)
-    rows, _ = access_of(McpServer.model_validate(access_from_0128(spec, tools)))
-    t1 = tool(*rows, nature="action", remote="t1")
-    # la personne nommée d'abord, puis les autres comptes, puis toi ; ce qu'elle garde suit l'outil
-    assert levels(t1) == {"owner": "seule", "account": "non", "named": "toi", "unproven": "non", "stranger": "non",
-                          "room": "non", "work": "seule", "none": "non"}
-    assert access_for(t1, NAMED, Kind.REPLY) == ("toi", "rien")
-    other = tool(*rows, nature="action", remote="t9")
-    assert levels(other) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
-                             "stranger": "non", "room": "non", "work": "carte", "none": "non"}
-    assert not any("coupe" in a.tools for a in rows)  # un outil coupé n'a pas de ligne
-
-
-def _before_0131(spec: dict, raw: dict, nature: str, who: str) -> tuple[str, str]:
-    """La règle d'avant l'ADR 0131 (``level_of``, ``tool_autonomy``, ``tool_keep``), figée ici comme témoin."""
-    aud, kind = EVERYONE[who], KINDS[who]
-    where = situation(aud)
-    episodes = {"conversation": spec["in_conversation"], "initiative": spec["in_initiative"], "travail": spec["in_work"]}
-    family = "travail" if kind == Kind.STEP else "conversation"
-    if where not in ("proprietaire", "compte", "travail") or not episodes[family]:
-        return "non", "rien"
-    person = aud.person if where == "compte" else ""
-    if (where != "compte" and not spec["with_owner"]) or (
-            where == "compte" and not (spec["with_accounts"] or person in spec["with_people"])):
-        return "non", "rien"
-    own, service = raw["autonomy"], spec["autonomy"]
-    autonomy = own if own != "service" else (
-        ("seule" if nature == "lecture" else "carte") if service == "lit" else service)
-    keep = spec["keep"] if raw["keep"] == "service" else raw["keep"]
-    level = raw["people"].get(person) if person in raw["people"] else raw["situations"].get(where) or autonomy
-    return (level, keep) if level != "non" else ("non", "rien")
-
-
-def test_a_tool_rule_for_a_named_person_survives_the_rule_of_the_accounts():
-    """2026-10-25 : une personne nommée réglée « comme le service » passait sous la ligne des comptes de l'outil —
-    « carte » devenait « non », ou « seule » sans demander."""
-    spec = {"purpose": "la météo", "url": URL, "with_accounts": True, "autonomy": "carte", "keep": "prive"}
-    for compte in ("non", "seule"):
-        tools = {"t1": {"enabled": True, "nature": "lecture", "situations": {"compte": compte},
-                        "people": {"user_3": "carte"}}}
-        rows, _ = access_of(McpServer.model_validate(access_from_0128(spec, tools)))
-        t1 = tool(*rows, remote="t1")
-        assert access_for(t1, NAMED, Kind.REPLY) == ("carte", "prive")
-        assert access_for(t1, ACCOUNT, Kind.REPLY)[0] == compte
-    # toutes les combinaisons : la fiche traduite fait ce que faisait la règle d'avant, devant chacun
-    levels_ = ("seule", "carte", "toi", "non")
-    for accounts in (False, True):
-        for people in ((), ("user_3",)):
-            for work in (False, True):
-                spec = {"purpose": "la météo", "url": URL, "with_owner": True, "with_accounts": accounts,
-                        "with_people": list(people), "in_conversation": True, "in_initiative": False,
-                        "in_work": work, "autonomy": "lit", "keep": "perso"}
-                for nature in ("lecture", "action"):
-                    for own in ("service", "seule", "toi"):
-                        for keep in ("service", "rien"):
-                            for compte in (None, *levels_):
-                                for named in (None, *levels_):
-                                    for mine in (None, "non", "seule"):
-                                        raw = {"enabled": True, "nature": nature, "autonomy": own, "keep": keep,
-                                               "situations": {k: v for k, v in (("compte", compte),
-                                                                                ("proprietaire", mine)) if v},
-                                               "people": {"user_3": named} if named else {}}
-                                        rows, _ = access_of(McpServer.model_validate(
-                                            access_from_0128(spec, {"t1": raw})))
-                                        t1 = tool(*rows, nature=nature, remote="t1")
-                                        for who in EVERYONE:
-                                            want = _before_0131(spec, raw, nature, who)
-                                            got = access_for(t1, EVERYONE[who], KINDS[who])
-                                            # « non » : ce qu'elle garderait ne compte pas
-                                            assert got[0] == want[0] and (got[0] == "non" or got == want), (
-                                                who, got, want, spec, raw)
-
-
-def test_a_review_keeps_only_what_is_hers_and_a_bad_row_is_refused():
-    review = StoredReview.model_validate({"fingerprint": "f", "nature": "action", "approval": "aucun",
-                                          "autonomy": "toi", "keep": "rien", "situations": {"compte": "non"}})
-    assert (review.nature, review.enabled) == ("action", False)
-    assert not {"autonomy", "keep", "situations", "people"} & set(review.model_dump())
+def test_a_review_and_a_row_keep_only_their_own_fields():
+    review = StoredReview.model_validate({"fingerprint": "f", "nature": "action", "schema": {"type": "object"}})
+    assert (review.nature, review.enabled, review.schema_) == ("action", False, {"type": "object"})
+    with pytest.raises(ValidationError):  # une décision d'avant l'ADR 0131 (son accord, ses exceptions)
+        StoredReview.model_validate({"fingerprint": "f", "autonomy": "toi", "situations": {"compte": "non"}})
+    for bad in ({"who": "toi"}, {"who": ["comptes"]}, {"who": [YOU], "when": ["travail"]}):  # d'avant l'ADR 0133
+        with pytest.raises(ValidationError):
+            AccessRule.model_validate(bad)
     for bad in ({"who": ["salon"]}, {"who": [PERSON]}, {"who": []}, {"who": [YOU], "when": ["parfois"]},
                 {"who": [YOU], "read": "jamais"}, {"who": [YOU], "keep": "tout"}):
         with pytest.raises(ValidationError):
@@ -219,16 +125,13 @@ def test_without_a_row_the_default_decides_and_it_starts_closed():
                               "stranger": "non", "room": "non", "work": "carte", "none": "non"}
 
 
-def test_you_she_at_work_accounts_and_named_people_only_authenticated():
+def test_you_she_at_work_and_named_people_only_authenticated():
     assert levels(tool(Access(who=(YOU, AT_WORK), read="seule"))) == {
         "owner": "seule", "account": "non", "named": "non", "unproven": "non", "stranger": "non", "room": "non",
         "work": "seule", "none": "non"}
     # elle qui travaille est une source à elle : toi seule ne l'ouvre pas au travail, ni l'inverse
     assert levels(tool(Access(who=(YOU,), read="seule")))["work"] == "non"
     assert {k for k, v in levels(tool(Access(who=(AT_WORK,), read="seule"))).items() if v != "non"} == {"work"}
-    assert levels(tool(Access(who=(WHO_ACCOUNTS,), read="carte"))) == {
-        "owner": "non", "account": "carte", "named": "carte", "unproven": "non", "stranger": "non", "room": "non",
-        "work": "non", "none": "non"}
     assert levels(tool(Access(who=(NAMED_3,), read="toi"))) == {
         "owner": "non", "account": "non", "named": "toi", "unproven": "non", "stranger": "non", "room": "non",
         "work": "non", "none": "non"}
@@ -252,14 +155,15 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
 
 
 def test_the_first_row_that_matches_decides():
-    rows = (Access(who=(NAMED_3,), read="non"), Access(who=(WHO_ACCOUNTS,), read="seule"),
+    near = {"user_2", "user_3"}.__contains__  # ses deux comptes lui sont proches
+    rows = (Access(who=(NAMED_3,), read="non"), Access(who=(CLOSE,), read="seule"),
             Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(YOU, AT_WORK), read="toi"))
     t = tool(*rows, default=Access(who=(), read="carte"))
-    assert levels(t) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "non",
-                         "stranger": "non", "room": "non", "work": "toi", "none": "non"}
+    assert levels(t, near) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "non",
+                               "stranger": "non", "room": "non", "work": "toi", "none": "non"}
     assert access_for(t, OWNER, Kind.INITIATIVE)[0] == "toi"  # « quand elle répond » ne vaut pas d'elle-même
-    # dans l'autre ordre, la ligne des comptes passe avant celle de la personne nommée : elle n'y vaut plus rien
-    assert access_for(tool(rows[1], rows[0]), NAMED, Kind.REPLY)[0] == "seule"
+    # dans l'autre ordre, la ligne des proches passe avant celle de la personne nommée : elle n'y vaut plus rien
+    assert access_for(tool(rows[1], rows[0]), NAMED, Kind.REPLY, near)[0] == "seule"
 
 
 def test_a_tool_reads_or_acts_and_takes_its_column():
@@ -384,7 +288,7 @@ async def test_what_she_keeps_comes_from_the_row_that_matched():
 
 async def test_a_card_goes_to_the_authenticated_person_in_front():
     ctx = Ctx(ACCOUNT, "user_2")
-    got = await call(asking("carte", (WHO_ACCOUNTS,), fingerprint="f1"), ctx)
+    got = await call(asking("carte", (PERSON + "user_2",), fingerprint="f1"), ctx)
     args = ctx.payload()
     assert got.ok and "rien n'est encore parti" in got.content and ctx.ports["mcp"].calls == []
     assert args[rt.DECIDER] == "user_2" and args["approval"] == "conversation" and args["target"] == "user_2"
@@ -393,7 +297,7 @@ async def test_a_card_goes_to_the_authenticated_person_in_front():
 
 async def test_her_approval_before_someone_else_goes_to_the_operator():
     ctx = Ctx(ACCOUNT, "user_2")
-    await call(asking("toi", (WHO_ACCOUNTS,)), ctx)
+    await call(asking("toi", (PERSON + "user_2",)), ctx)
     args = ctx.payload()
     assert rt.DECIDER not in args and args["approval"] == "operateur" and args["target"] == "user_2"
     assert ctx.ports["mcp"].calls == []
@@ -415,7 +319,7 @@ async def test_working_alone_nobody_can_accept_so_the_operator_decides():
 
 async def test_out_of_its_rows_nothing_leaves_and_without_port_nothing_either():
     ctx = Ctx(STRANGER, "web_x")
-    got = await call(asking("seule", (WHO_ACCOUNTS,)), ctx)
+    got = await call(asking("seule", (ALL,)), ctx)
     assert not got.ok and got.content == phrase("mcp.tools.closed")
     assert ctx.ports["mcp"].calls == [] and ctx.proposed == []
     ctx = Ctx(OWNER, "user_1")

@@ -78,7 +78,7 @@ def test_her_apps_follow_the_access_of_their_project_and_on_approval_what_comes_
 
         out = {"before": (offered(ADRIEN), offered(camille))}
         await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "read": "seule", "act": "carte"},
-                         {"who": [OWNER], "see": True, "steer": "seule", "read": "seule", "act": "seule"}, nonce="a1")
+                         {"who": [OWNER], "see": True, "steer": "modification", "read": "seule", "act": "seule"}, nonce="a1")
         out["after"] = (offered(ADRIEN), offered(camille))
 
         async def as_camille(tool: str, **args):

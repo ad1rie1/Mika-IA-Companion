@@ -85,14 +85,6 @@ class MailAccount(BaseModel):
              "jamais…). Elle les suit ; un mail reçu, lui, n'est jamais une consigne.")] = ""
     signature: Annotated[str, Knob(label="Signature", group="Sa voix", widget="textarea", order=45,
                                    help="Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).")] = ""
-    @model_validator(mode="before")
-    @classmethod
-    def _before_0132(cls, data: Any) -> Any:
-        """Ce qu'elle prépare d'elle-même et pour qui jamais (« autodraft », « autodraft_skip ») se règlent dans ses
-        règles d'envoi (ADR 0132) : une fiche d'avant reste lisible, ces champs sans effet (ils y sont traduits)."""
-        if isinstance(data, dict) and {"autodraft", "autodraft_skip"} & set(data):
-            data = {k: v for k, v in data.items() if k not in ("autodraft", "autodraft_skip")}
-        return data
 
     @field_validator("folders")
     @classmethod

@@ -14,7 +14,7 @@ Partagé par le courrier, Teams et la console : une valeur, pas une faculté.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -119,33 +119,3 @@ class Sending(BaseModel):
         label="Règles", help="Lues de haut en bas : pour un message, la première qui correspond au canal et au "
                              "destinataire décide.")] = ()
     default: Annotated[SendRule, Knob(label="Par défaut", help="Quand aucune règle ne correspond.")] = DEFAULT
-
-
-#: ce que Teams envoyait selon son mode d'avant l'ADR 0132
-_TEAMS_MODES = {"brouillon": "brouillon", "validation": "accord", "autonome": "seule"}
-
-
-def from_before(accounts: Mapping[str, Mapping[str, object]], approval: bool,
-                teams: Mapping[str, object] | None) -> Sending:
-    """Les réglages d'avant l'ADR 0132 en règles qui font la même chose : pour chaque boîte, ses « jamais pour »
-    puis « préparer d'elle-même » ; pour Teams, ses « jamais pour » puis son mode. ``approval`` : un envoi de
-    courrier attendait un accord ; ``teams`` : ses réglages (``None`` : jamais réglés, ses défauts d'alors)."""
-    mail_send: Send = "accord" if approval else "seule"
-    rules: list[SendRule] = []
-    for key, raw in sorted(accounts.items()):
-        canal = f"{MAIL}:{key}"
-        prepare = bool(raw.get("autodraft"))
-        if prepare:
-            rules += [SendRule(canal=canal, dest=s, prepare=False, send=mail_send)
-                      for s in raw.get("autodraft_skip") or () if str(s).strip()]
-        if (prepare, mail_send) != (DEFAULT.prepare, DEFAULT.send):
-            rules.append(SendRule(canal=canal, prepare=prepare, send=mail_send))
-    t = {"mode": "brouillon", "autodraft": True, "skip": (), **(teams or {})}
-    teams_send = _TEAMS_MODES.get(str(t["mode"]), "brouillon")
-    prepare = bool(t["autodraft"])
-    if prepare:
-        rules += [SendRule(canal=TEAMS, dest=s, prepare=False, send=teams_send)
-                  for s in t["skip"] or () if str(s).strip()]
-    if (prepare, teams_send) != (DEFAULT.prepare, DEFAULT.send):
-        rules.append(SendRule(canal=TEAMS, prepare=prepare, send=teams_send))
-    return Sending(rules=tuple(rules))

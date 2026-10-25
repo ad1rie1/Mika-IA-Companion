@@ -10,7 +10,9 @@ inconnue »), et sa fiche de personne répondait 404.
 - renommer un compte renomme la personne (et un retour à l'ancien nom s'écrit aussi) ;
 - un opérateur désactivé n'est plus propriétaire ;
 - rejouer la synchronisation n'écrit rien de plus ;
-- la fiche d'un projet nomme la personne, jamais « user_1 ».
+- la fiche d'un projet nomme la personne, jamais « user_1 » ;
+- les deux boutons de la console ajoutent un utilisateur (le chat, sans la console) ou un
+  opérateur, et chacun est une personne dès l'ajout.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ import html
 from mika.app.server import register_accounts
 from mika.contracts import identity as identity_c
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture
+
+ACCOUNTS = "/inspecteur/reglages/comptes"
 
 
 def _identity(client, live, handle: str):
@@ -70,6 +74,35 @@ def test_an_account_is_a_named_person_from_its_creation(world):  # noqa: F811
     before = len(_registered(client, live))
     again = client.portal.call(lambda: register_accounts(live.kernel, live.accounts))
     assert again == 0 and len(_registered(client, live)) == before  # rien de plus
+
+
+def test_the_console_adds_a_user_or_an_operator_each_a_person_at_once(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    listing = html.unescape(client.get(ACCOUNTS).text)
+    assert f"{ACCOUNTS}?nouveau=utilisateur" in listing and f"{ACCOUNTS}?nouveau=operateur" in listing
+    form = html.unescape(client.get(f"{ACCOUNTS}?nouveau=utilisateur").text)
+    assert "Ajouter un utilisateur" in form and 'name="role" value="utilisateur"' in form
+    assert "Ajouter un opérateur" in html.unescape(client.get(f"{ACCOUNTS}?nouveau=operateur").text)
+
+    def add(role: str, username: str, full_name: str):
+        return client.post(ACCOUNTS, data={"csrf": client.cookies.get("csrftoken"), "action": "create", "role": role,
+                                           "username": username, "full_name": full_name,
+                                           "password": "une-phrase-assez-longue"})
+
+    weak = client.post(ACCOUNTS, data={"csrf": client.cookies.get("csrftoken"), "action": "create",
+                                       "role": "operateur", "username": "cam", "password": "12345678"})
+    assert weak.status_code == 400 and 'name="role" value="operateur"' in html.unescape(weak.text)  # le rôle reste
+    added = add("utilisateur", "bea", "Béa Martin")
+    assert "Utilisateur ajouté" in html.unescape(added.text)
+    assert "/inspecteur/fiche/person/user_2" in added.text  # la page du compte mène à sa fiche
+    add("operateur", "dan", "")
+    by_name = {a.username: a for a in client.portal.call(live.accounts.all)}
+    assert not by_name["bea"].operator and by_name["dan"].operator
+    bea, dan = _identity(client, live, by_name["bea"].handle), _identity(client, live, by_name["dan"].handle)
+    assert bea.known and bea.authenticated and bea.name == "Béa Martin" and not bea.operator
+    assert dan.known and dan.authenticated and dan.operator  # un opérateur est aussi propriétaire
+    assert client.get(f"/inspecteur/fiche/person/{by_name['bea'].handle}").status_code == 200
 
 
 def test_a_confided_project_names_its_person_and_can_be_modified_by_an_operator_who_never_chatted(world):  # noqa: F811

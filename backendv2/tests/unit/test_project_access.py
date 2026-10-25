@@ -1,24 +1,27 @@
 """Qui peut quoi sur un projet (ADR 0133), par ses intentions.
 
 - un projet dont on n'a jamais réglé les accès : toi et elle qui travaille, tout ; les autres l'entendent selon sa
-  confidentialité, sans le piloter ;
+  confidentialité, en lecture seule ;
 - un opérateur règle ses lignes d'un coup (``projects.acces``), journalisées ; la première qui désigne qui est en face
-  décide — le voir, le piloter ; une ligne ajoutée est fermée ; une ligne illisible est refusée ;
-- piloter « seule » écrit le geste aussitôt, au nom de qui l'a demandé ; « ton accord » le garde et le propose :
-  accepté, il s'écrit ; refusé, rien ;
+  décide — le voir, piloter projet ; une ligne ajoutée est fermée ; une ligne illisible est refusée ;
+- piloter projet : en lecture seule, elle en dit le détail sans rien y changer ; en modification, la demande s'écrit
+  aussitôt, au nom de qui l'a faite ; sur l'accord du propriétaire, elle est gardée et proposée : acceptée, elle
+  s'écrit ; refusée, rien — toi en face, l'accord, c'est le tien : aussitôt ;
 - une ligne coche ses sources : toi, tes proches en privé, tout le monde, des personnes ; sans « voir », elle n'en
-  parle pas ; « tout le monde » le laisse voir aussi dans un salon ou à une inconnue, jamais le piloter.
+  parle pas ; « tout le monde » le laisse voir et lire aussi dans un salon ou à une inconnue, jamais y changer quoi
+  que ce soit.
 """
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+from dataclasses import replace
 
 from mika.app.mindport import KernelPort
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects.access import line_for, sees, steering
+from mika.faculties.projects.access import line_for, reads, sees, steering
 from mika.faculties.projects.faculty import ACCESS_SET, AMENDED, PAUSED
 from mika.faculties.projects.prompt import _live_section
 from mika.faculties.projects.tools import SteerArgs, may_steer, project_steer
@@ -89,12 +92,12 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
         out = {"before": kernel.mind.frame().get(c.LIVE)[0]}
         out["added"] = await set_access(kernel, pid, faire="ajouter", nonce="a0", voir="on")
         out["closed"] = kernel.mind.frame().get(c.LIVE)[0]
-        out["saved"] = await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "seule"},
+        out["saved"] = await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "modification"},
                                         {"who": [CLOSE], "when": ["conversation"], "see": True}, nonce="a1")
         out["refused"] = await set_access(kernel, pid, {"who": [PERSON + " user 2"]}, nonce="a2")
         out["no_moment"] = await set_access(kernel, pid, {"who": [OWNER], "when": ["jamais"]}, nonce="a3")
         out["after"] = kernel.mind.frame().get(c.LIVE)[0]
-        await set_access(kernel, pid, {"who": [EVERYONE], "see": True, "steer": "seule"}, nonce="a4")
+        await set_access(kernel, pid, {"who": [EVERYONE], "see": True, "steer": "modification"}, nonce="a4")
         out["everyone"] = kernel.mind.frame().get(c.LIVE)[0]
         return pid, out
 
@@ -102,8 +105,8 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
     before = out["before"]
     assert (before.access, before.default_access) == (c.UNSET, c.UNSET_DEFAULT)
     owner, friend = facing("user_1", owner=True), facing("user_2")
-    assert steering(before, owner, Kind.REPLY) == "seule" and steering(before, friend, Kind.REPLY) == "non"
-    assert sees(before, friend, Kind.REPLY)  # comme avant : sa confidentialité décide
+    assert steering(before, owner, Kind.REPLY) == "modification" and steering(before, friend, Kind.REPLY) == "lecture"
+    assert sees(before, friend, Kind.REPLY) and reads(before, friend, Kind.REPLY)  # sa confidentialité filtre
     # ajouter : une ligne fermée, enregistrée aussitôt
     assert out["added"].ok and "fermée" in out["added"].message
     assert out["closed"].access == (c.ProjectAccess(who=(OWNER,)),) and out["closed"].default_access.see
@@ -111,7 +114,7 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
     # deux lignes, de haut en bas ; la ligne par défaut fermée
     after = out["after"]
     assert out["saved"].ok and [a.who for a in after.access] == [(PERSON + "user_2",), (CLOSE,)]
-    assert steering(after, friend, Kind.REPLY) == "seule"
+    assert steering(after, friend, Kind.REPLY) == "modification"
     near, user_3 = {"user_3"}.__contains__, facing("user_3")
     assert steering(after, user_3, Kind.REPLY, near) == "non" and sees(after, user_3, Kind.REPLY, near)
     assert not sees(after, user_3, Kind.REPLY)  # sans lien « proche » : la ligne par défaut, fermée
@@ -120,12 +123,22 @@ def test_a_project_never_set_does_what_it_did_and_an_operator_sets_its_rows_at_o
     # jamais dans un salon ni avec une inconnue, quelles que soient les lignes
     assert line_for(after, facing("user_2", room="salon"), Kind.REPLY) is None
     assert line_for(after, facing("web_x", trust=ChannelTrust.ACCOUNT.value), Kind.REPLY) is None
-    # tout le monde : chacun en tête-à-tête ; le voir, aussi dans un salon ou avec une inconnue — le piloter, jamais
+    # tout le monde : chacun en tête-à-tête ; le voir et le lire, aussi dans un salon ou avec une inconnue — y
+    # changer quelque chose, jamais
     everyone, room = out["everyone"], facing("user_2", room="salon")
     stranger = facing("web_x", trust=ChannelTrust.ACCOUNT.value)
-    assert steering(everyone, user_3, Kind.REPLY) == "seule" and steering(everyone, owner, Kind.REPLY) == "seule"
+    assert steering(everyone, user_3, Kind.REPLY) == steering(everyone, owner, Kind.REPLY) == "modification"
     assert sees(everyone, room, Kind.REPLY) and sees(everyone, stranger, Kind.REPLY)
+    assert reads(everyone, room, Kind.REPLY) and reads(everyone, stranger, Kind.REPLY)
     assert steering(everyone, room, Kind.REPLY) == steering(everyone, stranger, Kind.REPLY) == "non"
+    # lecture seule : elle en dit le détail, rien ne s'y change ; aucun pilotage : le titre seulement ; l'accord du
+    # propriétaire, toi en face, c'est le tien
+    reader = replace(after, access=(c.ProjectAccess(who=(PERSON + "user_2",), see=True, steer="lecture"),
+                                    c.ProjectAccess(who=(OWNER,), see=True, steer="accord"),
+                                    c.ProjectAccess(who=(EVERYONE,), see=True)))
+    assert reads(reader, friend, Kind.REPLY) and steering(reader, friend, Kind.REPLY) == "lecture"
+    assert sees(reader, user_3, Kind.REPLY) and not reads(reader, user_3, Kind.REPLY)
+    assert steering(reader, owner, Kind.REPLY) == "modification"
     # une ligne illisible : refusée, rien n'est écrit
     assert not out["refused"].ok and "Ligne 1 : coche qui." in out["refused"].message
     assert not out["no_moment"].ok and "coche au moins un moment" in out["no_moment"].message
@@ -137,8 +150,8 @@ def test_steering_alone_writes_at_once_and_on_your_approval_waits_for_it(tmp_pat
         pid = await create(kernel, "p1", title="Le site", objectives="Écrire la page d'accueil")
         camille = facing("user_2")
         out = {"before": may_steer(camille, Kind.REPLY, kernel.mind.frame())}
-        await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "seule"},
-                         {"who": [OWNER], "see": True, "steer": "seule"}, nonce="a1")
+        await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "modification"},
+                         {"who": [OWNER], "see": True, "steer": "modification"}, nonce="a1")
         frame = kernel.mind.frame()
         policy = kernel.runner.policies[Kind.REPLY]
         out["offered"] = "project_steer" in offer(kernel.mind.registry.tools, policy, Kind.REPLY, camille,
@@ -148,8 +161,8 @@ def test_steering_alone_writes_at_once_and_on_your_approval_waits_for_it(tmp_pat
         out["alone"] = await project_steer(_args(pid, what="pause"), talking(kernel, "user_2", camille))
         out["paused"] = events(kernel, PAUSED)
         # sur ton accord : la demande attend, rien ne change avant l'accord
-        await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "toi"},
-                         {"who": [OWNER], "see": True, "steer": "seule"}, nonce="a2")
+        await set_access(kernel, pid, {"who": [PERSON + "user_2"], "see": True, "steer": "accord"},
+                         {"who": [OWNER], "see": True, "steer": "modification"}, nonce="a2")
         out["asked"] = await project_steer(_args(pid, what="instruct", text="Une page plus sobre."),
                                            talking(kernel, "user_2", camille))
         out["amended_before"] = events(kernel, AMENDED)
@@ -195,7 +208,7 @@ def test_without_see_she_does_not_speak_of_it(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_2", "Camille")
         pid = await create(kernel, "p1", title="Le site secret", objectives="Écrire la page d'accueil")
-        await set_access(kernel, pid, {"who": [OWNER], "see": True, "steer": "seule"}, nonce="a1")
+        await set_access(kernel, pid, {"who": [OWNER], "see": True, "steer": "modification"}, nonce="a1")
         mind = kernel.mind
         sections = {}
         for handle, aud in (("user_1", facing("user_1", owner=True)), ("user_2", facing("user_2"))):

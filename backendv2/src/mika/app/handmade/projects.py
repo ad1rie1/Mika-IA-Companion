@@ -1,4 +1,4 @@
-"""La fiche d'un projet, son onglet « Accès » dessiné (ADR 0121, 0133) : qui peut le voir, le piloter et se servir de
+"""La fiche d'un projet, son onglet « Accès » dessiné (ADR 0121, 0133) : qui peut le voir, le piloter, se servir de
 ses apps, et quand — un tableau de lignes lues de haut en bas, comme les règles d'un pare-feu, puis la ligne par
 défaut, obligatoire.
 
@@ -14,6 +14,7 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade.access import people_with_accounts, who_choices
+from mika.contracts import projects as c
 from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.faculty import access_of, project_at
 from mika.inspector import render
@@ -25,7 +26,6 @@ from mika.vocab.access import MOMENTS, PERSON, when_words
 
 KIND = "project"
 #: ce qu'une ligne fait, dans un sélecteur du tableau
-STEER_CHOICES = (("seule", "Seule"), ("toi", "Ton accord"), ("non", "Non"))
 POLICY_CHOICES = (("seule", "Seule"), ("carte", "Demande à la personne"), ("toi", "Ton accord"), ("non", "Non"))
 MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENTS)
 
@@ -73,7 +73,7 @@ class ProjectFiche(Overview):
                 "tools": [{"name": t, "nature": natures.get(t, ""), "on": t in a.tools} for t in known],
                 "first": n == 1, "last": n == len(lines)})
         return Markup(env.get_template("handmade/projets/acces.html").render(
-            rows=rows, default=default, steers=STEER_CHOICES, policies=POLICY_CHOICES, steer_words=STEER_WORDS,
+            rows=rows, default=default, steers=c.STEERS, policies=POLICY_CHOICES, steer_words=STEER_WORDS,
             form=_form(forms, "projects.acces"), never_set=p.access is None, has_apps=bool(tools),
             pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
             behaviour_tab=fiche_url(KIND, key, "comportement")))

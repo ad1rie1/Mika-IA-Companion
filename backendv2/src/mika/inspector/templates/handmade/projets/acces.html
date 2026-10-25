@@ -15,7 +15,7 @@
 {%- endmacro %}
 {% set locked = not form %}
 <div class="now-page service">
-  {% if never_set %}<p class="server-alert info">Jamais réglés : toi et elle qui travaille, tout ; les autres l'entendent selon sa confidentialité, sans le piloter ni se servir de ses apps. Enregistrer écrit ce tableau tel qu'il est.</p>{% endif %}
+  {% if never_set %}<p class="server-alert info">Jamais réglés : toi et elle qui travaille, tout ; les autres l'entendent selon sa confidentialité, en lecture seule, sans se servir de ses apps. Enregistrer écrit ce tableau tel qu'il est.</p>{% endif %}
   <form method="post" action="{{ form.url if form else '' }}" class="access-form">
     {% if not locked %}
     {{ plumbing(form) }}
@@ -27,7 +27,7 @@
       <header class="access-head">
         <div>
           <h2 id="project-access-title">Accès au projet</h2>
-          <p>De haut en bas : pour qui est en face, <b>la première ligne qui le désigne</b> (ses sources, quand) décide s'il voit le projet et s'il le pilote ; pour un outil de ses apps, la première qui le concerne aussi (l'outil dans sa colonne « Outils »). Aucune : le comportement par défaut. Le piloter et ses apps : jamais dans un salon ni avec une inconnue ; « tout le monde » ne les y laisse que le voir.</p>
+          <p>De haut en bas : pour qui est en face, <b>la première ligne qui le désigne</b> (ses sources, quand) décide s'il voit le projet et comment il le pilote ; pour un outil de ses apps, la première qui le concerne aussi (l'outil dans sa colonne « Outils »). Aucune : le comportement par défaut. Y changer quelque chose et ses apps : jamais dans un salon ni avec une inconnue ; « tout le monde » ne les y laisse que le voir et le lire.</p>
         </div>
         {% if not locked %}<button class="btn" name="faire" value="ajouter">+ Ajouter un accès</button>{% endif %}
       </header>
@@ -36,7 +36,7 @@
           <thead>
             <tr>
               <th scope="col" class="access-n">#</th><th scope="col">Qui</th><th scope="col">Quand</th>
-              <th scope="col">Voir</th><th scope="col">Piloter</th>
+              <th scope="col">Voir</th><th scope="col">Piloter projet</th>
               <th scope="col">Apps : lecture</th><th scope="col">Apps : action</th><th scope="col">Outils</th>
               {% if not locked %}<th scope="col"><span class="service-hidden">Ordre</span></th>{% endif %}
             </tr>
@@ -47,10 +47,10 @@
               <td class="access-n">{{ r.n }}</td>
               <td>
                 <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
-                <details class="access-tools access-who">
+                <details class="access-tools access-who" data-exclusive data-none="Personne">
                   <summary>{{ r.who.said }}</summary>
                   <div class="access-tools-list">
-                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {{ c.label }}</label>{% endfor %}
+                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }} data-word="{{ c.word }}"> {{ c.label }}</label>{% endfor %}
                   </div>
                 </details>
               </td>
@@ -66,7 +66,7 @@
                 </details>
               </td>
               <td><label class="access-tool"><input type="checkbox" name="voir.{{ r.n }}"{{ ' checked' if r.see }}{{ ' disabled' if locked }}> oui</label></td>
-              <td>{{ pick("piloter." ~ r.n, steers, r.steer, "Le piloter, ligne " ~ r.n, locked) }}</td>
+              <td>{{ pick("piloter." ~ r.n, steers, r.steer, "Piloter projet, ligne " ~ r.n, locked) }}</td>
               <td>{{ pick("lecture." ~ r.n, policies, r.read, "Apps : un outil qui lit, ligne " ~ r.n, locked) }}</td>
               <td>{{ pick("action." ~ r.n, policies, r.act, "Apps : un outil qui agit, ligne " ~ r.n, locked) }}</td>
               <td>
@@ -93,7 +93,7 @@
               <td class="access-n"></td>
               <th scope="row" colspan="2">Comportement par défaut<span>obligatoire : vaut quand aucune ligne au-dessus ne correspond</span></th>
               <td><label class="access-tool"><input type="checkbox" name="defaut_voir"{{ ' checked' if default.see }}{{ ' disabled' if locked }}> oui</label></td>
-              <td>{{ pick("defaut_piloter", steers, default.steer, "Par défaut, le piloter", locked) }}</td>
+              <td>{{ pick("defaut_piloter", steers, default.steer, "Par défaut, piloter projet", locked) }}</td>
               <td>{{ pick("defaut_lecture", policies, default.read, "Par défaut, un outil qui lit", locked) }}</td>
               <td>{{ pick("defaut_action", policies, default.act, "Par défaut, un outil qui agit", locked) }}</td>
               <td class="access-all">Tous</td>
@@ -112,9 +112,9 @@
   <section class="now-card access-legend" aria-labelledby="project-access-legend">
     <h2 id="project-access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
-      <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b>, en tête-à-tête · <b>Elle, quand elle travaille seule</b> (sur ce projet) · <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre) · <b>Tout le monde</b> · des personnes par leur nom, reconnues seulement connectées. Le piloter et ses apps, jamais dans un salon ni avec une inconnue ; en parler, « tout le monde » le peut aussi là.</dd></div>
+      <div><dt>Qui</dt><dd>Une ou plusieurs sources. <b>Toi</b> : en tête-à-tête. <b>Elle, quand elle travaille seule</b> : sur ce projet ; pour elle, seules les colonnes « Apps » comptent (elle y travaille déjà : ni « Voir » ni « Piloter projet » ne la concernent). <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre). <b>Tout le monde</b> : toute personne connectée, en tête-à-tête ; pour seulement le voir et le lire, aussi un salon ou une inconnue. <b>Une personne</b>, par son nom : reconnue seulement connectée.</dd></div>
       <div><dt>Voir</dt><dd>Elle peut en parler à cette personne : son titre, où il en est. Sa confidentialité filtre encore le détail.</dd></div>
-      <div><dt>Piloter</dt><dd>Une consigne, un objectif, une pause, une reprise, « vas-y maintenant ». <b>Seule</b> : c'est fait aussitôt, au nom de la personne · <b>Ton accord</b> : la demande t'attend (une carte dans ton chat si c'est toi en face, sinon la console) · <b>Non</b>. Jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
+      <div><dt>Piloter projet</dt><dd><b>Lecture seule</b> : elle lui en dit le détail (son dernier compte rendu, ce qui vient), sans rien y changer · <b>Accord du propriétaire</b> : ses demandes (une consigne, un objectif, une pause, une reprise, « vas-y maintenant ») t'attendent — une carte dans la console ; les tiennes, quand c'est toi en face, s'appliquent aussitôt · <b>Modification</b> : ses demandes s'appliquent aussitôt, à son nom · <b>Aucun pilotage</b>. Toujours avec « Voir » ; seulement quand elle lui répond, quel que soit « Quand » ; jamais son cadre (titre, outils, accord), qui reste ici.</dd></div>
       <div><dt>Apps : lecture, action</dt><dd>Ce qu'elle fait d'un outil de ses apps : un outil qui lit prend la colonne « lecture », un outil qui agit celle d'« action ». <b>Seule</b> : sans demander · <b>Demande à la personne</b> : une carte dans son chat · <b>Ton accord</b> : une carte dans ton chat quand c'est toi en face, sinon la console · <b>Non</b> : l'outil ne lui est pas offert.</dd></div>
       <div><dt>Outils</dt><dd>À quels outils de ses apps s'appliquent les deux colonnes « Apps » ; « Voir » et « Piloter » valent quelle que soit la sélection.</dd></div>
     </dl>

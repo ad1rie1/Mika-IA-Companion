@@ -35,12 +35,8 @@ from mika.vocab.privacy import ChannelTrust
 OWNER, WORK, CLOSE, EVERYONE, PERSON = "proprietaire", "travail", "proches", "tous", "personne:"
 SOURCES = ((OWNER, "Toi"), (WORK, "Elle, quand elle travaille seule"), (CLOSE, "Tes proches, en privé"),
            (EVERYONE, "Tout le monde"))
-#: d'avant (ADR 0131) : « toi » (toi, et elle quand elle travaille pour toi) et « comptes » (toute personne
-#: authentifiée en tête-à-tête) — lus encore, traduits (``upgrade``) ; « comptes » reste lisible tant qu'on ne l'a pas
-#: changé
-WHO_OWNER, WHO_ACCOUNTS, WHO_PERSON = "toi", "comptes", PERSON
-#: une source telle qu'une ligne la range (« comptes » : d'avant, encore lisible)
-SOURCE = re.compile(rf"(?:{OWNER}|{WORK}|{CLOSE}|{EVERYONE}|{WHO_ACCOUNTS}|{PERSON}\S{{1,200}})")
+#: une source telle qu'une ligne la range
+SOURCE = re.compile(rf"(?:{OWNER}|{WORK}|{CLOSE}|{EVERYONE}|{PERSON}\S{{1,200}})")
 #: où elle est : avec toi, avec une personne authentifiée en tête-à-tête, quand elle travaille seule, dans un salon,
 #: avec une inconnue
 ACCOUNT, ROOM, STRANGER = "compte", "salon", "inconnue"
@@ -64,7 +60,7 @@ POLICIES = ((ALONE, "seule — sans demander"), (CARD, "demande à la personne e
 POLICY_WORDS = {ALONE: "seule", CARD: "demande à la personne", OWNER_OK: "ton accord", NO: "non"}
 WHEN_WORDS = dict(MOMENTS)
 SOURCE_WORDS = {OWNER: "toi", WORK: "elle quand elle travaille seule", CLOSE: "tes proches en privé",
-                EVERYONE: "tout le monde", WHO_ACCOUNTS: "les comptes (ancien)"}
+                EVERYONE: "tout le monde"}
 
 L = TypeVar("L")
 
@@ -89,22 +85,6 @@ def decide(lines: Iterable[L], default: L, matches: Callable[[L], bool]) -> Verd
     return Verdict(default, 0)
 
 
-def upgrade(who: str | Iterable[str], when: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Une ligne d'avant en sources et moments qui font la même chose : « toi » devient toi et elle qui travaille,
-    selon ses moments, et le moment « travail » quitte « quand » ; une ligne qui ne valait qu'au travail pour qui n'y
-    est jamais garde ce moment, qui ne correspond à rien."""
-    when = tuple(dict.fromkeys(when or ()))
-    talks = tuple(w for w in when if w != WORK)
-    if isinstance(who, str):
-        if who == WHO_OWNER:
-            return ((OWNER,) if not when or talks else ()) + ((WORK,) if not when or WORK in when else ()), talks
-        who = (who,) if who else ()
-    sources = tuple(dict.fromkeys(w for w in who if w))
-    if when and not talks and WORK not in sources:
-        return sources, (WORK,)
-    return sources, talks
-
-
 def sources(who: Iterable[str]) -> tuple[str, ...]:
     """Les sources d'une ligne, vérifiées et sans doublon ; une source inconnue est refusée (``ValueError``)."""
     got = tuple(dict.fromkeys(str(w).strip() for w in who if str(w).strip()))
@@ -124,8 +104,7 @@ def checked(boxes: Mapping[str, bool], row: str) -> list[str]:
 def in_order(who: Iterable[str]) -> tuple[str, ...]:
     """Des sources dans l'ordre où la console les montre : les siennes, puis les personnes par leur clé."""
     got = set(who)
-    return (*(k for k, _ in SOURCES if k in got), *(k for k in (WHO_ACCOUNTS,) if k in got),
-            *sorted(k for k in got if k.startswith(PERSON)))
+    return (*(k for k, _ in SOURCES if k in got), *sorted(k for k in got if k.startswith(PERSON)))
 
 
 def who_words(who: str | Iterable[str], name: Callable[[str], str]) -> str:
@@ -187,8 +166,6 @@ def designates(who: str | Iterable[str], where: str, person: str, close: Callabl
         return OWNER in who
     if where != ACCOUNT:
         return False  # un salon, une inconnue : seulement « tout le monde »
-    if WHO_ACCOUNTS in who:
-        return True
     return bool(person) and (PERSON + person in who or (CLOSE in who and close is not None and bool(close(person))))
 
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
-from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
@@ -19,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
-from mika.ports.mcp import KEEPS, MOMENTS, POLICIES, WHO_ACCOUNTS, WHO_OWNER, WHO_PERSON
-from mika.vocab.access import sources, upgrade
+from mika.ports.mcp import KEEPS, MOMENTS, POLICIES
+from mika.vocab.access import sources
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -47,9 +46,7 @@ _REMOTE = ((("transport", ("distant",)),))
 
 _Policy = Literal["seule", "carte", "toi", "non"]
 _Keep = Literal["public", "perso", "prive", "rien"]
-#: « travail » : d'avant l'ADR 0133, où le travail était un moment (une ligne qui ne valait qu'au travail pour qui n'y
-#: est jamais le garde : il ne correspond à rien)
-_Moment = Literal["conversation", "initiative", "travail"]
+_Moment = Literal["conversation", "initiative"]
 
 
 class AccessRule(BaseModel):
@@ -66,18 +63,6 @@ class AccessRule(BaseModel):
     act: _Policy = "non"
     keep: _Keep = "rien"
     tools: tuple[str, ...] = ()
-
-    @model_validator(mode="before")
-    @classmethod
-    def _before_0133(cls, data: Any) -> Any:
-        """Une ligne d'avant (``who`` : « toi », « comptes », « personne:<clé> », le moment « travail ») : ses sources
-        et ses moments qui font la même chose (``vocab.access.upgrade``)."""
-        if not isinstance(data, dict) or not isinstance(data.get("who"), str):
-            return data
-        when = data.get("when") or ()
-        when = (() if when == "toujours" else (when,)) if isinstance(when, str) else tuple(when)
-        who, when = upgrade(data["who"], when)
-        return {**data, "who": who, "when": when}
 
     @field_validator("who")
     @classmethod
@@ -172,16 +157,6 @@ class McpServer(BaseModel):
     breaker: Annotated[int, Knob(label="Pannes d'affilée avant de le couper", group="Bornes", lo=1, hi=20,
                                  order=43)] = 3
 
-    @model_validator(mode="before")
-    @classmethod
-    def _before_0131(cls, data: Any) -> Any:
-        """Une fiche d'avant l'ADR 0131 reste lisible : ses réglages (avec qui, quand, ce qu'elle fait seule, ce
-        qu'elle en garde) deviennent les lignes qui font la même chose ; la prochaine sauvegarde l'écrit sous la forme
-        neuve. Les exceptions de ses outils, rangées à part, sont traduites par les réglages (``Settings.mcp``)."""
-        if not isinstance(data, dict) or not set(LEGACY_KEYS) & set(data):
-            return data
-        return access_from_0128(data)
-
     @property
     def local(self) -> bool:
         return self.transport == "local"
@@ -238,113 +213,6 @@ class McpServer(BaseModel):
         data = self.model_dump(include={"transport", "url", "auth", "token", "header", "secret_headers", "ca_file",
                                         "command", "args", "env", "secret_env", "network", "shared"})
         return hashlib.sha256(canonical_json(data).encode()).hexdigest()
-
-
-# ── les réglages d'avant l'ADR 0131 ───────────────────────────────────────
-
-#: ce qu'un service disait de lui avant l'ADR 0131 (et avant l'ADR 0128 : ``audience``, ``learns``)
-LEGACY_KEYS = ("with_owner", "with_accounts", "with_people", "in_conversation", "in_initiative", "in_work", "autonomy",
-               "keep", "audience", "learns")
-#: un accord d'avant l'ADR 0131 : (ce qu'elle fait d'un outil qui lit, d'un outil qui agit)
-_AUTONOMIES = {"seule": ("seule", "seule"), "lit": ("seule", "carte"), "carte": ("carte", "carte"),
-               "toi": ("toi", "toi")}
-#: l'accord d'un outil d'avant l'ADR 0128 : ce qu'il devient
-LEGACY_APPROVALS = {"aucun": "seule", "conversation": "service", "operateur": "toi"}
-#: ses lignes, du plus précis au plus large : une personne nommée passe avant les comptes (elle en a un)
-_SPECIFIC = {WHO_ACCOUNTS: 1, WHO_OWNER: 2}
-
-
-def _whens(episodes: list[str], owner: bool) -> list[str] | None:
-    """Les moments d'une ligne : rien (toujours) quand elle vaut à tout moment où cette personne peut la voir (une
-    personne ne la voit jamais travailler), sinon les siens ; ``None`` : aucun, pas de ligne."""
-    every = {"conversation", "initiative", "travail"} if owner else {"conversation", "initiative"}
-    got = [e for e in episodes if owner or e != "travail"]
-    if not got:
-        return None
-    return [] if every <= set(got) else got
-
-
-def access_from_0128(data: Mapping[str, Any], tools: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
-    """Les réglages d'un service d'avant l'ADR 0131 — avec qui, quand, ce qu'elle fait seule, ce qu'elle en garde, et
-    les exceptions de ses outils (``tools`` : leurs décisions telles que rangées) — en lignes d'accès qui font la même
-    chose : celles des outils qui s'écartent du service d'abord (une personne nommée avant les comptes, les comptes
-    avant toi), puis celles du service. La ligne par défaut est fermée : avant, personne d'autre n'en avait."""
-    data = dict(data)
-    if data.pop("audience", None) == "comptes":
-        data.setdefault("with_accounts", True)
-    if data.pop("learns", False):
-        data.setdefault("keep", "public")
-    owner = bool(data.pop("with_owner", True))
-    accounts = bool(data.pop("with_accounts", False))
-    named = list(dict.fromkeys(str(p).strip() for p in data.pop("with_people", ()) or () if str(p).strip()))
-    episodes = [e for e, on in (("conversation", data.pop("in_conversation", True)),
-                                ("initiative", data.pop("in_initiative", False)),
-                                ("travail", data.pop("in_work", False))) if on]
-    autonomy = str(data.pop("autonomy", "carte"))
-    keep = str(data.pop("keep", "prive"))
-    read, act = _AUTONOMIES.get(autonomy, ("carte", "carte"))
-    whos = ([WHO_OWNER] if owner else []) + [WHO_PERSON + p for p in named] + ([WHO_ACCOUNTS] if accounts else [])
-    service = [{"who": w, "when": when, "read": read, "act": act, "keep": keep, "tools": []}
-               for w in whos if (when := _whens(episodes, w == WHO_OWNER)) is not None]
-    rows: list[dict[str, Any]] = []
-    for remote, raw in sorted((tools or {}).items()):
-        rows += [{**r, "tools": [remote]} for r in _tool_rows(raw, owner, accounts, named, episodes, autonomy, keep)]
-    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for r in sorted(rows, key=lambda r: _SPECIFIC.get(r["who"], 0)):
-        key = (r["who"], tuple(r["when"]), r["read"], r["act"], r["keep"])
-        if key in merged:
-            merged[key]["tools"] += r["tools"]
-        else:
-            merged[key] = r
-    data["access"] = [*merged.values(), *service]
-    data.update(default_read="non", default_act="non", default_keep="rien")
-    return data
-
-
-def _tool_rows(raw: Mapping[str, Any], owner: bool, accounts: bool, named: list[str], episodes: list[str],
-               autonomy: str, keep: str) -> list[dict[str, Any]]:
-    """Les lignes d'un outil qui s'écarte de son service (son accord, ce qu'elle en garde, ses exceptions par
-    situation et par personne) ; aucune s'il fait comme lui. Un outil coupé n'en a pas : rien ne lui sert."""
-    raw = dict(raw)
-    if not raw.get("enabled"):
-        return []
-    nature = "lecture" if raw.get("nature", "lecture") == "lecture" else "action"
-    own = str(raw.get("autonomy") or LEGACY_APPROVALS.get(str(raw.get("approval") or ""), "service"))
-    service = _AUTONOMIES.get(autonomy, ("carte", "carte"))[0 if nature == "lecture" else 1]
-    base = service if own == "service" else own
-    kept = keep if raw.get("keep", "service") == "service" else str(raw["keep"])
-    situations = dict(raw.get("situations") or {})
-    people = dict(raw.get("people") or {})
-    talks = [e for e in episodes if e != "travail"]
-    compte = situations.get("compte") or base
-    out: list[dict[str, Any]] = []
-
-    def add(who: str, whens: list[str] | None, level: str, below: tuple[str, str] = (service, keep)) -> None:
-        """Une ligne, sauf si celle qui la suivrait pour cette personne fait déjà la même chose (``below``)."""
-        if whens is not None and (level, kept) != below:
-            out.append({"who": who, "when": whens, "read": level, "act": level, "keep": kept})
-
-    # une personne nommée de l'outil a sa ligne au-dessus de celle des comptes de l'outil, qui la suivrait sinon :
-    # « comme le service » pour elle ne l'est plus quand l'outil règle les comptes autrement (2026-10-25)
-    after_person = (compte, kept) if accounts else (service, keep)
-    for person, level in people.items():
-        if accounts or person in named:
-            add(WHO_PERSON + person, _whens(talks, False), level, after_person)
-    if accounts:
-        add(WHO_ACCOUNTS, _whens(talks, False), compte)
-    for person in named:
-        if person not in people:
-            add(WHO_PERSON + person, _whens(talks, False), compte)
-    if owner:
-        mine = situations.get("proprietaire") or base
-        work = situations.get("travail") or base
-        if "travail" in episodes and mine == work:
-            add(WHO_OWNER, _whens(episodes, True), mine)
-        else:
-            add(WHO_OWNER, talks or None, mine)
-            if "travail" in episodes:
-                add(WHO_OWNER, ["travail"], work)
-    return out
 
 
 def _header_lines(raw: str) -> list[str]:
@@ -426,13 +294,11 @@ class McpConfig(BaseModel):
 class StoredReview(BaseModel):
     """Une décision de l'opérateur sur un outil, telle qu'elle est rangée (``mcp_tools``)."""
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     fingerprint: str
     enabled: bool = False
     nature: Literal["lecture", "action"] = "lecture"
-    #: (son accord, ce qu'elle en gardait et ses exceptions d'avant l'ADR 0131, encore rangés, sont devenus des lignes
-    #: d'accès de son serveur : ignorés ici)
     description: str = ""
     server_description: str = ""
     title: str = ""

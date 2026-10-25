@@ -1,7 +1,96 @@
-/* Réglages › Droits (handmade/droits/page.html, ADR 0133) : qui peut quoi, par personne et par ressource. Les tableaux
-   reprennent ceux des accès (tools.css : access-table, access-head) ; ici, ce qui n'est qu'à cette page. */
-.rights-pick { display: flex; align-items: center; gap: 8px; }
-.rights-chosen { margin: 4px 0 12px; font-size: 15px; color: var(--text); }
-.rights-group { margin: 14px 0 0; }
-.rights-group h4 { margin: 0 0 6px; font-size: 14px; }
-.rights-group .now-tag { margin-right: 4px; }
+/* Réglages › Droits (handmade/droits/page.html, ADR 0133) : qui peut quoi. La grille (par personne) est à elle ; les
+   tableaux repliés (par ressource) reprennent ceux des accès (tools.css : access-table, access-default). */
+.rights-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px;
+  margin-bottom: 14px; }
+.rights-head h2 { margin: 0 0 4px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.rights-head p { margin: 0; max-width: 76ch; color: var(--text-2); font-size: 13.5px; }
+
+/* ── La légende des tons ─────────────────────────────────────────────────────── */
+.rights-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none;
+  color: var(--muted); font-size: 12.5px; }
+.rights-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.rights-swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--border-strong); }
+.rights-swatch.on { background: var(--ok); }
+.rights-swatch.part { background: var(--info); }
+.rights-swatch.ask { background: var(--warn); }
+
+/* ── La grille : ressources et actions en lignes, audiences en colonnes ─────── */
+.rights-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.rights-grid th, .rights-grid td { padding: 5px 10px; text-align: left; vertical-align: middle; }
+.rights-grid thead th { padding-bottom: 8px; border-bottom: 1px solid var(--border-strong); color: var(--muted);
+  font-size: 12px; font-weight: 600; vertical-align: bottom; }
+.rights-face { min-width: 92px; }
+.rights-face a { display: block; color: var(--text); font-size: 12.5px; font-weight: 650; line-height: 1.3; }
+.rights-face a span { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+.rights-face a:hover { color: var(--accent); text-decoration: none; }
+.rights-face.on a { color: var(--accent); }
+.rights-face.on, .rights-cell.on { background: var(--accent-soft); }
+/* la ressource reste à gauche quand la grille défile */
+.rights-res { position: sticky; left: 0; z-index: 1; min-width: 170px; max-width: 260px; background: var(--surface);
+  font-weight: 600; vertical-align: top; }
+thead .rights-res { z-index: 2; }
+tbody .rights-res { padding-top: 9px; border-bottom: 1px solid var(--border); }
+.rights-res a { color: var(--text); }
+.rights-res a:hover { color: var(--accent); }
+.rights-names { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-weight: 400; }
+.rights-names code, .rights-tools code, .rights-ruled code { padding: 1px 6px; border-radius: 6px; background: var(--sunken);
+  color: var(--text-2); font: 11.5px/1.5 var(--mono); }
+.rights-act { color: var(--text-2); font-weight: 400; white-space: nowrap; }
+.rights-row td, .rights-row th { padding-top: 9px; }
+.rights-kind th { padding: 18px 10px 6px; border-bottom: 1px solid var(--border-strong); color: var(--muted);
+  font: 600 11.5px var(--font); letter-spacing: .08em; text-transform: uppercase; }
+tbody:first-of-type .rights-kind th { padding-top: 12px; }
+.rights-why th, .rights-why td { padding-top: 0; padding-bottom: 9px; border-bottom: 1px solid var(--border);
+  color: var(--muted); font-size: 11.5px; }
+.rights-row + .rights-row td, .rights-row + .rights-row th { padding-top: 2px; }
+.rights-row.shut .rights-res, .rights-row.shut .rights-res a { color: var(--muted); }
+
+/* une réponse : pleine quand elle le fait, en demi-teinte sinon */
+.rights-v { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; }
+.rights-v.on { background: var(--ok-bg); color: var(--ok); }
+.rights-v.part { background: var(--info-bg); color: var(--info); }
+.rights-v.ask { background: var(--warn-bg); color: var(--warn); }
+.rights-v.off, .rights-v.none { padding: 1px 0; color: var(--muted); font-weight: 400; }
+.rights-v.plain { padding: 1px 0; color: var(--text-2); font-weight: 400; }
+.rights-foot { margin: 14px 0 0; color: var(--muted); font-size: 12.5px; }
+
+/* ── Par ressource, et ce que le code fixe : des blocs repliés ──────────────── */
+.rights-fold { border-top: 1px solid var(--border); }
+.rights-fold:last-child { border-bottom: 1px solid var(--border); }
+.rights-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 11px 2px;
+  cursor: pointer; list-style: none; }
+.rights-fold > summary::-webkit-details-marker { display: none; }
+.rights-fold > summary::before { content: "›"; width: 10px; color: var(--muted); font-weight: 700; transition: transform .15s; }
+.rights-fold[open] > summary::before { transform: rotate(90deg); }
+.rights-fold > summary:hover .rights-fold-title { color: var(--accent); }
+.rights-fold-title { color: var(--text); font-size: 14px; font-weight: 600; }
+.rights-fold-meta { color: var(--muted); font-size: 12.5px; }
+.rights-set { margin-left: auto; font-size: 13px; font-weight: 600; }
+.rights-fold[open] { padding-bottom: 14px; }
+.rights-fold .hm-table-wrap { margin-bottom: 8px; }
+.rights-note { margin: 8px 0 0; color: var(--text-2); font-size: 13px; }
+.rights-floors { margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); }
+.rights-floors p { margin: 0 0 4px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .06em;
+  text-transform: uppercase; }
+.rights-floors ul, .rights-list { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }
+.rights-floors li + li, .rights-list li + li { margin-top: 3px; }
+
+.rights-tools { display: grid; gap: 8px; margin: 10px 0 0; }
+.rights-tools > div { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 4px 16px; align-items: baseline; }
+.rights-tools.wide > div { grid-template-columns: minmax(260px, 1fr) minmax(0, 1fr); padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border); }
+.rights-tools.wide > div:last-child { border-bottom: 0; }
+.rights-tools dt { color: var(--text-2); font-size: 13px; font-weight: 600; }
+.rights-tools.wide dt { font-weight: 400; }
+.rights-tools dd { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+
+.rights-ruled { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 4px 16px; margin-top: 8px; }
+.rights-ruled p { margin: 0; font-weight: 600; font-size: 13px; }
+.rights-ruled ul { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none;
+  color: var(--text-2); font-size: 13px; }
+
+@media (max-width: 700px) {
+  .rights-res { min-width: 130px; }
+  .rights-tools > div, .rights-tools.wide > div, .rights-ruled { grid-template-columns: 1fr; }
+}

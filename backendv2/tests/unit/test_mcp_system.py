@@ -22,7 +22,7 @@ from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
 from mika.kernel.clock import MINUTE, US
 from mika.plugins import web
 from mika.plugins.web import serveur
-from mika.ports.mcp import OWNER, WHO_ACCOUNTS, WORK
+from mika.ports.mcp import CLOSE, OWNER, WORK
 
 
 def _system(p: web.WebParams | None) -> SystemServers:
@@ -48,21 +48,19 @@ def test_active_the_web_plugin_brings_its_server_into_the_mcp_client():
 
 
 def test_its_access_rows_are_set_on_its_page_and_replace_the_plugins():
-    """ADR 0131 : « pour qui » et « quand elle travaille » du plugin sont devenus ses lignes d'accès, réglées sur sa
-    fiche et rangées à part ; illisibles, celles du plugin valent ; ses valeurs d'avant, journalisées, se lisent sans
-    effet."""
+    """ADR 0131 : ses lignes d'accès se règlent sur sa fiche et se rangent à part ; illisibles, celles du plugin
+    valent."""
     rows = [{"who": [OWNER], "when": ["conversation"], "read": "seule", "act": "non", "keep": "public"},
-            {"who": [WHO_ACCOUNTS], "read": "carte", "act": "non", "keep": "rien"}]
+            {"who": [CLOSE], "read": "carte", "act": "non", "keep": "rien"}]
     ruled = SystemServers(lambda: system_mcp.provided(lambda owner: web.WebParams() if owner == "web" else None),
                           access=lambda: {"web": {"access": rows, "default_read": "non"}})
     srv = ruled.config(McpConfig()).servers["web"]
     assert [(a.who, a.when, a.read) for a in srv.access] == [((OWNER,), ("conversation",), "seule"),
-                                                              ((WHO_ACCOUNTS,), (), "carte")]
+                                                              ((CLOSE,), (), "carte")]
     assert srv.command == "python3" and srv.network == "isole"  # le reste suit son plugin
     broken = SystemServers(lambda: system_mcp.provided(lambda owner: web.WebParams() if owner == "web" else None),
                            access=lambda: {"web": {"access": [{"who": ["salon"]}]}})
     assert broken.config(McpConfig()).servers["web"].access == system_mcp.WEB_ACCESS
-    assert web.WEB.retired_params == ("audience", "in_work")
 
 
 def test_disabled_it_is_gone():

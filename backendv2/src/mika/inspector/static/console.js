@@ -315,12 +315,22 @@
     });
 
     // Accès aux outils : « toujours » (ou « tous ») et les cases une à une s'excluent, comme à l'enregistrement, et le
-    // bouton de la liste montre aussitôt ce qui est coché, comme le rend le serveur (``data-all``, ``data-none``).
+    // bouton de la liste montre aussitôt ce qui est coché, comme le rend le serveur (``data-all``, ``data-none``). Sans
+    // case « tous », c'est « qui » : une phrase, comme ``who_words`` (« Toi, tes proches en privé et Toto »).
     document.querySelectorAll("details.access-tools").forEach(function (d) {
       var said = d.querySelector("summary");
       var all = d.querySelector(".access-tool.all input");
       var items = Array.from(d.querySelectorAll(".access-tool:not(.all) input"));
-      if (!all) return;
+      function sayWho() {
+        var words = items.filter(function (i) { return i.checked; }).map(function (i) { return i.getAttribute("data-word"); });
+        var text = words.length > 1 ? words.slice(0, -1).join(", ") + " et " + words[words.length - 1] : words.join("");
+        said.textContent = text ? text.charAt(0).toUpperCase() + text.slice(1) : d.getAttribute("data-none");
+      }
+      if (!all) {
+        sayWho();
+        d.addEventListener("change", sayWho);
+        return;
+      }
       function say() {
         var on = all.checked ? [] : items.filter(function (i) { return i.checked; });
         said.textContent = all.checked ? d.getAttribute("data-all") : on.length ? "" : d.getAttribute("data-none");

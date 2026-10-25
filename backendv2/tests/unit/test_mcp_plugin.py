@@ -14,7 +14,7 @@ from mika.app.composition import policies
 from mika.faculties.identity import audience_for
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import OWNER, WHO_ACCOUNTS, WORK, Access, CallResult, OfferedTool
+from mika.ports.mcp import EVERYONE, OWNER, WORK, Access, CallResult, OfferedTool
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
@@ -42,11 +42,11 @@ def offered_tool(**kw) -> OfferedTool:
 
 
 def ruled(level: str, *, accounts: bool = False, keep: str = "perso", **kw) -> OfferedTool:
-    """Un outil dont la ligne d'accès dit ``level`` (en lecture comme en action) à toi, et aux comptes
-    (``accounts``)."""
+    """Un outil dont la ligne d'accès dit ``level`` (en lecture comme en action) à toi, et à tout le monde
+    (``accounts`` : toute personne connectée, en tête-à-tête)."""
     rows = (Access(who=(OWNER, WORK), read=level, act=level, keep=keep),)
     if accounts:
-        rows += (Access(who=(WHO_ACCOUNTS,), read=level, act=level, keep=keep),)
+        rows += (Access(who=(EVERYONE,), read=level, act=level, keep=keep),)
     return offered_tool(access=rows, **kw)
 
 
@@ -136,9 +136,9 @@ def test_an_approved_tool_becomes_hers_and_its_answer_is_cited(tmp_path):
     assert report.text.startswith("Grand soleil à Lyon")
 
 
-def test_a_server_for_accounts_never_serves_a_room_nor_a_stranger(tmp_path):
+def test_a_server_for_everyone_never_serves_a_room_nor_a_stranger(tmp_path):
     port = FakePort(offered_tool(access=(Access(who=(OWNER, WORK), read="seule", act="seule", keep="perso"),
-                                         Access(who=(WHO_ACCOUNTS,), read="seule", act="seule", keep="perso"))))
+                                         Access(who=(EVERYONE,), read="seule", act="seule", keep="perso"))))
 
     async def scenario(kernel, llm):
         return _offers(kernel)

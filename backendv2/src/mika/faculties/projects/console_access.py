@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import projects as c
 from mika.contracts import social as social_c
-from mika.faculties.projects.access import STEER_WORDS, who_named
+from mika.faculties.projects.access import STEER_WORDS, reads, steering, who_named
 from mika.faculties.projects.faculty import ACCESS_SET, PROJECTS, ProjectsState, access_of, project_at
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -58,23 +58,24 @@ def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
                   "tous" if not a.tools else ", ".join(a.tools)))
              for i, a in enumerate((*rows, default), start=1)]
     blocks: list[Block] = [
-        Table((Column("#", "fit"), "qui", "quand", "voir", "piloter", "apps : lecture", "apps : action", "outils"),
+        Table((Column("#", "fit"), "qui", "quand", "voir", "piloter projet", "apps : lecture", "apps : action",
+               "outils"),
               tuple(shown), title="Accès",
               caption="De haut en bas : pour qui est en face, la première ligne qui le désigne décide (pour un outil "
                       "de ses apps, celle qui le concerne aussi) ; aucune, c'est la dernière, le comportement par "
-                      "défaut. Le piloter et ses apps : jamais dans un salon ni avec une inconnue ; « tout le "
-                      "monde » ne les y laisse que le voir."),
+                      "défaut. Y changer quelque chose et ses apps : jamais dans un salon ni avec une inconnue ; "
+                      "« tout le monde » ne les y laisse que le voir et le lire."),
         ActionSlot("projects.acces", (), title="Enregistrer"),
     ]
     if p.access is None:
         blocks.insert(0, Note("Jamais réglés : toi et elle qui travaille, tout ; les autres l'entendent selon sa "
-                              "confidentialité, sans plus.", tone="info"))
+                              "confidentialité, en lecture seule.", tone="info"))
     return blocks
 
 
 # ── L'action ──────────────────────────────────────────────────────────────
 
-_Steer = Literal["seule", "toi", "non"]
+_Steer = Literal["lecture", "accord", "modification", "non"]
 _Policy = Literal["seule", "carte", "toi", "non"]
 
 
@@ -90,7 +91,7 @@ class AccessArgs(BaseModel):
     toujours: Annotated[dict[str, bool], Knob(label="Toujours", advanced=False)] = Field(default_factory=dict)
     moments: Annotated[dict[str, bool], Knob(label="Quand", advanced=False)] = Field(default_factory=dict)
     voir: Annotated[dict[str, bool], Knob(label="Le voir", advanced=False)] = Field(default_factory=dict)
-    piloter: Annotated[dict[str, _Steer], Knob(label="Le piloter", choices=c.STEERS, advanced=False)] = \
+    piloter: Annotated[dict[str, _Steer], Knob(label="Piloter projet", choices=c.STEERS, advanced=False)] = \
         Field(default_factory=dict)
     lecture: Annotated[dict[str, _Policy], Knob(label="Apps : un outil qui lit", choices=POLICIES,
                                                 advanced=False)] = Field(default_factory=dict)
@@ -99,7 +100,8 @@ class AccessArgs(BaseModel):
     tous: Annotated[dict[str, bool], Knob(label="Tous ses outils", advanced=False)] = Field(default_factory=dict)
     prend: Annotated[dict[str, bool], Knob(label="Ses outils", advanced=False)] = Field(default_factory=dict)
     defaut_voir: Annotated[bool, Knob(label="Par défaut, le voir", advanced=False)] = False
-    defaut_piloter: Annotated[_Steer, Knob(label="Par défaut, le piloter", choices=c.STEERS, advanced=False)] = "non"
+    defaut_piloter: Annotated[_Steer, Knob(label="Par défaut, piloter projet", choices=c.STEERS, advanced=False)] = \
+        "non"
     defaut_lecture: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
                                             advanced=False)] = "non"
     defaut_action: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
@@ -186,9 +188,10 @@ def _access(s: ProjectsState, frame: Frame, args: AccessArgs, ctx: ActionContext
 # ── Qui peut quoi, sur la page « Droits » ─────────────────────────────────
 
 #: ce qu'aucune ligne d'un projet n'ouvre
-FLOORS = ("le piloter et se servir de ses apps : jamais dans un salon, avec une inconnue, ni sans personne",
-          "son cadre (titre, outils, accord) reste à la console", "en parler : sa confidentialité filtre encore")
-COLUMNS = ("qui", "quand", "voir", "piloter", "apps : lecture", "apps : action", "outils")
+FLOORS = ("y changer quelque chose et se servir de ses apps : jamais dans un salon, avec une inconnue, ni sans "
+          "personne", "son cadre (titre, outils, accord) reste à la console",
+          "en parler, en dire le détail : sa confidentialité filtre encore")
+COLUMNS = ("qui", "quand", "voir", "piloter projet", "apps : lecture", "apps : action", "outils")
 
 
 def _row(frame: Frame, a: c.ProjectAccess) -> tuple[str, ...]:
@@ -213,11 +216,15 @@ def _project_grants(s: ProjectsState, frame: Frame, ctx: Any, audience: Any, kin
         if seen is None:
             continue
         acted = verdict(*access_of(p), audience, kind, close=close)
-        steer = acted.line.steer if acted is not None and acted.line.see else c.STEER_NO
+        # y changer quelque chose : jamais dans un salon ni devant une inconnue ; le lire, comme le voir
+        steer = steering(p, audience, kind, close)
+        if steer == c.STEER_NO and reads(p, audience, kind, close):
+            steer = c.STEER_READ
         why = why_words(seen.index) if acted is None or acted.index == seen.index else \
             f"{why_words(seen.index)} ; piloter : {why_words(acted.index)}"
         out.append(Grant(f"project:{pid}", f"Le projet « {title} »",
-                         (("le voir", "oui" if seen.line.see else "non"), ("le piloter", STEER_WORDS.get(steer, steer))),
+                         (("le voir", "oui" if seen.line.see else "non"),
+                          ("piloter projet", STEER_WORDS.get(steer, steer))),
                          why, href=Ref.subject("project", str(pid), title, "acces"), closed=not seen.line.see))
     return out
 
@@ -232,6 +239,6 @@ def _project_tables(s: ProjectsState, frame: Frame, ctx: Any) -> list[RuleTable]
         out.append(RuleTable(f"project:{pid}", f"Le projet « {title} »", COLUMNS,
                              tuple(_row(frame, a) for a in rows), _row(frame, default),
                              href=Ref.subject("project", str(pid), title, "acces"), floors=FLOORS,
-                             note="Jamais réglés : ceux d'avant (toi, tout ; les autres l'entendent selon sa "
-                                  "confidentialité)." if p.access is None else ""))
+                             note="Jamais réglés : toi et elle qui travaille, tout ; les autres l'entendent selon "
+                                  "sa confidentialité, en lecture seule." if p.access is None else ""))
     return out

@@ -49,10 +49,10 @@
               <td class="access-n">{{ r.n }}</td>
               <td>
                 <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
-                <details class="access-tools access-who">
+                <details class="access-tools access-who" data-exclusive data-none="Personne">
                   <summary>{{ r.who.said }}</summary>
                   <div class="access-tools-list">
-                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }}> {{ c.label }}</label>{% endfor %}
+                    {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }} data-word="{{ c.word }}"> {{ c.label }}</label>{% endfor %}
                   </div>
                 </details>
               </td>
@@ -112,7 +112,7 @@
   <section class="now-card access-legend" aria-labelledby="access-legend">
     <h2 id="access-legend" class="service-hidden">Ce que veulent dire les colonnes</h2>
     <dl>
-      <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b>, en tête-à-tête · <b>Elle, quand elle travaille seule</b> (pour toi) · <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre) · <b>Tout le monde</b> · des personnes par leur nom, reconnues seulement connectées. Agir, jamais dans un salon ni avec une inconnue, même pour « tout le monde ».</dd></div>
+      <div><dt>Qui</dt><dd>Une ou plusieurs sources : <b>Toi</b> : en tête-à-tête. <b>Elle, quand elle travaille seule</b> : pour toi. <b>Tes proches</b> : un lien « proche », en privé, reconnu seulement connecté (un long silence le fait descendre). <b>Tout le monde</b> : toute personne connectée, en tête-à-tête (pas elle quand elle travaille). <b>Une personne</b>, par son nom : reconnue seulement connectée. Un outil, jamais dans un salon ni avec une inconnue, même pour « tout le monde ».</dd></div>
       <div><dt>Lecture, action</dt><dd>Un outil qui lit prend la politique de lecture, un outil qui agit (créer, envoyer, exécuter, supprimer) celle d'action — c'est réglé outil par outil dans <a href="{{ tools_tab }}">« Ses outils »</a>.</dd></div>
       <div><dt>Seule</dt><dd>Elle s'en sert sans demander : l'appel part aussitôt.</dd></div>
       <div><dt>Demande à la personne</dt><dd>Une carte dans le chat de la personne en face ; quand elle travaille seule, la demande t'attend dans la console.</dd></div>

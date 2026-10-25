@@ -26,10 +26,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
-from mika.adapters.mcp.config import LEGACY_KEYS, McpConfig, McpServer, StoredReview, access_from_0128
+from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
-from mika.app import system_mcp
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
 from mika.ports.imaging import ROLES as IMAGE_ROLES
@@ -37,7 +36,7 @@ from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
 from mika.runtime.tools import SITUATIONS as TOOL_SITUATIONS
-from mika.vocab.sending import Sending, from_before
+from mika.vocab.sending import Sending
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal
@@ -81,8 +80,6 @@ WAKEUP_KEYS_KEY = "wakeup_keys"
 TEAMS_KEY = "teams"
 #: ce qu'elle envoie à ta place, courrier et Teams : ses règles (ADR 0132)
 SENDING_KEY = "envoi"
-#: des surcharges d'avant, devenues des règles d'envoi (ADR 0132) : retirées une fois traduites
-MIGRATED_OVERRIDES = {"email": ("send_needs_approval",)}
 TEAMS_KEYS_KEY = "teams_key"
 #: les règles d'outils d'un opérateur (ADR 0122) : par situation, « outil → off, hand ou ask »
 TOOL_RULES_KEY = "tool_rules"
@@ -280,7 +277,6 @@ class Settings:
             return MailConfig()
 
     async def save_email(self, cfg: MailConfig) -> MailConfig:
-        await self._keep_sending()
         accounts = {}
         for name, account in cfg.accounts.items():
             spec = account.model_dump(mode="json")
@@ -303,14 +299,10 @@ class Settings:
     MCP_SECRETS = ("token", "secret_env", "secret_headers")
 
     def mcp(self) -> McpConfig:
-        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant. Un serveur d'avant
-        l'ADR 0131 est lu en lignes d'accès, les exceptions de ses outils comprises."""
-        tools = dict(self._get(MCP_TOOLS_KEY) or {})
+        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""
         servers = {}
         for name, spec in dict(dict(self._get(MCP_KEY) or {}).get("servers") or {}).items():
             spec = dict(spec)
-            if set(LEGACY_KEYS) & set(spec):
-                spec = access_from_0128(spec, dict(tools.get(name) or {}))
             for k in self.MCP_SECRETS:
                 spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
             try:
@@ -347,19 +339,14 @@ class Settings:
         return out
 
     async def save_mcp_tools(self, reviews: dict[str, dict[str, StoredReview]]) -> None:
-        """Les décisions sur les outils. Une décision rangée d'avant l'ADR 0131 portait l'accord et les exceptions de
-        son outil, que la décision neuve n'a plus : un serveur encore rangé à l'ancienne est d'abord écrit en lignes
-        d'accès, pendant qu'elles se lisent encore."""
-        legacy = dict(dict(self._get(MCP_KEY) or {}).get("servers") or {})
-        if any(set(LEGACY_KEYS) & set(dict(spec)) for spec in legacy.values()):
-            await self.save_mcp(self.mcp())
+        """Les décisions sur les outils : serveur → outil → décision."""
         await self._put(MCP_TOOLS_KEY, {s: {r: v.model_dump(mode="json", by_alias=True) for r, v in tools.items()}
                                         for s, tools in reviews.items()})
 
     def mcp_system_access(self) -> dict[str, dict[str, Any]]:
         """Les accès réglés des serveurs du système : serveur → ses lignes et sa ligne par défaut. Rien d'enregistré
-        sur sa fiche : ce que faisaient les surcharges de son plugin d'avant l'ADR 0131, s'il y en a."""
-        raw = {**system_mcp.access_before(self.overrides()), **dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})}
+        sur sa fiche : celles de son plugin (``system_mcp``)."""
+        raw = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
         return {str(k): {f: v[f] for f in SYSTEM_ACCESS_FIELDS if f in v} for k, v in raw.items()
                 if isinstance(v, dict)}
 
@@ -454,36 +441,20 @@ class Settings:
     # ── Teams (``/api/teams/…``, ADR 0069) ──
     # ── Ce qu'elle envoie à ta place (ADR 0132) ──
     def sending(self) -> Sending:
-        """Ses règles d'envoi. Rien d'enregistré : celles qui font ce que faisaient les réglages d'avant (préparer
-        d'elle-même et « jamais pour » de chaque boîte, l'accord avant un envoi de courrier, le mode de Teams)."""
+        """Ses règles d'envoi ; rien d'enregistré ou illisibles : la règle par défaut seule."""
         raw = self._get(SENDING_KEY)
-        if isinstance(raw, dict):
-            try:
-                return Sending.model_validate(raw)
-            except ValueError:
-                log.warning("envoi : règles illisibles, la règle par défaut seule")
-                return Sending()
-        accounts = dict(dict(self._get(EMAIL_KEY) or {}).get("accounts") or {})
-        approval = self.overrides().get("email", {}).get("send_needs_approval", True)
-        teams = self._get(TEAMS_KEY)
-        return from_before({str(k): dict(v) for k, v in accounts.items() if isinstance(v, dict)}, bool(approval),
-                           dict(teams) if isinstance(teams, dict) else None)
+        if not isinstance(raw, dict):
+            return Sending()
+        try:
+            return Sending.model_validate(raw)
+        except ValueError:
+            log.warning("envoi : règles illisibles, la règle par défaut seule")
+            return Sending()
 
     async def save_sending(self, cfg: Sending) -> Sending:
         cfg = Sending.model_validate(cfg.model_dump())
         await self._put(SENDING_KEY, cfg.model_dump(mode="json"))
-        # « un envoi attend un accord », une surcharge du courrier d'avant, est désormais dans les règles : retirée
-        overrides = self.overrides()
-        if "send_needs_approval" in overrides.get("email", {}):
-            overrides["email"].pop("send_needs_approval")
-            await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
         return cfg
-
-    async def _keep_sending(self) -> None:
-        """Les règles d'avant l'ADR 0132 se lisent dans les réglages du courrier et de Teams, que leur réécriture
-        efface : elles sont d'abord écrites sous la forme neuve."""
-        if not isinstance(self._get(SENDING_KEY), dict):
-            await self.save_sending(self.sending())
 
     def teams(self) -> TeamsConfig:
         """Ce qu'un opérateur a réglé de Teams ; illisible, les valeurs par défaut (jamais bloquant)."""
@@ -494,7 +465,6 @@ class Settings:
             return TeamsConfig()
 
     async def save_teams(self, cfg: TeamsConfig) -> TeamsConfig:
-        await self._keep_sending()
         cfg = TeamsConfig.model_validate(cfg.model_dump())
         await self._put(TEAMS_KEY, cfg.model_dump(mode="json"))
         return cfg
@@ -676,22 +646,8 @@ class Settings:
         return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict) and v}
 
     async def save_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
-        """Les surcharges. « Un envoi attend un accord » du courrier (ADR 0132), « Pour qui » et « Quand elle
-        travaille » de la recherche web (ADR 0131) en étaient : traduits d'abord sous leur forme neuve, ils ne se
-        réécrivent plus (une réécriture les remettait derrière la migration qui venait de les retirer)."""
-        await self._keep_sending()
-        await self._keep_system_access()
-        gone = {**MIGRATED_OVERRIDES, **system_mcp.BEFORE_0131}
-        kept = {k: {p: v for p, v in dict(layer).items() if p not in gone.get(k, ())} for k, layer in overrides.items()}
-        await self._put(OVERRIDES_KEY, {k: v for k, v in kept.items() if v})
-
-    async def _keep_system_access(self) -> None:
-        """Les accès d'un serveur du système d'avant l'ADR 0131 se lisent dans les surcharges de son plugin, que leur
-        réécriture efface : ils sont d'abord écrits à part, sauf si sa fiche en a déjà enregistré."""
-        stored = dict(self._get(MCP_SYSTEM_ACCESS_KEY) or {})
-        missing = {k: v for k, v in system_mcp.access_before(self.overrides()).items() if k not in stored}
-        if missing:
-            await self._put(MCP_SYSTEM_ACCESS_KEY, {**stored, **missing})
+        """Les surcharges, par faculté (une couche vide n'est pas gardée)."""
+        await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
 
     # ── Réglages des apps forgées (valeurs simples, surchargent le manifeste) ──
     def forge_config(self, app: str | None = None) -> dict[str, Any]:

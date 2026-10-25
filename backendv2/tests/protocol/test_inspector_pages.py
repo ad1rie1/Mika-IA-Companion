@@ -140,7 +140,7 @@ def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     weak = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="12345678")
     assert "numérique" in html_of(weak)
     created = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="longue-phrase-secrete")
-    assert "Compte créé" in html_of(created) and "user_2" in html_of(created)
+    assert "Utilisateur ajouté" in html_of(created) and "user_2" in html_of(created)
     alone = post(client, "/inspecteur/reglages/comptes", action="update", account="1", active="on")  # sans « opérateur »
     assert "dernier opérateur actif" in html_of(alone)
     accounts = client.portal.call(live.accounts.all)
@@ -153,7 +153,7 @@ def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     journal = html_of(client.get("/inspecteur/reglages/journal"))
     assert "comptes.creer" in journal and "longue-phrase-secrete" not in journal
     # une page par geste : la liste, créer, modifier
-    assert "Créer un compte" in html_of(client.get("/inspecteur/reglages/comptes?nouveau=1"))
+    assert "Ajouter un utilisateur" in html_of(client.get("/inspecteur/reglages/comptes?nouveau=1"))
     assert "Nouveau mot de passe" in html_of(client.get("/inspecteur/reglages/comptes?compte=2"))
 
 

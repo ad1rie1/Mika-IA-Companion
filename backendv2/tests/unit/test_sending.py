@@ -1,6 +1,5 @@
 """Ce qu'elle envoie à ta place (ADR 0132) : des règles lues de haut en bas, la première qui correspond décide ;
-les réglages d'avant (« préparer d'elle-même », « jamais pour », l'accord d'un courrier, le mode de Teams) traduits
-en règles qui font la même chose, gardés quand on réécrit le courrier ou Teams."""
+rangées à part dans les réglages, illisibles elles laissent la règle par défaut seule."""
 
 from __future__ import annotations
 
@@ -9,16 +8,14 @@ from pydantic import ValidationError
 
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.teams import TeamsConfig
-from mika.app.settings import EMAIL_KEY, OVERRIDES_KEY, SENDING_KEY, TEAMS_KEY, SecretBox, Settings
+from mika.app.settings import SENDING_KEY, SecretBox, Settings
 from mika.inspector.pages.sending import NEW_RULE, moved, parse
-from mika.vocab.access import OWNER, WHO_ACCOUNTS
 from mika.vocab.sending import (
     DEFAULT,
     MAIL,
     TEAMS,
     Sending,
     SendRule,
-    from_before,
     mail_rule,
     mail_rule_for_all,
     mail_send,
@@ -57,22 +54,6 @@ def test_a_mail_has_no_draft_and_a_channel_is_one_she_knows():
             SendRule(canal=bad)
 
 
-def test_the_settings_of_before_become_rules_that_do_the_same():
-    accounts = {"perso": {"autodraft": True, "autodraft_skip": ["@shop.fr", " "]}, "pro": {"autodraft": False}}
-    got = from_before(accounts, approval=False, teams={"mode": "validation", "autodraft": True, "skip": ["rh"]})
-    assert got.rules == (
-        SendRule(canal="courrier:perso", dest="@shop.fr", prepare=False, send="seule"),
-        SendRule(canal="courrier:perso", prepare=True, send="seule"),
-        SendRule(canal="courrier:pro", prepare=False, send="seule"),
-        SendRule(canal=TEAMS, dest="rh", prepare=False, send="accord"),
-        SendRule(canal=TEAMS, prepare=True, send="accord"))
-    assert got.default == DEFAULT
-    # rien de réglé : ce que faisaient les défauts d'alors (Teams préparait, en brouillon ; le courrier attendait)
-    assert from_before({}, approval=True, teams=None).rules == (SendRule(canal=TEAMS, prepare=True, send="brouillon"),)
-    # une boîte qui ne prépare rien et attend l'accord : la règle par défaut suffit
-    assert from_before({"perso": {}}, approval=True, teams={"autodraft": False, "mode": "validation"}).rules == ()
-
-
 def test_a_table_sent_from_the_page_is_read_in_its_order_and_moved():
     data = {"canal.2": TEAMS, "dest.2": "RH", "send.2": "seule", "canal.1": MAIL, "prepare.1": "on",
             "send.1": "brouillon", "defaut_send": "seule"}
@@ -90,52 +71,23 @@ def test_a_table_sent_from_the_page_is_read_in_its_order_and_moved():
         parse({"canal.1": ""})
 
 
-async def test_the_old_settings_are_kept_when_mail_or_teams_is_rewritten(tmp_path):
+async def test_its_rules_are_kept_apart_and_unreadable_ones_give_the_default(tmp_path):
+    """Rien d'enregistré : la règle par défaut seule ; enregistrées, réécrire Teams n'y touche pas ; illisibles, la
+    règle par défaut seule — jamais une panne. Les champs d'avant l'ADR 0132 ne se lisent plus (2026-10-25 : les
+    réglages repartent de zéro)."""
     store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
     await store.open()
     try:
         settings = Settings(store, SecretBox.for_data(tmp_path))
         await settings.open()
-        await settings._put(EMAIL_KEY, {"accounts": {"perso": {"autodraft": True, "autodraft_skip": ["@shop.fr"]}}})
-        await settings._put(TEAMS_KEY, {"enabled": True, "mode": "autonome", "autodraft": False})
-        await settings._put(OVERRIDES_KEY, {"email": {"send_needs_approval": False, "max_per_day": 3}})
-        before = settings.sending()
-        assert before.rules[1] == SendRule(canal="courrier:perso", prepare=True, send="seule")
-        assert before.rules[-1] == SendRule(canal=TEAMS, prepare=False, send="seule")
-        # réécrire Teams efface ses anciens champs : les règles sont d'abord écrites sous leur forme neuve
+        assert settings.sending() == Sending()
+        rules = Sending(rules=(SendRule(canal="courrier:perso", prepare=True, send="seule"),))
+        await settings.save_sending(rules)
         await settings.save_teams(TeamsConfig(enabled=True))
-        assert settings._get(SENDING_KEY) == before.model_dump(mode="json") and settings.sending() == before
-        # enregistrées, elles retirent la surcharge qui les disait ; les autres surcharges restent
-        await settings.save_sending(Sending(rules=before.rules[:1]))
-        assert settings.overrides() == {"email": {"max_per_day": 3}}
-        assert settings.sending().rules == before.rules[:1]
-        # illisibles : la règle par défaut seule, jamais une panne
+        assert settings.sending() == rules
         await settings._put(SENDING_KEY, {"rules": [{"canal": "sms"}]})
         assert settings.sending() == Sending()
-    finally:
-        await store.close()
-
-
-async def test_old_overrides_are_translated_then_never_written_back(tmp_path):
-    """2026-10-25 : enregistrer une autre surcharge traduisait « un envoi attend un accord », puis le réécrivait —
-    et « Pour qui » de la recherche web (ADR 0131) se perdait sans traduction."""
-    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
-    await store.open()
-    try:
-        settings = Settings(store, SecretBox.for_data(tmp_path))
-        await settings.open()
-        await settings._put(EMAIL_KEY, {"accounts": {"perso": {}}})
-        await settings._put(OVERRIDES_KEY, {"email": {"send_needs_approval": False, "max_per_day": 3},
-                                            "web": {"audience": "comptes", "in_work": False, "max_calls": 2}})
-        # tant que rien n'est réécrit, les anciennes valeurs se lisent déjà sous leur forme neuve
-        web = settings.mcp_system_access()["web"]["access"]
-        assert [(tuple(a["who"]), tuple(a["when"])) for a in web] == [((OWNER,), ("conversation",)),
-                                                                       ((WHO_ACCOUNTS,), ("conversation",))]
-        # une autre surcharge enregistrée, avec celles qu'on avait lues
-        await settings.save_overrides({**settings.overrides(), "teams": {"drafts_per_day": 2}})
-        assert settings.overrides() == {"email": {"max_per_day": 3}, "web": {"max_calls": 2},
-                                        "teams": {"drafts_per_day": 2}}
-        assert settings.sending().rules[0] == SendRule(canal="courrier:perso", send="seule")
-        assert settings.mcp_system_access()["web"]["access"] == web  # écrites à part, elles restent
+        with pytest.raises(ValidationError):
+            TeamsConfig.model_validate({"enabled": True, "mode": "autonome"})
     finally:
         await store.close()

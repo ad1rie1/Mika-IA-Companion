@@ -2,8 +2,8 @@
 service (ADR 0131, ``vocab.access``), puis sa ligne par défaut.
 
 ``line_for`` : la ligne qui décide pour qui est en face, à ce moment — le voir, le piloter ; pour un outil d'une de ses
-apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Jamais dans un salon, avec une inconnue, ni sans
-personne. Sa fiche (l'onglet « Accès », l'action ``projects.acces``) et la page « Droits » : ``console_access``.
+apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Y changer quelque chose : jamais dans un salon,
+avec une inconnue, ni sans personne. Sa fiche (l'onglet « Accès », l'action ``projects.acces``) et la page « Droits » : ``console_access``.
 """
 
 from __future__ import annotations
@@ -15,10 +15,11 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects.faculty import Project, access_of
 from mika.kernel.frame import Frame
-from mika.vocab.access import first, who_words
+from mika.vocab.access import OWNER, first, situation, who_words
 
 #: ce que « piloter » permet, en mots courts
-STEER_WORDS = {c.STEER_ALONE: "seule", c.STEER_ASK: "ton accord", c.STEER_NO: "non"}
+STEER_WORDS = {c.STEER_READ: "lecture seule", c.STEER_ASK: "accord du propriétaire", c.STEER_EDIT: "modification",
+               c.STEER_NO: "aucun pilotage"}
 
 
 def lines(p: Project | c.ProjectView) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
@@ -44,11 +45,20 @@ def sees(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[
     return line is not None and line.see
 
 
+def reads(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[str], bool] | None = None) -> bool:
+    """Peut-elle lui en dire le détail (son dernier compte rendu, ce qui vient) ? Le voir, et le piloter au moins en
+    lecture seule ; lire n'est pas agir (un salon, une inconnue : comme le voir). Sa confidentialité filtre encore."""
+    line = line_for(p, audience, kind, close=close, acting=False)
+    return line is not None and line.see and line.steer != c.STEER_NO
+
+
 def steering(p: Project | c.ProjectView, audience: Any, kind: str, close: Callable[[str], bool] | None = None) -> str:
-    """Ce que qui est en face peut faire de ce projet en le pilotant : ``seule``, ``toi`` (ton accord) ou ``non`` —
-    jamais sans le voir."""
+    """Ce que qui est en face peut faire de ce projet en le pilotant (``STEERS``) — jamais sans le voir, ni y changer
+    quoi que ce soit dans un salon ou devant une inconnue. Toi en face, l'accord du propriétaire, c'est le tien : ta
+    demande s'applique aussitôt."""
     line = line_for(p, audience, kind, close=close)
-    return line.steer if line is not None and line.see else c.STEER_NO
+    level = line.steer if line is not None and line.see else c.STEER_NO
+    return c.STEER_EDIT if level == c.STEER_ASK and situation(audience) == OWNER else level
 
 
 def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:

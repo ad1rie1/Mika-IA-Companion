@@ -243,10 +243,7 @@ class PollAsked(Payload):
 
 #: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
-#: l'accord avant un envoi, ce qu'elle prépare d'elle-même et pour qui jamais sont devenus ses règles d'envoi (ADR
-#: 0132) : leurs valeurs journalisées se lisent sans effet
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4,
-                retired_params=("send_needs_approval", "autodraft", "autodraft_skip"))
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4)
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
 READ = EMAIL.event("read", MailRead)

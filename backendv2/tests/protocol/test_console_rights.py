@@ -26,19 +26,22 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     for part in ("Par personne", "Toi, quand elle te répond", "Par ressource", "Le projet « Le site »",
                  "Ce qu'elle envoie à ta place", "Tes règles d'outils", "Ce que le code fixe"):
         assert part in page, part
-    assert "le piloter : seule" in page and "ligne 1" in page  # jamais réglé : toi, tout, par sa ligne
+    assert "piloter projet : modification" in page and "ligne 1" in page  # jamais réglé : toi, tout, par sa ligne
     home = html_of(client.get("/inspecteur"))
     assert 'href="/inspecteur/reglages/droits"' in home and "/inspecteur/outils/droits" not in home  # menu Réglages
-    # un autre compte : il l'entend selon sa confidentialité, sans le piloter
+    # un autre compte : il l'entend selon sa confidentialité, en lecture seule
     other = html_of(client.get(PAGE, params={"qui": "comptes"}))
-    assert "le piloter : non" in other and "comportement par défaut" in other
+    assert "piloter projet : lecture seule" in other and "comportement par défaut" in other
+    assert 'class="rights-face on" title="Un autre compte, quand elle lui répond"' in other  # sa colonne soulignée
+    # un salon : le voir et le lire, jamais y changer quelque chose (la ligne par défaut, qui vaut pour tous)
+    assert "piloter projet : lecture seule" in html_of(client.get(PAGE, params={"qui": "salon"}))
     # l'onglet « Accès » du projet, dessiné, sa ligne d'avant réglage cochée comme elle vaut ; ajouter : une ligne
     # fermée, enregistrée (le navigateur envoie ce qui est coché, le test le dit)
     tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))
     assert "Accès au projet" in tab and "+ Ajouter un accès" in tab and "Jamais réglés" in tab
     assert 'name="qui.1|proprietaire" checked' in tab and 'name="qui.1|travail" checked' in tab
     shown = {"qui.1|proprietaire": "on", "qui.1|travail": "on", "toujours.1": "on", "voir.1": "on",
-             "piloter.1": "seule", "lecture.1": "seule", "action.1": "seule", "tous.1": "on",
+             "piloter.1": "modification", "lecture.1": "seule", "action.1": "seule", "tous.1": "on",
              "defaut_piloter": "non", "defaut_lecture": "non", "defaut_action": "non"}
     added = submit(client, tab, "projects.acces", faire="ajouter", **shown)
     assert added.status_code == 200 and "Ligne 2 ajoutée, fermée" in html_of(added)
@@ -52,6 +55,7 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     assert "Ligne 1 retirée." in html_of(removed)
     view = next(v for v in live.kernel.mind.frame().get(c.LIVE) if v.id == pid)
     assert view.access == (c.ProjectAccess(who=(OWNER,)),)
-    # la page le lit aussitôt : pour toi, plus rien — ce qui est fermé se compte, sans se lister
+    # la page le lit aussitôt : pour toi, plus rien — sa case le dit, avec la ligne qui en décide
     after = html_of(client.get(PAGE))
-    assert "le piloter : seule" not in after and "fermé ici" in after
+    assert "piloter projet : modification" not in after
+    assert "Toi, quand elle te répond — le voir : non (ligne 1)" in after
