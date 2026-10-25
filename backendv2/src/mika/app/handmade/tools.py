@@ -1,6 +1,6 @@
 """Outils, dessinés (ADR 0121, 0122) : « Ce qu'elle peut faire » et « Venus d'ailleurs ».
 
-« Ce qu'elle peut faire » est une grille, que la console porte dans son panneau (son formulaire, ``outils/peut.html``) :
+« Ce qu'elle peut faire » est la page des tableaux de droits de ses familles, que la console porte dans son panneau (``droits/familles.html``) :
 ses blocs ne servent qu'à qui lit sans panneau (la console en MCP) ; la fiche d'un outil, elle, se dessine bloc par
 bloc. « Venus d'ailleurs » réunit ce qui ne vient pas d'elle : les services branchés (la vue du plugin MCP, son
 onglet) et les outils que ses apps lui donnent (la vue de la Forge, lue ici sans onglet à elle).

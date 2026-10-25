@@ -5,6 +5,10 @@ liaison. Aucun ne fait monter la confiance — un modèle se laisse conter
 - douter et défaire un lien ne sont offerts que là où il y a quelque chose à
   mettre en doute : jamais devant une session authentifiée (elle prouve qui
   écrit ; personne n'y est « lié » — une propriétaire connectée non plus) ;
+- douter et défaire un lien ne font que resserrer ce qu'elle croit de qui est
+  en face : rien que la personne obtienne. Pour ses droits (ADR 0134), ils
+  lisent — le plafond d'une inconnue, qui ferme toute action, ne les ferme pas :
+  c'est contre elle qu'ils servent ;
 - relire « qui t'écrit » redit une section déjà sous ses yeux : il n'est pas
   chargé d'emblée (lot ``social``, à la demande), et ne sert que si elle manque.
 """
@@ -81,7 +85,7 @@ async def doubt(args: DoubtArgs, ctx: Any) -> str:
     return phrase("identity.tools.doubt.done")
 
 
-@IDENTITY.tool("identity_forget_binding", acts=True, description=phrase("identity.tools.forget.description"), args=NoArgs,
+@IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"), args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def forget_binding(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)

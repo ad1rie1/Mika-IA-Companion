@@ -130,8 +130,13 @@ def test_two_doors_the_stricter_wins_and_the_decision_says_both():
     assert got.level == NO and got.capped and "plafond" in got.why
     got = tool_allowance(lines, default, GUEST, Kind.REPLY, False, wide)
     assert (got.level, got.keep) == (ALONE, "rien")
-    # par Internet, le minimum vital du canal ferme déjà les outils (son tableau peut les ouvrir)
-    assert tool_allowance(lines, default, STRANGER, Kind.REPLY, False, wide).level == NO
+    # par Internet, une inconnue a ce que le minimum vital du canal laisse (un outil qui lit), sous son plafond :
+    # jamais une action ; toi, par une adresse qu'un opérateur t'a reliée, tout (ADR 0035)
+    assert tool_allowance(lines, default, STRANGER, Kind.REPLY, False, wide).level == ALONE
+    assert tool_allowance(lines, default, STRANGER, Kind.REPLY, True, wide).level == NO
+    yours = Audience(persons=("ext_1",), channel="external", public=False, trust=ChannelTrust.ACCOUNT.value,
+                     owner=True, person="user_1")
+    assert tool_allowance(lines, default, yours, Kind.REPLY, True, wide).level == ALONE
     # sans personne : rien ; elle seule : la ligne sans qui
     assert tool_allowance(lines, default, NOBODY, Kind.REPLY, False, wide) is None
     assert tool_allowance(lines, default, WORKING, Kind.STEP, False, wide).level == NO

@@ -120,9 +120,9 @@ def test_where_she_would_use_a_service():
 def test_without_a_row_the_default_decides_and_it_starts_closed():
     assert set(levels(tool()).values()) == {"non"}
     opened = tool(default=Access(who=(), read="carte", act="toi", keep="prive"))
-    # la ligne par défaut vaut pour tous ; une inconnue sur le chat web lit au plus (le plafond), une inconnue par
-    # Internet rien (le minimum vital de ce canal), un salon rien venu d'ailleurs, personne rien
-    assert levels(opened) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "non",
+    # la ligne par défaut vaut pour tous ; une inconnue (sur le chat web, ou par Internet : le minimum vital de ce
+    # canal laisse lire) lit au plus (le plafond), un salon rien venu d'ailleurs, personne rien
+    assert levels(opened) == {"owner": "carte", "account": "carte", "named": "carte", "unproven": "carte",
                               "stranger": "carte", "room": "non", "work": "carte", "none": "non"}
 
 
@@ -150,10 +150,10 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
     # plusieurs sources sur une ligne : l'une suffit
     assert {k for k, v in levels(tool(Access(who=(CLOSE, NAMED_3), read="seule")), is_close).items()
             if v != "non"} == {"account", "named"}
-    # une inconnue sur le chat web lit au plus (le plafond), jamais une action ; par Internet, rien (le minimum vital
-    # de ce canal) ; dans un salon, rien venu d'ailleurs (des témoins)
+    # une inconnue, sur le chat web ou par Internet, lit au plus (le plafond), jamais une action ; dans un salon, rien
+    # venu d'ailleurs (des témoins)
     assert levels(tool(Access(who=(ALL,), read="seule"))) == {
-        "owner": "seule", "account": "seule", "named": "seule", "unproven": "non", "stranger": "seule",
+        "owner": "seule", "account": "seule", "named": "seule", "unproven": "seule", "stranger": "seule",
         "room": "non", "work": "non", "none": "non"}
     assert levels(tool(Access(who=(ALL,), act="seule"), nature="action")) == {
         "owner": "seule", "account": "seule", "named": "seule", "unproven": "non", "stranger": "non", "room": "non",
@@ -165,7 +165,7 @@ def test_the_first_row_that_matches_decides():
     rows = (Access(who=(NAMED_3,), read="non"), Access(who=(CLOSE,), read="seule"),
             Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(YOU,), read="toi"), Access(who=(), canal=(INTERNAL,), read="toi"))
     t = tool(*rows, default=Access(who=(), read="carte"))
-    assert levels(t, near) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "non",
+    assert levels(t, near) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "carte",
                                "stranger": "carte", "room": "non", "work": "toi", "none": "non"}
     assert access_for(t, OWNER, Kind.INITIATIVE)[0] == "toi"  # « quand elle répond » ne vaut pas d'elle-même
     # dans l'autre ordre, la ligne des proches passe avant celle de la personne nommée : elle n'y vaut plus rien

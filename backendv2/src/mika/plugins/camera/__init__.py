@@ -198,8 +198,7 @@ class Look:
 
 
 def _for_owner(frame: Frame) -> bool:
-    """Ce que voit la caméra : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
-    ADR 0133) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
+    """Ce que voit la caméra : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
     la caméra."""
     return here_allowed(frame, BUNDLE)
 

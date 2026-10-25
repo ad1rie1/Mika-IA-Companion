@@ -45,7 +45,7 @@ from mika.sim.llm.scripted import ScriptedLLM
 from mika.sim.world import Driver
 from mika.vocab.episodes import Kind
 from tests.conftest import START
-from tests.fixtures.harness import CONTACTS, events_of
+from tests.fixtures.harness import CONTACTS, events_of, facing
 from tests.fixtures.harness import build as build_toy
 from tests.fixtures.harness import said as said_toy
 from tests.fixtures.mika import AFTERNOON, boot, build, connect, said
@@ -528,7 +528,7 @@ def test_a_recomposed_reply_does_not_redo_its_tool_writes(tmp_path):
     reply = EpisodePolicy(kind="REPLY", role="reply", priority=0, lane="conversation",
                           tool_bundles=frozenset({"notes"}))
     kernel, clock, _ = build_toy(tmp_path, [CONTACTS, NOTES], respond=respond, latency=10.0,
-                                 policies={"REPLY": reply})
+                                 policies={"REPLY": reply}, audience_of=facing)  # quelqu'un en face : ses outils passent
 
     async def main():
         await kernel.start()
@@ -558,7 +558,8 @@ def test_identical_provider_call_ids_in_two_turns_both_write(tmp_path):
 
     reply = EpisodePolicy(kind="REPLY", role="reply", priority=0, lane="conversation",
                           tool_bundles=frozenset({"notes"}))
-    kernel, clock, _ = build_toy(tmp_path, [CONTACTS, NOTES], respond=respond, policies={"REPLY": reply})
+    kernel, clock, _ = build_toy(tmp_path, [CONTACTS, NOTES], respond=respond, policies={"REPLY": reply},
+                                 audience_of=facing)
 
     async def main():
         await kernel.start()

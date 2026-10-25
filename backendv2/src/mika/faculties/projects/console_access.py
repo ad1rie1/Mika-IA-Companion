@@ -67,7 +67,8 @@ def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
         ActionSlot("projects.acces", (), title="Enregistrer"),
     ]
     if p.access is None:
-        blocks.insert(0, Note("Jamais réglés : toi et elle seule, tout ; les autres l'entendent selon sa "
+        blocks.insert(0, Note("Jamais réglés : toi et elle seule, tout ; la personne qui l'a confié le voit, le pilote "
+                              "sur ton accord et en reçoit les fichiers ; les autres l'entendent selon sa "
                               "confidentialité, en lecture seule.", tone="info"))
     return blocks
 
@@ -184,6 +185,7 @@ def _project_tables(s: ProjectsState, frame: Frame, ctx: Any) -> list[RuleTable]
         out.append(RuleTable(f"project:{pid}", f"Le projet « {title} »", COLUMNS,
                              tuple(_row(frame, a) for a in rows), _row(frame, default),
                              href=Ref.subject("project", str(pid), title, "acces"), floors=FLOORS,
-                             note="Jamais réglés : toi et elle seule, tout ; les autres l'entendent selon sa "
-                                  "confidentialité, en lecture seule." if p.access is None else ""))
+                             note="Jamais réglés : toi et elle seule, tout ; la personne qui l'a confié le voit, le "
+                                  "pilote sur ton accord et en reçoit les fichiers ; les autres l'entendent selon "
+                                  "sa confidentialité, en lecture seule." if p.access is None else ""))
     return out

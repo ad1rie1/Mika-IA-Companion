@@ -31,6 +31,7 @@ from mika.vocab.access import (
     MAIL,
     MOBILE,
     NO,
+    OWNER,
     POLICIES,
     REPLIES,
     STEER_EDIT,
@@ -72,6 +73,9 @@ class CanalRule(Rule):
 CLOSED = CanalRule()
 #: tout ouvert : ce que laisse un canal qui prouve qui parle (le chat web, l'app Android) et elle seule
 WIDE = CanalRule(who=(EVERYONE,), reply="seule", read=ALONE, act=ALONE, steer=STEER_EDIT, files=True, keep="public")
+#: tout ouvert à toi seulement : ce que laisse, par Internet, une adresse qui est la tienne (déclarée, ou qu'un
+#: opérateur t'a reliée : ADR 0035, tes droits tiennent à l'adresse qui parle)
+YOURS = CanalRule(who=(OWNER,), reply="seule", read=ALONE, act=ALONE, steer=STEER_EDIT, files=True, keep="public")
 
 
 class CanalTable(Table[CanalRule]):
@@ -81,14 +85,15 @@ class CanalTable(Table[CanalRule]):
 
 
 #: le minimum vital de chaque type de canal, tant qu'on ne l'a pas réglé : le chat web et l'app Android laissent
-#: tout (les tableaux des ressources décident) ; elle seule, tout ; Internet, répondre, et lire un projet ; tes
-#: comptes (le courrier, Teams) : rien ne part sans ton accord, elle ne prépare rien d'elle-même
+#: tout (les tableaux des ressources décident) ; elle seule, tout ; Internet : toi, tout — les autres, répondre, un
+#: outil qui lit, lire un projet (le plafond d'une inconnue fait le reste : jamais une action) ; tes comptes (le
+#: courrier, Teams) : rien ne part sans ton accord, elle ne prépare rien d'elle-même
 VITAL: Mapping[str, CanalTable] = {
     WEB: CanalTable(lines=(WIDE,)),
     MOBILE: CanalTable(lines=(WIDE,)),
     INTERNAL: CanalTable(lines=(CanalRule(canal=(INTERNAL,), reply="seule", read=ALONE, act=ALONE,
                                           steer=STEER_EDIT, files=True, keep="public"),)),
-    INTERNET: CanalTable(lines=(CanalRule(who=(EVERYONE,), reply="seule", steer=STEER_READ),)),
+    INTERNET: CanalTable(lines=(YOURS, CanalRule(who=(EVERYONE,), reply="seule", read=ALONE, steer=STEER_READ))),
     MAIL: CanalTable(lines=(CanalRule(who=(EVERYONE,), reply="accord"),)),
     TEAMS: CanalTable(lines=(CanalRule(who=(EVERYONE,), reply="accord"),)),
 }

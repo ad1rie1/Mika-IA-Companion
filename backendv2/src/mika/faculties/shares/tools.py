@@ -1,8 +1,10 @@
 """Ses outils pour envoyer un fichier à la personne à qui elle parle (ADR 0062).
 
-Offerts seulement en tête-à-tête, à quelqu'un qui a un compte (authentifié), jamais dans un salon : un fichier
-part avec son message, vers l'application de la personne. Trois appels au plus par épisode, un quota par jour et
-par personne ; le résultat lui dit d'annoncer en une phrase ce qu'elle envoie, sans le recopier.
+Seulement en tête-à-tête, à quelqu'un de reconnu (toi, ou un compte), jamais dans un salon ni à une inconnue — la
+situation du moteur de droits (``offered``) : envoyer, les plafonds le ferment déjà (ADR 0134) ; lister ce qu'elle
+pourrait envoyer garde cette condition, rien à lister ailleurs. Un fichier part avec son message, vers l'application
+de la personne. Trois appels au plus par épisode, un quota par jour et par personne ; le résultat lui dit d'annoncer
+en une phrase ce qu'elle envoie, sans le recopier.
 
 - ``share_text`` : un texte qu'elle écrit maintenant (une liste, une note, du code, un tableau) ;
 - ``project_files`` : ce qu'elle peut envoyer de ses projets (les numéros ne se disent jamais en conversation) ;
@@ -36,10 +38,11 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.inspect import num_fr
 from mika.ports.workshop import OutsideWorkshop
+from mika.vocab.access import ACCOUNT, AT_OWNER, situation
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import ChannelTrust, Sensitivity, hearable
+from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.rights import closeness_of, project_allowance, rights_of
 
 BUNDLE = "shares"
@@ -85,9 +88,9 @@ SHARES.bundle(BUNDLE, phrase("shares.tools.bundle"))
 
 
 def offered(audience: Any) -> bool:
-    """Seulement en tête-à-tête, à quelqu'un qui a un compte : jamais dans un salon, jamais à un inconnu."""
-    return bool(getattr(audience, "persons", ())) and not audience.public \
-        and audience.trust == ChannelTrust.AUTHENTICATED.value
+    """Seulement en tête-à-tête, à quelqu'un de reconnu (toi — une adresse qu'un opérateur t'a reliée aussi —, ou un
+    compte) : jamais dans un salon, jamais à une inconnue, jamais personne (``vocab.access.situation``)."""
+    return situation(audience) in (AT_OWNER, ACCOUNT)
 
 
 def clean_name(raw: Any) -> str:
@@ -275,7 +278,8 @@ def _entries(tree: list[str]) -> list[str]:
     return [line for line in tree if not line.startswith("[")]
 
 
-@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4)
+@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4,
+             when=offered)  # il ne liste que ce qu'elle pourrait envoyer : rien dans un salon ni pour une inconnue
 async def project_files(args: FilesArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):

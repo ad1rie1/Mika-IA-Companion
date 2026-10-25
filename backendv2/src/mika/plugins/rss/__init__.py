@@ -495,8 +495,7 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 
 
 def _may_read(frame: Frame) -> bool:
-    """Lire va sur le réseau : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
-    ADR 0133) — toi en privé, ou elle qui travaille (un projet ou un réveil seulement s'il a pris ses flux)."""
+    """Lire va sur le réseau : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) — toi en privé, ou elle qui travaille (un projet ou un réveil seulement s'il a pris ses flux)."""
     return here_allowed(frame, BUNDLE, "rss_read")
 
 

@@ -1122,8 +1122,8 @@ def _tab_access(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]
     if app is None:
         return [Note("Cette app n'existe plus.", tone="muted")]
     if app.project:
-        return [Note(f"Cette app vit dans le projet n° {app.project} : ses accès sont ceux du projet.", tone="info",
-                     refs=(Ref.subject("project", str(app.project), f"projet n° {app.project}", "acces"),))]
+        return [Note(f"Cette app vit dans le projet n° {app.project} : ses accès sont ceux du projet.", tone="info"),
+                Fields((("ses accès", Ref.subject("project", str(app.project), f"projet n° {app.project}", "acces")),))]
     rows, default = app_lines(frame, app)
     shown = [Row((str(i), *_app_row(frame, a))) for i, a in enumerate((*rows, default), start=1)]
     blocks: list[Block] = [

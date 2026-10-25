@@ -14,6 +14,7 @@ from mika.kernel.episode import EpisodePolicy
 from mika.kernel.events import Content
 from mika.kernel.facts import FactFamily
 from mika.kernel.faculty import Faculty
+from mika.kernel.frame import Audience
 from mika.kernel.ids import SeededIdGen
 from mika.kernel.registry import ArbitrationPolicy
 from mika.kernel.state import FrozenDict
@@ -21,6 +22,7 @@ from mika.ports.llm import LLMRequest, LLMResponse, PersonaRender
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.clock import SimClock
 from mika.sim.llm.scripted import ScriptedLLM
+from mika.vocab.privacy import ChannelTrust
 from tests.conftest import START
 from tests.fixtures import backend
 
@@ -92,6 +94,15 @@ def build(
 
 def said(handle: str, text: str, **kw: Any) -> PerceptionReceived:
     return PerceptionReceived(handle=handle, channel=kw.pop("channel", "web"), text=Content.of(text), **kw)
+
+
+def facing(frame: Any, req: Any) -> Audience:
+    """Qui est en face, dans un jouet sans faculté d'identité : la personne à qui l'épisode s'adresse, reconnue, en
+    tête-à-tête — de quoi passer la porte de ses outils (ADR 0134 : sans personne en face, rien). À donner au noyau
+    par ``build(..., audience_of=facing)`` ; sans lui, l'audience fermée du runtime."""
+    target = str(getattr(req, "target", "") or "")
+    return Audience(persons=(target,) if target else (), channel=getattr(req, "channel", None) or "web",
+                    public=False, trust=ChannelTrust.AUTHENTICATED.value, person=target)
 
 
 def events_of(kernel: Kernel, *types: str) -> list[Any]:

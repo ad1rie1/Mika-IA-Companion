@@ -582,7 +582,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("Clé de l'extension", f"définie ({key.hint}…)" if key is not None else "aucune"),
                 ("Reçu de l'extension", seen),
                 ("Conversations et réponses", "Relations & échanges › Teams"),
-                ("Ce qu'elle prépare, comment ça part", "Relations & échanges › Envoyer à ta place")]
+                ("Ce qu'elle prépare, comment ça part", "Réglages › Canaux (le tableau de Teams)")]
 
     async def new_teams_key(by: str) -> tuple[str, str]:
         if live.teams is None:

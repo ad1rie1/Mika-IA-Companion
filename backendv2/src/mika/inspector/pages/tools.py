@@ -13,7 +13,6 @@ différer). Jamais une règle ne l'offre là où le code ne l'offre pas.
 from __future__ import annotations
 
 import inspect
-import re
 import secrets as _secrets
 import unicodedata
 from collections.abc import Mapping
@@ -211,12 +210,6 @@ def _tool_ref(name: str, text: str | None = None, context: Mapping[str, str] | N
 
 def _fold(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
-
-
-def _lead(text: str, limit: int = 150) -> str:
-    """Ce qu'il fait, en une phrase : la première de sa description, coupée à un mot."""
-    first = re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0]
-    return first if len(first) <= limit else first[:limit].rsplit(" ", 1)[0] + "…"
 
 
 def _params(ui: Any) -> tuple[Param, ...]:

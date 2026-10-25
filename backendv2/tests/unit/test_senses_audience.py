@@ -134,7 +134,8 @@ def tool_ctx(kind=Kind.REPLY, *, public=False, room=None, owner=True, ports=None
         if emitted is not None:
             emitted.extend(drafts)
 
-    audience = Audience(persons=("ext_42",), public=public, room=room, owner=owner, level=3, witness_level=3)
+    audience = Audience(persons=("ext_42",), channel="external", public=public, room=room, owner=owner, level=3,
+                        witness_level=3)
     frame = NS(root=None, now=now, env=NS(params_of=lambda name, root: params), audience=audience,
                episode=EpisodeRef("e", kind, target="ext_42" if kind == Kind.REPLY else "goal:1"),
                get=lambda ref: self_c.PersonaDoc() if ref.name == self_c.PERSONA.name else owner)

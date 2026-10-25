@@ -1154,8 +1154,7 @@ def _section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
 
 
 def _may_build(ctx: Any) -> bool:
-    """Écrire et régler ses apps : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``,
-    ADR 0133) — toi en privé, jamais dans un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris la
+    """Écrire et régler ses apps : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) — toi en privé, jamais dans un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris la
     Forge ; la lecture de la file d'une app."""
     return here_allowed(ctx.frame, BUNDLE, acts=True, tasks=lambda target: bool(sifting_app(target)))
 

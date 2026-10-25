@@ -441,7 +441,7 @@ def _drafts(s: EmailState, cx) -> tuple[c.DraftView, ...]:
 
 
 def for_owner(frame: Frame) -> bool:
-    """Sa boîte : le plancher de ce que le code réserve à sa propriétaire (``vocab.access.owner_here``, ADR 0133) —
+    """Sa boîte : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) —
     toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris sa boîte ;
     ses tâches à elle (un brouillon de réponse)."""
     return here_allowed(frame, BUNDLE, tasks=lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)

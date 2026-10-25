@@ -129,10 +129,10 @@ def _words(kind: str, a: CanalRule) -> str:
 
 
 def _below(key: str, table: CanalTable) -> str:
-    """Ce qui manque au minimum vital : un canal qui prouve (le chat web, l'app Android) ou elle seule fermé à
-    tout."""
+    """Ce qui manque au minimum vital : un canal où elle parle en son nom (le chat web, l'app Android, Internet) ou
+    elle seule fermé à tout."""
     kind = canal_key(key)[0]
-    if kind not in TALKING or kind == "internet":
+    if kind not in TALKING:
         return ""
     if not any(a.read != "non" or a.act != "non" for a in (*table.lines, table.default)):
         return "plus aucun outil ne passe par ce canal" if kind != INTERNAL else "elle seule n'a plus aucun outil"
