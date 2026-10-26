@@ -726,6 +726,8 @@ def _read_text(f: FormField, raw: str, load: Callable[[str], Any]) -> Any:
         return tuple(line.strip() for line in text.splitlines() if line.strip())
     if f.kind in ("text", "textarea", "subject", "datetime"):
         return None if not text and f.nullable else text
+    if not text and f.kind == "select" and any(value == "" for value, _ in f.choices):
+        return ""  # un choix à valeur vide (« rien de particulier ») est un choix, pas un oubli
     if not text:
         if f.nullable:
             return None

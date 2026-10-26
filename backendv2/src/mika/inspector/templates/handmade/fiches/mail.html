@@ -1,0 +1,37 @@
+{# La fiche d'un mail, son onglet « Message » dessiné (app/handmade/mail_fiches.py, ADR 0121) : le message à lire — ses
+   actions, son texte, ses pièces, le détail (les blocs du plugin, leurs formulaires préparés) — et, à côté, ce qu'elle
+   en sait et le fil où il s'inscrit. Un mail est un document venu d'ailleurs : ses textes restent du texte. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page mailf">
+  <div class="mailf-grid">
+    <div class="now-stack mailf-message">
+      {% for b in message %}{{ one(b) }}{% endfor %}
+    </div>
+
+    <aside class="now-stack mailf-side" aria-label="Autour de ce mail">
+      {% if known|rejectattr("t", "equalto", "note")|list %}{% for b in known %}{{ one(b) }}{% endfor %}
+      {% else %}
+      <section class="now-card" aria-labelledby="mailf-known">
+        <header class="now-card-head"><h2 id="mailf-known">Ce qu'elle en sait</h2></header>
+        {% for b in known %}{{ one(b, 1) }}{% else %}<p class="now-empty">rien de plus que la boîte</p>{% endfor %}
+      </section>
+      {% endif %}
+      <p class="mailf-more"><a href="{{ known_tab }}">Ce qu'elle en sait, en détail →</a></p>
+
+      {% if thread %}
+      <section class="now-card" aria-labelledby="mailf-thread">
+        <header class="now-card-head"><h2 id="mailf-thread">Le fil</h2><span class="person-count now-num">{{ total }}</span>{% if more %}<a class="now-more" href="{{ thread_tab }}">tout le fil →</a>{% endif %}</header>
+        <ol class="mailf-thread">
+          {% for m in thread %}
+          <li class="{{ 'here' if m.here }}{{ ' sent' if m.sent }}">
+            {% if m.here %}<p class="mailf-thread-subject"><b>{{ m.subject }}</b> <span class="now-tag info">ce mail</span></p>
+            {% else %}<p class="mailf-thread-subject"><a href="{{ m.href }}">{{ m.subject }}</a></p>{% endif %}
+            <p class="person-meta">{{ "↗ envoyé · " if m.sent }}{{ m.who }}{% if m.when %} · {{ m.when }}{% endif %}</p>
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endif %}
+    </aside>
+  </div>
+</div>

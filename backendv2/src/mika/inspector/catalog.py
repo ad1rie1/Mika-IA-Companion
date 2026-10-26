@@ -173,6 +173,9 @@ class SettingsSection:
     head: Callable[[Mapping[str, str]], Any] | None = None
     #: « Voir l'effet » : ``preview(ui, valeur validée)`` → des blocs, rien d'écrit (absent : pas de bouton)
     preview: Callable[[Any, Any], Sequence[Any]] | None = None
+    #: juste avant ``save`` : ``adjust(valeur validée)`` → (valeur à enregistrer, notes) — ce qui se lit ailleurs pour
+    #: la compléter (la fenêtre d'un modèle, chez son fournisseur : ADR 0136) ; les notes suivent le message de la page
+    adjust: Callable[[Any], Awaitable[tuple[Any, list[str]]]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

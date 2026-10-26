@@ -1,0 +1,85 @@
+{# « Pourquoi a-t-elle dit ça ? », dessinée (inspector/pages/why.py, ``why_view``) : sa phrase en grand et ce qu'elle
+   ressentait ; ce qui l'a fait parler ; sa réponse pas à pas (le modèle principal, la relecture, l'autrice, ce qui est
+   parti) ; son état intérieur ; ses outils ; ses souvenirs ; ce qu'elle avait sous les yeux, section par section, et le
+   contexte complet. Ce qui n'a pas de forme à lui reprend ses blocs (``one``), chacun sa carte. Aucun style en ligne
+   (CSP). #}
+{% from "handmade/shared/macros.html" import facets %}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% import "handmade/parole/macros.html" as p %}
+<div class="now-page parole">
+
+  <section class="now-hero parole-hero sw-{{ v.felt.emotion if v.felt else 'neutral' }}" aria-labelledby="parole-said">
+    <div>
+      <p class="now-eyebrow">Ce qu'elle a dit · à {{ v.to }} · {{ v.when }}</p>
+      <blockquote class="now-voice parole-said" id="parole-said"><p>{{ v.text }}</p></blockquote>
+      <ul class="now-chips">{% for c in v.chips %}<li class="{{ c.tone }}">{{ c.text }}</li>{% endfor %}</ul>
+    </div>
+    <aside class="parole-felt" aria-label="Ce qu'elle ressentait">
+      <p class="now-eyebrow">Ce qu'elle ressentait en le disant</p>
+      {% if v.felt %}
+      <p class="now-word">{{ v.felt.word }}</p>
+      <p class="now-qualifier">{{ v.felt.how }}</p>
+      {{ facets(v.felt) }}
+      {% else %}<p class="now-empty">aucune balise d'émotion dans sa réponse</p>{% endif %}
+      {% if v.their %}<p class="now-eyebrow parole-their-title">Ce qu'elle lisait chez l'autre</p><p class="parole-their">{{ v.their }}</p>{% endif %}
+    </aside>
+  </section>
+
+  {% for b in v.verdict %}{{ one(b) }}{% endfor %}
+
+  <div class="now-grid two">
+    <div class="now-stack">
+      {% if v.cause.blocks %}{% for b in v.cause.blocks %}{{ one(b) }}{% endfor %}{% else %}
+      <section class="now-card" aria-labelledby="parole-cause">
+        <header class="now-card-head"><h2 id="parole-cause">Ce qui l'a fait parler</h2></header>
+        <p class="now-sub parole-lead">{{ v.cause.lead }}</p>
+        <ol class="person-thread parole-thread">
+          <li class="theirs"><p class="person-bubble">{{ v.cause.text }}</p><p class="person-meta">{{ v.cause.who }}{% if v.cause.when %} · {{ v.cause.when }}{% endif %} · <a href="{{ v.cause.href }}">message n° {{ v.cause.number }}</a></p></li>
+          <li class="mine sw-{{ v.felt.emotion if v.felt else 'neutral' }}"><p class="person-bubble">{{ v.text }}</p></li>
+        </ol>
+      </section>
+      {% endif %}
+
+      <section class="now-card" aria-labelledby="parole-steps">
+        <header class="now-card-head"><h2 id="parole-steps">Sa réponse, pas à pas</h2><p>Du texte brut du modèle à ce qui est parti.</p></header>
+        {{ p.steps(v.steps, v.kept) }}
+      </section>
+    </div>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="parole-inner">
+        <header class="now-card-head"><h2 id="parole-inner">Son humeur à ce moment-là</h2><a class="now-more" href="{{ PREFIX }}/vie">aujourd'hui →</a></header>
+        {% if v.inner %}
+        <dl class="parole-inner">{% for s in v.inner %}<div><dt>{{ s.label }}</dt><dd>{{ s.text }}</dd></div>{% endfor %}</dl>
+        {% elif not v.inner_missing %}<p class="now-empty">son prompt ne montrait rien de sa vie intérieure</p>{% endif %}
+        {% if v.inner_missing %}<p class="now-after now-muted">Le texte de son état n'est plus gardé (la trace a expiré, ou a été oubliée) : seule la balise de sa réponse reste.</p>{% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="parole-tools">
+        <header class="now-card-head"><h2 id="parole-tools">Ce qu'elle a fait</h2>{% if v.tools.known %}<p>{{ v.tools["items"]|length }} outil(s) en main, {{ v.tools.called }} appelé(s).</p>{% endif %}</header>
+        {{ p.tools(v.tools) }}
+      </section>
+      {% if v.tools.called %}{% for b in v.calls %}{{ one(b) }}{% endfor %}{% endif %}
+
+      {% if v.recall %}{% for b in v.recall %}{{ one(b) }}{% endfor %}{% else %}
+      <section class="now-card" aria-label="Ce dont elle s'est souvenue">
+        <header class="now-card-head"><h2>Ce dont elle s'est souvenue</h2></header>
+        <p class="now-empty">aucun souvenir ni objet n'a nourri cette parole (rien n'était cité dans son prompt)</p>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="now-card" aria-labelledby="parole-prompt">
+    <header class="now-card-head">
+      <h2 id="parole-prompt">Ce qu'elle avait sous les yeux</h2>
+      {{ p.prompt_head(v.prompt) }}
+      <a class="now-more" href="{{ PREFIX }}/episode/{{ v.episode|urlencode }}?onglet=prompt">l'onglet Prompt →</a>
+    </header>
+    {{ p.sections(v.prompt) }}
+    {{ p.context(v.context) }}
+  </section>
+
+  {% for b in v.details %}{{ one(b) }}{% endfor %}
+  {% include "handmade/parole/rejouer.html" %}
+</div>

@@ -220,6 +220,11 @@ def _cursor(p: Pager, query: Mapping[str, str]) -> dict[str, Any] | None:
             "page": len(pile) + 1 if current else 1}
 
 
+def pager_ctx(p: Pager | None, query: Mapping[str, str]) -> dict[str, Any] | None:
+    """La pagination d'une page dessinée, telle que la lit la macro ``pager`` (``_navigation.html``)."""
+    return _pager(p, query)
+
+
 def _pager(p: Pager | None, query: Mapping[str, str]) -> dict[str, Any] | None:
     if p is None:
         return None

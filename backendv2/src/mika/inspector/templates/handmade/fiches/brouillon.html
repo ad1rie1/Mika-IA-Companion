@@ -1,0 +1,39 @@
+{# La fiche d'un brouillon, son onglet « Brouillon » dessiné (app/handmade/mail_fiches.py, ADR 0121) : l'enveloppe de ce
+   qui partira (de, à, copie, objet, le texte tel qu'il partira, signature et citation comprises) ; à côté, ce que tu
+   peux en faire (les formulaires de la console), d'où il vient et son parcours ; ses deux versions s'il a été
+   retouché. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page draftf">
+  {% if blocked %}<p class="obj-alert warn">Il ne peut pas partir tel quel : {{ blocked }}. Retouche-le.</p>{% endif %}
+
+  <div class="mailf-grid">
+    <div class="now-stack">
+      <article class="now-card draftf-envelope" aria-labelledby="draftf-out">
+        <header class="now-card-head"><h2 id="draftf-out">Ce qui partira</h2><p>Exactement : l'expéditeur selon la voix de la boîte, la signature, la citation.</p></header>
+        {% if envelope %}
+        <dl class="draftf-heads">
+          <div><dt>De</dt><dd>{{ envelope["from"] }}</dd></div>
+          <div><dt>À</dt><dd>{{ envelope.to }}</dd></div>
+          {% if envelope.cc %}<div><dt>Copie</dt><dd>{{ envelope.cc }}</dd></div>{% endif %}
+          <div><dt>Objet</dt><dd><b>{{ envelope.subject }}</b></dd></div>
+          {% if answered %}<div><dt>En réponse à</dt><dd><a href="{{ answered.href }}">{{ answered.text }}</a></dd></div>{% endif %}
+        </dl>
+        {% else %}<p class="now-empty">l'aperçu de ce brouillon n'est pas disponible</p>{% endif %}
+        <div class="draftf-text">{% for b in text %}{{ one(b, 1) }}{% endfor %}</div>
+      </article>
+    </div>
+
+    <aside class="now-stack mailf-side" aria-label="Ce que tu peux en faire, d'où il vient, son parcours">
+      <section class="now-card{{ ' draftf-decide' if waiting }}" aria-labelledby="draftf-do">
+        <header class="now-card-head"><h2 id="draftf-do">{{ "Ce que tu peux en faire" if waiting else "Où il en est" }}</h2>{% if waiting %}<p>Rien ne part sans toi.</p>{% endif %}</header>
+        {% if actions %}<div class="now">{% for b in actions %}{{ one(b, 1) }}{% endfor %}</div>{% endif %}
+        {% for b in notes %}{{ one(b, 1) }}{% endfor %}
+        {% if not actions and not notes %}<p class="now-empty">elle n'attend rien de toi</p>{% endif %}
+      </section>
+      {% for b in why %}{{ one(b) }}{% endfor %}
+      {% for b in history %}{{ one(b) }}{% endfor %}
+    </aside>
+  </div>
+
+  {% for b in versions %}{{ one(b) }}{% endfor %}
+</div>

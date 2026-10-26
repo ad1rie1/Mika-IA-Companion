@@ -1,0 +1,66 @@
+{# « Pourquoi n'a-t-elle pas répondu ? », dessinée (inspector/pages/why.py, ``silence_page``) : le message en grand ;
+   pourquoi il est resté sans réponse, en mots (pas pour elle, en attente, un silence choisi, trop tard, une panne) ;
+   selon le cas l'appel au modèle en échec, ce qu'elle allait dire, ce qu'elle avait sous les yeux, ses outils. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% import "handmade/parole/macros.html" as p %}
+<div class="now-page parole silence">
+
+  <section class="now-hero parole-hero silence-hero" aria-labelledby="silence-text">
+    <div>
+      <p class="now-eyebrow">Ce qu'on lui a écrit · {{ v.from }} · {{ v.when }} · {{ v.where }}</p>
+      <blockquote class="now-voice parole-said" id="silence-text"><p>{{ v.text }}</p></blockquote>
+      {% if v.outcome %}<ul class="now-chips"><li class="{{ v.outcome.tone if v.outcome.tone in ('warn', 'danger') else '' }}">{{ v.outcome.text }}</li></ul>{% endif %}
+    </div>
+    <aside class="parole-felt silence-state {{ v.state.tone }}" aria-label="Pourquoi elle n'a pas répondu">
+      <p class="now-eyebrow">Pourquoi elle n'a pas répondu</p>
+      <p class="now-word silence-word">{{ v.state.title }}</p>
+      <p class="now-qualifier">{{ v.state.text }}</p>
+    </aside>
+  </section>
+
+  {% if v.ended %}
+  <div class="now-grid two">
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="silence-when">
+        <header class="now-card-head"><h2 id="silence-when">Comment ça s'est réglé</h2></header>
+        <ol class="now-feed silence-feed">
+          <li class="tone-muted"><time>reçu</time><div><p>{{ v.when }}</p></div></li>
+          {% if v.started %}<li class="tone-accent"><time>elle s'y met</time><div><p>{{ v.started }} · <a href="{{ PREFIX }}/episode/{{ v.episode|urlencode }}">son épisode</a></p></div></li>{% endif %}
+          <li class="{{ 'tone-danger' if v.state.tone == 'danger' else 'tone-ok' }}"><time>réglé</time><div><p>{{ v.ended.when }} · <a href="{{ v.ended.href }}">événement n° {{ v.ended.number }}</a></p></div></li>
+        </ol>
+        {% if v.burst %}<p class="now-after now-muted">{{ v.burst }}</p>{% endif %}
+      </section>
+      {% for b in v.calls %}{{ one(b) }}{% endfor %}
+      {% if v.steps %}
+      <section class="now-card" aria-labelledby="silence-steps">
+        <header class="now-card-head"><h2 id="silence-steps">Ce que le modèle a répondu</h2><p>Jamais livré.</p></header>
+        {{ p.steps(v.steps) }}
+      </section>
+      {% endif %}
+    </div>
+    <div class="now-stack">
+      {% if v.tools %}
+      <section class="now-card" aria-labelledby="silence-tools">
+        <header class="now-card-head"><h2 id="silence-tools">Ce qu'elle a fait</h2></header>
+        {{ p.tools(v.tools) }}
+      </section>
+      {% for b in v.calls_made %}{{ one(b) }}{% endfor %}
+      {% endif %}
+    </div>
+  </div>
+
+  {% if v.episode %}
+  <section class="now-card" aria-labelledby="silence-prompt">
+    <header class="now-card-head">
+      <h2 id="silence-prompt">Ce qu'elle avait sous les yeux</h2>
+      {% if v.kept %}{{ p.prompt_head(v.prompt) }}{% endif %}
+      <a class="now-more" href="{{ PREFIX }}/episode/{{ v.episode|urlencode }}?onglet=prompt">l'onglet Prompt →</a>
+    </header>
+    {% if v.kept %}{{ p.sections(v.prompt) }}{{ p.context(v.context) }}{% else %}
+    <p class="now-empty">son prompt n'est pas gardé : elle n'est pas allée jusqu'à le composer (elle s'est ravisée, une panne avant l'appel), ou sa trace a expiré (14 jours) ou a été oubliée</p>{% endif %}
+  </section>
+  {% endif %}
+
+  {% for b in v.details %}{{ one(b) }}{% endfor %}
+  {% endif %}
+</div>

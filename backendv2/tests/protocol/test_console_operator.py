@@ -67,6 +67,17 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     assert "<script>alert" not in r.text and "&lt;script&gt;alert" in r.text  # le texte hostile reste du texte
     # la clé d'une section ne se lit qu'au détail : jamais en libellé de ligne
     assert not re.search(r"<td>who</td>", r.text)
+    # dessinée (ADR 0121) : son humeur, sa réponse pas à pas depuis le texte brut du modèle, le texte de chaque section
+    # et le contexte complet, ses outils en main
+    assert "handmade/parole.css" in r.text and 'class="now-page parole"' in r.text
+    assert "Son humeur à ce moment-là" in page and "Sa réponse, pas à pas" in page and "Le modèle principal" in page
+    assert "Le contexte complet, tel qu'envoyé au modèle" in page and "QUI TU AS EN FACE" in page
+    assert "outil(s) en main" in page
+    # au repli (une liste demandée en tableau), les blocs de la console disent la même chose
+    fallback = client.get(f"{url}?vue_x=table")
+    assert fallback.status_code == 200 and "now-page parole" not in fallback.text
+    ConsoleHTML(fallback.text).check()
+    assert "Son humeur à ce moment-là" in html_of(fallback) and "Sa réponse, pas à pas" in html_of(fallback)
     # le même lien depuis l'épisode, et depuis l'événement de la parole
     utterance = client.portal.call(lambda: live.kernel.mind.store.get_events([int(seq)]))[0]
     said = client.get(f"{BASE}/episode/{utterance.correlation}?onglet=dit").text

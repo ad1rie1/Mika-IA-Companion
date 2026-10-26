@@ -40,6 +40,10 @@ from mika.kernel.faculty import SectionSpec, Zone
 TRIM_MARK = " …[coupé faute de place]"
 CONTEXT_HEADER = "--- ETAT INTERNE ---"
 CONTEXT_FOOTER = "--- FIN ETAT INTERNE ---"
+#: l'en-tête d'une section titrée (``Composer.header_fmt`` par défaut)
+HEADER_FMT = "--- {title} ---"
+#: l'ancre d'une section sans titre : ses premiers caractères (``ComposeTrace.anchors``)
+ANCHOR_CHARS = 80
 RESUME_MARKER = "(reprise de la conversation)"
 
 #: Étiquettes de section qui rangent l'état interne : l'arrière-plan (ce qui se
@@ -303,6 +307,10 @@ class ComposeTrace:
     #: ce que valent les sections rendues (``SectionBody.floor``, ``unkept``)
     floor: int = 0
     unkept: bool = False
+    #: le début de chaque section rendue de la zone stable ou volatile — sa ligne d'en-tête, ou sans titre ses
+    #: ``ANCHOR_CHARS`` premiers caractères : de quoi retrouver son texte dans le prompt gardé (l'ancre, puis ``sizes``
+    #: caractères en tout), sans le garder deux fois
+    anchors: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(slots=True)
@@ -330,15 +338,24 @@ def _defused(turn: ChatTurn) -> ChatTurn:
 
 @dataclass(slots=True)
 class Composer:
-    header_fmt: str = "--- {title} ---"
+    header_fmt: str = HEADER_FMT
     #: fil → premier message gardé (hystérésis de la coupe de l'historique)
     _history_cut: dict[str, int] = field(default_factory=dict)
 
     def render_block(self, spec: SectionSpec, body: SectionBody, text: str) -> str:
+        header = self.header(spec, body)
+        return f"{header}\n{text}" if header else text
+
+    def header(self, spec: SectionSpec, body: SectionBody) -> str:
+        """La ligne d'en-tête d'une section (vide : elle n'a pas de titre)."""
         title = body.title or spec.title
-        if not title:
-            return text
-        return f"{self.header_fmt.format(title=title)}\n{text}"
+        return self.header_fmt.format(title=title) if title else ""
+
+    def anchor(self, b: _Block) -> str:
+        """Le début d'une section rendue (``ComposeTrace.anchors``) : son en-tête et le saut de ligne, ou sans titre
+        ses premiers caractères."""
+        header = self.header(b.spec, b.body)
+        return f"{header}\n" if header else b.text[:ANCHOR_CHARS]
 
     def compose(
         self,
@@ -539,6 +556,7 @@ class Composer:
             floor=max((b.body.floor for b in rendered), default=0),
             unkept=any(b.body.unkept for b in rendered),
             reserved=max(0, reserved) + (len(prompt.chat_messages()) - 1) * budget.message_overhead,
+            anchors=tuple((b.spec.key, self.anchor(b)) for b in (*stable, *volatile)),
         )
         return prompt, trace
 

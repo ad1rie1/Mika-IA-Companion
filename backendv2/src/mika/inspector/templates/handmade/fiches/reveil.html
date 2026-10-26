@@ -1,0 +1,71 @@
+{# La fiche d'un réveil par API, son onglet « État » dessiné (app/handmade/wakeup.py, ADR 0068, 0121) : s'il reçoit, ce
+   qu'il lui fait faire, ce qu'il expose, sa clé et ses boutons (ceux de la console), comment l'appeler, ses derniers
+   appels. Ce qu'un appel apporte est une donnée venue d'ailleurs : citée, jamais obéie. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% from "_forms.html" import action_button %}
+<div class="now-page wake">
+  {% for a in alerts %}<p class="obj-alert {{ a.tone }}">{{ a.text }}</p>{% endfor %}
+
+  <ul class="person-tiles-list" aria-label="En bref">
+    {% for t in tiles %}<li class="{{ t.tone }}"><span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value">{{ t.value }}</span>{% if t.sub %}<span class="person-tile-sub">{{ t.sub }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+
+  <div class="now-grid two">
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="wake-does">
+        <header class="now-card-head"><h2 id="wake-does">Ce qu'il lui fait faire</h2><p>Ce que tu as déclaré : ce qui vaut pour chaque appel.</p></header>
+        {% if instructions %}
+        <p class="now-eyebrow wake-eyebrow">Ses consignes — elles priment sur ce que l'appel apporte</p>
+        <blockquote class="now-voice wake-orders"><p>{{ instructions }}</p></blockquote>
+        {% else %}<p class="now-empty">aucune consigne : elle fait de l'appel ce qu'elle juge bon</p>{% endif %}
+        <dl class="obj-facts">
+          <div><dt>Projet</dt><dd>{% if project %}{% if project.href %}<a href="{{ project.href }}">{{ project.text }}</a>{% else %}{{ project.text }}{% endif %}{% else %}aucun{% endif %}</dd></div>
+          <div><dt>Mode</dt><dd>{{ mode }}</dd></div>
+          <div><dt>Outils</dt><dd>{% if bundles %}<ul class="hm-chips obj-chips">{% for b in bundles %}<li class="hm-chip">{{ b }}</li>{% endfor %}</ul>{% else %}aucun <span class="now-muted">(seulement de quoi conclure)</span>{% endif %}</dd></div>
+          <div><dt>Rend compte à</dt><dd>{{ notify }}</dd></div>
+          <div><dt>Passe outre son sommeil</dt><dd>{{ rouse }}</dd></div>
+          <div><dt>Signé</dt><dd>{{ signed }}</dd></div>
+          <div><dt>Champs gardés</dt><dd>{% if fields %}<code>{{ fields|join(", ") }}</code>{% else %}tout le corps, quand l'appel n'a pas de « text »{% endif %}</dd></div>
+          <div><dt>Plafonds</dt><dd>{{ limits }}</dd></div>
+          <div><dt>Durée de vie d'un appel</dt><dd>{{ lifetime }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="now-card" aria-labelledby="wake-calls">
+        <header class="now-card-head"><h2 id="wake-calls">Ses derniers appels</h2>{% if calls %}<a class="now-more" href="{{ calls_tab }}">{{ "tous ses appels →" if more else "le détail →" }}</a>{% endif %}</header>
+        {% if calls %}
+        <ol class="wake-calls">
+          {% for x in calls %}
+          <li class="wake-call {{ x.tone }}">
+            <p class="wake-call-head"><span class="now-tag {{ x.status.tone }}">{{ x.status.text }}</span> <span class="now-muted">reçu {{ x.when }}</span>{% if x.episode %} · <a href="{{ PREFIX }}/episode/{{ x.episode|urlencode }}">l'épisode</a>{% endif %}</p>
+            <p class="now-eyebrow">Ce qu'il apportait</p>
+            <p class="wake-call-text">{{ x.text }}</p>
+            {% if x.report %}<p class="now-eyebrow">Son compte rendu</p><p class="person-bubble wake-report">{{ x.report }}</p>{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}<p class="now-empty">aucun appel pour l'instant</p>{% endif %}
+      </section>
+    </div>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="wake-key">
+        <header class="now-card-head"><h2 id="wake-key">Sa clé</h2><p>Montrée une seule fois, à sa naissance ; jamais gardée en clair.</p></header>
+        {% if key %}
+        <p class="wake-key"><code>{{ key.hint }}</code></p>
+        <p class="person-meta">{% if key.at %}générée {{ key.at }}{% endif %}{% if key.by %} par {{ key.by }}{% endif %}</p>
+        {% else %}<p class="now-empty">aucune : il ne reçoit rien</p>{% endif %}
+        {% if actions %}
+        <div class="toolbar hm-toolbar wake-key-actions" role="group" aria-label="Sa clé">{% for b in actions %}{{ action_button(forms.get(b.slot), loop.first and not key) }}{% endfor %}</div>
+        <p class="now-after now-muted">Une clé neuve rend l'ancienne inutile ; sans clé, plus aucun appel ne passe.</p>
+        {% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="wake-how">
+        <header class="now-card-head"><h2 id="wake-how">L'appeler</h2><p>Un POST sur son adresse, avec sa clé.</p></header>
+        {% for b in codes %}{{ one(b, 1) }}{% endfor %}
+        {% for b in notes %}{{ one(b, 1) }}{% endfor %}
+      </section>
+    </div>
+  </div>
+</div>

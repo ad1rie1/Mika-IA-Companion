@@ -21,8 +21,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from mika.adapters.imaging.config import ImagingConfig
 from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
 from mika.adapters.imaging.models import list_image_models
-from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig
-from mika.adapters.llm.models import ListingFailed, list_models
+from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig, tokens_fr
+from mika.adapters.llm.models import ListingFailed, list_models, settle_limits
 from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
@@ -221,9 +221,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         except ValidationError:
             raise ValueError("fournisseur incomplet (type, hôte ou clé)") from None
         try:
-            return [(name, name) for name in await list_models(spec)]
+            # ce que la liste dit de chacun (l'API Claude : fenêtre et réponse) se lit avant de choisir
+            return [(name, f"{name} — fenêtre {tokens_fr(got.window)}"
+                           + (f", réponse {tokens_fr(got.output)}" if got.output else "") if got.window else name)
+                    for name, got in await list_models(spec)]
         except ListingFailed as exc:
             raise ValueError(str(exc)) from None
+
+    async def settle_llm(cfg: LLMConfig) -> tuple[LLMConfig, list[str]]:
+        """Ce que chaque fournisseur dit de son modèle, lu avant d'enregistrer (ADR 0136)."""
+        if live.read_limits is None:
+            return cfg, []
+        return await settle_limits(cfg, live.read_limits)
 
     def routing() -> list[Any]:
         """Qui sert vraiment chaque rôle : le fournisseur déclaré, sinon le repli de rôle."""
@@ -333,11 +342,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             said = "aucun rôle ne le désigne" + (" ; ceux qui n'ont pas de fournisseur y retombent" if speaks else "")
         else:
             said = ", ".join(serves[:6]) + (f" et {len(serves) - 6} autres" if len(serves) > 6 else "")
+        if spec.detected_window:
+            accepts = f"{tokens_fr(spec.detected_window)} jetons" + (
+                f", réponse {tokens_fr(spec.detected_output)}" if spec.detected_output else "")
+        else:
+            accepts = "son fournisseur ne le dit pas" if spec.detected_for == spec.detection_key else \
+                "lu au prochain enregistrement"
         facts = [("Sert", f"{len(serves)} rôle{'s' if len(serves) > 1 else ''} : {said}" if serves else said),
                  ("Contexte", f"{spec.context_tokens:,} jetons".replace(",", " ") if spec.context_tokens
                   else "celui du modèle"),
                  ("Réponse au plus", f"{spec.max_output_tokens:,} jetons".replace(",", " ") if spec.max_output_tokens
                   else "ce que prévoit son type"),
+                 ("Le modèle accepte", accepts),
                  ("Appels en même temps", str(spec.slots) if spec.slots else "selon son type (1 en local, 4 hébergé)")]
         where = spec.base_url or spec.host
         if where:
@@ -674,7 +690,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         SettingsSection("modeles", "Modèles", "intelligence", LLMConfig, settings.llm, save_llm,
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
-                        describe={"backends": describe_backend},
+                        describe={"backends": describe_backend}, adjust=settle_llm,
                         pages=(
                             SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, extra=who_replies,
                                          description=(

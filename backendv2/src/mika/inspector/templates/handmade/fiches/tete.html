@@ -1,0 +1,9 @@
+{# L'en-tête d'une fiche dessinée d'un objet (app/handmade/fiche_parts.py, ADR 0121), sur tous ses onglets : sa sorte, son
+   nom, une ligne qui le dit, ses étiquettes et quelques faits ; la console met ses actions à droite. #}
+<div class="obj-head">
+  {% if kicker %}<p class="now-kicker">{{ kicker }}</p>{% endif %}
+  <h1>{{ title }}</h1>
+  {% if lede %}<p class="obj-head-lede">{{ lede }}</p>{% endif %}
+  {% if tags %}<p class="obj-head-tags">{% for t in tags %}<span class="now-tag {{ t.tone }}">{{ t.text }}</span>{% endfor %}</p>{% endif %}
+  {% if facts %}<p class="obj-head-facts">{% for f in facts %}<span>{% if f.label %}<span class="now-muted">{{ f.label }}</span> {% endif %}{% if f.href %}<a href="{{ f.href }}">{{ f.text }}</a>{% else %}{{ f.text }}{% endif %}</span>{% endfor %}</p>{% endif %}
+</div>

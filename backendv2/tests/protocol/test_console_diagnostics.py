@@ -119,9 +119,9 @@ def test_episode_summary_reads_cause_and_latest_speeches_without_losing_full_his
     assert re.search(r'onglet=resume" aria-current="page"', body)
     speeches = page(client, url + "?onglet=dit")
     assert all(f"Parole de diagnostic {n}" in speeches for n in range(5))
-    assert 'class="now-card person-list' in speeches  # les blocs d'une page sont dessinés (ADR 0121)
+    assert 'class="episode-speeches"' in speeches  # la page d'un épisode est dessinée (ADR 0121)
     journal = page(client, url + "?onglet=deroule")
-    assert 'class="now-card person-list' in journal and "7 au total" in journal
+    assert 'class="now-feed episode-feed"' in journal and "7 au total" in journal
     table = page(client, url + "?onglet=deroule&vue_pg1=table")
     assert 'person-list' not in table and 'class="hm-table"' in table and "7 au total" in table
     assert kernel.mind.head == before and len(backend.calls) == calls

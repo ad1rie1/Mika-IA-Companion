@@ -47,7 +47,14 @@ Toute la console est dessinée (ADR 0121) : les onglets des destinations sur les
 chiffres en tuiles, des faits en grille, des listes en cartes ou en lignes serrées, des tableaux sobres pour
 l'exploitation, les formulaires à leur place) ; les fiches, les épisodes, « pourquoi a-t-elle dit ça ? » et les
 panneaux (réglages, comptes, demandes en attente) dans le même vocabulaire. Seules les vues de la Forge gardent le
-rendu de la console : ses apps déclarent leur interface par un contrat.
+rendu de la console : ses apps déclarent leur interface par un contrat. Les fiches d'un but, d'un réveil, d'une
+conversation et d'une réponse Teams, d'une boîte aux lettres, d'un mail et d'un brouillon ont leur en-tête et leur
+onglet principal dessinés (`app/handmade/fiches.py`, gabarits `handmade/fiches/`) : ce qui compte d'abord (où en est
+le but et son plan, ce qu'un réveil fait faire et sa clé, le fil en bulles, ce qui partira en face du message), les
+formulaires que la console a préparés à leur place, leurs autres onglets bloc par bloc. Les pages de détail ont
+chacune leur gabarit (`inspector/templates/handmade/`, inclus comme un panneau, leurs blocs au repli ou quand une
+liste est demandée en tableau) : un épisode et ses sept onglets (`episode/`), un événement (`evenement/`), « pourquoi
+a-t-elle dit ça ? » et « pourquoi n'a-t-elle pas répondu ? » (`parole/`), la recherche (`recherche/`).
 
 ## Page par page
 
@@ -160,15 +167,27 @@ avancer maintenant, rouvrir, priorité, plan de travail.
 - **Initiatives** : budget du jour, période réfractaire, ignorées.
 - **Ses choix**, **Épisodes** (filtres sorte, issue, cible), **Échéances**.
 
-**Un épisode** a sa page, en onglets : Résumé (résultat, durée, événements et paroles, message déclencheur, ses
-dernières paroles — lu dans le journal, sans rien lancer), Déroulé, Ce qu'elle a dit, Prompt, Outils, Appels de
-modèle, Décision.
+**Un épisode** a sa page, en onglets, chacun dessiné : Résumé (son issue en grand, le message déclencheur en bulle,
+ses dernières paroles, ses chiffres en tuiles — durée, paroles, événements, appels et leur coût, outils —, lu dans le
+journal sans rien lancer), Déroulé (ses événements sur un fil, à la seconde), Ce qu'elle a dit (ses paroles en
+bulles, leur voix, leurs outils, leurs sections), Prompt (ce qui l'a décidé, ses sections dépliables sur leur texte,
+le contexte complet, ses outils en main, sa réponse pas à pas jusqu'à l'autrice), Outils (un appel par carte, ses
+arguments à côté de son résultat), Appels de modèle (leurs totaux, puis leur tableau), Décision.
+
+**Un événement** (`/inspecteur/evenement/<n>`) : ses repères, ses textes (en bulle pour une parole ou un message), son
+parcours dans la machine (qui le réduit, ce qu'il réveille, qui le projette), qui il concerne, les épisodes qu'il a
+déclenchés et leur issue, ses données brutes repliées.
 
 **Pourquoi a-t-elle dit ça ?** (ADR 0042) : une page par parole (`/inspecteur/parole/<seq>`), liée depuis le fil,
-l'onglet « Échanges » d'une personne, chaque épisode et chaque événement de parole : ce qu'elle a dit ; ce qui
-l'a fait parler (le message, ou la ligne exacte de l'arbitre pas à pas) ; les sections de son prompt, nommées ;
-ce dont elle s'est souvenue, avec le texte ; ses outils et leurs résultats ; l'avis de l'opératrice (« Ton avis »).
-Les clés techniques sont dans « Détails techniques ».
+l'onglet « Échanges » d'une personne, chaque épisode et chaque événement de parole. Elle est dessinée
+(`handmade/parole/parole.html`, ADR 0121 ; ses blocs au repli) : ce qu'elle a dit, en grand, avec ce qu'elle
+ressentait en le disant (sa balise) et ce qu'elle lisait chez l'autre ; ce qui l'a fait parler (le message, ou la
+ligne exacte de l'arbitre pas à pas) ; sa réponse pas à pas — le texte brut du modèle principal, la relecture,
+l'autrice (son contexte, sa réponse, retenue ou écartée et pourquoi), ce qui est parti ; son humeur à ce moment-là
+(les sections affectives de son prompt, telles qu'envoyées) ; ses outils en main et ceux qu'elle a appelés, avec
+leurs résultats ; ce dont elle s'est souvenue, avec le texte ; les sections de son prompt, nommées, chacune
+dépliable sur son texte, et le contexte complet tel qu'envoyé ; l'avis de l'opératrice (« Ton avis »). Les clés
+techniques sont dans « Détails techniques ».
 
 - « Rejouer avec… », sur cette page et dans l'onglet « Prompt » d'un épisode : le prompt gardé (la trace, 14 jours)
   renvoyé tel quel à un fournisseur déclaré, par `Gateway.try_on` — un seul appel, derrière tout le fond, sous le

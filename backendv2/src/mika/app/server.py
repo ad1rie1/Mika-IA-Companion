@@ -21,7 +21,7 @@ import logging
 import re
 import secrets
 import shutil
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,8 +40,9 @@ from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
 from mika.adapters.llm.calls import CallLog
 from mika.adapters.llm.claude_code import runtime_dir
-from mika.adapters.llm.config import LiveGateway, build_gateway
+from mika.adapters.llm.config import BackendSpec, LiveGateway, ModelLimits, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
+from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
@@ -67,7 +68,7 @@ from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
-from mika.app.handmade import handles, projects, servers
+from mika.app.handmade import fiches, handles, projects, servers
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN
@@ -206,6 +207,9 @@ class Live:
     gateway: LiveGateway
     #: une passerelle fournie de l'extérieur (tests, simulateur) n'est pas rechargée
     fixed: bool = False
+    #: lit chez son fournisseur ce qu'accepte le modèle d'une fiche qu'on enregistre (ADR 0136) ; ``None`` : personne
+    #: n'est interrogé (une passerelle fournie de l'extérieur, où les fournisseurs des réglages ne servent pas)
+    read_limits: Callable[[BackendSpec], Awaitable[ModelLimits]] | None = None
     preprocess: Any = None
     calls: CallLog | None = None
     persona_file: Path = PERSONA
@@ -452,7 +456,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
-                wakeups=wakeups, teams=teams)
+                wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits)
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -548,7 +552,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
                       backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
                       overviews={"person": person_overview, servers.KIND: servers.ServerOverview(),
-                                 handles.KIND: handles.HandleOverview(), projects.KIND: projects.ProjectFiche()},
+                                 handles.KIND: handles.HandleOverview(), projects.KIND: projects.ProjectFiche(),
+                                 **fiches.OVERVIEWS},
                       drawn=DRAWN,
                       plain_owners=frozenset({"forge"})),
         cookie_secure=web.cookie_secure)

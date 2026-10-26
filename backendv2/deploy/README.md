@@ -292,7 +292,8 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
    `journalctl -u mika | grep "code de premier démarrage"` — tiré à chaque démarrage tant qu'aucun compte
    n'existe, pour que le premier arrivé sur le réseau ne devienne pas opérateur.
 2. **Réglages › Modèles de texte** (`/inspecteur/reglages/fournisseurs`) : ajoute un fournisseur (sa clé est
-   chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre »
+   chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles ; à l'enregistrement, la fenêtre du
+   modèle est lue chez le fournisseur et borne le contexte, ADR 0136). Le premier déclaré sert « répondre »
    d'office, et les autres rôles y retombent — sauf la seconde passe (`polish`, l'autrice qui récrit ses messages),
    qui ne se fait que si un fournisseur lui est confié dans « Qui sert quoi ». Tant qu'aucun modèle ne sert
    « répondre », `/health` dit `degraded` et elle ne peut pas parler.

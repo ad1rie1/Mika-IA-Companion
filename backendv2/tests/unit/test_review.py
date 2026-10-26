@@ -211,6 +211,42 @@ def test_the_rewrite_is_said_with_the_feelings_of_the_first_draft(tmp_path):
     assert len(polishes) == 1 and not polishes[0].tools and "C'est le piège du métier" in polishes[0].messages[0].content
 
 
+def _authored_trace(tmp_path, polished_text):
+    def respond(req):
+        if req.role == "polish":
+            return LLMResponse(polished_text)
+        if req.role != "reply":
+            return LLMResponse("{}" if req.role in ("extract", "profile") else "[SILENCE]")
+        return LLMResponse(DRAFT)
+
+    kernel, clock, _llm, _out = build(tmp_path, respond, start=at_paris(2026, 10, 15, 18, 0), polish=True)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_1", "Adrien")
+        await asyncio.sleep(2 * HOUR / 1e6)
+        report = await (await kernel.perceive(said("user_1", "bah personne voit le taf que je fais"))).reply
+        await kernel.traces.flush()
+        trace = kernel.traces.get(report.id)
+        await kernel.stop()
+        return trace
+
+    return run_virtual(clock, main)
+
+
+def test_the_trace_keeps_what_the_author_read_and_wrote_kept_or_not(tmp_path):
+    """« Pourquoi a-t-elle dit ça ? » montre la réponse principale, puis le contexte et la réponse de l'autrice : la
+    trace les garde, et dit pourquoi le premier jet est parti quand elle est écartée."""
+    kept = _authored_trace(tmp_path / "a", "C'est vache, ça. Tout le monde voit le bug, jamais le reste.")
+    author = kept["naturel"]
+    assert DRAFT.startswith(author["premier_jet"][:20]) and kept["reply"] == DRAFT  # le texte brut, balises comprises
+    assert author["systeme"] and "bah personne voit le taf que je fais" in author["message"]
+    assert author["reponse"] == "C'est vache, ça. Tout le monde voit le bug, jamais le reste."
+    assert "ecartee" not in author
+    dropped = _authored_trace(tmp_path / "b", "Bla bla. " * 80)["naturel"]
+    assert dropped["ecartee"] == "plus longue que le premier jet" and dropped["reponse"].startswith("Bla bla.")
+
+
 def test_without_a_model_for_it_or_with_a_longer_rewrite_the_first_draft_is_said(tmp_path):
     report, _said, polishes = _polished_life(tmp_path / "a", "C'est vache.", routed=False)
     assert polishes == [] and report.text.startswith("C'est le piège du métier")

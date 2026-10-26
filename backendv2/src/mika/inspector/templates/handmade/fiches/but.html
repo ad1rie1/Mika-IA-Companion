@@ -1,0 +1,132 @@
+{# La fiche d'un but, son « Résumé » dessiné (app/handmade/goal.py, ADR 0121) : ce qu'elle cherche et où elle en est, son
+   avancement ; son plan de travail (les boutons de chaque tâche sont ceux de la faculté), ses dernières séances, ses
+   garde-fous, la dernière consigne ; un rappel : quoi, quand, à qui. Le détail complet, replié. Aucun style en ligne
+   (CSP) : une jauge est un attribut SVG. #}
+{% from "handmade/shared/macros.html" import bar %}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page goal">
+  {% for a in alerts %}<p class="obj-alert {{ a.tone }}">{{ a.text }}</p>{% endfor %}
+
+  <section class="now-hero goal-hero" aria-labelledby="goal-seeks">
+    <div class="goal-hero-main">
+      <p class="now-eyebrow" id="goal-seeks">{{ "À rappeler" if reminder else "Ce qu'elle cherche" }}</p>
+      {% if details and not reminder %}
+      <blockquote class="now-voice goal-seeks"><p>{{ details }}</p></blockquote>
+      {% else %}
+      <p class="goal-title">{{ title }}</p>
+      {% endif %}
+      {% if summary %}
+      <div class="goal-where">
+        <p class="now-eyebrow">Où elle en est{% if last_step %} · dernière séance {{ last_step }}{% endif %}</p>
+        <p>{{ summary }}</p>
+      </div>
+      {% elif not reminder %}<p class="now-empty goal-where">pas encore de séance : rien d'écrit sur où elle en est</p>{% endif %}
+      <ul class="now-chips">{% for c in chips %}<li>{{ c }}</li>{% endfor %}</ul>
+    </div>
+
+    {% if reminder %}
+    <aside class="goal-side" aria-label="Le rappel">
+      <p class="now-eyebrow">Quand</p>
+      <p class="goal-when">{{ remind.when }}</p>
+      {% if remind.urgent %}<p><span class="now-tag danger">urgent : même la nuit</span></p>{% endif %}
+      <dl class="goal-facts">
+        <div><dt>Statut</dt><dd><span class="now-tag {{ status.tone }}">{{ status.text }}</span></dd></div>
+        <div><dt>À qui</dt><dd>{% if address %}{% if address.href %}<a href="{{ address.href }}">{{ address.name }}</a>{% else %}{{ address.name }}{% endif %}{% else %}—{% endif %}</dd></div>
+        <div><dt>Dit</dt><dd>{{ "oui" if remind.said else "pas encore" }}</dd></div>
+        <div><dt>Tentatives</dt><dd class="now-num">{{ remind.attempts }}</dd></div>
+        {% if remind.retry %}<div><dt>Prochain essai</dt><dd>{{ remind.retry }}</dd></div>{% endif %}
+      </dl>
+    </aside>
+    {% else %}
+    <aside class="goal-side" aria-label="Avancement">
+      <p class="now-eyebrow">Avancement</p>
+      <p class="goal-count now-num"><b>{{ progress.done }}</b> / {{ progress.of }}</p>
+      <p class="goal-unit">{{ progress.unit }}{% if progress.note %} · <span class="danger">{{ progress.note }}</span>{% endif %}</p>
+      {{ bar(progress.w, "goal") }}
+      <dl class="goal-facts">
+        <div><dt>Statut</dt><dd><span class="now-tag {{ status.tone }}">{{ status.text }}</span></dd></div>
+        {% if next %}<div><dt>Prochaine séance</dt><dd>{{ next }}</dd></div>{% endif %}
+        {% if due %}<div><dt>Échéance</dt><dd>{{ due }}</dd></div>{% endif %}
+        {% if owner %}<div><dt>Pour</dt><dd>{% if owner.href %}<a href="{{ owner.href }}">{{ owner.name }}</a>{% else %}{{ owner.name }}{% endif %}</dd></div>{% endif %}
+      </dl>
+      {% if wish %}
+      <div class="now-meter">
+        <div class="now-meter-head"><span>Son envie{% if wish.frozen %} <span class="now-muted">(figée : en pause)</span>{% endif %}</span><span class="now-num">{{ wish.text }}</span></div>
+        {{ bar(wish.w, "goal-wish") }}
+      </div>
+      {% endif %}
+    </aside>
+    {% endif %}
+  </section>
+
+  {% if not reminder %}
+  <div class="now-grid two">
+    <div class="now-stack">
+      <section class="now-card goal-plan" aria-labelledby="goal-plan">
+        <header class="now-card-head">
+          <h2 id="goal-plan">Plan de travail{% if tasks %} ({{ progress.done }} / {{ progress.of }} faites){% endif %}</h2>
+          <p>Elle le lit à chaque séance — les tâches que tu poses passent d'abord — et le tient à jour.</p>
+        </header>
+        {% if tasks %}
+        <ol class="goal-tasks">
+          {% for t in tasks %}
+          <li class="goal-task t-{{ t.key }}">
+            <span class="goal-task-mark {{ t.tone }}" aria-hidden="true"></span>
+            <div class="goal-task-body">
+              <p class="goal-task-text">{{ t.text }}</p>
+              <p class="person-meta"><span class="now-tag {{ t.tone }}">{{ t.status }}</span> n° {{ t.id }} · posée par {{ "elle" if t.mine else "toi" }}</p>
+              {% if t.note %}<p class="goal-task-note">{{ t.note }}</p>{% endif %}
+              {% if t.actions %}<details class="goal-task-actions"><summary>Changer cette tâche</summary><div class="now">{% for x in t.actions %}{{ one(x, 1) }}{% endfor %}</div></details>{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}
+        <p class="now-empty">aucune tâche écrite : elle avance d'après le cadre.{% if editable %} Ajoute des étapes, elle les cochera.{% endif %}</p>
+        {% endif %}
+        {% if add %}<details class="goal-add"{{ ' open' if not tasks }}><summary>Ajouter une tâche</summary><div class="now">{{ one(add) }}</div></details>{% endif %}
+      </section>
+
+      {% if instruction %}
+      <section class="now-card" aria-labelledby="goal-order">
+        <header class="now-card-head"><h2 id="goal-order">La dernière consigne</h2><a class="now-more" href="{{ tabs.carnet }}">le carnet →</a></header>
+        <blockquote class="now-voice goal-order"><p>{{ instruction }}</p></blockquote>
+        <p class="now-after now-muted">La plus récente prime sur les autres.</p>
+      </section>
+      {% endif %}
+    </div>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="goal-steps">
+        <header class="now-card-head"><h2 id="goal-steps">Ses dernières séances</h2><a class="now-more" href="{{ tabs.seances }}">toutes →</a></header>
+        {% if steps %}
+        <ol class="goal-steps">
+          {% for s in steps %}
+          <li>
+            <p class="goal-step-head"><span class="now-tag {{ s.tone }}">{{ s.verdict }}</span>{% if s.proof %} <span class="now-tag {{ 'ok' if s.proof == 'prouvé' else 'danger' }}">{{ s.proof }}</span>{% endif %} <span class="now-muted">{{ s.when }}</span>{% if s.episode %} · <a href="{{ PREFIX }}/episode/{{ s.episode|urlencode }}">l'épisode</a>{% endif %}</p>
+            <p class="goal-step-text">{{ s.text }}</p>
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}<p class="now-empty">aucune séance rapportée encore</p>{% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="goal-guards">
+        <header class="now-card-head"><h2 id="goal-guards">Garde-fous</h2><p>Ce qui l'arrête avant qu'elle ne s'épuise dessus.</p></header>
+        {% for label, g in guards %}
+        <div class="now-meter goal-guard {{ g.tone }}">
+          <div class="now-meter-head"><span>{{ label }}</span><span class="now-num">{{ g.n }} / {{ g.limit }} <span class="now-muted">· au-delà : {{ g.then }}</span></span></div>
+          {{ bar(g.w, "goal-guard-bar " ~ g.tone) }}
+        </div>
+        {% endfor %}
+        <dl class="goal-facts goal-proofs">
+          <div><dt>« Fini » sans preuve</dt><dd class="now-num">{{ unproven }}</dd></div>
+          <div><dt>Preuves</dt><dd><span class="now-num">{{ evidence }}</span> <span class="now-muted">outil(s) qui ont produit</span></dd></div>
+        </dl>
+      </section>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if detail %}{{ one(detail) }}{% endif %}
+</div>

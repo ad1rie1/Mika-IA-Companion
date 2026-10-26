@@ -19,19 +19,21 @@ from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, de
 from mika.inspector.formview import action_view, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.canals import canals_post
+from mika.inspector.pages.episode_drawn import episode_panel
 from mika.inspector.pages.families import families_post
 from mika.inspector.pages.journal import (
     EPISODE_TABS,
     episode_head,
     episode_tab,
-    event_blocks,
+    event_page,
+    event_panel,
     replay_blocks,
     replay_panel,
 )
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.tools import expose_post
-from mika.inspector.pages.why import silence_page, why_page
+from mika.inspector.pages.why import silence_page, why_page, why_panel
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, Forms, secure, wants_table
 from mika.kernel.faculty import InspectSpec
 from mika.kernel.forms import RENDERED, describe
@@ -364,8 +366,11 @@ class Pages:
             slug = "resume"
         base = f"{PREFIX}/episode/{quote(corr, safe='')}"
         tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0} for s, t in EPISODE_TABS]
-        blocks = episode_tab(self.ui, corr, slug, info, request.query_params)
         panel = replay_panel(self.ui, corr, self.back(request)) if slug == "prompt" else None
+        # dessinée (ADR 0121) ; ses blocs au repli, ou quand une liste est demandée en tableau
+        drawn = None if wants_table(request.query_params) else episode_panel(
+            self.ui, corr, slug, info, dict(request.query_params), self.ui.env(), panel)
+        blocks = [] if drawn is not None else episode_tab(self.ui, corr, slug, info, request.query_params)
         return self.render_page(request, title=f"Épisode · {info['kind']}", heading=f"Un épisode : {info['kind']}",
                                 subtitle=dict(EPISODE_TABS)[slug] + " · " + {
                                     "resume": "Le résultat, le déclencheur et les paroles produites, en un regard.",
@@ -378,7 +383,7 @@ class Pages:
                                 }[slug],
                                 active="decisions", crumbs=[("Décisions", f"{PREFIX}/decisions/episodes")],
                                 head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks,
-                                panel=panel)
+                                panel=drawn or panel)
 
     async def replay(self, request: Request) -> Response:
         """« Rejouer avec… » : le prompt gardé d'un épisode envoyé à un autre fournisseur (``journal.replay_blocks``).
@@ -431,18 +436,28 @@ class Pages:
         if got["correlation"]:
             crumbs.append(("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}"))
         panel = replay_panel(self.ui, got["correlation"], self.back(request)) if spoken and got["correlation"] else None
+        # dessinée (ADR 0121), sauf au repli : ses blocs, si le dessin échoue ou si on demande le tableau
+        drawn = None if wants_table(request.query_params) else why_panel(got, env, dict(request.query_params), panel)
+        if drawn is not None:
+            return self.render_page(request, title=got["title"], heading=got["title"], active="fil", facts=facts,
+                                    blocks=[], crumbs=crumbs, panel=drawn)
         return self.render_page(request, title=got["title"], heading=got["title"], subtitle=got["subtitle"],
                                 active="fil", facts=facts, blocks=got["blocks"], crumbs=crumbs, panel=panel)
 
     async def event(self, request: Request) -> Response:
         seq = int_query(request.path_params["seq"], 0)
-        got = event_blocks(self.ui, seq, request.query_params) if seq > 0 else None
+        got = event_page(self.ui, seq, request.query_params) if seq > 0 else None
         if got is None:
             return self.render_page(request, title="Événement introuvable", active="systeme", status=404,
                                     blocks=[Note("Aucun événement à ce numéro.", "warn")])
-        title, blocks = got
-        return self.render_page(request, title=title, active="systeme",
-                                crumbs=[("Journal d’événements", f"{PREFIX}/systeme/chronologie")], blocks=blocks)
+        # dessinée (ADR 0121) ; ses blocs au repli
+        drawn = None if wants_table(request.query_params) else event_panel(got, self.ui.env(),
+                                                                           dict(request.query_params))
+        crumbs = [("Journal d’événements", f"{PREFIX}/systeme/chronologie")]
+        if drawn is not None:
+            return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=[],
+                                    panel=drawn)
+        return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=got["blocks"])
 
     # ── vitaux, connexion ──
     async def vitals(self, request: Request) -> Response:

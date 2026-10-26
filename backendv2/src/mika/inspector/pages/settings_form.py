@@ -21,7 +21,10 @@ un réglage en particulier :
   sans contenu) et la page revient avec un message ;
 - une section qui le déclare (``preview``) a un bouton « Voir l'effet » : la
   soumission, relue et validée comme pour l'enregistrer, revient avec ce qu'elle
-  changerait — rien n'est enregistré ni audité.
+  changerait — rien n'est enregistré ni audité ;
+- une section qui le déclare (``adjust``) complète la valeur validée juste avant
+  de l'enregistrer (ce qui se lit ailleurs : la fenêtre d'un modèle) et le dit à
+  la suite du message.
 """
 
 from __future__ import annotations
@@ -547,6 +550,9 @@ class SettingsForms:
     async def _commit(self, ui: Any, s: SettingsSection, new: Any, by: str, page: str, subject: str,
                       state: State, message: str = "", back: str = "") -> tuple[Response | None, dict[str, State], int]:
         assert s.save is not None
+        notes: list[str] = []
+        if s.adjust is not None:
+            new, notes = await s.adjust(new)
         try:
             problems = await s.save(new, by)
         except ValueError as exc:
@@ -556,7 +562,8 @@ class SettingsForms:
             return None, {s.key: state}, 400
         await operations.audit(ui.kernel, f"console.reglages.{s.key}", by=by, subject_kind="reglage",
                                subject=subject)
-        return self._done(ui, page, "ok", message or f"{s.label} : enregistré.", back), {}, 303
+        said = " ".join([message or f"{s.label} : enregistré.", *notes])
+        return self._done(ui, page, "ok", said, back), {}, 303
 
     async def _save_record(self, ui: Any, s: SettingsSection, current: Any, data: Mapping[str, str],
                            lists: Mapping[str, list[str]], by: str,

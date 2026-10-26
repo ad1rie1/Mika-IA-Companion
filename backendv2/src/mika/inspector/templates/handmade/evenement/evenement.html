@@ -1,0 +1,62 @@
+{# Un événement du journal, dessiné (inspector/pages/journal.py, ``event_page``) : ses repères, ses textes (en bulle
+   pour une parole ou un message), son parcours dans la machine, qui il concerne, ce qu'il a déclenché, ses données
+   brutes. Le titre de la page dit déjà ce qui s'est passé. Aucun style en ligne (CSP). #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page evenement">
+
+  <section class="now-card event-head" aria-label="Ses repères">
+    <ul class="now-chips">
+      <li>n° {{ v.number }}</li><li>{{ v.when }}</li><li>{{ v.owner }}</li><li>origine : {{ v.origin }}</li>
+    </ul>
+    <p class="now-after"><a href="{{ v.episode.href }}">{{ v.episode.label }} →</a>{% if v.why %} · <a href="{{ v.why }}">Pourquoi a-t-elle dit ça ? →</a>{% endif %}</p>
+  </section>
+
+  {% if v.texts %}
+  <section class="now-card" aria-labelledby="event-texts">
+    <header class="now-card-head"><h2 id="event-texts">Ce qu'il dit</h2></header>
+    {% for t in v.texts %}
+    {% if t.text is none %}<p class="now-empty">{{ t.field }} : oublié (le texte a été effacé)</p>
+    {% elif v.speech %}
+    <ol class="person-thread"><li class="{{ 'mine' if v.mine else 'theirs' }}"><p class="person-bubble">{{ t.text }}</p>{% if v.texts|length > 1 %}<p class="person-meta">{{ t.field }}</p>{% endif %}</li></ol>
+    {% else %}
+    <div class="event-text"><p class="now-eyebrow">{{ t.field }}</p><p>{{ t.text }}</p></div>
+    {% endif %}
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="event-path">
+      <header class="now-card-head"><h2 id="event-path">Son parcours dans la machine</h2></header>
+      <dl class="event-path">
+        <div><dt>réduit par</dt><dd>{% if v.readers %}<ul class="hm-chips">{% for x in v.readers %}<li class="hm-chip">{{ x }}</li>{% endfor %}</ul>{% else %}<span class="now-muted">aucune faculté</span>{% endif %}</dd></div>
+        <div><dt>réveille</dt><dd>{% if v.processes %}<ul class="hm-chips">{% for x in v.processes %}<li class="hm-chip">{{ x }}</li>{% endfor %}</ul>{% else %}<span class="now-muted">aucun processus</span>{% endif %}</dd></div>
+        <div><dt>projeté par</dt><dd>{% if v.projectors %}<ul class="hm-chips">{% for x in v.projectors %}<li class="hm-chip"><code>{{ x }}</code></li>{% endfor %}</ul>{% else %}<span class="now-muted">aucune projection</span>{% endif %}</dd></div>
+      </dl>
+    </section>
+    <section class="now-card" aria-labelledby="event-who">
+      <header class="now-card-head"><h2 id="event-who">Qui il concerne</h2></header>
+      {% if v.people %}<ul class="hm-chips">{% for x in v.people %}<li class="hm-chip">{% if x.href %}<a href="{{ x.href }}">{{ x.name }}</a>{% else %}{{ x.name }}{% endif %}</li>{% endfor %}</ul>
+      {% else %}<p class="now-empty">personne en particulier</p>{% endif %}
+      <dl class="person-fields episode-fields event-facts">
+        <div><dt>type</dt><dd><code>{{ v.type }}</code></dd></div>
+        <div><dt>lu sur la tête</dt><dd class="now-num">{{ v.basis }}</dd></div>
+      </dl>
+    </section>
+  </div>
+
+  {% if v.triggered %}
+  <section class="now-card" aria-labelledby="event-triggered">
+    <header class="now-card-head"><h2 id="event-triggered">Ce qu'il a déclenché</h2></header>
+    <ul class="person-entries">
+      {% for t in v.triggered %}
+      <li><div class="person-entry-top"><p class="person-entry-title"><a href="{{ t.href }}">{{ t.kind }}</a> <span class="now-muted">vers {{ t.to }}</span></p><span class="person-entry-time">{{ t.when }}</span></div>
+        <p class="person-entry-tags"><span class="now-tag {{ t.outcome[1] }}">{{ t.outcome[0] }}</span></p></li>
+      {% endfor %}
+    </ul>
+    {% if v.pager %}<div class="episode-pager">{{ pages(v.pager) }}</div>{% endif %}
+  </section>
+  {% endif %}
+
+  <details class="now-card person-fold"><summary>Ses données brutes</summary><pre class="hm-code">{{ v.raw }}</pre></details>
+</div>

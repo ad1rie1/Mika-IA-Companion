@@ -1,0 +1,65 @@
+{# Ce qu'une parole et un épisode montrent de la même façon (parole.html, silence.html, episode.html ; feuille
+   parole.css) : sa réponse pas à pas, les sections de son prompt dépliables sur leur texte, le contexte complet, ses
+   outils. Aucun style en ligne (CSP). #}
+{% from "handmade/shared/macros.html" import bar %}
+
+{% macro steps(list, kept=True) -%}
+{% if not kept %}<p class="now-empty">la trace de cet épisode n'est plus gardée (14 jours, oubli) : seul ce qui est parti reste</p>{% endif %}
+<ol class="parole-steps">
+  {% for s in list %}
+  <li class="parole-step{{ ' last' if s.said is defined }}">
+    <p class="parole-step-head"><span class="parole-step-title">{{ s.title }}</span>{% if s.tag %} <span class="now-tag {{ 'close' if s.tag.tone == 'ok' else 'secret' }}">{{ s.tag.text }}</span>{% endif %}</p>
+    {% if s.meta %}<p class="person-meta">{{ s.meta }}</p>{% endif %}
+    {% if s.context %}
+    <details class="parole-fold"><summary>Son contexte</summary>
+      {% for c in s.context %}<div class="hm-code-block"><p class="now-eyebrow">{{ c.title }}</p><pre class="hm-code">{{ c.text }}</pre></div>{% endfor %}
+    </details>
+    {% endif %}
+    {% if s.said is defined %}
+    <p class="person-bubble parole-sent">{{ s.said }}</p>
+    {% elif s.text %}
+    {% if s.label %}<p class="now-eyebrow">{{ s.label }}</p>{% endif %}
+    <pre class="hm-code">{{ s.text }}</pre>
+    {% else %}<p class="now-empty">{{ s.empty }}</p>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{%- endmacro %}
+
+{% macro sections(prompt) -%}
+<ul class="parole-sections">
+  {% for r in prompt.rows %}
+  <li class="{{ r.tone }}">
+    {% if r.text %}<details><summary>{% endif %}
+    <span class="parole-section-name">{{ r.label }}</span>
+    <span class="parole-section-bar">{{ bar(r.share) }}</span>
+    <span class="parole-section-size now-num">{{ r.chars }}</span>
+    {% if r.state %}<span class="now-tag {{ 'close' if r.tone == 'ok' else ('secret' if r.tone == 'warn' else '') }}">{{ r.state }}</span>{% endif %}
+    {% if r.text %}</summary><pre class="hm-code">{{ r.text }}</pre><p class="person-meta">clé : <code>{{ r.key }}</code></p></details>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro prompt_head(prompt) -%}
+{% if prompt.kept %}<p>{{ prompt.chars }} caractères, {{ prompt.turns }} tour(s) de conversation. Une section rognée a perdu sa fin faute de place ; une coupée n'a pas été montrée.</p>{% else %}<p>La trace détaillée n'a pas été gardée : seule leur liste est au journal.</p>{% endif %}
+{%- endmacro %}
+
+{% macro context(parts, open=False) -%}
+{% if parts %}
+<details class="parole-fold parole-context"{{ ' open' if open }}><summary>Le contexte complet, tel qu'envoyé au modèle</summary>
+  {% for c in parts %}<div class="hm-code-block"><p class="now-eyebrow">{{ c.title }}</p><pre class="hm-code">{{ c.text }}</pre></div>{% endfor %}
+</details>
+{% endif %}
+{%- endmacro %}
+
+{% macro tools(t) -%}
+{% if t.called %}
+<ul class="hm-chips parole-tools">{% for x in t["items"] if x.called %}<li class="hm-chip called{{ ' failed' if not x.ok }}">{{ x.name }}<span class="now-tag {{ 'close' if x.ok else 'secret' }}">{{ 'appelé' if x.ok else 'échec' }}</span></li>{% endfor %}</ul>
+{% else %}<p class="now-empty">elle n'a appelé aucun outil pour dire ça</p>{% endif %}
+{% if t.known and t["items"] %}
+<details class="parole-fold parole-offered"><summary>Les {{ t["items"]|length }} outils qu'elle avait en main</summary>
+  <ul class="hm-chips parole-tools">{% for x in t["items"] %}<li class="hm-chip{{ ' called' if x.called }}">{{ x.name }}</li>{% endfor %}</ul>
+</details>
+{% elif t.known %}<p class="now-after now-muted">Aucun outil ne lui était offert.</p>{% endif %}
+{%- endmacro %}

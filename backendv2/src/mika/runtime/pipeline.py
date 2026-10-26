@@ -873,24 +873,34 @@ class EpisodeRunner:
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
                          priority=llm_req.priority, deadline_s=llm_req.deadline_s,
                          meta={**dict(llm_req.meta), "passe": "naturel"})
+        # ce qu'elle a lu et ce qu'elle a rendu, gardés dans la trace quelle que soit l'issue (« pourquoi a-t-elle dit
+        # ça ? ») ; écartée, la raison dit pourquoi le premier jet est parti
+        seen: dict[str, Any] = {"premier_jet": text, "autrice": author.key, "systeme": system, "message": message}
+        ep.seen["naturel"] = seen
         again = await self._extra_pass(
             ep, lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
             label="seconde passe : appel du modèle")
         if isinstance(again, Failed):
+            seen["ecartee"] = f"panne : {_describe(again.error)}"
             return text
+        seen["reponse"] = again.text
         kept = call(keep, again.text, label="seconde passe : ses messages")
         if isinstance(kept, Failed):
+            seen["ecartee"] = "ses messages illisibles"
             return text
         polished, _annotations = self._parse(kept, name)
         polished = polished.strip()
-        if not polished or is_silence(polished) or len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
+        if not polished or is_silence(polished):
+            seen["ecartee"] = "rien rendu"
+            return text
+        if len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
+            seen["ecartee"] = "plus longue que le premier jet"
             return text
         if not keeps_facts(text, polished):
             # l'autrice n'a pas vu les résultats des outils : une température, une heure, un lien du premier jet
             # qui manquent au texte récrit, et c'est le premier jet qui part
-            ep.seen["naturel"] = {"premier_jet": text, "autrice": author.key, "ecartee": "faits du premier jet perdus"}
+            seen["ecartee"] = "faits du premier jet perdus"
             return text
-        ep.seen["naturel"] = {"premier_jet": text, "autrice": author.key}
         return polished
 
     async def _author_draft(self, ep: _Live, eid: str, llm_req: LLMRequest, flow: str, text: str, about: str) -> str:

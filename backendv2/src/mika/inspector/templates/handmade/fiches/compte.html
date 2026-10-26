@@ -1,0 +1,49 @@
+{# La fiche d'une boîte aux lettres, son onglet « État » dessiné (app/handmade/mail_fiches.py, ADR 0121) : si elle relève,
+   ses dossiers et leurs non-lus (chacun mène à sa liste), comment elle y écrit, et « Écrire depuis cette boîte » (le
+   formulaire de la console). Une jauge est un attribut SVG (CSP). #}
+{% from "handmade/shared/macros.html" import bar %}
+{% from "_forms.html" import action_button %}
+<div class="now-page mailbox">
+  {% for a in alerts %}<p class="obj-alert {{ a.tone }}">{{ a.text }}</p>{% endfor %}
+
+  <ul class="person-tiles-list" aria-label="En bref">
+    {% for t in tiles %}<li class="{{ t.tone }}"><span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value">{{ t.value }}</span>{% if t.sub %}<span class="person-tile-sub">{{ t.sub }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="mailbox-folders">
+      <header class="now-card-head"><h2 id="mailbox-folders">Ses dossiers</h2>{% if folders %}<span class="person-count now-num">{{ folders|length }}</span>{% endif %}<a class="now-more" href="{{ box }}">la réception →</a></header>
+      {% if folders %}
+      <ul class="mailbox-folders">
+        {% for f in folders %}
+        <li class="{{ 'polled' if f.polled }}">
+          <p class="mailbox-folder-head"><a href="{{ f.href }}">{{ f.label }}</a>{% if f.polled %} <span class="now-tag info">relevé</span>{% endif %}<span class="mailbox-folder-count now-num">{% if f.unseen %}<b>{{ f.unseen }}</b> non lu{{ 's' if f.unseen > 1 }} · {% endif %}{{ f.total }} gardé{{ 's' if f.total > 1 }}</span></p>
+          {{ bar(f.w, "mailbox-unseen") }}
+          <p class="person-meta"><code>{{ f.name }}</code> · {{ f.sync }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="now-after now-muted">Elle ne remarque que ce qui arrive dans les dossiers relevés.</p>
+      {% else %}<p class="now-empty">la liste des dossiers n'est pas encore connue : « Actualiser les dossiers », en haut</p>{% endif %}
+    </section>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="mailbox-voice">
+        <header class="now-card-head"><h2 id="mailbox-voice">Comment elle y écrit</h2><a class="now-more" href="{{ voice_tab }}">sa voix →</a></header>
+        <dl class="obj-facts">
+          <div><dt>Elle y écrit</dt><dd><span class="now-tag info">{{ voice }}</span></dd></div>
+          {% if sender %}<div><dt>Sous le nom</dt><dd>{{ sender }}</dd></div>{% endif %}
+          <div><dt>Signature</dt><dd>{{ "ajoutée sous chaque envoi" if signature else "aucune" }}</dd></div>
+        </dl>
+        {% if write %}<div class="toolbar hm-toolbar mailbox-write" role="group" aria-label="Écrire">{% for b in write %}{{ action_button(forms.get(b.slot), True) }}{% endfor %}</div>{% endif %}
+      </section>
+
+      <details class="now-card person-fold">
+        <summary>Ses réglages, sans secret</summary>
+        {% if details %}<dl class="obj-facts">{% for label, value in details %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>
+        {% else %}<p class="now-empty">aucun réglage connu</p>{% endif %}
+        <p class="now-after now-muted">Ils se modifient dans Réglages › Plugins › Boîtes aux lettres.</p>
+      </details>
+    </div>
+  </div>
+</div>

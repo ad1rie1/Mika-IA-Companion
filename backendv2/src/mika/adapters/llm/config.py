@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -38,6 +39,8 @@ ROLES = tuple(str(r) for r in Role)
 #: ``THINKING_CONTEXT_TOKENS`` plutôt que le défaut commun, qui leur laisserait la moitié de leur prompt
 THINKING_KINDS = frozenset({"claude", "claude_code"})
 THINKING_CONTEXT_TOKENS = 40_000
+#: le plus petit contexte qu'un fournisseur peut déclarer (une fenêtre lue plus petite n'est pas gardée)
+MIN_CONTEXT_TOKENS = 2_000
 
 log = logging.getLogger("mika.llm.config")
 
@@ -50,6 +53,20 @@ _AUTHS = (("abonnement", "le login de la CLI (abonnement)"), ("cle_api", "une cl
 #: le nom d'un type de fournisseur, pour un opérateur (« Ollama Cloud »)
 KIND_LABELS = {"claude": "Claude, par l'API", "claude_code": "Claude Code (la CLI)", "openai": "Compatible OpenAI",
                "ollama": "Ollama, sur cette machine", "ollama_cloud": "Ollama Cloud"}
+
+
+def tokens_fr(n: int) -> str:
+    """Un nombre de jetons tel qu'on le lit (« 1 000 000 »)."""
+    return f"{n:,}".replace(",", " ")
+
+
+@dataclass(frozen=True, slots=True)
+class ModelLimits:
+    """Ce qu'accepte un modèle, dit par son fournisseur : sa fenêtre et sa plus longue réponse, en jetons (0 : il
+    ne le dit pas)."""
+
+    window: int = 0
+    output: int = 0
 
 
 class BackendSpec(BaseModel):
@@ -71,17 +88,31 @@ class BackendSpec(BaseModel):
                                               "charge d'elle-même une fois le fournisseur enregistré).",
                                group="Le fournisseur", loader="models", advanced=False, order=20)]
     context_tokens: Annotated[int, Knob(label="Contexte (jetons)",
-        help="Fenêtre totale de ce fournisseur : entrée, outils et réserve de sortie. Un modèle qui réfléchit "
-             "(Claude 5.x, Fable) réserve jusqu'à 16 384 jetons de sortie — au plus la moitié de cette fenêtre : "
-             "compter 40 000 au moins pour lui laisser son prompt entier.",
-        lo=2_000, hi=1_000_000, step=1_000, group="Budgets", advanced=False, order=21)] = \
-        Field(default=24_000, ge=2_000, le=1_000_000)
+        help="Ce que chaque appel envoie au plus : entrée, outils et réserve de sortie. Elle le remplit (le fil, "
+             "les résultats d'outils) : c'est un budget, jamais plus que la fenêtre du modèle. Un modèle qui "
+             "réfléchit (Claude 5.x, Fable) réserve jusqu'à 16 384 jetons de sortie — au plus la moitié du "
+             "contexte : compter 40 000 au moins pour lui laisser son prompt entier.",
+        lo=MIN_CONTEXT_TOKENS, hi=1_000_000, step=1_000, group="Budgets", advanced=False, order=21)] = \
+        Field(default=24_000, ge=MIN_CONTEXT_TOKENS, le=1_000_000)
     max_output_tokens: Annotated[int, Knob(label="Sortie max. (jetons)",
-        help="Plafond de chaque réponse, tous rôles confondus. 0 : la limite demandée par le rôle.",
+        help="Plafond de chaque réponse, tous rôles confondus, jamais plus que la réponse du modèle. 0 : la "
+             "limite demandée par le rôle.",
         lo=0, hi=65_536, group="Budgets", advanced=False, order=22)] = Field(default=0, ge=0, le=65_536)
     chars_per_token: Annotated[float, Knob(label="Caractères par jeton estimé",
         help="Estimation du contexte. Réduire cette valeur pour réserver davantage de place.",
         lo=1.0, hi=4.0, step=0.1, group="Budgets", order=23)] = Field(default=3.6, ge=1.0, le=4.0)
+    # ce que le fournisseur dit du modèle choisi, lu quand la fiche s'enregistre (ADR 0136) : des bornes, jamais
+    # des valeurs proposées — elle remplit le contexte qu'on lui déclare, et Ollama en fait sa mémoire
+    detected_window: Annotated[int, Knob(label="Fenêtre du modèle (jetons)",
+        help="Lue chez le fournisseur quand la fiche s'enregistre : le contexte n'en dépasse jamais (plus grand, "
+             "il y est ramené). 0 : inconnue — Claude Code, ou un fournisseur qui ne la dit pas.",
+        lo=0, hi=10_000_000, group="Budgets", readonly=True, advanced=False, order=24)] = Field(default=0, ge=0)
+    detected_output: Annotated[int, Knob(label="Réponse du modèle (jetons)",
+        help="Sa plus longue réponse, lue avec sa fenêtre : la sortie max. n'en dépasse jamais. 0 : inconnue.",
+        lo=0, hi=10_000_000, group="Budgets", readonly=True, advanced=False, order=25)] = Field(default=0, ge=0)
+    detected_for: Annotated[str, Knob(label="Lu pour", help="Le type et le modèle dont la fenêtre a été lue (vide : "
+                                      "pas encore demandé) ; un autre modèle les oublie.", widget="hidden",
+                                      readonly=True, order=26)] = ""
 
     auth: Annotated[Literal["abonnement", "cle_api"], Knob(
         label="Connexion", help="Le serveur ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
@@ -157,15 +188,61 @@ class BackendSpec(BaseModel):
             return {k: v for k, v in data.items() if k != "fallback"}
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def _detected_follows_model(cls, data: Any) -> Any:
+        """Ce qui a été lu d'un modèle ne vaut que pour lui : un autre modèle (ou le même nom chez un autre type de
+        fournisseur) oublie sa fenêtre et sa réponse, relues au prochain enregistrement."""
+        if isinstance(data, Mapping) and data.get("detected_for") and \
+                data["detected_for"] != f"{data.get('kind')}:{data.get('model')}":
+            return {**data, "detected_window": 0, "detected_output": 0, "detected_for": ""}
+        return data
+
     @model_validator(mode="after")
     def _output_fits_context(self):
         if self.max_output_tokens >= self.context_tokens:
             raise ValueError("la sortie maximale doit être inférieure au contexte du fournisseur")
         return self
 
+    @model_validator(mode="after")
+    def _within_model(self):
+        if self.detected_window and self.context_tokens > self.detected_window:
+            raise ValueError(f"le contexte ({tokens_fr(self.context_tokens)} jetons) dépasse la fenêtre de ce modèle "
+                             f"({tokens_fr(self.detected_window)})")
+        if self.detected_output and self.max_output_tokens > self.detected_output:
+            raise ValueError(f"la sortie maximale ({tokens_fr(self.max_output_tokens)} jetons) dépasse la plus "
+                             f"longue réponse de ce modèle ({tokens_fr(self.detected_output)})")
+        return self
+
     @property
     def limits(self) -> LLMLimits:
         return LLMLimits(self.context_tokens, self.max_output_tokens, self.chars_per_token)
+
+    @property
+    def detection_key(self) -> str:
+        """Ce dont ``detected_for`` garde la trace : le type de fournisseur et le modèle."""
+        return f"{self.kind}:{self.model}"
+
+    def fitted(self, got: ModelLimits) -> tuple[BackendSpec, list[str]]:
+        """La fiche avec ce que son fournisseur dit du modèle : sa fenêtre et sa réponse gardées, le contexte et la
+        sortie max. ramenés dessous s'ils les dépassent — jamais relevés (ADR 0136). Rend aussi ce qui a changé, en
+        mots. Une fenêtre plus petite que ``MIN_CONTEXT_TOKENS`` n'est pas gardée."""
+        window = got.window if got.window >= MIN_CONTEXT_TOKENS else 0
+        raw = {**self.model_dump(), "detected_window": window, "detected_output": got.output,
+               "detected_for": self.detection_key}
+        said = []
+        if got.window and not window:
+            said.append(f"sa fenêtre lue ({tokens_fr(got.window)} jetons) est trop petite pour elle : pas gardée")
+        if window and self.context_tokens > window:
+            raw["context_tokens"] = window
+            said.append(f"contexte ramené à {tokens_fr(window)} jetons, la fenêtre du modèle")
+        output = min(self.max_output_tokens, got.output) if got.output else self.max_output_tokens
+        if output >= raw["context_tokens"]:
+            output = raw["context_tokens"] // 2
+        if output != self.max_output_tokens:
+            raw["max_output_tokens"] = output
+            said.append(f"sortie max. ramenée à {tokens_fr(output)} jetons")
+        return BackendSpec.model_validate(raw), said
 
     @property
     def local(self) -> bool:

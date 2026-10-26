@@ -412,6 +412,15 @@ def test_select_must_be_a_choice():
     assert errors == {"mode": "choisissez une valeur"}
 
 
+def test_select_accepts_a_blank_choice():
+    # « rien de particulier » vaut "" : la console ne doit pas le prendre pour un champ laissé vide
+    current = flatten(Temperament(reaction="anger", defense="deny"))
+    values, errors = parse(describe(Temperament), form("reaction", "defense", reaction="", defense=""),
+                           current=current)
+    assert errors == {}
+    assert values == {"reaction": "", "defense": ""}
+
+
 def test_unrendered_and_readonly_fields_are_untouched():
     submitted = form("title", title="  Bonjour ", count="9", free="2", extra="{}")
     submitted["_champs"] += ["free", "extra", "rows", "inner"]

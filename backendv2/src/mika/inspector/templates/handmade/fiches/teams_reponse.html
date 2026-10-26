@@ -1,0 +1,47 @@
+{# La fiche d'une réponse Teams, dessinée (app/handmade/teams_fiches.py, ADR 0069, 0121) : le message auquel elle répond
+   et, en face, exactement ce qui partira (signature comprise) ; son parcours ; ce que tu peux en faire (les
+   formulaires de la console). #}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page teams-reply">
+  {% if blocked %}<p class="obj-alert warn">Elle ne peut pas partir telle quelle : {{ blocked }}. Retouche-la.</p>{% endif %}
+
+  <div class="now-grid two">
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="teams-said">
+        <header class="now-card-head"><h2 id="teams-said">{{ "Ce qui est parti" if gone else "Ce qui partira" }}</h2><a class="now-more" href="{{ conversation }}">la conversation →</a></header>
+        <ol class="person-thread teams-pair">
+          {% if answered %}
+          <li class="theirs"><p class="person-bubble">{{ answered.text }}</p><p class="person-meta">{{ answered.who }} · {{ answered.at }}</p></li>
+          {% endif %}
+          <li class="mine"><p class="person-bubble teams-out">{{ text }}</p><p class="person-meta">{{ "parti" if gone else "tel qu'il partira, signature comprise" }}</p></li>
+        </ol>
+        {% if not answered %}<p class="now-after now-muted">Un message nouveau : il ne répond à rien.</p>{% endif %}
+        {% if sent %}
+        <p class="now-eyebrow teams-sent-title">Ce qui est vraiment parti (retouché dans Teams)</p>
+        <p class="person-bubble teams-sent">{{ sent }}</p>
+        {% endif %}
+        {% if reason %}<p class="now-after"><span class="now-muted">Pourquoi :</span> {{ reason }}</p>{% endif %}
+      </section>
+    </div>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="teams-do">
+        <header class="now-card-head"><h2 id="teams-do">{{ "Ce que tu peux en faire" if waiting else "Où elle en est" }}</h2>{% if mode %}<p>Mode : {{ mode }}.</p>{% endif %}</header>
+        {% if waiting %}
+        {% if actions %}<div class="now">{% for b in actions %}{{ one(b, 1) }}{% endfor %}</div>{% else %}<p class="now-empty">rien à décider d'ici</p>{% endif %}
+        {% else %}
+        {% for b in notes %}{{ one(b, 1) }}{% else %}<p class="now-empty">elle n'attend rien de toi</p>{% endfor %}
+        {% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="teams-journey">
+        <header class="now-card-head"><h2 id="teams-journey">Son parcours</h2></header>
+        {% if steps %}
+        <ol class="obj-journey">
+          {% for s in steps %}<li class="{{ s.tone }}"><p><b>{{ s.what }}</b>{% if s.when %} <span class="now-muted">{{ s.when }}</span>{% endif %}</p>{% if s.text %}<p class="obj-journey-text">{{ s.text }}</p>{% endif %}</li>{% endfor %}
+        </ol>
+        {% else %}<p class="now-empty">aucune proposition au journal : un brouillon écrit hors d'elle</p>{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

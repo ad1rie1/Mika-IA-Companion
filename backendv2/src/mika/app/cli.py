@@ -40,6 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
@@ -434,6 +435,10 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 config_dir=kept(args.config_dir, "config_dir", ""),
                 effort=kept(getattr(args, "effort", None), "effort", ""),
                 workspace=kept(getattr(args, "workspace", None), "workspace", ""),
+                # ce que la console a lu du modèle (ADR 0136) ; un autre modèle l'oublie de lui-même
+                detected_window=previous.detected_window if previous else 0,
+                detected_output=previous.detected_output if previous else 0,
+                detected_for=previous.detected_for if previous else "",
             )
         elif args.llm_cmd == "route":
             for role in args.roles:
@@ -459,7 +464,10 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 "répondre": cfg.routes.get(REPLY, ""),
                 "problems": cfg.problems()}
 
-    return await _with_settings(data, run)
+    try:
+        return await _with_settings(data, run)
+    except ValidationError as exc:  # une fiche refusée (un contexte au-delà de la fenêtre lue du modèle)
+        return {"ok": False, "problems": list(forms.errors_fr(exc).values())}
 
 
 async def images_command(data: Path, args: argparse.Namespace) -> dict[str, object]:

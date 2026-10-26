@@ -1,0 +1,49 @@
+{# La fiche d'une conversation Teams, son fil dessiné (app/handmade/teams_fiches.py, ADR 0069, 0121) : les messages en
+   bulles, jour par jour — les autres à gauche, toi à droite —, les questions marquées ; ce qu'elle a préparé ici, et
+   le formulaire qui lui demande une réponse (celui de la console). #}
+{% from "handmade/shared/drawn.html" import one with context %}
+<div class="now-page teams-thread">
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="teams-thread">
+      <header class="now-card-head"><h2 id="teams-thread">Le fil</h2>{% if count %}<span class="person-count now-num">{{ count }}</span>{% endif %}<p>Les derniers messages que l'extension a apportés, du plus ancien au plus récent.</p></header>
+      {% if days %}
+      <div class="person-chat">
+        {% for d in days %}
+        <p class="person-day">{{ d.day }}</p>
+        <ol class="person-thread">
+          {% for m in d.messages %}
+          <li class="{{ 'mine' if m.mine else 'theirs' }}">
+            <p class="person-bubble">{{ m.text }}</p>
+            <p class="person-meta">{{ m.who }} · {{ m.at }}{% if m.question %} · <span class="now-tag warn">question</span>{% elif m.answered %} · {{ m.answered }}{% endif %}</p>
+          </li>
+          {% endfor %}
+        </ol>
+        {% endfor %}
+      </div>
+      {% else %}<p class="now-empty">aucun message</p>{% endif %}
+    </section>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="teams-hers">
+        <header class="now-card-head"><h2 id="teams-hers">Ce qu'elle a préparé ici</h2><a class="now-more" href="{{ PREFIX }}/teams/reponses">toutes ses réponses →</a></header>
+        {% if drafts %}
+        <ol class="teams-drafts">
+          {% for d in drafts %}
+          <li>
+            <p class="teams-draft-head"><span class="now-tag {{ d.state.tone }}">{{ d.state.text }}</span> <span class="now-muted">{{ "demandée" if d.asked else "d'elle-même" }}, {{ d.when }}</span></p>
+            {% if d.href %}<a class="teams-draft-text" href="{{ d.href }}">{{ d.text }}</a>{% else %}<p class="teams-draft-text">{{ d.text }}</p>{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}<p class="now-empty">elle n'a rien préparé dans cette conversation</p>{% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="teams-ask">
+        <header class="now-card-head"><h2 id="teams-ask">Lui demander une réponse</h2><p>Au dernier message reçu, selon le mode réglé pour cette conversation.</p></header>
+        {% if ask %}{% for b in ask %}{{ one(b, 1) }}{% endfor %}
+        {% elif under_way %}<p class="now-empty">une réponse est déjà en chemin dans cette conversation</p>
+        {% else %}<p class="now-empty">aucun message reçu auquel répondre</p>{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

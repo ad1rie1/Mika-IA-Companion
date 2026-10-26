@@ -78,6 +78,15 @@ def test_the_reply_trace_holds_what_she_saw_and_what_her_tools_did(tmp_path):
     # la composition : chaque section incluse avec sa taille
     compose = trace["compose"]
     assert [k for k, _ in compose["sizes"]] == list(compose["included"])
+    # l'ancre de chaque section (son en-tête, ou ses premiers caractères), puis sa taille : son texte se retrouve dans
+    # le prompt gardé, entier — une section sans titre aussi (sa façon de parler)
+    sizes, prompt = dict(compose["sizes"]), trace["system_stable"] + "\n" + trace["messages"][-1]["content"]
+    anchors = dict(compose["anchors"])
+    assert "style" in anchors and not anchors["style"].startswith("---")
+    for key, anchor in anchors.items():
+        at = prompt.find(anchor)
+        assert at >= 0, key
+        assert prompt[at + sizes[key]:at + sizes[key] + 1] in ("\n", ""), key
     assert all(isinstance(n, int) and n >= 0 for _, n in compose["sizes"])
     assert max(n for _, n in compose["sizes"]) > 0
     # les outils : arguments et résultats, tels que le modèle les a reçus

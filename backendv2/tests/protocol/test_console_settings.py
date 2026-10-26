@@ -18,6 +18,7 @@ import re
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from mika.adapters.llm.config import ModelLimits
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -313,7 +314,7 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
 
     async def fake_models(spec):  # le fournisseur répond avec la clé tapée : rien ne sort de la machine
         seen.append(spec.api_key)
-        return ["claude-haiku-4-5", "claude-opus-5"]
+        return [("claude-haiku-4-5", ModelLimits()), ("claude-opus-5", ModelLimits(1_000_000, 128_000))]
 
     monkeypatch.setattr("mika.app.reglages.list_models", fake_models)
     url = f"{BASE}/fournisseurs"
@@ -326,6 +327,7 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     text = html_of(loaded)
     assert loaded.status_code == 200 and "Rien n'est encore enregistré" in text and seen == [CANARY_KEY]
     assert re.search(r'<select name="model"[^>]*>.*?<option value="claude-opus-5"', text, re.S)
+    assert "claude-opus-5 — fenêtre 1 000 000, réponse 128 000" in text  # ce que la liste en dit, avant de choisir
     assert CANARY_KEY not in loaded.text  # la clé tapée ne redescend pas : elle est gardée sous un jeton
     assert client.portal.call(live.settings.llm).backends == {}  # rien d'enregistré
     token = re.search(r'name="_reserve" value="([^"]+)"', text).group(1)
@@ -345,6 +347,37 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     failed = post(client, url, {**backend("local", kind="ollama", model=""), "_charger": "model"})
     assert failed.status_code == 200 and "Liste indisponible" in html_of(failed)
     assert "local" not in client.portal.call(live.settings.llm).backends
+
+
+def test_saving_a_provider_reads_its_model_window_and_lowers_never_raises(world):  # noqa: F811
+    """ADR 0136 : à l'enregistrement, la fenêtre du modèle est lue chez son fournisseur ; un contexte plus grand y
+    est ramené et la page le dit ; au-delà pour le même modèle, refusé ; un autre modèle est relu."""
+    client, live, _ = world
+    bootstrap(client)
+    asked: list[str] = []
+
+    async def read(spec):
+        asked.append(spec.model)
+        return {"gemma3:4b": ModelLimits(8_192), "qwen3:8b": ModelLimits(40_960)}.get(spec.model, ModelLimits())
+
+    live.read_limits = read
+    url = f"{BASE}/fournisseurs"
+    saved = post(client, url, backend("local", kind="ollama", model="gemma3:4b", context_tokens="24000"))
+    assert saved.status_code == 200 and "contexte ramené à 8 192 jetons, la fenêtre du modèle" in html_of(saved)
+    spec = client.portal.call(live.settings.llm).backends["local"]
+    assert (spec.context_tokens, spec.detected_window, asked) == (8_192, 8_192, ["gemma3:4b"])
+    assert "Le modèle accepte" in html_of(client.get(url))  # la carte du fournisseur
+    assert "Fenêtre du modèle" in html_of(client.get(f"{url}?enregistrement=backends&cle=local"))
+    again = {"_ancienne": "local"}
+    refused = post(client, url, {**backend("local", kind="ollama", model="gemma3:4b", context_tokens="9000"),
+                                 **again})
+    assert refused.status_code == 400 and "dépasse la fenêtre de ce modèle" in html_of(refused)
+    assert client.portal.call(live.settings.llm).backends["local"].context_tokens == 8_192
+    other = post(client, url, {**backend("local", kind="ollama", model="qwen3:8b", context_tokens="32000"), **again})
+    assert other.status_code == 200
+    spec = client.portal.call(live.settings.llm).backends["local"]
+    assert (spec.context_tokens, spec.detected_window) == (32_000, 40_960)  # gardé : sous la fenêtre, jamais relevé
+    assert asked == ["gemma3:4b", "qwen3:8b"]
 
 
 def test_phone_notifications_take_a_firebase_key_sealed_and_never_shown(world):  # noqa: F811

@@ -1,0 +1,165 @@
+{# Un épisode, dessiné (inspector/pages/episode_drawn.py) : une forme par onglet (``v.tab``), sous l'en-tête et la barre
+   d'onglets de la console. Ce qui n'a pas de forme à lui (le tableau des appels, le calcul de l'arbitre) reprend ses
+   blocs (``one``). Aucun style en ligne (CSP). #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% from "_navigation.html" import pager as pages %}
+{% import "handmade/parole/macros.html" as p %}
+
+{% macro bubble(s) -%}
+<li class="mine">
+  <p class="person-bubble">{{ s.text }}</p>
+  <p class="person-meta">à {{ s.to }} · {{ s.when }} · {{ 'dans le fil' if s.visible else 'hors du fil' }} · <a href="{{ s.why }}">pourquoi ?</a></p>
+</li>
+{%- endmacro %}
+
+{% macro trigger(t) -%}
+{% if t.text is defined %}
+<p class="now-eyebrow">Message déclencheur</p>
+<ol class="person-thread">
+  <li class="theirs"><p class="person-bubble">{{ t.text }}</p><p class="person-meta">{{ t.who }}{% if t.when %} · {{ t.when }}{% endif %} · <a href="{{ t.href }}">message n° {{ t.number }}</a></p></li>
+</ol>
+{% else %}<p class="person-tab-note {{ t.tone }}">{{ t.note }}</p>{% endif %}
+{%- endmacro %}
+
+<div class="now-page episode">
+
+{% if v.tab == "resume" %}
+  <section class="now-card episode-hero {{ v.outcome.tone }}" aria-labelledby="episode-outcome">
+    <p class="now-eyebrow">Résultat de l’épisode · {{ v.kind }}{% if v.to and v.to != '—' %} · vers {{ v.to }}{% endif %}{% if v.began %} · {{ v.began }}{% endif %}</p>
+    <p class="episode-outcome" id="episode-outcome">{{ v.outcome.text }}</p>
+    {% if v.detail %}<p class="now-lede">{{ v.detail }}</p>{% endif %}
+    {% if v.open %}<p class="now-after"><a href="{{ PREFIX }}/decisions/en_cours">Vérifier l’activité actuelle →</a></p>{% endif %}
+  </section>
+
+  <ul class="person-tiles-list episode-tiles">
+    {% for t in v.tiles %}<li>{% if t.href %}<a href="{{ t.href }}">{% endif %}<span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value now-num">{{ t.value }}</span><span class="person-tile-sub">{{ t.sub }}</span>{% if t.href %}</a>{% endif %}</li>{% endfor %}
+  </ul>
+
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="episode-trigger">
+      <header class="now-card-head"><h2 id="episode-trigger">Ce qui l'a déclenché</h2><a class="now-more" href="{{ v.href.decision }}">la décision →</a></header>
+      {{ trigger(v.trigger) }}
+    </section>
+    <section class="now-card" aria-labelledby="episode-said">
+      <header class="now-card-head"><h2 id="episode-said">Ce qu'elle a dit</h2>{% if v.speech_count %}<p>Les {{ v.speeches|length }} dernières paroles sur {{ v.speech_count }}.</p><a class="now-more" href="{{ v.href.dit }}">toutes →</a>{% endif %}</header>
+      {% if v.speeches %}<ol class="person-thread">{% for s in v.speeches %}{{ bubble(s) }}{% endfor %}</ol>
+      {% else %}<p class="now-empty">Aucune parole n’est enregistrée pour cet épisode.</p>{% endif %}
+    </section>
+  </div>
+
+{% elif v.tab == "deroule" %}
+  <section class="now-card" aria-labelledby="episode-flow">
+    <header class="now-card-head"><h2 id="episode-flow">Ce qui s'est passé, dans l'ordre</h2>{% if v.pager and v.pager.total %}<p>{{ v.pager.total }} au total</p>{% endif %}</header>
+    {% if v.events %}
+    <ol class="now-feed episode-feed">
+      {% for e in v.events %}
+      <li class="tone-{{ e.tone or 'default' }}"><time>{{ e.time }}</time><div>
+        <p><a href="{{ e.href }}">{{ e.label }}</a> <span class="now-muted">· n° {{ e.number }}</span>{% if e.why %} · <a href="{{ e.why }}">pourquoi ?</a>{% endif %}</p>
+        {% if e.excerpt %}<q>{{ e.excerpt }}</q>{% endif %}
+        <p class="person-meta"><code>{{ e.type }}</code></p>
+      </div></li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">aucun événement dans cet épisode</p>{% endif %}
+    {% if v.pager %}<div class="episode-pager">{{ pages(v.pager) }}</div>{% endif %}
+  </section>
+
+{% elif v.tab == "dit" %}
+  <section class="now-card" aria-labelledby="episode-speeches">
+    <header class="now-card-head"><h2 id="episode-speeches">Ses paroles</h2><p>{% if v.pager and v.pager.total %}{{ v.pager.total }} au total. {% endif %}Chacune mène à « pourquoi a-t-elle dit ça ? ».</p></header>
+    {% if v.speeches %}
+    <ol class="episode-speeches">
+      {% for s in v.speeches %}
+      <li>
+        <ol class="person-thread">{{ bubble(s) }}</ol>
+        <dl class="person-entry-facts episode-speech-facts">
+          <div><dt class="k">voix</dt><dd>{{ s.voice }}</dd></div>
+          <div><dt class="k">outils</dt><dd>{% for t in s.tools %}{{ t.name }}{{ ' (échec)' if not t.ok }}{{ ', ' if not loop.last }}{% else %}aucun{% endfor %}</dd></div>
+          <div><dt class="k">ce que le prompt lui montrait</dt><dd>{{ s.sections|join(' · ') or '—' }}</dd></div>
+        </dl>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">elle n'a rien dit dans cet épisode</p>{% endif %}
+    {% if v.pager %}<div class="episode-pager">{{ pages(v.pager) }}</div>{% endif %}
+  </section>
+
+{% elif v.tab == "prompt" %}
+  {% if not v.kept %}
+  <section class="now-card"><p class="now-empty">le prompt de cet épisode n'a pas été gardé (plus de 14 jours, oubli, ou épisode antérieur à la console)</p></section>
+  {% else %}
+  {% if v.truncated %}<p class="person-tab-note warn" role="note">Cette trace a été tronquée (un texte trop long) : ce qui est montré est incomplet.</p>{% endif %}
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="episode-decided">
+      <header class="now-card-head"><h2 id="episode-decided">Ce qui a décidé du prompt</h2></header>
+      <dl class="person-fields episode-fields">{% for k, x in v.facts %}<div><dt>{{ k }}</dt><dd>{{ x }}</dd></div>{% endfor %}</dl>
+    </section>
+    <section class="now-card" aria-labelledby="episode-offered">
+      <header class="now-card-head"><h2 id="episode-offered">Ses outils</h2></header>
+      {{ p.tools(v.tools) }}
+    </section>
+  </div>
+  <section class="now-card" aria-labelledby="episode-sections">
+    <header class="now-card-head"><h2 id="episode-sections">Ce qu'elle avait sous les yeux</h2>{{ p.prompt_head(v.prompt) }}</header>
+    {{ p.sections(v.prompt) }}
+    {{ p.context(v.context, open=True) }}
+  </section>
+  <section class="now-card" aria-labelledby="episode-steps">
+    <header class="now-card-head"><h2 id="episode-steps">Sa réponse, pas à pas</h2><p>{{ "Ce qu'elle allait dire : jamais livré." if v.unsaid else "Du texte brut du modèle à ce qui est parti." }}</p></header>
+    {% if v.steps %}{{ p.steps(v.steps) }}{% else %}<p class="now-empty">le modèle n'a rien rendu de gardé</p>{% endif %}
+  </section>
+  {% endif %}
+  {% include "handmade/parole/rejouer.html" %}
+
+{% elif v.tab == "outils" %}
+  {% if v.calls %}
+  <ol class="episode-tools">
+    {% for t in v.calls %}
+    <li class="now-card episode-tool{{ ' failed' if not t.ok }}">
+      <header class="now-card-head"><h2><code>{{ t.name }}</code></h2><span class="now-tag {{ 'close' if t.ok else 'secret' }}">{{ 'réussi' if t.ok else 'échec' }}</span>{% if not t.executed %}<span class="now-tag">pas exécuté</span>{% endif %}<p class="now-num">{{ t.ms }} ms</p></header>
+      <div class="now-grid two">
+        <div class="hm-code-block"><p class="now-eyebrow">Ses arguments</p><pre class="hm-code">{{ t.args or '—' }}</pre></div>
+        <div class="hm-code-block"><p class="now-eyebrow">Son résultat</p><pre class="hm-code">{{ t.result or '—' }}</pre></div>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% elif v.named %}
+  <section class="now-card" aria-labelledby="episode-named">
+    <header class="now-card-head"><h2 id="episode-named">Ses outils, parole par parole</h2><p>La trace détaillée (arguments, résultats) n'a pas été gardée.</p></header>
+    <ul class="person-entries">{% for n in v.named %}<li><p class="person-entry-title"><a href="{{ n.why }}">parole n° {{ n.number }}</a></p><ul class="hm-chips parole-tools">{% for t in n.tools %}<li class="hm-chip called{{ ' failed' if not t.ok }}">{{ t.name }}</li>{% endfor %}</ul></li>{% endfor %}</ul>
+  </section>
+  {% else %}
+  <section class="now-card"><p class="now-empty">{{ "elle n'a appelé aucun outil dans cet épisode" if v.kept else "aucun outil retrouvé pour cet épisode (la trace n'est pas gardée)" }}</p></section>
+  {% endif %}
+
+{% elif v.tab == "appels" %}
+  {% if v.tiles %}
+  <ul class="person-tiles-list episode-tiles">
+    {% for t in v.tiles %}<li class="{{ t.tone }}"><span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value now-num">{{ t.value }}</span><span class="person-tile-sub">{{ t.sub }}</span></li>{% endfor %}
+  </ul>
+  {% for b in v.table %}{{ one(b) }}{% endfor %}
+  {% else %}
+  <section class="now-card"><p class="now-empty">aucun appel de modèle retrouvé pour cet épisode</p></section>
+  {% endif %}
+
+{% elif v.tab == "decision" %}
+  {% if v.missing %}
+  <section class="now-card"><p class="now-empty">le début de cet épisode est introuvable</p></section>
+  {% else %}
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="episode-launch">
+      <header class="now-card-head"><h2 id="episode-launch">Ce qui l'a lancé</h2></header>
+      {{ trigger(v.trigger) }}
+      {% if v.guard %}<p class="person-tab-note warn">{{ v.guard }}</p>{% endif %}
+    </section>
+    <section class="now-card" aria-labelledby="episode-what">
+      <header class="now-card-head"><h2 id="episode-what">En bref</h2></header>
+      <dl class="person-fields episode-fields">{% for k, x in v.facts %}<div><dt>{{ k }}</dt><dd>{{ x }}</dd></div>{% endfor %}</dl>
+    </section>
+  </div>
+  {% for b in v.cause %}{{ one(b) }}{% endfor %}
+  {% endif %}
+{% endif %}
+
+</div>

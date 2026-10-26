@@ -1,0 +1,90 @@
+/* « Pourquoi a-t-elle dit ça ? », dessinée (handmade/parole/parole.html) : sur le vocabulaire commun (base.css), sa
+   phrase en grand, sa réponse pas à pas sur un fil, les sections de son prompt en jauges dépliables. Aucune couleur
+   en ligne (CSP) : l'émotion se porte par sa classe sw-<émotion>. */
+
+/* ── Sa phrase, et ce qu'elle ressentait ─────────────────────────────── */
+.parole-said { margin-top: 14px; }
+.parole-said p { font-size: clamp(1.25rem, 2vw, 1.6rem); line-height: 1.4; white-space: pre-line; }
+.parole-felt { display: grid; align-content: start; gap: 0; min-width: 0; }
+.parole-felt .now-word { font-size: clamp(2.2rem, 4vw, 3.2rem); }
+.parole-their-title { margin-top: 20px; }
+.parole-their { margin: 6px 0 0; color: var(--text-2); font-size: 14px; }
+
+/* ── Ce qui l'a fait parler : le message, sa réponse ─────────────────── */
+.parole-lead { margin: 0 0 14px; }
+.parole-thread .person-meta a { color: var(--muted); }
+
+/* ── Sa réponse, pas à pas : un fil numéroté ─────────────────────────── */
+.parole-steps { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.parole-step { position: relative; display: grid; gap: 8px; min-width: 0; padding: 0 0 22px 34px; counter-increment: step; }
+.parole-step::before { content: counter(step); position: absolute; top: 0; left: 0; display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%; background: var(--sunken); color: var(--text-2);
+  font: 600 11.5px/1 var(--font); }
+.parole-step::after { content: ""; position: absolute; top: 26px; bottom: 4px; left: 10.5px; width: 1px;
+  background: var(--border); }
+.parole-step.last { padding-bottom: 0; }
+.parole-step.last::before { background: var(--accent-soft); color: var(--accent); }
+.parole-step.last::after { display: none; }
+.parole-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 1px 0 0; }
+.parole-step-title { font-family: var(--now-serif); font-size: 1.05rem; font-weight: 600; }
+.parole-step .person-meta { margin: 0; }
+.parole-step .hm-code { max-height: 20em; }
+.parole-sent { justify-self: start; max-width: 100%; white-space: pre-line;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 16px 16px 4px 16px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+
+/* un repli dans une carte : son contexte, le prompt entier */
+.parole-fold { display: grid; gap: 10px; min-width: 0; }
+.parole-fold > summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+.parole-fold[open] > summary { margin-bottom: 2px; }
+.parole-context { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); }
+
+/* ── Son état intérieur : une section, son texte ─────────────────────── */
+.parole-inner { display: grid; gap: 14px; margin: 0; }
+.parole-inner dt { margin-bottom: 4px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .07em;
+  text-transform: uppercase; }
+.parole-inner dd { margin: 0; color: var(--text); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+
+/* ── Ses outils : ceux qu'elle avait en main, les appelés en tête ────── */
+.parole-tools { margin: 0; padding: 0; list-style: none; }
+.parole-tools .hm-chip { padding: 3px 10px; color: var(--muted); font: 12px var(--mono); cursor: default; }
+.parole-tools .hm-chip.called { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--text); }
+.parole-tools .hm-chip.failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.parole-tools .now-tag { font-family: var(--font); }
+.parole-offered { margin-top: 14px; }
+
+/* ── Ce qu'elle avait sous les yeux : une ligne par section ──────────── */
+.parole-sections { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.parole-sections > li > summary,
+.parole-sections > li:not(:has(> details)) { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) 64px auto;
+  align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; }
+.parole-sections > li > details > summary { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) 64px auto;
+  align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; cursor: pointer; font-size: 13.5px;
+  list-style: none; }
+.parole-sections > li > details > summary::-webkit-details-marker { display: none; }
+.parole-sections > li > details > summary:hover { background: var(--surface-2); }
+.parole-sections > li > details[open] > summary { background: var(--surface-2); }
+.parole-sections > li > details > .hm-code,
+.parole-sections > li > details > .person-meta { margin: 8px 10px 0; }
+.parole-sections > li > details[open] { padding-bottom: 12px; }
+.parole-section-name { min-width: 0; overflow-wrap: anywhere; }
+.parole-sections details .parole-section-name::after { content: " ›"; color: var(--muted); }
+.parole-sections details[open] .parole-section-name::after { content: " ⌄"; }
+.parole-section-size { color: var(--text-2); text-align: right; }
+.parole-sections li.muted { color: var(--muted); }
+.parole-sections li.warn .now-bar .fill { stroke: var(--warn); }
+
+/* ── « Pourquoi n'a-t-elle pas répondu ? » : la cause en grand, de la couleur de son ton ── */
+.silence-word { font-size: clamp(1.7rem, 3vw, 2.3rem); color: var(--text); }
+.silence-state.info .silence-word { color: var(--info); }
+.silence-state.warn .silence-word { color: var(--warn); }
+.silence-state.danger .silence-word { color: var(--danger); }
+.silence-feed li { grid-template-columns: 96px minmax(0, 1fr); }
+.silence-feed::before { left: 109px; }
+
+@media (max-width: 700px) {
+  .parole-sections > li > details > summary,
+  .parole-sections > li:not(:has(> details)) { grid-template-columns: minmax(0, 1fr) auto; }
+  .parole-section-bar { display: none; }
+  .parole-step { padding-left: 30px; }
+}

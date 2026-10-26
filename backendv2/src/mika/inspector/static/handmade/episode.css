@@ -1,0 +1,62 @@
+/* Un épisode, dessiné (handmade/episode/episode.html) : sur le vocabulaire commun (base.css) et celui d'une parole
+   (parole.css : sa réponse pas à pas, ses sections, ses outils). Son issue en grand, ses chiffres en tuiles, son
+   déroulé sur un fil, ses outils en cartes. Aucune couleur en ligne (CSP). */
+
+/* ── Le résumé : son issue en grand, de la couleur de son ton ────────── */
+.episode-hero { padding: 26px 30px; }
+.episode-outcome { margin: 8px 0 0; font-family: var(--now-serif); font-size: clamp(1.9rem, 3.4vw, 2.6rem); font-weight: 600;
+  line-height: 1.05; letter-spacing: -.015em; }
+.episode-hero.ok .episode-outcome { color: var(--ok); }
+.episode-hero.warn .episode-outcome { color: var(--warn); }
+.episode-hero.danger .episode-outcome { color: var(--danger); }
+.episode-hero.info .episode-outcome { color: var(--info); }
+.episode-hero.danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.episode-tiles li > a { text-decoration: none; }
+
+/* ── Le déroulé : l'heure à la seconde, un extrait sous l'événement ──── */
+.episode-feed li { grid-template-columns: 70px minmax(0, 1fr); }
+.episode-feed::before { left: 83px; }
+.episode-feed .person-meta { margin-top: 2px; }
+.episode-feed .person-meta code { font-size: 11px; color: var(--muted); }
+.episode-feed .tone-default > div::before { background: var(--info); }
+.episode-pager { margin-top: 16px; }
+
+/* ── Ses paroles : une bulle, puis ce qui l'a faite ──────────────────── */
+.episode-speeches { display: grid; gap: 18px; margin: 0; padding: 0; list-style: none; }
+.episode-speeches > li { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+.episode-speeches > li:first-child { padding-top: 0; border-top: 0; }
+.episode-speech-facts > div { display: inline-flex; gap: 6px; }
+.episode-speech-facts dd { margin: 0; }
+
+/* ── Ce qui a décidé du prompt, en bref ─────────────────────────────── */
+.episode-fields { grid-template-columns: 1fr; gap: 8px; }
+.episode-fields dd { overflow-wrap: anywhere; }
+
+/* ── Ses outils : une carte par appel, ses arguments à côté de son résultat ── */
+.episode-tools { display: grid; gap: var(--now-gap); margin: 0; padding: 0; list-style: none; }
+.episode-tool .now-card-head h2 code { font-size: 1.05rem; }
+.episode-tool .now-card-head p { flex: 0 0 auto; margin-left: auto; }
+.episode-tool.failed { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.episode-tool .hm-code { max-height: 22em; }
+
+/* ── Un événement : ses repères, ses textes, son parcours ───────────── */
+.event-head { padding: 16px 20px; }
+.event-head .now-chips { margin-top: 0; }
+.event-text { display: grid; gap: 6px; }
+.event-text + .event-text { margin-top: 14px; }
+.event-text p:last-child { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.event-path { display: grid; gap: 14px; margin: 0; }
+.event-path dt { margin-bottom: 6px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .07em;
+  text-transform: uppercase; }
+.event-path dd { margin: 0; }
+.event-path .hm-chip { cursor: default; }
+.event-facts { margin-top: 16px; }
+
+/* ── La recherche : une carte par sorte de résultat ──────────────────── */
+.search-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--now-gap);
+  align-items: start; }
+.search-items { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.search-items li { display: grid; gap: 2px; padding: 9px 0; border-top: 1px solid var(--border); }
+.search-items li:first-child { padding-top: 0; border-top: 0; }
+.search-items a { font-weight: 600; overflow-wrap: anywhere; }
+.search-sub { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }

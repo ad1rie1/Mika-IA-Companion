@@ -14,7 +14,7 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.inspector import render
-from mika.inspector.catalog import Builtin
+from mika.inspector.catalog import Builtin, Panel
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
@@ -50,6 +50,38 @@ def retyped(given: str, shown: str, key: str) -> bool:
     """Le nom retapé confirme-t-il l'oubli ? Le nom affiché (casse et espaces près) ou la clé exacte."""
     folded = " ".join(given.split()).casefold()
     return bool(folded) and (folded == " ".join(shown.split()).casefold() or given.strip() == key)
+
+
+#: la recherche dessinée, et sa feuille
+SEARCH_TEMPLATE = "handmade/recherche/recherche.html"
+SEARCH_STYLES = ("handmade/episode.css",)
+
+
+def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str) -> dict[str, Any]:
+    """Ce que dessine la recherche : chaque groupe de résultats (ses tableaux de liens) en carte, ses liens et leur
+    détail, sa pagination ; ou ce que dit sa note (rien trouvé, rien demandé)."""
+    def plain(cell: Any) -> str:
+        if isinstance(cell, Text):
+            return cell.text
+        if isinstance(cell, Ref):
+            return cell.text
+        return "" if cell in (None, "—") else str(cell)
+
+    groups, note = [], ""
+    for b in blocks:
+        if isinstance(b, Note):
+            note = b.text
+            continue
+        if not isinstance(b, Table):
+            continue
+        items = []
+        for raw in b.rows:
+            cells = raw.cells if isinstance(raw, Row) else tuple(raw)
+            link = cells[0] if cells and isinstance(cells[0], Ref) else None
+            items.append({"label": plain(cells[0]) if cells else "", "href": render.href(link) if link else "",
+                          "sub": plain(cells[1]) if len(cells) > 1 else ""})
+        groups.append({"title": b.title, "items": items, "empty": b.empty, "pager": render.pager_ctx(b.pager, query)})
+    return {"q": q, "only": only, "groups": groups, "note": note}
 
 
 class Subjects:
@@ -249,9 +281,17 @@ class Subjects:
                 blocks.insert(0, Table(("page", "rubrique"), tuple(unique.values()), title="Pages de la console"))
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
-        return self.pages.render_page(request, title="Recherche", heading=f"Recherche : « {q} »" if q else "Recherche",
-                                      active="", blocks=blocks, search_q=q,
-                                      subtitle="Retrouve une page, un réglage, une personne, un projet ou un message.")
+        heading = f"Recherche : « {q} »" if q else "Recherche"
+        subtitle = "Retrouve une page, un réglage, une personne, un projet ou un message."
+        # dessinée (ADR 0121) : chaque sorte de résultat en carte ; ses blocs au repli
+        drawn = None if wants_table(request.query_params) else call(
+            search_view, blocks, dict(request.query_params), q, only, label="recherche dessinée")
+        if isinstance(drawn, dict):
+            return self.pages.render_page(request, title="Recherche", heading=heading, active="", blocks=[],
+                                          search_q=q, subtitle=subtitle,
+                                          panel=Panel(SEARCH_TEMPLATE, {"v": drawn}, styles=SEARCH_STYLES))
+        return self.pages.render_page(request, title="Recherche", heading=heading, active="", blocks=blocks,
+                                      search_q=q, subtitle=subtitle)
 
     async def forget(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]

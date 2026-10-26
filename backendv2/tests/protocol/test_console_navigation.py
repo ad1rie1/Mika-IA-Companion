@@ -135,14 +135,15 @@ def test_search_finds_settings_without_accents_and_preserves_subject_filter(worl
     page = client.get('/inspecteur/recherche?q=identite')
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
-    results = re.search(r'Pages de la console.*?</table>', page.text, re.S).group()
+    # la recherche est dessinée (ADR 0121) : une carte par sorte de résultat
+    results = re.search(r'Pages de la console.*?</section>', page.text, re.S).group()
     assert 'href="/inspecteur/reglages/identite"' in results
     assert 'href="/inspecteur/identites"' in results
     providers = client.get('/inspecteur/recherche?q=fournisseurs').text
-    results = re.search(r'Pages de la console.*?</table>', providers, re.S).group()
+    results = re.search(r'Pages de la console.*?</section>', providers, re.S).group()
     assert 'href="/inspecteur/reglages/fournisseurs"' in results
     rhythm = client.get('/inspecteur/recherche?q=sommeil').text
-    results = re.search(r'Pages de la console.*?</table>', rhythm, re.S).group()
+    results = re.search(r'Pages de la console.*?</section>', rhythm, re.S).group()
     assert 'href="/inspecteur/vie/rythme"' in results
     assert 'Pages de la console' not in client.get('/inspecteur/recherche?q=identite&sorte=person').text
     assert 'Pages de la console' not in client.get('/inspecteur/recherche?q=aucune-page-de-ce-nom').text

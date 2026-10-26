@@ -25,7 +25,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
@@ -1200,6 +1200,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* le 2026-10-22, l'abonnement à 85 % sur sept jours, 39 séances refusées en zéro seconde ont clos six explorations « en échec, le modèle ne répond pas », et la santé restait verte. La relecture échouait chaque nuit depuis le 18 sur le même lot trop long. Son journal racontait des recherches jamais faites, avec des pensées du lendemain.
 
 *Révise 0050 (en partie), 0073 (en partie), 0085 (en partie).*
+
+### 0136 — La fenêtre du modèle borne le contexte, elle ne le fixe pas
+
+- Ce que le fournisseur dit du modèle choisi (sa fenêtre, sa plus longue réponse) est lu quand la console enregistre sa fiche : `GET /v1/models/{id}` de l'API Claude, `/api/show` d'Ollama (local et Cloud), la liste d'un compatible OpenAI qui le dit (OpenRouter, vLLM, LM Studio, Groq). Claude Code n'est pas interrogé : la CLI choisit son modèle derrière un alias. La liste des modèles de l'API Claude montre déjà la fenêtre de chacun.
+- La fiche le garde (`detected_window`, `detected_output`) pour le type et le modèle lus : un autre modèle l'oublie et le fait relire. Le contexte et la sortie max. n'en dépassent jamais : plus grands quand le modèle vient d'être lu, ils y sont ramenés, et la page le dit ; tapés au-delà pour un modèle déjà lu, ils sont refusés.
+- Jamais relevés jusqu'à elle : le contexte déclaré est un budget que le composeur remplit (le fil jusqu'à 320 messages, les résultats d'outils coupés seulement au-delà), et dont Ollama fait sa mémoire (`num_ctx`). Le million de jetons de Claude 5.x rendrait chaque tour plus cher et plus lent ; sur la GTX 1650, ce serait un `num_ctx` qui ne tient pas.
+- Un fournisseur qui ne répond pas laisse la fiche telle quelle : il est redemandé au prochain enregistrement. Une passerelle fournie de l'extérieur (tests, simulateur) n'interroge personne ; la CLI garde ce qui a été lu, sans rien lire.
+
+*Pourquoi :* le contexte se réglait à l'aveugle (24 000 pour un Sonnet qui en lit un million, ou plus que la fenêtre d'un petit modèle Ollama), et le remplir avec la capacité du modèle aurait multiplié le coût de chaque tour : la capacité dit ce que le modèle peut lire, pas ce qu'il faut lui envoyer.
 
 ## Sa voix, sa persona, la genèse
 

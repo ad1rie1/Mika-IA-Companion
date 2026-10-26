@@ -18,12 +18,20 @@ from typing import Any
 from sqlalchemy import func, select
 
 from mika.contracts import runtime as rt
-from mika.inspector import names
+from mika.inspector import names, render
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.decisions import selection_detail, waterfall
 from mika.inspector.pages.episode_overview import overview
 from mika.inspector.pages.home import outcome_badge
-from mika.inspector.pages.why import episode_events, prompt_blocks, selection_of, tools_blocks, trace_of
+from mika.inspector.pages.why import (
+    author_blocks,
+    context_blocks,
+    episode_events,
+    prompt_blocks,
+    selection_of,
+    tools_blocks,
+    trace_of,
+)
 from mika.kernel.inspect import (
     Badge,
     Code,
@@ -155,19 +163,13 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
                                                hint="la même d'un épisode à l'autre : le cache sert")),
                  ("issue", names.outcome(trace.get("outcome"))[0] if trace.get("outcome") != "running" else "en cours")]
         out.append(Fields(tuple(facts)))
-        if trace.get("system_stable"):
-            out.append(Prose(trace["system_stable"], "La partie stable (persona, en cache)", clamp=1200))
-        if trace.get("system_volatile"):
-            out.append(Prose(trace["system_volatile"], "La partie volatile", clamp=1200))
-        for m in trace.get("messages") or ():
-            role = m.get("role", "?") if isinstance(m, dict) else "?"
-            content = m.get("content", "") if isinstance(m, dict) else str(m)
-            out.append(Prose(str(content), {"user": "Tour (entrée)", "assistant": "Tour (elle)",
-                                            "tool": "Résultat d'outil"}.get(role, role), clamp=1500))
+        out += context_blocks(trace)
         if trace.get("reply"):
             said = trace.get("outcome") in ("done", "abstained")
             out.append(Prose(str(trace["reply"]), "Ce que le modèle a répondu" if said
                              else "Ce qu'elle allait dire (jamais livré)", clamp=1500))
+        # l'autrice a récrit derrière (ADR 0114) : ce qu'elle a lu et rendu
+        out += author_blocks(trace)
         return out
     if tab == "outils":
         trace = trace_of(ui, corr)
@@ -244,6 +246,15 @@ def decision_blocks(ui: Any, started: Any, ended: Any, info: dict[str, Any]) -> 
 
 
 def event_blocks(ui: Any, seq: int, query=None) -> tuple[str, list[Any]] | None:
+    """Un événement du journal, en blocs (le repli de sa page dessinée) : son titre, ses blocs."""
+    got = event_page(ui, seq, query)
+    return (got["title"], got["blocks"]) if got is not None else None
+
+
+def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
+    """Un événement du journal : son titre, ses blocs, et ce que dessine ``handmade/evenement/evenement.html``
+    (``view``) — ce qui s'est passé en mots, ses textes, son parcours dans la machine (qui le réduit, ce qu'il
+    réveille, qui le projette), qui il concerne, les épisodes qu'il a déclenchés, ses données brutes."""
     found = ui.kernel.mind.store.get_events([seq]) if seq > 0 else []
     if not found:
         return None
@@ -255,18 +266,21 @@ def event_blocks(ui: Any, seq: int, query=None) -> tuple[str, list[Any]] | None:
     subjects = sorted({str(v) for f in e.type.subject_fields for v in _values(getattr(e.data, f, None))})
     ctx = ui.inspection.context(query)
     triggered, pager = ctx.older([rt.EPISODE_STARTED], 25, where=("reply_to", seq))
-    episode = Ref("episode", e.correlation, "son épisode") if is_episode(ui, e.correlation) else \
+    linked = is_episode(ui, e.correlation)
+    episode = Ref("episode", e.correlation, "son épisode") if linked else \
         Ref("local", "/inspecteur/systeme/chronologie", "les événements liés", (("correlation", e.correlation),))
+    title = ui.names.event(e.type.name)
+    owner = f"{ui.names.faculty(e.type.owner)} · {'public' if e.type.public else 'privé'}"
+    contents = [(f, getattr(getattr(e.data, f, None), "text", None)) for f in sorted(e.type.content_fields)]
     pairs: list[tuple[str, Any]] = [
-        ("quand", ui.when_long(e.at)), ("ce qui s'est passé", ui.names.event(e.type.name)),
-        ("émis par", f"{ui.names.faculty(e.type.owner)} · {'public' if e.type.public else 'privé'}"),
+        ("quand", ui.when_long(e.at)), ("ce qui s'est passé", title), ("émis par", owner),
         ("lié à", episode), ("origine", str(e.origin.value)),
         ("lu sur la tête", e.basis), ("réduit par", ", ".join(readers) or "—"),
         ("réveille", ", ".join(processes) or "—"), ("projeté par", ", ".join(projectors) or "—"),
         ("personnes concernées", ", ".join(ui.names.who(s) for s in subjects) or "—"),
-        ("contenus", ", ".join(f"{f} : {'oublié' if getattr(getattr(e.data, f, None), 'text', 1) is None else 'présent'}"
-                                for f in sorted(e.type.content_fields)) or "—"),
+        ("contenus", ", ".join(f"{f} : {'oublié' if text is None else 'présent'}" for f, text in contents) or "—"),
     ]
+    raw = json.dumps(json.loads(e.data.model_dump_json()), ensure_ascii=False, indent=1)
     blocks: list[Any] = []
     if e.type.name == rt.UTTERANCE.name:
         blocks.append(Note("Une de ses paroles : ce qui l'a fait parler, ce qu'elle avait sous les yeux, ce dont "
@@ -278,9 +292,41 @@ def event_blocks(ui: Any, seq: int, query=None) -> tuple[str, list[Any]] | None:
         blocks.append(Table(("épisode", "vers", "quand"), tuple(
             (Ref("episode", t.correlation, names.kind(t.data.kind)), ui.names.who(t.data.target), When(t.at))
             for t in triggered), title="A déclenché", pager=pager))
-    blocks.append(Code(json.dumps(json.loads(e.data.model_dump_json()), ensure_ascii=False, indent=1),
-                       "Données (techniques)"))
-    return f"{ui.names.event(e.type.name)} · n° {e.seq}", blocks
+    blocks.append(Code(raw, "Données (techniques)"))
+
+    def view(env: Any, q: Any) -> dict[str, Any]:
+        ends = {t.correlation: episode_events(ui, t.correlation)[1] for t in triggered}
+        return {
+            "title": title, "number": e.seq, "when": ui.when_long(e.at), "type": e.type.name, "owner": owner,
+            "origin": str(e.origin.value), "basis": e.basis,
+            "episode": {"href": render.href(episode), "label": "son épisode" if linked else "les événements liés"},
+            "why": render.href(Ref.why(e.seq)) if e.type.name == rt.UTTERANCE.name else "",
+            "texts": [{"field": f, "text": text} for f, text in contents],
+            "speech": e.type.name in (rt.UTTERANCE.name, rt.PERCEPTION_RECEIVED.name),
+            "mine": e.type.name == rt.UTTERANCE.name,
+            "readers": readers, "processes": processes, "projectors": projectors,
+            "people": [{"name": ui.names.who(s), "href": render.href(Ref.subject("person", s, ""))
+                        if s.startswith("user_") else ""} for s in subjects],
+            "triggered": [{"kind": names.kind(t.data.kind), "to": ui.names.who(t.data.target),
+                           "when": ui.when_long(t.at), "href": render.href(Ref("episode", t.correlation, "")),
+                           "outcome": names.outcome(ends[t.correlation].data.outcome, ends[t.correlation].data.kind)
+                           if ends.get(t.correlation) is not None else ("en cours", "warn")} for t in triggered],
+            "pager": render.pager_ctx(pager, q or {}), "raw": raw,
+        }
+
+    return {"title": f"{title} · n° {e.seq}", "blocks": blocks, "view": view}
+
+
+#: la page d'un événement, dessinée, et ses feuilles
+EVENT_TEMPLATE = "handmade/evenement/evenement.html"
+EVENT_STYLES = ("handmade/episode.css",)
+
+
+def event_panel(got: dict[str, Any], env: Any, query: Any) -> Panel | None:
+    """La page d'un événement, dessinée : son gabarit et ce qu'il dessine (``v``) ; ``None`` si ce qu'il dessine ne se
+    lit pas (ses blocs, alors)."""
+    drawn = call(got["view"], env, query, label="événement dessiné")
+    return None if isinstance(drawn, Failed) else Panel(EVENT_TEMPLATE, {"v": drawn}, styles=EVENT_STYLES)
 
 
 def _values(v: Any) -> list[Any]:
