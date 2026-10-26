@@ -15,7 +15,9 @@
   requête porte (``deadline_s`` : l'échéance de l'épisode — le mode pro a
   quinze minutes), jamais plus que ce qui reste devant l'épisode
   (``meta[DEADLINE_AT]``) ; sans lui, celui de sa voie (``deadlines`` : les
-  processus). Une réponse n'attend pas dix minutes un fournisseur muet.
+  processus). Une réponse n'attend pas dix minutes un fournisseur muet. Un
+  appel dont l'épisode n'a plus de temps n'est pas tenté (issue ``expired``,
+  pas « timeout » : le fournisseur n'a pas manqué).
 - Une erreur est journalisée et propagée, sans changement de fournisseur.
 - Une boucle d'outils reste sur son fournisseur pendant toute sa durée.
 - Une réponse coupée par son plafond de jetons, sans appel d'outil : une sortie
@@ -30,9 +32,11 @@
   ``LLMLimits.reserve``).
 - Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache, coût,
   latence, attente, issue), avec l'entrée telle que le budget l'estimait à côté
-  de l'entrée réelle : quand leur rapport sort de ``ESTIMATE_RATIO``, un
-  avertissement (un par fournisseur et par heure) dit que ``chars_per_token``
-  est à régler — rien ne se recale seul.
+  de l'entrée réelle — la plus grande entrée d'un seul appel au modèle quand le
+  fournisseur en a fait plusieurs (``LLMResponse.prompt_tokens`` : la CLI de
+  Claude Code), jamais leur somme : quand leur rapport sort de
+  ``ESTIMATE_RATIO``, un avertissement (un par fournisseur et par heure) dit
+  que ``chars_per_token`` est à régler — rien ne se recale seul.
 - Un **essai** de la console (``try_on``, « Rejouer avec… ») envoie un prompt
   gardé à un fournisseur nommé : un seul appel, derrière tout le reste, sans
   repli ni reprise, sous un rôle à part (``TRIAL_ROLE``) ; un appel d'outil
@@ -426,8 +430,15 @@ class Gateway:
         token: int | None = None
         outcome = "ok"
         resp: LLMResponse | None = None
+        if budget <= 0:
+            # l'épisode n'a plus de temps devant lui : rien n'est tenté (ni créneau ni appel), et la trace le dit
+            # autrement qu'un fournisseur muet (« timeout »)
+            log.info("appel LLM %s (%s, rôle %s) : plus de temps devant l'épisode, appel non tenté",
+                     req.call_id, name, req.role)
+            self._trace(req, name, None, t_wait, t_wait, "expired")
+            raise TimeoutError(f"plus de temps devant l'épisode pour l'appel {req.call_id}")
         try:
-            async with asyncio.timeout(max(0.0, budget)):
+            async with asyncio.timeout(budget):
                 req = self.limits.get(name, LLMLimits()).fit(req, self._sent(name, req))
                 token = await slots.acquire(req.priority, preempt=name in self.preempt)
                 t0 = self.clock.now()
@@ -467,14 +478,16 @@ class Gateway:
         )
         self.traces.append(tr)
         if resp is not None:
-            self._check_estimate(backend, tr, limits.chars_per_token, now)
+            # un fournisseur qui a fait plusieurs appels pour cette réponse dit la plus grande entrée d'un seul
+            real = resp.prompt_tokens or (usage.input_tokens + usage.cache_read + usage.cache_write)
+            self._check_estimate(backend, tr, limits.chars_per_token, now, real)
         if self._on_trace is not None:
             self._on_trace(tr)
 
-    def _check_estimate(self, backend: str, tr: LLMTrace, chars_per_token: float, now: int) -> None:
-        """L'entrée réelle (jetons du fournisseur, cache compris) contre l'estimation du budget : hors de
-        ``ESTIMATE_RATIO``, un avertissement par fournisseur et par heure — pas de recalage automatique."""
-        real = tr.input_tokens + tr.cache_read + tr.cache_write
+    def _check_estimate(self, backend: str, tr: LLMTrace, chars_per_token: float, now: int, real: int) -> None:
+        """L'entrée réelle (``real`` : les jetons d'un seul appel au modèle, cache compris) contre l'estimation du
+        budget : hors de ``ESTIMATE_RATIO``, un avertissement par fournisseur et par heure — pas de recalage
+        automatique."""
         if real <= 0 or tr.estimated_input_tokens <= 0:
             return
         ratio = real / tr.estimated_input_tokens

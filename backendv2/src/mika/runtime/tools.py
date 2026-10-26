@@ -9,7 +9,9 @@ clôt sans payer un appel pour la même coupure. Un outil émet ses événements
 tout de suite ; le suivant voit l'état à jour (il lit ses propres écritures).
 Le résultat d'un outil venu d'ailleurs (``ToolSpec.outside`` : un service MCP,
 une page web) entre dans le fil **cité** (``kernel.prompt.cited``) : il ne peut
-ni fermer l'état interne ni imiter un titre de section, et il est borné.
+ni fermer l'état interne ni imiter un titre de section, et il est borné
+(``EpisodePolicy.outside_chars`` ; la coupe est notée dans sa trace,
+``ToolRecord.cut``).
 
 Jamais un marqueur interne comme sa parole : au plafond de tours, ou quand un
 appel d'outil reste coupé, un **dernier tour sans appel d'outil**
@@ -47,12 +49,12 @@ from pydantic import ValidationError
 
 from mika.contracts import runtime as rt
 from mika.kernel.codec import h64
-from mika.kernel.episode import EpisodePolicy
+from mika.kernel.episode import OUTSIDE_CHARS, EpisodePolicy
 from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, combine
-from mika.kernel.prompt import cited, neutral
+from mika.kernel.prompt import TRIM_MARK, cited, neutral
 from mika.kernel.rights import Rights
 from mika.kernel.schema import problems as schema_problems
 from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
@@ -82,9 +84,9 @@ RAW_ARGS_KEY = "_raw"
 #: au-delà, les arguments et le résultat d'un appel sont coupés dans sa trace
 RECORD_MAX_CHARS = 4096
 RECORD_TRUNCATED = "…[coupé]"
-#: au-delà, le résultat d'un outil venu d'ailleurs est coupé dans le fil (cité, à une frontière) — au-dessus de ce
-#: qu'une page lue rend (``plugins/web`` : 20 000), pour que la borne de l'outil reste celle qui compte
-OUTSIDE_RESULT_MAX = 24_000
+#: au-delà, le résultat d'un outil venu d'ailleurs est coupé dans le fil (cité, à une frontière), quand la politique
+#: de l'épisode ne dit pas sa propre borne (``EpisodePolicy.outside_chars`` : le mode pro la relève)
+OUTSIDE_RESULT_MAX = OUTSIDE_CHARS
 
 
 @dataclass(slots=True)
@@ -189,6 +191,9 @@ class ToolRecord:
     result: str
     duration_us: int = 0
     executed: bool = True
+    #: le modèle n'a vu qu'un début de ce que l'outil a rendu (un résultat venu d'ailleurs, coupé à la borne de
+    #: l'épisode) ; la trace garde le brut, borné à sa propre taille
+    cut: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,17 +435,19 @@ async def run_tool_loop(
     clock: Callable[[], int] | None = None,
     result: LoopResult | None = None,
     watch: Watch | None = None,
+    outside_max: int = OUTSIDE_RESULT_MAX,
 ) -> LoopResult:
     """``clock`` date les appels d'outils (sans horloge : durées nulles) ;
     ``result``, s'il est donné, est rempli au fil de l'eau — ce qui a été fait
     reste lisible quand l'épisode est coupé en route (délai, supplantation) ;
-    ``watch``, s'il est donné, en voit chaque moment au fil de l'eau.
+    ``watch``, s'il est donné, en voit chaque moment au fil de l'eau ;
+    ``outside_max`` borne ce qu'un outil venu d'ailleurs rend au fil (caractères).
     La boucle finie, de quelque façon que ce soit (réponse, plafond, coupure,
     annulation), la passerelle la relâche (``release(call_id)``) : un
     fournisseur à session n'attend pas son délai d'inactivité."""
     try:
         return await _loop(gateway, request, tools, make_context, max_turns=max_turns, clock=clock, result=result,
-                           watch=watch)
+                           watch=watch, outside_max=outside_max)
     finally:
         release(gateway, request.call_id)
 
@@ -506,6 +513,7 @@ async def _loop(
     clock: Callable[[], int] | None,
     result: LoopResult | None,
     watch: Watch | None = None,
+    outside_max: int = OUTSIDE_RESULT_MAX,
 ) -> LoopResult:
     result = result if result is not None else LoopResult(text="")
     result.stop = "running"  # chaque sortie le fixe ; resté tel quel, la boucle a été coupée en route
@@ -579,12 +587,14 @@ async def _loop(
             if tr.ok:
                 result.floor = max(result.floor, tr.floor)
                 result.unkept = result.unkept or tr.unkept
-            # ce dont rien ne se garde ne se garde pas non plus en trace : ni ce qu'on a demandé, ni ce qu'il a rendu
-            result.records.append(ToolRecord(call.id, call.name, "{}" if tr.unkept else _args_json(call.args), tr.ok,
-                                             "" if tr.unkept else _bounded(tr.content), elapsed))
             # ce qu'un service extérieur rend entre dans le fil cité : une donnée, qui ne peut ni fermer l'état interne
             # ni imiter un titre de section (``--- FIN ETAT INTERNE ---`` dans une page ou un mail), bornée
-            content = cited(tr.content, OUTSIDE_RESULT_MAX) if spec.outside else tr.content
+            content = cited(tr.content, outside_max) if spec.outside else tr.content
+            # ce dont rien ne se garde ne se garde pas non plus en trace : ni ce qu'on a demandé, ni ce qu'il a rendu ;
+            # ce que le modèle n'a vu qu'en partie se dit
+            result.records.append(ToolRecord(call.id, call.name, "{}" if tr.unkept else _args_json(call.args), tr.ok,
+                                             "" if tr.unkept else _bounded(tr.content), elapsed,
+                                             cut=spec.outside and content.endswith(TRIM_MARK)))
             outputs.append(Message("tool", content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
             await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
             ended = ended or (spec.ends_loop and tr.ok)

@@ -46,9 +46,13 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   longue ou d'une forme inattendue est sautée, et la fin du processus est
   toujours signalée ; l'attente d'un tour est bornée (``turn_timeout_s``) ;
 - la sortie est bornée (``CLAUDE_CODE_MAX_OUTPUT_TOKENS`` d'après ``max_tokens`` ; avec des outils, assez pour
-  écrire leurs arguments entiers, la CLI ne sachant pas rejouer un appel coupé) ; une sortie qui passe son plafond
+  écrire leurs arguments entiers, la CLI ne sachant pas rejouer un appel coupé), et ce plafond est dit à la
+  passerelle (``output_tokens``), qui ne rejoue jamais une coupure au même plafond ; une sortie qui passe son plafond
   est ``stop="max_tokens"`` — ``truncated_tool_call`` seulement si un appel d'outil avait été annoncé (sinon la
   parole se coupe à sa dernière phrase, comme ailleurs, au lieu de rejouer toute la session) ;
+- l'usage d'un tour somme ses messages ; la plus grande entrée d'un seul (``LLMResponse.prompt_tokens``) sert à la
+  passerelle pour juger l'estimation du budget — la CLI renvoie tout le contexte à chaque message, et une recherche
+  d'outil en fait un de plus ;
 - aucune connexion annexe (``CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC``) et pas de socket de messagerie entre
   sessions (``CLAUDE_CODE_HARBOR_KITE=0``) ; ``mika claude-code check`` vérifie qu'aucune ne s'ouvre ;
 - les dossiers d'appel (prompt système, configuration MCP et son jeton de
@@ -341,6 +345,12 @@ class ClaudeCodeBackend:
             args += ["--effort", self.effort]
         return args
 
+    def output_tokens(self, req: LLMRequest) -> int:
+        """Le plafond de sortie donné à la CLI pour ``req`` (``CLAUDE_CODE_MAX_OUTPUT_TOKENS``) : celui demandé,
+        jamais sous ``MIN_OUTPUT_TOKENS`` ; avec des outils, ``TOOLS_OUTPUT_TOKENS`` au moins. La passerelle le lit
+        pour réserver la sortie et ne pas rejouer une coupure au même plafond."""
+        return max(MIN_OUTPUT_TOKENS, int(req.max_tokens), TOOLS_OUTPUT_TOKENS if req.tools else 0)
+
     def env(self, req: LLMRequest) -> dict[str, str]:
         out = {k: os.environ[k] for k in INHERITED if os.environ.get(k)}
         out.update({
@@ -356,8 +366,7 @@ class ClaudeCodeBackend:
             "MCP_TOOL_TIMEOUT": str(int(self.tool_timeout_s * 1000)),
             # la sortie suit le budget de la requête (la CLI l'ignorait : un murmure pouvait faire une page) ; avec des
             # outils, de quoi écrire leurs arguments entiers (le code d'une app)
-            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max(MIN_OUTPUT_TOKENS, int(req.max_tokens),
-                                                     TOOLS_OUTPUT_TOKENS if req.tools else 0)),
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(self.output_tokens(req)),
         })
         if self.config_dir:
             out["CLAUDE_CONFIG_DIR"] = self.config_dir
@@ -517,8 +526,9 @@ class ClaudeCodeBackend:
                 run.settled.update(run.announced[i][0] for i in placed.values())
                 run.handed.update(p.id for p in batch)
                 self._arm_reaper(call_id, run)
+                usage, prompt = _unreported(run)
                 return LLMResponse("".join(texts), tuple(ToolCall(p.id, p.name, p.args) for p in batch),
-                                   stop="tool_use", usage=_unreported(run), model=run.model or self.model)
+                                   stop="tool_use", usage=usage, model=run.model or self.model, prompt_tokens=prompt)
             else:
                 return self._ended(call_id, run, kind, value, texts)
 
@@ -582,8 +592,9 @@ class ClaudeCodeBackend:
         models = list((d.get("modelUsage") or {}).keys())
         model = run.model or (models[0] if models else self.model)
         # l'usage du ``result`` couvre toute la session : ce que les tours d'outils ont déjà rendu n'y est pas recompté
-        usage = _unreported(run) if run.usage else _usage(d.get("usage"))
-        return LLMResponse(answer(texts, str(d.get("result") or "")), stop=stop, usage=usage, model=model)
+        usage, prompt = _unreported(run) if run.usage else (_usage(d.get("usage")), 0)
+        return LLMResponse(answer(texts, str(d.get("result") or "")), stop=stop, usage=usage, model=model,
+                           prompt_tokens=prompt)
 
     # ── Lecture de la CLI ────────────────────────────────────────────────
 
@@ -919,12 +930,15 @@ def _note_usage(run: _Run, message_id: str, u: Any) -> None:
                                   max(got.cache_read, seen.cache_read), max(got.cache_write, seen.cache_write))
 
 
-def _unreported(run: _Run) -> Usage:
-    """L'usage des messages pas encore rendus, sommé (puis rendu)."""
+def _unreported(run: _Run) -> tuple[Usage, int]:
+    """L'usage des messages pas encore rendus, sommé (puis rendu), et la plus grande entrée d'un seul d'entre eux,
+    cache compris (``LLMResponse.prompt_tokens``) : la CLI renvoie tout le contexte à chaque message, et c'est à un
+    seul que l'estimation du budget se compare."""
     fresh = [u for m, u in run.usage.items() if m not in run.reported]
     run.reported.update(run.usage)
-    return Usage(sum(u.input_tokens for u in fresh), sum(u.output_tokens for u in fresh),
-                 sum(u.cache_read for u in fresh), sum(u.cache_write for u in fresh))
+    return (Usage(sum(u.input_tokens for u in fresh), sum(u.output_tokens for u in fresh),
+                  sum(u.cache_read for u in fresh), sum(u.cache_write for u in fresh)),
+            max((u.input_tokens + u.cache_read + u.cache_write for u in fresh), default=0))
 
 
 def _usage(u: Any) -> Usage:

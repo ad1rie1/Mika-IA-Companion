@@ -318,3 +318,14 @@ def test_the_last_user_turn_is_never_empty():
     assert prompt.chat_messages()[-1] == {"role": "user", "content": "(silence)"}
     prompt, _ = _compose([ME, (HISTORY, SectionBody(turns))], message="tu es là ?", silence="(silence)")
     assert prompt.chat_messages()[-1] == {"role": "user", "content": "tu es là ?"}
+
+
+def test_a_cited_table_keeps_its_separators_and_a_title_line_is_still_defused():
+    """``cited`` réécrivait toute suite de tirets : le séparateur d'un tableau Markdown, un « --- » dans un JSON
+    devenaient un tiret long, et un outil qui relit un tableau ne le retrouvait plus. Seuls les tirets qui ouvrent
+    ou ferment une ligne peuvent imiter un titre : eux seuls sont désamorcés ; « état interne » l'est partout."""
+    out = cited('| a | b |\n|---|---|\n{"x": "a---b"}\n---\n--- TITRE ---\nfoo --- ETAT INTERNE --- bar')
+    lines = out.splitlines()[1:]
+    assert lines[:3] == ["> | a | b |", "> |---|---|", '> {"x": "a---b"}']
+    assert lines[3] == "> —" and lines[4] == "> — TITRE —"
+    assert lines[5] == "> foo --- état interne --- bar" and CONTEXT_HEADER not in out

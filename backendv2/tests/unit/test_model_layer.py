@@ -9,11 +9,12 @@ from types import SimpleNamespace
 
 from pydantic import BaseModel
 
+from mika.app.composition import modes
 from mika.faculties.memory.extraction import parse
 from mika.kernel.clock import HOUR
-from mika.kernel.episode import Outcome
+from mika.kernel.episode import OUTSIDE_CHARS, EpisodeMode, EpisodePolicy, Outcome
 from mika.kernel.faculty import ToolSpec
-from mika.kernel.prompt import CONTEXT_FOOTER, UNTRUSTED_NOTE
+from mika.kernel.prompt import CONTEXT_FOOTER, TRIM_MARK, UNTRUSTED_NOTE
 from mika.ports.llm import (
     RETRY_AFTER_CUT,
     TOOL_CHOICE_AUTO,
@@ -22,9 +23,10 @@ from mika.ports.llm import (
     LLMResponse,
     ToolCall,
 )
-from mika.runtime.pipeline import facts_of, keeps_facts
+from mika.runtime.facts import facts_of, keeps_facts
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 from mika.sim.clock import run_virtual
+from mika.vocab.episodes import PRO
 from tests.fixtures.mika import at_paris, boot, build, connect, said
 
 
@@ -204,3 +206,75 @@ def test_misread_confidential_ids_no_longer_throw_the_whole_window_away():
     assert out is not None and out.confidentiel == [] and out.issues == ["confidentiel: identifiants illisibles"]
     out = parse(answered([0, -3]))
     assert out is not None and out.confidentiel == []
+
+
+# ── Relecture du lot (26 octobre, soir) : tableaux cités, borne par politique, nombres en lettres ──────────────
+
+
+async def test_an_outside_result_keeps_its_tables_and_is_bounded_by_the_policy():
+    """Un tableau Markdown rendu par un service (``|---|---|``) voyait ses tirets devenir un tiret long : seuls ceux
+    qui ouvrent ou ferment une ligne sont désamorcés. La borne est celle de l'épisode (``outside_max``), et une coupe
+    se dit dans la trace (``ToolRecord.cut``) ; la trace garde le brut."""
+    table = "| a | b |\n|---|---|\n| 1 | 2 |\n--- TITRE ---"
+
+    async def read(args: Args, ctx) -> ToolResult:
+        return ToolResult(content=table)
+
+    web = tool("web_read", read, outside=True)
+    gw = Replies(_calling("web_read", "t1"), LLMResponse("Hm."))
+    req = LLMRequest(role="reply", call_id="c#0", system_stable="s", tools=declare([web]))
+    loop = await run_tool_loop(gw, req, {"web_read": web}, _ctx, max_turns=3)
+    sent = next(m for m in gw.seen[1].messages if m.role == "tool").content
+    assert "> |---|---|" in sent and "--- TITRE ---" not in sent and loop.records[0].cut is False
+
+    async def read_long(args: Args, ctx) -> ToolResult:
+        return ToolResult(content="mot " * 2000)
+
+    far = tool("web_read", read_long, outside=True)
+    gw2 = Replies(_calling("web_read", "t1"), LLMResponse("Hm."))
+    loop2 = await run_tool_loop(gw2, req, {"web_read": far}, _ctx, max_turns=3, outside_max=500)
+    sent2 = next(m for m in gw2.seen[1].messages if m.role == "tool").content
+    assert sent2.endswith(TRIM_MARK) and len(sent2) < 700 and loop2.records[0].cut is True
+    assert loop2.records[0].result.startswith("mot mot")
+
+
+def test_the_pro_mode_raises_the_outside_bound_and_the_policy_keeps_the_default():
+    """Un service branché (un dépôt, des fichiers) rend des fichiers entiers qu'elle récrit ensuite : coupés à
+    24 000 caractères, le modèle n'en voyait pas la fin. Le mode pro relève la borne ; l'ordinaire la garde."""
+    policy = EpisodePolicy(kind="REPLY", role="reply")
+    assert policy.outside_chars == OUTSIDE_CHARS == 24_000
+    assert EpisodeMode(kinds=frozenset({"REPLY"}), outside_chars=120_000).applied(policy).outside_chars == 120_000
+    assert EpisodeMode(kinds=frozenset({"REPLY"})).applied(policy).outside_chars == 24_000
+    assert modes()[PRO].outside_chars == 120_000
+
+
+def test_a_rewrite_that_spells_numbers_out_keeps_the_facts():
+    """L'autrice écrit comme on parle — « trois idées », « à seize heures », « le 28 octobre 2026 »,
+    « quatre-vingts pour cent » — et la seconde passe était écartée pour ces mots (mesure du 2026-10-26 : six
+    récritures sur sept écartées à tort). Du côté récrit, les nombres en lettres comptent comme des chiffres ; le
+    premier jet garde ses chiffres, et un fait perdu l'écarte toujours."""
+    kept = [
+        ("On se voit à 16 h ?", "On se voit à seize heures ?"),
+        ("J'ai 3 idées pour toi.", "J'ai trois idées pour toi."),
+        ("Le 1er du mois, promis.", "Le premier du mois, promis."),
+        ("Le 26 octobre à 9h.", "Le 26 octobre à neuf heures."),
+        ("Il y a 80 % de chances.", "Il y a quatre-vingts pour cent de chances."),
+        ("Réunion le 2026-10-28 à 14h.", "Réunion le 28 octobre 2026 à 14 h."),
+        ("14 °C à Montaigu.", "Quatorze degrés à Montaigu."),
+        ("On se voit à 12 h.", "On se voit à midi."),
+        ("En 1999, 2 fois.", "En mille neuf cent quatre-vingt-dix-neuf, deux fois."),
+        ("Le 23e étage.", "Le vingt-troisième étage."),
+        ("Il a 21 ans.", "Il a vingt et un ans."),
+        ("3 ou 4 personnes.", "trois ou quatre personnes."),
+    ]
+    for draft, text in kept:
+        assert keeps_facts(draft, text), (draft, text)
+    lost = [
+        ("14 °C à Montaigu, averses à 16 h.", "Il fera moche cet aprèm."),
+        ("rendez-vous à 16:30", "rendez-vous à 16h30"),
+        ("J'ai 3 idées.", "J'ai deux idées."),
+    ]
+    for draft, text in lost:
+        assert not keeps_facts(draft, text), (draft, text)
+    assert facts_of("En 1999, 2 fois.") == {"1999", "2"}  # une virgule puis un blanc sépare ; « 1 234,50 » tient
+    assert facts_of("1 234,50 € et 3.12") == {"1234,50", "3.12"}

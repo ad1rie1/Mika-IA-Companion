@@ -13,12 +13,14 @@ construction du client.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mika.adapters.llm.claude import THINKING_OUTPUT_TOKENS
 from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, Trial, UnconfiguredRole
 from mika.kernel import forms
 from mika.kernel.clock import Clock
@@ -31,6 +33,13 @@ from mika.vocab.episodes import FALLBACKS, TRIAL_ROLE, VOICE_ROLES, Role
 REPLY = str(Role.REPLY)
 #: les rôles qui existent (une route vers un autre nom ne servirait jamais rien)
 ROLES = tuple(str(r) for r in Role)
+#: les types de fournisseur dont le modèle réfléchit (l'API Claude sur une famille 5.x, la CLI) : leur sortie réserve
+#: jusqu'à ``THINKING_OUTPUT_TOKENS``, au plus la moitié du contexte déclaré — sans contexte dit, le leur est
+#: ``THINKING_CONTEXT_TOKENS`` plutôt que le défaut commun, qui leur laisserait la moitié de leur prompt
+THINKING_KINDS = frozenset({"claude", "claude_code"})
+THINKING_CONTEXT_TOKENS = 40_000
+
+log = logging.getLogger("mika.llm.config")
 
 Kind = Literal["claude", "claude_code", "openai", "ollama", "ollama_cloud"]
 
@@ -129,6 +138,16 @@ class BackendSpec(BaseModel):
                                          hi=1.0, step=0.05, group="Options avancées", order=120,
                                          only=(("kind", ("claude_code",)),))] = \
         Field(default=0.8, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _room_to_think(cls, data: Any) -> Any:
+        """Un fournisseur Claude sans contexte déclaré en reçoit ``THINKING_CONTEXT_TOKENS`` : son modèle réserve
+        jusqu'à 16 384 jetons de sortie, et le défaut commun (24 000) ne lui laissait que la moitié de son prompt
+        (audit du 2026-10-26). Une valeur dite n'est jamais changée ; ``build_gateway`` la dit si elle est courte."""
+        if isinstance(data, Mapping) and data.get("kind") in THINKING_KINDS and "context_tokens" not in data:
+            return {**data, "context_tokens": THINKING_CONTEXT_TOKENS}
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -244,6 +263,8 @@ def failure_fr(outcome: str) -> str:
     """Pourquoi un appel a échoué, en mots (« connexion impossible », « délai dépassé »)."""
     if outcome == "timeout":
         return "délai dépassé"
+    if outcome == "expired":
+        return "plus de temps devant l'épisode"
     name = outcome.partition(":")[2] if outcome.startswith("error:") else outcome
     for marker, text in _FAILURES_FR:
         if marker.lower() in name.lower():
@@ -303,6 +324,13 @@ def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace]
         def make(name: str, spec: BackendSpec) -> LLMBackend:
             return build_backend(name, spec, relay=relay, relay_base=relay_base, work_dir=work_dir)
     backends = {name: make(name, spec) for name, spec in sorted(cfg.backends.items())}
+    for name, spec in sorted(cfg.backends.items()):
+        if spec.kind in THINKING_KINDS and spec.context_tokens // 2 < THINKING_OUTPUT_TOKENS:
+            log.warning("fournisseur « %s » : un contexte de %d jetons ne laisse que %d jetons à son prompt — son "
+                        "modèle réserve jusqu'à %d jetons de sortie, au plus la moitié du contexte ; compter %d au "
+                        "moins (réglage « Contexte »)", name, spec.context_tokens,
+                        spec.context_tokens - spec.context_tokens // 2, THINKING_OUTPUT_TOKENS,
+                        THINKING_CONTEXT_TOKENS)
     slots = {name: spec.slots or (1 if spec.local else 4) for name, spec in cfg.backends.items()}
     preempt = frozenset(name for name, spec in cfg.backends.items() if slots[name] == 1)
     return Gateway(backends, dict(cfg.routes), clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),

@@ -44,6 +44,10 @@ class Outcome(enum.StrEnum):
 
 
 GuardFactory = Callable[[Frame, str | None, Audience | None], Guard | None]
+#: au-delà, le résultat d'un outil venu d'ailleurs (``ToolSpec.outside``) est coupé dans le fil, cité, à une frontière
+#: (caractères) : au-dessus de ce qu'une page lue rend (``plugins/web`` : 20 000), pour que la borne de l'outil reste
+#: celle qui compte ; un mode qui travaille sur des fichiers (le mode pro) la relève (``EpisodeMode.outside_chars``)
+OUTSIDE_CHARS = 24_000
 #: Le message final d'un épisode que personne n'a demandé (initiative, pas,
 #: murmure) : la consigne « c'est toi qui prends la parole, et pourquoi ».
 Brief = Callable[[Frame, Any], str]
@@ -80,6 +84,8 @@ class EpisodePolicy:
     #: au plus tant de paragraphes gardés de son texte (0 : tous) — une pensée à mi-voix tient en un souffle ; ce
     #: qui suit (un message entier qu'elle rédigerait) n'est pas sa pensée
     max_paragraphs: int = 0
+    #: au-delà, ce qu'un outil venu d'ailleurs rend est coupé dans le fil (``OUTSIDE_CHARS``)
+    outside_chars: int = OUTSIDE_CHARS
     tool_bundles: frozenset[str] = frozenset()
     #: les lots « en main » ; les autres lots offerts sont à la demande (le modèle
     #: les cherche quand il en a besoin). None : tout est en main.
@@ -104,6 +110,8 @@ class EpisodeMode:
     max_tool_turns: int | None = None
     max_tokens: int | None = None
     deadline_s: float | None = None
+    #: une autre borne pour ce qu'un outil venu d'ailleurs rend (un mode qui lit des fichiers entiers)
+    outside_chars: int | None = None
     muted_tags: frozenset[str] = frozenset()
     #: sa parole relue (``reviewers``) et passée une seconde fois (``polishers``), comme d'ordinaire
     reviewed: bool = True
@@ -125,5 +133,6 @@ class EpisodeMode:
             max_tool_turns=self.max_tool_turns if self.max_tool_turns is not None else policy.max_tool_turns,
             max_tokens=self.max_tokens if self.max_tokens is not None else policy.max_tokens,
             deadline_s=self.deadline_s if self.deadline_s is not None else policy.deadline_s,
+            outside_chars=self.outside_chars if self.outside_chars is not None else policy.outside_chars,
             muted_tags=policy.muted_tags | self.muted_tags,
         )

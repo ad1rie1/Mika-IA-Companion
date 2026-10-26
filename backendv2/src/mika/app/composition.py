@@ -197,8 +197,11 @@ def modes() -> dict[str, EpisodeMode]:
     style et « TA RÉPONSE », ni relecture ni seconde passe ; la place de travailler (24 tours d'outils, 15 min) et
     d'écrire long, en Markdown ; ses outils montrés en direct."""
     return {
+        # un service branché (un dépôt, des fichiers) rend des fichiers entiers qu'elle récrit ensuite : la borne
+        # ordinaire (24 000 caractères) en cacherait la fin
         PRO: EpisodeMode(kinds=frozenset({Kind.REPLY}), role=Role.PRO, persona_depth=PRO, max_tool_turns=24,
-                         max_tokens=8192, deadline_s=900.0, muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, LAST}),
+                         max_tokens=8192, deadline_s=900.0, outside_chars=120_000,
+                         muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, LAST}),
                          reviewed=False, polished=False, live=True, markdown=True, instruction=pro_style),
     }
 

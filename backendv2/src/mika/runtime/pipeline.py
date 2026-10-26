@@ -72,6 +72,7 @@ from mika.ports.llm import (
     ToolDecl,
 )
 from mika.runtime.boundary import Failed, acall, call
+from mika.runtime.facts import keeps_facts
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
 from mika.runtime.tools import (
     LoopEvent,
@@ -128,11 +129,6 @@ Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
 #: … pour un brouillon (un courriel a sa formule d'appel et sa formule de politesse) : plus de marge
 _DRAFT_SLACK = 400
-#: les faits d'un premier jet qu'une récriture doit garder : ses nombres (une température, une heure, un montant, une
-#: date — espaces, y compris insécables, et ponctuation finale ôtés) et ses liens
-_NUMBER = re.compile(r"\d[\d\s.,:%°]*")
-_URL = re.compile(r"https?://\S+")
-_URL_TAIL = ".,;:!?)»\"'"
 #: sans réglage des autrices, le chat garde l'autrice d'avant elles : le cadre seul, ni codes ni exemple (ADR 0124)
 _CHAT_AUTHOR = Author(flows.CHAT, "")
 #: un brouillon que le modèle a mis entre trois accents graves
@@ -145,21 +141,6 @@ _PASS_SPARE_S = 5.0
 def _no_tools(spec: Any, call_id: str) -> ToolContext:
     """Le contexte d'outil d'une passe qui n'en offre aucun : jamais demandé."""
     raise RuntimeError("une passe sans outil n'appelle pas d'outil")
-
-
-def facts_of(text: str) -> frozenset[str]:
-    """Les faits d'un texte, normalisés : ses nombres sans blancs ni ponctuation finale (« 14 °C » → « 14°C »,
-    « 1 234,50 » → « 1234,50 »), ses liens sans la ponctuation qui les suit."""
-    numbers = {n for raw in _NUMBER.findall(text) if (n := re.sub(r"\s", "", raw).rstrip(".,:"))}
-    urls = {u.rstrip(_URL_TAIL) for u in _URL.findall(text)}
-    return frozenset(numbers | urls)
-
-
-def keeps_facts(draft: str, text: str) -> bool:
-    """Une récriture garde les faits du premier jet : chacun de ses nombres et de ses liens s'y retrouve. Sinon
-    (« 14 °C à Montaigu, averses à 16 h » devenu « il fera moche cet aprèm », une URL altérée), le premier jet
-    part : l'autrice ne voit pas les résultats des outils qui l'ont fondé."""
-    return facts_of(draft) <= facts_of(text)
 
 
 def is_silence(text: str) -> bool:
@@ -535,7 +516,8 @@ class EpisodeRunner:
                 watch = self._watcher(ep, persona.name if persona is not None else "")
                 loop = await acall(
                     lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns,
-                                          clock=mind.clock.now, result=ep.loop, watch=watch),
+                                          clock=mind.clock.now, result=ep.loop, watch=watch,
+                                          outside_max=policy.outside_chars),
                     label=f"appel du modèle ({policy.role})",
                 )
                 ep.preemptible = False

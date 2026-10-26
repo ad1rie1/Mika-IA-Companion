@@ -65,6 +65,10 @@ _DASHES = ("-\u2010\u2011\u2012\u2013\u2014\u2015\u2043\u2212\u23af\u2500\u2501\
            "\u254d\u2550\u2e3a\u2e3b\ufe58\ufe63\uff0d")
 #: trois tirets ou plus (espaces permis entre eux) : de quoi imiter un titre de section
 _DASH_RUN = re.compile(f"[{re.escape(_DASHES)}](?:[ \\t\u00a0]*[{re.escape(_DASHES)}]){{2,}}")
+#: dans une ligne citée, seule une suite de tirets qui ouvre ou ferme la ligne peut imiter un titre ou une borne de
+#: l'état interne ; au milieu (le séparateur d'un tableau Markdown, un trait dans une phrase) elle est une donnée
+_DASH_RUN_OPENING = re.compile("^([ \\t]*)" + _DASH_RUN.pattern)
+_DASH_RUN_CLOSING = re.compile(_DASH_RUN.pattern + "[ \\t]*$")
 #: « ETAT INTERNE » (et « FIN ETAT INTERNE ») : toute casse, accent précomposé
 #: ou combinant, blancs quelconques entre les mots
 _STATE = re.compile(r"(?:\bfin[\s_]+)?\b[eé]\u0301?tat[\s_]+interne\b", re.IGNORECASE)
@@ -81,18 +85,32 @@ def neutral(text: str) -> str:
     texte ordinaire ne change pas (« ton état interne ? » reste tel quel)."""
     if not text:
         return text
-    text = _STATE.sub(lambda m: "fin état interne" if m.group(0).casefold().startswith("fin") else "état interne",
+    return _DASH_RUN.sub("—", _lowered_state(text))
+
+
+def _lowered_state(text: str) -> str:
+    """« ETAT INTERNE » et « FIN ETAT INTERNE » (toute casse, tout accent) réécrits en minuscules."""
+    return _STATE.sub(lambda m: "fin état interne" if m.group(0).casefold().startswith("fin") else "état interne",
                       text)
-    return _DASH_RUN.sub("—", text)
+
+
+def _quoted(raw: str) -> str:
+    """Une ligne citée : « état interne » réécrit où qu'il soit ; une suite de tirets désamorcée seulement quand elle
+    ouvre ou ferme la ligne — au milieu, c'est une donnée (le séparateur d'un tableau, un trait dans une phrase), et
+    un outil qui relit un tableau ou un JSON le retrouve tel quel."""
+    line = _DASH_RUN_OPENING.sub(lambda m: m.group(1) + "—", _lowered_state(raw))
+    return _DASH_RUN_CLOSING.sub("—", line)
 
 
 def cited(text: str, limit: int = UNTRUSTED_MAX) -> str:
     """Un texte venu d'ailleurs, rendu comme une citation : chaque ligne
     préfixée, aucune ne peut imiter un titre de section ou la fin de l'état
-    interne, longueur bornée — coupée à une frontière (ligne, phrase, mot),
-    jamais au milieu d'un mot ou d'un nombre (le modèle compléterait le
-    demi-fait) ; le plancher à la moitié garde quelque chose d'une ligne géante."""
-    body = "\n".join("> " + neutral(raw) for raw in text.strip().splitlines())
+    interne (``_quoted`` : les tirets qui ouvrent ou ferment une ligne, les
+    mots de l'état interne), longueur bornée — coupée à une frontière (ligne,
+    phrase, mot), jamais au milieu d'un mot ou d'un nombre (le modèle
+    compléterait le demi-fait) ; le plancher à la moitié garde quelque chose
+    d'une ligne géante."""
+    body = "\n".join("> " + _quoted(raw) for raw in text.strip().splitlines())
     if len(body) > limit:
         body = _trim_at_boundary(body, limit, limit // 2) + TRIM_MARK
     return f"{UNTRUSTED_NOTE}\n{body}"

@@ -28,7 +28,7 @@ from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel
 
 from mika.adapters.llm.claude import ClaudeBackend
-from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend, build_gateway
+from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend, build_gateway, failure_fr
 from mika.adapters.llm.gateway import Gateway, last_sentence, trim_speech
 from mika.adapters.llm.ollama import OllamaBackend
 from mika.adapters.llm.openai_compat import OpenAICompatBackend
@@ -447,3 +447,55 @@ async def test_each_trace_keeps_the_estimated_input_and_a_lying_estimate_is_said
 def test_an_ollama_backend_is_built_with_the_context_window_of_its_spec():
     spec = BackendSpec(kind="ollama", model="gemma4:12b", context_tokens=8_000)
     assert build_backend("local", spec).context_tokens == 8_000
+
+
+# ── Relecture du lot (26 octobre, soir) : plus de temps, l'entrée d'un seul appel, la place de réfléchir ─────────
+
+
+async def test_a_call_with_no_time_left_is_not_attempted_and_says_so(caplog):
+    """Un épisode à bout de temps donnait un délai nul : l'appel partait prendre un créneau, la trace disait
+    « timeout » (un fournisseur muet) et le journal une erreur. Rien n'est tenté, et l'issue est ``expired``."""
+    cut = Cut(LLMResponse("jamais"))
+    gw = Gateway({"c": cut}, {"reply": "c"}, clock=ManualClock(0))
+    gone = asyncio.get_running_loop().time() - 1.0
+    with caplog.at_level(logging.INFO, logger="mika.llm.gateway"), pytest.raises(TimeoutError):
+        await gw.call(LLMRequest(role="reply", call_id="r#0", system_stable="s", deadline_s=180.0,
+                                 meta={DEADLINE_AT: gone}))
+    assert cut.seen == [] and [t.outcome for t in gw.traces] == ["expired"]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert failure_fr("expired") == "plus de temps devant l'épisode"
+
+
+class Searching(Quick):
+    """Un fournisseur qui fait trois appels au modèle pour une réponse (la CLI cherche ses outils) : l'usage somme
+    les trois, la plus grande entrée d'un seul est dite à part."""
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        self.seen.append(req)
+        one = len(req.system_stable)
+        return LLMResponse("ok", model="m", usage=Usage(input_tokens=3 * one, output_tokens=1), prompt_tokens=one)
+
+
+async def test_the_estimate_is_judged_on_the_largest_single_prompt_not_on_a_sum(caplog):
+    """Sur Claude Code, l'entrée réelle sommait les messages de la CLI (chacun renvoie tout le contexte) : le rapport
+    dépassait le seuil dès qu'elle cherchait un outil, et l'avertissement revenait chaque heure avec un conseil faux."""
+    gw = Gateway({"q": Searching("q")}, {"reply": "q"}, clock=ManualClock(0),
+                 limits={"q": LLMLimits(chars_per_token=1.0)})
+    with caplog.at_level(logging.WARNING, logger="mika.llm.gateway"):
+        await gw.call(LLMRequest(role="reply", call_id="r#0", system_stable="x" * 1000))
+    assert gw.traces[0].input_tokens == 3000
+    assert not [r for r in caplog.records if "chars_per_token" in r.getMessage()]
+
+
+def test_a_claude_backend_without_a_declared_context_gets_room_to_think(caplog):
+    """Le défaut commun (24 000) laissait la moitié de son prompt à un modèle qui réserve 16 384 jetons de sortie :
+    un fournisseur Claude sans contexte dit en reçoit 40 000 ; une valeur dite reste, et courte, elle est dite."""
+    assert BackendSpec(kind="claude", model="claude-sonnet-5-5").context_tokens == 40_000
+    assert BackendSpec(kind="claude_code", model="").context_tokens == 40_000
+    assert BackendSpec(kind="ollama", model="gemma4:12b").context_tokens == 24_000
+    short = BackendSpec(kind="claude", model="claude-sonnet-5-5", context_tokens=24_000)
+    assert short.context_tokens == 24_000
+    cfg = LLMConfig(backends={"api": short}, routes={"reply": "api"})
+    with caplog.at_level(logging.WARNING, logger="mika.llm.config"):
+        build_gateway(cfg, ManualClock(0), make=lambda n, s: Quick())
+    assert [r for r in caplog.records if "Contexte" in r.getMessage()]

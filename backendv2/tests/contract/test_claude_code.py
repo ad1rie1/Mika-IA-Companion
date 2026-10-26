@@ -142,6 +142,7 @@ async def test_a_tool_turn_reports_the_usage_of_its_own_messages(tmp_path, cli):
     assert (first.input_tokens, first.output_tokens, first.cache_read) == (5, 11, 40)
     assert (last.input_tokens, last.output_tokens, last.cache_read) == (6, 12, 40)  # pas l'usage cumulé du result
     assert loop.last.usage.output_tokens == 12
+    assert loop.last.prompt_tokens == 46  # la plus grande entrée d'un seul message, cache compris
 
 
 async def test_calls_written_together_are_one_batch_even_when_the_model_writes_slowly(tmp_path, cli):
@@ -615,7 +616,7 @@ async def test_the_cli_output_follows_the_request_budget(tmp_path, cli):
         req = LLMRequest(role="journal", call_id="b-1#0", system_stable=scenario(report=True),
                          messages=(Message("user", "x"),), max_tokens=3000)
         report = _report((await be.complete(req)).text)
-    assert report["max_output"] == "3000"
+    assert report["max_output"] == "3000" == str(be.output_tokens(req))
 
 
 async def test_the_cli_makes_no_side_connections_and_opens_no_session_socket(tmp_path, cli):
@@ -654,6 +655,9 @@ async def test_with_tools_the_cli_has_room_for_their_arguments(tmp_path, cli):
                          tools=(ToolDecl("forge_write", "Écrire une app.", {"type": "object"}),))
         report = _report((await be.complete(req)).text)
     assert int(report["max_output"]) >= 16_384
+    # le plafond est dit à la passerelle (``output_tokens``) : elle ne rejoue pas une coupure au même plafond
+    assert be.output_tokens(req) == int(report["max_output"])
+    assert be.output_tokens(replace(req, tools=())) == 1024  # sans outil : le budget, jamais sous le plancher
 
 
 async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli):

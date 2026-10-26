@@ -108,6 +108,10 @@ class LLMResponse:
     #: la catégorie d'un refus (``stop_details.category`` de l'API : « cyber », « bio », « frontier_llm »…) ; vide hors
     #: refus, ou quand le fournisseur n'en donne pas
     stop_detail: str = ""
+    #: la plus grande entrée d'un seul appel au modèle, cache compris, quand le fournisseur en a fait plusieurs pour
+    #: cette réponse (la CLI de Claude Code cherche ses outils en cours de tour) ; 0 : l'entrée de ``usage`` suffit.
+    #: C'est ce que la passerelle compare à l'estimation du budget — jamais la somme de plusieurs appels
+    prompt_tokens: int = 0
 
 
 #: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
