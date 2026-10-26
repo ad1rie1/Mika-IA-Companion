@@ -665,8 +665,9 @@ def polish_draft(flow: str, draft: str, about: str, author: Any) -> tuple[str, s
 SHORT_MESSAGE = 40
 #: les curseurs de son tempérament qui s'entendent dans une réponse, du plus visible au moins visible ; au plus
 #: ``_MARKED_SHOWN`` d'entre eux, marqués (``_MARKED`` du milieu ou plus), sont rappelés dans « TA RÉPONSE »
-_VOICED = ("expressiveness", "sociability", "optimism", "negativity", "energy", "reactivity", "impulsivity",
-           "shyness", "empathy", "trust", "curiosity", "contagion", "mask", "grudge", "anxiety", "introspection")
+_VOICED = ("expressiveness", "sociability", "inquisitiveness", "optimism", "negativity", "energy", "reactivity",
+           "impulsivity", "shyness", "empathy", "trust", "curiosity", "contagion", "mask", "grudge", "anxiety",
+           "introspection")
 _MARKED, _MARKED_SHOWN = 0.3, 3
 
 

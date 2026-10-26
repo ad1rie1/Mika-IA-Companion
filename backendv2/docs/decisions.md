@@ -22,7 +22,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
@@ -788,7 +788,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* presque tout ce que la propriétaire attendait dépendait du type de personne, pas d'une règle.
 
-*Révisée par 0102, 0112, 0118.*
+*Révisée par 0102, 0112, 0118, 0137.*
 
 ### 0107 — Les suites du parcours d'une émotion
 
@@ -812,6 +812,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* elle écrivait trois fois de l'actualité à quelqu'un resté silencieux depuis la veille.
 
 *Révise 0033 (en partie), 0100 (en partie), 0105 (en partie).*
+
+### 0137 — L'intérêt pour les autres : c'est elle qui demande leur journée
+
+- Un 29ᵉ curseur, « Intérêt pour les autres » (`inquisitiveness`, famille « Les autres ») : combien ce que vivent les gens l'intéresse. Il est distinct de la curiosité (apprendre, explorer : ses explorations) et de l'empathie (s'inquiéter de qui va mal).
+- Il pilote `social.their_day_from_h`. Au milieu et en dessous, la valeur est 24 : jamais, comme avant. Au-dessus, l'heure avance, de 21 h à peine marqué jusqu'à midi au plus haut. À partir de cette heure, une fois par jour, la section « SA JOURNÉE » lui fait demander à une amie ou une proche, en privé, comment se passe sa journée (avant 17 h) ou comment elle s'est passée, si on ne lui en a pas déjà parlé.
+- Elle le demande en répondant ou en saluant, jamais dans une relance, une inquiétude ou une promesse, qui ont leur sujet. Rien pendant des jours durs (sa mémoire en parle déjà, avec douceur), ni en mode pro. Un énoncé qui avait la section sous les yeux compte pour la journée (`social.asked_day`), qu'elle ait demandé ou non.
+- Il se dit au modèle comme les autres traits, et dans « TA RÉPONSE » quand il est marqué, juste après la sociabilité.
+- « Réfléchie » le porte à 8 : Mika demande à partir de 14 h 15. Solaire est à 7, de marbre et dépressive à 3, narcissique à 2.
+
+*Pourquoi :* sa curiosité nourrissait ses explorations, jamais un intérêt pour la personne en face, et son prompt ne faisait que freiner les questions (« pas une intervieweuse »). Une IA n'a pas de journée à raconter : c'est à elle de demander celle de l'autre (demande de l'utilisateur, 2026-10-26).
+
+*Révise 0100 (29 curseurs).*
 
 ## Buts, projets, Forge et atelier
 

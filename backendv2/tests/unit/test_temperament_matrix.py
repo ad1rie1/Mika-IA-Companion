@@ -83,6 +83,15 @@ def test_every_slider_drives_something_and_is_told():
         assert phrase(f"self.temperament.name.{slider}")
 
 
+def test_inquisitiveness_asks_about_their_day_only_above_the_middle_and_sooner_the_higher():
+    """L'intérêt pour les autres (ADR 0137) : jamais au milieu ni en dessous (24 h, la valeur d'avant), puis de plus en
+    plus tôt, jusqu'à midi au plus haut que permet la console."""
+    hours = [social_derive(_t(inquisitiveness=x)).their_day_from_h for x in (0.0, T.LOWEST, 0.5, 0.6, 0.8, T.HIGHEST)]
+    assert hours[:3] == [24.0, 24.0, 24.0]
+    assert 24.0 > hours[3] > hours[4] > hours[5] == 12.0
+    assert social_derive(_t(inquisitiveness=1.0)).their_day_from_h == 12.0
+
+
 def test_her_reaction_and_her_defense_drive_the_affect_too():
     """Sa réaction et sa défense ne sont pas que des mots : chacune règle l'affect (et se dit au modèle)."""
     for key, _label in T.REACTIONS:

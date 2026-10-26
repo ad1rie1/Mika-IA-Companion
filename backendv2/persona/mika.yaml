@@ -166,6 +166,7 @@ temperament:
   impulsivity: 0.2
   introspection: 0.9
   empathy: 0.6
+  inquisitiveness: 0.8
   shyness: 0.5
   attachment: 0.5
   stability: 0.5

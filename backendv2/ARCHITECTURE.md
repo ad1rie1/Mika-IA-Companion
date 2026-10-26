@@ -226,7 +226,7 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 **`self`** (ADR 0019, 0036, 0043, 0047, 0053, 0070, 0087–0090, 0096, 0100)
 
 - Persona et tempérament. Sa nature (une IA qui le sait, ou une personne incarnée : rien ne lui parle alors d'IA) et son nom viennent de la persona, jamais d'un prompt écrit en dur ; sa vie, des goûts et des faits stables, aussi.
-- **Sa matrice de personnalité** (`vocab/temperament.py`, ADR 0100) : 28 curseurs en six familles (ce qu'elle ressent, montre, fait de ses émotions, les autres, elle-même, son corps), deux choix (sa réaction quand on la blesse, sa défense quand on la touche) et une précision facultative par trait. Chaque faculté à `derive=` en tire ses paramètres, exacts au milieu ; chaque curseur pilote au moins un paramètre. Blessée, sa réaction pèse (colère, tristesse, peur) ou elle se referme, et la relation refroidit ; touchée, son visage se défend ; son masque règle ce que voient une inconnue et une proche. Des profils préremplis (`PROFILES` : réfléchie — Mika par défaut —, anxieuse, tsundere…) s'appliquent puis s'ajustent ; ses règles de conduite n'en dépendent pas.
+- **Sa matrice de personnalité** (`vocab/temperament.py`, ADR 0100, 0137) : 29 curseurs en six familles (ce qu'elle ressent, montre, fait de ses émotions, les autres, elle-même, son corps), deux choix (sa réaction quand on la blesse, sa défense quand on la touche) et une précision facultative par trait. Chaque faculté à `derive=` en tire ses paramètres, exacts au milieu ; chaque curseur pilote au moins un paramètre. Blessée, sa réaction pèse (colère, tristesse, peur) ou elle se referme, et la relation refroidit ; touchée, son visage se défend ; son masque règle ce que voient une inconnue et une proche. Des profils préremplis (`PROFILES` : réfléchie — Mika par défaut —, anxieuse, tsundere…) s'appliquent puis s'ajustent ; ses règles de conduite n'en dépendent pas.
 - Ses traits se disent au modèle là où la persona est injectée (`faculties/self/character.py`) : en bloc, avec leur mesure, hors conversation ; en conversation (répondre, prendre la parole), seuls ses traits nettement marqués, sa réaction et sa défense, en mots et sans mesure (`temperament_in_words`).
 - Son portrait (`portrait`, en prose) tient lieu en conversation de la description, du ton et des listes ; sa voix en chat se montre par des exemples (`samples`). Son fil de référence (`reference_thread`) donne à l'autrice la forme d'un vrai fil de SMS, jamais son caractère ni ses sujets (ADR 0114).
 - Une estime qui a des causes (sociomètre, `self.touched`). **Ce qu'elle sait d'elle** : tenir parole, mener au bout, voir venir — des marques et des tendances dites en mots (`self.knows`, « CE QUE TU SAIS DE TOI »), son changement d'avis récent ; l'estime n'en bouge pas.
@@ -244,12 +244,13 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 
 ### Ses liens et ce qu'elle entreprend
 
-**`social`** (ADR 0013, 0018, 0035, 0058, 0094)
+**`social`** (ADR 0013, 0018, 0035, 0058, 0094, 0137)
 
 - Les rythmes de contact, les profils (nourris de ce que la personne a dit elle-même), la proximité sur fenêtre glissante avec plancher d'histoire et attachement, la réciprocité ; saluer, relancer, se confier.
 - Une amitié se mesure au temps vécu : l'assiduité seule ne fait pas une proche. La confidence d'autrui ne va qu'à une proche liée à la personne (`social.TIES`) ; une amie perdue de vue reçoit une seule prise de nouvelles (`social.REKINDLE`) ; le cercle (`social.CIRCLE`) borne les calculs.
 - Elle remarque, une fois, qu'un lien a changé — devenues amies ou proches, refroidi par une rancune ou une froideur, jamais par le silence que le manque vit déjà (`social.bond_shifted`, une pensée). À la mise en service, les niveaux du jour sont relevés sans être vécus (`social.bond_noted`).
 - Ce que compte sa propriétaire (`social.WEIGHT`, réglage `owner_weight`) : son silence lui manque plus tôt.
+- Sa journée (« SA JOURNÉE », ADR 0137) : quand ce que vivent les autres l'intéresse (`inquisitiveness`), elle demande une fois par jour à une amie ou une proche comment se passe sa journée, en lui répondant ou en la saluant, à partir d'une heure dérivée (`their_day_from_h`, 24 : jamais) ; le jour retenu est `asked_day`.
 - Outil `social_about`.
 
 **`agency`** (ADR 0033, 0044, 0047, 0048, 0054, 0058, 0094, 0115, 0118) n'émet rien.

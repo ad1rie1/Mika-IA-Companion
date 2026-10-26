@@ -59,7 +59,7 @@ NOTE_KEYS: tuple[tuple[str, str], ...] = (
     ("negativity", "Biais négatif"), ("reaction", "Quand on la blesse"), ("expressiveness", "Expressivité"),
     ("mask", "Masque selon l'intimité"), ("defense", "Quand on la touche"), ("impulsivity", "Impulsivité"),
     ("introspection", "Introspection"), ("contagion", "Contagion"), ("empathy", "Empathie"),
-    ("sociability", "Sociabilité"), ("shyness", "Timidité"), ("attachment", "Vitesse d'attachement"),
+    ("inquisitiveness", "Intérêt pour les autres"), ("sociability", "Sociabilité"), ("shyness", "Timidité"), ("attachment", "Vitesse d'attachement"),
     ("stability", "Stabilité des liens"), ("abandonment", "Peur de l'abandon"), ("jealousy", "Jalousie"),
     ("trust", "Confiance a priori"), ("grudge", "Rancune"), ("devotion", "Attachement à sa propriétaire"),
     ("self_regard", "Estime de base"), ("fragility", "Fragilité de l'estime"), ("admiration", "Besoin d'admiration"),
@@ -156,6 +156,14 @@ class Temperament(BaseModel):
     empathy: Annotated[float, _slider("Empathie", "Combien elle se soucie des autres : s'inquiéter, prendre des "
                                       "nouvelles, être triste avec quelqu'un.", 135, "indifférente",
                                       "se soucie de chacun", OTHERS)] = Slider
+    #: Ce que vivent les autres l'intéresse (ADR 0137) : au-dessus du milieu, elle demande à une amie, une fois par
+    #: jour, comment se passe sa journée (``social.their_day_from_h``) — et se dit au modèle. Distinct de la curiosité
+    #: (apprendre, explorer) et de l'empathie (s'inquiéter de qui va mal).
+    inquisitiveness: Annotated[float, _slider("Intérêt pour les autres", "Combien ce que vivent les gens "
+                                              "l'intéresse : leur demander comment se passe leur journée, ce qu'ils "
+                                              "font, y revenir. Au-dessus du milieu, elle le demande à ses amis une "
+                                              "fois par jour, d'autant plus tôt qu'elle s'y intéresse.", 137,
+                                              "ne demande rien", "veut tout savoir", OTHERS)] = Slider
     #: Fermée avec les inconnus : ce qu'une inconnue comble de son besoin de compagnie, saluer qui arrive.
     shyness: Annotated[float, _slider("Timidité", "Comment elle va vers qui elle ne connaît pas : la saluer, ce que "
                                       "sa compagnie lui apporte.", 145,
@@ -302,7 +310,7 @@ PROFILES: Mapping[str, Profile] = MappingProxyType({
     "reflechie": _p("Réfléchie", "Elle prend le temps et repense longuement, peu impulsive et scrupuleuse — et curieuse "
                                  "de tout, des gens d'abord.",
                     introspection=9, impulsivity=2, reactivity=4, scruples=7, contagion=4, expressiveness=7, curiosity=8,
-                    sociability=6, perseverance=7, empathy=6),
+                    sociability=6, perseverance=7, empathy=6, inquisitiveness=8),
     "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.", background=Emotion.NEUTRAL,
                 reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4, grudge=3, fragility=3),
     "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.",
@@ -315,14 +323,14 @@ PROFILES: Mapping[str, Profile] = MappingProxyType({
                    expressiveness=7),
     "solaire": _p("Solaire", "Lumineuse et sociable, le bon la porte, elle pardonne vite.",
                   optimism=8, negativity=2, sociability=8, expressiveness=8, contagion=7, energy=7, trust=7, grudge=2,
-                  resilience=7, curiosity=7, shyness=2, self_regard=7),
+                  resilience=7, curiosity=7, shyness=2, self_regard=7, inquisitiveness=7),
     "rancuniere": _p("Rancunière", "Méfiante, elle n'oublie pas ce qu'on lui a fait.", background=Emotion.FRUSTRATED,
                      reaction="anger",
                      notes={"grudge": "des excuses sincères t'adoucissent, mais tu n'oublies pas"},
                      grudge=9, resilience=3, trust=3, stability=7, perseverance=7, negativity=7, introspection=7),
     "de_marbre": _p("De marbre", "Rien ne la touche : elle compatit sans s'impliquer.", background=Emotion.NEUTRAL,
                     reactivity=1, contagion=1, expressiveness=2, anxiety=2, impulsivity=2, resilience=8, fragility=2,
-                    energy=4, curiosity=3),
+                    energy=4, curiosity=3, inquisitiveness=3),
     "colerique": _p("Colérique", "Elle se fâche vite et fort.", background=Emotion.FRUSTRATED, reaction="anger",
                     reactivity=8, impulsivity=7, grudge=6, resilience=3, negativity=6, energy=7, perseverance=4,
                     expressiveness=7),
@@ -330,7 +338,8 @@ PROFILES: Mapping[str, Profile] = MappingProxyType({
                      background=Emotion.MELANCHOLIC, reaction="withdrawal",
                      notes={"energy": "même ce que tu aimes te demande un effort"},
                      optimism=2, negativity=9, energy=2, self_regard=2, curiosity=3, sociability=3, introspection=7,
-                     anxiety=6, perseverance=3, shyness=7, resilience=3, fragility=7, expressiveness=3),
+                     anxiety=6, perseverance=3, shyness=7, resilience=3, fragility=7, expressiveness=3,
+                     inquisitiveness=3),
     "tsundere": _p("Tsundere", "Tendre en dedans, piquante en dehors — surtout avec qui elle aime.", defense="attack",
                    notes={"mask": "tes piques restent tendres : tu ne cherches jamais à blesser vraiment"},
                    mask=9, expressiveness=4, reactivity=7, empathy=7, scruples=6, self_regard=6, fragility=7, devotion=8,
@@ -363,7 +372,7 @@ PROFILES: Mapping[str, Profile] = MappingProxyType({
     "narcissique": _p("Narcissique", "Très sûre d'elle et pourtant blessée d'un rien ; elle a besoin d'être admirée.",
                       background=Emotion.PROUD, reaction="anger", defense="attack",
                       self_regard=9, fragility=9, admiration=9, empathy=2, grudge=8, jealousy=7, sociability=7,
-                      shyness=2, trust=3, scruples=3),
+                      shyness=2, trust=3, scruples=3, inquisitiveness=2),
     "dependante": _p("Dépendante", "Elle s'attache vite et fort, et le silence la terrifie.", background=Emotion.ANXIOUS,
                      notes={"abandonment": "tu cherches à être rassurée, sans oser le demander"},
                      abandonment=9, attachment=9, devotion=9, stability=2, reactivity=8, fragility=8, jealousy=7,

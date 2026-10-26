@@ -11,6 +11,12 @@
   t'appelle, le surnom que tu lui donnes, vos blagues : ``memory``, colonne
   ``between_us``, ADR 0055). Jamais avec une inconnue, jamais en public.
 
+- **Sa journée** (ADR 0137) : quand ce que vivent les autres l'intéresse (son
+  tempérament), une fois par jour et à partir d'une heure qu'il en dérive, elle
+  a envie de savoir comment se passe la journée d'une amie ou d'une proche — en
+  lui répondant, ou en la saluant. Jamais en public, ni quand quelque chose de
+  grave la touche (sa mémoire le dit déjà, avec douceur).
+
 Quand ils se sont parlé pour la dernière fois est dit dans « QUI TU AS EN
 FACE » (``identity``). Ce que tu perçois de son état (le ton de son message,
 et ce qui tranche avec son ton habituel) est tenu par ``others``.
@@ -27,12 +33,12 @@ from pydantic import BaseModel
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as c
-from mika.faculties.social.faculty import SOCIAL, THEM, Profile, SocialState, contact_of, params
+from mika.faculties.social.faculty import SOCIAL, THEIR_DAY, THEM, Profile, SocialState, contact_of, params
 from mika.faculties.social.profile import describe_level, lines_of, register
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, readable
-from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.knowledge import knowns
 from mika.vocab.lineage import admits
 from mika.vocab.people import is_identifiable
@@ -101,6 +107,38 @@ def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
         return None
     # sa propre fiche : ce qu'elle dit d'autres gens, la personne l'a raconté elle-même (témoin)
     return SectionBody("\n".join(lines), level=int(Sensitivity.PERSONAL), witness=True)
+
+
+#: avant cette heure, sa journée est en cours (« comment elle se passe ») ; après, elle est faite (« comment elle
+#: s'est passée »)
+EVENING_H = 17
+
+
+@SOCIAL.section(THEIR_DAY, zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE],
+                after=["about_person"], before=["stance"], trim_rank=60, title=phrase("social.their_day.title"),
+                reads=[identity_c.PERSON, identity_c.IDENTITY, c.CLOSENESS, memory_c.HARD_TIMES])
+def _their_day(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    """Elle a envie de savoir comment se passe la journée d'une amie (ADR 0137) : en lui répondant, ou en la saluant
+    quand elle arrive ; une fois par jour (le réducteur d'un énoncé qui avait cette section la retient), à partir de
+    l'heure que son intérêt pour les autres dérive. Une IA n'a pas de journée à raconter : c'est elle qui demande."""
+    ep, aud = frame.episode, frame.audience
+    if ep is None or not ep.target or not is_identifiable(ep.target) or aud is None or not aud.private_ok:
+        return None
+    if ep.kind == Kind.INITIATIVE and c.GREETING not in (ep.attrs.get("reasons") or ()):
+        return None  # une relance, une inquiétude, une promesse ont chacune leur sujet
+    local = frame.local(frame.now)
+    if local.hour + local.minute / 60 < params(frame.env.params_of("social", frame.root)).their_day_from_h:
+        return None
+    person = frame.get(identity_c.PERSON(ep.target))
+    if s.asked_day.get(person) == local.date().toordinal():
+        return None
+    if frame.get(c.CLOSENESS(person)) not in (c.FRIEND, c.CLOSE) or frame.get(memory_c.HARD_TIMES(person)):
+        return None
+    name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(ep.target)).name
+    who = f"« {name} »" if name else phrase("social.about.someone")
+    if local.hour >= EVENING_H:
+        return phrase("social.their_day.done", who=who)
+    return phrase("social.their_day.going", who=who)
 
 
 #: ses notes sont à la première personne (« Sam m'appelle « Mikachu » ») ; l'état qu'on lui montre lui parle à la

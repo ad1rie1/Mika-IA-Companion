@@ -33,6 +33,9 @@ STARTS_KEPT = 20
 OPENINGS_KEPT = 16
 #: Qui a ouvert une conversation.
 HER, THEM = "her", "them"
+#: La section où elle a envie de savoir comment se passe la journée de quelqu'un (ADR 0137) : un énoncé qui l'a eue
+#: sous les yeux compte pour ce jour-là.
+THEIR_DAY = "their_day"
 #: Les connexions vivantes retenues (au-delà, les plus anciennes s'oublient) ; les départs retenus (les plus récents).
 LINKS_KEPT = 512
 LEFT_KEPT = 512
@@ -249,6 +252,13 @@ class SocialParams(BaseModel):
         label="Saluer une inconnue qui arrive", group="Saluer", lo=0.0, hi=15.0, step=0.5,
         help="La preuve (log-odds, seuil d'initiative : 9) pour saluer une inconnue ou une connaissance qui arrive ; "
              "une amie, une proche : 11 toujours. Dérivé de la timidité : 11 au milieu, moins chez une timide.")] = 11.0
+    # sa journée : ce que vit une amie l'intéresse (ADR 0137)
+    their_day_from_h: Annotated[float, Knob(
+        label="Lui demander sa journée à partir de (heure)", group="Sa journée", lo=0.0, hi=24.0, step=0.25,
+        help="À partir de cette heure, une fois par jour, elle a envie de savoir comment se passe la journée d'une "
+             "amie ou d'une proche à qui elle parle en privé, et le lui demande — sauf si elle en a déjà parlé, ou "
+             "quand quelque chose de grave la touche. 24 : jamais. Dérivé de l'intérêt pour les autres : jamais au "
+             "milieu ni en dessous, de plus en plus tôt au-dessus (21 h à peine marqué, midi au plus haut).")] = 24.0
     grudge_demote: Annotated[float, Knob(
         label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
         help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "
@@ -387,6 +397,21 @@ class SocialState:
     felt_levels: FrozenDict[str, tuple[str, int]] = field(default_factory=FrozenDict)
     #: quand elle a relevé ses liens pour la première fois (0 : jamais — le premier passage les relève sans les vivre)
     bonds_since: int = 0
+    #: le dernier jour (ordinal local) où elle a voulu savoir comment se passait la journée de chacun (ADR 0137)
+    asked_day: FrozenDict[str, int] = field(default_factory=FrozenDict)
+
+
+#: l'intérêt pour les autres : sous ce seuil (le milieu compris), elle ne demande jamais sa journée à personne
+_ASKS_ABOVE = 0.5
+
+
+def their_day_from(inquisitiveness: float) -> float:
+    """L'heure à partir de laquelle elle demande sa journée à une amie (ADR 0137) : 24 (jamais) au milieu et en
+    dessous — la valeur d'avant —, puis de 21 h, à peine au-dessus du milieu, à midi au plus haut que permet la
+    console (0,9)."""
+    if inquisitiveness <= _ASKS_ABOVE:
+        return 24.0
+    return round(lerp(21.0, 12.0, (inquisitiveness - _ASKS_ABOVE) / (0.9 - _ASKS_ABOVE)), 2)
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -394,11 +419,13 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
     longtemps avant d'aller chercher du réconfort (au milieu : −0,35, la valeur
     d'avant). L'attachement à sa propriétaire (ADR 0100) dit combien elle compte plus qu'une proche — jamais moins
     (au milieu : 1,3, la valeur d'avant). La timidité (ADR 0100) : timide, elle salue moins une inconnue ou une
-    connaissance qui arrive ; ouverte, davantage. Les surcharges sont posées par ``runtime/params.py``."""
+    connaissance qui arrive ; ouverte, davantage. L'intérêt pour les autres (ADR 0137) : au-dessus du milieu, elle
+    demande sa journée à une amie, d'autant plus tôt. Les surcharges sont posées par ``runtime/params.py``."""
     values: dict[str, Any] = {"distress_valence": round(lerp(-0.2, -0.5, t.optimism), 3),
                               "owner_weight": max(1.0, around(t.devotion, 1.3, 1.3)),
                               # la timidité : saluer une inconnue qui arrive (au milieu : 11, la valeur d'avant)
-                              "stranger_greeting": shift(t.shyness, 11.0, -4.0)}
+                              "stranger_greeting": shift(t.shyness, 11.0, -4.0),
+                              "their_day_from_h": their_day_from(t.inquisitiveness)}
     values.update(dict(overrides or {}))
     return SocialParams(**values)
 
@@ -414,8 +441,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: v11 : un lien suit chaque témoignage de la croyance d'où il vient, et passe à la gardée d'une jointure (ADR 0080).
 #: v12 : un portrait suit ce qu'il reprenait : devenu secret, il se tait ; changé, il se réécrit (ADR 0082).
 #: v13 : … devenu une confidence (un sujet délicat, ``memory.delicate``), aussi (ADR 0099).
+#: v14 : le jour où elle a voulu savoir comment se passait la journée de chacun (``asked_day``, ADR 0137).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=13, retired_params=("ignored_shift", "tie_room_max"))
+                 state_version=14, retired_params=("ignored_shift", "tie_room_max"))
 SOCIAL.declare(*c.ALL)
 
 
@@ -516,6 +544,10 @@ def _uttered(s: SocialState, e, cx) -> SocialState:
     ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if speaking_up else 0))
     if initiative and c.REKINDLE in reasons:
         s = replace(s, rekindled=s.rekindled.set(person, e.at))  # une fois par silence
+    if THEIR_DAY in d.sections:
+        # elle avait envie de savoir sa journée, et elle a parlé : pas deux fois le même jour, qu'elle l'ait demandé
+        # ou que la personne en ait déjà parlé
+        s = replace(s, asked_day=s.asked_day.set(person, cx.local(e.at).date().toordinal()))
     return replace(s, contacts=s.contacts.set(person, ct))
 
 
@@ -649,7 +681,7 @@ def _without_person(s: SocialState, subject: str, *, link_too: bool) -> SocialSt
     return replace(s, contacts=s.contacts.without(drop), greeted=s.greeted.without(drop),
                    profiles=s.profiles.without(drop), declared=s.declared.without(drop),
                    noticed=s.noticed.without(drop), rekindled=s.rekindled.without(drop),
-                   felt_levels=s.felt_levels.without(drop))
+                   felt_levels=s.felt_levels.without(drop), asked_day=s.asked_day.without(drop))
 
 
 @SOCIAL.reducer(SUBJECT_FORGOTTEN)

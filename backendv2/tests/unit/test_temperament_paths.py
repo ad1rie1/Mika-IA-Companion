@@ -388,6 +388,30 @@ def test_empathy_sadness_shared_brings_her_closer(tmp_path):
     assert got["haut"] > got["milieu"] > got["bas"]
 
 
+def test_inquisitiveness_she_asks_a_friend_about_their_day_once_a_day(tmp_path):
+    """L'intérêt pour les autres (ADR 0137) : au plus haut, à partir de midi, elle a envie de savoir comment se passe
+    la journée d'un ami — une fois par jour, de nouveau le lendemain ; jamais avant l'heure, jamais à une inconnue ;
+    au milieu, jamais."""
+    title = phrase("social.their_day.title")
+
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1")
+        seen = []
+        for pause in (0, 3 * HOUR / US, 60, DAY / US):  # 10 h, 13 h, 13 h, le lendemain 13 h
+            await wait(pause)
+            await say(kernel, voice, "user_1")
+            seen.append(title in voice.prompts[-1])
+        await say(kernel, voice, "user_2")
+        return seen, title in voice.prompts[-1], voice.prompts[1]
+
+    got = each(tmp_path, {"milieu": T.Temperament(), "haut": T.Temperament(inquisitiveness=T.HIGHEST)}, scenario,
+               start=at_paris(2026, 9, 28, 10, 0))
+    seen, stranger, prompt = got["haut"]
+    assert seen == [False, True, False, True] and not stranger
+    assert "comment se passe la journée" in prompt  # avant 17 h, sa journée est en cours
+    assert got["milieu"][0] == [False] * 4 and not got["milieu"][1]
+
+
 def test_shyness_a_stranger_fills_her_less(tmp_path):
     async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
         await wait(3 * HOUR / US * US / US)

@@ -249,7 +249,7 @@ def test_real_temperament():
     l'humeur de fond et deux choix."""
     f = fields_by_path(Temperament)
     sliders = [p for p in f if f[p].kind == "slider"]
-    assert sorted(sliders) == sorted(temperament.SLIDERS) and len(sliders) == 28
+    assert sorted(sliders) == sorted(temperament.SLIDERS) and len(sliders) == 29
     assert all((f[p].lo, f[p].hi, f[p].readonly, f[p].advanced) == (0.1, 0.9, False, False) for p in sliders)
     assert all(f[p].help and f[p].label != p for p in sliders)  # chaque curseur dit ce qu'il pilote
     families = {temperament.FEEL, temperament.SHOW, temperament.ACT, temperament.OTHERS, temperament.SELF,
