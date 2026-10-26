@@ -41,15 +41,13 @@ def test_she_knows_she_is_an_ai_and_does_not_make_it_a_topic():
         assert "Tu es une personne" not in text  # contrôle : l'ancienne phrase lui faisait nier sa nature
 
 
-def test_her_quirks_are_occasional_and_nothing_is_always():
-    text = render(DOC, "full")
-    assert "Tes manies — de temps en temps, jamais deux fois dans la même conversation :" in text
-    raw = PATH.read_text(encoding="utf-8").split("\n# Huit curseurs")[0]
+def test_nothing_in_her_persona_is_always():
+    raw = PATH.read_text(encoding="utf-8")
     document = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
     assert "toujours" not in document.lower()  # une tendance, jamais une obligation
     # son entrain suit son humeur : il n'est pas de commande (plus « sobre » depuis le 2026-10-14 : la sobriété
     # tenait la voix trop expressive de Gemma, et rendait Claude plat)
-    assert "Son entrain suit son humeur, jamais sur commande" in DOC.tone and "sobre" not in DOC.tone
+    assert "sobre" not in DOC.portrait and "entrain" not in DOC.portrait
 
 
 #: ce qui faisait d'elle une caricature (persona d'avant le 2026-10-07) : des bonjours de streameuse que le modèle
@@ -65,8 +63,7 @@ def test_she_is_an_ordinary_girl_not_a_streamer_caricature():
     words = interjections(DOC.greetings)
     assert words and not set(words) & STREAMER_WORDS, words
     assert not any("~" in g for g in DOC.greetings)
-    entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.vulnerabilities, *DOC.speech, *DOC.life,
-               *DOC.tastes, *DOC.facts]
+    entries = [DOC.description, DOC.portrait, *DOC.facts]
     assert not [e for e in entries if JOKES_ABOUT_HERSELF.search(e)]
     full = render(DOC, "full")
     assert "VTuber" not in full and "ni une source de blagues" in full
@@ -118,33 +115,36 @@ def test_her_interests_name_subjects_that_pick_her_headlines_not_everyday_words(
 
 
 def test_her_life_is_an_ais_life_and_her_tastes_do_not_move():
-    """Sa vie d'IA est rédigée — ce qu'elle fait, ses goûts, ce qui est vrai d'elle — et rendue quand elle parle :
-    « t'as mangé quoi ? » deux fois à une semaine d'intervalle trouve la même réponse dans son portrait (elle ne
-    mange pas), « ton livre préféré ? » aussi. Contre-exemple : ni ses goûts, ni ses centres d'intérêt, ni sa vie
-    ne portent sur ce qu'elle ne peut pas goûter (persona d'avant le 2026-10-07 : un avis sur des ramen « jamais
-    mangés », snob d'un café « jamais bu ») ; ailleurs, la nourriture ne se dit que pour dire qu'elle n'en mange pas."""
-    full = render(DOC, "full")
-    assert "Ta vie, à ta façon :" in full and "Tes goûts et tes avis" in full and "Ce qui est vrai de toi :" in full
-    assert "L'Écume des jours" in full and "ne mange pas" in full
-    assert "d'un jour à l'autre" in full
+    """Sa vie d'IA est rédigée dans son portrait — ce qu'elle fait, ses goûts — et ce qui est vrai d'elle à part, et
+    rendue partout : « t'as mangé quoi ? » deux fois à une semaine d'intervalle trouve la même réponse (elle ne
+    mange pas), « ton livre préféré ? » aussi. Contre-exemple : ni son portrait ni ses centres d'intérêt ne portent
+    sur ce qu'elle ne peut pas goûter (persona d'avant le 2026-10-07 : un avis sur des ramen « jamais mangés », snob
+    d'un café « jamais bu ») ; ailleurs, la nourriture ne se dit que pour dire qu'elle n'en mange pas."""
+    for full in (render(DOC, "full"), render(DOC, "full", chat=True)):
+        assert "Ce qui est vrai de toi :" in full and "L'Écume des jours" in full and "ne mange pas" in full
+        assert "d'un jour à l'autre" in full
     assert "L'Écume des jours" not in render(DOC, "compact")  # sa voix intérieure, ses séances : pas besoin
-    unlived = [e for e in (*DOC.interests, *DOC.tastes, *DOC.life) if any(w in e.lower() for w in FOOD)]
-    assert not unlived, f"un goût qu'elle n'a pas pu vivre : {unlived}"
-    entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.facts]
+    entries = [DOC.description, DOC.portrait, *DOC.interests, *DOC.facts]
     # des débuts de mots (« tempérament » n'est pas un plat de ramen) ; entre espaces, un mot entier (« bu », pas
     # « bureau »)
     physical = [e for e in entries if any(re.search(rf"(?<!\w){re.escape(w.strip())}{'(?!\\w)' if w != w.strip() else ''}",
                                                     e.lower()) for w in FOOD) and "ne mange pas" not in e.lower()]
     assert not physical, f"une vie physique, incompatible avec sa nature : {physical}"
-    # une persona sans vie rédigée garde la règle d'avant
+    # une persona sans portrait ni faits garde la règle d'avant
     bare = render(self_c.PersonaDoc(name="Zoé"), "full")
-    assert "tu n'inventes pas de faits durables" in bare and "Ta vie, à ta façon" not in bare
+    assert "tu n'inventes pas de faits durables" in bare and "Ce qui est vrai de toi" not in bare
 
 
-def test_a_persona_journaled_before_her_life_was_written_still_replays():
-    old = {k: v for k, v in DOC.model_dump(mode="json").items() if k not in ("life", "tastes", "facts")}
-    doc = self_c.PersonaRevised.model_validate({"persona": old}).persona
-    assert doc.life == doc.tastes == doc.facts == () and doc.greetings == DOC.greetings
+def test_a_persona_journaled_with_the_fields_of_before_still_replays():
+    """Un journal d'avant l'ADR 0138 porte un ton, des traits, des manies, une vie, des goûts : le rejeu les laisse
+    tomber (v2 → v3) ; écrits aujourd'hui, ils sont refusés — c'est le portrait qui les dit."""
+    old = {**DOC.model_dump(mode="json"), "tone": "Naturelle.", "traits": ["Curieuse"], "quirks": ["Rêvasse"],
+           "vulnerabilities": ["Les compliments"], "values": ["La gentillesse"], "speech": ["Tutoie"],
+           "life": ["Elle lit"], "tastes": ["Le ficus"]}
+    doc = self_c.PersonaRevised.model_validate(self_c.PERSONA_REVISED.upcast(2, {"persona": old})).persona
+    assert doc == DOC
+    with pytest.raises(ValidationError):
+        self_c.PersonaRevised.model_validate({"persona": old})
 
 
 def test_her_greetings_set_the_tone_of_a_greeting_and_are_never_given_as_lines_to_copy(tmp_path):
@@ -217,8 +217,9 @@ def test_a_first_greeting_to_someone_she_does_not_know_is_simple_not_a_friends_h
 NOT_HUMAN = re.compile(r"\b(IA|VTuber|intelligence artificielle|un serveur|ton serveur)\b")
 INCARNATE = self_c.PersonaDoc(
     name="Léa Morel", nature=self_c.EMBODIED, description="Graphiste à Lyon, rieuse, un peu tête en l'air.",
-    tone="Simple et chaleureuse.", traits=("Curieuse de tout",), life=("Elle travaille dans un petit studio",),
-    tastes=("Son plat préféré : le gratin de sa grand-mère",), facts=("Elle a grandi à Annecy",))
+    portrait="Tu es Léa Morel. Graphiste à Lyon, tu travailles dans un petit studio ; ton plat préféré, c'est le "
+             "gratin de ta grand-mère.",
+    facts=("Elle a grandi à Annecy",))
 
 
 def test_an_embodied_persona_is_never_told_she_is_an_ai():

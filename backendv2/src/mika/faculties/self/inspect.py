@@ -233,23 +233,15 @@ def _persona(s: SelfState) -> list[Block]:
         ("nom", doc.name),
         ("nature", NATURE_FR.get(doc.nature, doc.nature)),
         ("description", Text(doc.description, clamp=CLAMP) if doc.description else Text("—", kind="muted")),
-        ("portrait (conversation)", Text(doc.portrait, clamp=CLAMP) if doc.portrait.strip() else Text("—", kind="muted")),
+        ("portrait", Text(doc.portrait, clamp=CLAMP) if doc.portrait.strip() else Text("—", kind="muted")),
         ("fil de référence (autrice)", Text(doc.reference_thread, clamp=CLAMP) if doc.reference_thread.strip()
          else Text("—", kind="muted")),
-        ("ton", doc.tone or "—"),
         ("langue", doc.language),
         ("fuseau", doc.timezone),
-        ("traits", _lines(doc.traits)),
-        ("manies", _lines(doc.quirks)),
-        ("fragilités", _lines(doc.vulnerabilities)),
-        ("valeurs", _lines(doc.values)),
+        ("ce qui est vrai d'elle", _lines(doc.facts)),
         ("centres d'intérêt", _lines(doc.interests)),
-        ("façons de parler", _lines(doc.speech)),
         ("salutations (seuls leurs premiers mots lui sont montrés)", _lines(doc.greetings)),
         ("exemples en conversation (montrés seulement quand elle parle à quelqu'un)", _lines(doc.samples)),
-        ("sa vie, à sa façon", _lines(doc.life)),
-        ("ses goûts et ses avis", _lines(doc.tastes)),
-        ("ce qui est vrai d'elle", _lines(doc.facts)),
     ), title="La persona", columns=2)
     rows: list[tuple[Cell, ...]] = []
     knobs = {f.path: f for f in forms.describe(type(t))}

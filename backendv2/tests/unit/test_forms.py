@@ -264,10 +264,10 @@ def test_real_temperament():
 
 def test_real_persona():
     f = fields_by_path(PersonaDoc)
-    assert f["traits"].kind == "lines" and f["name"].kind == "text"
+    assert f["facts"].kind == "lines" and f["name"].kind == "text" and f["portrait"].kind == "textarea"
     assert f["temperament"].kind == "group"
     assert f["temperament.reactivity"].group == temperament.FEEL and f["temperament.reactivity"].lo == 0.1
-    assert f["traits"].group == "Caractère" and not f["traits"].advanced
+    assert f["facts"].group == f["portrait"].group == "Portrait" and not f["facts"].advanced
 
 
 def test_real_llm_config():
@@ -319,7 +319,7 @@ def test_real_mail_config():
     Sample(),
     Sample(ratio=0.2, notes=("a", "b"), rows={"x": Row(name="x")}, weights={"a": 3}, inner=Inner(enabled=False),
            color=Color.BLUE, limit=4.0),
-    PersonaDoc(traits=("curieuse",), temperament=Temperament(optimism=0.8, background=Emotion.SAD)),
+    PersonaDoc(facts=("curieuse",), temperament=Temperament(optimism=0.8, background=Emotion.SAD)),
     LLMConfig(backends={"main": BackendSpec(kind="claude", model="m", api_key="k")}, routes={"conversation": "main"}),
     MailConfig(accounts={"perso": MailAccount(imap_host="h", password="p", folders=("INBOX", "Pro"))}),
 ])

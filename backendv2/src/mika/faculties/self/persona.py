@@ -1,7 +1,8 @@
 """La persona : un seul document pour toutes ses voix, écrit par l'opératrice. Deux profondeurs : ``full``
-(répondre, prendre la parole, se raconter) et ``compact`` (murmurer, travailler) — rendues depuis le même document,
-pour qu'aucune de ses voix ne soit quelqu'un d'autre. Elle est une IA et le sait, ou une personne incarnée (``nature``)
-; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
+(répondre, prendre la parole, se raconter : son portrait en prose) et ``compact`` (murmurer, travailler : sa
+description) — rendues depuis le même document, pour qu'aucune de ses voix ne soit quelqu'un d'autre. Qui elle est
+s'écrit une fois, dans le portrait (ADR 0138) ; ce qu'elle ressent, c'est son tempérament qui le dit. Elle est une IA
+et le sait, ou une personne incarnée (``nature``) ; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
 0100), est dans les deux profondeurs hors conversation — murmurer, travailler, un réveil, un brouillon, son journal,
 ses rêves, son récit. En conversation (répondre, prendre la parole), il se dit en mots : ses traits nettement marqués,
 sa réaction et sa défense, sans mesure (``character.temperament_in_words``). En mode pro (ADR 0116, la profondeur
@@ -53,65 +54,41 @@ def nature_of(doc: c.PersonaDoc) -> str:
 
 
 def life_rule(doc: c.PersonaDoc) -> str:
-    """La règle de sa vie : avec une vie rédigée, ce qu'elle raconte de son quotidien reste compatible avec elle et
-    ses goûts ne bougent pas (``self.life.lived``) ; sans, la règle d'alors (``self.life.sketched``)."""
-    return phrase("self.life.lived") if doc.life or doc.tastes or doc.facts else phrase("self.life.sketched")
+    """La règle de sa vie : avec un portrait ou des faits rédigés, ce qu'elle raconte de son quotidien reste
+    compatible avec eux et ses goûts ne bougent pas (``self.life.lived``) ; sans, la règle d'alors
+    (``self.life.sketched``)."""
+    return phrase("self.life.lived") if doc.portrait.strip() or doc.facts else phrase("self.life.sketched")
 
 
 def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str:
-    """Le texte de la persona, en deuxième personne. Sa vie (ce qu'elle fait à sa
-    façon, ses goûts, ce qui est vrai d'elle) en profondeur ``full`` : c'est là
-    qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? ».
-    ``chat`` : elle parle à quelqu'un — ses exemples en conversation montrent sa
-    voix (décrite, elle sonnait comme un assistant : 2026-10-14) ; jamais dans un
-    mail, un travail ou son journal, qui ne s'écrivent pas comme un chat. En
+    """Le texte de la persona, en deuxième personne. En profondeur ``full``, son
+    portrait en prose — le seul texte qui la décrit (ADR 0138 ; écrites en listes,
+    ses qualités se jouaient une à une, « attentive », « à l'écoute » en faisaient
+    une intervieweuse : banc de recherche du 2026-10-15, 4,5 → 6,8 → 7,9 sur 10)
+    —, puis ce qui est vrai d'elle : c'est là qu'on lui demande « t'as mangé
+    quoi ? », « ton livre préféré ? ». En ``compact`` (murmurer, travailler), sa
+    description en une phrase. ``chat`` : elle parle à quelqu'un — ses exemples en
+    conversation montrent sa voix (décrite, elle sonnait comme un assistant :
+    2026-10-14) ; jamais dans un mail, un travail ou son journal, qui ne
+    s'écrivent pas comme un chat ; hors conversation, ses centres d'intérêt. En
     conversation, son tempérament se dit en mots, pas en bloc (banc de recherche,
     2026-10-15 : profil reconnu autant, un peu plus humain, au quart de la
     longueur ; sans rien, une tsundere n'était plus reconnue). ``pro`` : le mode
     pro (``_pro``)."""
     if depth == PRO:
         return _pro(doc)
-    if chat and depth == "full" and doc.portrait.strip():
-        return _portrait(doc)
+    portrait = doc.portrait.strip()
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
-    parts = [head]
-    if doc.tone:
-        parts.append(phrase("self.persona.tone", tone=doc.tone))
+    parts = [portrait if portrait and depth == "full" else head]
     if depth == "full":
-        parts += [
-            _bullets(phrase("self.persona.traits"), doc.traits),
-            _bullets(phrase("self.persona.quirks"), doc.quirks),
-            _bullets(phrase("self.persona.vulnerabilities"), doc.vulnerabilities),
-            _bullets(phrase("self.persona.values"), doc.values),
-            _bullets(phrase("self.persona.interests"), doc.interests),
-            _bullets(phrase("self.persona.speech"), doc.speech),
-            _bullets(phrase("self.persona.samples"), doc.samples) if chat else "",
-            _bullets(phrase("self.persona.life"), doc.life),
-            _bullets(phrase("self.persona.tastes"), doc.tastes),
-            _bullets(phrase("self.persona.facts"), doc.facts),
-        ]
-    else:
-        parts.append(_bullets(phrase("self.persona.in_short"), doc.traits[:3]))
+        parts.append(_bullets(phrase("self.persona.samples"), doc.samples) if chat
+                     else _bullets(phrase("self.persona.interests"), doc.interests))
+        parts.append(_bullets(phrase("self.persona.facts"), doc.facts))
     # hors conversation (son journal, ses rêves, son récit, son travail), le bloc ; en conversation, ses traits marqués
     # en mots (banc de recherche, 2026-10-15)
     parts.append(temperament_in_words(doc.temperament) if chat else temperament_text(doc.temperament))
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
-    return "\n\n".join(p for p in parts if p)
-
-
-def _portrait(doc: c.PersonaDoc) -> str:
-    """En conversation, quand la persona a un portrait : lui, en prose, à la place de la description, du ton et des
-    listes. Écrites en listes, ses qualités se jouaient une à une (« attentive », « à l'écoute » en faisaient une
-    intervieweuse) ; le même contenu en prose sonnait plus humain, et un portrait réécrit plus encore (banc de
-    recherche, 2026-10-15 : 4,5 → 6,8 → 7,9 sur 10). Ses exemples, ce qui est vrai d'elle, son tempérament (en mots, comme en
-    conversation), sa nature et la règle de sa vie suivent."""
-    parts = [doc.portrait.strip(),
-             _bullets(phrase("self.persona.samples"), doc.samples),
-             _bullets(phrase("self.persona.facts"), doc.facts),
-             temperament_in_words(doc.temperament),
-             phrase("self.persona.language", language=doc.language, nature=nature_of(doc)),
-             life_rule(doc)]
     return "\n\n".join(p for p in parts if p)
 
 

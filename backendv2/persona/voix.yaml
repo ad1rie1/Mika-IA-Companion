@@ -118,23 +118,14 @@ self:
   # persona/mika.yaml suivent chaque titre, une puce par entrée. En profondeur « compact » (murmurer, travailler),
   # seuls la première ligne, le ton, « En deux mots » (ses trois premiers traits), la langue et les règles restent.
   persona:
-    # la première ligne. {name} : son nom (persona) ; {description} : la description de la persona (peut être vide)
+    # sans portrait, ou en profondeur compacte (murmurer, travailler). {name} : son nom ; {description} : la
+    # description de la persona (peut être vide). Avec un portrait, en profondeur complète, c'est lui qui ouvre.
     head: "Tu es {name}. {description}"
-    # {tone} : le champ « tone » de la persona
-    tone: "Ton ton : {tone}"
-    traits: "Ton caractère :"
-    quirks: "Tes manies — de temps en temps, jamais deux fois dans la même conversation :"
-    vulnerabilities: "Tes fragilités :"
-    values: "Ce qui compte pour toi :"
+    # hors conversation seulement (en conversation, le portrait les dit)
     interests: "Ce qui t'intéresse :"
-    speech: "Ta façon de parler :"
     # ses exemples en conversation (seulement quand elle parle à quelqu'un)
     samples: "Ta voix en conversation — des exemples du registre (oral, court, vrai), pas de ton caractère : ce que tu montres et comment tu réagis, c'est ton tempérament qui le dit. Jamais une phrase à recopier :"
-    life: "Ta vie, à ta façon :"
-    tastes: "Tes goûts et tes avis — tranchés, et les mêmes d'un jour à l'autre :"
     facts: "Ce qui est vrai de toi :"
-    # en profondeur « compact » seulement, devant ses trois premiers traits
-    in_short: "En deux mots :"
     # {language} : le champ « language » de la persona (« français ») ; {nature} : sa nature (self.nature ci-dessus)
     language: "Tu parles {language}. {nature}"
 

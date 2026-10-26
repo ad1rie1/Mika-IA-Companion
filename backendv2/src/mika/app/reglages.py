@@ -731,22 +731,20 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             SettingsPage("identite", "Identité",
                                          ("name", "nature", "description", "language", "timezone"), order=10,
                                          description="Son nom, ce qu'elle est (une IA qui le sait, ou une personne "
-                                                     "incarnée), qui elle est, sa langue et l'heure qu'elle vit "
-                                                     "(ses nuits, ses salutations en dépendent)."),
-                            SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings", "samples"), order=20,
-                                         facts=False, description="Comment elle parle : son ton général, ses "
-                                                                  "tournures, le ton de ses bonjours et des "
-                                                                  "échanges qui montrent sa voix (des exemples, "
-                                                                  "jamais recopiés)."),
-                            SettingsPage("caractere", "Caractère",
-                                         ("traits", "quirks", "vulnerabilities", "values", "interests"), order=30,
-                                         facts=False, description="Ce qui la définit, la touche et la passionne : "
-                                                                  "une phrase par ligne."),
-                            SettingsPage("vie", "Sa vie", ("life", "tastes", "facts"), order=40, facts=False,
-                                         description="Sa vie, rédigée, à sa façon : ce qu'elle fait de ses "
-                                                     "journées, ses goûts et avis tranchés, ce qui est vrai d'elle. "
-                                                     "Ce qu'elle raconte de son quotidien en découle, et elle ne se "
-                                                     "contredit pas d'un jour à l'autre."),
+                                                     "incarnée), qui elle est en une phrase, sa langue et l'heure "
+                                                     "qu'elle vit (ses nuits, ses salutations en dépendent)."),
+                            # ADR 0138 : un seul texte la décrit ; ce qu'elle ressent se règle dans son tempérament
+                            SettingsPage("portrait", "Portrait", ("portrait", "facts", "interests"), order=20,
+                                         facts=False, description="Qui elle est, en prose — le seul texte qui la "
+                                                                  "décrit, qu'elle lit partout —, ce qui est vrai "
+                                                                  "d'elle, et ce qui la passionne. Ce qu'elle "
+                                                                  "ressent, montre et fait de ses émotions se règle "
+                                                                  "dans son tempérament, pas ici."),
+                            SettingsPage("parole", "Sa parole", ("samples", "greetings", "reference_thread"),
+                                         order=30, facts=False,
+                                         description="Comment elle écrit : des échanges qui montrent sa voix en "
+                                                     "chat, ses petits mots de bonjour, et un vrai fil de SMS pour "
+                                                     "la forme — des exemples, jamais recopiés."),
                             SettingsPage("document", "Import / export", order=50, form=False, yaml=True,
                                          commands=True, extra=revisions, description=(
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "

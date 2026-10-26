@@ -114,7 +114,7 @@ def test_persona_pages_yaml_import_and_back_to_the_file(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     identite = html_of(client.get(f"{BASE}/identite"))
-    assert "Nom" in identite and "Traits" not in identite  # un sujet par page
+    assert "Nom" in identite and "Centres d'intérêt" not in identite  # un sujet par page
     assert re.search(r'<select name="timezone"[^>]*>.*?<option value="Europe/Paris" selected', identite, re.S)
     assert "Ce que pilote chaque curseur" in html_of(client.get(f"{BASE}/temperament"))
     kernel = live.kernel
@@ -125,11 +125,11 @@ def test_persona_pages_yaml_import_and_back_to_the_file(world):  # noqa: F811
     before = revisions()
     saved = post(client, f"{BASE}/identite", {"_section": "personnage", "_champs": ["name"], "name": "Mikaela"})
     assert saved.status_code == 200 and "Identité : enregistré" in html_of(saved)
-    traits = post(client, f"{BASE}/caractere", {"_section": "personnage", "_champs": ["traits"],
-                                               "traits": "Curieuse de tout, pas juste de tech\nDrôle"})
-    assert traits.status_code == 200 and "Caractère : enregistré" in html_of(traits)
+    interests = post(client, f"{BASE}/portrait", {"_section": "personnage", "_champs": ["interests"],
+                                                  "interests": "Le dessin — aquarelle\nLes plantes"})
+    assert interests.status_code == 200 and "Portrait : enregistré" in html_of(interests)
     doc = client.portal.call(lambda: kernel.mind.frame().get(self_c.PERSONA))
-    assert doc.name == "Mikaela" and doc.traits == ("Curieuse de tout, pas juste de tech", "Drôle")
+    assert doc.name == "Mikaela" and doc.interests == ("Le dessin — aquarelle", "Les plantes")
     assert revisions() == before + 2
     document = f"{BASE}/document"
     assert "Révisions de sa persona" in html_of(client.get(document))

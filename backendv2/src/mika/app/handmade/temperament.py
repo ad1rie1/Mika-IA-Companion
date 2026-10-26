@@ -5,7 +5,7 @@ humeur de fond, sa réaction, sa défense et ses précisions ; son chronotype et
 (``profile_of``). La page le choisit donc ici : ``?profil=<clé>`` pré-remplit le formulaire sans rien enregistrer
 (``SettingsSection.prefill``) ; on ajuste, on regarde l'effet, on enregistre une fois.
 
-La forme : tous ses curseurs (les 27 du caractère et son chronotype), rangés par famille dans l'ordre du formulaire,
+La forme : tous ses curseurs (les 28 du caractère et son chronotype), rangés par famille dans l'ordre du formulaire,
 chaque famille un secteur nommé (chacun de ses 18 profils s'y reconnaît, sa silhouette à côté de son nom). La forme en
 place est grise en pointillé quand un profil est proposé, la proposée pleine, dans la couleur d'accent ; chaque sommet
 dit sa valeur dans une bulle, ses traits les plus marqués se disent à côté en mots, et ses trois choix (humeur de fond,
@@ -190,7 +190,7 @@ def figure(current: Temperament, proposed: Temperament | None = None) -> dict[st
 
 
 def marked(t: Temperament, limit: int = 6) -> list[str]:
-    """Ses traits les plus marqués, des 27 curseurs, en mots : « à fleur de peau (réactivité 0,8) »."""
+    """Ses traits les plus marqués, des 28 curseurs du caractère, en mots : « à fleur de peau (réactivité 0,8) »."""
     sliders = _sliders()
     far = sorted(((abs(float(getattr(t, s)) - 0.5), s) for s in PERSONALITY), reverse=True)
     out = []

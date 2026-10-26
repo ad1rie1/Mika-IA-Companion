@@ -308,9 +308,11 @@ def _p(label: str, summary: str, background: Emotion = Emotion.HAPPY, reaction: 
 PROFILES: Mapping[str, Profile] = MappingProxyType({
     "neutre": _p("Neutre", "Comme la plupart des gens, partout."),
     "reflechie": _p("Réfléchie", "Elle prend le temps et repense longuement, peu impulsive et scrupuleuse — et curieuse "
-                                 "de tout, des gens d'abord.",
+                                 "de tout, des gens d'abord ; les compliments la gênent.", defense="laugh",
+                    notes={"defense": "les compliments te gênent : tu les prends d'un merci un peu gêné, ou tu "
+                                      "détournes d'un mot"},
                     introspection=9, impulsivity=2, reactivity=4, scruples=7, contagion=4, expressiveness=7, curiosity=8,
-                    sociability=6, perseverance=7, empathy=6, inquisitiveness=8),
+                    sociability=6, perseverance=7, empathy=6, inquisitiveness=8, abandonment=6),
     "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.", background=Emotion.NEUTRAL,
                 reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4, grudge=3, fragility=3),
     "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.",

@@ -19,13 +19,16 @@ jugement lu dans la forme du message, enregistré). Des **excuses** sincères
 y a quelque chose à pardonner) adoucissent ce que ses mots lui avaient fait —
 et ce que la relation en garde (``affect`` les lit).
 
-**Sa vie** est rédigée dans la persona : ce qu'elle fait à sa façon
-(``life``), ses goûts et avis tranchés (``tastes``), ce qui est vrai d'elle
-(``facts``) — pour qu'elle ne se contredise pas d'un jour à l'autre ; ses
-façons de dire bonjour (``greetings``) donnent le ton d'une salutation, sans
-jamais être recopiées. **Sa nature** (``nature``) dit ce qu'elle est : une IA
-qui le sait (la persona livrée), ou une personne incarnée, dont rien ne parle
-d'IA (ADR 0070). **Son nom** est celui de la persona, partout : aucun prompt ne
+**Qui elle est** s'écrit une fois, en prose : son portrait (``portrait``), lu
+partout — sa vie, ses goûts, ses avis, ce qui la définit ; ce qui est vrai
+d'elle (``facts``) l'ancre contre l'invention ; ses centres d'intérêt
+(``interests``) font vivre ses explorations et ses flux (ADR 0138). Ce qu'elle
+ressent et fait de ses émotions, c'est son tempérament qui le dit, jamais un
+texte. Ses façons de dire bonjour (``greetings``) donnent le ton d'une
+salutation, sans jamais être recopiées ; ses exemples (``samples``) montrent sa
+voix en chat. **Sa nature** (``nature``) dit ce qu'elle est : une IA qui le
+sait (la persona livrée), ou une personne incarnée, dont rien ne parle d'IA
+(ADR 0070). **Son nom** est celui de la persona, partout : aucun prompt ne
 l'écrit en dur (``name_of``).
 """
 
@@ -47,7 +50,7 @@ from mika.vocab.temperament import Temperament
 OWNER = "self"
 
 
-def _lines(label: str, help: str, order: int, group: str = "Caractère") -> Knob:
+def _lines(label: str, help: str, order: int, group: str = "Portrait") -> Knob:
     return Knob(label=label, help=help + " Une phrase par ligne.", group=group, advanced=False, order=order)
 
 
@@ -73,15 +76,16 @@ class PersonaDoc(BaseModel):
         help="Une IA qui le sait (si on le lui demande sincèrement, elle ne le cache pas), ou une personne incarnée : "
              "rien de ce qu'on lui dit d'elle-même ne parle alors d'IA. Sa vie, ses goûts et ce qui est vrai d'elle "
              "(ci-dessous) doivent aller avec.")] = AI
-    description: Annotated[str, Knob(label="Description", help="Qui elle est, en quelques phrases.",
-                                     group="Identité", widget="textarea", advanced=False, order=20)] = ""
+    description: Annotated[str, Knob(
+        label="Description", group="Identité", widget="textarea", advanced=False, order=20,
+        help="Qui elle est, en une phrase ou deux : ce qu'elle lit d'elle dans ses prompts courts (murmurer, "
+             "travailler), et sa présentation dans la console.")] = ""
     portrait: Annotated[str, Knob(
-        label="Portrait (conversation)", group="Identité", widget="textarea", advanced=False, order=25,
+        label="Portrait", group="Portrait", widget="textarea", advanced=False, order=25,
         help="Qui elle est, écrit comme on décrit quelqu'un : en prose, à la deuxième personne (« Tu es… »), avec sa "
-             "vie, ses avis, ce qui l'agace, comment elle écrit. Rempli, il remplace en conversation la description, "
-             "le ton et les listes (traits, manies, fragilités, valeurs, centres d'intérêt, façons de parler, vie, "
-             "goûts) : en listes, elle les jouait une à une. Les listes servent toujours ailleurs (ses explorations, "
-             "ses flux, son journal).")] = ""
+             "vie, ses goûts, ses avis, ce qui l'agace. Le seul texte qui la décrit : elle le lit partout (en "
+             "conversation, dans son journal, ses rêves, son travail). Ce qu'elle ressent et montre, c'est son "
+             "tempérament qui le dit : ne l'écris pas ici, il l'emporterait sur les curseurs.")] = ""
     reference_thread: Annotated[str, Knob(
         label="Fil de référence (registre)", group="Sa parole", widget="textarea", advanced=False, order=45,
         help="Un vrai fil de SMS entre deux personnes, tel qu'on voudrait qu'elle écrive : la longueur des messages, "
@@ -90,17 +94,13 @@ class PersonaDoc(BaseModel):
              "les sujets. Vide : l'autrice écrit sans référence.")] = ""
     language: Annotated[str, Knob(label="Langue", help="Celle dans laquelle elle parle et écrit.",
                                   group="Identité", advanced=False, order=30)] = "français"
-    tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Sa parole",
-                              widget="textarea", advanced=False, order=40)] = ""
-    traits: Annotated[tuple[str, ...], _lines("Traits", "Ce qui la définit.", 50)] = ()
-    quirks: Annotated[tuple[str, ...], _lines("Manies", "Ses petites habitudes.", 60)] = ()
-    vulnerabilities: Annotated[tuple[str, ...], _lines("Fragilités", "Ce qui la touche.", 70)] = ()
-    values: Annotated[tuple[str, ...], _lines("Valeurs", "Ce à quoi elle tient.", 80)] = ()
+    facts: Annotated[tuple[str, ...], _lines(
+        "Ce qui est vrai d'elle", "Ce que rien d'autre ne dit et qu'elle ne doit ni esquiver ni inventer : son "
+        "corps, son âge, comment elle parle d'elle (le tutoiement, le féminin), ce qu'elle ne fait pas.", 30)] = ()
     interests: Annotated[tuple[str, ...], _lines(
         "Centres d'intérêt", "Ce qui la passionne. Un sujet court d'abord, puis « — » et le détail (« Le dessin — "
         "illustration, aquarelle ») : le sujet seul titre ses explorations, et leurs mots décident des titres de ses "
-        "flux qui la touchent.", 90)] = ()
-    speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100, "Sa parole")] = ()
+        "flux qui la touchent.", 35)] = ()
     greetings: Annotated[tuple[str, ...], _lines(
         "Salutations", "Des exemples de ses bonjours : seuls leurs premiers mots (« hey », « yooo ») lui sont montrés "
         "quand elle salue quelqu'un qu'elle connaît — jamais la phrase, qu'un modèle recopiait.", 110,
@@ -109,15 +109,6 @@ class PersonaDoc(BaseModel):
         "Exemples en conversation", "Quelques échanges qui montrent sa voix en chat (« ce qu'on lui dit » → « ce qu'elle "
         "répond ») : montrés pour le ton et le registre quand elle parle à quelqu'un, jamais une phrase à recopier, "
         "et jamais dans un mail ni un texte à envoyer.", 105, "Sa parole")] = ()
-    life: Annotated[tuple[str, ...], _lines(
-        "Sa vie, à sa façon", "Ce qu'elle fait vraiment de ses journées (jouer, regarder, lire des recettes, "
-        "travailler…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()
-    tastes: Annotated[tuple[str, ...], _lines(
-        "Ses goûts et ses avis", "Tranchés et stables : son plat préféré ne change pas d'une conversation à "
-        "l'autre.", 130, "Sa vie")] = ()
-    facts: Annotated[tuple[str, ...], _lines(
-        "Ce qui est vrai d'elle", "Sa biographie (d'où elle vient, où elle habite, ce qu'elle a ou n'a pas) : ce "
-        "qu'on lui demande de base, sans qu'elle esquive ni n'invente.", 140, "Sa vie")] = ()
     timezone: Annotated[str, Knob(label="Fuseau horaire", help="Celui qu'elle vit (nom IANA : Europe/Paris, "
                                                               "America/Montreal…).", group="Identité",
                                   advanced=False, order=35)] = "Europe/Paris"
@@ -175,6 +166,20 @@ def _zone_repaired(raw: dict[str, Any]) -> dict[str, Any]:
         zone = persona["timezone"]
         name = zone.strip() if isinstance(zone, str) else ""
         raw["persona"] = {**persona, "timezone": name if valid_zone(name) else DEFAULT_ZONE}
+    return raw
+
+
+#: les champs que la persona n'a plus (ADR 0138) : chacun redisait un curseur du tempérament, le portrait, la consigne
+#: de style ou une autrice
+_GONE = ("tone", "traits", "quirks", "vulnerabilities", "values", "speech", "life", "tastes")
+
+
+def _gone_dropped(raw: dict[str, Any]) -> dict[str, Any]:
+    """v2 → v3 : une persona journalisée avec les champs d'avant se relit sans eux (le rejeu ne casse pas)."""
+    raw = dict(raw)
+    persona = raw.get("persona")
+    if isinstance(persona, dict):
+        raw["persona"] = {k: v for k, v in persona.items() if k not in _GONE}
     return raw
 
 
@@ -306,8 +311,8 @@ THANKED, COMPLIMENTED, INSULTED, APOLOGIZED = reading.THANKED, reading.COMPLIMEN
     reading.APOLOGIZED
 DISAPPOINTED = reading.DISAPPOINTED
 
-PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=2,
-                             upcasters={1: _zone_repaired})
+PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=3,
+                             upcasters={1: _zone_repaired, 2: _gone_dropped})
 JOURNALED = event_type("self.journaled", OWNER, Journaled, public=True, content=("text", "shareable"),
                        subjects=("about",),
                        authored=True)

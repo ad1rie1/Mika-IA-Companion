@@ -26,7 +26,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -662,6 +662,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0044 (en partie).*
 
+*Révisée par 0138.*
+
 ### 0053 — Ce qu'elle se raconte d'elle-même est vrai
 
 - Sa journée « à raconter » n'est pas écrite par un modèle : elle est rendue d'après des faits qu'elle peut dire (combien de gens, ce qu'elle a fait, un ton vague mais vrai), jamais qui ni de quoi.
@@ -788,7 +790,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* presque tout ce que la propriétaire attendait dépendait du type de personne, pas d'une règle.
 
-*Révisée par 0102, 0112, 0118, 0137.*
+*Révisée par 0102, 0112, 0118, 0137, 0138.*
 
 ### 0107 — Les suites du parcours d'une émotion
 
@@ -1294,6 +1296,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* un mail pro, un message Teams et un SMS n'ont pas les mêmes codes, et seuls les messages du chat passaient par une autrice.
 
 *Révise 0114 (en partie).*
+
+### 0138 — Une seule maison par chose : le portrait, la matrice, la voix
+
+- La persona n'a plus que ce qu'un seul endroit dit. **Qui elle est** — sa vie, ses goûts, ses avis, ce qui la définit — s'écrit une fois, en prose, dans son portrait (`portrait`), que le modèle lit partout en profondeur complète : en conversation, dans son journal, ses rêves, son récit, son travail. La profondeur compacte (murmurer, travailler) ouvre sur sa description, en une phrase.
+- **Ce qu'elle ressent, montre et fait de ses émotions, et avec les gens**, c'est sa matrice qui le dit (ADR 0100) : aucun texte ne redit un curseur ; la nuance d'un trait se met dans sa précision. **Comment elle écrit**, ce sont ses exemples (`samples`), ses petits mots de bonjour (`greetings`), son fil de référence et ses autrices ; **les règles du média** (une question à la fois, pas de listes, la relecture) restent statiques dans `voix.yaml` et se mesurent au banc.
+- Les champs `tone`, `traits`, `quirks`, `vulnerabilities`, `values`, `speech`, `life` et `tastes` sont supprimés : chacun redisait un curseur, le portrait, la consigne de style ou une autrice, et le modèle jouait les listes une à une. `facts` reste l'ancre contre l'invention (ce que rien d'autre ne dit) ; `interests` fait vivre ses explorations et ses flux. Un journal d'avant se rejoue (`self.persona_revised` v3 laisse tomber ces champs) ; écrits aujourd'hui, ils sont refusés.
+- La persona livrée en tire les conséquences : « Réfléchie » porte sa défense (« en rire », précision : les compliments la gênent) et une peur de l'abandon à 0,6, qui remplacent les phrases du texte ; son portrait ne dit plus « pas une intervieweuse » ni « que tu ne finis jamais » (persévérance 0,7 : une Mika qui abandonne un projet confié est un bug), ni comment on écrit dans un chat ; ses exemples demandent parfois ce que vit l'autre (ADR 0137), au plus un tiers en question.
+- La console a trois pages pour le personnage : Identité, Portrait (le portrait, ce qui est vrai d'elle, ses centres d'intérêt), Sa parole (exemples, salutations, fil de référence), plus le tempérament, les autrices et l'import.
+
+*Pourquoi :* la même personne était écrite deux fois — en prose pour le chat, en listes pour le reste — et les deux avaient dérivé ; sur la console, on éditait la version que le chat ne lisait pas, et le portrait n'était sur aucun formulaire. Le texte contredisait la matrice (« scripts que tu ne finis jamais » contre persévérance 0,7, « pas une intervieweuse » contre l'intérêt pour les autres).
+
+*Révise 0047 (en partie : sa vie rédigée en listes), 0100 (en partie : la persona livrée).*
 
 ## Les clients, le fil, le monde
 
