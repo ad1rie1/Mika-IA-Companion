@@ -31,7 +31,6 @@ from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
-from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.kernel.clock import HOUR, MINUTE
@@ -239,6 +238,15 @@ def _opener(text: str) -> tuple[str, str]:
     return raw.strip(" ,;:!?."), " ".join(_words(raw)[:2])
 
 
+def asking_in_a_row(said: Sequence[tuple[int, str]]) -> bool:
+    """Ses trois derniers messages posent tous une question (2026-10-14, avec Sonnet : « un seul ou plusieurs ? »,
+    « tu les as essayés, ou… ? », « tu comptes y aller, ou… ? »). Elle se l'entend dire comme un fait (« ce que tu te
+    répètes »), jamais comme un ordre : le 2026-10-26, un ordre de ne plus demander et un ordre de demander dans le
+    même prompt ont fait écrire à Sonnet un brouillon où il se disputait avec lui-même (ADR 0141)."""
+    kept = [t for _at, t in said if t and t.strip() and A.SILENCE_TOKEN not in t][-HABIT_WINDOW:]
+    return len(kept) >= 3 and all("?" in A.strip_prosody(t) for t in kept[-3:])
+
+
 def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = ()) -> list[str]:
     """Ce qu'on entendrait se répéter dans ses derniers messages : une même ouverture (deux des trois derniers, ou
     trois des six derniers) et une même formule de quatre mots ou plus dans au moins trois messages. Une
@@ -282,9 +290,7 @@ def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = (
     if twice is not None:
         raw = next(r for r, k in reversed(starts) if k == twice)
         out.append(phrase("expression.habits.reunion", opener=raw))
-    # trois messages d'affilée qui posent des questions : un interrogatoire, pas une conversation (2026-10-14, avec
-    # Sonnet : « un seul ou plusieurs ? », « tu les as essayés, ou… ? », « tu comptes y aller, ou… ? »)
-    if len(msgs) >= 3 and all("?" in A.strip_prosody(t) for t in msgs[-3:]):
+    if asking_in_a_row(said):
         out.append(phrase("expression.habits.questions"))
     # trois longs messages d'affilée : un monologue, pas une conversation (sonde : quatre à six phrases à chaque fois)
     if len(msgs) >= 3 and all(len(A.strip_prosody(t)) >= LONG_MESSAGE for t in msgs[-3:]):
@@ -467,8 +473,8 @@ def _bubbles(text: str) -> str:
 
 
 def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "") -> str | None:
-    """Ce qu'elle remarquerait en se relisant, avant d'envoyer : une question à options, plusieurs questions, une
-    question encore après deux messages qui en posaient, la même ouverture que deux de ses trois derniers messages, ses premiers mots qui redisent ceux de la personne, une
+    """Ce qu'elle remarquerait en se relisant, avant d'envoyer : une question à options, plusieurs questions,
+    la même ouverture que deux de ses trois derniers messages, ses premiers mots qui redisent ceux de la personne, une
     suite de mots déjà dite dans un de ses derniers messages, ou recopiée de son portrait (``portrait`` : sa persona
     telle que le modèle l'a lue — un exemple de sa voix repris mot pour mot, banc du 2026-10-14). ``None`` : rien à
     reprendre."""
@@ -483,10 +489,9 @@ def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "")
     if len(questions) >= 2:
         found.append(phrase("expression.review.questions"))
     before = [_plain(m) for m in mine if _plain(m)][-3:]
-    # une question à chaque message, la troisième d'affilée : un interrogatoire. Aucune consigne ne le retient
-    # (ablation du 2026-10-15 : 88 à 100 % de ses réponses finissent sur une question, quoi qu'on retire ou ajoute)
-    if questions and len(before) >= 2 and all(_QUESTION.search(m) for m in before[-2:]):
-        found.append(phrase("expression.review.asked"))
+    # la troisième question d'affilée n'est plus un tic repris (ADR 0141) : « ce que tu te répètes » le lui dit en
+    # fait, et c'est son caractère qui tranche (ablation du 2026-10-15 : 88 à 100 % de ses réponses finissaient sur
+    # une question, quoi qu'on retire ou ajoute ; v15 : la règle laissait des culs-de-sac)
     first = (_words(text)[:1] or [""])[0]
     if first and first not in GREETINGS and sum((_words(m)[:1] or [""])[0] == first for m in before) >= 2:
         found.append(phrase("expression.review.opener", word=text.split()[0].rstrip(",;:!?.…")))
@@ -674,33 +679,6 @@ def polish_draft(flow: str, draft: str, about: str, author: Any) -> tuple[str, s
 
 #: un message de quelques mots : une réponse à la même mesure
 SHORT_MESSAGE = 40
-#: les curseurs de son tempérament qui s'entendent dans une réponse, du plus visible au moins visible ; au plus
-#: ``_MARKED_SHOWN`` d'entre eux, marqués (``_MARKED`` du milieu ou plus), sont rappelés dans « TA RÉPONSE »
-_VOICED = ("expressiveness", "sociability", "inquisitiveness", "optimism", "negativity", "energy", "reactivity",
-           "impulsivity", "shyness", "empathy", "trust", "curiosity", "contagion", "mask", "grudge", "anxiety",
-           "introspection")
-_MARKED, _MARKED_SHOWN = 0.3, 3
-
-
-def marked_traits(temperament: Any) -> list[str]:
-    """Ses traits les plus marqués, tels qu'ils doivent s'entendre dans une réponse (banc de conversation du
-    2026-10-15 : réfléchie, solaire et kuudere parlaient pareil — un juge reconnaissait le profil une fois sur
-    trois, le hasard ; le texte de sa persona l'emportait sur ses curseurs)."""
-    if temperament is None:
-        return []
-    marked = []
-    for rank, slider in enumerate(_VOICED):
-        value = getattr(temperament, slider, None)
-        if isinstance(value, (int, float)) and abs(float(value) - 0.5) >= _MARKED - 1e-9:
-            marked.append((-abs(float(value) - 0.5), rank, slider, "high" if value > 0.5 else "low"))
-    out: list[str] = []
-    # les plus marqués d'abord ; chacun dit ce qu'il change à la façon d'écrire dans un chat (« tu montres peu : des
-    # phrases courtes… »), pas seulement ce qu'il est (« ton attention passe par les actes ») — V5 du banc : la
-    # phrase du trait seule ne changeait rien à sa parole
-    for _dist, _rank, slider, side in sorted(marked)[:_MARKED_SHOWN]:
-        note = (getattr(temperament, "notes", None) or {}).get(slider, "")
-        out.append(f"{phrase(f'expression.answer.traits.{slider}.{side}')} {note}".strip())
-    return out
 
 
 #: un merci, un au revoir (mots repliés) : la réponse d'une amie, pas d'un guichet
@@ -710,19 +688,16 @@ LEAVING = re.compile(r"\b(?:bonne (?:nuit|soiree|journee|aprem)|a (?:plus tard|d
 
 
 @EXPRESSION.section("answer", zone=Zone.VOLATILE, episodes=[Kind.REPLY], tags=[LAST], trim_rank=90,
-                    title=phrase("expression.answer.title"), reads=[self_c.PERSONA])
+                    title=phrase("expression.answer.title"))
 def _answer(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str:
-    """« TA RÉPONSE » : le dernier mot avant son message — réagir en personne, une question au plus et ouverte, pas
-    de conseil qu'on ne demande pas, pas sa phrase reformulée ; court à qui écrit court. Banc de conversation du
-    2026-10-14 (Sonnet, jugé par Opus) : avec ces règles seulement dans la consigne de style, en tête du prompt, une
-    réplique sur deux finissait par « ceci, ou cela ? » et les conseils de coach revenaient."""
+    """« TA RÉPONSE » : le dernier mot avant son message — réagir en personne, pas de conseil qu'on ne demande pas,
+    pas sa phrase reformulée, pas de vérité générale ; court à qui écrit court quand aucune autrice ne suit. Banc de
+    conversation du 2026-10-14 (Sonnet, jugé par Opus) : avec ces règles seulement dans la consigne de style, en tête
+    du prompt, les conseils de coach revenaient. Rien sur ses questions ni ses traits (ADR 0141, banc v18) : son
+    caractère écrit les porte, et c'est lui qui tranche."""
     heard = " ".join(A.strip_prosody(enrich.get("last_heard") or "").split())
     folded = fold(heard.lower())
     out = [phrase("expression.answer.react")]
-    doc = frame.get(self_c.PERSONA)
-    traits = marked_traits(getattr(doc, "temperament", None))
-    if traits:
-        out.append(phrase("expression.answer.character", traits=" ; ".join(traits)))
     out.append(phrase("expression.answer.subject"))
     # la mesure d'une réponse est de la forme : quand une seconde passe suit, c'est l'autrice qui la prend (ADR 0140)
     if heard and len(heard) <= SHORT_MESSAGE and not frame.episode.attrs.get("second_pass"):

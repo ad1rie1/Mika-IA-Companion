@@ -26,7 +26,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -827,6 +827,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0100 (29 curseurs).*
 
+*Révisée par 0141.*
+
 ## Buts, projets, Forge et atelier
 
 ### 0005 — La Forge hors du processus
@@ -1259,7 +1261,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les corrections de prompt une à une ne tenaient pas : il fallait mesurer, et un tic se voit mieux sur le brouillon.
 
-*Révise 0100 (en partie). Révisée par 0114, 0115, 0140.*
+*Révise 0100 (en partie). Révisée par 0114, 0115, 0140, 0141.*
 
 ### 0114 — Une autrice écrit ses messages
 
@@ -1325,6 +1327,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0100 (en partie : comment le tempérament se dit au modèle), 0138 (en partie).*
 
+*Révisée par 0141.*
+
 ### 0140 — La forme n'a qu'une maison : l'autrice du flux
 
 - La consigne de style du premier jet (`expression.style`) ne dit plus la forme — longueur, registre, hésitations, émojis, listes, gras, titres, écriture inclusive, « lu à voix haute ». Elle garde le rôle (une conversation, pas un guichet), la discipline (une question à la fois, ne pas se redire, « et toi ? », merci et au revoir) et le protocole (les jetons de voix, les balises de fin, l'état interne).
@@ -1336,6 +1340,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* la forme était dite trois fois — la consigne de style, le portrait, les codes de l'autrice — et deux fois en contradiction (« pas d'émojis : lu à voix haute » contre « un émoji de temps en temps ») ; c'est l'autrice qui gagnait, et la consigne parlait dans le vide. À mesurer au banc : la consigne de style et la relecture valaient +6.
 
 *Révise 0112 (en partie : la consigne de style), 0114 (en partie), 0124 (en partie : le chat sans réglage).*
+
+*Révisée par 0141.*
+
+### 0141 — Informer, pas ordonner : ses questions ne sont plus commandées
+
+- Rien dans ses prompts ne compte ni ne commande ses questions. La consigne de style garde une phrase de principe (« une conversation vit de ce que tu y mets plus que de questions ») et perd le compte (« une seule à la fois, pas à chaque message, tu ne finis pas chaque message par une question ») ; « TA RÉPONSE » ne lui dit plus de demander, et ne redit plus ses traits en phrases de style : le caractère écrit les porte (ADR 0139) ; la relecture ne reprend plus la troisième question d'affilée.
+- Le moteur **l'informe** de ce qu'elle ne peut pas savoir, en faits : « tes trois derniers messages se terminaient tous par une question » (ce qu'elle se répète), « tu ne sais pas encore comment s'est passée la journée de X » (SA JOURNÉE). Ce qu'elle en fait, son caractère le dit.
+- « Jamais à options » est une forme de SMS, pas une règle de conversation : il vit dans les codes de l'autrice, et la relecture garde ce tic (un réflexe du modèle).
+- Mesuré au banc v18 (12 scénarios, juge Opus) : les ordres ne retenaient pas les questions (27 % des tours avec la base, 35 % informée avec Sonnet) et se contredisaient entre sections (un brouillon où Sonnet se disputait avec lui-même, 2026-10-26). Informée, Sonnet fait 57,1 contre 57,6 (le bruit) ; Opus informé, 62,7 (réservés 65,2), et des fils que la propriétaire a jugés plus humains. Retenu sur sa lecture des fils.
+
+*Pourquoi :* sept endroits parlaient de ses questions, trois en ordre contraire ; l'équilibre questions/réactions est à elle, pas aux consignes.
+
+*Révise 0112 (en partie : la relecture), 0137 (en partie : SA JOURNÉE en fait), 0139 (en partie : plus de phrases de traits dans « TA RÉPONSE »), 0140 (en partie : la discipline des questions).*
 
 ## Les clients, le fil, le monde
 

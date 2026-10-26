@@ -157,8 +157,9 @@ class WriteCharacter:
 
     async def run(self, ctx: Any) -> None:
         self._back_off(ctx.frame.now)  # si l'appel lève ou ne donne rien : pas de rafale
-        if ctx.llm is None:
-            return
+        serving = getattr(ctx.llm, "serving", None)
+        if ctx.llm is None or (callable(serving) and not serving("character")):
+            return  # aucun modèle ne sert ce rôle (ni par repli) : rien à tenter, la console le dit
         state: SelfState = ctx.state
         doc = state.persona
         request = request_for(doc, f"{ctx.run_id}#0")

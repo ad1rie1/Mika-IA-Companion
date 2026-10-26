@@ -106,14 +106,15 @@ def test_a_sentence_copied_from_her_portrait_is_caught():
     assert review("Oh, merci, ça me touche.", [], "t'es drôle", portrait) is None
 
 
-def test_a_third_question_in_a_row_is_caught():
+def test_a_third_question_in_a_row_is_no_longer_a_tic():
     # ablation du 2026-10-15 : quoi qu'on retire ou ajoute au prompt, 88 à 100 % de ses réponses finissent sur une
-    # question ; seule la relecture la retient
+    # question ; la relecture la retenait — et laissait des culs-de-sac (v15). Depuis l'ADR 0141 (banc v18), rien ne
+    # commande ses questions : elle se l'entend dire en fait (« ce que tu te répètes »), son caractère tranche
     asked = ["Ah merde. Qu'est-ce qui s'est passé ?", "Il a dit ça devant tout le monde ? [EMOTION: sad 0.3]"]
-    note = review("C'est vache, ça. Ton chef, il le voit, ce que tu fais ?", asked, "personne voit mon taf")
-    assert note is not None and "comme tes deux derniers messages" in note
+    assert review("C'est vache, ça. Ton chef, il le voit, ce que tu fais ?", asked, "personne voit mon taf") is None
     assert review("C'est vache, ça. Moi je le vois, en tout cas.", asked, "personne voit mon taf") is None
-    assert review("C'est vache, ça. Ton chef, il le voit ?", [asked[0], "Ah merde, désolée."], "personne") is None
+    # une question à options reste un tic du modèle, repris
+    assert "options" in review("Ton chef, il le voit, ou il s'en fiche ?", asked, "personne voit mon taf").lower()
 
 
 # ── La seconde passe : une autrice écrit la suite du fil à partir du premier jet (ADR 0114) ──

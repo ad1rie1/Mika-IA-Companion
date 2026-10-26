@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from mika.faculties.expression import style
+from mika.faculties.expression import asking_in_a_row, repeats, review, style
 from mika.ports.llm import LLMRequest, LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab.phrasebook import phrase
@@ -22,12 +22,27 @@ FORM_WORDS = ("émoji", "une à trois phrases", "voix haute", "pas de listes", "
 def test_the_style_keeps_the_protocol_and_the_discipline_and_leaves_the_form_to_the_author():
     text = style().lower()
     assert not any(w in text for w in FORM_WORDS), [w for w in FORM_WORDS if w in text]
-    assert "[emotion: …]" in text and "[silence]" in text and "une seule à la fois" in text
-    assert "pas à un guichet" in text
+    assert "[emotion: …]" in text and "[silence]" in text and "plus que de questions" in text
+    assert "pas à un guichet" in text and "une seule à la fois" not in text  # ADR 0141 : rien ne compte ses questions
     # toute la forme est dans les codes de l'autrice livrée « Message »
     codes = CODES.lower()
     assert "émoji" in codes and "pas de listes" in codes and "registre de la personne" in codes
     assert "quelques mots" in codes and "écriture inclusive" in codes
+
+
+def test_her_questions_are_informed_never_ordered():
+    """ADR 0141 (banc v18) : rien ne compte ni ne commande ses questions. Après trois questions d'affilée, elle se
+    l'entend dire comme un fait, sans ordre ; « TA RÉPONSE » ne lui dit ni de demander ni ses traits ; la relecture
+    ne reprend plus la troisième question. Reste le tic de la question à options, une forme, chez l'autrice."""
+    said = [(1, "c'était bien ?"), (2, "t'as ramené quelque chose ?"), (3, "tu l'as essayée ?")]
+    assert asking_in_a_row(said) and not asking_in_a_row(said[:2])
+    fact = phrase("expression.habits.questions")
+    assert fact in repeats(said, 4) and "?" not in fact and "cette fois" not in fact and "réagis" not in fact
+    react = phrase("expression.answer.react")
+    assert "question" not in react.lower() and "intéresse-toi" not in react.lower()
+    assert review("tu l'as essayée ?", ["c'était bien ?", "t'as ramené quelque chose ?"], "oui") is None
+    assert "options" in review("t'as pris la bleue ou la rouge ?", [], "j'ai acheté une chaise").lower()
+    assert "jamais à options" in CODES
 
 
 def _respond(req: LLMRequest) -> LLMResponse:
