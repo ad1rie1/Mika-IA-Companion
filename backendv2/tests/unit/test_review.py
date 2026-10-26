@@ -229,7 +229,8 @@ def test_with_the_author_there_is_no_review_and_what_she_starts_herself_is_autho
         if req.role == "polish":
             return LLMResponse("Mika : j'ai lu un truc sur la marche 👀\nL'autre : quoi")
         if req.role == "initiative":
-            return LLMResponse("Je suis allée lire une étude sur la marche, avec 262 malades suivis. [EMOTION:happy:0.4]")
+            # sans chiffre : une récriture qui perdrait un nombre du premier jet serait écartée (audit du 2026-10-26, L8)
+            return LLMResponse("Je suis allée lire une étude sur la marche, avec des malades suivis. [EMOTION:happy:0.4]")
         if req.role != "reply":
             return LLMResponse("{}" if req.role in ("extract", "profile") else "[SILENCE]")
         return LLMResponse("Ah, sympa. Tu l'as pris en bleu, ou en noir ? [EMOTION:happy:0.4]")

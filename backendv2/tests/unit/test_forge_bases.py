@@ -8,7 +8,8 @@
 - une instruction trop longue est interrompue ; une base pleine refuse ce qui l'agrandirait, jamais ce qui la vide ;
 - son stockage clé/valeur est une table de sa base, qui revient si l'app la supprime ;
 - vider rend une base vide ; supprimer exporte puis supprime (base et utilisateur) : recréée, l'app repart de rien ;
-- son journal garde les dernières lignes, app par app.
+- son journal garde les dernières lignes, app par app ;
+- le nom d'une table vient de l'app : exporté sous le compte de Mika, il reste un identifiant, jamais du SQL.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from mika.adapters.forge.bases import BaseLimits, ForgeBases, SqlRefused
+from mika.adapters.forge.bases import BaseLimits, ForgeBases, SqlRefused, qualified
 from tests.fixtures import backend
 
 
@@ -193,6 +194,31 @@ def test_logs_keep_the_last_lines_app_by_app(make) -> None:
     b.log("autre", "seule", keep=3)
     assert b.logs("une") == ["ligne 3", "ligne 4", "ligne 5"] and b.logs("une", 2) == ["ligne 4", "ligne 5"]
     assert b.logs("autre") == ["seule"]
+
+
+def test_a_table_name_is_an_identifier_never_sql() -> None:
+    """MariaDB admet un nom de table avec un accent grave, un espace ou un ``;`` (entre accents graves doublés), et une
+    app peut le créer : sous les guillemets du moteur, il reste un nom — ``SHOW CREATE TABLE`` et ``SELECT *`` de
+    l'export, qui parlent sous le compte de Mika, n'exécutent jamais ce qu'il contient."""
+    from sqlalchemy.dialects import mysql, sqlite
+
+    assert qualified(mysql.dialect(), "mika_forge_x", "a`b; DROP DATABASE mika_mind") == \
+        "mika_forge_x.`a``b; DROP DATABASE mika_mind`"
+    assert qualified(mysql.dialect(), "mika_forge_x", "notes") == "mika_forge_x.notes"
+    assert qualified(sqlite.dialect(), "s", 'a"b') == 's."a""b"'
+
+
+def test_a_table_with_a_backtick_in_its_name_is_exported_then_dropped(make, tmp_path) -> None:
+    b = make()
+    b.execute("piege", "CREATE TABLE `a``b` (x INT)")
+    b.execute("piege", "INSERT INTO `a``b` VALUES (1)")
+    assert "a`b" in [t["name"] for t in b.schema("piege")["tables"]]
+    dumped = b.drop("piege", tmp_path / "corbeille" / "piege")  # l'app s'efface, son nom piégé compris
+    assert dumped is not None and dumped.exists()
+    if _maria(b):
+        data = json.loads(dumped.read_text())
+        assert data["tables"]["a`b"]["rows"] == [{"x": 1}] and "CREATE TABLE" in data["tables"]["a`b"]["create"]
+    assert "a`b" not in [t["name"] for t in b.schema("piege")["tables"]]  # recréée : rien de l'ancienne
 
 
 def test_a_name_is_checked_before_anything(make) -> None:

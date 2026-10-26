@@ -844,7 +844,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "se lisent dans Relations & échanges › Teams.")),)),
         SettingsSection("appareils", "Appareils", "sens", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
-                        facts=lambda: [("Jeton", "défini" if settings.sensors_token() else "aucun")],
+                        facts=lambda: [("Jeton", "défini" if settings.sensors_digest() else "aucun")],
                         commands=(Command("jeton", "Nouveau jeton", new_token,
                                           confirm="L'ancien jeton ne vaudra plus rien."),),
                         pages=(SettingsPage("appareils", "Appareils connectés", commands=True, description=(

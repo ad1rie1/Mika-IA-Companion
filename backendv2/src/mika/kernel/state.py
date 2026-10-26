@@ -8,7 +8,7 @@ clés** : l'ordre d'un HAMT dépend du hachage des chaînes, donc de
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar, get_args
 
@@ -79,6 +79,16 @@ class FrozenDict(Generic[K, V]):
         if key not in self._m:
             return self
         return FrozenDict(self._m.delete(key))
+
+    def without(self, drop: Callable[[K], bool]) -> FrozenDict[K, V]:
+        """Sans les clés que ``drop`` désigne (la même carte si aucune)."""
+        gone = [k for k in self._m if drop(k)]
+        if not gone:
+            return self
+        with self._m.mutate() as m:
+            for k in gone:
+                del m[k]
+            return FrozenDict(m.finish())
 
     def update(self, other: Mapping[K, V]) -> FrozenDict[K, V]:
         if not other:

@@ -4,6 +4,10 @@
 La clé de chiffrement vient de ``MIKA_SECRET_KEY`` ou, à défaut, d'un
 fichier ``secret.key`` créé au premier démarrage à côté des bases (droits
 0600). Elle ne va jamais dans le dépôt.
+
+Un jeton porteur qu'on ne fait que vérifier (appareils, console MCP, prêts,
+Teams, réveils) n'est pas gardé, même scellé : seule son empreinte SHA-256
+l'est, et c'est l'empreinte du jeton présenté qu'on lui compare.
 """
 
 from __future__ import annotations
@@ -55,9 +59,12 @@ GIT_KEY = "git"
 PUSH_KEY = "push"
 #: … ou, à défaut d'une clé collée dans la console, ce fichier du dossier de données (à côté de ``secret.key``)
 PUSH_KEY_FILE = "firebase-service-account.json"
+#: le jeton des appareils (``POST /api/perceptions``) : son empreinte seule
 SENSORS_KEY = "sensors"
-#: le point MCP de la console (le Claude Code d'une opératrice) : son jeton, scellé, et ce qu'il sert (ADR 0122)
+#: le point MCP de la console (le Claude Code d'une opératrice) : l'empreinte de son jeton, et ce qu'il sert (ADR 0122)
 CONSOLE_MCP_KEY = "console_mcp"
+#: les deux ont été gardés scellés (réversibles) avant : convertis en empreinte à l'ouverture
+HASHED_TOKEN_KEYS = (SENSORS_KEY, CONSOLE_MCP_KEY)
 #: les points MCP qui prêtent ses outils à un agent (ADR 0122) : par nom, l'empreinte de leur jeton, leurs outils
 LENT_KEY = "mcp_lent"
 #: le nom d'un point de prêt : son adresse (``/mcp/pret/<nom>``)
@@ -106,6 +113,11 @@ NO_TABLE = (OperationalError, ProgrammingError)
 _SAID_OPEN: set[str] = set()  # les fichiers de clé déjà signalés lisibles par d'autres
 
 
+def token_digest(token: str) -> str:
+    """L'empreinte d'un jeton porteur (SHA-256, en hexadécimal) : ce qu'on garde, ce qu'on compare."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def push_key_file(data: Path) -> str:
     """Le JSON de la clé du compte de service Firebase posée dans le dossier de données
     (``firebase-service-account.json``) ; vide sans fichier ou illisible. Un fichier lisible par d'autres
@@ -136,8 +148,14 @@ class SecretBox:
         path = data / "secret.key"
         if not path.exists():
             data.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(Fernet.generate_key())
-            path.chmod(0o600)
+            fresh = Fernet.generate_key()
+            try:  # né en 0600, d'un seul coup : jamais un instant lisible par d'autres
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                pass  # un autre processus l'a créée entre-temps : on lit la sienne
+            else:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(fresh)
         return cls(path.read_bytes().strip())
 
     def seal(self, text: str) -> str:
@@ -173,6 +191,8 @@ class Settings:
             sql.execute(delete(SettingRow).where(SettingRow.key.in_(RETIRED_KEYS)))
 
         await self.store.run_mind(create)
+        for key in HASHED_TOKEN_KEYS:
+            await self._hash_sealed_token(key)
         data = self._get(FORGE_CONFIG_KEY) or {}
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
         self._rights = self._read_rights()
@@ -531,23 +551,52 @@ class Settings:
         await self._put(TEAMS_KEYS_KEY, {})
         return True
 
+    # ── Les jetons gardés en empreinte (appareils, console MCP) ──
+    def _token_digest(self, key: str) -> str:
+        """L'empreinte du jeton de ``key`` (vide : aucun). Un jeton encore scellé par les réglages d'avant vaut par
+        son empreinte, calculée ici ; ``open`` le convertit pour de bon."""
+        data = dict(self._get(key) or {})
+        digest = str(data.get("digest") or "")
+        if digest:
+            return digest
+        token = self.box.open(str(data.get("token_sealed") or ""))
+        return token_digest(token) if token else ""
+
+    async def _hash_sealed_token(self, key: str) -> None:
+        """Un jeton que les réglages d'avant gardaient scellé devient une empreinte : déchiffré, haché, le scellé
+        retiré. Un scellé qui ne s'ouvre plus (``secret.key`` changée) part sans empreinte : il ne valait déjà plus —
+        et la console fermée ainsi ne reste pas ouverte au réseau."""
+        data = dict(self._get(key) or {})
+        if "token_sealed" not in data:
+            return
+        token = self.box.open(str(data.pop("token_sealed") or ""))
+        if token:
+            data["digest"] = token_digest(token)
+        else:
+            data.pop("network", None)
+        await self._put(key, data)
+
     # ── Appareils (``POST /api/perceptions``) ──
-    def sensors_token(self) -> str:
-        return self.box.open(dict(self._get(SENSORS_KEY) or {}).get("token_sealed", ""))
+    def sensors_digest(self) -> str:
+        """L'empreinte du jeton des appareils (vide : aucun) ; la porte compare les empreintes."""
+        return self._token_digest(SENSORS_KEY)
 
     async def new_sensors_token(self) -> str:
-        """Un jeton neuf (l'ancien ne vaut plus) ; montré une fois."""
+        """Un jeton neuf (l'ancien ne vaut plus) ; montré une fois, seule son empreinte est gardée."""
         token = secrets.token_urlsafe(32)
-        await self._put(SENSORS_KEY, {"token_sealed": self.box.seal(token)})
+        await self._put(SENSORS_KEY, {"digest": token_digest(token)})
         return token
 
-    def console_mcp_token(self) -> str:
-        return self.box.open(dict(self._get(CONSOLE_MCP_KEY) or {}).get("token_sealed", ""))
+    def console_mcp_digest(self) -> str:
+        """L'empreinte du jeton de ``/mcp/console`` (vide : aucun, le point répond 404)."""
+        return self._token_digest(CONSOLE_MCP_KEY)
 
     async def new_console_mcp_token(self) -> str:
-        """Un jeton neuf pour ``/mcp/console`` (l'ancien ne vaut plus) ; montré une fois."""
+        """Un jeton neuf pour ``/mcp/console`` (l'ancien ne vaut plus) ; montré une fois, seule son empreinte est
+        gardée."""
         token = secrets.token_urlsafe(32)
-        await self._put(CONSOLE_MCP_KEY, {**dict(self._get(CONSOLE_MCP_KEY) or {}), "token_sealed": self.box.seal(token)})
+        data = {k: v for k, v in dict(self._get(CONSOLE_MCP_KEY) or {}).items() if k != "token_sealed"}
+        await self._put(CONSOLE_MCP_KEY, {**data, "digest": token_digest(token)})
         return token
 
     async def revoke_console_mcp_token(self) -> bool:
@@ -555,7 +604,8 @@ class Settings:
         ouverture au réseau, non : un jeton neuf la rouvre en local seulement."""
         data = dict(self._get(CONSOLE_MCP_KEY) or {})
         data.pop("network", None)
-        if not data.pop("token_sealed", ""):
+        had = bool(data.pop("digest", "")) | bool(data.pop("token_sealed", ""))
+        if not had:
             return False
         await self._put(CONSOLE_MCP_KEY, data)
         return True
@@ -566,7 +616,7 @@ class Settings:
 
     async def save_console_mcp_network(self, network: bool) -> None:
         data = dict(self._get(CONSOLE_MCP_KEY) or {})
-        if network and not data.get("token_sealed"):
+        if network and not self.console_mcp_digest():
             raise ValueError("la console n'a pas de jeton")
         if network:
             data["network"] = True

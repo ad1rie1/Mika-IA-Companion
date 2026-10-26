@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -264,6 +265,7 @@ async def test_claude_refusal_is_a_refusal_stop():
 @pytest.mark.parametrize(("model", "sent"), [
     ("claude-opus-5", False), ("claude-opus-5-5", False), ("claude-opus-4-7", False),
     ("claude-sonnet-5", False), ("claude-fable-5-1", False), ("claude-mythos-5-1", False),
+    ("claude-haiku-5-5", False), ("claude-haiku-5", False),  # Haiku 5.5 refuse une température non défaut (400)
     ("claude-sonnet-4-6", True), ("claude-haiku-4-5", True), ("claude-opus-4-6", True),
 ])
 async def test_claude_temperature_is_gated_per_model(model: str, sent: bool):
@@ -390,7 +392,8 @@ async def test_claude_replays_the_tool_search_blocks_unchanged():
 
 
 async def test_claude_through_the_runtime_tool_loop():
-    """La boucle unique du runtime : appel coupé rejoué au double, outil exécuté, réflexion rejouée."""
+    """La boucle unique du runtime : appel coupé rejoué au double, outil exécuté, réflexion rejouée. Sur un modèle
+    sans réflexion d'emblée : avec elle, le plafond envoyé ne bougerait pas et la boucle ne rejouerait pas."""
     seen: list[str] = []
 
     class AddArgs(BaseModel):
@@ -407,7 +410,7 @@ async def test_claude_through_the_runtime_tool_loop():
         claude_reply(thinking("sig"), tool_use("toolu_1", "note_add", {"what": "pain"}), stop="tool_use"),
         claude_reply(text("C'est noté.")),
     )
-    gateway = Gateway({"claude": ClaudeBackend("k", "claude-opus-5", client=fake)}, {"reply": "claude"},
+    gateway = Gateway({"claude": ClaudeBackend("k", "claude-sonnet-4-6", client=fake)}, {"reply": "claude"},
                       clock=ManualClock(0))
     req = LLMRequest(role="reply", call_id="c1", system_stable="Tu es Mika.",
                      messages=(Message("user", "Note « pain »."),), tools=declare([spec]), max_tokens=512)
@@ -592,15 +595,15 @@ async def test_ollama_thinking_off_by_default_and_reply_cap():
     await backend.complete(request(Message("user", "coucou"), max_tokens=200))
     first, second = fake.chat.calls
     assert first["think"] is False and first["model"] == "gemma4:12b"
-    assert first["options"] == {"num_predict": 768}
-    assert second["options"] == {"num_predict": 200}
+    assert first["options"] == {"num_predict": 768, "num_ctx": 24_000}
+    assert second["options"] == {"num_predict": 200, "num_ctx": 24_000}
 
 
 async def test_ollama_thinking_and_temperature_are_configurable():
     fake = FakeOllama(ollama_reply("salut"))
     await OllamaBackend("qwen3:8b", think=True, temperature=0.5, client=fake).complete(request(Message("user", "x")))
     body = fake.chat.calls[0]
-    assert body["think"] is True and body["options"] == {"num_predict": 768, "temperature": 0.5}
+    assert body["think"] is True and body["options"] == {"num_predict": 768, "num_ctx": 24_000, "temperature": 0.5}
 
 
 async def test_ollama_messages_tool_name_and_empty_result_placeholder():
@@ -688,7 +691,7 @@ async def test_ollama_cloud_bearer_host_and_larger_cap(monkeypatch: pytest.Monke
     assert cloud.headers == {"Authorization": "Bearer sk-cloud"}
     await cloud.complete(request(Message("user", "x"), max_tokens=4096))
     body = fake.chat.calls[0]
-    assert body["options"] == {"num_predict": 2048} and body["think"] is False
+    assert body["options"] == {"num_predict": 2048, "num_ctx": 24_000} and body["think"] is False
     # le vrai client est construit avec l'hôte et l'en-tête (aucun appel réseau à la construction)
     real = OllamaCloudBackend("gpt-oss:120b", "sk-cloud")
     assert real._client._client.headers["authorization"] == "Bearer sk-cloud"
@@ -822,3 +825,89 @@ def test_claude_a_key_without_workspace_names_it_on_every_request():
     backend = ClaudeBackend("sk-ant-usr-x", "claude-sonnet-4-6", workspace="wrkspc_essai")
     assert backend._client.default_headers.get("anthropic-workspace-id") == "wrkspc_essai"
     assert "anthropic-workspace-id" not in ClaudeBackend("k", "claude-sonnet-4-6")._client.default_headers
+
+
+# ── Audit du 2026-10-26 : plafond effectif, tour de clôture, refus, Ollama ───
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1",
+                                   "claude-mythos-5-1", "claude-opus-5", "claude-sonnet-5"])
+async def test_claude_models_that_think_by_default_get_the_output_floor_without_effort(model: str):
+    """Sur ces modèles la réflexion adaptative est active d'emblée et compte dans ``max_tokens`` : un murmure à
+    80 jetons n'écrirait pas un mot. Le plafond effectif (``output_tokens``) est le plancher, envoyé tel quel —
+    sans ``thinking`` ni ``output_config`` (la réflexion est déjà là), et sans température."""
+    fake = FakeAnthropic(claude_reply(text("ok")))
+    backend = ClaudeBackend("k", model, temperature=0.7, client=fake)
+    req = request(Message("user", "x"), max_tokens=80)
+    assert backend.thinks() and backend.output_tokens(req) == 16_384
+    await backend.complete(req)
+    sent = fake.create.calls[0]
+    assert sent["max_tokens"] == 16_384 and "thinking" not in sent and "temperature" not in sent
+
+
+async def test_claude_models_without_default_thinking_keep_the_requested_cap():
+    fake = FakeAnthropic(claude_reply(text("ok")))
+    backend = ClaudeBackend("k", "claude-sonnet-4-6", client=fake)
+    req = request(Message("user", "x"), max_tokens=80)
+    assert not backend.thinks() and backend.output_tokens(req) == 80
+    await backend.complete(req)
+    assert fake.create.calls[0]["max_tokens"] == 80
+    assert ClaudeBackend("k", "claude-sonnet-4-6", effort="low", client=fake).output_tokens(req) == 16_384
+
+
+async def test_claude_closing_turn_keeps_its_tools_declared_and_forbids_their_use():
+    """Le tour de clôture (``tool_choice="none"``) : l'API refuse une conversation qui porte des ``tool_use`` ou
+    ``tool_result`` sans leurs outils — ils restent déclarés, et ``tool_choice: none`` retient le modèle, là où la
+    consigne seule ne le retenait pas."""
+    fake = FakeAnthropic(claude_reply(text("Voilà.")))
+    closing = replace(request(*LOOP, Message("user", "(Réponds maintenant.)")), tool_choice="none")
+    await ClaudeBackend("k", "claude-sonnet-4-6", client=fake).complete(closing)
+    sent = fake.create.calls[0]
+    assert [t["name"] for t in sent["tools"]] == ["note_add", "note_count"]
+    assert sent["tool_choice"] == {"type": "none"}
+    plain = FakeAnthropic(claude_reply(text("ok")))
+    await ClaudeBackend("k", "claude-sonnet-4-6", client=plain).complete(request(*LOOP))
+    assert "tool_choice" not in plain.create.calls[0]
+
+
+async def test_claude_refusal_carries_its_category():
+    """Un classifieur (cyber, bio, frontier_llm…) arrête la réponse : ``stop_details.category`` remonte, pour que
+    l'épisode dise pourquoi il échoue au lieu d'un silence."""
+    refused = AnthropicMessage.model_validate({
+        **claude_reply(text("Je ne peux p"), stop="refusal").model_dump(),
+        "stop_details": {"type": "refusal", "category": "cyber", "explanation": None}})
+    resp = await ClaudeBackend("k", "claude-sonnet-5-5", client=FakeAnthropic(refused)).complete(
+        request(Message("user", "…")))
+    assert (resp.stop, resp.stop_detail, resp.tool_calls) == ("refusal", "cyber", ())
+    bare = await ClaudeBackend("k", "claude-opus-5", client=FakeAnthropic(claude_reply(stop="refusal"))).complete(
+        request(Message("user", "…")))
+    assert (bare.stop, bare.stop_detail) == ("refusal", "")
+
+
+async def test_openai_and_ollama_closing_turns_forbid_tool_calls_their_own_way():
+    """Compatible OpenAI : ``tool_choice: "none"``, outils déclarés ; Ollama, qui n'a pas de ``tool_choice`` : les
+    outils ne partent pas."""
+    fake_o = FakeOpenAI(openai_reply("Voilà."))
+    await OpenAICompatBackend("k", "gpt-4.1", client=fake_o).complete(
+        replace(request(*LOOP, Message("user", "(Réponds.)")), tool_choice="none"))
+    sent = fake_o.create.calls[0]
+    assert sent["tool_choice"] == "none" and [t["function"]["name"] for t in sent["tools"]] == ["note_add", "note_count"]
+    fake_l = FakeOllama(ollama_reply("Voilà."))
+    await OllamaBackend("gemma4:12b", client=fake_l).complete(
+        replace(request(*LOOP, Message("user", "(Réponds.)")), tool_choice="none"))
+    assert "tools" not in fake_l.chat.calls[0]
+
+
+async def test_ollama_sends_its_context_window_and_caps_only_her_voice():
+    """``num_ctx`` : sans lui, le serveur applique sa fenêtre par défaut (souvent 4 096) et tronque le prompt en
+    silence. ``max_reply_tokens`` ne plafonne que les rôles voix : une extraction demande 6 000 jetons et les a —
+    elle en coûtait deux appels (coupée à 768, redemandée)."""
+    fake = FakeOllama(ollama_reply("ok"), ollama_reply("{}"))
+    backend = OllamaBackend("gemma4:12b", client=fake, context_tokens=32_000)
+    await backend.complete(request(Message("user", "x"), max_tokens=4096))
+    await backend.complete(replace(request(Message("user", "x"), max_tokens=6000), role="extract"))
+    voice, extract = fake.chat.calls
+    assert voice["options"] == {"num_predict": 768, "num_ctx": 32_000}
+    assert extract["options"] == {"num_predict": 6000, "num_ctx": 32_000}
+    with pytest.raises(ValueError):
+        OllamaBackend("gemma4:12b", client=fake, context_tokens=0)

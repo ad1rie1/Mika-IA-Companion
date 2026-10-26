@@ -55,6 +55,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
@@ -201,9 +202,9 @@ class AgencyState:
     #: qui lui a écrit pendant qu'elle était en train de lui écrire d'elle-même : adresse → (quand son message est
     #: arrivé, les raisons de l'initiative) — jusqu'à sa parole suivante vers elle, ou ``CROSSED_SPAN``
     crossed: FrozenDict[str, tuple[int, str]] = field(default_factory=FrozenDict)
-    #: le délai de la prochaine relance envers chaque adresse, tiré à sa dernière initiative : la part du délai de
-    #: base (1,0 : tel quel)
-    follow_up_draws: FrozenDict[str, float] = field(default_factory=FrozenDict)
+    #: le délai de la prochaine relance envers chaque adresse, tiré à sa dernière initiative : (quand, la part du
+    #: délai de base — 1,0 : tel quel) ; les ``DRAWS_KEPT`` plus récents
+    follow_up_draws: FrozenDict[str, tuple[int, float]] = field(default_factory=FrozenDict)
 
 
 #: v4 : une ouverture garde l'adresse visée et son départ, et un message qui croise une initiative en cours vers sa
@@ -226,7 +227,8 @@ def derive(t: Temperament, overrides: Any = None) -> AgencyParams:
 
 
 AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, derive=derive,
-                 state_version=5)
+                 # 6 : le tirage de la relance est daté, pour garder les plus récents (audit du 2026-10-26)
+                 state_version=6)
 #: les adresses dont on garde les hésitations, au plus
 HESITATIONS_KEPT = 64
 #: les adresses dont on garde le délai tiré de la prochaine relance, au plus (les plus récentes)
@@ -321,10 +323,13 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
     s = replace(s, initiatives=(*kept, e.at)[-KEEP:], refractory_us=jittered)
     if not d.target:
         return s
-    # le délai de la prochaine relance envers elle, s'il ne répond pas
-    draws = s.follow_up_draws.delete(d.target).set(
-        d.target, round(1.0 + p.follow_up_jitter * (2.0 * cx.rng.random() - 1.0), 4))
-    return replace(s, follow_up_draws=FrozenDict(list(draws.items())[-DRAWS_KEPT:]))
+    # le délai de la prochaine relance envers elle, s'il ne répond pas : daté, pour ne garder que les plus récents
+    # (``FrozenDict`` itère par clé, pas par insertion — audit du 2026-10-26)
+    draws = s.follow_up_draws.set(d.target, (e.at, round(1.0 + p.follow_up_jitter * (2.0 * cx.rng.random() - 1.0), 4)))
+    if len(draws) > DRAWS_KEPT:
+        recent = sorted(draws.items(), key=lambda kv: (kv[1][0], kv[0]))[-DRAWS_KEPT:]
+        draws = FrozenDict(recent)
+    return replace(s, follow_up_draws=draws)
 
 
 @AGENCY.reducer(rt.EPISODE_ENDED)
@@ -441,7 +446,7 @@ def follow_up_after(frame: Frame, target: str, person: str, p: AgencyParams) -> 
     """Le délai avant une relance : au moins un jour (selon sa sociabilité), et au moins le rythme de la relation —
     tiré au sort à sa dernière initiative (± ``follow_up_jitter``)."""
     rhythm = frame.get(social_c.CONTACT(person)).rhythm_days
-    draw = frame.state("agency").follow_up_draws.get(target, 1.0)
+    draw = frame.state("agency").follow_up_draws.get(target, (0, 1.0))[1]
     return round(draw * max(p.follow_up_min_us, round(p.follow_up_rhythms * rhythm * DAY)))
 
 
@@ -737,3 +742,25 @@ def task_brief(frame: Frame, req: Any) -> str:
 # ── Inspection ────────────────────────────────────────────────────────────
 
 from mika.faculties.agency import inspect as _inspect  # noqa: E402,F401 — contributions : sa vue
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_addresses(s: AgencyState, gone: set[str]) -> AgencyState:
+    def drop(k: object) -> bool:
+        return k in gone
+
+    return replace(s, hesitations=s.hesitations.without(drop), renounced=s.renounced.without(drop),
+                   crossed=s.crossed.without(drop), follow_up_draws=s.follow_up_draws.without(drop))
+
+
+@AGENCY.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: AgencyState, e, cx) -> AgencyState:
+    """Une inconnue de passage oubliée : plus d'hésitation, de relance ni de message croisé envers son adresse."""
+    return _without_addresses(s, {e.data.handle, e.data.person})
+
+
+@AGENCY.reducer(SUBJECT_FORGOTTEN, reads=[identity_c.HANDLES])
+def _person_forgotten(s: AgencyState, e, cx) -> AgencyState:
+    subject = e.data.subject
+    return _without_addresses(s, {subject, *cx.facts.get(identity_c.HANDLES(subject))})

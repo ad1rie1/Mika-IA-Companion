@@ -36,6 +36,12 @@ export interface AuthState {
   /** True while no account exists yet — the bootstrap window. */
   needs_bootstrap?: boolean;
   /**
+   * The first account asks for the start-up code written in the server's
+   * journal, unless the browser runs on the server's own machine: the first
+   * device on the network must not become the operator (audit 2026-10-26).
+   */
+  bootstrap_code_required?: boolean;
+  /**
    * Operator account (`is_staff`). Only operators may approve or reject a
    * project's pending actions: the server answers 403 to a chat account, so
    * the panel hides the buttons rather than offering a refusal.
@@ -144,9 +150,10 @@ export const BOOTSTRAP_CLOSED = 409;
  */
 export async function bootstrap(
   username: string,
-  password: string
+  password: string,
+  code = ""
 ): Promise<AuthState> {
-  const resp = await postJson("/auth/bootstrap", { username, password });
+  const resp = await postJson("/auth/bootstrap", code ? { username, password, code } : { username, password });
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     throw new LoginRefusedError(resp.status, body.error || "création du compte refusée");

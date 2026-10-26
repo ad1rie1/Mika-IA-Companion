@@ -89,10 +89,12 @@ def neutral(text: str) -> str:
 def cited(text: str, limit: int = UNTRUSTED_MAX) -> str:
     """Un texte venu d'ailleurs, rendu comme une citation : chaque ligne
     préfixée, aucune ne peut imiter un titre de section ou la fin de l'état
-    interne, longueur bornée."""
+    interne, longueur bornée — coupée à une frontière (ligne, phrase, mot),
+    jamais au milieu d'un mot ou d'un nombre (le modèle compléterait le
+    demi-fait) ; le plancher à la moitié garde quelque chose d'une ligne géante."""
     body = "\n".join("> " + neutral(raw) for raw in text.strip().splitlines())
     if len(body) > limit:
-        body = body[:limit].rstrip() + TRIM_MARK
+        body = _trim_at_boundary(body, limit, limit // 2) + TRIM_MARK
     return f"{UNTRUSTED_NOTE}\n{body}"
 
 
@@ -216,6 +218,10 @@ class ChatPrompt:
     system_volatile: str = ""
     history: tuple[ChatTurn, ...] = ()
     message: str = ""
+    #: le mot d'un dernier tour utilisateur qui n'aurait rien à dire (une initiative sans consigne, tout le volatile
+    #: coupé) : donné par l'appelant (``persona/voix.yaml``, le composeur n'a pas de voix) — un fournisseur écarte un
+    #: bloc vide, et une conversation qui finit sur un tour de l'assistant est refusée (400)
+    silence: str = ""
 
     def chat_messages(self) -> list[dict[str, str]]:
         msgs: list[dict[str, str]] = []
@@ -235,6 +241,8 @@ class ChatPrompt:
         final = self.message
         if self.system_volatile:
             final = f"{CONTEXT_HEADER}\n{self.system_volatile}\n{CONTEXT_FOOTER}\n\n{self.message}"
+        if not final.strip():
+            final = self.silence  # jamais un dernier tour utilisateur vide
         msgs.append({"role": "user", "content": final})
         return msgs
 
@@ -329,12 +337,14 @@ class Composer:
         tied_level: int | None = None,
         typed_chars: int | None = None,
         veiled_level: int | None = None,
+        silence: str = "",
     ) -> tuple[ChatPrompt, ComposeTrace]:
         """``reserved`` : les caractères qui partiront au modèle hors du composeur
         (persona, catalogue, déclarations d'outils) ; ``thread_key`` : la clé de
         coupe de l'historique quand la section d'historique ne déclare pas son fil ;
         ``typed_chars`` : combien de caractères, au début du message, la personne a
-        tapés (la suite vient de ses pièces jointes, coupée d'abord faute de place)."""
+        tapés (la suite vient de ses pièces jointes, coupée d'abord faute de place) ;
+        ``silence`` : le mot du dernier tour quand il n'a rien à dire (``ChatPrompt.silence``)."""
         kept: list[_Block] = []
         dropped: list[tuple[str, str]] = []
         for spec, body in blocks:
@@ -444,7 +454,7 @@ class Composer:
             volatile = [b for b in volatile if b.text]
 
         volatile_text = "\n\n".join(self.render_block(b.spec, b.body, b.text) for b in volatile)
-        prompt = ChatPrompt(stable_text, volatile_text, turns, message)
+        prompt = ChatPrompt(stable_text, volatile_text, turns, message, silence=silence)
         def total_size() -> int:
             return prompt.chars() + max(0, reserved) + (len(prompt.chat_messages()) - 1) * budget.message_overhead
         # Les planchers sont des préférences. Les séparateurs, les dates d'ouverture et les résumés

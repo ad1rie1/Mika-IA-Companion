@@ -62,7 +62,9 @@ class BackendSpec(BaseModel):
                                               "charge d'elle-même une fois le fournisseur enregistré).",
                                group="Le fournisseur", loader="models", advanced=False, order=20)]
     context_tokens: Annotated[int, Knob(label="Contexte (jetons)",
-        help="Fenêtre totale de ce fournisseur : entrée, outils et réserve de sortie.",
+        help="Fenêtre totale de ce fournisseur : entrée, outils et réserve de sortie. Un modèle qui réfléchit "
+             "(Claude 5.x, Fable) réserve jusqu'à 16 384 jetons de sortie — au plus la moitié de cette fenêtre : "
+             "compter 40 000 au moins pour lui laisser son prompt entier.",
         lo=2_000, hi=1_000_000, step=1_000, group="Budgets", advanced=False, order=21)] = \
         Field(default=24_000, ge=2_000, le=1_000_000)
     max_output_tokens: Annotated[int, Knob(label="Sortie max. (jetons)",
@@ -278,13 +280,13 @@ def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base
 
         return OllamaBackend(spec.model, host=spec.host or "http://localhost:11434", think=spec.think,
                              max_reply_tokens=spec.max_output_tokens or spec.max_reply_tokens or 768,
-                             temperature=spec.temperature, name=name)
+                             temperature=spec.temperature, name=name, context_tokens=spec.context_tokens)
     from mika.adapters.llm.ollama import OllamaCloudBackend  # noqa: PLC0415
 
     return OllamaCloudBackend(spec.model, spec.api_key, host=spec.host or "https://ollama.com", think=spec.think,
                               max_reply_tokens=spec.max_output_tokens or spec.max_reply_tokens or 2048,
                               temperature=spec.temperature,
-                              name=name)
+                              name=name, context_tokens=spec.context_tokens)
 
 
 def price_kind(spec: BackendSpec) -> str:

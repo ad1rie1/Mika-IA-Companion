@@ -22,8 +22,10 @@ from typing import Any
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
+from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, inspect
+from sqlalchemy.exc import DBAPIError
 
 from mika.adapters.database import Target, sqlite_engine
 from mika.app.migrations import _declared
@@ -89,8 +91,21 @@ def _config(name: str) -> Config:
     return cfg
 
 
+class SchemaDrift(RuntimeError):
+    """Une base marquée à jour qui ne l'est pas, et qu'on ne sait pas compléter seul : refusée en le disant."""
+
+    def __init__(self, name: str, diffs: list[Any]) -> None:
+        self.name = name
+        self.diffs = diffs
+        super().__init__(f"la base « {name} » ne correspond pas à ses entités : " + " ; ".join(describe_diffs(diffs))
+                         + " — une révision ou une réparation à la main s'impose avant de démarrer")
+
+
 def migrate(name: str, engine: Engine) -> None:
-    """Passe la base ``name`` à la dernière révision (marquée d'abord si ses tables viennent des entités seules)."""
+    """Passe la base ``name`` à la dernière révision (marquée d'abord si ses tables viennent des entités seules),
+    puis **vérifie** qu'elle est vraiment à cette révision : ``create_all`` ne touche pas une table qui existe, donc
+    une table d'avant garde ses anciennes colonnes — ce qui manque (colonnes, index) est ajouté, le reste est refusé
+    (``SchemaDrift``) plutôt que marqué à jour sans l'être (audit du 2026-10-26 : c'est arrivé à ``data/v2``)."""
     cfg = _config(name)
     metadata = DATABASES[name]
     with engine.connect() as probe:
@@ -104,6 +119,50 @@ def migrate(name: str, engine: Engine) -> None:
             command.stamp(cfg, "head")
         command.upgrade(cfg, "head")
         conn.commit()
+        drift = _differences(conn, metadata)
+        if drift:
+            _repair(conn, drift)
+            conn.commit()
+            left = _differences(conn, metadata)
+            if left:
+                raise SchemaDrift(name, left)
+
+
+def _repair(conn: Any, diffs: list[Any]) -> None:
+    """Ce qu'on sait ajouter sans risque à une base vivante : une colonne absente (telle que l'entité la déclare),
+    un index absent. Tout le reste reste dans les différences, et ``migrate`` le refuse."""
+    ops = Operations(MigrationContext.configure(conn))
+    for diff in diffs:
+        kind = diff[0] if isinstance(diff, tuple) else diff[0][0]
+        try:
+            if kind == "add_column":
+                _, _schema, table, column = diff
+                ops.add_column(table, column._copy())
+            elif kind == "add_index":
+                diff[1].create(conn)
+        except DBAPIError:
+            # une colonne NOT NULL sans défaut sur une table pleine, par exemple : elle reste dans les différences,
+            # et ``migrate`` refuse de démarrer en la nommant
+            conn.rollback()
+
+
+def describe_diffs(diffs: list[Any]) -> list[str]:
+    """Les différences d'Alembic, en mots (table et colonne nommées)."""
+    out = []
+    for diff in diffs:
+        head = diff if isinstance(diff, tuple) else diff[0]
+        kind = head[0]
+        if kind in ("add_column", "remove_column"):
+            out.append(f"colonne {'absente' if kind == 'add_column' else 'en trop'} {head[2]}.{head[3].name}")
+        elif kind in ("add_table", "remove_table"):
+            out.append(f"table {'absente' if kind == 'add_table' else 'en trop'} {head[1].name}")
+        elif kind in ("add_index", "remove_index"):
+            out.append(f"index {'absent' if kind == 'add_index' else 'en trop'} {head[1].name}")
+        elif kind.startswith("modify_"):
+            out.append(f"{kind[7:]} de {head[2]}.{head[3]} à revoir")
+        else:
+            out.append(str(kind))
+    return out
 
 
 def migrate_data(data: Path, where: Mapping[str, Target] | None = None) -> None:
@@ -124,8 +183,12 @@ def differences(name: str, engine: Engine) -> list[Any]:
     load_models()
     metadata = DATABASES[name]
     with engine.connect() as conn:
-        ctx = MigrationContext.configure(conn, opts={"include_object": _declared(metadata), "compare_type": True})
-        return list(compare_metadata(ctx, metadata))
+        return _differences(conn, metadata)
+
+
+def _differences(conn: Any, metadata: Any) -> list[Any]:
+    ctx = MigrationContext.configure(conn, opts={"include_object": _declared(metadata), "compare_type": True})
+    return list(compare_metadata(ctx, metadata))
 
 
 def revision(name: str, message: str) -> Path:

@@ -43,6 +43,7 @@ async def test_a_restarted_log_finds_an_episodes_calls(tmp_path):
     await again.open()
     episode = again.for_correlation("ep-1")
     assert [(t.call_id, t.input_tokens) for t in episode] == [("ep-1#0", 10), ("ep-1#0", 12)]
+    assert all(t.estimated_input_tokens > 0 for t in episode)  # l'estimation du budget, gardée à côté du réel
     last = again.by_call_id("ep-1#0")
     assert last is not None and last.output_tokens == 3, "le dernier tour : celui qui a écrit le texte"
     process = again.for_correlation("memory.consolidate:xyz")

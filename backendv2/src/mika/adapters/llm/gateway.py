@@ -11,17 +11,28 @@
 - Un appel fait **pendant** un épisode (un outil qui regarde par la caméra au
   milieu d'une réponse) hérite de la priorité et de la voie de cet épisode : il
   ne repasse pas derrière le fond qu'il devançait.
-- **Chaque appel a un délai**, par voie (``deadlines``) : l'attente d'un créneau
-  comprise. Une réponse n'attend pas dix minutes un fournisseur muet.
+- **Chaque appel a un délai**, l'attente d'un créneau comprise : celui que la
+  requête porte (``deadline_s`` : l'échéance de l'épisode — le mode pro a
+  quinze minutes), jamais plus que ce qui reste devant l'épisode
+  (``meta[DEADLINE_AT]``) ; sans lui, celui de sa voie (``deadlines`` : les
+  processus). Une réponse n'attend pas dix minutes un fournisseur muet.
 - Une erreur est journalisée et propagée, sans changement de fournisseur.
 - Une boucle d'outils reste sur son fournisseur pendant toute sa durée.
 - Une réponse coupée par son plafond de jetons, sans appel d'outil : une sortie
   structurée (extraction, profil…) est redemandée une fois avec un plafond
   doublé ; une parole (rôle voix) est coupée à sa dernière phrase complète —
   redemandée seulement si rien de complet n'en restait (un modèle qui réfléchit
-  a tout dépensé avant le premier mot).
+  a tout dépensé avant le premier mot). Jamais redemandée quand le fournisseur
+  enverrait le même plafond **effectif** (``output_tokens`` : un modèle qui
+  réfléchit a son plancher) — la même coupure, un appel payé pour rien ; la
+  sortie est réservée dans le budget sur ce plafond effectif, pas sur le seul
+  plafond demandé (jamais plus de la moitié du contexte déclaré :
+  ``LLMLimits.reserve``).
 - Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache, coût,
-  latence, attente, issue).
+  latence, attente, issue), avec l'entrée telle que le budget l'estimait à côté
+  de l'entrée réelle : quand leur rapport sort de ``ESTIMATE_RATIO``, un
+  avertissement (un par fournisseur et par heure) dit que ``chars_per_token``
+  est à régler — rien ne se recale seul.
 - Un **essai** de la console (``try_on``, « Rejouer avec… ») envoie un prompt
   gardé à un fournisseur nommé : un seul appel, derrière tout le reste, sans
   repli ni reprise, sous un rôle à part (``TRIAL_ROLE``) ; un appel d'outil
@@ -44,6 +55,7 @@ from mika.kernel.clock import Clock
 from mika.kernel.prompt import Budget
 from mika.kernel.slots import PrioritySlots
 from mika.ports.llm import (
+    DEADLINE_AT,
     PREEMPTED,
     RETRY_AFTER_CUT,
     LLMBackend,
@@ -57,7 +69,8 @@ from mika.vocab.episodes import TRIAL_ROLE
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
-#: le délai d'un appel par voie (secondes, attente d'un créneau comprise) ; une voie inconnue prend « background »
+#: le délai d'un appel par voie (secondes, attente d'un créneau comprise), quand la requête n'en porte pas
+#: (``LLMRequest.deadline_s``) ; une voie inconnue prend « background »
 DEFAULT_DEADLINES: Mapping[str, float] = {"conversation": 120.0, "background": 300.0}
 #: temps minimal pour redemander une sortie tronquée (secondes)
 MIN_RETRY_S = 5.0
@@ -67,6 +80,11 @@ CUT_RETRY_CEILING = 8192
 STICKY_KEPT = 4096
 #: la priorité d'un essai de la console : derrière tout le fond
 TRIAL_PRIORITY = 9
+#: l'entrée réelle (jetons du fournisseur, cache compris) rapportée à l'entrée estimée (caractères du budget) : hors
+#: de cet intervalle, l'estimation ment et ``chars_per_token`` du fournisseur est à régler
+ESTIMATE_RATIO = (0.7, 1.4)
+#: au plus un avertissement d'estimation par fournisseur et par heure (microsecondes)
+ESTIMATE_WARN_EVERY_US = 3_600 * 1_000_000
 
 log = logging.getLogger("mika.llm.gateway")
 
@@ -103,6 +121,9 @@ class LLMTrace:
     #: l'épisode (ou le passage d'un processus) qui a fait l'appel : de quoi
     #: retrouver ses appels après un redémarrage
     correlation: str = ""
+    #: l'entrée telle que le budget l'estimait (caractères de la requête / ``chars_per_token``), à côté de l'entrée
+    #: réelle (``input_tokens`` + cache) : de quoi voir si l'estimation ment
+    estimated_input_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,12 +204,41 @@ class Gateway:
         self.limits = dict(limits or {})
         #: boucle d'outils (``call_id``) → le fournisseur qui la tient
         self._sticky: OrderedDict[str, str] = OrderedDict()
+        #: fournisseur → quand son estimation d'entrée a été dite fausse pour la dernière fois
+        self._estimate_warned: dict[str, int] = {}
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
 
     def budget(self, role: str, max_tokens: int) -> Budget:
-        return self.limits.get(self.resolve(role), LLMLimits()).budget(max_tokens)
+        """Le budget de prompt du fournisseur de ce rôle, la sortie réservée sur le plafond qu'il enverra vraiment
+        (``output_tokens`` du fournisseur : un modèle qui réfléchit a son plancher)."""
+        name = self.resolve(role)
+        limits = self.limits.get(name, LLMLimits())
+        probe = LLMRequest(role=role, call_id="", system_stable="", max_tokens=max_tokens)
+        return limits.budget(max_tokens, self._sent(name, probe))
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        """Le plafond de sortie effectif de ``req`` chez le fournisseur qui la servira (celui de sa boucle, sinon celui
+        de son rôle), son propre plafond appliqué ; ``req.max_tokens`` quand personne ne la sert."""
+        name = self._sticky.get(req.call_id)
+        if name not in self.backends:
+            try:
+                name = self.resolve(req.role)
+            except UnconfiguredRole:
+                return req.max_tokens
+        return self._sent(name, req)
+
+    def _sent(self, name: str, req: LLMRequest) -> int:
+        """Ce que le fournisseur ``name`` enverra comme plafond de sortie pour ``req`` : le plafond demandé, borné par le
+        sien (``LLMLimits.output``), puis relevé par lui s'il le dit (``output_tokens``, facultatif)."""
+        limits = self.limits.get(name, LLMLimits())
+        capped = limits.output(req.max_tokens)
+        ask = getattr(self.backends.get(name), "output_tokens", None)
+        if not callable(ask):
+            return capped
+        got = ask(replace(req, max_tokens=capped))
+        return max(capped, int(got)) if isinstance(got, int) else capped
 
     def defers_tools(self, role: str) -> bool:
         """Le fournisseur qui sert ce rôle sait-il différer des outils ? Un fournisseur qui n'en dit rien : oui
@@ -266,6 +316,15 @@ class Gateway:
     def deadline(self, lane: str) -> float:
         return float(self.deadlines.get(lane, self.deadlines.get("background", DEFAULT_DEADLINES["background"])))
 
+    def deadline_of(self, req: LLMRequest) -> float:
+        """Le délai d'un appel de ``req`` (secondes) : celui qu'elle porte (l'échéance de l'épisode), sinon celui de sa
+        voie — et jamais plus que ce qui reste devant l'épisode (``meta[DEADLINE_AT]``, un instant de la boucle)."""
+        budget = float(req.deadline_s) if req.deadline_s is not None else self.deadline(req.lane)
+        until = req.meta.get(DEADLINE_AT) if req.meta else None
+        if isinstance(until, (int, float)) and not isinstance(until, bool):
+            budget = min(budget, max(0.0, float(until) - asyncio.get_running_loop().time()))
+        return budget
+
     # ── Appel ────────────────────────────────────────────────────────────
 
     async def call(self, req: LLMRequest) -> LLMResponse:
@@ -275,7 +334,7 @@ class Gateway:
         name = self._sticky.get(req.call_id)
         if name not in self.backends:
             name = self.resolve(req.role)
-        budget = self.deadline(req.lane)
+        budget = self.deadline_of(req)
         loop = asyncio.get_running_loop()
         start = loop.time()
         resp = await self._on(name, req, budget)
@@ -302,6 +361,10 @@ class Gateway:
             return resp
         retry = replace(req, max_tokens=min(CUT_RETRY_CEILING, req.max_tokens * 2),
                         meta={**dict(req.meta), RETRY_AFTER_CUT: True})
+        if self._sent(name, retry) <= self._sent(name, req):
+            # le fournisseur enverrait le même plafond (un modèle qui réfléchit a son plancher) : la même coupure,
+            # un appel payé pour rien
+            return resp
         try:
             again = await self._on(name, retry, remaining)
         except Exception as exc:  # la première réponse, même coupée, vaut mieux que rien
@@ -365,7 +428,7 @@ class Gateway:
         resp: LLMResponse | None = None
         try:
             async with asyncio.timeout(max(0.0, budget)):
-                req = self.limits.get(name, LLMLimits()).fit(req)
+                req = self.limits.get(name, LLMLimits()).fit(req, self._sent(name, req))
                 token = await slots.acquire(req.priority, preempt=name in self.preempt)
                 t0 = self.clock.now()
                 resp = await backend.complete(req)
@@ -393,16 +456,37 @@ class Gateway:
         if resp is not None and backend in self.pricing:
             kind, ttl = self.pricing[backend]
             cost = price_usd(resp.model, usage, provider=kind, cache_ttl=ttl)
+        limits = self.limits.get(backend, LLMLimits())
+        estimated = round(limits.size(req) / limits.chars_per_token)
         tr = LLMTrace(
             at=now, role=req.role, backend=backend, model=resp.model if resp else "", lane=req.lane,
             priority=req.priority, latency_us=now - t0, wait_us=t0 - t_wait,
             input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, outcome=outcome,
             call_id=req.call_id, cache_read=usage.cache_read, cache_write=usage.cache_write, cost_usd=cost,
-            correlation=correlation_of(req),
+            correlation=correlation_of(req), estimated_input_tokens=estimated,
         )
         self.traces.append(tr)
+        if resp is not None:
+            self._check_estimate(backend, tr, limits.chars_per_token, now)
         if self._on_trace is not None:
             self._on_trace(tr)
+
+    def _check_estimate(self, backend: str, tr: LLMTrace, chars_per_token: float, now: int) -> None:
+        """L'entrée réelle (jetons du fournisseur, cache compris) contre l'estimation du budget : hors de
+        ``ESTIMATE_RATIO``, un avertissement par fournisseur et par heure — pas de recalage automatique."""
+        real = tr.input_tokens + tr.cache_read + tr.cache_write
+        if real <= 0 or tr.estimated_input_tokens <= 0:
+            return
+        ratio = real / tr.estimated_input_tokens
+        if ESTIMATE_RATIO[0] <= ratio <= ESTIMATE_RATIO[1]:
+            return
+        last = self._estimate_warned.get(backend)
+        if last is not None and now - last < ESTIMATE_WARN_EVERY_US:
+            return
+        self._estimate_warned[backend] = now
+        log.warning("%s : l'entrée réelle fait %.2f× l'estimation (%d jetons pour %d estimés à %.1f car./jeton, "
+                    "soit %.1f réels) — « chars_per_token » du fournisseur est à régler",
+                    backend, ratio, real, tr.estimated_input_tokens, chars_per_token, chars_per_token / ratio)
 
 
 def _inherit(req: LLMRequest) -> LLMRequest:

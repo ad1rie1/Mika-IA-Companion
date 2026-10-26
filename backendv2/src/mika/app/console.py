@@ -229,6 +229,7 @@ PROCESS_LABELS: dict[str, str] = {
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
+    "identity.expire": "Oublier les inconnues de passage restées silencieuses",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -247,6 +248,7 @@ EVENT_LABELS: dict[str, str] = {
     "identity.linked": "Un moyen de communication relié", "identity.registered": "Un compte enregistré",
     "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",
     "identity.name_dismissed": "Un nom écarté pour une personne (« ce n'est pas elle »)",
+    "identity.expired": "Une inconnue de passage oubliée (silencieuse depuis longtemps)",
     "transcript.compacted": "Un fil replié en résumé",
     "transcript.judged": "Une de ses réponses jugée par son opératrice",
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",

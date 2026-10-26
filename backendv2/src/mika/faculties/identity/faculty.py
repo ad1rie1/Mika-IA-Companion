@@ -13,8 +13,9 @@ from mika.contracts import identity as c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, US
-from mika.kernel.faculty import Faculty
+from mika.kernel.faculty import CatchUp, Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import privacy
@@ -45,6 +46,13 @@ class IdentityParams(BaseModel):
              "ce que seule cette personne savait sur deux messages différents, au moins aussi espacés (dont un "
              "avec un détail rare : un nom propre, un nombre, une date). Jamais dans le message où elle se "
              "présente.")] = 30 * US
+    #: Une inconnue de passage silencieuse depuis si longtemps est oubliée (audit du 2026-10-26).
+    stranger_ttl_days: Annotated[int, Knob(
+        label="Oublier une inconnue de passage après (jours)", group="Inconnues de passage", lo=7, hi=3650,
+        help="Une adresse jamais reliée à une personne ni authentifiée, dont elle n'est pas proche, et qui n'a rien "
+             "dit depuis ce nombre de jours, est oubliée : chaque faculté retire ce qu'elle en gardait (sa posture, "
+             "ses heures, ses attentes). Un compte, une amie, une personne connue de nom ne s'oublient jamais "
+             "ainsi.")] = 90
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +90,8 @@ class Handle:
     certainty: float = 0.0  # de la liaison
     via: str = ""
     claim: Claim | None = None
+    #: la dernière fois qu'elle a été vue (connexion, message) : une inconnue de passage s'oublie à force de silence
+    last_seen: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,8 +122,11 @@ NAMED = "name:"
 #: compte ni une liaison d'opérateur — reconstruit depuis la genèse.
 #: v6 : les suggestions de noms écartées par un opérateur (``dismissed``).
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
-                   state_version=6)
+                   # 7 : ``last_seen`` sur chaque adresse, et les inconnues de passage s'oublient (audit du 2026-10-26)
+                   state_version=7)
 IDENTITY.declare(*c.ALL)
+#: les inconnues de passage sont relues à ce rythme
+EXPIRY_PERIOD = DAY
 
 
 def _params(p: IdentityParams | None) -> IdentityParams:
@@ -158,6 +171,8 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
         current = replace(current, first_seen=at)
     if _TRUST_ORDER[trust] > _TRUST_ORDER[current.trust]:
         current = replace(current, trust=trust)  # monte, ne descend jamais
+    if at > current.last_seen:
+        current = replace(current, last_seen=at)
     if privacy.is_messaging(channel) and not public and not authenticated and not current.push:
         # une conversation privée sur un compte extérieur : on peut lui écrire. Un compte du système, lui, n'est
         # joignable que par ce que dit ``identity.registered`` (une application qui reçoit hors ligne) : ça se
@@ -207,6 +222,78 @@ def _perceived(s: IdentityState, e, cx) -> IdentityState:
     d = e.data
     return _seen(s, d.handle, e.at, channel=d.channel, authenticated=d.authenticated, public=d.public,
                  name=d.display_name, operator=None)
+
+
+# ── Les inconnues de passage s'oublient (audit du 2026-10-26) ─────────────
+
+
+def is_stranger(s: IdentityState, handle: str, h: Handle) -> bool:
+    """Une inconnue de passage : une adresse qui ne parle pour personne d'autre, jamais authentifiée, ni opératrice,
+    ni connue de nom — ce qu'un opérateur n'a jamais relié, ce qu'aucun compte ne prouve."""
+    return (h.person is None and not h.authenticated and not h.operator and h.trust is not ChannelTrust.INTERNAL
+            and handle not in s.operators and handle not in set(s.names.values()) and not is_internal(handle))
+
+
+def _remove(s: IdentityState, handle: str) -> IdentityState:
+    """Retire une adresse, et la sort de l'index personne → adresses."""
+    h = s.handles.get(handle)
+    if h is None:
+        return s
+    person = h.person or handle
+    left = tuple(k for k in s.by_person.get(person, ()) if k != handle)
+    by_person = s.by_person.set(person, left) if left else s.by_person.delete(person)
+    return replace(s, handles=s.handles.delete(handle), by_person=by_person)
+
+
+@IDENTITY.process("identity.expire", lane="background", catch_up=CatchUp.SKIP, max_quantum_s=3600, priority=90,
+                  reads=[social_c.CLOSENESS])
+class Expire:
+    """Une fois par jour : les inconnues de passage silencieuses depuis ``stranger_ttl_days``, dont elle n'est pas
+    proche, sont oubliées (``identity.expired``, public) — chaque faculté retire ce qu'elle en gardait."""
+
+    def next_due(self, state: IdentityState, frame: Any, last_run: int | None) -> int | None:
+        # une fois par période pleine : pas encore passée dans celle-ci → maintenant ; sinon au début de la suivante
+        # (jamais « maintenant plus un jour », qui reculerait à chaque évaluation sans jamais venir)
+        period_start = frame.now // EXPIRY_PERIOD * EXPIRY_PERIOD
+        if last_run is None or last_run < period_start:
+            return frame.now
+        return period_start + EXPIRY_PERIOD
+
+    async def run(self, ctx: Any) -> None:
+        p = _params(ctx.frame.env.params_of("identity", ctx.frame.root))
+        ttl = p.stranger_ttl_days * DAY
+        drafts = []
+        for handle, h in ctx.state.handles.items():
+            last = h.last_seen or h.first_seen
+            if not last or ctx.now - last < ttl or not is_stranger(ctx.state, handle, h):
+                continue
+            if ctx.frame.get(social_c.CLOSENESS(handle)) != social_c.STRANGER:
+                continue
+            drafts.append(c.EXPIRED.draft(handle=handle, person=handle, last_seen=last,
+                                          dedupe_key=f"expire:{handle}:{last}"))
+        for i in range(0, len(drafts), 50):
+            await ctx.emit(*drafts[i:i + 50])
+
+
+@IDENTITY.reducer(c.EXPIRED)
+def _expired(s: IdentityState, e, cx) -> IdentityState:
+    return _remove(s, e.data.handle)
+
+
+@IDENTITY.reducer(SUBJECT_FORGOTTEN)
+def _person_forgotten(s: IdentityState, e, cx) -> IdentityState:
+    """L'oubli d'une personne : ses adresses ne parlent plus pour elle (déliées, elles restent des adresses — un
+    compte existe toujours), les noms reliés à elle et ce qu'on avait écarté pour elle s'en vont."""
+    subject = e.data.subject
+    for handle in handles_of(s, subject):
+        h = s.handles.get(handle)
+        if h is not None and h.person == subject:
+            s = _put(s, handle, _unbound(h))
+    names = s.names.without(lambda k: s.names[k] == subject)
+    dismissed = s.dismissed.without(lambda k: k == subject)
+    dismissed = FrozenDict((k, tuple(p for p in v if p != subject)) for k, v in dismissed.items()
+                           if any(p != subject for p in v))
+    return replace(s, names=names, dismissed=dismissed)
 
 
 # ── Revendications, preuves, liaisons ─────────────────────────────────────

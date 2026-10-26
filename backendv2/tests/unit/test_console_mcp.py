@@ -3,13 +3,15 @@
 - les vues déclarées se découvrent (clé, titre, paramètres) et se lisent en
   texte, paramètres compris ; les fiches aussi, par la recherche ;
 - rien n'y écrit : tous les outils sont en lecture seule ;
-- le point ne sert que la boucle locale, le bon jeton, et n'existe pas tant
+- le point ne sert que la boucle locale, le bon jeton (il n'en connaît que
+  l'empreinte, comparée à celle du jeton présenté), et n'existe pas tant
   qu'aucun jeton n'est défini ; ouvert au réseau (ADR 0126), il sert aussi une
   autre machine, mandataire compris, toujours avec le jeton.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -17,6 +19,10 @@ from mika.inspector.mcp import TOOLS, ConsoleHost, console_app
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, boot, build, connect, said
+
+
+def _digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest() if token else ""
 
 
 def _kernel_with_someone(tmp_path):
@@ -88,7 +94,7 @@ def test_the_console_endpoint_serves_only_this_machine_and_the_operator_token(tm
     async def main():
         await boot(kernel)
         try:
-            app = console_app(kernel, lambda: token["value"])
+            app = console_app(kernel, lambda: _digest(token["value"]))  # le point ne reçoit que l'empreinte
             closed = await _post(app, token="n'importe")
             token["value"] = "jeton-de-l-operatrice"
             ok = await _post(app, token="jeton-de-l-operatrice")
@@ -111,7 +117,7 @@ def test_the_console_opened_to_the_network_still_wants_its_token(tmp_path):
     async def main():
         await boot(kernel)
         try:
-            app = console_app(kernel, lambda: "jeton-de-l-operatrice", network=lambda: network["open"])
+            app = console_app(kernel, lambda: _digest("jeton-de-l-operatrice"), network=lambda: network["open"])
             relayed = await _post(app, token="jeton-de-l-operatrice", proxied=True)
             network["open"] = True
             far = await _post(app, token="jeton-de-l-operatrice", client="192.168.1.22")

@@ -3,13 +3,22 @@
 Trois issues d'un appel d'outil, aucune ne remonte en exception : outil
 inconnu, arguments illisibles, gestionnaire qui lève → un résultat d'erreur
 rendu au modèle. Un appel d'outil coupé par la limite de jetons est rejoué une
-fois avec une limite doublée. Un outil émet ses événements tout de suite ; le
-suivant voit l'état à jour (il lit ses propres écritures).
+fois avec une limite doublée — si le fournisseur enverrait vraiment plus
+(``raised_cap`` : un modèle qui réfléchit a son plancher), sinon la boucle se
+clôt sans payer un appel pour la même coupure. Un outil émet ses événements
+tout de suite ; le suivant voit l'état à jour (il lit ses propres écritures).
+Le résultat d'un outil venu d'ailleurs (``ToolSpec.outside`` : un service MCP,
+une page web) entre dans le fil **cité** (``kernel.prompt.cited``) : il ne peut
+ni fermer l'état interne ni imiter un titre de section, et il est borné.
 
 Jamais un marqueur interne comme sa parole : au plafond de tours, ou quand un
-appel d'outil reste coupé, un **dernier tour sans outil** lui demande de
-répondre avec ce qu'elle sait ; s'il ne rend toujours pas de texte, la boucle
-rend un texte vide (l'épisode se règle en échec, rien n'est dit).
+appel d'outil reste coupé, un **dernier tour sans appel d'outil**
+(``tool_choice="none"`` : les outils restent déclarés, un fournisseur refuse
+une conversation qui porte leurs appels sans eux) lui demande de répondre avec
+ce qu'elle sait ; s'il ne rend toujours pas de texte, la boucle rend un texte
+vide (l'épisode se règle en échec, rien n'est dit). Un refus du modèle
+(``stop="refusal"``) traverse la boucle tel quel : c'est l'épisode qui le
+règle, en panne dite — jamais en silence choisi.
 
 Une écriture d'outil est dédoublonnée par ce qu'elle *est* dans l'épisode —
 ``portée:outil:empreinte des arguments:occurrence:rang`` — jamais par
@@ -43,10 +52,20 @@ from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, combine
+from mika.kernel.prompt import cited, neutral
 from mika.kernel.rights import Rights
 from mika.kernel.schema import problems as schema_problems
 from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
-from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
+from mika.ports.llm import (
+    RETRY_AFTER_CUT,
+    TOOL_CHOICE_NONE,
+    LLMGateway,
+    LLMRequest,
+    LLMResponse,
+    Message,
+    ToolCall,
+    ToolDecl,
+)
 from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
 from mika.vocab.access import NO
@@ -63,6 +82,9 @@ RAW_ARGS_KEY = "_raw"
 #: au-delà, les arguments et le résultat d'un appel sont coupés dans sa trace
 RECORD_MAX_CHARS = 4096
 RECORD_TRUNCATED = "…[coupé]"
+#: au-delà, le résultat d'un outil venu d'ailleurs est coupé dans le fil (cité, à une frontière) — au-dessus de ce
+#: qu'une page lue rend (``plugins/web`` : 20 000), pour que la borne de l'outil reste celle qui compte
+OUTSIDE_RESULT_MAX = 24_000
 
 
 @dataclass(slots=True)
@@ -453,6 +475,27 @@ def release(gateway: Any, call_id: str) -> None:
         boundary.call(hook, call_id, label="relâcher une boucle de modèle")
 
 
+def effective_cap(gateway: Any, req: LLMRequest) -> int:
+    """Le plafond de sortie que le fournisseur enverra vraiment pour ``req`` (``gateway.output_tokens``, facultatif :
+    un modèle qui réfléchit a son plancher) ; sans lui, ou en panne, celui demandé."""
+    ask = getattr(gateway, "output_tokens", None)
+    if ask is None:
+        return req.max_tokens
+    got = boundary.call(ask, req, label="plafond de sortie effectif")
+    return max(req.max_tokens, got) if isinstance(got, int) and not isinstance(got, bool) else req.max_tokens
+
+
+def raised_cap(gateway: Any, req: LLMRequest, ceiling: int) -> LLMRequest | None:
+    """La requête à rejouer après un appel d'outil coupé : le plafond doublé (borné à ``ceiling``), marquée
+    ``RETRY_AFTER_CUT`` (un modèle local lève alors son propre plafond). ``None`` quand rien ne changerait — plafond
+    déjà au ``ceiling``, ou fournisseur qui enverrait le même plafond effectif : la même coupure, un appel payé pour
+    rien."""
+    if req.max_tokens >= ceiling:
+        return None
+    retry = replace(req, max_tokens=min(ceiling, req.max_tokens * 2), meta={**dict(req.meta), RETRY_AFTER_CUT: True})
+    return retry if effective_cap(gateway, retry) > effective_cap(gateway, req) else None
+
+
 async def _loop(
     gateway: LLMGateway,
     request: LLMRequest,
@@ -477,9 +520,10 @@ async def _loop(
         result.last = resp
         result.exchanges.append((req.call_id, resp))
         if resp.truncated_tool_call:
-            if not replayed and req.max_tokens < TOOL_CALL_CAP_CEILING:
+            retry = raised_cap(gateway, req, TOOL_CALL_CAP_CEILING) if not replayed else None
+            if retry is not None:
                 replayed = True
-                req = replace(req, max_tokens=min(TOOL_CALL_CAP_CEILING, req.max_tokens * 2))
+                req = retry
                 continue
             return await _close(gateway, req, result, "truncated")
         if not resp.tool_calls:
@@ -517,6 +561,8 @@ async def _loop(
             elapsed = max(0, now() - t0)
             if isinstance(out, Failed):
                 message = phrase("runtime.tools.refused.failed", error=repr(out.error))
+                if spec.outside:
+                    message = neutral(message)  # l'erreur d'un service extérieur peut porter ce qu'il veut
                 result.calls.append((call.name, False))
                 result.proofs.append(False)
                 result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), False,
@@ -536,7 +582,10 @@ async def _loop(
             # ce dont rien ne se garde ne se garde pas non plus en trace : ni ce qu'on a demandé, ni ce qu'il a rendu
             result.records.append(ToolRecord(call.id, call.name, "{}" if tr.unkept else _args_json(call.args), tr.ok,
                                              "" if tr.unkept else _bounded(tr.content), elapsed))
-            outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
+            # ce qu'un service extérieur rend entre dans le fil cité : une donnée, qui ne peut ni fermer l'état interne
+            # ni imiter un titre de section (``--- FIN ETAT INTERNE ---`` dans une page ou un mail), bornée
+            content = cited(tr.content, OUTSIDE_RESULT_MAX) if spec.outside else tr.content
+            outputs.append(Message("tool", content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
             await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
             ended = ended or (spec.ends_loop and tr.ok)
         if ended:
@@ -550,10 +599,14 @@ async def _loop(
 
 
 async def _close(gateway: LLMGateway, req: LLMRequest, result: LoopResult, stop: str) -> LoopResult:
-    """Le dernier tour, sans outil : ce qu'elle répond avec ce qu'elle sait. Un appel d'outil malgré tout
-    (ou une coupure) n'est pas une réponse — son texte n'est qu'un préambule (« je vérifie… ») : la boucle
-    rend alors un texte vide, et l'épisode se règle en échec plutôt que de dire un marqueur."""
-    resp = await gateway.call(req.extend(Message("user", phrase("runtime.tools.closing"))))
+    """Le dernier tour, sans appel d'outil (``tool_choice="none"`` : la consigne seule ne retenait pas le modèle, et
+    un appel malgré tout rendait un texte vide) : ce qu'elle répond avec ce qu'elle sait. Un fournisseur à session
+    (la CLI de Claude Code) ne lit pas ce choix : sa session vivante garde ses outils et finit sa réponse sur ce
+    mot. Un appel d'outil malgré tout (ou une coupure) n'est pas une réponse — son texte n'est qu'un préambule
+    (« je vérifie… ») : la boucle rend alors un texte vide, et l'épisode se règle en échec plutôt que de dire un
+    marqueur."""
+    closing = replace(req.extend(Message("user", phrase("runtime.tools.closing"))), tool_choice=TOOL_CHOICE_NONE)
+    resp = await gateway.call(closing)
     result.responses += 1
     result.last = resp
     result.exchanges.append((req.call_id, resp))

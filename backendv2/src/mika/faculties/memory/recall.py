@@ -1436,7 +1436,7 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         lines.append(phrase("memory.life.hard"))
     for m in recall.moments:
         lines.append(_moment_line(m, frame, recall.close, recall.hard))
-    return SectionBody("\n".join(lines), level=max(m.verdict.level for m in recall.moments),
+    return SectionBody("\n".join(lines), level=max((m.verdict.level for m in recall.moments), default=0),
                        provenance=tuple(f"memory:{m.event.id}" for m in recall.moments),
                        tied=any(m.verdict.tied for m in recall.moments))
 
@@ -1497,7 +1497,7 @@ def _ahead(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
         likely = likely_words(m.event.likelihood, careful=careful)
         lines.append(phrase("memory.ahead.line", when=moment_when(m.event, frame), label=m.label) +
                      (phrase("memory.ahead.likely", likely=likely) if likely else ""))
-    return SectionBody("\n".join(lines), level=max(m.verdict.level for m in recall.ahead),
+    return SectionBody("\n".join(lines), level=max((m.verdict.level for m in recall.ahead), default=0),
                        provenance=tuple(f"memory:{m.event.id}" for m in recall.ahead),
                        tied=any(m.verdict.tied for m in recall.ahead))
 

@@ -447,7 +447,7 @@ def test_her_follow_ups_ask_how_he_is_then_say_what_the_silence_does_then_stop(t
     assert len(again) == 1 and "ce que ce silence te fait" in again[0] and "C'est ta dernière relance" in again[0]
     gaps = [b.at - a.at for a, b in zip(sent, sent[1:], strict=False)]
     assert all(gap >= 0.6 * 3 * DAY for gap in gaps), gaps  # le rythme (trois jours) tiré à ± 40 %
-    assert 0.6 <= draws["ext_1"] <= 1.4
+    assert 0.6 <= draws["ext_1"][1] <= 1.4  # (quand, le tirage)
 
 
 # ── De quoi parler ────────────────────────────────────────────────────────

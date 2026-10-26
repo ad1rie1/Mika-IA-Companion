@@ -65,6 +65,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.kernel.arbitration import Candidate, Modulation, RowView
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, within_daily_window
 from mika.kernel.events import Draft
 from mika.kernel.faculty import Faculty, Zone
@@ -77,7 +78,7 @@ from mika.vocab import causes, privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of, felt_pad
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.farewell import closing
-from mika.vocab.people import is_identifiable
+from mika.vocab.people import is_identifiable, key_concerns
 from mika.vocab.phrasebook import phrase
 from mika.vocab.reading import OTHER, Reading
 from mika.vocab.temperament import Temperament, around, lerp, shift
@@ -1183,3 +1184,26 @@ def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | Non
         return None
     lines.append(phrase("others.state.hint"))
     return SectionBody("\n".join(lines))
+
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_person(s: OthersState, person: str) -> OthersState:
+    def drop(k: object) -> bool:
+        return key_concerns(k, person)
+
+    return replace(s, people=s.people.without(drop), hours=s.hours.without(drop), concerns=s.concerns.without(drop),
+                   contagion=s.contagion.without(drop), awaiting=s.awaiting.without(drop),
+                   delays=s.delays.without(drop), answers=s.answers.without(drop))
+
+
+@OTHERS.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: OthersState, e, cx) -> OthersState:
+    """Une inconnue de passage oubliée : ce qu'elle sentait d'elle, ses heures, ses délais s'en vont."""
+    return _without_person(s, e.data.person)
+
+
+@OTHERS.reducer(SUBJECT_FORGOTTEN)
+def _person_forgotten(s: OthersState, e, cx) -> OthersState:
+    return _without_person(s, e.data.subject)

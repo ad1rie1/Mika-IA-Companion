@@ -67,7 +67,7 @@ export class LoginOverlay {
     if (state.authenticated) return state;
     // Auth disabled server-side: let the app run anonymously as before.
     if (state.auth_required === false) return state;
-    return this.prompt(Boolean(state.needs_bootstrap));
+    return this.prompt(Boolean(state.needs_bootstrap), Boolean(state.bootstrap_code_required));
   }
 
   /** Écran bloquant + bouton Réessayer ; résout quand on retente. */
@@ -95,7 +95,7 @@ export class LoginOverlay {
     });
   }
 
-  private render(isBootstrap: boolean): void {
+  private render(isBootstrap: boolean, codeRequired = false): void {
     const title = isBootstrap ? "Bienvenue" : "Connexion";
     const hint = isBootstrap
       ? `<p style="color:#94a3b8; font-size:13px; line-height:1.45;">
@@ -105,6 +105,14 @@ export class LoginOverlay {
       : "";
     const action = isBootstrap ? "Créer mon compte" : "Se connecter";
     const autocomplete = isBootstrap ? "new-password" : "current-password";
+    // Depuis une autre machine que celle du serveur, le premier compte demande
+    // le code écrit dans le journal du serveur au démarrage (audit 2026-10-26).
+    const codeField =
+      isBootstrap && codeRequired
+        ? `<input id="login-code" type="text" placeholder="Code de premier démarrage (journal du serveur)"
+          autocomplete="one-time-code"
+          style="padding:10px; border-radius:8px; border:1px solid #2d3a5e; background:#0f1830; color:#e2e8f0;" />`
+        : "";
 
     this.root.innerHTML = `
       <form id="login-form" style="
@@ -113,6 +121,7 @@ export class LoginOverlay {
           box-shadow:0 10px 40px rgba(0,0,0,.4);">
         <h2 style="color:#e2e8f0; font-size:18px;">${title}</h2>
         ${hint}
+        ${codeField}
         <input id="login-user" type="text" placeholder="Identifiant" autocomplete="username"
           style="padding:10px; border-radius:8px; border:1px solid #2d3a5e; background:#0f1830; color:#e2e8f0;" />
         <input id="login-pass" type="password" placeholder="Mot de passe" autocomplete="${autocomplete}"
@@ -124,15 +133,16 @@ export class LoginOverlay {
       </form>`;
   }
 
-  private prompt(isBootstrap: boolean): Promise<AuthState> {
-    this.render(isBootstrap);
+  private prompt(isBootstrap: boolean, codeRequired = false): Promise<AuthState> {
+    this.render(isBootstrap, codeRequired);
     document.body.appendChild(this.root);
 
     const form = this.root.querySelector<HTMLFormElement>("#login-form")!;
     const errorEl = this.root.querySelector<HTMLDivElement>("#login-error")!;
     const userEl = this.root.querySelector<HTMLInputElement>("#login-user")!;
     const passEl = this.root.querySelector<HTMLInputElement>("#login-pass")!;
-    userEl.focus();
+    const codeEl = this.root.querySelector<HTMLInputElement>("#login-code");
+    (codeEl ?? userEl).focus();
 
     return new Promise<AuthState>((resolve) => {
       form.addEventListener("submit", async (e) => {
@@ -144,9 +154,14 @@ export class LoginOverlay {
           errorEl.textContent = "Identifiant et mot de passe requis.";
           return;
         }
+        const code = codeEl ? codeEl.value.trim() : "";
+        if (isBootstrap && codeRequired && !code) {
+          errorEl.textContent = "Le code de premier démarrage est dans le journal du serveur.";
+          return;
+        }
         try {
           const state = isBootstrap
-            ? await bootstrap(username, password)
+            ? await bootstrap(username, password, code)
             : await login(username, password);
           this.root.remove();
           resolve(state);

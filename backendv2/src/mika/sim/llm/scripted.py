@@ -10,11 +10,12 @@ import inspect
 import math
 import random
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from mika.kernel.clock import US, Clock
 from mika.kernel.codec import h64
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
+from mika.ports.llm_budget import LLMLimits
 
 Responder = Callable[[LLMRequest], "LLMResponse | Awaitable[LLMResponse]"]
 
@@ -64,13 +65,15 @@ class ScriptedLLM:
         if out is None:
             raise UnexpectedCall(f"appel non prévu : rôle {req.role}, {req.call_id}")
         if not out.model:
-            out = LLMResponse(out.text, out.tool_calls, out.stop, _usage(req, out), self.model, out.truncated_tool_call)
+            out = replace(out, usage=_usage(req, out), model=self.model)
         return out
 
 
 def _usage(req: LLMRequest, resp: LLMResponse) -> Usage:
-    chars = len(req.system_stable) + len(req.system_volatile) + sum(len(m.content) for m in req.messages)
-    return Usage(input_tokens=chars // 4, output_tokens=len(resp.text) // 4)
+    """L'usage d'un faux appel : l'entrée telle que le budget de la passerelle l'estime (outils et enveloppe compris),
+    pour qu'une simulation ne déclenche pas l'avertissement d'une estimation fausse — il vise les vrais fournisseurs."""
+    limits = LLMLimits()
+    return Usage(input_tokens=round(limits.size(req) / limits.chars_per_token), output_tokens=len(resp.text) // 4)
 
 
 def text(t: str) -> LLMResponse:

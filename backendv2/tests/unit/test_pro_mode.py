@@ -18,7 +18,7 @@ from mika.faculties.self.character import temperament_in_words
 from mika.faculties.self.persona import render
 from mika.kernel.clock import HOUR
 from mika.ports.delivery import DONE, NOTE, TOOL_END, TOOL_START
-from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
+from mika.ports.llm import DEADLINE_AT, LLMRequest, LLMResponse, ToolCall
 from mika.runtime.tools import LoopEvent, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.phrasebook import phrase
@@ -104,6 +104,17 @@ def test_a_pro_request_is_worked_with_her_tools_shown_live_and_answered_in_markd
     assert done.outcome == "done"
     assert {a.target for a in shown} == {"user_1"} and {a.reply_to for a in shown} == {seen["seq"]}
     assert len({a.episode for a in shown}) == 1
+
+
+def test_her_pro_calls_carry_the_fifteen_minutes_of_the_mode(tmp_path):
+    """Chaque appel du mode pro portait le délai de sa voie (120 s) : un tour qui réfléchit puis écrit du code
+    échouait alors que l'épisode avait quinze minutes (audit du 2026-10-26, L1). Le délai de l'épisode suit la
+    requête, borné par ce qui lui reste ; l'ordinaire aussi, avec les siens."""
+    _seen, calls, _shown, _said = _life(tmp_path / "pro", tools=False)
+    pro = [c for c in calls if c.role == "pro"]
+    assert pro and all(c.deadline_s == 900.0 and DEADLINE_AT in c.meta for c in pro)
+    _seen, calls, _shown, _said = _life(tmp_path / "chat", mode="", tools=False)
+    assert {c.deadline_s for c in calls if c.role in ("reply", "polish")} == {180.0}
 
 
 def test_a_pro_answer_without_tools_is_neither_reviewed_nor_rewritten(tmp_path):

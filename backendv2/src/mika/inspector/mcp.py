@@ -10,8 +10,9 @@ ferait-elle ? », « À traiter » — plus « pourquoi a-t-elle dit ça ? »
 comptes), et aucune action d'opérateur ici (elles passent par la console, avec
 leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale,
 ou aussi au réseau si une opératrice l'y ouvre (ADR 0126), toujours derrière un
-jeton d'opérateur (``mika mcp token``, ou Outils › Prêter à un agent) ; sans
-jeton défini, le point n'existe pas (404). Ce qu'elle sert
+jeton d'opérateur (``mika mcp token``, ou Outils › Prêter à un agent — montré
+une fois, seule son empreinte SHA-256 est gardée et comparée) ; sans jeton
+défini, le point n'existe pas (404). Ce qu'elle sert
 se choisit dans la console (``served`` : ses pages parmi ``SERVABLE``, ses vues,
 ses fiches, « pourquoi » — ADR 0122) ; ce qui n'est pas servi n'est ni listé ni
 lu.
@@ -23,6 +24,7 @@ souvenir).
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
@@ -232,22 +234,24 @@ class ConsoleHost:
         return Outcome("\n".join(lines))
 
 
-def console_app(kernel: Kernel, token: Callable[[], str], pages: ConsolePages | None = None,
+def console_app(kernel: Kernel, digest: Callable[[], str], pages: ConsolePages | None = None,
                 served: Callable[[], Sequence[str] | None] | None = None,
                 network: Callable[[], bool] | None = None) -> Callable[..., Any]:
-    """Le point MCP de la console : boucle locale, jeton d'opérateur ; sans jeton défini, 404. ``pages`` : celles
-    de la console (``inspector.app.assemble``), pour servir aussi ses pages et « pourquoi » ; ``served`` : ce qu'une
-    opératrice lui fait servir ; ``network`` : vrai quand elle l'a ouvert au réseau (ADR 0126), le jeton restant
-    exigé."""
+    """Le point MCP de la console : boucle locale, jeton d'opérateur — ``digest`` rend l'empreinte SHA-256 du jeton
+    attendu (jamais le jeton), celle du jeton présenté lui est comparée en temps constant ; sans jeton défini, 404.
+    ``pages`` : celles de la console (``inspector.app.assemble``), pour servir aussi ses pages et « pourquoi » ;
+    ``served`` : ce qu'une opératrice lui fait servir ; ``network`` : vrai quand elle l'a ouvert au réseau
+    (ADR 0126), le jeton restant exigé."""
     host = ConsoleHost(kernel, pages, served)
 
     def resolve(scope: Mapping[str, Any]) -> Any:
         if not loopback(scope) and not (network is not None and network()):
             return 403
-        expected = token()
+        expected = digest()
         if not expected:
             return 404
-        if not hmac.compare_digest(bearer(scope), expected):
+        given = hashlib.sha256(bearer(scope).encode()).hexdigest()
+        if not hmac.compare_digest(given, expected):
             return 401
         return host
 

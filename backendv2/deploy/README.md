@@ -12,7 +12,9 @@ sudo useradd --system --home /var/lib/mika --shell /usr/sbin/nologin mika
 sudo install -d -o mika -g mika -m 0700 /var/lib/mika /var/backups/mika
 sudo git clone <dépôt> /opt/mika
 cd /opt/mika/backendv2
-sudo python3 -m venv .venv
+sudo python3 -m venv .venv                       # Python ≥ 3.12 ; développé et testé en 3.14 — garder la même
+                                                 # version que le poste de développement (torch et les pilotes suivent
+                                                 # les nouvelles versions de Python avec retard)
 sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # documents : lire les PDF ; + mariadb, plus bas
 sudo dnf install bubblewrap passt iproute git   # ou apt install bubblewrap passt iproute2 git
 ```
@@ -202,7 +204,11 @@ Trois options de `serve` :
   sans elle, le navigateur se voit refuser CORS, CSRF et la WebSocket.
 - `--behind-proxy` : l'adresse du client est lue dans `X-Forwarded-For` (envoyé
   par un mandataire **local** seulement — 127.0.0.1, ::1) ; l'étranglement des
-  connexions vise alors la vraie adresse. Implique `--cookie-secure`.
+  connexions vise alors la vraie adresse. Implique `--cookie-secure`. Sans elle,
+  derrière un mandataire, l'étranglement verrait tous les clients en 127.0.0.1
+  et les cookies partiraient sans `Secure` : la première requête qui porte un
+  en-tête de mandataire (`X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `Via`) est
+  signalée au journal (« mandataire non déclaré : lance avec --behind-proxy »).
 - `--cookie-secure` : cookies de session et CSRF marqués `Secure`.
 
 Pose-les par une surcharge, qu'une nouvelle copie de `mika.service` n'écrasera
@@ -281,7 +287,10 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 ## Premier démarrage
 
 1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou
-   `mika account <nom> --operator`, serveur arrêté, le mot de passe demandé sans écho).
+   `mika account <nom> --operator`, serveur arrêté, le mot de passe demandé sans écho). Depuis une autre machine
+   que le serveur (derrière Caddy, avec `--behind-proxy`), la page demande le **code de premier démarrage** :
+   `journalctl -u mika | grep "code de premier démarrage"` — tiré à chaque démarrage tant qu'aucun compte
+   n'existe, pour que le premier arrivé sur le réseau ne devienne pas opérateur.
 2. **Réglages › Modèles de texte** (`/inspecteur/reglages/fournisseurs`) : ajoute un fournisseur (sa clé est
    chiffrée et jamais réaffichée ; « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre »
    d'office, et les autres rôles y retombent — sauf la seconde passe (`polish`, l'autrice qui récrit ses messages),
@@ -384,7 +393,20 @@ recharge `mind` dans une base de travail et l'y rejoue. Les dossiers d'appel de
 Claude Code (prompts privés, jeton de session du relais) ne sont pas dans le
 dossier de données : ils vivent sous `XDG_RUNTIME_DIR` (`/run/mika` avec l'unité
 fournie), en `0700`, effacés en fin d'appel et purgés au démarrage — jamais
-archivés. Copie les archives ailleurs que sur la machine.
+archivés.
+
+**Hors de la machine, et chiffrées.** Un disque qui meurt emporte Mika et ses
+quatorze archives ; une archive qui fuit contient `secret.key` à côté des secrets
+qu'elle déchiffre (clés d'API, mot de passe IMAP, jeton git). Donc :
+
+- copier chaque archive ailleurs (un second disque, un stockage distant) en la
+  chiffrant — par exemple `restic` (chiffre, déduplique, vérifie) ou `age` :
+  `age -r <clé publique> -o mika-….tar.gz.age mika-….tar.gz` ; un minuteur
+  systemd après `mika-backup.service` suffit ;
+- en service, préférer `MIKA_SECRET_KEY` dans `/etc/mika/mika.env` (droits 0600)
+  à un `secret.key` dans le dossier : la clé n'est alors dans aucune archive, et
+  on la garde à part (un gestionnaire de mots de passe) ; sans elle, les secrets
+  d'une archive restaurée sont perdus, le reste de sa vie non.
 
 ## Restaurer
 

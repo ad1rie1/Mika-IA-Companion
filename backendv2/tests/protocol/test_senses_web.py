@@ -8,6 +8,7 @@ import base64
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from mika.adapters.web.app import LoginThrottle
 from mika.contracts.sensors import SENSED
 from mika.runtime.effects import with_content
 from tests.protocol.test_web import WS, bootstrap, csrf, recv_until, world  # noqa: F401 — fixture
@@ -90,3 +91,21 @@ def test_a_device_signals_through_the_perceptions_route(world):  # noqa: F811
     assert codes[-1] == 429  # un appareil ne l'inonde pas
     bootstrap(client)  # un opérateur connecté, avec CSRF
     assert client.post("/api/perceptions", json={**body, "device": "script"}, headers=csrf(client)).status_code == 202
+    # le jeton n'est gardé qu'en empreinte : ni dans les réglages, ni ailleurs dans ``mind.db``
+    rows = client.portal.call(lambda: live.kernel.mind.store.query_mind("SELECT value FROM settings"))
+    assert all(token not in r[0] for r in rows) and client.portal.call(live.settings.sensors_digest)
+
+
+def test_the_devices_remembered_for_their_rate_are_bounded(world, monkeypatch):  # noqa: F811
+    """Un nom d'appareil se choisit librement : les fenêtres gardées sont bornées comme les adresses de la connexion
+    (``LoginThrottle.MAX_KEYS``), les plus anciennes partent — un balayage de noms ne fait pas grossir la mémoire."""
+    client, live, _ = world
+    monkeypatch.setattr(LoginThrottle, "MAX_KEYS", 3)
+    auth = {"Authorization": f"Bearer {client.portal.call(live.settings.new_sensors_token)}"}
+
+    def signal(device: str) -> int:
+        return client.post("/api/perceptions", json={"device": device, "text": "tic"}, headers=auth).status_code
+
+    assert [signal("a") for _ in range(31)][-1] == 429  # « a » est plein
+    assert [signal(d) for d in ("b", "c", "d")] == [202, 202, 202]  # trois appareils de plus : « a » est oublié
+    assert signal("a") == 202

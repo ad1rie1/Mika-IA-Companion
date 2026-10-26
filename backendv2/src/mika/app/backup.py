@@ -272,10 +272,18 @@ def _safe_rel(rel: str) -> bool:
         and not parts[0].startswith(".") and "\x00" not in rel
 
 
+#: les dossiers des cages : un lien n'y est suivi que par bubblewrap (qui ne voit que ``/usr`` en lecture), jamais
+#: par le serveur (``workshop.path`` résout et vérifie ; un serveur MCP vit dans sa cage) — et un dépôt du modèle ou un
+#: ``.venv`` en porte légitimement vers le système (``python → /usr/bin/python3``) : les refuser rendrait l'archive
+#: entière irrestaurable pour un lien
+CAGED_DIRS = ("ateliers", "mcp")
+
+
 def _relink(root: Path, links: object) -> None:
     """Recrée dans ``root`` les liens symboliques du manifeste. Un lien n'est créé que dans
-    le dossier (jamais à travers un lien qui en sortirait) ; une entrée invalide refuse
-    l'archive."""
+    le dossier (jamais à travers un lien qui en sortirait) et, hors des cages (``CAGED_DIRS``),
+    sa cible reste dans le dossier — ni absolue, ni remontante : ``partages/<id>.bin → /etc/…``,
+    le serveur l'ouvrirait lui-même ; une entrée invalide refuse l'archive."""
     if not isinstance(links, dict):
         raise BackupError("liens illisibles dans le manifeste")
     base = root.resolve()
@@ -284,12 +292,25 @@ def _relink(root: Path, links: object) -> None:
                 or "\x00" in target:
             raise BackupError(f"lien invalide dans l'archive : {rel!r}")
         path = root / rel
-        if not path.parent.resolve().is_relative_to(base):  # avant de créer quoi que ce soit
+        parent = path.parent.resolve()
+        if not parent.is_relative_to(base):  # avant de créer quoi que ce soit
             raise BackupError(f"lien hors du dossier dans l'archive : {rel}")
+        if PurePosixPath(rel).parts[0] not in CAGED_DIRS and not _stays_inside(parent, target, base):
+            raise BackupError(f"lien vers l'extérieur du dossier dans l'archive : {rel}")
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_symlink() or path.exists():
             raise BackupError(f"lien en double dans l'archive : {rel}")
         path.symlink_to(target)
+
+
+def _stays_inside(parent: Path, target: str, base: Path) -> bool:
+    """La cible d'un lien, vue de son dossier, reste-t-elle dans ``base`` ? (Une cible absolue, jamais.)"""
+    if PurePosixPath(target).is_absolute():
+        return False
+    try:
+        return (parent / target).resolve().is_relative_to(base)
+    except (OSError, RuntimeError):  # une boucle de liens, un chemin illisible
+        return False
 
 
 def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None) -> Summary:

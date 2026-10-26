@@ -79,7 +79,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
-from mika.kernel.builtin import BOOT
+from mika.kernel.builtin import BOOT, SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
@@ -89,7 +89,7 @@ from mika.vocab import causes, privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.lineage import Lineage
-from mika.vocab.people import is_identifiable
+from mika.vocab.people import is_identifiable, key_concerns
 from mika.vocab.phrasebook import phrase
 from mika.vocab.temperament import Temperament, around, shift
 
@@ -1481,3 +1481,26 @@ def _missed_felt(e, cx) -> list[Appraisal]:
         out.append(Appraisal(emotion, intensity, toward=d.person, reason=reason, relational=relational))
     return out
 
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_person(s: AttentionState, person: str) -> AttentionState:
+    def drop(k: object) -> bool:
+        return key_concerns(k, person)
+
+    return replace(s, exchanges=s.exchanges.without(drop), eased=s.eased.without(drop), glad=s.glad.without(drop),
+                   missing=s.missing.without(drop), late=s.late.without(drop),
+                   expectations=s.expectations.without(drop),
+                   screens=s.screens.without(lambda k: s.screens[k] == person))
+
+
+@ATTENTION.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: AttentionState, e, cx) -> AttentionState:
+    """Une inconnue de passage oubliée : plus rien d'attendu d'elle, plus de fil avec elle."""
+    return _without_person(s, e.data.person)
+
+
+@ATTENTION.reducer(SUBJECT_FORGOTTEN)
+def _person_forgotten(s: AttentionState, e, cx) -> AttentionState:
+    return _without_person(s, e.data.subject)

@@ -17,6 +17,8 @@ Contrat :
 - ``finish_reason == "length"`` avec un appel entamé → ``truncated_tool_call`` ;
   des arguments illisibles → ``{"_raw": texte}``, que la validation du runtime
   renvoie au modèle comme une erreur ;
+- ``tool_choice="none"`` (le tour de clôture) → ``tool_choice: "none"``, les
+  outils restant déclarés ;
 - ``input_tokens`` exclut les jetons lus (``cache_read``) ou écrits
   (``cache_write``) en cache, comptés à part.
 
@@ -32,7 +34,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall, ToolDecl, Usage
+from mika.ports.llm import TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl, Usage
 from mika.vocab.phrasebook import phrase
 
 try:
@@ -231,6 +233,10 @@ class OpenAICompatBackend:
         body: dict[str, Any] = {"model": self.model, "messages": chat_messages(req)}
         if req.tools:
             body["tools"] = function_tools(req.tools)
+            if req.tool_choice == TOOL_CHOICE_NONE:
+                # le tour de clôture : aucun appel d'outil, les outils restant déclarés (les tours ``tool`` du fil les
+                # supposent)
+                body["tool_choice"] = "none"
         return body
 
     async def complete(self, req: LLMRequest) -> LLMResponse:
@@ -281,7 +287,8 @@ class OpenAICompatBackend:
         refusal = getattr(msg, "refusal", None)
         if refusal or finish == "content_filter":
             log.warning("%s refuse de répondre (finish=%s) : %s", model, finish, refusal)
-            return LLMResponse(text, stop="refusal", usage=usage, model=model)
+            return LLMResponse(text, stop="refusal", usage=usage, model=model,
+                               stop_detail="content_filter" if finish == "content_filter" else "refusal")
         calls = tuple(
             ToolCall(tc.id or new_call_id(), tc.function.name, decode_args(tc.function.arguments))
             for tc in raw_calls

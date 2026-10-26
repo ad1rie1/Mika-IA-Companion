@@ -66,7 +66,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import world as w
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
-from mika.kernel.builtin import BOOT
+from mika.kernel.builtin import BOOT, SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
@@ -79,7 +79,7 @@ from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.lineage import admits
-from mika.vocab.people import is_identifiable
+from mika.vocab.people import is_identifiable, key_concerns
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.temperament import Temperament, around, geometric, lerp
@@ -1099,3 +1099,19 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
 # ── Inspection ────────────────────────────────────────────────────────────
 
 from mika.faculties.needs import inspect as _inspect  # noqa: E402,F401 — contributions : sa vue
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_person(s: NeedsState, person: str) -> NeedsState:
+    return replace(s, told=s.told.without(lambda k: key_concerns(k, person)))
+
+
+@NEEDS.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: NeedsState, e, cx) -> NeedsState:
+    return _without_person(s, e.data.person)
+
+
+@NEEDS.reducer(SUBJECT_FORGOTTEN)
+def _person_forgotten(s: NeedsState, e, cx) -> NeedsState:
+    return _without_person(s, e.data.subject)

@@ -99,6 +99,11 @@ class EventStore(Protocol):
 
     def find_dedupe(self, type_name: str, key: str) -> int | None: ...
 
+    def find_dedupes(self, keys: Collection[tuple[str, str]]) -> dict[tuple[str, str], int]:
+        """Les ``seq`` déjà écrits pour ces couples (type, clé) : une requête pour tout un lot (un ajout de N
+        brouillons à clé ne fait pas N allers-retours sous le verrou d'écriture)."""
+        ...
+
     def read(
         self, after: int = 0, types: Collection[str] | None = None, upto: int | None = None
     ) -> Iterator[StoredEvent]: ...

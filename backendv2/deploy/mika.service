@@ -37,6 +37,14 @@ TimeoutStopSec=60
 # (« bwrap: setting up uid map: Operation not permitted », vérifié sur Fedora 44).
 # Ce que la cage exécute reste sans privilèges nouveaux : bubblewrap pose
 # no_new_privs lui-même.
+# Bornes de la machine (audit du 2026-10-26). Les cages de la Forge, des ateliers et des serveurs MCP vivent dans ce
+# même cgroup : la limite vaut pour elle et pour elles ensemble. MemoryHigh ralentit avant de tuer ; MemoryMax tue ;
+# OOMPolicy=continue : la mort d'une cage par manque de mémoire ne tue pas Mika. À ajuster à la mémoire de la machine
+# (ici pour 16 Go : le modèle de plongements en prend 1 à 2).
+MemoryHigh=8G
+MemoryMax=10G
+OOMPolicy=continue
+TasksMax=4096
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/lib/mika

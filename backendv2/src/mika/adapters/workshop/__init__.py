@@ -247,6 +247,7 @@ class BwrapWorkshop:
         return self.folder(goal).is_dir()
 
     def _open(self, goal: int) -> Path:
+        cage.private_root(self.root)  # ``ateliers/`` : des dépôts, des données personnelles, à elle seule
         d = self.folder(goal)
         (d / HOME_DIRNAME).mkdir(parents=True, exist_ok=True)
         return d

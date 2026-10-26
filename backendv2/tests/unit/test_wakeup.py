@@ -277,6 +277,30 @@ def test_the_same_idempotency_key_makes_one_call(tmp_path):
     assert first == again and other != first and n == 2
 
 
+def test_a_replayed_call_is_recognised_long_after_the_state_forgot_it(tmp_path, monkeypatch):
+    """Un rejeu (une livraison signée renvoyée : même corps, donc même clé d'idempotence ``corps:<empreinte>``) se
+    reconnaît par la clé d'idempotence du journal (``dedupe_key``, ``store.find_dedupe``), jamais par l'état du
+    plugin : un appel sorti des ``CALLS_KEPT`` que l'état garde est encore reconnu, des centaines d'appels plus
+    tard."""
+    from mika.plugins import wakeup as wakeup_plugin
+
+    monkeypatch.setattr(wakeup_plugin, "CALLS_KEPT", 2)
+
+    async def scenario(kernel, llm):
+        first = await wake(kernel, idempotency="corps:abc")
+        await settle(kernel, lambda: call(kernel, first).status == DONE)
+        for i in range(3):
+            seq = await wake(kernel, idempotency=f"corps:{i}")
+            await settle(kernel, lambda: call(kernel, seq).status == DONE)
+        kept = set(kernel.mind.frame().state(c.OWNER).calls)
+        again = await wake(kernel, idempotency="corps:abc")
+        return first, kept, again, len(of(kernel, c.CALLED))
+
+    first, kept, again, n = live(tmp_path, scenario)
+    assert first not in kept and len(kept) == 2  # l'état ne le garde plus
+    assert again == first and n == 4  # le journal, si : le même appel, rien de journalisé
+
+
 # ── Sur un projet ─────────────────────────────────────────────────────────
 
 

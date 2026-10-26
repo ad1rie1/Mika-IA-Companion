@@ -143,6 +143,17 @@ class Registered(Payload):
     messaging: str | None = None
 
 
+class Expired(Payload):
+    """Une inconnue de passage oubliée : une adresse jamais reliée ni authentifiée, dont elle n'est pas proche,
+    silencieuse depuis ``stranger_ttl_days``. Public : chaque faculté retire ce qu'elle gardait d'elle (sa posture,
+    ses heures, ses attentes…), comme à l'oubli d'une personne — sinon six tranches grossissaient avec chaque
+    correspondant vu une fois (audit du 2026-10-26)."""
+
+    handle: str
+    person: str
+    last_seen: int
+
+
 CLAIMED = event_type("identity.claimed", OWNER, Claimed, public=True, subjects=("handle",))
 EVIDENCE = event_type("identity.evidence", OWNER, Evidence, version=2, public=True, upcasters={1: _evidence_v1},
                       content=("name", "note"), subjects=("handle", "about"))
@@ -150,7 +161,8 @@ LINKED = event_type("identity.linked", OWNER, Linked, public=True, subjects=("ha
 REGISTERED = event_type("identity.registered", OWNER, Registered, public=True, subjects=("handle",))
 NAME_BOUND = event_type("identity.name_bound", OWNER, NameBound, public=True, subjects=("name",))
 NAME_DISMISSED = event_type("identity.name_dismissed", OWNER, NameDismissed, subjects=("name", "person"))
-ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED, NAME_BOUND, NAME_DISMISSED)
+EXPIRED = event_type("identity.expired", OWNER, Expired, public=True, subjects=("handle", "person"))
+ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED, NAME_BOUND, NAME_DISMISSED, EXPIRED)
 
 
 @dataclass(frozen=True, slots=True)

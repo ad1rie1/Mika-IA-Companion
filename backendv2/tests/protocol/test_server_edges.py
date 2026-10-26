@@ -1,6 +1,7 @@
 """Le serveur au bord du monde : ce que les journaux ne disent jamais, un
-déploiement derrière un mandataire, les points MCP qu'un mandataire ne rend pas
-joignables, les dossiers de la CLI hors des sauvegardes."""
+déploiement derrière un mandataire (déclaré, ou trahi par ses en-têtes), les
+points MCP qu'un mandataire ne rend pas joignables, les dossiers de la CLI hors
+des sauvegardes."""
 
 from __future__ import annotations
 
@@ -11,9 +12,11 @@ from typing import Any
 
 from mika.adapters.mcp.protocol import Tool
 from mika.adapters.mcp.relay import PREFIX, Relay
+from mika.adapters.web import app as web_app
 from mika.adapters.web.app import DEV_ORIGINS
 from mika.app import backup
 from mika.app.server import RedactingFilter, redact, web_config
+from tests.protocol.test_web import world  # noqa: F401 — fixture
 
 TOKEN = "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
 
@@ -22,6 +25,33 @@ def test_logs_never_show_a_secret():
     assert "abc123secret" not in redact("GET https://flux.example/rss?user=moi&token=abc123secret&x=1")
     assert "user=moi" in redact("GET https://flux.example/rss?user=moi&token=abc123secret")
     assert "s3cr3t-jeton-long" not in redact("Authorization: Bearer s3cr3t-jeton-long")
+
+
+def test_logs_mask_her_own_tokens_basic_auth_gitlab_and_mysql_secrets():
+    for secret in ("mw_" + "A" * 43, "mtk_" + "b" * 43, "mwk_" + "c" * 43, "mlp_" + "d" * 43):
+        shown = redact(f"jeton {secret} refusé sur /ws")
+        prefix = secret[:secret.index("_") + 1]
+        assert secret not in shown and f" {prefix}… " in shown  # son préfixe dit lequel, le reste part
+    assert "dXNlcjpwYXNzd29yZA==" not in redact("Authorization: Basic dXNlcjpwYXNzd29yZA==")
+    assert "glpat-abcdefghij12" not in redact("X-Gitlab-Token: glpat-abcdefghij12")
+    assert "abcdefgh1234" not in redact(repr({"x-gitlab-token": "abcdefgh1234"}))
+    assert "s3cret!" not in redact("env MYSQL_PWD=s3cret! mariadb-dump mika_mind")
+    assert redact("mw_court et mwk_x restent lisibles") == "mw_court et mwk_x restent lisibles"
+
+
+def test_an_undeclared_proxy_is_said_once(world, caplog, monkeypatch):  # noqa: F811
+    """Sans ``--behind-proxy``, la première requête qui porte un en-tête de mandataire est dite au journal — une
+    seule fois par processus : derrière un mandataire non déclaré, l'étranglement par adresse verrait tout le monde
+    en 127.0.0.1 et les cookies partiraient sans ``Secure``."""
+    client, _, _ = world
+    monkeypatch.setattr(web_app, "_PROXY_SAID", set())
+    with caplog.at_level(logging.WARNING, logger="mika.web"):
+        client.get("/auth/whoami")  # sans en-tête : rien à dire
+        assert not [r for r in caplog.records if "mandataire" in r.getMessage()]
+        client.get("/auth/whoami", headers={"X-Forwarded-For": "203.0.113.9"})
+        client.get("/auth/whoami", headers={"X-Real-IP": "203.0.113.9", "Via": "1.1 nginx"})
+    said = [r.getMessage() for r in caplog.records if "mandataire non déclaré" in r.getMessage()]
+    assert len(said) == 1 and "--behind-proxy" in said[0] and "x-forwarded-for" in said[0]
 
 
 def test_the_filter_masks_records_from_any_library(caplog):

@@ -97,6 +97,20 @@ def _local(tmp_path, **kw) -> tuple[McpHub, Store]:
     return McpHub(lambda: store.config, lambda: store.reviews, store.save, local_root=root), store
 
 
+def test_the_cage_forbids_nested_user_namespaces_and_its_folder_is_hers_alone(tmp_path):
+    from mika.adapters.mcp.stdio import Launcher, Sandbox
+
+    root = tmp_path / "mcp"
+    (root / "ici").mkdir(parents=True)
+    (root / "ici" / "server.py").write_text(SERVER, encoding="utf-8")
+    launcher = Launcher(root, Sandbox(bwrap="/usr/bin/bwrap", pasta=None, ip=None, sh="/bin/sh", prlimit=None))
+    spec = McpServer(purpose="un outil sur cette machine", transport="local", command="python3",
+                     args=("-I", "server.py"))
+    argv, _env, _home = launcher.command("ici", spec)
+    assert "--disable-userns" in argv and argv.index("--disable-userns") > argv.index("--unshare-all")
+    assert root.stat().st_mode & 0o777 == 0o700  # les dossiers des serveurs : à elle seule
+
+
 async def test_a_local_server_lives_in_its_cage(tmp_path, monkeypatch):
     monkeypatch.setenv("MIKA_TEST_CANARY", "fuite")
     outside = tmp_path / "ailleurs.txt"

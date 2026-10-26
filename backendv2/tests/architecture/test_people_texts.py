@@ -44,6 +44,7 @@ PLAIN = {
                             "person": "une clé de personne", "by": "qui (code)"},
     "identity.name_dismissed": {"name": "une clé de personne connue de nom (``name:alice``, celle de la mémoire)",
                                 "person": "une clé de personne", "by": "qui (code)"},
+    "identity.expired": {"handle": "une adresse (une clé)", "person": "une clé de personne"},
     "social.profile_revised": {
         "person": "une clé de personne", "call_id": "un identifiant d'appel", "model": "un nom de modèle",
         "legacy_tone": "héritage : avant la version 2, le ton était en clair",

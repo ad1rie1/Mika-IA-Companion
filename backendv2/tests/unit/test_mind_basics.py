@@ -99,3 +99,20 @@ async def test_a_write_cancelled_in_flight_is_still_published(tmp_db):
     assert mind.root.slices["counter"].n == 3 and after.seqs == (3,)  # 1 + 2 : les deux sont là
     assert [r[0] for r in mind.store.query_mind("SELECT seq FROM events ORDER BY seq")] == [1, 2, 3]
     await mind.close()
+
+
+async def test_a_batch_of_keyed_drafts_is_deduplicated_in_one_query(tmp_db):
+    """Le dédoublonnage d'un lot passe par ``find_dedupes`` (une requête), avec le même résultat que clé par clé
+    (audit du 2026-10-26)."""
+    mind = make_mind(tmp_db, [COUNTER])
+    await mind.boot()
+    first = await mind.append([BUMPED.draft(by=1, dedupe_key="a"), BUMPED.draft(by=2, dedupe_key="b")],
+                              emitter="counter", correlation="t")
+    again = await mind.append([BUMPED.draft(by=1, dedupe_key="a"), BUMPED.draft(by=2, dedupe_key="b"),
+                               BUMPED.draft(by=3, dedupe_key="c")], emitter="counter", correlation="t")
+    assert again.seqs[:2] == first.seqs and len(again.seqs) == 3 and not again.deduped
+    assert mind.frame().get(VALUE) == 6  # 1 + 2, puis 3 seulement
+    found = mind.store.find_dedupes([(BUMPED.name, "a"), (BUMPED.name, "zz"), ("autre.type", "a")])
+    assert found == {(BUMPED.name, "a"): first.seqs[0]}
+    assert mind.store.find_dedupes([]) == {}
+    await mind.close()

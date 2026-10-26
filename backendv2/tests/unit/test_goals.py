@@ -775,3 +775,17 @@ def test_a_reminder_counts_only_real_tries(ending, counts, why):
     s = initiative_ends((_started, _ended), _set(GoalsState(), due), GoalsParams(), goals_c.REMIND,
                          goal_target(1), ending)
     assert s.goals[1].attempts == (2 if counts else 0), why
+
+
+def test_a_zero_abandon_threshold_never_divides_by_zero():
+    """``abandon_below`` à 0 (la borne basse d'avant) : l'envie ne s'use jamais, rien à planifier — et pas de
+    ``ZeroDivisionError`` qui tuerait ``goals.tend`` (audit du 2026-10-26)."""
+    from types import SimpleNamespace
+
+    from mika.contracts import goals as gc
+    from mika.faculties.goals.tend import _worn_out_at
+    from mika.kernel.clock import HOUR
+
+    goal = SimpleNamespace(kind=gc.EXPLORATION, desire=0.5, desire_at=10)
+    assert _worn_out_at(goal, SimpleNamespace(abandon_below=0.0, desire_half_life_us=HOUR)) is None
+    assert _worn_out_at(goal, SimpleNamespace(abandon_below=0.25, desire_half_life_us=HOUR)) == 10 + HOUR

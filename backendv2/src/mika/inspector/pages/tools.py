@@ -385,7 +385,7 @@ async def exposed(ui: Any, request: Request) -> Any:
     relay, settings, lending = ui.deps.relay, ui.deps.settings, ui.deps.lending
     account = ui.operator(request)
     try:
-        token = bool(settings.console_mcp_token()) if settings is not None else False
+        token = bool(settings.console_mcp_digest()) if settings is not None else False
         network = token and settings.console_mcp_network()
         chosen = settings.console_mcp_served() if settings is not None else None
         entries = settings.lent() if settings is not None else {}

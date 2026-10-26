@@ -110,3 +110,79 @@ def test_each_base_reaches_its_last_revision_on_mariadb(tmp_path, name) -> None:
             assert collations == {"utf8mb4_nopad_bin"}
     finally:
         engine.dispose()
+
+
+# ── une base d'avant, marquée à jour sans l'être (audit du 2026-10-26) ──────────────────────────────────────────
+
+
+def _droppable(meta, *, nullable: bool):
+    """Une colonne qu'on peut retirer sous SQLite (ni clé, ni indexée, ni étrangère, sans défaut) : la base
+    d'une version d'avant des entités."""
+    for table in meta.sorted_tables:
+        indexed = {c.name for i in table.indexes for c in i.columns}
+        for c in table.constraints:
+            if isinstance(c, UniqueConstraint):
+                indexed |= {col.name for col in c.columns}
+        for col in table.columns:
+            if col.primary_key or col.name in indexed or col.foreign_keys or col.default is not None \
+                    or col.server_default is not None:
+                continue
+            if col.nullable == nullable:
+                return table, col
+    return None
+
+
+def _drop(engine, table, column) -> None:
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f'ALTER TABLE "{table.name}" DROP COLUMN "{column.name}"')
+
+
+@pytest.mark.sqlite_only
+def test_a_base_from_older_entities_gets_its_missing_columns(tmp_path) -> None:
+    """Née des entités d'avant (une colonne de moins), jamais marquée : marquée, puis complétée — jamais marquée à
+    jour sans l'être."""
+    found = _droppable(MIND, nullable=True)
+    assert found, "aucune colonne facultative à retirer pour le test"
+    table, column = found
+    engine = _engine(tmp_path, "mind")
+    try:
+        MIND.create_all(engine)
+        _drop(engine, table, column)
+        schema.migrate_data(tmp_path)
+        assert schema.differences("mind", engine) == []
+        assert column.name in {c["name"] for c in inspect(engine).get_columns(table.name)}
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.sqlite_only
+def test_a_base_already_marked_but_incomplete_is_completed_too(tmp_path) -> None:
+    """Le cas de ``data/v2`` : marquée à la dernière révision avec une table d'avant — le démarrage suivant la
+    complète."""
+    table, column = _droppable(MIND, nullable=True)
+    schema.migrate_data(tmp_path)
+    engine = _engine(tmp_path, "mind")
+    try:
+        _drop(engine, table, column)
+        assert schema.differences("mind", engine) != []
+        schema.migrate_data(tmp_path)
+        assert schema.differences("mind", engine) == []
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.sqlite_only
+def test_a_drift_that_cannot_be_repaired_refuses_to_start(tmp_path) -> None:
+    """Ce qu'on ne sait pas compléter seul (ici une colonne en trop, d'une version d'avant qui en avait une de
+    plus) : la base est refusée en nommant la différence, plutôt que marquée à jour."""
+    table = MIND.sorted_tables[0]
+    schema.migrate_data(tmp_path)
+    engine = _engine(tmp_path, "mind")
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN surplus_d_avant TEXT')
+        with pytest.raises(schema.SchemaDrift) as caught:
+            schema.migrate_data(tmp_path)
+        assert f"{table.name}.surplus_d_avant" in str(caught.value)
+    finally:
+        engine.dispose()

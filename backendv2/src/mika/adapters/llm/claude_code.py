@@ -12,7 +12,11 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   aucun connecteur claude.ai, aucun outil natif — l'atelier et la Forge
   exécutent sous bubblewrap, pas la CLI), avec le prompt système du runtime
   et deux serveurs MCP servis par le relais (``mika`` en main, ``mika_plus`` à
-  la demande, que la CLI charge par sa recherche d'outils) ;
+  la demande, que la CLI charge par sa recherche d'outils). Le prompt système
+  (``system.txt``) ne reçoit que la zone stable : la zone volatile — où
+  voyage ce qui vient d'ailleurs (mails, titres de flux, pages web) — part
+  dans le tour utilisateur, encadrée comme le pipeline l'encadre
+  (``CONTEXT_HEADER``/``CONTEXT_FOOTER``), jamais avec l'autorité du système ;
 - quand la CLI appelle un outil, le relais le met en attente : la réponse est
   ``stop="tool_use"`` et c'est **le runtime** qui l'exécute ;
 - les appels écrits dans un même message du modèle forment **un** lot, comme sur
@@ -42,7 +46,9 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   longue ou d'une forme inattendue est sautée, et la fin du processus est
   toujours signalée ; l'attente d'un tour est bornée (``turn_timeout_s``) ;
 - la sortie est bornée (``CLAUDE_CODE_MAX_OUTPUT_TOKENS`` d'après ``max_tokens`` ; avec des outils, assez pour
-  écrire leurs arguments entiers, la CLI ne sachant pas rejouer un appel coupé) ;
+  écrire leurs arguments entiers, la CLI ne sachant pas rejouer un appel coupé) ; une sortie qui passe son plafond
+  est ``stop="max_tokens"`` — ``truncated_tool_call`` seulement si un appel d'outil avait été annoncé (sinon la
+  parole se coupe à sa dernière phrase, comme ailleurs, au lieu de rejouer toute la session) ;
 - aucune connexion annexe (``CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC``) et pas de socket de messagerie entre
   sessions (``CLAUDE_CODE_HARBOR_KITE=0``) ; ``mika claude-code check`` vérifie qu'aucune ne s'ouvre ;
 - les dossiers d'appel (prompt système, configuration MCP et son jeton de
@@ -78,8 +84,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mika.adapters.llm.openai_compat import volatile_system
 from mika.adapters.mcp.protocol import Outcome, Tool
 from mika.adapters.mcp.relay import Pending, Relay, RelaySession
+from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, ToolCall, Usage
 from mika.vocab.phrasebook import phrase
 
@@ -362,13 +370,19 @@ class ClaudeCodeBackend:
     @staticmethod
     def user_message(req: LLMRequest) -> dict[str, Any]:
         """Le fil en un message : l'historique, puis le dernier tour tel quel
-        (il porte déjà l'état interne)."""
+        (il porte déjà l'état interne). Un bloc volatile que la requête porte
+        encore dans son système (``system_volatile``, pas déjà encadré dans ce
+        dernier tour) y descend, encadré comme le pipeline l'encadre : ce qui
+        vient d'ailleurs ne parle jamais avec l'autorité du système."""
         turns = [m for m in req.messages if m.role in ("user", "assistant") and m.content.strip()]
         last = turns[-1] if turns and turns[-1].role == "user" else None
         history = turns[:-1] if last is not None else turns
         lines = [phrase("llm.thread.mine", text=m.content.strip()) if m.role == "assistant" else m.content.strip()
                  for m in history]
         text = last.content if last is not None else ""
+        volatile = volatile_system(req)
+        if volatile:
+            text = f"{CONTEXT_HEADER}\n{volatile}\n{CONTEXT_FOOTER}" + (f"\n\n{text}" if text.strip() else "")
         if lines:
             text = phrase("llm.thread.header") + "\n" + "\n".join(lines) + "\n" + phrase("llm.thread.footer") \
                 + "\n\n" + text
@@ -445,8 +459,8 @@ class ClaudeCodeBackend:
         if core or extra:
             run.session = self.relay.open(core, extra, run.on_call)
         run.workdir = Path(tempfile.mkdtemp(prefix=f"{CALL_PREFIX}{os.getpid()}-", dir=self.work_dir))
-        _write_private(run.workdir / "system.txt", "\n\n".join(p for p in (req.system_stable, req.system_volatile)
-                                                                  if p.strip()))
+        # la zone stable seule : le volatile (la bande citée comprise) voyage dans le tour utilisateur (``user_message``)
+        _write_private(run.workdir / "system.txt", req.system_stable)
         if run.session is not None:
             config = self.mcp_config(run.session, str(base))
             run.servers = tuple(config["mcpServers"])
@@ -558,9 +572,11 @@ class ClaudeCodeBackend:
             if OUTPUT_CAPPED.search(str(detail)):
                 # la sortie a passé son plafond : une réponse tronquée, comme chez les autres fournisseurs — l'appelant
                 # sait la traiter (la relecture diffère et redécoupe sa fenêtre) ; une panne se réessaierait à
-                # l'identique (sonde réelle du 2026-10-10)
+                # l'identique (sonde réelle du 2026-10-10). Un appel d'outil coupé seulement si le message en
+                # annonçait un : sinon c'est une parole trop longue, coupée à sa dernière phrase par la passerelle,
+                # pas une session entière à rejouer
                 return LLMResponse(answer(texts, ""), stop="max_tokens", model=run.model or self.model,
-                                   truncated_tool_call=True)
+                                   truncated_tool_call=bool(run.announced))
             raise ClaudeCodeError(f"la CLI a échoué : {detail}")
         stop = {"max_tokens": "max_tokens", "refusal": "refusal"}.get(str(d.get("stop_reason") or ""), "end")
         models = list((d.get("modelUsage") or {}).keys())

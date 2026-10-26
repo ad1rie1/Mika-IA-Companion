@@ -101,19 +101,27 @@ def params(p: ExpressionParams | None) -> ExpressionParams:
 #: partir : ce qu'elle y écrit peut dire ce qu'elle cache)
 LIE_MARK = re.compile(r"\[\s*(?:MENSONGE|MENTI|LIE)\b\s*:?([^\]]*)(?:\]|$)", re.IGNORECASE)
 _SENTENCE = re.compile(r"[^.!?…]+[.!?…]*")
-#: une ligne qui ouvre ses balises de fin (« [EMOTION: … », « [EN_FACE: … », « [MENSONGE: … »)
-_TRAILER = re.compile(r"^[ \t]*\[\s*(?:EMOTION|EN_FACE|MENSONGE|MENTI|LIE)\b", re.IGNORECASE | re.MULTILINE)
+#: une ligne qui ouvre ses balises de fin (« [EMOTION: … », « [EN_FACE: … », « [EN FACE : … », « [MENSONGE: … ») —
+#: la graphie d'EN_FACE est celle que ``reading.TAG`` lit (tiret bas, espace, tiret ou rien)
+_TRAILER = re.compile(r"^[ \t]*\[\s*(?:EMOTION|EN[\s_\-]?FACE|MENSONGE|MENTI|LIE)\b", re.IGNORECASE | re.MULTILINE)
 _BRACKETS = re.compile(r"\[[^\]\n]*\]?")
+#: une phrase : des mots jusqu'à une ponctuation forte — ce qui, après une ligne de balise, est encore sa parole
+_SPOKEN = re.compile(r"\w[^.!?…\n]*[.!?…]")
 
 
 def closing(text: str) -> str:
     """Ce qu'elle dit, puis ses balises de fin : passé la première ligne de balises qui suit sa parole, seules les
     balises comptent. Un texte écrit après n'est pas à dire (2026-10-14 : « Correction de balise : [EN_FACE: …] »
-    arrivait à la personne). Une balise en tête de réponse ne coupe rien."""
+    arrivait à la personne). Une balise en tête de réponse ne coupe rien. Et si ce qui suit la ligne de balises
+    contient encore une phrase (elle a posé sa balise au milieu de son message, puis repris), tout compte : ses
+    balises se lisent où qu'elles soient, rien de ce qu'elle a dit ne tombe."""
     m = next((m for m in _TRAILER.finditer(text) if text[:m.start()].strip()), None)
     if m is None:
         return text
-    return text[:m.start()] + " ".join(_BRACKETS.findall(text[m.start():]))
+    tail = text[m.start():]
+    if _SPOKEN.search(_BRACKETS.sub(" ", tail)):
+        return text
+    return text[:m.start()] + " ".join(_BRACKETS.findall(tail))
 
 
 def lied(text: str, mark: str) -> tuple[int, int] | None:

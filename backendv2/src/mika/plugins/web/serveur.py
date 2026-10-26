@@ -539,7 +539,7 @@ def check_url(url: str) -> str:
 
 
 def _clock() -> str:
-    return datetime.now().strftime("%H:%M")
+    return datetime.now().astimezone().strftime("%H:%M")  # l'heure murale de la cage (son /etc/localtime)
 
 
 class Web:

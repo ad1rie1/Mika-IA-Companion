@@ -10,6 +10,7 @@ console et dans le journal — ils n'y sont jamais.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import re
@@ -232,8 +233,8 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     assert client.portal.call(live.settings.stt)["api_key"] == CANARY_STT
     devices = f"{BASE}/appareils"
     shown = post(client, devices, {"_section": "appareils", "_commande": "jeton"})
-    token = client.portal.call(live.settings.sensors_token)
-    assert token and token in shown.text  # montré une fois…
+    token = re.search(r"montré une seule fois\) : ([A-Za-z0-9_\-]{20,})", html_of(shown)).group(1)  # montré une fois…
+    assert hashlib.sha256(token.encode()).hexdigest() == client.portal.call(live.settings.sensors_digest)  # …empreinte
     assert token not in client.get(devices).text  # … et plus jamais
     # un envoi sur la page d'une autre section est refusé
     wrong = post(client, feeds, {"_section": "transcription", "_champs": ["model"], "model": "x"})

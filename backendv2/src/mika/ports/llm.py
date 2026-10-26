@@ -84,6 +84,13 @@ class LLMRequest:
     persona: PersonaRender | None = None
     lane: str = "background"
     priority: int = 1
+    #: le délai de chaque appel de cette requête (secondes, attente d'un créneau comprise) : celui de l'épisode qui la
+    #: porte (le mode pro a quinze minutes, pas les deux de sa voie) ; ``None`` : le délai de sa voie (les processus)
+    deadline_s: float | None = None
+    #: ``auto`` : le modèle appelle ses outils s'il le veut ; ``none`` : aucun appel d'outil à ce tour (le tour de
+    #: clôture d'une boucle). Les outils restent déclarés : un fournisseur refuse une conversation qui porte leurs
+    #: appels sans eux (Claude) ; celui qui n'a pas de ``tool_choice`` (Ollama) ne les envoie pas
+    tool_choice: str = "auto"
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def extend(self, *messages: Message) -> LLMRequest:
@@ -98,11 +105,19 @@ class LLMResponse:
     usage: Usage = Usage()
     model: str = ""
     truncated_tool_call: bool = False
+    #: la catégorie d'un refus (``stop_details.category`` de l'API : « cyber », « bio », « frontier_llm »…) ; vide hors
+    #: refus, ou quand le fournisseur n'en donne pas
+    stop_detail: str = ""
 
 
 #: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
 #: fournisseur qui bride sa sortie (un modèle local) lève alors son propre plafond
 RETRY_AFTER_CUT = "retry_after_cut"
+#: ``meta`` : l'instant (``loop.time()``) où l'épisode qui porte la requête s'arrête — la passerelle ne donne à aucun
+#: de ses appels plus que ce qui reste devant lui
+DEADLINE_AT = "deadline_at"
+#: les valeurs de ``LLMRequest.tool_choice``
+TOOL_CHOICE_AUTO, TOOL_CHOICE_NONE = "auto", "none"
 
 
 class MissingPersona(ValueError):
@@ -120,8 +135,10 @@ class LLMBackend(Protocol):
     reprendre une boucle d'outils commencée ailleurs — la passerelle ne bascule
     jamais vers lui en cours de boucle), ``defers_tools`` (faux : il ignore
     ``ToolDecl.deferred`` et envoie tous les outils — le prompt ne lui parle alors
-    pas d'outils « à chercher ») et ``release(call_id)`` (la boucle est finie :
-    relâcher ce qu'il tient encore pour elle)."""
+    pas d'outils « à chercher »), ``release(call_id)`` (la boucle est finie :
+    relâcher ce qu'il tient encore pour elle) et ``output_tokens(req) -> int`` (le
+    plafond de sortie qu'il enverra vraiment pour cette requête — un modèle qui
+    réfléchit a un plancher ; sans lui : ``req.max_tokens``)."""
 
     name: str
 
@@ -145,3 +162,6 @@ class LLMGateway(Protocol):
     # sait-il différer des outils (une recherche d'outils) ? Sans réponse : oui.
     # facultatif (à appeler par ``getattr``) : ``held(role, priority) -> str`` — un appel de ce rôle à cette priorité
     # serait-il refusé d'avance (``Held``) ? La raison en mots, « » : il passerait (ADR 0127).
+    # facultatif (à appeler par ``getattr``) : ``output_tokens(req) -> int`` — le plafond de sortie que le fournisseur
+    # de cette requête enverra vraiment (jamais sous ``req.max_tokens``) : un rejeu après coupure qui ne le relève pas
+    # ne vaut pas un appel.

@@ -6,7 +6,8 @@ peut pas faire.
   sont arrêtées (tuées à leur délai, ou à leur limite) — et l'app repart à
   l'appel suivant ;
 - son stockage lui est propre et borné ; son réseau est libre (ADR 0105) : tout
-  Internet, jamais une adresse privée ;
+  Internet, jamais une adresse privée, jamais la machine elle-même (ses adresses
+  propres, le port où Mika écoute) ;
 - une écriture refusée ne change rien ; une version se remplace, se
   restaure ; sans bubblewrap, rien ne tourne ;
 - sa base (ADR 0101) : l'app y range ses lignes par l'hôte, n'atteint aucune
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from mika.adapters import cage
 from mika.adapters import forge as forge_adapter
 from mika.adapters.forge import ForgeBases, ForgeHost, lint
 from mika.ports.forge import ForgeRefused
@@ -57,6 +59,11 @@ def test_an_app_sees_neither_the_databases_nor_the_environment_nor_the_network(t
     secret = tmp_path / "mind.db"
     secret.write_text("CANARI-base")
     h = host(tmp_path)
+    # une oreille sur la boucle locale de l'hôte : l'app a la sienne, vide (audit du 2026-10-26)
+    ear = socket.socket()
+    ear.bind(("127.0.0.1", 0))
+    ear.listen(1)
+    port = ear.getsockname()[1]
     write(h, f'''
 import os
 def view(api):
@@ -71,13 +78,16 @@ def view(api):
         out["home"] = type(exc).__name__
     try:
         import urllib.request
-        urllib.request.urlopen("http://1.1.1.1", timeout=2)
+        urllib.request.urlopen("http://127.0.0.1:{port}", timeout=2)
         out["net"] = "ouvert"
     except Exception as exc:
         out["net"] = type(exc).__name__
     return out
 ''')
-    r = go(h.call("essai", "view"))
+    try:
+        r = go(h.call("essai", "view"))
+    finally:
+        ear.close()
     assert r.ok, r.error
     assert "CANARI" not in str(r.value["env"]) and r.value["db"] in ("FileNotFoundError", "PermissionError")
     assert r.value["home"] in ("FileNotFoundError", "PermissionError") and r.value["net"] != "ouvert"
@@ -451,6 +461,46 @@ def test_a_slow_huge_or_invalid_view_becomes_a_note_and_the_app_lives_on(tmp_pat
 ])
 def test_only_an_internet_address_is_public(address, public):
     assert forge_adapter.is_global(ipaddress.ip_address(address)) is public
+
+
+def test_the_machine_itself_and_her_own_port_are_refused_even_when_public(monkeypatch):
+    """Un serveur à adresse publique (un VPS, une box en pont) : une app ne joint ni Mika, ni MariaDB, ni SSH par
+    l'adresse de l'hôte — ses adresses, v4 et v6, relues au plus toutes les cinq minutes —, ni le port où Mika
+    écoute, même sous une adresse qui n'est pas la sienne (une box qui relaie ce port vers elle)."""
+    ip = ipaddress.ip_address
+    public = ip("93.184.216.34")
+    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+                        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (str(public), 443))])
+    assert forge_adapter.resolve_public("moi.exemple.fr", local=set(), server_ports=set()) == [public]
+    with pytest.raises(ValueError, match="cette machine"):
+        forge_adapter.resolve_public("moi.exemple.fr", local={public, ip("::1")}, server_ports=set())
+    with pytest.raises(ValueError, match="port"):
+        forge_adapter.resolve_public("moi.exemple.fr", 8001, local=set(), server_ports={8001})
+    # les adresses de la machine : relues au plus toutes les ``LOCAL_REFRESH_S`` secondes
+    clock, reads = {"t": 0.0}, []
+    local = forge_adapter.LocalAddresses(lambda: reads.append(1) or [public], ttl_s=300.0,
+                                         monotonic=lambda: clock["t"])
+    assert local.get() == local.get() == frozenset({public}) and len(reads) == 1
+    clock["t"] = 299.0
+    assert local.get() and len(reads) == 1
+    clock["t"] = 300.0
+    assert local.get() and len(reads) == 2
+    # …telles que ``ip -o addr show`` les dit, v4 et v6 (pasta, lui, ne retient que les v4)
+    listing = ("1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n"
+               "1: lo    inet6 ::1/128 scope host noprefixroute \\       valid_lft forever\n"
+               "2: eth0    inet 203.0.113.7/24 brd 203.0.113.255 scope global dynamic eth0\n"
+               "2: eth0    inet6 2001:db8::7/64 scope global\n2: eth0    inet6 fe80::1/64 scope link\n"
+               "3: tun0    inet6 pas-une-adresse/64\n")
+    assert cage.parse_addresses(listing) == [ip("127.0.0.1"), ip("::1"), ip("203.0.113.7"), ip("2001:db8::7"),
+                                             ip("fe80::1")]
+    assert forge_adapter.SERVER_PORTS == set() or 8001 in forge_adapter.SERVER_PORTS  # posé par ``serve`` seul
+
+
+def test_the_cage_forbids_nested_user_namespaces_and_her_folder_is_hers_alone(tmp_path):
+    h = ForgeHost(tmp_path / "forge", bwrap="/usr/bin/bwrap")
+    assert (tmp_path / "forge").stat().st_mode & 0o777 == 0o700  # ses apps et leurs bases : à elle seule
+    args = h._command("essai")
+    assert "--disable-userns" in args and args.index("--disable-userns") > args.index("--unshare-all")
 
 
 class _Answer:

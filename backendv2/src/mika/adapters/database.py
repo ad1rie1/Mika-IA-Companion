@@ -175,6 +175,9 @@ def mariadb_engine(url: str, name: str, *, autocommit: bool = False) -> Engine:
     if target.get_driver_name() in ("pymysql", "mysqldb"):
         # des paramètres positionnels (``%s``), comme ``?`` sous SQLite : les requêtes préparées les rangent par ordre
         extra["paramstyle"] = "format"
+    # Jamais ``client_flag`` avec ``MULTI_STATEMENTS`` (PyMySQL ne l'active pas d'office, et c'est voulu) : les
+    # requêtes des apps de la Forge (``adapters/forge/bases.py``) passent en clair sous le compte de Mika — une
+    # instruction empilée après un ``;`` s'exécuterait en administrateur.
     engine = create_engine(
         target.set(query=query),
         pool_pre_ping=True,

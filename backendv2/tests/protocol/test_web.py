@@ -14,7 +14,7 @@ from mika.adapters.llm.config import LiveGateway
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
-from mika.adapters.web.app import WebConfig
+from mika.adapters.web.app import BODY_MAX_BYTES, WebConfig
 from mika.app.server import PERSONA, build
 from mika.faculties.affect.params import derive as affect_derive
 from mika.faculties.self.persona import load as load_persona
@@ -86,7 +86,8 @@ def test_whoami_plants_the_csrf_cookie_and_reports_the_bootstrap_window(world):
     client, _, _ = world
     r = client.get("/auth/whoami")
     body = r.json()
-    assert body == {"authenticated": False, "auth_required": True, "needs_bootstrap": True}
+    assert body == {"authenticated": False, "auth_required": True, "needs_bootstrap": True,
+                    "bootstrap_code_required": False}  # pas de code dans ce montage : il vient de ``serve``
     assert client.cookies.get("csrftoken")
     assert r.headers["access-control-allow-origin"] == ORIGIN
     assert r.headers["access-control-allow-credentials"] == "true"
@@ -121,6 +122,24 @@ def test_login_401_then_429_after_five_failures(world):
     blocked = client.post("/auth/login", json={"username": "adrien", "password": "faux"}, headers=h)
     assert blocked.headers["retry-after"] == "60"
     assert blocked.headers["access-control-allow-origin"] == ORIGIN  # CORS aussi sur les erreurs
+
+
+def test_a_huge_body_on_login_is_refused_with_413_not_an_exception(world):
+    """Les routes ordinaires bornent leur corps (``BODY_MAX_BYTES``) : annoncé trop grand, ou envoyé par morceaux
+    sans longueur, 413 avant d'avoir tout gardé — jamais une panne, et la route vit toujours."""
+    client, _, _ = world
+    h = {**csrf(client), "Content-Type": "application/json"}
+    big = b'{"username": "' + b"a" * (BODY_MAX_BYTES + 1) + b'", "password": "x"}'
+    r = client.post("/auth/login", content=big, headers=h)
+    assert r.status_code == 413 and r.json()["error"] and r.headers["access-control-allow-origin"] == ORIGIN
+
+    def chunks():  # sans Content-Length : lu par morceaux, borné quand même
+        for _ in range(BODY_MAX_BYTES // 4096 + 2):
+            yield b"x" * 4096
+
+    assert client.post("/auth/login", content=chunks(), headers=h).status_code == 413
+    assert client.post("/auth/bootstrap", content=big, headers=h).status_code == 413
+    assert client.post("/auth/login", json={"username": "a", "password": "b"}, headers=h).status_code == 401
 
 
 def test_preflight_allows_credentials_and_csrf_header(world):

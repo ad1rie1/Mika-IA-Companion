@@ -6323,7 +6323,9 @@ llm:
     # une de ses répliques. {text} : ce qu'elle a dit
     mine: "toi : {text}"
     footer: "--- FIN DU FIL ---"
-    # un fil sans aucun texte
+    # un fil sans aucun texte ; aussi le dernier tour utilisateur du composeur (kernel/prompt.py, ChatPrompt.silence)
+    # quand il n'a rien à dire — une initiative sans consigne, tout le volatile coupé : l'API refuse une conversation
+    # qui finit sur un tour de l'assistant
     silence: (silence)
   # un résultat d'outil vide, pour un fournisseur qui n'en veut pas de vide (adapters/llm/openai_compat.py, ollama)
   empty_tool_result: (résultat vide)

@@ -21,9 +21,10 @@ from mika.ports.llm import Usage
 log = logging.getLogger("mika.llm.pricing")
 
 #: (entrée, sortie) en $ par million de jetons. Claude : tarifs publiés par Anthropic (vérifiés le
-#: 2026-10-01, y compris les identifiants datés et les modèles 3.x retirés : un registre peut encore en
-#: porter) ; OpenAI : grille publique standard (même date). Les autres serveurs compatibles (GLM, DeepSeek…)
-#: changent de grille trop souvent pour une table figée : non chiffrés, et dits (un avertissement par modèle).
+#: 2026-10-01, Haiku 5.5 le 2026-10-26, y compris les identifiants datés et les modèles 3.x retirés : un registre
+#: peut encore en porter) ; OpenAI : grille publique standard (même date). Les autres serveurs compatibles (GLM,
+#: DeepSeek…) changent de grille trop souvent pour une table figée : non chiffrés, et dits (un avertissement par
+#: modèle).
 PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     # Fable / Mythos — même palier
     "claude-fable": (10.0, 50.0),
@@ -51,8 +52,11 @@ PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "claude-sonnet-4": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    # Haiku
+    # Haiku — 5.5 à 0,10 $/0,50 $ (jusqu'à 100 k jetons de prompt : au-delà, 0,50 $/2,50 $, non chiffré ici) ; la
+    # génération 4.x à 1 $/5 $
     "claude-haiku": (1.0, 5.0),
+    "claude-haiku-5": (0.10, 0.50),
+    "claude-haiku-5-5": (0.10, 0.50),
     "claude-haiku-4": (1.0, 5.0),
     "claude-haiku-4-5": (1.0, 5.0),
     # génération 3 (retirée ou dépréciée)

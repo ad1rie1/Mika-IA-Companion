@@ -65,10 +65,14 @@ def _uses(path: Path) -> Iterator[tuple[int, str]]:
             yield node.lineno, node.value
 
 
+#: nomme ses tables pour les étiqueter dans la console (« Ses souvenirs et ses croyances »), sans en lire une ligne
+LABELS_ONLY = frozenset({SRC / "app" / "handmade" / "system.py"})
+
+
 def test_no_one_reads_her_tables_behind_her_back():
     offences = []
     for path in _modules(SRC):
-        if _owned(path):
+        if _owned(path) or path in LABELS_ONLY:
             continue
         for line, used in _uses(path):
             if used in TABLE_NAMES or TABLE_TEXT.search(used):

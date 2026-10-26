@@ -61,8 +61,9 @@ class GoalsParams(BaseModel):
         label="Demi-vie de l'envie", group="L'envie d'une exploration", lo=HOUR, hi=3 * DAY,
         help="L'envie d'une exploration perd la moitié de sa force en ce temps (pas pendant une pause). Le "
              "tempérament la dérive de la persévérance.")] = 6 * HOUR
+    # jamais 0 : l'instant d'usure divise par ce seuil (``tend._worn_out_at``) — audit du 2026-10-26
     abandon_below: Annotated[float, Knob(
-        label="Abandon sous", group="L'envie d'une exploration", lo=0.0, hi=0.9, step=0.01,
+        label="Abandon sous", group="L'envie d'une exploration", lo=0.01, hi=0.9, step=0.01,
         help="Quand l'envie d'une exploration passe sous ce seuil, elle y renonce (« l'envie s'est usée ») : "
              "renoncer n'est pas un échec.")] = 0.15
     # les pas

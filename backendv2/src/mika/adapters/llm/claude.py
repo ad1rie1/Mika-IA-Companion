@@ -17,9 +17,19 @@ Contrat :
   sans elle, le tour est reconstruit sans réflexion ;
 - ``temperature`` n'est jamais envoyée aux modèles qui la refusent ; un 400 qui
   la nomme est rejoué une fois sans elle, et le refus mémorisé par modèle ;
+- le plafond de sortie envoyé (``output_tokens``) ne descend jamais sous
+  ``THINKING_OUTPUT_TOKENS`` quand le modèle réfléchit — à l'effort demandé, ou
+  d'emblée (Opus 5.x, Sonnet 5.x, Haiku 5.x, Fable, Mythos : la réflexion
+  adaptative est active par défaut et compte dans ``max_tokens`` ; un murmure
+  à 80 jetons n'écrirait pas un mot) ; la passerelle le lit pour réserver la
+  sortie et pour ne pas rejouer une coupure au même plafond ;
+- ``tool_choice="none"`` (le tour de clôture d'une boucle) → ``tool_choice: none``,
+  les outils restant déclarés : l'API refuse une conversation qui porte des
+  ``tool_use`` ou ``tool_result`` sans leurs outils ;
 - ``tool_use`` coupé par ``max_tokens`` → ``truncated_tool_call`` ; refus →
   ``stop="refusal"`` **sans aucun appel d'outil** (un ``tool_use`` porté par un
-  refus n'est jamais exécuté) ; jetons de cache comptés à part (``cache_read``,
+  refus n'est jamais exécuté), la catégorie de ``stop_details`` dans
+  ``stop_detail`` ; jetons de cache comptés à part (``cache_read``,
   ``cache_write``), hors ``input_tokens`` ;
 - ``pause_turn`` (la boucle serveur — recherche d'outils — s'est mise en pause)
   est reprise, au plus ``PAUSE_RESUMES`` fois, en renvoyant le tour tel quel :
@@ -42,7 +52,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.ports.llm import TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, Usage
 
 try:
     import anthropic
@@ -51,15 +61,21 @@ except ImportError:  # pragma: no cover — extra « llm » absent
 
 log = logging.getLogger("mika.llm.claude")
 
-#: Modèles qui refusent les paramètres d'échantillonnage (400) : Opus 4.7+, Sonnet 5, Fable, Mythos.
+#: Modèles qui refusent les paramètres d'échantillonnage (400) : Opus 4.7+, Sonnet 5, Haiku 5.5, Fable, Mythos.
+#: (La version d'API ``2026-10-21`` les refuse sur tous les modèles : au prochain changement de version, plus de
+#: température du tout.)
 NO_SAMPLING_PREFIXES = (
     "claude-opus-4-7",
     "claude-opus-4-8",
     "claude-opus-5",
     "claude-sonnet-5",
+    "claude-haiku-5",
     "claude-fable",
     "claude-mythos",
 )
+#: Modèles qui réfléchissent d'emblée (réflexion adaptative active par défaut, qui compte dans ``max_tokens`` et ne se
+#: coupe pas) : Opus 5.x, Sonnet 5.x, Haiku 5.x, Fable, Mythos — référence de l'API du 2026-10-06.
+THINKING_PREFIXES = ("claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable", "claude-mythos")
 CACHE_TTLS = ("5m", "1h")
 #: Tours outillés dont la réflexion reste disponible pour le rejeu.
 REPLAY_CAPACITY = 256
@@ -133,6 +149,16 @@ class ClaudeBackend:
             mark["ttl"] = self.cache_ttl
         return mark
 
+    def thinks(self) -> bool:
+        """Le modèle réfléchit avant d'écrire : à l'effort demandé, ou d'emblée (``THINKING_PREFIXES``)."""
+        return bool(self.effort) or self.model.startswith(THINKING_PREFIXES)
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        """Le plafond de sortie envoyé pour ``req`` : celui demandé, jamais sous ``THINKING_OUTPUT_TOKENS`` quand le
+        modèle réfléchit (la réflexion compte dans la sortie : assez de place pour réfléchir puis répondre, la CLI
+        fait de même)."""
+        return max(req.max_tokens, THINKING_OUTPUT_TOKENS) if self.thinks() else req.max_tokens
+
     def payload(self, req: LLMRequest) -> dict[str, Any]:
         """Le corps de ``messages.create``, hors ``temperature`` (décidée à l'envoi)."""
         decls = sorted(req.tools, key=lambda t: t.name)
@@ -152,16 +178,18 @@ class ClaudeBackend:
         messages = self._messages(req.messages)
         if len(messages) >= 2:
             _mark_last_block(messages[-2], self.cache_mark())
-        body: dict[str, Any] = {"model": self.model, "max_tokens": req.max_tokens, "messages": messages}
+        body: dict[str, Any] = {"model": self.model, "max_tokens": self.output_tokens(req), "messages": messages}
         if self.effort:
-            # la réflexion compte dans la sortie : assez de place pour réfléchir puis répondre (la CLI fait de même)
-            body["max_tokens"] = max(req.max_tokens, THINKING_OUTPUT_TOKENS)
             body["thinking"] = {"type": "adaptive"}
             body["output_config"] = {"effort": self.effort}
         if system:
             body["system"] = system
         if tools:
             body["tools"] = tools
+            if req.tool_choice == TOOL_CHOICE_NONE:
+                # le tour de clôture : aucun appel d'outil, mais les outils restent déclarés (l'API refuse une
+                # conversation qui porte des tool_use ou tool_result sans eux)
+                body["tool_choice"] = {"type": "none"}
         return body
 
     def _messages(self, msgs: Sequence[Message]) -> list[dict[str, Any]]:
@@ -259,7 +287,7 @@ class ClaudeBackend:
 
     def _accepts_temperature(self) -> bool:
         # la réflexion impose la température par défaut
-        return not self.effort and not self.model.startswith(NO_SAMPLING_PREFIXES) \
+        return not self.thinks() and not self.model.startswith(NO_SAMPLING_PREFIXES) \
             and self.model not in self._no_temperature
 
     # ── Réponse ──────────────────────────────────────────────────────────
@@ -292,16 +320,18 @@ class ClaudeBackend:
                 thought = True
                 replay.append({"type": "redacted_thinking", "data": block.data})
         reason = getattr(resp, "stop_reason", None)
+        details = getattr(resp, "stop_details", None)
         if reason == "refusal":
-            log.warning("%s refuse de poursuivre (stop_details=%s)", self.model, getattr(resp, "stop_details", None))
+            log.warning("%s refuse de poursuivre (stop_details=%s)", self.model, details)
         stop = _STOPS.get(reason or "", "end")
         usage = _sum([_usage(getattr(p, "usage", None)) for p in parts])
         model = getattr(resp, "model", None) or self.model
         text = "".join(texts)
         if stop == "refusal":
             # un refus n'exécute rien : un tool_use qu'il porterait (entrée partielle, ou ce que la
-            # sauvegarde a coupé) n'est pas une décision du modèle
-            return LLMResponse(text, (), "refusal", usage, model)
+            # sauvegarde a coupé) n'est pas une décision du modèle ; sa catégorie remonte (l'épisode la dit)
+            category = getattr(details, "category", None) if details is not None else None
+            return LLMResponse(text, (), "refusal", usage, model, stop_detail=str(category or ""))
         if stop == "max_tokens" and calls:
             return LLMResponse(text, stop="max_tokens", usage=usage, model=model, truncated_tool_call=True)
         if calls and thought:

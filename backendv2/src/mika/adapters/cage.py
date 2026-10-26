@@ -48,10 +48,18 @@ def system(network: str) -> list[str]:
     return args
 
 
+#: les dossiers des cages (``forge/``, ``ateliers/``, ``mcp/``) : à l'utilisateur de Mika seul — des bases d'apps, des
+#: dépôts, des données personnelles
+HOME_MODE = 0o700
+
+
 def head(bwrap: str, network: str) -> list[str]:
-    """Le début d'une cage : tout délié, aucune capacité ; ``network`` non vide : le réseau de l'espace où elle
-    entre (celui de pasta pour ``isolated``, où l'on est « root » : la cage reprend son utilisateur)."""
-    args = [bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--cap-drop", "ALL"]
+    """Le début d'une cage : tout délié, aucune capacité, aucun espace d'utilisateur imbriqué (``--disable-userns`` :
+    ce qui tient la cage ne se refait pas dedans — il exige ``--unshare-user`` dit explicitement, ``--unshare-all``
+    ne fait qu'essayer) ; ``network`` non vide : le réseau de l'espace où elle entre (celui de pasta pour
+    ``isolated``, où l'on est « root » : la cage reprend son utilisateur)."""
+    args = [bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns",
+            "--cap-drop", "ALL"]
     if network:
         args.append("--share-net")
     if network == "isolated":
@@ -82,18 +90,37 @@ def isolated(inner: list[str], *, pasta: str, ip: str, sh: str,
             "--", sh, "-c", script + '; exec "$0" "$@"', *inner]
 
 
+def private_root(root: Path) -> Path:
+    """Le dossier racine d'une cage, créé au besoin et à son propriétaire seul (``HOME_MODE``, posé à chaque fois :
+    un dossier né sous l'umask d'avant le devient aussi)."""
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, HOME_MODE)
+    return root
+
+
 def host_addresses(ip: str) -> list[ipaddress.IPv4Address]:
-    """Les adresses IPv4 de la machine elle-même (l'adresse publique d'un serveur joindrait ses propres
+    """Les adresses IPv4 de la machine elle-même (celles que le réseau à part rend injoignables : pasta ne parle
+    qu'IPv4) ; au mieux : sans réponse, la liste est vide."""
+    return [a for a in all_host_addresses(ip) if isinstance(a, ipaddress.IPv4Address)]
+
+
+def all_host_addresses(ip: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Toutes les adresses de la machine elle-même, v4 et v6 (l'adresse publique d'un serveur joindrait ses propres
     services) ; au mieux : sans réponse, la liste est vide."""
     try:
-        r = subprocess.run([str(ip), "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=5,
-                           check=False)
+        r = subprocess.run([str(ip), "-o", "addr", "show"], capture_output=True, text=True, timeout=5, check=False)
     except (OSError, subprocess.SubprocessError):
         return []
-    out = []
-    for m in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)", r.stdout):
+    return parse_addresses(r.stdout)
+
+
+def parse_addresses(listing: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Les adresses d'une sortie de ``ip -o addr show`` (``inet a.b.c.d/n``, ``inet6 x::y/n``) ; une adresse
+    illisible est écartée."""
+    out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for m in re.finditer(r"\binet6? ([0-9A-Fa-f.:]+)", listing):
         try:
-            out.append(ipaddress.IPv4Address(m.group(1)))
+            out.append(ipaddress.ip_address(m.group(1)))
         except ValueError:
             continue
     return out

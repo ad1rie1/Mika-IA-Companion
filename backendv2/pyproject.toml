@@ -24,7 +24,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4", "google-genai>=1.0"]
+# Ollama et Ollama Cloud passent par httpx : aucun paquet à eux (audit du 2026-10-26)
+llm = ["anthropic>=0.40", "openai>=1.40"]
 memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
 # lire les PDF joints (sans : « je ne peux pas le lire »)
 documents = ["pypdf>=4"]
@@ -84,6 +85,8 @@ ignore = ["E501", "UP040", "UP046", "UP047", "B008"]
 "src/mika/runtime/boundary.py" = ["BLE001"]
 "src/mika/sim/**" = ["TID251", "BLE001"]
 "src/mika/app/**" = ["TID251"]
+# le serveur MCP du plugin web : un programme à part, lancé dans sa cage, qui vit au vrai temps (débit, délais)
+"src/mika/plugins/web/serveur.py" = ["TID251"]
 "tests/**" = ["TID251", "BLE001", "PLC0415", "DTZ", "B"]
 
 [tool.importlinter]

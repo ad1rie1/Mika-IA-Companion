@@ -16,7 +16,11 @@ Il n'y a pas de conversation anonyme : `serve` exige un compte. Deux chemins, se
 1. `GET /auth/whoami` plante le cookie lisible `csrftoken` et dit `{authenticated, auth_required, needs_bootstrap}`
    (plus `username`, `display_name`, `person_id`, `operator` une fois connecté).
 2. `POST /auth/login {username, password}` avec l'en-tête `X-CSRFToken` (la valeur du cookie) : cookie `sessionid`
-   (`HttpOnly`, 14 jours). `POST /auth/bootstrap` crée le premier compte (opérateur) tant qu'il n'en existe aucun.
+   (`HttpOnly`, 14 jours). `POST /auth/bootstrap` crée le premier compte (opérateur) tant qu'il n'en existe aucun ;
+   depuis une autre machine que celle du serveur, il porte aussi `code`, le code de premier démarrage écrit au
+   journal du serveur (`whoami` le dit : `bootstrap_code_required`) — sans lui, 403.
+   Ces routes (et `/auth/token`, `/auth/push`, `/api/perceptions`, les décisions) lisent un corps JSON de 64 Kio au
+   plus : au-delà, 413.
 3. `/ws` s'ouvre avec le cookie, depuis une origine déclarée (`--origin`) ; une origine inconnue est refusée avant
    l'ouverture (le client voit un échec de poignée de main, HTTP 403).
 4. Déconnexion : `GET` ou `POST /auth/logout` avec l'en-tête CSRF.

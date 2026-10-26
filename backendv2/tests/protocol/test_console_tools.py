@@ -193,10 +193,14 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     ConsoleHTML(page.text).check()
     made = _expose(client, "console_jeton")
     assert made.status_code == 303 and "montrer=" in made.headers["location"]
-    token = read("console_mcp_token")
+    digest = read("console_mcp_digest")
     shown = client.get(made.headers["location"])
     ConsoleHTML(shown.text).check()
-    assert token and token in shown.text and "claude mcp add --transport http mika" in html_of(shown)
+    assert "claude mcp add --transport http mika" in html_of(shown)
+    token = re.search(r"Bearer ([A-Za-z0-9_\-]{20,})", html_of(shown)).group(1)
+    assert digest and hashlib.sha256(token.encode()).hexdigest() == digest  # seule l'empreinte est gardée
+    rows = client.portal.call(lambda: live.kernel.mind.store.query_mind("SELECT value FROM settings"))
+    assert all(token not in r[0] for r in rows)
     assert token not in client.get(made.headers["location"]).text  # une seule fois
     served = _expose(client, "console_servir", servi=["systeme.sante", "vues"])
     assert served.status_code == 303 and read("console_mcp_served") == ("systeme.sante", "vues")
@@ -205,7 +209,7 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     assert "http://localhost:8001/mcp/console/" in html_of(client.get(f"{BASE}/expose"))  # là où on la lit
     assert _expose(client, "console_reseau_fermer").status_code == 303 and not read("console_mcp_network")
     _expose(client, "console_reseau_ouvrir")
-    assert _expose(client, "console_fermer").status_code == 303 and not read("console_mcp_token")
+    assert _expose(client, "console_fermer").status_code == 303 and not read("console_mcp_digest")
     assert not read("console_mcp_network")  # fermer le jeton la ferme au réseau
     alone = _expose(client, "console_reseau_ouvrir")
     assert "la console n'a pas de jeton" in html_of(client.get(alone.headers["location"]))
@@ -232,4 +236,4 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
                    "console.mcp.pret.retirer"):
         assert action in actions, action
     refused = client.post(f"{BASE}/exposer", data={"csrf": "faux", "faire": "console_jeton"}, follow_redirects=False)
-    assert refused.status_code == 303 and not read("console_mcp_token")
+    assert refused.status_code == 303 and not read("console_mcp_digest")

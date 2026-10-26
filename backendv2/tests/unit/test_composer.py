@@ -3,6 +3,7 @@ change, coupe de l'historique avec hystérésis, section trop sensible bloquée.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -13,6 +14,7 @@ from mika.kernel.prompt import (
     CONTEXT_FOOTER,
     CONTEXT_HEADER,
     INTERLOCUTOR,
+    TRIM_MARK,
     Budget,
     ChatPrompt,
     ChatTurn,
@@ -290,3 +292,29 @@ def test_what_the_episode_is_about_is_cut_first_but_never_out_of_sight(key):
     assert size >= subject.floor_chars and "filler" in trace.trimmed + tuple(k for k, _ in trace.dropped)
     bare, _ = rendered(replace(subject, floor_chars=0))
     assert bare < subject.floor_chars  # le plancher est ce qui la garde
+
+
+def test_a_cited_text_is_cut_at_a_boundary_never_inside_a_word():
+    """``cited`` coupait à 4 000 caractères au milieu d'un mot ou d'un nombre (le modèle compléterait le demi-fait) ;
+    la coupe se fait à une frontière — une ligne entière quand il y en a, sinon un mot entier."""
+    lines = cited("\n".join(f"ligne {i} : " + "x" * 40 for i in range(50)), limit=300)
+    body = lines.split("\n", 1)[1]
+    assert body.endswith(TRIM_MARK) and len(body) <= 300 + len(TRIM_MARK)
+    kept = body[: -len(TRIM_MARK)]
+    assert kept.endswith("x" * 40) and all(line.startswith("> ligne") for line in kept.splitlines())
+    words = cited(" ".join(f"mot{i}" for i in range(500)), limit=200)
+    kept = words.split("\n", 1)[1][: -len(TRIM_MARK)]
+    assert re.fullmatch(r"> (?:mot\d+ )*mot\d+", kept) and len(kept) <= 200
+
+
+def test_the_last_user_turn_is_never_empty():
+    """Une initiative sans consigne dont tout le volatile est coupé finissait sur un tour de l'assistant (le
+    fournisseur écarte un bloc vide), refusé par l'API. Le mot du silence, donné par l'appelant, tient la place."""
+    turns = (ChatTurn("user", "salut", id=1), ChatTurn("assistant", "coucou", id=2))
+    assert ChatPrompt("s", "", turns, "", silence="(silence)").chat_messages()[-1] == {"role": "user",
+                                                                                      "content": "(silence)"}
+    assert ChatPrompt("s", "", turns, "").chat_messages()[-1]["content"] == ""  # sans mot donné : rien à inventer
+    prompt, _ = _compose([ME, (HISTORY, SectionBody(turns))], message="", silence="(silence)")
+    assert prompt.chat_messages()[-1] == {"role": "user", "content": "(silence)"}
+    prompt, _ = _compose([ME, (HISTORY, SectionBody(turns))], message="tu es là ?", silence="(silence)")
+    assert prompt.chat_messages()[-1] == {"role": "user", "content": "tu es là ?"}

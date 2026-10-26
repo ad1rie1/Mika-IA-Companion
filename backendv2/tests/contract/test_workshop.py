@@ -71,6 +71,14 @@ def test_an_ambiguous_edit_fails_instead_of_guessing(tmp_path):
     assert go(ws.read(1, "a.py")) == "x = 3\n"
 
 
+def test_the_cage_forbids_nested_user_namespaces_and_the_root_is_hers_alone(tmp_path):
+    ws = BwrapWorkshop(tmp_path / "ateliers", bwrap="/usr/bin/bwrap")
+    root = ws._open(3)
+    assert (tmp_path / "ateliers").stat().st_mode & 0o777 == 0o700  # des dépôts, des données personnelles
+    args = ws._sandbox(root, ["true"], "")
+    assert "--disable-userns" in args and args.index("--disable-userns") > args.index("--unshare-all")
+
+
 def test_without_bubblewrap_nothing_runs(tmp_path):
     ws = BwrapWorkshop(tmp_path, bwrap="")
     r = go(ws.run(1, ["python3", "-c", "print('hors de la cage')"]))
@@ -89,7 +97,16 @@ def test_a_program_sees_neither_the_server_secrets_nor_the_network_nor_the_disk(
     ws = BwrapWorkshop(tmp_path / "ateliers")
     env = go(ws.run(1, ["python3", "-c", "import os; print(sorted(os.environ.items()))"]))
     assert env.ok and "CANARI" not in env.stdout and "MIKA_ATELIER" in env.stdout
-    net = go(ws.run(1, ["python3", "-c", "import socket; socket.create_connection(('1.1.1.1', 53), 2)"]))
+    # une oreille sur la boucle locale de l'hôte : la cage a la sienne, vide — joindre l'hôte doit échouer même sans
+    # Internet sur la machine (un test qui visait 1.1.1.1 passait à vide hors ligne, audit du 2026-10-26)
+    ear = socket.socket()
+    ear.bind(("127.0.0.1", 0))
+    ear.listen(1)
+    port = ear.getsockname()[1]
+    try:
+        net = go(ws.run(1, ["python3", "-c", f"import socket; socket.create_connection(('127.0.0.1', {port}), 2)"]))
+    finally:
+        ear.close()
     assert not net.ok
     home = os.path.expanduser("~")
     disk = go(ws.run(1, ["python3", "-c", f"open({home + '/mika-evasion.txt'!r}, 'w').write('x')"]))

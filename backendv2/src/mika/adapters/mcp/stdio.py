@@ -89,6 +89,7 @@ class Launcher:
         network = "isolated" if spec.network == "isole" else ""
         if network and not (box.pasta and box.ip and box.sh):
             raise McpError(NO_NETWORK)
+        cage.private_root(self.root)  # ``mcp/`` : les dossiers des serveurs, à elle seule
         home = self.home(name)
         home.mkdir(parents=True, exist_ok=True)
         exe = self._visible(spec.command.strip(), home)

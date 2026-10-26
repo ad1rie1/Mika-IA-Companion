@@ -31,11 +31,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import logging
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,6 +49,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
+from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.push import key_from
@@ -89,6 +92,15 @@ FILES_RATE = (60, 60.0)
 #: en ``application/octet-stream`` : rien de ce qu'elle envoie ne s'exécute dans une page
 SAFE_MIMES = frozenset({"text/plain", "text/markdown", "text/csv", "application/json", "image/png", "image/jpeg",
                         "image/webp", "image/gif", "application/pdf"})
+#: le corps JSON d'une route ordinaire (connexion, premier compte, jeton, notifications, décision, appareil) : au
+#: plus tant d'octets, 413 au-delà — ni Starlette ni uvicorn ne bornent un corps
+BODY_MAX_BYTES = 64 * 1024
+#: un appareil (``/api/perceptions``) : tant de signaux par fenêtre (secondes) ; les appareils retenus sont bornés
+#: comme les adresses de ``LoginThrottle`` (un nom d'appareil se choisit librement)
+SENSED_RATE = (30, 60.0)
+#: les en-têtes qu'un mandataire pose ; sans ``--behind-proxy``, ils trahissent un mandataire non déclaré
+PROXY_HEADERS = (b"x-forwarded-for", b"x-real-ip", b"forwarded", b"via")
+_PROXY_SAID: set[str] = set()  # l'avertissement du mandataire non déclaré : une fois par processus
 #: un réveil par API (ADR 0068) : la taille d'une requête au plus (le JSON d'un service, GitHub par exemple, ADR 0117),
 #: et les échecs d'authentification tolérés par IP
 WAKE_MAX_BYTES = 512 * 1024
@@ -142,6 +154,10 @@ class WebConfig:
     #: échecs de connexion tolérés par IP, tous noms confondus, dans la fenêtre
     login_ip_failures: int = 20
     login_window_s: float = 60.0
+    #: le code de premier démarrage (``app/server.py`` le tire et l'écrit au journal) : créer le premier compte depuis
+    #: une autre machine que celle du serveur l'exige — le premier arrivé sur le réseau ne devient pas opérateur
+    #: (audit du 2026-10-26) ; vide : pas de code (tests, un montage sans ``serve``)
+    bootstrap_code: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -191,11 +207,74 @@ def bearer(header: str | None) -> str:
     return value.strip() if scheme.lower() == "bearer" else ""
 
 
-def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict[str, Any]:
+class PayloadTooLarge(Exception):
+    """Un corps au-delà de sa borne : la route répond 413 (``too_large``, posé par ``create_app`` pour les routes
+    ordinaires ; les portes des services le font elles-mêmes, avec leurs en-têtes)."""
+
+
+async def read_bounded(request: Request, limit: int) -> bytes:
+    """Le corps d'une requête, borné à ``limit`` octets : un ``Content-Length`` au-delà, ou un flux (un envoi par
+    morceaux, sans longueur annoncée) qui le dépasse, lèvent ``PayloadTooLarge`` avant d'avoir tout gardé."""
+    try:
+        size = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        size = 0
+    if size > limit:
+        raise PayloadTooLarge
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise PayloadTooLarge
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def too_large(request: Request, exc: Exception) -> Response:
+    return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers={"Cache-Control": "no-store"})
+
+
+class UndeclaredProxy:
+    """Sans ``--behind-proxy``, une requête qui porte un en-tête de mandataire est dite une fois au journal (par
+    processus) : derrière un mandataire non déclaré, l'étranglement par adresse verrait tous les clients en 127.0.0.1
+    et les cookies partiraient sans ``Secure``."""
+
+    def __init__(self, app: ASGIApp, cfg: WebConfig) -> None:
+        self.app = app
+        self.cfg = cfg
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket") and not self.cfg.behind_proxy and not _PROXY_SAID:
+            names = {k for k, _ in scope.get("headers", ())}
+            seen = [h.decode() for h in PROXY_HEADERS if h in names]
+            if seen:
+                _PROXY_SAID.add("proxy")
+                log.warning("mandataire non déclaré : lance avec --behind-proxy (une requête de %s porte %s ; sans lui, "
+                            "l'étranglement par adresse voit tout le monde ici et les cookies partent sans Secure)",
+                            (scope.get("client") or ("?",))[0], ", ".join(seen))
+        await self.app(scope, receive, send)
+
+
+def from_this_machine(request: Request) -> bool:
+    """La requête vient-elle de la machine du serveur (l'adresse que le serveur voit : derrière un mandataire déclaré,
+    celle du client) ? Elle seule crée le premier compte sans le code de premier démarrage."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost")
+
+
+def bootstrap_code_required(request: Request, cfg: WebConfig) -> bool:
+    return bool(cfg.bootstrap_code) and not from_this_machine(request)
+
+
+def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts, *, code_required: bool = False) -> dict[str, Any]:
     if account is None:
-        return {"authenticated": False, "auth_required": cfg.auth_required, "needs_bootstrap": accounts.count() == 0}
+        needs = accounts.count() == 0
+        return {"authenticated": False, "auth_required": cfg.auth_required, "needs_bootstrap": needs,
+                "bootstrap_code_required": needs and code_required}
     return {
         "authenticated": True, "auth_required": cfg.auth_required, "needs_bootstrap": False,
+        "bootstrap_code_required": False,
         "username": account.username, "display_name": account.display_name, "person_id": account.handle,
         "operator": account.operator,
     }
@@ -212,7 +291,7 @@ def native_token(headers: Any) -> str:
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
-               sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None,
+               sensor_digest: Callable[[], str] | None = None, wakeup: wakeup_p.WakeGate | None = None,
                teams: teams_p.TeamsGate | None = None, push_ready: Callable[[], bool] | None = None,
                phone: phone_p.PhoneGate | None = None) -> Starlette:
     cfg = cfg or WebConfig()
@@ -247,9 +326,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return JSONResponse({"error": "Requête refusée (CSRF)."}, status_code=403)
 
     async def body(request: Request) -> dict[str, Any]:
+        """Le JSON d'une route ordinaire, borné (``BODY_MAX_BYTES`` ; au-delà, ``PayloadTooLarge`` → 413) ;
+        illisible, ou pas un objet : ``{}``."""
         try:
-            data = json.loads(await request.body() or b"{}")
-        except ValueError:
+            data = json.loads(await read_bounded(request, BODY_MAX_BYTES) or b"{}")
+        except (ValueError, RecursionError):
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -269,7 +350,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             if found is not None:
                 report |= {"client": accounts.token_client(found[1]), "token_id": found[1]}
             return JSONResponse(report, headers={"Cache-Control": "no-store"})
-        return with_csrf(request, JSONResponse(_whoami(account_of(request), cfg, accounts)))
+        return with_csrf(request, JSONResponse(_whoami(account_of(request), cfg, accounts,
+                                                       code_required=bootstrap_code_required(request, cfg))))
 
     async def login(request: Request) -> Response:
         if not csrf_ok(request):
@@ -293,6 +375,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if accounts.count() > 0:
             return JSONResponse({"error": "Un compte existe déjà : connecte-toi."}, status_code=409)
         data = await body(request)
+        if bootstrap_code_required(request, cfg) and not hmac.compare_digest(str(data.get("code") or "").strip(),
+                                                                             cfg.bootstrap_code):
+            # depuis une autre machine : le code écrit au journal du serveur prouve qu'on est chez soi
+            return JSONResponse({"error": "Le code de premier démarrage ne correspond pas : il est dans le journal "
+                                          "du serveur."}, status_code=403)
         username = str(data.get("username") or "").strip()
         password = str(data.get("password") or "")
         if not username:
@@ -451,14 +538,16 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
             "Content-Security-Policy": "sandbox; default-src 'none'"})
 
-    sensed: dict[str, deque[float]] = defaultdict(deque)
+    sensed = LoginThrottle(*SENSED_RATE)  # une fenêtre par appareil, autant d'appareils au plus que d'adresses
 
     async def perceptions(request: Request) -> Response:
         """Un appareil signale quelque chose : ``{"device", "text", "pertinence", "emotion", "sensitivity"}``.
-        Un opérateur connecté (avec CSRF), ou un jeton porteur (``mika sensors token``)."""
-        token = sensor_token() if sensor_token is not None else ""
-        given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        by_token = bool(token) and bool(given) and secrets.compare_digest(token, given)
+        Un opérateur connecté (avec CSRF), ou un jeton porteur (``mika sensors token`` : seule son empreinte est
+        gardée, celle du jeton présenté lui est comparée)."""
+        expected = sensor_digest() if sensor_digest is not None else ""
+        given = bearer(request.headers.get("authorization"))
+        by_token = bool(expected) and bool(given) \
+            and hmac.compare_digest(hashlib.sha256(given.encode()).hexdigest(), expected)
         if not by_token:
             if not csrf_ok(request):
                 return csrf_refused()
@@ -472,13 +561,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         text = str(data.get("text") or "").strip()
         if not text or len(text) > 400:
             return JSONResponse({"error": "Un texte, 400 caractères au plus."}, status_code=400)
-        window = sensed[device]
-        now = time.monotonic()
-        while window and now - window[0] >= 60:
-            window.popleft()
-        if len(window) >= 30:
+        if sensed.blocked(device):
             return JSONResponse({"error": "Trop de signaux."}, status_code=429, headers={"Retry-After": "60"})
-        window.append(now)
+        sensed.fail(device)  # un signal de plus dans sa fenêtre
         try:
             pertinence = float(data.get("pertinence", 0.5))
             sensitivity = int(data.get("sensitivity", 1))
@@ -507,16 +592,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429,
                                 headers={**headers, "Retry-After": "60"})
         try:
-            size = int(request.headers.get("content-length") or 0)
-        except ValueError:
-            size = 0
-        if size > WAKE_MAX_BYTES:
+            raw = await read_bounded(request, WAKE_MAX_BYTES)  # borné aussi sans Content-Length
+        except PayloadTooLarge:
             return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
-        raw = b""
-        async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
-            raw += chunk
-            if len(raw) > WAKE_MAX_BYTES:
-                return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
         try:
             data = json.loads(raw) if raw else None
         except (ValueError, RecursionError):  # illisible (et, selon la version de Python, trop imbriqué)
@@ -558,16 +636,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         data: Any = {}
         if request.method == "POST":
             try:
-                size = int(request.headers.get("content-length") or 0)
-            except ValueError:
-                size = 0
-            if size > TEAMS_MAX_BYTES:
+                raw = await read_bounded(request, TEAMS_MAX_BYTES)  # borné aussi sans Content-Length
+            except PayloadTooLarge:
                 return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
-            raw = b""
-            async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
-                raw += chunk
-                if len(raw) > TEAMS_MAX_BYTES:
-                    return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
             try:
                 data = json.loads(raw or b"{}")
             except (ValueError, RecursionError):  # illisible (et, selon la version de Python, trop imbriqué)
@@ -610,16 +681,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if found is None or not found[0].active:
             return JSONResponse({"error": "Jeton invalide."}, status_code=401, headers=headers)
         try:
-            size = int(request.headers.get("content-length") or 0)
-        except ValueError:
-            size = 0
-        if size > PHONE_MAX_BYTES:
+            raw = await read_bounded(request, PHONE_MAX_BYTES)  # borné aussi sans Content-Length
+        except PayloadTooLarge:
             return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
-        raw = b""
-        async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
-            raw += chunk
-            if len(raw) > PHONE_MAX_BYTES:
-                return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
         try:
             data = json.loads(raw or b"{}")
         except (ValueError, RecursionError):
@@ -728,10 +792,12 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         WebSocketRoute("/ws", ws),
         *extra_routes,
     ]
-    middleware = [Middleware(CORSMiddleware, allow_origins=list(cfg.origins), allow_credentials=True,
+    middleware = [Middleware(UndeclaredProxy, cfg=cfg),
+                  Middleware(CORSMiddleware, allow_origins=list(cfg.origins), allow_credentials=True,
                              allow_methods=["GET", "POST"], allow_headers=["content-type", "x-csrftoken",
                                                                            "authorization", "idempotency-key"])]
-    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
+    return Starlette(routes=routes, middleware=middleware, lifespan=lifespan,
+                     exception_handlers={PayloadTooLarge: too_large})
 
 
 class _Session:

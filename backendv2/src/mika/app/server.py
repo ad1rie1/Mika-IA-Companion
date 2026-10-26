@@ -8,8 +8,9 @@ sur ``/ws/world`` (ADR 0051) avec un jeton de son compte : ``python -m mika toke
 create <compte> --label "Unity"``.
 
 Les journaux ne portent jamais un secret : un jeton passé en paramètre d'URL
-(un flux), un ``Bearer`` sont masqués ; ``httpx``/``httpcore`` ne parlent qu'en
-avertissement.
+(un flux), un ``Bearer``, un ``Basic``, ses propres jetons (``mw_``, ``mtk_``,
+``mwk_``, ``mlp_``), un ``X-Gitlab-Token``, un ``MYSQL_PWD=`` sont masqués ;
+``httpx``/``httpcore`` ne parlent qu'en avertissement.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import secrets
 import shutil
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -32,7 +34,7 @@ from starlette.routing import Mount, Route
 
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
-from mika.adapters.forge import ForgeBases, ForgeHost
+from mika.adapters.forge import ForgeBases, ForgeHost, serving_on
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -108,6 +110,12 @@ _SECRETS = (
     (re.compile(r"([?&](?:token|key|api[_-]?key|access_token|secret|password|passwd|auth|sig|signature)=)"
                 r"[^&\s\"'#]+", re.IGNORECASE), r"\1…"),
     (re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
+    (re.compile(r"(Basic\s+)[A-Za-z0-9+/=]{16,}", re.IGNORECASE), r"\1…"),
+    # ses propres jetons, par leur préfixe : client natif ``mw_``, extension Teams ``mtk_``, réveil ``mwk_``, prêt
+    # ``mlp_`` (16 caractères au moins après : un ``mw_`` dans un mot reste lisible)
+    (re.compile(r"\b(m(?:w|tk|wk|lp)_)[A-Za-z0-9_-]{16,}"), r"\1…"),
+    (re.compile(r"(X-Gitlab-Token\W{1,4})[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
+    (re.compile(r"(MYSQL_PWD=)[^\s\"'`,;)}\]]+"), r"\1…"),
 )
 
 
@@ -478,6 +486,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                                                     live.inputs()))
         await live.settings.open()
         await live.accounts.open()
+        if live.accounts.count() == 0 and web.bootstrap_code:
+            log.warning("aucun compte n'existe : le premier (opérateur) se crée sur la page de connexion. Depuis une "
+                        "autre machine que celle-ci, elle demande le code de premier démarrage : %s", web.bootstrap_code)
         await register_accounts(kernel, live.accounts)  # ceux d'avant, et ceux créés hors ligne (mika account)
         live.accounts.on_change = lambda: register_accounts(kernel, live.accounts)
         await live.calls.open()
@@ -529,6 +540,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
     inspector, console_pages = assemble(
         InspectorDeps(kernel, live.accounts, live.settings, gateway.traces, port=port, calls=live.calls,
+                      bootstrap_code=web.bootstrap_code,
                       after_decision=hub.refresh_panels, reconfigure=live.reconfigure,
                       reports=reports, navigation=NAVIGATION, menu=MENU,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,
@@ -546,7 +558,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     now_page, people_page = NowPage(console_pages.ui), PeoplePage(console_pages.ui)
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
-    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages,
+    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
     lent = Mount(LENT_PREFIX, app=lending.app())
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
@@ -554,7 +566,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp, lent,
                                     world_hub.route()],
-                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
+                      preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
                       phone=phone), live
 
@@ -606,12 +618,14 @@ async def _root(request: Request) -> Response:
     return RedirectResponse(f"{CONSOLE_PREFIX}/", status_code=303)
 
 
-def web_config(*, origins: Sequence[str] = (), cookie_secure: bool = False, behind_proxy: bool = False) -> WebConfig:
+def web_config(*, origins: Sequence[str] = (), cookie_secure: bool = False, behind_proxy: bool = False,
+               bootstrap_code: str = "") -> WebConfig:
     """La configuration web d'un déploiement : les origines du frontend (par défaut celles du
-    développement), des cookies ``Secure`` derrière TLS, l'adresse du client lue chez le mandataire."""
+    développement), des cookies ``Secure`` derrière TLS, l'adresse du client lue chez le mandataire, et le code de
+    premier démarrage que le premier compte créé depuis une autre machine doit donner."""
     clean = tuple(dict.fromkeys(o.strip().rstrip("/") for o in origins if o.strip()))
     return WebConfig(origins=clean or DEV_ORIGINS, cookie_secure=cookie_secure or behind_proxy,
-                     behind_proxy=behind_proxy)
+                     behind_proxy=behind_proxy, bootstrap_code=bootstrap_code)
 
 
 def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/v2"),
@@ -628,10 +642,14 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
         raise SystemExit(2)
     if problem:
         log.warning("persona : %s", problem)
+    # le premier compte : depuis cette machine, rien à prouver ; depuis une autre, ce code, tiré à chaque démarrage
+    # et écrit au journal tant qu'aucun compte n'existe (audit du 2026-10-26 : le premier arrivé devenait opérateur)
     app, live = build(data, reports=reports, web=web_config(origins=origins, cookie_secure=cookie_secure,
-                                                            behind_proxy=behind_proxy))
+                                                            behind_proxy=behind_proxy,
+                                                            bootstrap_code=secrets.token_urlsafe(9)))
     live.relay_base = relay_base(host, port)
     live.console_url = console_url(host, port)
+    serving_on(port)  # une app de la Forge ne joint pas Mika elle-même, même par une adresse relayée
     log.info("console : %s/", live.console_url)
     # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau. Les en-têtes de
     # mandataire ne sont crus que derrière un mandataire déclaré (local) ; ailleurs, l'adresse vue fait foi.

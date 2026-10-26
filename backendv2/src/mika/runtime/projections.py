@@ -43,8 +43,14 @@ def suffix(version: int) -> str:
     return f"_v{version}"
 
 
+#: une reconstruction T0 relit le journal par lots de tant d'événements (jamais tout le fil en mémoire)
+T0_BATCH = 256
+
+
 async def ensure_t0(mind: Mind) -> list[str]:
-    """Crée (ou reconstruit si leur version a changé) les projections T0."""
+    """Crée (ou reconstruit si leur version a changé) les projections T0 — par lots, la version écrite en dernier :
+    une reconstruction interrompue n'a pas sa version, elle se refait au démarrage suivant (audit du 2026-10-26 :
+    charger des années de fil en une liste faisait un pic de mémoire au démarrage)."""
     rebuilt: list[str] = []
     for spec in mind.registry.projectors.values():
         if spec.tier is not Tier.T0:
@@ -54,17 +60,25 @@ async def ensure_t0(mind: Mind) -> list[str]:
         current = int(rows[0][0]) if rows else None
         if current == spec.version:
             continue
-        events = [with_content(mind, mind.decode(s)) for s in mind.store.read(after=0, types=spec.types)]
 
-        def rebuild(sql: Sql, spec: ProjectorSpec = spec, events: list[Event[Any]] = events, current=current) -> None:
+        def begin(sql: Sql, spec: ProjectorSpec = spec, current: int | None = current) -> None:
             if current is not None:
                 spec.projector.drop(sql, "")
             spec.projector.create(sql, "")
-            if events:
-                spec.projector.apply(sql, events, "")
-            upsert(sql, MindMeta, {"key": f"t0:{spec.name}", "value": str(spec.version)}, keys=["key"])
+            # la version d'avant ne vaut plus : sans version tant que la reconstruction n'est pas au bout
+            sql.execute(delete(MindMeta).where(MindMeta.key == f"t0:{spec.name}"))
 
-        await mind.store.run_mind(rebuild)
+        await mind.store.run_mind(begin)
+        batch: list[Event[Any]] = []
+        for stored in mind.store.read(after=0, types=spec.types):
+            batch.append(with_content(mind, mind.decode(stored)))
+            if len(batch) >= T0_BATCH:
+                await mind.store.run_mind(lambda sql, s=spec, b=batch: s.projector.apply(sql, b, ""))
+                batch = []
+        if batch:
+            await mind.store.run_mind(lambda sql, s=spec, b=batch: s.projector.apply(sql, b, ""))
+        await mind.store.run_mind(lambda sql, s=spec: upsert(
+            sql, MindMeta, {"key": f"t0:{s.name}", "value": str(s.version)}, keys=["key"]))
         rebuilt.append(spec.name)
     return rebuilt
 

@@ -79,6 +79,9 @@ class BootReport:
     replayed: int
     stale: tuple[str, ...]
     head: int
+    #: les trous vus en relisant le journal : (premier ``seq`` manquant, ``seq`` relu ensuite) — un journal sain n'en
+    #: a aucun (audit du 2026-10-26)
+    gaps: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(slots=True)
@@ -121,6 +124,9 @@ class Mind:
         self.unsnapshotted: set[str] = set()
         #: les types d'événements relus sans propriétaire (une faculté retirée de la composition)
         self.retired: set[str] = set()
+        #: les trous du journal vus à la dernière relecture (``boot``, ``rebuild``) : (premier ``seq`` manquant,
+        #: ``seq`` relu ensuite) ; la santé les montre
+        self.gaps: tuple[tuple[int, int], ...] = ()
 
     # ── lecture ────────────────────────────────────────────────────────────
     @property
@@ -169,19 +175,34 @@ class Mind:
             root = self._rebuild_from_genesis(root, stale, upto=root.seq)
         replayed = 0
         skip = {n for n, f in self.registry.faculties.items() if f.volatile}
+        gaps = _Gaps(root.seq)
         for stored in self.store.read(after=root.seq):
+            gaps.see(stored.seq)
             root = self._apply(root, self.decode(stored), skip=skip, live=False)
             replayed += 1
         self._root = root
         self._last_snapshot_seq = snap.seq if snap else 0
         self._last_snapshot_at = snap.at if snap else 0
+        self._note_gaps(gaps.found)
         if self.retired:
             log.warning("types d'événements retirés (relus sans effet) : %s", ", ".join(sorted(self.retired)))
             self.trace("retired", types=sorted(self.retired))
         if append_boot:
             await self.append([BOOT.draft(code=self.code, last_at=root.at)], emitter="kernel", origin=Origin.KERNEL,
                               correlation="boot")
-        return BootReport(snap.seq if snap else 0, replayed, tuple(sorted(stale)), self.head)
+        return BootReport(snap.seq if snap else 0, replayed, tuple(sorted(stale)), self.head, gaps.found)
+
+    def _note_gaps(self, gaps: tuple[tuple[int, int], ...]) -> None:
+        """Un journal relu avec des trous (un ``seq`` qui saute) : des événements ont disparu — une réparation à la
+        main, une base recopiée à moitié. L'état relu n'est plus celui vécu : dit en anomalie et montré par la santé,
+        jamais tu."""
+        self.gaps = gaps
+        if not gaps:
+            return
+        shown = ", ".join(f"{a}–{b - 1}" if b - 1 > a else str(a) for a, b in gaps[:10])
+        log.warning("journal : %d trou(s) de séquence (%s%s)", len(gaps), shown, "…" if len(gaps) > 10 else "")
+        self.anomalies.append(f"journal : {len(gaps)} trou(s) de séquence ({shown})")
+        self.trace("gaps", count=len(gaps), first=list(gaps[:10]))
 
     def _check_round_trip(self) -> None:
         """Chaque tranche doit pouvoir aller en instantané et en revenir : vérifié au démarrage sur son état
@@ -367,14 +388,17 @@ class Mind:
             head_root = self._root
             now = self.clock.now()
 
-            # 1. dédoublonnage
+            # 1. dédoublonnage — une requête pour tout le lot quand le magasin le sait (audit du 2026-10-26)
             fresh: list[Draft[Any]] = []
             existing: list[int] = []
             seen_keys: set[tuple[str, str]] = set()
+            keyed = [(d.type.name, d.dedupe_key) for d in drafts if d.dedupe_key is not None]
+            finder = getattr(self.store, "find_dedupes", None) if keyed else None
+            known: dict[tuple[str, str], int] | None = finder(keyed) if finder is not None else None
             for d in drafts:
                 if d.dedupe_key is not None:
                     k = (d.type.name, d.dedupe_key)
-                    prev = self.store.find_dedupe(*k)
+                    prev = known.get(k) if known is not None else self.store.find_dedupe(*k)
                     if prev is not None:
                         existing.append(prev)
                         continue
@@ -588,12 +612,15 @@ class Mind:
         h1 = self.head
         shadow = new_reg.initial_root()
         count = 0
+        gaps = _Gaps(0)
         for stored in self.store.read(after=0, upto=h1):
+            gaps.see(stored.seq)
             shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, skip=skip, live=False,
                                  registry=new_reg)
             count += 1
             if count % 2000 == 0:
                 await asyncio.sleep(0)
+        self._note_gaps(gaps.found)
         async with self._lock:
             for stored in self.store.read(after=h1, upto=self.head):
                 shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, skip=skip,
@@ -612,7 +639,7 @@ class Mind:
             self.registry = new_reg
             if mismatches:
                 self.trace("rebuild_mismatch", owners=mismatches)
-        return {"closure": sorted(closure), "mismatches": mismatches, "replayed": count}
+        return {"closure": sorted(closure), "mismatches": mismatches, "replayed": count, "gaps": list(gaps.found)}
 
     @staticmethod
     def _decode_with(registry: Registry, stored: StoredEvent) -> Event[Any]:
@@ -623,6 +650,21 @@ class Mind:
 
 def event_type_names(types: Iterable[EventType[Any]]) -> set[str]:
     return {t.name for t in types}
+
+
+class _Gaps:
+    """Les trous d'une relecture du journal : chaque ``seq`` doit suivre le précédent de un."""
+
+    __slots__ = ("_expected", "found")
+
+    def __init__(self, after: int) -> None:
+        self._expected = after + 1
+        self.found: tuple[tuple[int, int], ...] = ()
+
+    def see(self, seq: int) -> None:
+        if seq != self._expected:
+            self.found = (*self.found, (self._expected, seq))
+        self._expected = seq + 1
 
 
 def _retainted(current: FrozenDict[str, int], shadow: FrozenDict[str, int],

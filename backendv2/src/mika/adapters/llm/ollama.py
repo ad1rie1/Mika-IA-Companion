@@ -7,10 +7,17 @@ Contrat :
 
 - ``think`` coupé par défaut : un modèle de raisonnement réfléchit sinon avant
   le premier mot de sa réponse (mesuré sur gemma4:12b : 1,5 s sans, 27 s avec) ;
+- ``num_ctx`` = le contexte déclaré du fournisseur (``context_tokens``) : sans
+  lui, le serveur applique sa fenêtre par défaut (souvent 4 096) et tronque le
+  prompt en silence ;
 - ``num_predict`` = le plus petit de ``max_reply_tokens`` et du ``max_tokens``
-  de la requête : un modèle qui ne s'arrête pas ne tient pas un tour ouvert —
-  sauf quand la passerelle redemande une sortie coupée (``RETRY_AFTER_CUT``) :
-  le plafond propre est alors levé, sinon la reprise serait coupée au même mot ;
+  de la requête **pour les rôles voix** (une parole qui ne s'arrête pas ne tient
+  pas un tour ouvert) ; une sortie structurée (l'extraction demande 6 000 jetons)
+  garde le plafond de sa requête — sauf quand la passerelle redemande une sortie
+  coupée (``RETRY_AFTER_CUT``) : le plafond propre est alors levé, sinon la
+  reprise serait coupée au même mot ;
+- ``tool_choice="none"`` (le tour de clôture) : les outils ne partent pas,
+  Ollama n'a pas de ``tool_choice`` ;
 - un délai explicite côté client HTTP (``HTTP_TIMEOUT_S``) : la passerelle borne
   l'appel, mais un serveur muet ne doit pas tenir une connexion sans limite ;
 - un refus du paramètre ``think`` (message qui le nomme, ou 400) est rejoué une
@@ -24,6 +31,7 @@ Contrat :
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from mika.adapters.llm.openai_compat import (
@@ -34,7 +42,8 @@ from mika.adapters.llm.openai_compat import (
     system_text,
     tool_content,
 )
-from mika.ports.llm import RETRY_AFTER_CUT, LLMRequest, LLMResponse, ToolCall, Usage
+from mika.ports.llm import RETRY_AFTER_CUT, TOOL_CHOICE_NONE, LLMRequest, LLMResponse, ToolCall, Usage
+from mika.vocab.episodes import VOICE_ROLES
 
 try:
     import ollama
@@ -45,6 +54,8 @@ log = logging.getLogger("mika.llm.ollama")
 
 #: délai du client HTTP (secondes) : au-delà de tout délai de la passerelle, jamais infini
 HTTP_TIMEOUT_S = 900.0
+#: la fenêtre de contexte envoyée au serveur quand le fournisseur ne la dit pas (celle de ``BackendSpec``)
+DEFAULT_CONTEXT_TOKENS = 24_000
 
 
 def ollama_messages(req: LLMRequest) -> list[dict[str, Any]]:
@@ -92,15 +103,23 @@ class OllamaBackend:
         temperature: float | None = None,
         name: str = "ollama",
         client: Any = None,
+        context_tokens: int = DEFAULT_CONTEXT_TOKENS,
+        voice_roles: Iterable[str] | None = None,
     ) -> None:
         if max_reply_tokens < 1:
             raise ValueError(f"max_reply_tokens doit être positif (reçu {max_reply_tokens})")
+        if context_tokens < 1:
+            raise ValueError(f"context_tokens doit être positif (reçu {context_tokens})")
         self.name = name
         self.model = model
         self.host = host
         self.think = think
         self.max_reply_tokens = max_reply_tokens
         self.temperature = temperature
+        #: la fenêtre de contexte du serveur (``num_ctx``), celle que le budget du fournisseur suppose
+        self.context_tokens = context_tokens
+        #: les rôles où c'est elle qui parle : les seuls que ``max_reply_tokens`` plafonne
+        self.voice_roles = frozenset(str(r) for r in (VOICE_ROLES if voice_roles is None else voice_roles))
         if client is None:
             if ollama is None:
                 raise RuntimeError(f"{type(self).__name__} exige le paquet « ollama » (extra « llm »).")
@@ -114,8 +133,10 @@ class OllamaBackend:
 
     def payload(self, req: LLMRequest) -> dict[str, Any]:
         """Les arguments de ``AsyncClient.chat``."""
-        cap = req.max_tokens if req.meta.get(RETRY_AFTER_CUT) else min(req.max_tokens, self.max_reply_tokens)
-        options: dict[str, Any] = {"num_predict": cap}
+        cap = req.max_tokens
+        if req.role in self.voice_roles and not req.meta.get(RETRY_AFTER_CUT):
+            cap = min(req.max_tokens, self.max_reply_tokens)
+        options: dict[str, Any] = {"num_predict": cap, "num_ctx": self.context_tokens}
         if self.temperature is not None:
             options["temperature"] = self.temperature
         body: dict[str, Any] = {
@@ -124,7 +145,7 @@ class OllamaBackend:
             "think": self.think,
             "options": options,
         }
-        if req.tools:
+        if req.tools and req.tool_choice != TOOL_CHOICE_NONE:
             body["tools"] = function_tools(req.tools)
         return body
 
@@ -192,11 +213,14 @@ class OllamaCloudBackend(OllamaBackend):
         temperature: float | None = None,
         name: str = "ollama_cloud",
         client: Any = None,
+        context_tokens: int = DEFAULT_CONTEXT_TOKENS,
+        voice_roles: Iterable[str] | None = None,
     ) -> None:
         self.api_key = (api_key or "").strip()
         super().__init__(
             model, host=host, think=think, max_reply_tokens=max_reply_tokens,
-            temperature=temperature, name=name, client=client,
+            temperature=temperature, name=name, client=client, context_tokens=context_tokens,
+            voice_roles=voice_roles,
         )
 
     @property

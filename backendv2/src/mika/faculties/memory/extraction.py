@@ -595,11 +595,12 @@ def parse(resp: LLMResponse) -> Extraction | None:
         setattr(out, key, kept)
     for key in ("confidentiel", "situations_finies"):
         items = raw.get(key, [])
-        if items is None:
-            items = []
-        if not isinstance(items, list) or any(type(i) is not int or i <= 0 for i in items):
-            return None
-        setattr(out, key, items)
+        # des numéros écrits « #12 », en texte ou un seul hors liste passent (``lenient_ids``) ; ce qui ne se lit pas
+        # est signalé, jamais toute la fenêtre jetée pour lui quand souvenirs et croyances étaient valides
+        ids = [i for i in Extraction.lenient_ids(items) if i > 0]
+        if items and not ids:
+            out.issues.append(f"{key}: identifiants illisibles")
+        setattr(out, key, ids)
     return out
 
 

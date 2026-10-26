@@ -28,11 +28,13 @@ import queue
 import re
 import secrets
 import threading
+import time
+from collections import deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, Engine, bindparam, delete, func, insert, select, update
+from sqlalchemy import Connection, Engine, bindparam, delete, event, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from mika.adapters.database import (
@@ -75,6 +77,10 @@ SNAPSHOTS_KEPT = 3
 #: (l'identifiant de l'événement en fait partie). Ce qui n'est pas parti (en attente, en cours, échoué, interrompu,
 #: périmé, vu) reste, quel que soit son âge (ADR 0059).
 OUTBOX_DONE_KEPT_US = 30 * DAY
+#: une lecture plus longue que ça (millisecondes) est notée : la boucle d'événements l'a attendue — les lectures du
+#: magasin sont synchrones, et certaines parcourent le journal (audit du 2026-10-26) ; la santé les montre
+SLOW_READ_MS = 50.0
+SLOW_READS_KEPT = 200
 
 
 class SqlConn:
@@ -331,6 +337,8 @@ class SqlStore:
         self._last_at = 0
         self._sealed = False
         self._on_append: list[Callable[[AppendBatch], None]] = []
+        #: les lectures lentes : (instant monotone, millisecondes, début de la requête)
+        self.slow_reads: deque[tuple[float, float, str]] = deque(maxlen=SLOW_READS_KEPT)
 
     # ── cycle de vie ──
     def _open_writers(self) -> tuple[Kept, Kept]:
@@ -346,12 +354,36 @@ class SqlStore:
         self._writer.start()
         self._mind_reader = self.mind_target.engine(autocommit=True)
         self._views_reader = self.views_target.engine(autocommit=True)
+        for engine in (self._mind_reader, self._views_reader):
+            self._watch(engine)
         self._mind_r = Kept(self._mind_reader.connect())
         self._views_r = Kept(self._views_reader.connect())
         row = self._mind_r.get().execute(select(JournalEvent.seq, JournalEvent.at)
                                    .order_by(JournalEvent.seq.desc()).limit(1)).first()
         if row:
             self._head, self._last_at = int(row[0]), int(row[1])
+
+    def _watch(self, engine: Engine) -> None:
+        """Mesure chaque requête de lecture ; au-delà de ``SLOW_READ_MS``, elle est gardée pour la santé."""
+        slow = self.slow_reads
+
+        @event.listens_for(engine, "before_cursor_execute")
+        def _before(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
+            conn.info["mika_read_t0"] = time.monotonic()
+
+        @event.listens_for(engine, "after_cursor_execute")
+        def _after(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
+            t0 = conn.info.pop("mika_read_t0", None)
+            if t0 is None:
+                return
+            ms = (time.monotonic() - t0) * 1000.0
+            if ms >= SLOW_READ_MS:
+                slow.append((time.monotonic(), ms, " ".join(statement.split())[:160]))
+
+    def recent_slow_reads(self, window_s: float = 600.0) -> list[tuple[float, str]]:
+        """Les lectures lentes de la dernière fenêtre : (millisecondes, requête), les plus longues d'abord."""
+        now = time.monotonic()
+        return sorted(((ms, sql) for at, ms, sql in self.slow_reads if now - at <= window_s), reverse=True)
 
     async def close(self) -> None:
         self._writer.stop()
@@ -510,6 +542,25 @@ class SqlStore:
         rows = _P_DEDUPE.fetch(self._r(), {"type": type_name, "key": fit(key, DEDUPE_KEY_MAX)})
         row = rows[0] if rows else None
         return int(row[0]) if row else None
+
+    def find_dedupes(self, keys: Collection[tuple[str, str]]) -> dict[tuple[str, str], int]:
+        """Les couples (type, clé) déjà écrits, en une requête par lot de 500 (les types et les clés en ``IN``, puis
+        le couple exact revérifié ici : portable, et sans produit cartésien dangereux — le résultat est borné par
+        les lignes de dédoublonnage qui portent l'une de ces clés)."""
+        wanted = list(dict.fromkeys(keys))
+        out: dict[tuple[str, str], int] = {}
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
+            fitted = {(t, fit(k, DEDUPE_KEY_MAX)): (t, k) for t, k in chunk}
+            rows = self._r().execute(
+                select(JournalDedupe.type, JournalDedupe.key, JournalDedupe.seq)
+                .where(JournalDedupe.type.in_(sorted({t for t, _ in fitted})),
+                       JournalDedupe.key.in_(sorted({k for _, k in fitted})))).all()
+            for t, k, seq in rows:
+                original = fitted.get((t, k))
+                if original is not None:
+                    out[original] = int(seq)
+        return out
 
     def read(
         self, after: int = 0, types: Collection[str] | None = None, upto: int | None = None

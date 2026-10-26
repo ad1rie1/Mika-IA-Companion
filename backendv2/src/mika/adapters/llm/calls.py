@@ -26,7 +26,8 @@ TABLE = "llm_calls"
 KEEP_DAYS = 30
 _PRUNE_EVERY = 500
 _COLUMNS = ("at", "role", "backend", "model", "lane", "priority", "latency_us", "wait_us", "input_tokens",
-            "output_tokens", "cache_read", "cache_write", "cost_usd", "outcome", "call_id", "correlation")
+            "output_tokens", "cache_read", "cache_write", "cost_usd", "outcome", "call_id", "correlation",
+            "estimated_input_tokens")
 
 
 class CallRow(ViewsBase):
@@ -52,6 +53,9 @@ class CallRow(ViewsBase):
     outcome: Mapped[str] = mapped_column(LongText)
     call_id: Mapped[str] = mapped_column(Key(255))
     correlation: Mapped[str] = mapped_column(Key(255), default="")
+    #: l'entrée telle que le budget l'estimait, à côté de l'entrée réelle (audit du 2026-10-26) ; un défaut côté base :
+    #: une table d'avant reçoit la colonne pleine de zéros
+    estimated_input_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 _FIELDS = tuple(getattr(CallRow, c) for c in _COLUMNS)

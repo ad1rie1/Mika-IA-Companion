@@ -37,6 +37,10 @@ PROJECTION_LAG_MAX = 500
 OUTBOX_AGE_MAX_US = 5 * MINUTE
 #: échecs d'affilée d'un processus avant de le dire
 PROCESS_FAILURES_MAX = 3
+#: une lecture du magasin plus longue que ça est dite ; plus longue que ``SLOW_READ_STALL_MS``, la santé se dégrade
+#: (elle a retenu la boucle d'événements — audit du 2026-10-26)
+SLOW_READ_MS = 50.0
+SLOW_READ_STALL_MS = 200.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +77,24 @@ def _journal(kernel: Kernel) -> Check:
     snap = mind.store.latest_snapshot()
     behind = mind.head - (snap.seq if snap else 0)
     limit = 4 * max(1, kernel.deps.snapshot_every)
+    detail: tuple[str, ...] = (f"instantané au seq {snap.seq}" if snap else "aucun instantané",)
+    if mind.gaps:
+        # des événements ont disparu du journal : l'état relu n'est plus celui vécu (audit du 2026-10-26)
+        holes = ", ".join(f"{a}–{b - 1}" if b - 1 > a else str(a) for a, b in mind.gaps[:10])
+        return Check("journal", KO, f"{len(mind.gaps)} trou(s) de séquence dans le journal relu",
+                     (*detail, f"seq manquants : {holes}{'…' if len(mind.gaps) > 10 else ''} — "
+                               "`mika replay --verify` les liste tous"))
     state = DEGRADED if behind > limit else OK
-    return Check("journal", state, f"{mind.head} événements, dernier instantané {behind} derrière",
-                 (f"instantané au seq {snap.seq}" if snap else "aucun instantané",))
+    # des lectures qui ont retenu la boucle d'événements (le magasin les mesure, s'il sait le faire)
+    recent = getattr(mind.store, "recent_slow_reads", None)
+    slow = recent() if callable(recent) else []
+    if slow:
+        worst_ms, sql = slow[0]
+        detail += (f"{len(slow)} lecture(s) de plus de {SLOW_READ_MS:.0f} ms ces 10 min, la plus longue "
+                   f"{worst_ms:.0f} ms : {sql[:100]}",)
+        if worst_ms >= SLOW_READ_STALL_MS:
+            state = DEGRADED
+    return Check("journal", state, f"{mind.head} événements, dernier instantané {behind} derrière", detail)
 
 
 def _slices(kernel: Kernel) -> Check:

@@ -78,6 +78,9 @@ class InspectorDeps:
     #: le menu de l'opératrice (``app/console_menu.py``) : la navigation de la console
     menu: Sequence[MenuGroup]
     tz: ZoneInfo | None = None
+    #: le code de premier démarrage (``app/server.py``, écrit au journal) : créer le premier compte depuis une autre
+    #: machine que celle du serveur le demande — vide : pas de code (tests, ligne de commande), audit du 2026-10-26
+    bootstrap_code: str = ""
     #: le port d'entrée (décider d'un effet, santé)
     port: Any = None
     #: le registre durable des appels de modèle (``adapters/llm/calls.py``)

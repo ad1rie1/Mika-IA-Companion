@@ -31,7 +31,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy, CompositionError, Registry
 from mika.kernel.schedule import next_after, parse
-from mika.ports.llm import LLMRequest, LLMResponse, PersonaRender
+from mika.ports.llm import RETRY_AFTER_CUT, LLMRequest, LLMResponse, PersonaRender
 from mika.runtime import health
 from mika.runtime.scheduler import _BoundedLLM
 from mika.sim.clock import run_virtual
@@ -321,6 +321,39 @@ async def test_a_process_model_call_is_released_as_soon_as_it_returns():
     llm = _BoundedLLM(session, asyncio.Semaphore(1))
     await llm.call(LLMRequest(role="extract", call_id="memory.consolidate:1", system_stable=""))
     assert session.released == ["memory.consolidate:1"]
+
+
+class _Cutting(_Session):
+    """Un fournisseur qui coupe chaque appel d'outil à son plafond."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: list[LLMRequest] = []
+
+    async def call(self, req: LLMRequest) -> LLMResponse:
+        self.seen.append(req)
+        return LLMResponse("", stop="max_tokens", truncated_tool_call=True)
+
+
+class _Floored(_Cutting):
+    """Le même, qui réfléchit : il enverrait 16 384 jetons quoi qu'on lui demande (Claude 5.x)."""
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        return max(req.max_tokens, 16_384)
+
+
+async def test_a_process_call_cut_at_the_same_effective_cap_is_not_asked_again():
+    """Audit du 2026-10-26 (L2) : la sortie d'un processus coupée sur un appel d'outil est redemandée au plafond
+    doublé — sauf quand le fournisseur enverrait le même plafond effectif : la même coupure, un appel payé pour rien."""
+    cutting = _Cutting()
+    await _BoundedLLM(cutting, asyncio.Semaphore(1)).call(
+        LLMRequest(role="extract", call_id="memory.consolidate:2", system_stable="", max_tokens=1000))
+    assert [r.max_tokens for r in cutting.seen] == [1000, 2000] and cutting.seen[1].meta[RETRY_AFTER_CUT]
+    floored = _Floored()
+    resp = await _BoundedLLM(floored, asyncio.Semaphore(1)).call(
+        LLMRequest(role="extract", call_id="memory.consolidate:3", system_stable="", max_tokens=1000))
+    assert resp.truncated_tool_call and [r.max_tokens for r in floored.seen] == [1000]
+    assert floored.released == ["memory.consolidate:3"]
 
 
 # ── KER-6 : un instantané impossible ──────────────────────────────────────

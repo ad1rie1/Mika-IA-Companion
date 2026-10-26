@@ -61,7 +61,16 @@ from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import DONE, NOTE, Activity
-from mika.ports.llm import PREEMPTED, Held, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
+from mika.ports.llm import (
+    DEADLINE_AT,
+    PREEMPTED,
+    Held,
+    LLMGateway,
+    LLMRequest,
+    Message,
+    PersonaRender,
+    ToolDecl,
+)
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
 from mika.runtime.tools import (
@@ -80,6 +89,7 @@ from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 from mika.vocab import flows
 from mika.vocab.episodes import Role
 from mika.vocab.flows import Author
+from mika.vocab.phrasebook import phrase
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
@@ -118,6 +128,11 @@ Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
 #: … pour un brouillon (un courriel a sa formule d'appel et sa formule de politesse) : plus de marge
 _DRAFT_SLACK = 400
+#: les faits d'un premier jet qu'une récriture doit garder : ses nombres (une température, une heure, un montant, une
+#: date — espaces, y compris insécables, et ponctuation finale ôtés) et ses liens
+_NUMBER = re.compile(r"\d[\d\s.,:%°]*")
+_URL = re.compile(r"https?://\S+")
+_URL_TAIL = ".,;:!?)»\"'"
 #: sans réglage des autrices, le chat garde l'autrice d'avant elles : le cadre seul, ni codes ni exemple (ADR 0124)
 _CHAT_AUTHOR = Author(flows.CHAT, "")
 #: un brouillon que le modèle a mis entre trois accents graves
@@ -130,6 +145,21 @@ _PASS_SPARE_S = 5.0
 def _no_tools(spec: Any, call_id: str) -> ToolContext:
     """Le contexte d'outil d'une passe qui n'en offre aucun : jamais demandé."""
     raise RuntimeError("une passe sans outil n'appelle pas d'outil")
+
+
+def facts_of(text: str) -> frozenset[str]:
+    """Les faits d'un texte, normalisés : ses nombres sans blancs ni ponctuation finale (« 14 °C » → « 14°C »,
+    « 1 234,50 » → « 1234,50 »), ses liens sans la ponctuation qui les suit."""
+    numbers = {n for raw in _NUMBER.findall(text) if (n := re.sub(r"\s", "", raw).rstrip(".,:"))}
+    urls = {u.rstrip(_URL_TAIL) for u in _URL.findall(text)}
+    return frozenset(numbers | urls)
+
+
+def keeps_facts(draft: str, text: str) -> bool:
+    """Une récriture garde les faits du premier jet : chacun de ses nombres et de ses liens s'y retrouve. Sinon
+    (« 14 °C à Montaigu, averses à 16 h » devenu « il fera moche cet aprèm », une URL altérée), le premier jet
+    part : l'autrice ne voit pas les résultats des outils qui l'ont fondé."""
+    return facts_of(draft) <= facts_of(text)
 
 
 def is_silence(text: str) -> bool:
@@ -458,6 +488,9 @@ class EpisodeRunner:
                     message=message, budget=budget,
                     reserved=_reserved(persona, more, declared) + envelope if policy.role is not None else 0,
                     typed_chars=req.typed_chars if message == req.message else None,
+                    # jamais un dernier tour utilisateur vide (une initiative sans consigne, tout le volatile coupé) :
+                    # l'API refuse une conversation qui finit sur un tour de l'assistant
+                    silence=phrase("llm.thread.silence"),
                 )
                 report.trace = trace
                 ep.seen.update(_composition(req, audience, policy.role, message, trace, enrich),
@@ -477,8 +510,11 @@ class EpisodeRunner:
                     messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
                     tools=declared, max_tokens=policy.max_tokens, persona=persona,
                     lane=policy.lane, priority=req.priority,
+                    # le délai de chaque appel : celui de l'épisode (le mode pro a quinze minutes, pas les deux de sa
+                    # voie), et jamais plus que ce qui lui reste (``DEADLINE_AT``)
+                    deadline_s=policy.deadline_s,
                     meta={"episode": eid, "kind": req.kind, "target": req.target, "sections": trace.included,
-                          "audience_level": audience.level},
+                          "audience_level": audience.level, **_deadline_meta(ep)},
                 )
 
                 ep.seen.update(_request(llm_req))
@@ -507,6 +543,15 @@ class EpisodeRunner:
                     await self._settle(ep, _failed(loop.error), detail=_describe(loop.error))
                     return
                 report.tools = loop.calls
+                if loop.stop == "refusal":
+                    # un classifieur du fournisseur a arrêté la réponse (cyber, bio…) : une panne, dite avec sa
+                    # catégorie — jamais un silence choisi, que l'arbitre et les hésitations liraient comme une
+                    # abstention (ADR 0054) ; ce qu'il avait commencé à écrire n'est pas sa parole
+                    category = loop.last.stop_detail if loop.last is not None else ""
+                    ep.seen["refus"] = {"categorie": category, "texte": loop.text}
+                    await self._settle(ep, Outcome.FAILED,
+                                       detail=f"refus du modèle ({category or 'catégorie inconnue'})")
+                    return
                 text, annotations = self._parse(loop.text, persona.name if persona is not None else "",
                                                 markdown=ep.mode is not None and ep.mode.markdown)
                 if policy.max_paragraphs:
@@ -844,7 +889,8 @@ class EpisodeRunner:
         system, message, keep = asked
         req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
-                         priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "naturel"})
+                         priority=llm_req.priority, deadline_s=llm_req.deadline_s,
+                         meta={**dict(llm_req.meta), "passe": "naturel"})
         again = await self._extra_pass(
             ep, lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
             label="seconde passe : appel du modèle")
@@ -856,6 +902,11 @@ class EpisodeRunner:
         polished, _annotations = self._parse(kept, name)
         polished = polished.strip()
         if not polished or is_silence(polished) or len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
+            return text
+        if not keeps_facts(text, polished):
+            # l'autrice n'a pas vu les résultats des outils : une température, une heure, un lien du premier jet
+            # qui manquent au texte récrit, et c'est le premier jet qui part
+            ep.seen["naturel"] = {"premier_jet": text, "autrice": author.key, "ecartee": "faits du premier jet perdus"}
             return text
         ep.seen["naturel"] = {"premier_jet": text, "autrice": author.key}
         return polished
@@ -882,7 +933,8 @@ class EpisodeRunner:
         done = ep.seen.setdefault("autrice", [])
         req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#autrice{len(done)}", system_stable=system,
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
-                         priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "autrice", "flux": flow})
+                         priority=llm_req.priority, deadline_s=llm_req.deadline_s,
+                         meta={**dict(llm_req.meta), "passe": "autrice", "flux": flow})
         again = await self._extra_pass(
             ep, lambda: run_tool_loop(gateway, req, {}, _no_tools, max_turns=1, clock=self.mind.clock.now),
             label="autrice d'un brouillon : appel du modèle")
@@ -891,7 +943,8 @@ class EpisodeRunner:
         written = again.text.strip()
         fenced = _FENCED.match(written)
         written = fenced.group(1).strip() if fenced else written
-        if not written or is_silence(written) or len(written) > len(text) * _POLISH_GROWTH + _DRAFT_SLACK:
+        if not written or is_silence(written) or len(written) > len(text) * _POLISH_GROWTH + _DRAFT_SLACK \
+                or not keeps_facts(text, written):
             return text
         done.append({"flux": flow, "autrice": author.key, "premier_jet": text})
         return written
@@ -1099,8 +1152,15 @@ def _request(llm_req: LLMRequest) -> dict[str, Any]:
         "tools": [d.name for d in llm_req.tools],
         "persona": {"hash": persona.hash, "depth": persona.depth} if persona is not None else None,
         "call_id": llm_req.call_id, "max_tokens": llm_req.max_tokens, "lane": llm_req.lane,
-        "priority": llm_req.priority,
+        "priority": llm_req.priority, "deadline_s": llm_req.deadline_s,
     }
+
+
+def _deadline_meta(ep: _Live) -> dict[str, Any]:
+    """L'instant où l'épisode s'arrête (``DEADLINE_AT``), pour que la passerelle ne donne à aucun appel plus que ce
+    qui reste devant lui ; rien sans échéance posée."""
+    when = ep.deadline.when() if ep.deadline is not None else None
+    return {DEADLINE_AT: when} if when is not None else {}
 
 
 def _results(loop: LoopResult) -> dict[str, Any]:

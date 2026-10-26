@@ -35,6 +35,7 @@ from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
 from mika.faculties.affect.params import AffectParams, derive
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
@@ -544,3 +545,22 @@ def _withdrawn(s: AffectState, frame: Frame, row: RowView) -> Modulation:
 # ── Inspection ────────────────────────────────────────────────────────────
 
 from mika.faculties.affect import inspect as _inspect  # noqa: E402,F401 — contributions : ses vues
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_addresses(s: AffectState, gone: set[str]) -> AffectState:
+    return replace(s, stances=s.stances.without(lambda k: k in gone))
+
+
+@AFFECT.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: AffectState, e, cx) -> AffectState:
+    """Une inconnue de passage oubliée : plus de posture envers son adresse."""
+    return _without_addresses(s, {e.data.handle, e.data.person})
+
+
+@AFFECT.reducer(SUBJECT_FORGOTTEN, reads=[identity_c.HANDLES])
+def _person_forgotten(s: AffectState, e, cx) -> AffectState:
+    """L'oubli d'une personne emporte sa posture envers chacune de ses adresses."""
+    subject = e.data.subject
+    return _without_addresses(s, {subject, *cx.facts.get(identity_c.HANDLES(subject))})

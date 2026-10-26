@@ -85,6 +85,9 @@ def make(tmp_path) -> Iterator[Any]:
         roles = {str(r): "fake" for r in Role if r is not Role.POLISH}  # sans seconde passe
         gw = gateway or LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(), voice_roles=frozenset(),
                                             slots={"fake": 4}))
+        # l'horloge est réelle : la nuit, sa réponse à un inconnu attendrait son réveil (ADR 0036) — le protocole
+        # se teste à toute heure (un test qui veut cette attente passe son propre ``reply_wait``)
+        kw.setdefault("reply_wait", None)
         app, live = build(tmp_path / "data", web=WebConfig(), gateway=gw, embedder=HashEmbedder(),
                           arbitration=ArbitrationPolicy(), **kw)
         client = TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN})

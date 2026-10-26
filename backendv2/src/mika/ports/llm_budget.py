@@ -37,8 +37,18 @@ class LLMLimits:
     def output(self, requested: int) -> int:
         return min(requested, self.max_output_tokens) if self.max_output_tokens else requested
 
-    def budget(self, requested: int) -> Budget:
-        return Budget(max_tokens=max(0, self.context_tokens - self.output(requested)),
+    def reserve(self, requested: int, effective: int | None = None) -> int:
+        """La sortie à réserver dans le contexte : le plafond demandé (borné par ``max_output_tokens``), relevé jusqu'au
+        plafond que le fournisseur enverra vraiment (``effective`` : un modèle qui réfléchit a son plancher) — sans
+        jamais prendre plus de la moitié du contexte, pour qu'un fournisseur à petite fenêtre déclarée (24 000 par
+        défaut) garde de quoi lire son prompt ; au-delà, c'est ``context_tokens`` qu'il faut relever."""
+        asked = self.output(requested)
+        if effective is None or effective <= asked:
+            return asked
+        return max(asked, min(effective, self.context_tokens // 2))
+
+    def budget(self, requested: int, effective: int | None = None) -> Budget:
+        return Budget(max_tokens=max(0, self.context_tokens - self.reserve(requested, effective)),
                       chars_per_token=self.chars_per_token)
 
     def overhead(self, req: LLMRequest) -> int:
@@ -54,9 +64,11 @@ class LLMLimits:
         return (len(req.system_stable) + len(req.system_volatile) + tools + calls + self.overhead(req)
                 + sum(len(m.content) + len(m.tool_call_id or "") + len(m.name or "") for m in req.messages))
 
-    def fit(self, req: LLMRequest) -> LLMRequest:
+    def fit(self, req: LLMRequest, effective: int | None = None) -> LLMRequest:
+        """``effective`` : le plafond de sortie que le fournisseur enverra vraiment (un modèle qui réfléchit a un
+        plancher au-dessus de ``req.max_tokens``) — la sortie est réservée dessus, jamais sur le seul plafond demandé."""
         req = replace(req, max_tokens=self.output(req.max_tokens))
-        ceiling = self.budget(req.max_tokens).max_chars
+        ceiling = self.budget(req.max_tokens, effective).max_chars
         excess = self.size(req) - ceiling
         if excess <= 0:
             return req

@@ -29,7 +29,8 @@ WORD = re.compile(r"[A-Za-zÀ-ÿ']+")
 FRENCH = re.compile(r"\b(tu|te|ta|ton|tes|elle|la|le|les|de|des|du|un|une|et|est|pas|ne|qui|que|à|ce|sa|son|ses)\b",
                     re.I)
 
-#: ce qui restait le 2026-10-06, trié (console, journal, listes de mots, serveur autonome) — ne peut que baisser
+#: ce qui restait le 2026-10-06, trié (console, journal, listes de mots, serveur autonome) — ne peut que baisser,
+#: et le test l'exige : un compte sous son plafond fait baisser le plafond (2026-10-26)
 CEILING = {
     "faculties/goals/tend.py": 3,  # raisons de clôture, gardées au journal
     "faculties/goals/tools.py": 1,  # aperçu d'une capacité (console)
@@ -46,19 +47,18 @@ CEILING = {
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
-    "plugins/forge/__init__.py": 5,  # capacité d'installation (console)
+    "plugins/forge/__init__.py": 4,  # capacité d'installation (console)
     # mode d'emploi de forge_help (exemples de code) — à migrer ; +2 le 2026-10-12 : le manifeste et le code de
     # l'exemple de veille (ADR 0104), du code qu'un test exécute, pas une phrase qu'elle lit (son texte est dans
     # la voix, forge.guide.veille)
     "plugins/forge/guide.py": 11,
     "plugins/forge/views.py": 6,  # rendus de console, aussi lus par forge_test — à migrer
     "plugins/forge/calls.py": 2,  # capacité forge.call et note d'un refus au délai (console, ADR 0133)
-    "plugins/mcp/__init__.py": 2,  # aperçu d'une capacité (console)
+    "plugins/mcp/__init__.py": 1,  # aperçu d'une capacité (console)
     "plugins/mcp/calls.py": 5,  # capacité et résumé (console)
     "plugins/rss/__init__.py": 16,  # panneaux de console
     "plugins/sensors/__init__.py": 6,  # panneaux de console
     "plugins/wakeup/prompt.py": 6,  # « pourquoi pas maintenant » (console)
-    "plugins/web/__init__.py": 1,  # aperçu d'une capacité (console)
     "plugins/web/serveur.py": 30,  # serveur autonome dans sa cage : il ne peut pas lire la voix
 }
 
@@ -101,18 +101,24 @@ def prose_in(path: Path) -> list[tuple[int, str]]:
 
 
 def test_no_new_prose_outside_her_voice() -> None:
-    grew = []
+    grew, shrank = [], []
     for root in ROOTS:
         for path in sorted((SRC / root).rglob("*.py")):
             rel = str(path.relative_to(SRC))
             if SKIPPED_FILES.search(rel):
                 continue
             found = prose_in(path)
-            if len(found) > CEILING.get(rel, 0):
+            ceiling = CEILING.get(rel, 0)
+            if len(found) > ceiling:
                 sample = "; ".join(f"l.{line} « {text[:60]} »" for line, text in found[:3])
-                grew.append(f"{rel} : {len(found)} chaînes (plafond {CEILING.get(rel, 0)}) — {sample}")
+                grew.append(f"{rel} : {len(found)} chaînes (plafond {ceiling}) — {sample}")
+            elif len(found) < ceiling:
+                # le plafond « ne peut que baisser » : quand une phrase migre, on le baisse ici — sinon il resterait
+                # une marge où de la prose neuve passerait sans bruit (audit du 2026-10-26)
+                shrank.append(f"{rel} : {len(found)} chaînes pour un plafond de {ceiling} — baisse-le")
     assert not grew, ("De la prose écrite en dur : une phrase qu'elle lit va dans persona/voix.yaml (ADR 0071), un "
                       "texte de console dans un fichier de console.\n" + "\n".join(grew))
+    assert not shrank, "Des plafonds trop hauts (de la prose a migré) :\n" + "\n".join(shrank)
 
 
 def test_the_ceiling_names_real_files() -> None:

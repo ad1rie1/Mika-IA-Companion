@@ -26,3 +26,19 @@ def test_a_tag_before_her_words_cuts_nothing():
     assert parse("Coucou toi. [EMOTION:happy:0.4]")[0] == "Coucou toi."
     two = "Premier paragraphe.\n\nDeuxième paragraphe, sans balise au milieu.\n[EMOTION: calm 0.3]"
     assert parse(two)[0] == "Premier paragraphe.\n\nDeuxième paragraphe, sans balise au milieu."
+
+
+def test_her_tags_are_read_whatever_their_spelling():
+    """« [EN FACE : …] », « [EN-FACE: …] » ouvrent une ligne de balises comme « [EN_FACE: …] » (la graphie que lit
+    ``reading.TAG``) : ce qui suit n'est pas dit non plus."""
+    leaked = "Courage pour la journée.\n[EN FACE : tired 0.4]\nCorrection de balise : [EN-FACE: anxious 0.2]"
+    text, notes = parse(leaked)
+    assert text == "Courage pour la journée." and "their_feeling" in notes
+
+
+def test_what_she_says_after_a_tag_in_the_middle_is_kept():
+    """Une balise au milieu, puis elle reprend sa parole : ses phrases comptent, ses balises se lisent où qu'elles
+    soient. Seul ce qui n'est pas une phrase (« Correction de balise : ») tombe."""
+    text, notes = parse("Aïe, mal dormi.\n[EMOTION: sad 0.4]\nBon, du coup tu viens demain ? Dis-moi.")
+    assert text.startswith("Aïe, mal dormi.") and text.endswith("Bon, du coup tu viens demain ? Dis-moi.")
+    assert notes["emotion"] == "sad:0.400" and notes["question"] == "1"

@@ -10,9 +10,12 @@ la mémoire replonge ce qui manque au premier passage.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from mika.adapters.vectors.embedders import DEFAULT_MODEL, SentenceEmbedder
+
+log = logging.getLogger("mika.embeddings")
 
 MODEL_ENV = "MIKA_EMBEDDINGS_MODEL"
 DEVICE_ENV = "MIKA_EMBEDDINGS_DEVICE"
@@ -26,6 +29,15 @@ def configured() -> tuple[str, str]:
     return model, device if device in DEVICES else "cpu"
 
 
+#: les modèles pour lesquels les seuils de similarité de sa mémoire ont été réglés au banc (ADR 0110, 0111) : avec un
+#: autre, le rappel n'est pas garanti — dit au démarrage plutôt que découvert sur une mémoire qui rappelle mal
+#: (audit du 2026-10-26)
+TUNED_MODELS = ("google/embeddinggemma-2",)
+
+
 def embedder() -> SentenceEmbedder:
     model, device = configured()
+    if model not in TUNED_MODELS:
+        log.warning("plongements : « %s » n'est pas un modèle réglé au banc (%s) : le rappel de sa mémoire et ses seuils "
+                    "ne sont pas garantis — MIKA_EMBEDDINGS_MODEL, ADR 0109", model, ", ".join(TUNED_MODELS))
     return SentenceEmbedder(model, device=device)

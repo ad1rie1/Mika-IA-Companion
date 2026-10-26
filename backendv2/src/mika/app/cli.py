@@ -146,8 +146,10 @@ async def replay_verify(data: Path) -> dict[str, object]:
 
     await restore()
     await full.close()
+    # un ``seq`` qui saute : des événements ont disparu (audit du 2026-10-26) — le rejeu depuis la genèse les voit tous
     return {"identiques": d1 == d2, "instantané": r1.snapshot_seq, "rejoués_depuis_genèse": r2.replayed,
-            "tête": r2.head}
+            "tête": r2.head, "contigu": not r2.gaps,
+            "trous": [f"{a}–{b - 1}" if b - 1 > a else str(a) for a, b in r2.gaps]}
 
 
 async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
@@ -896,7 +898,7 @@ def _run(argv: list[str] | None) -> int:
     if args.cmd == "replay":
         out = asyncio.run(replay_verify(args.data))
         print(json.dumps(out, ensure_ascii=False))
-        return 0 if out["identiques"] else 1
+        return 0 if out["identiques"] and out["contigu"] else 1
     if args.cmd == "rebuild":
         print(json.dumps(asyncio.run(rebuild(args.data, args.owners)), ensure_ascii=False))
         return 0

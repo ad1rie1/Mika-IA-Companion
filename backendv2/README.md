@@ -31,9 +31,12 @@ serveur par dossier : un second est refusé.
 Ouvre `http://127.0.0.1:8001/` (qui mène à `/inspecteur/`).
 
 1. **Le compte opérateur.** Sans aucun compte, la page de connexion le crée :
-   le premier compte est opérateur — il ouvre la console et le chat. (En
-   ligne de commande, serveur arrêté : `mika account <nom> --operator`, le mot
-   de passe est demandé sans écho.)
+   le premier compte est opérateur — il ouvre la console et le chat. Depuis
+   une autre machine que celle du serveur, la page demande le **code de premier
+   démarrage** écrit dans le journal du serveur au lancement (le premier arrivé
+   sur le réseau ne devient pas opérateur). (En ligne de commande, serveur
+   arrêté : `mika account <nom> --operator`, le mot de passe est demandé sans
+   écho.)
 2. **Un fournisseur de modèles.** Réglages › Modèles de texte › Ajouter :
    son type (Claude, Claude Code, compatible OpenAI, Ollama, Ollama Cloud), le
    modèle, la clé s'il en faut une. **Le premier fournisseur déclaré la fait

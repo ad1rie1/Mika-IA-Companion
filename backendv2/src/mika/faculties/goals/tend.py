@@ -617,6 +617,8 @@ def _worn_out_at(g: Goal, p: Any) -> int | None:
     """L'instant où l'envie d'une exploration passe sous le seuil d'abandon."""
     if g.kind != c.EXPLORATION or g.desire <= p.abandon_below:
         return None if g.kind != c.EXPLORATION else g.desire_at
+    if p.abandon_below <= 0.0:
+        return None  # sans seuil, l'envie ne s'use jamais : rien à planifier (et pas de division par zéro)
     return g.desire_at + math.ceil(p.desire_half_life_us * math.log2(g.desire / p.abandon_below))
 
 

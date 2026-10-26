@@ -185,7 +185,9 @@ def _speaker_forgotten(s: TranscriptState, e, cx) -> TranscriptState:
     for person in [p for p in s.summaries if p.startswith("room:")
                    and (who in s.speakers.get(p, ()) or not s.speakers.get(p))]:
         s = _without(s, person)
-    return s
+    # et le résumé de son propre fil (son texte est déjà effacé par ses sujets) ; son dernier message et le dernier
+    # vers elle restent : un compte qui existe garde son fil (audit du 2026-10-26)
+    return _without(s, who)
 
 
 @TRANSCRIPT.reducer(rt.PERCEPTION_RECEIVED)
@@ -1294,3 +1296,12 @@ def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
 # l'avis de son opératrice sur ses réponses (ADR 0113) : l'action et sa vue, enregistrées sur la faculté
 from mika.faculties.transcript import actions as _actions  # noqa: E402, F401
 from mika.faculties.transcript import inspect as _inspect  # noqa: E402, F401
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+@TRANSCRIPT.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: TranscriptState, e, cx) -> TranscriptState:
+    """Une inconnue de passage oubliée : plus de dernier message d'elle ni vers elle, plus de résumé de son fil."""
+    person = e.data.person
+    return replace(_without(s, person), last_from=s.last_from.delete(person), last_to=s.last_to.delete(person))

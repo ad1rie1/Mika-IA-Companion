@@ -15,8 +15,9 @@ fonctions attendues, taille) est une politesse, pas la défense.
 **Son réseau est libre** (ADR 0105) : l'app n'a pas de réseau, elle demande
 ses requêtes à l'hôte (``api.http``, ``api.http_get``) — toute adresse
 d'Internet, toute méthode, ses en-têtes, les redirections suivies ; jamais
-cette machine ni le réseau local (chaque nom est résolu une fois et vérifié,
-à chaque saut). ``allowed_domains`` n'est plus qu'une indication.
+cette machine — ses propres adresses comprises, ni le port où Mika écoute —
+ni le réseau local (chaque nom est résolu une fois et vérifié, à chaque saut).
+``allowed_domains`` n'est plus qu'une indication.
 
 Le processus d'une app reste chaud entre deux appels ; une nouvelle version
 le remplace ; il est relancé s'il meurt.
@@ -53,7 +54,7 @@ import socket
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
 
+from mika.adapters import cage
 from mika.adapters.forge.bases import ForgeBases, SqlRefused
 from mika.adapters.forge.manifest import HANDLERS, coherence, lint, read_manifest, signatures
 from mika.ports.forge import (
@@ -152,6 +154,50 @@ _NAT64 = ipaddress.ip_network("64:ff9b::/96")
 HTTP_TIMEOUT_S = 15.0
 #: …ni plus que ça, même si elle le demande
 HTTP_TIMEOUT_MAX_S = 120.0
+#: les adresses de la machine elle-même sont relues au plus toutes les tant de secondes (une adresse qui apparaît —
+#: un câble branché, un VPN — est refusée au plus tard un peu après)
+LOCAL_REFRESH_S = 300.0
+
+IP = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+
+class LocalAddresses:
+    """Les adresses de la machine elle-même (v4 et v6, ``cage.all_host_addresses``), relues au plus toutes les
+    ``ttl_s`` secondes : une app ne joint ni Mika, ni MariaDB, ni SSH par l'adresse publique de l'hôte — pasta les
+    rend injoignables à l'atelier, ``resolve_public`` les refuse aux apps, qui n'ont pas de réseau à elles."""
+
+    def __init__(self, read: Callable[[], Iterable[IP]], *, ttl_s: float = LOCAL_REFRESH_S,
+                 monotonic: Callable[[], float] = time.monotonic) -> None:
+        self._read = read
+        self._ttl = ttl_s
+        self._now = monotonic
+        self._at: float | None = None
+        self._got: frozenset[IP] = frozenset()
+        self._lock = threading.Lock()
+
+    def get(self) -> frozenset[IP]:
+        with self._lock:
+            now = self._now()
+            if self._at is None or now - self._at >= self._ttl:
+                self._got = frozenset(self._read())
+                self._at = now
+            return self._got
+
+
+def _host_addresses() -> list[IP]:
+    ip = shutil.which("ip")
+    return cage.all_host_addresses(ip) if ip else []
+
+
+#: les adresses de l'hôte, et les ports où Mika écoute elle-même (``serving_on``, posé par ``serve``) : refusés
+LOCAL = LocalAddresses(_host_addresses)
+SERVER_PORTS: set[int] = set()
+
+
+def serving_on(port: int) -> None:
+    """Le serveur dit le port où il écoute : une app ne le joint pas, même sous une adresse qui n'est pas celle de la
+    machine (une box qui relaie ce port vers elle)."""
+    SERVER_PORTS.add(int(port))
 
 
 def is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -169,9 +215,14 @@ def is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return True
 
 
-def resolve_public(host: str, port: int = 443) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    """Résout ``host`` **une fois** : toutes ses adresses doivent être publiques (sinon ``ValueError``). On se
+def resolve_public(host: str, port: int = 443, *, local: Collection[IP] | None = None,
+                   server_ports: Collection[int] | None = None) -> list[IP]:
+    """Résout ``host`` **une fois** : toutes ses adresses doivent être publiques **et** ne pas être celles de la
+    machine (``local`` ; sinon ``LOCAL``, relues au plus toutes les ``LOCAL_REFRESH_S`` secondes), et ``port`` ne doit
+    pas être un de ceux où Mika écoute (``server_ports`` ; sinon ``SERVER_PORTS``) — sinon ``ValueError``. On se
     connecte ensuite à l'une d'elles, jamais à une seconde résolution (qui pourrait répondre autre chose)."""
+    if int(port) in (SERVER_PORTS if server_ports is None else set(server_ports)):
+        raise ValueError(f"le port {port} est celui du serveur lui-même : refusé")
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as exc:
@@ -179,6 +230,9 @@ def resolve_public(host: str, port: int = 443) -> list[ipaddress.IPv4Address | i
     ips = list(dict.fromkeys(ipaddress.ip_address(info[4][0].split("%", 1)[0]) for info in infos))
     if not ips or not all(is_global(ip) for ip in ips):
         raise ValueError(f"« {host} » est une adresse privée : refusée")
+    mine = LOCAL.get() if local is None else frozenset(local)
+    if any(ip in mine for ip in ips):
+        raise ValueError(f"« {host} » est cette machine : refusée")
     return ips
 
 
@@ -366,8 +420,7 @@ class ForgeHost:
                  http: Callable[[str, str, dict[str, str], bytes | None], Mapping[str, Any]] | None = None,
                  config: Callable[[str], Mapping[str, Any]] | None = None,
                  which: Callable[[str], str | None] = shutil.which, bases: ForgeBases | None = None) -> None:
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root = cage.private_root(Path(root))  # ``forge/`` : ses apps et leurs bases SQLite, à elle seule
         self.limits = limits
         self.bwrap = bwrap if bwrap is not None else which("bwrap")
         self.python = which("python3") or "/usr/bin/python3"
@@ -682,7 +735,10 @@ class ForgeHost:
 
     def _command(self, app: str) -> list[str]:
         assert self.bwrap
-        args = [self.bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--cap-drop", "ALL"]
+        # ``--disable-userns`` : aucun espace d'utilisateur imbriqué (ce qui tient la cage ne se refait pas dedans) ;
+        # il exige ``--unshare-user`` dit explicitement (``--unshare-all`` ne fait qu'essayer)
+        args = [self.bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user", "--disable-userns",
+                "--cap-drop", "ALL"]
         for d in _SYSTEM_DIRS:
             p = Path(d)
             if p.is_symlink():

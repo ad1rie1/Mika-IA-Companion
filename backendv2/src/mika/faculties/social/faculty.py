@@ -23,7 +23,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
-from mika.vocab.people import fold, is_identifiable
+from mika.vocab.people import fold, is_identifiable, key_concerns
 from mika.vocab.temperament import Temperament, around, lerp, shift
 
 KEEP_DAYS = 64
@@ -630,13 +630,36 @@ def _relations_recalled(s: SocialState, e, cx) -> SocialState:
     return replace(s, relations=relation_cache(relations, frozenset((subject, key) for subject, key, _ in e.data.edges)))
 
 
-@SOCIAL.reducer(SUBJECT_FORGOTTEN)
-def _forget_relations(s: SocialState, e, cx) -> SocialState:
-    subject = e.data.subject
+def _without_person(s: SocialState, subject: str, *, link_too: bool) -> SocialState:
+    """Ce qu'on a appris d'elle s'en va : ses liens dans le graphe, le compte de ce que la mémoire en tient. Avec
+    ``link_too`` (une inconnue de passage qui expire), son lien aussi — contact, salutations, profil, proximité
+    déclarée, ce qu'on a remarqué — ; à l'oubli d'une personne qui a un compte, le lien reste (sa proximité, son
+    rythme), son profil se montre oublié (audit du 2026-10-26)."""
     relations = FrozenDict((who, FrozenDict((key, edge) for key, edge in edges.items()
                                            if subject not in (edge.other, *edge.about, *edge.told_by)))
                            for who, edges in s.relations.items() if who != subject)
-    return replace(s, relations=FrozenDict((who, edges) for who, edges in relations.items() if edges))
+
+    def drop(k: object) -> bool:
+        return key_concerns(k, subject)
+
+    s = replace(s, relations=FrozenDict((who, edges) for who, edges in relations.items() if edges),
+                mentions=s.mentions.without(drop))
+    if not link_too:
+        return s
+    return replace(s, contacts=s.contacts.without(drop), greeted=s.greeted.without(drop),
+                   profiles=s.profiles.without(drop), declared=s.declared.without(drop),
+                   noticed=s.noticed.without(drop), rekindled=s.rekindled.without(drop),
+                   felt_levels=s.felt_levels.without(drop))
+
+
+@SOCIAL.reducer(SUBJECT_FORGOTTEN)
+def _forget_relations(s: SocialState, e, cx) -> SocialState:
+    return _without_person(s, e.data.subject, link_too=False)
+
+
+@SOCIAL.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: SocialState, e, cx) -> SocialState:
+    return _without_person(s, e.data.person, link_too=True)
 
 
 @SOCIAL.reducer(c.PROFILE_REVISED)

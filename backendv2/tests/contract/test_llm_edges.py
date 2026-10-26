@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import replace
 from types import SimpleNamespace
@@ -27,14 +28,25 @@ from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel
 
 from mika.adapters.llm.claude import ClaudeBackend
-from mika.adapters.llm.config import BackendSpec, LLMConfig, build_gateway
+from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend, build_gateway
 from mika.adapters.llm.gateway import Gateway, last_sentence, trim_speech
 from mika.adapters.llm.ollama import OllamaBackend
 from mika.adapters.llm.openai_compat import OpenAICompatBackend
 from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
-from mika.ports.llm import RETRY_AFTER_CUT, LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, Usage
+from mika.kernel.prompt import PromptBudgetError
+from mika.ports.llm import (
+    DEADLINE_AT,
+    RETRY_AFTER_CUT,
+    LLMRequest,
+    LLMResponse,
+    Message,
+    PersonaRender,
+    ToolCall,
+    Usage,
+)
+from mika.ports.llm_budget import LLMLimits
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 from tests.contract.test_llm_backends import (
     FakeAnthropic,
@@ -321,6 +333,9 @@ async def test_a_value_error_on_max_tokens_does_not_rename_the_parameter_for_lif
     ("claude-opus-4-1-20250805", 90.0),
     ("claude-opus-4-5-20251101", 30.0),
     ("claude-sonnet-5-5", 12.0),
+    ("claude-haiku-5-5", 0.6),               # 0,10 $ / 0,50 $ : dix fois moins que la famille 4.x
+    ("claude-haiku-5-5-20260401", 0.6),
+    ("claude-haiku-4-5", 6.0),
     ("claude-3-5-haiku-20241022", 4.8),
     ("claude-3-7-sonnet-20250219", 18.0),
     ("gpt-5", 11.25),
@@ -331,3 +346,104 @@ async def test_a_value_error_on_max_tokens_does_not_rename_the_parameter_for_lif
 ])
 def test_prices_of_dated_ids_and_current_families(model: str, cost: float):
     assert price_usd(model, Usage(1_000_000, 1_000_000), provider="x") == pytest.approx(cost)
+
+
+# ── Audit du 2026-10-26 : le délai de l'épisode, le plafond effectif, l'estimation ──
+
+
+class Slowish:
+    def __init__(self, delay: float) -> None:
+        self.name, self.delay = "slowish", delay
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        await asyncio.sleep(self.delay)
+        return LLMResponse("fini", model="m", usage=Usage(10, 2))
+
+
+async def test_a_call_takes_the_deadline_of_its_episode_not_of_its_lane():
+    """Le mode pro a quinze minutes ; chaque tour restait un appel borné aux 120 s de sa voie, et un tour qui
+    réfléchit puis écrit du code échouait. Le délai de la requête (``deadline_s``) l'emporte ; sans lui, celui de
+    la voie reste le défaut (les processus)."""
+    gw = Gateway({"s": Slowish(0.2)}, {"reply": "s", "pro": "s"}, clock=ManualClock(0),
+                 deadlines={"conversation": 0.05})
+    long = LLMRequest(role="pro", call_id="p#0", system_stable="s", lane="conversation", deadline_s=900.0)
+    assert (await gw.call(long)).text == "fini"
+    with pytest.raises(TimeoutError):
+        await gw.call(LLMRequest(role="reply", call_id="r#0", system_stable="s", lane="conversation"))
+
+
+async def test_a_call_never_outlives_what_its_episode_has_left():
+    gw = Gateway({"s": Slowish(0.3)}, {"pro": "s"}, clock=ManualClock(0))
+    soon = asyncio.get_running_loop().time() + 0.05
+    with pytest.raises(TimeoutError):
+        await gw.call(LLMRequest(role="pro", call_id="p#1", system_stable="s", deadline_s=900.0,
+                                 meta={DEADLINE_AT: soon}))
+    assert [t.outcome for t in gw.traces] == ["timeout"]
+
+
+class Thinker(Cut):
+    """Un fournisseur qui réfléchit : jamais sous 16 384 jetons de sortie, quoi qu'on lui demande (Claude 5.x)."""
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        return max(req.max_tokens, 16_384)
+
+
+async def test_a_cut_is_not_asked_again_when_the_provider_would_send_the_same_cap():
+    """Avec un plancher de réflexion, demander 2 000 jetons au lieu de 1 000 envoie toujours 16 384 : la même
+    coupure, un appel payé pour rien. La réponse coupée est rendue telle quelle ; la passerelle dit le plafond
+    effectif à qui le lui demande (la boucle d'outils, les processus)."""
+    cut = Thinker(LLMResponse('{"souvenirs": [{"texte": "Alice m', stop="max_tokens"))
+    gw = Gateway({"c": cut}, {"extract": "c"}, clock=ManualClock(0))
+    resp = await gw.call(LLMRequest(role="extract", call_id="x#0", system_stable="s", max_tokens=1000))
+    assert resp.stop == "max_tokens" and len(cut.seen) == 1
+    assert gw.output_tokens(LLMRequest(role="extract", call_id="y#0", system_stable="s", max_tokens=1000)) == 16_384
+    assert gw.output_tokens(LLMRequest(role="inconnu", call_id="z#0", system_stable="s", max_tokens=1000)) == 1000
+
+
+def test_the_prompt_budget_and_the_fit_reserve_the_effective_output():
+    """Le budget du composeur et ``fit`` réservent la sortie sur ce que le fournisseur enverra vraiment : ce qui
+    tenait avec 1 000 jetons réservés ne tient plus quand il en envoie 16 384 — et les deux s'accordent. Jamais plus
+    de la moitié du contexte déclaré : un fournisseur à petite fenêtre garde de quoi lire son prompt."""
+    wide = LLMLimits(context_tokens=200_000, chars_per_token=1.0)
+    gw = Gateway({"c": Thinker()}, {"extract": "c"}, clock=ManualClock(0), limits={"c": wide})
+    assert gw.budget("extract", 1000).max_tokens == 200_000 - 16_384
+    plain = Gateway({"c": Cut()}, {"extract": "c"}, clock=ManualClock(0), limits={"c": wide})
+    assert plain.budget("extract", 1000).max_tokens == 200_000 - 1000
+    small = LLMLimits(context_tokens=20_000, chars_per_token=1.0)
+    assert Gateway({"c": Thinker()}, {"extract": "c"}, clock=ManualClock(0),
+                   limits={"c": small}).budget("extract", 1000).max_tokens == 10_000
+    assert small.reserve(1000, 16_384) == 10_000 and small.reserve(1000) == 1000 and small.reserve(1000, 500) == 1000
+    req = LLMRequest(role="extract", call_id="x#0", system_stable="x" * 10_000, max_tokens=1000)
+    assert small.fit(req).max_tokens == 1000  # tient, la seule sortie demandée réservée
+    with pytest.raises(PromptBudgetError):
+        small.fit(req, effective=16_384)
+
+
+class Counting(Quick):
+    """Un fournisseur dont l'entrée réelle vaut dix fois ce que le budget estime."""
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        self.seen.append(req)
+        return LLMResponse("ok", model="m", usage=Usage(input_tokens=10 * len(req.system_stable), output_tokens=1))
+
+
+async def test_each_trace_keeps_the_estimated_input_and_a_lying_estimate_is_said_once_an_hour(caplog):
+    """L'entrée estimée (caractères / ``chars_per_token``) reste à côté de l'entrée réelle dans chaque trace ; quand
+    leur rapport sort de [0,7 ; 1,4], un avertissement par fournisseur et par heure — rien ne se recale seul."""
+    clock = ManualClock(0)
+    gw = Gateway({"q": Counting("q")}, {"reply": "q"}, clock=clock, limits={"q": LLMLimits(chars_per_token=1.0)})
+    req = LLMRequest(role="reply", call_id="r#0", system_stable="x" * 100)
+    with caplog.at_level(logging.WARNING, logger="mika.llm.gateway"):
+        await gw.call(req)
+        await gw.call(req)
+        clock.advance(3_600 * 1_000_000)
+        await gw.call(req)
+    first = gw.traces[0]
+    assert first.input_tokens == 1000 and 100 < first.estimated_input_tokens < 1000
+    warned = [r.getMessage() for r in caplog.records if "chars_per_token" in r.getMessage()]
+    assert len(warned) == 2 and "q : l'entrée réelle fait" in warned[0]
+
+
+def test_an_ollama_backend_is_built_with_the_context_window_of_its_spec():
+    spec = BackendSpec(kind="ollama", model="gemma4:12b", context_tokens=8_000)
+    assert build_backend("local", spec).context_tokens == 8_000

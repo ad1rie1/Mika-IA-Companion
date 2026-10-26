@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -492,12 +493,18 @@ class Pages:
         ``Accounts.bootstrap`` qui refuse dès qu'un compte existe — deux onglets ne créent pas deux comptes)."""
         accounts = self.ui.deps.accounts
         error, username = "", ""
+        # depuis une autre machine, le code de premier démarrage écrit au journal du serveur est exigé : le premier
+        # arrivé sur le réseau ne devient pas opérateur (audit du 2026-10-26) ; la machine du serveur en est dispensée
+        code_required = bool(self.ui.deps.bootstrap_code) and not _from_this_machine(request)
         if request.method == "POST":
             data = await self.ui.form(request)
             username = str((data or {}).get("username", "")).strip()[:150]
             password = str((data or {}).get("password", ""))
             if data is None:
                 error = "Jeton de formulaire invalide : recharge la page."
+            elif code_required and not hmac.compare_digest(str(data.get("code", "")).strip(),
+                                                           self.ui.deps.bootstrap_code):
+                error = "Le code de premier démarrage ne correspond pas (il est dans le journal du serveur)."
             elif not username:
                 error = "Donne un identifiant."
             elif password != str(data.get("password2", "")):
@@ -516,7 +523,7 @@ class Pages:
                                         secure=self.ui.cookie_secure)
                     return secure(response)
         return self.ui.bare(request, "login.html", "Créer le compte opérateur", error=error, bootstrap=True,
-                            username=username, status=400 if error else 200)
+                            code_required=code_required, username=username, status=400 if error else 200)
 
     async def logout(self, request: Request) -> Response:
         data = await self.ui.form(request)
@@ -652,3 +659,10 @@ class Pages:
             Route(PREFIX + "/{key:str}", g(self.destination)),
             Route(PREFIX + "/{key:str}/{tab:str}", g(self.destination)),
         ]
+
+
+def _from_this_machine(request: Request) -> bool:
+    """La requête vient-elle de la machine du serveur (boucle locale, l'adresse vue par le serveur — derrière un
+    mandataire déclaré, celle du client) ?"""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost")

@@ -317,7 +317,7 @@ def test_workshop_symlinks_survive_a_backup_and_their_history_stays_clean(tmp_pa
     (shop / "cible.txt").write_text("bonjour\n", encoding="utf-8")
     (shop / "lien.txt").symlink_to("cible.txt")
     (shop / "docs" / "vers-cible.txt").symlink_to("../cible.txt")
-    (shop / "systeme").symlink_to("/usr/bin")  # hors du dossier : gardé comme lien, jamais suivi
+    (shop / "systeme").symlink_to("/usr/bin")  # hors du dossier : gardé comme lien, jamais suivi (une cage)
     git = ["git", "-c", "user.name=Mika", "-c", "user.email=mika@localhost", "-C", str(shop)]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
@@ -337,14 +337,19 @@ def test_workshop_symlinks_survive_a_backup_and_their_history_stays_clean(tmp_pa
 
 
 def test_an_archive_whose_link_would_escape_the_folder_is_refused(tmp_path, monkeypatch):
-    """Un lien ne se recrée jamais hors du dossier, ni à travers un autre lien qui en sort."""
+    """Un lien ne se recrée jamais hors du dossier, ni à travers un autre lien qui en sort ; et hors des cages
+    (``ateliers/``, ``mcp/``), sa cible ne sort pas du dossier non plus — ni absolue ni remontante : le serveur
+    ouvrirait lui-même ``partages/<id>.bin → /etc/…``."""
     monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
     data, dest = tmp_path / "data", tmp_path / "archives"
     live(data, talk=False)
     made = backup.backup(data, dest)
     outside = tmp_path / "dehors"
     outside.mkdir()
-    for links in ({"../evade": "x"}, {"a": str(outside), "a/b/c": "x"}):
+    for links in ({"../evade": "x"}, {"a": str(outside), "a/b/c": "x"},
+                  {"partages/fuite.bin": "/etc/passwd"},  # une cible absolue
+                  {"pieces/fuite.bin": "../../dehors/x"},  # une cible qui remonte hors du dossier
+                  {"forge/app/app.py": "../../../dehors/x"}):  # la Forge n'est pas une cage pour le serveur, qui la lit
         unpacked = tmp_path / "déballée"
         shutil.rmtree(unpacked, ignore_errors=True)
         with tarfile.open(made.archive) as tar:

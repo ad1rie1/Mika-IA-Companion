@@ -62,7 +62,7 @@ from sqlalchemy.pool import NullPool
 from mika.adapters.database import MARIADB_CHARSET, MARIADB_COLLATION, Target, ensure_database, sqlite_engine
 from mika.ports.sql import TABLE_OPTIONS, Id, Key, LongText, ViewsBase, table_args, upsert
 
-__all__ = ["BaseLimits", "ForgeBases", "ForgeLogRow", "SqlRefused"]
+__all__ = ["BaseLimits", "ForgeBases", "ForgeLogRow", "SqlRefused", "qualified"]
 
 APP = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 #: ce qu'une lecture peut être ; ce qu'une écriture peut être ; ce qui ne fait que libérer de la place
@@ -84,6 +84,14 @@ DEFAULT_PREFIX = "mika_"
 
 class SqlRefused(ValueError):
     """Une requête d'app refusée (forme, base pleine, erreur du moteur) : le message est pour l'app."""
+
+
+def qualified(dialect: Any, schema: str, table: str) -> str:
+    """``schema.table`` sous les guillemets du moteur : un nom de table qui porte un accent grave, un espace ou un
+    ``;`` (MariaDB l'admet, et une app peut le créer) reste un nom — ses guillemets doublés —, jamais du SQL. Ce qui
+    s'exécute sous le compte de Mika (``SHOW CREATE TABLE``, ``SELECT *`` d'une base qu'on exporte) passe par là."""
+    quote = dialect.identifier_preparer.quote
+    return f"{quote(schema)}.{quote(table)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -604,9 +612,10 @@ class ForgeBases:
         tables = [r[0] for r in conn.execute(text(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = :n ORDER BY table_name"), {"n": name})]
         for table in tables:
-            create = conn.exec_driver_sql(f"SHOW CREATE TABLE `{name}`.`{table}`").first()
+            ref = qualified(conn.dialect, name, table)  # le nom vient de l'app : un identifiant, jamais du SQL
+            create = conn.exec_driver_sql(f"SHOW CREATE TABLE {ref}").first()
             rows = [{k: _plain(v) for k, v in r.items()}
-                    for r in conn.exec_driver_sql(f"SELECT * FROM `{name}`.`{table}`").mappings()]
+                    for r in conn.exec_driver_sql(f"SELECT * FROM {ref}").mappings()]
             out["tables"][table] = {"create": create[1] if create else "", "rows": rows}
         return out
 

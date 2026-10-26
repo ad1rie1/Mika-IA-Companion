@@ -148,3 +148,12 @@ def clean_tokens(text: str) -> str:
     """Le texte sans les jetons de personnes (« Chloé [P1] » → « Chloé ») : l'extraction s'en sert pour dire qui
     c'est ; ils ne doivent finir ni dans un souvenir, ni dans un rêve."""
     return re.sub(r"[ \t]*\[P\d{1,3}\]", "", text).strip()
+
+
+def key_concerns(key: object, person: str) -> bool:
+    """La clé d'une carte d'état parle-t-elle de cette personne : elle-même, ou une clé composée qui la porte
+    (« elle|classe », « elle:moment », « sorte:elle ») ? Ce que retirent l'oubli d'une personne et l'expiration
+    d'une inconnue (audit du 2026-10-26)."""
+    if not isinstance(key, str) or not person:
+        return False
+    return key == person or key.startswith(f"{person}|") or key.startswith(f"{person}:") or key.endswith(f":{person}")
