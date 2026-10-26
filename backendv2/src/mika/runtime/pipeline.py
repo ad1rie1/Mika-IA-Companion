@@ -88,7 +88,7 @@ from mika.runtime.tools import (
 )
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 from mika.vocab import flows
-from mika.vocab.episodes import Role
+from mika.vocab.episodes import CONVERSATIONAL, Role
 from mika.vocab.flows import Author
 from mika.vocab.phrasebook import phrase
 
@@ -129,8 +129,10 @@ Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
 #: … pour un brouillon (un courriel a sa formule d'appel et sa formule de politesse) : plus de marge
 _DRAFT_SLACK = 400
-#: sans réglage des autrices, le chat garde l'autrice d'avant elles : le cadre seul, ni codes ni exemple (ADR 0124)
-_CHAT_AUTHOR = Author(flows.CHAT, "")
+#: sans réglage des autrices, le chat a l'autrice livrée « Message » : son nom et ses codes, qui portent la forme
+#: (ADR 0124, 0140) — sans eux, rien ne dirait comment on écrit dans un chat
+_CHAT_AUTHOR = Author(flows.CHAT, phrase("expression.author.defaults.message.name"),
+                      phrase("expression.author.defaults.message.codes"))
 #: un brouillon que le modèle a mis entre trois accents graves
 _FENCED = re.compile(r"^```[\w-]*\n(.*)\n```$", re.S)
 #: ce qu'une passe de plus (relecture, seconde passe) laisse de l'échéance de l'épisode, en secondes, pour écrire la
@@ -423,6 +425,13 @@ class EpisodeRunner:
                     attrs["args"] = req.selected.args
                 if ep.mode is not None:
                     attrs["mode"] = req.mode
+                if req.kind in CONVERSATIONAL:
+                    # la forme n'a qu'une maison, l'autrice du chat (ADR 0140) : ses codes passent en seconde passe,
+                    # ou, quand aucune ne suivra, dans le premier jet (« COMMENT TU ÉCRIS ICI »)
+                    polished = self._authored(req.kind) and (ep.mode is None or ep.mode.polished)
+                    author = self._author(flows.CHAT)
+                    attrs["second_pass"] = polished
+                    attrs["form"] = "" if polished or author is None else author.codes
                 episode = EpisodeRef(eid, req.kind, req.target, policy.muted_tags, FrozenDict(attrs))
                 frame = Frame(start.root, mind.clock.now(), mind.registry, audience, episode)
                 message = req.message

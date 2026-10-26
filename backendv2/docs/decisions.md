@@ -26,7 +26,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -1259,7 +1259,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les corrections de prompt une à une ne tenaient pas : il fallait mesurer, et un tic se voit mieux sur le brouillon.
 
-*Révise 0100 (en partie). Révisée par 0114, 0115.*
+*Révise 0100 (en partie). Révisée par 0114, 0115, 0140.*
 
 ### 0114 — Une autrice écrit ses messages
 
@@ -1297,6 +1297,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0114 (en partie).*
 
+*Révisée par 0140.*
+
 ### 0138 — Une seule maison par chose : le portrait, la matrice, la voix
 
 - La persona n'a plus que ce qu'un seul endroit dit. **Qui elle est** — sa vie, ses goûts, ses avis, ce qui la définit — s'écrit une fois, en prose, dans son portrait (`portrait`), que le modèle lit partout en profondeur complète : en conversation, dans son journal, ses rêves, son récit, son travail. La profondeur compacte (murmurer, travailler) ouvre sur sa description, en une phrase.
@@ -1322,6 +1324,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* en lignes chiffrées, elle jouait ses traits un à un ; en phrases toutes faites, « anxieuse et sociable » restait la somme de deux phrases. La prose dit la combinaison, et c'est ce que le modèle lit le mieux (le portrait : 4,5 → 7,9 sur 10). Demandé par l'utilisateur le 2026-10-26, sans repli.
 
 *Révise 0100 (en partie : comment le tempérament se dit au modèle), 0138 (en partie).*
+
+### 0140 — La forme n'a qu'une maison : l'autrice du flux
+
+- La consigne de style du premier jet (`expression.style`) ne dit plus la forme — longueur, registre, hésitations, émojis, listes, gras, titres, écriture inclusive, « lu à voix haute ». Elle garde le rôle (une conversation, pas un guichet), la discipline (une question à la fois, ne pas se redire, « et toi ? », merci et au revoir) et le protocole (les jetons de voix, les balises de fin, l'état interne).
+- La forme vit dans les codes de l'autrice du flux (ADR 0124), réglables dans Réglages › Personnage › Autrices ; les codes livrés de « Message » portent toute celle du chat. Sans réglage des autrices, le chat a l'autrice livrée « Message », nom et codes compris.
+- Deux lecteurs, un texte : quand une seconde passe suit, le premier jet ne reçoit rien de la forme (ni « réponds court ») et l'autrice met en forme ; quand aucune ne suivra (pas de modèle au rôle « rendre naturel », autrice retirée), les codes de l'autrice du chat entrent dans le premier jet, section « COMMENT TU ÉCRIS ICI » (`expression.form`, stable), et la mesure d'une réponse courte se rappelle. Le pipeline le dit à l'épisode (`second_pass`, `form`). Jamais en mode pro.
+- « Lu à voix haute » n'est pas une règle d'écriture : le client web retire les émojis avant la synthèse (ADR 0114) et ne lit pas les crochets ; Android affiche. L'autrice écrit pour un chat, chaque écran fait ce qu'il sait faire.
+- La consigne de la seconde passe ne redit plus les émojis : les codes le disent. La relecture garde son tic « long » : elle ne tourne jamais quand une seconde passe suit (ADR 0115).
+
+*Pourquoi :* la forme était dite trois fois — la consigne de style, le portrait, les codes de l'autrice — et deux fois en contradiction (« pas d'émojis : lu à voix haute » contre « un émoji de temps en temps ») ; c'est l'autrice qui gagnait, et la consigne parlait dans le vide. À mesurer au banc : la consigne de style et la relecture valaient +6.
+
+*Révise 0112 (en partie : la consigne de style), 0114 (en partie), 0124 (en partie : le chat sans réglage).*
 
 ## Les clients, le fil, le monde
 

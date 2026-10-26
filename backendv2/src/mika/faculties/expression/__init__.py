@@ -195,6 +195,17 @@ def _style(s: ExpressionState, frame: Frame, enrich: Any) -> str:
     return style()
 
 
+@EXPRESSION.section("form", zone=Zone.STABLE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], after=["style"],
+                    trim_rank=98, title=phrase("expression.form.title"))
+def _form(s: ExpressionState, frame: Frame, enrich: Any) -> str | None:
+    """« COMMENT TU ÉCRIS ICI » (ADR 0140) : les codes d'écriture de l'autrice du chat — la longueur, le registre,
+    les émojis, la mise en forme —, dans le premier jet seulement quand aucune seconde passe ne suivra (le pipeline le
+    dit dans l'épisode : ``form``). La forme n'a qu'une maison, l'autrice ; deux lecteurs, jamais les deux à la fois."""
+    ep = frame.episode
+    codes = str(ep.attrs.get("form") or "").strip() if ep is not None else ""
+    return phrase("expression.form.codes", codes=codes) if codes else None
+
+
 def pro_style() -> str:
     """La consigne du mode pro (``expression.pro`` dans sa voix, ADR 0116), à la place de sa consigne de style (coupée
     avec ses sections affectives) : un travail, fait avec ses outils, rendu à l'écran en Markdown, sans jetons de voix
@@ -713,7 +724,8 @@ def _answer(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str:
     if traits:
         out.append(phrase("expression.answer.character", traits=" ; ".join(traits)))
     out.append(phrase("expression.answer.subject"))
-    if heard and len(heard) <= SHORT_MESSAGE:
+    # la mesure d'une réponse est de la forme : quand une seconde passe suit, c'est l'autrice qui la prend (ADR 0140)
+    if heard and len(heard) <= SHORT_MESSAGE and not frame.episode.attrs.get("second_pass"):
         out.append(phrase("expression.answer.short"))
     if THANKS & set(_words(heard)):
         out.append(phrase("expression.answer.thanked"))
