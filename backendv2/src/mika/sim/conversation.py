@@ -21,7 +21,7 @@ from mika.runtime.pipeline import EpisodeRequest
 from mika.sim import expect
 from mika.sim.clock import SimClock
 from mika.sim.lane import Plan, Result, at_paris
-from mika.sim.llm.scripted import ScriptedLLM
+from mika.sim.llm.scripted import CHARACTER, ScriptedLLM
 from mika.sim.rng import RngTree
 from mika.sim.world import Driver
 from mika.vocab.episodes import Kind, goal_target
@@ -50,6 +50,8 @@ def _llm(clock: SimClock, seed: int) -> ScriptedLLM:
             return LLMResponse("Tu fais quoi de beau ? [EMOTION:playful:0.4]")
         if req.role == "murmur":
             return LLMResponse("tiens, si je lui écrivais")
+        if req.role == "character":
+            return LLMResponse(CHARACTER)
         return LLMResponse("{}")
 
     return ScriptedLLM(clock, respond, latency=lambda r: LATENCY.get(r.role, 2.0))

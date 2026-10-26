@@ -1,20 +1,20 @@
 """Son portrait en prose (banc de recherche du 2026-10-15, ADR 0138) : le seul texte qui la décrit, lu partout —
 en conversation comme dans son journal, son travail, ses rêves. Les listes qu'il remplaçait n'existent plus : le
-modèle les jouait une à une, et chacune redisait un curseur du tempérament, le portrait ou la consigne de style."""
+modèle les jouait une à une, et chacune redisait un curseur du tempérament, le portrait ou la consigne de style. Son
+caractère, c'est le texte que le modèle en a écrit (ADR 0139), le même partout ; sans lui, rien."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from mika.contracts import self_ as self_c
-from mika.faculties.self.character import temperament_in_words
 from mika.faculties.self.persona import load, render
-from mika.vocab import temperament as T
 from mika.vocab.phrasebook import phrase
 
 SHIPPED = Path(__file__).resolve().parents[2] / "persona" / "mika.yaml"
 DOC = self_c.PersonaDoc(name="Mika", description="Une fille attentive.", portrait="Tu es Mika. Tu lis beaucoup.",
                         samples=("« salut » → « coucou »",), facts=("C'est une IA",), interests=("Le dessin",))
+CHARACTER = "Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée."
 
 
 def test_her_portrait_opens_every_full_persona_and_her_description_the_compact_one():
@@ -25,12 +25,20 @@ def test_her_portrait_opens_every_full_persona_and_her_description_the_compact_o
     # sa voix en chat, en conversation seulement ; ses centres d'intérêt, hors conversation (le portrait les dit)
     assert "« salut » → « coucou »" in chat and "Le dessin" not in chat
     assert "« salut » → « coucou »" not in other and "Le dessin" in other
-    assert phrase("self.temperament.title") not in chat  # en conversation, son tempérament se dit en mots
-    tsundere = DOC.model_copy(update={"temperament": T.apply_profile(T.Temperament(), "tsundere")})
-    assert temperament_in_words(tsundere.temperament) in render(tsundere, "full", chat=True)
     for is_chat in (True, False):
         compact = render(DOC, "compact", chat=is_chat)
         assert "Tu lis beaucoup." not in compact and compact.startswith("Tu es Mika. Une fille attentive.")
+
+
+def test_her_written_character_is_the_same_everywhere_and_nothing_replaces_it():
+    """Le texte écrit par le modèle entre dans sa persona, complète ou compacte, en conversation ou non — encadré
+    pour elle seule ; sans lui, sa persona ne dit rien de son caractère ; en mode pro, jamais."""
+    framed = phrase("self.character.frame", text=CHARACTER)
+    for depth, is_chat in (("full", True), ("full", False), ("compact", True), ("compact", False)):
+        assert framed in render(DOC, depth, chat=is_chat, character=CHARACTER)
+        bare = render(DOC, depth, chat=is_chat)
+        assert CHARACTER not in bare and "Ton caractère" not in bare
+    assert CHARACTER not in render(DOC, "pro", character=CHARACTER)
 
 
 def test_without_a_portrait_her_description_opens():

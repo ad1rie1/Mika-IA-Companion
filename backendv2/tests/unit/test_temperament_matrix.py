@@ -183,24 +183,27 @@ def test_every_trait_is_told_with_its_measure_and_its_sentence():
                        for line in told(T.apply_profile(T.Temperament(), key)))
 
 
-def test_her_persona_carries_her_temperament_in_both_depths():
-    """Le bloc de son tempérament fait partie de sa persona, complète comme compacte : partout où elle est injectée
-    (répondre, murmurer, travailler, son journal, ses rêves, son récit), elle a le même caractère. Il s'ouvre pour
-    elle seule et se ferme sur des tendances."""
-    from mika.faculties.self.character import temperament_text  # noqa: PLC0415
+def test_what_the_writer_of_her_character_reads_and_what_her_persona_carries():
+    """Le modèle qui écrit son caractère (ADR 0139) lit ses traits famille par famille, chacun avec sa mesure et sa
+    phrase ; le texte qu'il écrit entre dans sa persona, complète comme compacte, partout où elle est injectée
+    (répondre, murmurer, travailler, son journal, ses rêves, son récit) : elle a le même caractère partout. Aucune
+    mesure, aucun bloc ne lui parvient autrement."""
+    from mika.faculties.self.character import request_for  # noqa: PLC0415
     from mika.faculties.self.persona import render  # noqa: PLC0415
 
     shy = self_c.PersonaDoc(name="Mika", temperament=T.apply_profile(T.Temperament(), "dandere"))
-    block = temperament_text(shy.temperament)
-    lines = block.split("\n")
-    assert lines[0] == phrase("self.temperament.title") and lines[1] == phrase("self.temperament.lead")
-    assert lines[-1] == phrase("self.temperament.tail")
+    request = request_for(shy, "essai#0")
+    assert request.role == "character" and "Mika" in request.system_stable
+    shown = request.messages[-1].content
     for family in ("feel", "show", "act", "others", "self", "body"):
-        assert phrase(f"self.temperament.family.{family}") in lines
+        assert phrase(f"self.temperament.family.{family}") in shown
     high = phrase("self.temperament.trait.shyness.high")
-    assert f"{high[0].lower()}{high[1:]}" in block
+    assert f"{high[0].lower()}{high[1:]}" in shown and " : 90 % — " in shown
+    written = "Tu es timide avec qui tu ne connais pas, et tu t'ouvres à mesure que tu fais confiance."
     for depth in ("full", "compact"):
-        assert block in render(shy, depth)
+        with_it, without = render(shy, depth, character=written), render(shy, depth)
+        assert phrase("self.character.frame", text=written) in with_it
+        assert "%" not in without and "Ton caractère" not in without and "Timidité" not in without
 
 
 def test_a_note_follows_its_trait_and_never_replaces_it():

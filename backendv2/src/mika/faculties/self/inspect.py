@@ -234,6 +234,8 @@ def _persona(s: SelfState) -> list[Block]:
         ("nature", NATURE_FR.get(doc.nature, doc.nature)),
         ("description", Text(doc.description, clamp=CLAMP) if doc.description else Text("—", kind="muted")),
         ("portrait", Text(doc.portrait, clamp=CLAMP) if doc.portrait.strip() else Text("—", kind="muted")),
+        ("caractère écrit par le modèle (ADR 0139)", Text(s.character, clamp=CLAMP)
+         if s.character and s.character_hash == c.temperament_hash(t) else Text("pas encore écrit", kind="muted")),
         ("fil de référence (autrice)", Text(doc.reference_thread, clamp=CLAMP) if doc.reference_thread.strip()
          else Text("—", kind="muted")),
         ("langue", doc.language),

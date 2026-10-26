@@ -146,6 +146,9 @@ class SettingsSection:
     commands: tuple[Command, ...] = ()
     facts: Callable[[], Sequence[tuple[str, str]]] | None = None
     blocks: Callable[[], Sequence[Any]] | None = None
+    #: l'état de la section en JSON, pour le script d'une de ses pages (``GET /reglages/<page>/etat`` : la modale qui
+    #: suit l'écriture de son caractère, ADR 0139)
+    probe: Callable[[], Mapping[str, Any]] | None = None
     #: les chemins que ce formulaire ne montre pas (une autre section les règle)
     exclude: tuple[str, ...] = ()
     #: propose aussi d'importer / exporter le tout en YAML (sans secret)

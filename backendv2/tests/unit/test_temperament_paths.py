@@ -26,8 +26,6 @@ from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.affect import overflow_evidence
-from mika.faculties.self.character import temperament_in_words
-from mika.faculties.self.persona import render
 from mika.faculties.social.initiative import _arrivals
 from mika.kernel import forms
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
@@ -39,6 +37,9 @@ from mika.vocab import temperament as T
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import AFTERNOON, DOC, at_paris, befriend, boot, build, connect, said
 
+#: ce que le modèle factice écrit de son caractère, quel que soit le tempérament (ADR 0139)
+CHARACTER = "Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée."
+
 
 class Voice:
     """Le modèle factice : il répond avec la balise d'émotion et la lecture de la personne qu'on lui dicte (un texte
@@ -49,9 +50,13 @@ class Voice:
         self.their = ""
         self.n = 0
         self.prompts: list[str] = []
+        self.asked: list[tuple[str, str]] = []  # (rôle, ce qu'on lui a montré) pour les autres rôles
         self.delivered: list = []  # ce qui est parti vers les écrans (``Delivery``)
 
     def __call__(self, req: LLMRequest) -> LLMResponse:
+        if req.role == "character":
+            self.asked.append((req.role, req.system_stable + "\n".join(m.content for m in req.messages)))
+            return LLMResponse(CHARACTER)  # son caractère écrit (ADR 0139) : une phrase qui vaut pour tous
         if req.role != "reply":
             return LLMResponse("[SILENCE]")
         self.n += 1
@@ -167,31 +172,28 @@ def test_expressiveness_shows_on_her_face(tmp_path):
 
 
 def test_what_she_is_told_of_herself(tmp_path):
-    """En conversation, une tsundere avec une précision lit ses traits marqués en mots, sans mesure — sa défense et
-    la précision comprises (sans elle, une tsundere n'était plus reconnue : banc de recherche, 2026-10-15) ; au milieu
-    partout, rien ne se dit. Hors conversation (son journal, ses rêves, son travail), le bloc complet : chaque trait
-    avec sa mesure, sa défense, sa précision ; au milieu, chaque trait à 50 %, comme la plupart des gens."""
+    """Son caractère, c'est le texte que le modèle en a écrit (ADR 0139) : en conversation, elle le lit, encadré pour
+    elle seule, et aucune mesure ne lui parvient. Ce que lit le modèle qui l'écrit, c'est chaque trait avec sa
+    mesure — sa défense et la précision de l'opératrice comprises (sans elle, une tsundere n'était plus reconnue :
+    banc de recherche, 2026-10-15) ; au milieu partout, chaque trait à 50 %, comme la plupart des gens."""
     tsundere = profile("tsundere").model_copy(update={"notes": {"reactivity": "tu t'énerves quand on t'appelle poulet"}})
 
     async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
         await say(kernel, voice, "user_1")
-        return voice.prompts[-1]
+        asked = [p for p in voice.asked if p[0] == "character"]
+        return voice.prompts[-1], asked[-1][1] if asked else ""
 
     got = each(tmp_path, {"tsundere": tsundere, "neutre": T.Temperament()}, scenario)
-    title = phrase("self.temperament.title")
-    words = temperament_in_words(tsundere)
-    assert words and words in got["tsundere"] and title not in got["tsundere"]
-    assert phrase("self.temperament.trait.defense.attack")[:30].lower() in words
-    assert "poulet" in words and "%" not in words
-    assert temperament_in_words(T.Temperament()) == "" and title not in got["neutre"]
-    told = {k: render(self_c.PersonaDoc(name="Mika", temperament=t), "full")
-            for k, t in {"tsundere": tsundere, "neutre": T.Temperament()}.items()}
+    for key in ("tsundere", "neutre"):
+        prompt, _asked = got[key]
+        assert phrase("self.character.frame", text=CHARACTER) in prompt
+        assert " % — " not in prompt and phrase("self.temperament.name.mask") + " :" not in prompt
     mask = phrase("self.temperament.trait.mask.high")
     for line in (phrase("self.temperament.name.mask") + " : 90 % — " + mask[0].lower() + mask[1:],
                  phrase("self.temperament.trait.defense.attack"),
                  phrase("self.temperament.precisely", note="tu t'énerves quand on t'appelle poulet")):
-        assert line in told["tsundere"]
-    assert phrase("self.temperament.name.mask") + " : 50 % — " + phrase("self.temperament.middle") in told["neutre"]
+        assert line in got["tsundere"][1]
+    assert phrase("self.temperament.name.mask") + " : 50 % — " + phrase("self.temperament.middle") in got["neutre"][1]
 
 
 HURT = "[EN_FACE: angry 0.7 | geste : blessant]"

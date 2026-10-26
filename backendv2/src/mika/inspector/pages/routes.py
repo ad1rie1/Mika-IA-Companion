@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -644,10 +645,24 @@ class Pages:
         return await self.destination(request, key="reglages", tab=tab, status=status,
                                       produced={"blocks": [], "panel": panel, "messages": general})
 
+    async def settings_probe(self, request: Request) -> Response:
+        """L'état d'une section de réglages en JSON (``SettingsSection.probe``), pour le script d'une de ses pages :
+        la modale qui suit l'écriture de son caractère (ADR 0139). Une page sans sonde : 404, vide."""
+        forms_ = self.ui.settings_forms
+        found = forms_.pages.get(request.path_params["tab"]) if forms_ is not None else None
+        section = found[0] if found else None
+        if section is None or section.probe is None:
+            return Response("{}", status_code=404, media_type="application/json")
+        got = call(section.probe, label=f"état {section.key}")
+        if isinstance(got, Failed):
+            return Response("{}", status_code=500, media_type="application/json")
+        return Response(json.dumps(dict(got), ensure_ascii=False), media_type="application/json")
+
     def routes(self) -> list[Route]:
         g = self.ui.guarded
         return [
             Route(PREFIX + "/reglages/{tab:str}", g(self.settings_post), methods=["POST"]),
+            Route(PREFIX + "/reglages/{tab:str}/etat", g(self.settings_probe)),
             Route(PREFIX + "/connexion", self.login, methods=["GET", "POST"]),
             Route(PREFIX + "/deconnexion", self.logout, methods=["POST"]),
             Route(PREFIX + "/_vitals", g(self.vitals)),

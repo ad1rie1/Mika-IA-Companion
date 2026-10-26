@@ -21,6 +21,11 @@ from mika.kernel.state import FrozenDict
 class SelfState:
     persona: c.PersonaDoc = field(default_factory=c.PersonaDoc)
     revisions: int = 0
+    #: son caractère écrit par le modèle (ADR 0139), l'empreinte du tempérament qu'il décrit, quand et par quel modèle
+    character: str = ""
+    character_hash: str = ""
+    character_at: int = 0
+    character_model: str = ""
     esteem: float = 0.5  # à ``esteem_at``
     esteem_at: int = 0
     souvenirs: int = 0
@@ -90,10 +95,11 @@ class SelfState:
 #: v11 : une réflexion menée au bout n'est pas un exploit : ni estime, ni « elle mène ses buts au bout » (ADR 0096)
 #: v12 : une source devenue une confidence (un sujet délicat, ``memory.delicate``) fait taire le récit, le rêve, le
 #: journal intime qui la reprenaient, comme une source devenue secrète (ADR 0099)
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=12,
+#: v13 : son caractère écrit par le modèle d'après sa matrice, et l'empreinte du tempérament qu'il décrit (ADR 0139)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=13,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED, c.INTEREST_BORN,
-             c.REFLECTED)
+             c.REFLECTED, c.CHARACTER_WRITTEN)
 
 
 def day_of(cx: Any, at: int) -> str:

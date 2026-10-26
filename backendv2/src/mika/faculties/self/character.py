@@ -1,24 +1,33 @@
-"""Ce que son tempérament dit au modèle (ADR 0100) : dans sa persona, partout où elle est injectée.
+"""Son caractère, écrit par le modèle d'après sa matrice (ADR 0100, 0139).
 
 La matrice de personnalité règle la physique de ses émotions (chaque faculté en dérive ses paramètres) ; mais c'est
 le modèle qui écrit ses mots et choisit sa balise d'émotion. Sans le lui dire, une Mika anxieuse ou tsundere aurait
-les balises et les répliques d'une Mika au milieu partout. Tous ses traits se disent donc, rangés par famille, chacun
-avec sa mesure (« Introspection : 90 % — tu repenses longuement… ») : le modèle dose d'après elle, et une mesure de
-75 % ne se lit pas comme une de 95 %. La phrase vient de ``persona/voix.yaml`` (``self.temperament``) : celle du bas
-à 40 % ou moins, celle du haut à 60 % ou plus, « comme la plupart des gens » entre les deux ; très marqué, il le dit.
-S'y ajoutent son humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. La précision que
-l'opératrice a pu écrire pour un trait (« tu t'énerves quand on t'appelle poulet ») suit sa phrase, sans la remplacer.
-Des tendances, jamais une obligation ; les mesures sont pour elle seule. Le bloc fait partie de sa persona
-(``persona.render``, dans ses deux profondeurs) hors conversation : ses murmures, son travail, ses brouillons, son
-journal, ses rêves et son récit le lisent. En conversation (ses répliques, ses initiatives), il se dit en mots
-(``temperament_in_words``) : ses traits nettement marqués, sa réaction, sa défense, sans mesure — en 28 lignes chiffrées,
-elle jouait ses traits au lieu de parler ; sans rien, une tsundere n'était plus reconnue (banc de recherche,
-2026-10-15).
+les balises et les répliques d'une Mika au milieu partout. Ses 29 mesures, chacune avec ce qu'elle veut dire chez
+elle (``told`` : « Introspection : 90 % — tu repenses longuement… », les phrases de ``self.temperament`` dans
+``persona/voix.yaml``), ne vont plus au modèle qui parle : elles vont à celui qui **écrit son caractère** — six à
+huit phrases, à la deuxième personne, qui disent ce que ses traits font ensemble (``self.character.system``). En
+listes chiffrées, elle jouait ses traits un à un ; en phrases toutes faites, « anxieuse et sociable » restait la somme
+de deux phrases. Le texte est journalisé (``self.character_written``) avec l'empreinte du tempérament qu'il décrit :
+le processus ``self.character`` le réécrit dès que le tempérament change (un enregistrement dans la console, un
+profil appliqué), et jamais autrement. Tant qu'il n'est pas écrit, sa persona ne dit rien de son caractère (pas de
+repli : demandé par l'utilisateur le 2026-10-26). Ce que ses traits changent à sa façon d'écrire dans un chat reste
+dit à part, en phrases toutes faites, dans « TA RÉPONSE » (``expression.marked_traits``) : des consignes mesurées au
+banc, pas une description.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
+
+from mika.contracts import self_ as c
+from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel import forms
+from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.events import VoiceProvenance
+from mika.kernel.faculty import CatchUp
+from mika.kernel.frame import Frame
+from mika.ports.llm import LLMRequest, Message
 from mika.vocab import temperament as T
 from mika.vocab.affect import FR
 from mika.vocab.phrasebook import phrase
@@ -28,13 +37,18 @@ from mika.vocab.phrasebook import phrase
 #: modèle adoucissait les archétypes)
 LOW, HIGH = 0.4, 0.6
 VERY_LOW, VERY_HIGH = 0.15, 0.85
-#: en conversation, seuls les traits nettement marqués se disent (0,3 ou moins, 0,7 ou plus), quatre au plus
-CLEARLY, IN_WORDS = 0.2, 4
+#: nettement marqué (0,3 ou moins, 0,7 ou plus) : ce que la console montre comme « ce qui la marque le plus »
+CLEARLY = 0.2
 _EPS = 1e-9
 #: les familles de la matrice et le nom de leur titre (``self.temperament.family.*``)
 FAMILIES = {T.FEEL: "feel", T.SHOW: "show", T.ACT: "act", T.OTHERS: "others", T.SELF: "self", T.BODY: "body"}
 #: ses traits dans l'ordre de la matrice (famille, puis rang dans la famille) — ses précisions mises à part
 _FIELDS = tuple(f for f in forms.describe(T.Temperament) if f.group in FAMILIES)
+#: le texte écrit : au plus tant de caractères ; en dessous de tant, ce n'est pas un caractère (une balise, un refus)
+CHARACTER_MAX, CHARACTER_MIN = 2000, 40
+#: après un appel qui n'a rien donné (ou aucun modèle), le prochain essai : une minute, puis le double à chaque fois,
+#: jusqu'à une fois par jour — un modèle qui répond mal ne se rappelle pas 1 440 fois par jour
+RETRY_US, RETRY_MAX_US = MINUTE, DAY
 
 
 def _lower(sentence: str) -> str:
@@ -63,7 +77,7 @@ def sentence(slider: str, value: float) -> str:
 def told(t: T.Temperament) -> list[str]:
     """Son tempérament ligne par ligne, dans l'ordre de la matrice : le titre de chaque famille, puis chacun de ses
     traits avec sa mesure et sa phrase, son humeur de fond, sa réaction, sa défense — chacun suivi de sa précision
-    s'il y en a une (``notes``)."""
+    s'il y en a une (``notes``). Ce que lit le modèle qui écrit son caractère."""
     out: list[str] = []
     family = ""
     for field in _FIELDS:
@@ -83,38 +97,77 @@ def told(t: T.Temperament) -> list[str]:
     return out
 
 
-def temperament_text(t: T.Temperament) -> str:
-    """Le bloc de sa persona qui dit son tempérament : son titre, ce que veulent dire les mesures, chacun de ses
-    traits, et que ce sont des tendances."""
-    return "\n".join([phrase("self.temperament.title"), phrase("self.temperament.lead"), *told(t),
-                      phrase("self.temperament.tail")])
+def request_for(doc: c.PersonaDoc, call_id: str) -> LLMRequest:
+    """L'appel qui écrit son caractère : la consigne, puis ses traits mesurés."""
+    return LLMRequest(role="character", call_id=call_id,
+                      system_stable=phrase("self.character.system", name=c.name_of(doc)),
+                      messages=(Message("user", phrase("self.character.message",
+                                                       lines="\n".join(told(doc.temperament)))),),
+                      max_tokens=700, lane="background", priority=2)
 
 
-def _noted(line: str, note: str) -> str:
-    """Un trait en mots, et la précision de l'opératrice à sa suite (« …, tu t'énerves quand on t'appelle poulet »)."""
-    note = note.strip().rstrip(".")
-    return f"{line} — {note}" if note else line
+def written(raw: str | None) -> str:
+    """Le caractère tel qu'il se garde : le texte seul, coupé avant une balise qu'un modèle de voix aurait ajoutée
+    par habitude ; « » si ce n'en est pas un (vide, une balise, un refus en un mot)."""
+    text = (raw or "").strip()
+    cut = text.find("\n[")
+    if cut > 0:
+        text = text[:cut].rstrip()
+    if len(text) < CHARACTER_MIN or text[0] in "[{":
+        return ""
+    return text[:CHARACTER_MAX]
 
 
-def temperament_in_words(t: T.Temperament) -> str:
-    """Son tempérament en conversation, à la place du bloc : ses traits nettement marqués en mots (les plus marqués
-    d'abord, ``IN_WORDS`` au plus), sa réaction quand on la blesse, sa défense quand on la touche, et chaque précision
-    de l'opératrice — sans mesure ni « comme la plupart des gens ». « » : rien de marqué, rien à dire."""
-    marked = sorted((-abs(float(getattr(t, f.path)) - 0.5), f.path) for f in _FIELDS
-                    if f.path not in ("background", "reaction", "defense")
-                    and abs(float(getattr(t, f.path)) - 0.5) >= CLEARLY - _EPS)[:IN_WORDS]
-    said: list[str] = []
-    for _dist, key in marked:
-        value = float(getattr(t, key))
-        line = _lower(phrase(f"self.temperament.trait.{key}.{'low' if value < 0.5 else 'high'}")).rstrip(".")
-        if value <= VERY_LOW + _EPS or value >= VERY_HIGH - _EPS:
-            line += phrase("self.temperament.in_words_marked")
-        said.append(_noted(line, t.notes.get(key, "")))
-    for key in ("reaction", "defense"):
-        if getattr(t, key):
-            said.append(_noted(_lower(phrase(f"self.temperament.trait.{key}.{getattr(t, key)}")).rstrip("."),
-                               t.notes.get(key, "")))
-    shown = {key for _d, key in marked} | {k for k in ("reaction", "defense") if getattr(t, k)}
-    said += [note.strip().rstrip(".") for key, note in t.notes.items() if key not in shown and note.strip()]
-    return phrase("self.temperament.in_words", traits=" ; ".join(said)) if said else ""
+@SELF.reducer(c.CHARACTER_WRITTEN)
+def _written(s: SelfState, e, cx) -> SelfState:
+    d = e.data
+    return replace(s, character=d.text, character_hash=d.temperament, character_at=e.at, character_model=d.voice.model)
 
+
+@SELF.fact(c.CHARACTER)
+def _character(s: SelfState, cx) -> str:
+    """Son caractère écrit, s'il décrit le tempérament courant ; sinon rien."""
+    return s.character if s.character and s.character_hash == c.temperament_hash(s.persona.temperament) else ""
+
+
+@SELF.process("self.character", wake_on=[c.PERSONA_REVISED], priority=10, lane="background", catch_up=CatchUp.ONCE,
+              max_quantum_s=600)
+class WriteCharacter:
+    """Écrit son caractère dès que son tempérament n'a pas le sien : au démarrage d'une vie, après un enregistrement
+    dans la console, un profil appliqué. Un appel qui ne donne rien (ou qui lève, ou aucun modèle) se retente en
+    reculant : une minute, deux, quatre… jusqu'à une fois par jour ; un tempérament qui change remet le compte à
+    zéro."""
+
+    def __init__(self) -> None:
+        self.retry_at = 0
+        self.tries = 0
+        self.tried_for = ""  # l'empreinte du tempérament que les essais visent
+
+    def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
+        wanted = c.temperament_hash(state.persona.temperament)
+        if state.character_hash == wanted and state.character:
+            return None
+        if wanted != self.tried_for:
+            self.tried_for, self.tries, self.retry_at = wanted, 0, 0
+        return max(frame.now, self.retry_at)
+
+    def _back_off(self, now: int) -> None:
+        self.tries += 1
+        self.retry_at = now + min(RETRY_US * 2 ** (self.tries - 1), RETRY_MAX_US)
+
+    async def run(self, ctx: Any) -> None:
+        self._back_off(ctx.frame.now)  # si l'appel lève ou ne donne rien : pas de rafale
+        if ctx.llm is None:
+            return
+        state: SelfState = ctx.state
+        doc = state.persona
+        request = request_for(doc, f"{ctx.run_id}#0")
+        response = await ctx.llm.call(request)
+        text = written(response.text)
+        if not text:
+            return
+        self.tries, self.retry_at = 0, 0
+        # écrit sans persona (le rôle n'en porte pas) : ``persona_hash`` reste vide
+        await ctx.emit(c.CHARACTER_WRITTEN.draft(
+            text=text, temperament=c.temperament_hash(doc.temperament),
+            voice=VoiceProvenance(call_id=request.call_id, persona_hash="", role="character", model=response.model)))

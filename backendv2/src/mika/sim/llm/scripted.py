@@ -20,6 +20,13 @@ from mika.ports.llm_budget import LLMLimits
 Responder = Callable[[LLMRequest], "LLMResponse | Awaitable[LLMResponse]"]
 
 
+#: ce qu'une doublure écrit de son caractère (rôle « character », ADR 0139) : un vrai texte, pour qu'il s'écrive une
+#: fois et que le processus ne se rappelle pas
+CHARACTER = ("Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée. Ce que vivent les "
+             "gens t'intéresse vraiment, et ça se voit à ce que tu retiens d'eux. Tu montres ce que tu ressens sans "
+             "en faire trop, et quand on te touche, tu détournes d'un mot.")
+
+
 class UnexpectedCall(AssertionError):
     pass
 

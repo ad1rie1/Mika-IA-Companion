@@ -1,12 +1,10 @@
 """La persona : un seul document pour toutes ses voix, écrit par l'opératrice. Deux profondeurs : ``full``
 (répondre, prendre la parole, se raconter : son portrait en prose) et ``compact`` (murmurer, travailler : sa
 description) — rendues depuis le même document, pour qu'aucune de ses voix ne soit quelqu'un d'autre. Qui elle est
-s'écrit une fois, dans le portrait (ADR 0138) ; ce qu'elle ressent, c'est son tempérament qui le dit. Elle est une IA
-et le sait, ou une personne incarnée (``nature``) ; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
-0100), est dans les deux profondeurs hors conversation — murmurer, travailler, un réveil, un brouillon, son journal,
-ses rêves, son récit. En conversation (répondre, prendre la parole), il se dit en mots : ses traits nettement marqués,
-sa réaction et sa défense, sans mesure (``character.temperament_in_words``). En mode pro (ADR 0116, la profondeur
-``pro``), qui elle est et rien de sa voix de chat ni de son tempérament."""
+s'écrit une fois, dans le portrait (ADR 0138) ; ce qu'elle ressent, c'est son tempérament qui le dit — par le texte
+que le modèle en a écrit (``self.character``, ADR 0139), le même dans les deux profondeurs. Elle est une IA et le
+sait, ou une personne incarnée (``nature``) ; ses bonjours donnent un ton, jamais une phrase à recopier. En mode pro
+(ADR 0116, la profondeur ``pro``), qui elle est et rien de sa voix de chat ni de son caractère."""
 
 from __future__ import annotations
 
@@ -16,7 +14,6 @@ from pathlib import Path
 import yaml
 
 from mika.contracts import self_ as c
-from mika.faculties.self.character import temperament_in_words, temperament_text
 from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
@@ -60,7 +57,7 @@ def life_rule(doc: c.PersonaDoc) -> str:
     return phrase("self.life.lived") if doc.portrait.strip() or doc.facts else phrase("self.life.sketched")
 
 
-def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str:
+def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False, character: str = "") -> str:
     """Le texte de la persona, en deuxième personne. En profondeur ``full``, son
     portrait en prose — le seul texte qui la décrit (ADR 0138 ; écrites en listes,
     ses qualités se jouaient une à une, « attentive », « à l'écoute » en faisaient
@@ -70,11 +67,10 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     description en une phrase. ``chat`` : elle parle à quelqu'un — ses exemples en
     conversation montrent sa voix (décrite, elle sonnait comme un assistant :
     2026-10-14) ; jamais dans un mail, un travail ou son journal, qui ne
-    s'écrivent pas comme un chat ; hors conversation, ses centres d'intérêt. En
-    conversation, son tempérament se dit en mots, pas en bloc (banc de recherche,
-    2026-10-15 : profil reconnu autant, un peu plus humain, au quart de la
-    longueur ; sans rien, une tsundere n'était plus reconnue). ``pro`` : le mode
-    pro (``_pro``)."""
+    s'écrivent pas comme un chat ; hors conversation, ses centres d'intérêt. Son
+    caractère, c'est le texte que le modèle en a écrit d'après sa matrice
+    (``character``, ADR 0139), le même partout ; tant qu'il n'est pas écrit, rien
+    ne le remplace. ``pro`` : le mode pro (``_pro``), sans caractère."""
     if depth == PRO:
         return _pro(doc)
     portrait = doc.portrait.strip()
@@ -84,9 +80,7 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
         parts.append(_bullets(phrase("self.persona.samples"), doc.samples) if chat
                      else _bullets(phrase("self.persona.interests"), doc.interests))
         parts.append(_bullets(phrase("self.persona.facts"), doc.facts))
-    # hors conversation (son journal, ses rêves, son récit, son travail), le bloc ; en conversation, ses traits marqués
-    # en mots (banc de recherche, 2026-10-15)
-    parts.append(temperament_in_words(doc.temperament) if chat else temperament_text(doc.temperament))
+    parts.append(phrase("self.character.frame", text=character.strip()) if character.strip() else "")
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
     return "\n\n".join(p for p in parts if p)
@@ -106,6 +100,6 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     """Le fournisseur de persona du pipeline (mis en cache par document)."""
     doc: c.PersonaDoc = frame.get(c.PERSONA)
     ep = frame.episode
-    text = render(doc, depth, chat=ep is not None and ep.kind in CONVERSATIONAL)
+    text = render(doc, depth, chat=ep is not None and ep.kind in CONVERSATIONAL, character=frame.get(c.CHARACTER))
     return PersonaRender(text=text, hash=digest((depth, text)), depth=depth, name=c.name_of(doc),
                          reference=doc.reference_thread.strip())

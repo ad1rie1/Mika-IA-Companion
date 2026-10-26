@@ -14,7 +14,6 @@ import asyncio
 from mika.contracts import runtime as rt
 from mika.faculties import transcript
 from mika.faculties.expression import parse
-from mika.faculties.self.character import temperament_in_words
 from mika.faculties.self.persona import render
 from mika.kernel.clock import HOUR
 from mika.ports.delivery import DONE, NOTE, TOOL_END, TOOL_START
@@ -84,8 +83,7 @@ def test_a_pro_request_is_worked_with_her_tools_shown_live_and_answered_in_markd
     content = first.system_stable + "".join(m.content for m in first.messages)
     # la consigne du mode, sa persona de travail ; ni son tempérament, ni sa voix de chat, ni « TA RÉPONSE »
     assert "MODE PRO" in first.system_stable and first.persona.depth == "pro" and first.max_tokens == 8192
-    traits = temperament_in_words(SHIPPED.temperament)
-    assert traits and traits not in content
+    assert "Ton caractère, pour toi seule" not in content  # son caractère écrit (ADR 0139) n'entre pas en mode pro
     assert STYLE not in content and phrase("expression.answer.title") not in content
     assert SHIPPED.portrait.strip()[:60] not in content
     # sa réponse en Markdown, telle qu'écrite : le code, ses crochets, ses espaces et son indentation
@@ -144,15 +142,15 @@ def test_an_unknown_mode_is_the_ordinary_conversation(tmp_path):
     assert not [c for c in calls if c.role == "pro"] and seen["utterance"].mode == "" and shown == []
 
 
-def test_her_pro_persona_says_who_she_is_without_her_chat_voice_nor_her_temperament():
-    text = render(SHIPPED, "pro")
+def test_her_pro_persona_says_who_she_is_without_her_chat_voice_nor_her_character():
+    character = "Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée."
+    text = render(SHIPPED, "pro", character=character)
     assert text.startswith(f"Tu es {SHIPPED.name}") and SHIPPED.language in text
-    assert temperament_in_words(SHIPPED.temperament) not in text
-    assert phrase("self.temperament.title") not in text and SHIPPED.tone.strip()[:40] not in text
+    assert character not in text and "Ton caractère" not in text
     assert SHIPPED.portrait.strip()[:60] not in text
     assert not any(sample in text for sample in SHIPPED.samples)
-    # le contre-exemple : en conversation, son tempérament se dit
-    assert temperament_in_words(SHIPPED.temperament) in render(SHIPPED, "full", chat=True)
+    # le contre-exemple : en conversation, son caractère écrit se dit
+    assert character in render(SHIPPED, "full", chat=True, character=character)
 
 
 def test_without_the_shield_her_code_would_be_mangled():

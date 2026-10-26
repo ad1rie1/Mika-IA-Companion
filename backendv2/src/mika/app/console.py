@@ -210,6 +210,8 @@ PROCESS_LABELS: dict[str, str] = {
     "attention.anticipate": "Attendre ce qui approche", "body.sleep": "S'endormir et se réveiller",
     "needs.empty": "Sentir le vide", "attention.watch": "Remarquer et attendre",
     "attention.digest": "Digérer ses pensées la nuit", "self.narrate": "Se raconter",
+    # ADR 0139
+    "self.character": "Écrire son caractère",
     "self.journal": "Tenir son journal", "self.dream": "Rêver", "self.reflect": "Voir ce qui la passionne", "social.profile": "Comprendre les gens",
     "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
     "projects.apps": "Réparer les apps de ses projets",
@@ -276,6 +278,7 @@ EVENT_LABELS: dict[str, str] = {
     "attention.expectation_met": "Une attente comblée", "attention.expectation_missed": "Une attente déçue",
     "attention.noticed": "Quelque chose de remarqué", "attention.thought_born": "Une pensée née",
     "self.dreamt": "Un rêve", "self.journaled": "Son journal", "self.narrated": "Son récit de soi",
+    "self.character_written": "Son caractère, écrit",
     "self.persona_revised": "Sa persona révisée",
     "social.closeness_set": "La proximité réglée", "social.profile_revised": "Un profil revu",
     "goals.amended": "Un but modifié", "goals.awaited": "Un but en attente", "goals.closed": "Un but clos",

@@ -340,8 +340,8 @@ async def profile_command(settings: Settings, args: argparse.Namespace) -> dict[
     await settings.save_persona(yaml.safe_dump(doc.model_dump(mode="json"), allow_unicode=True, sort_keys=False,
                                                width=100))
     return {"ok": True, "appliqué": args.nom,
-            "note": "ses paramètres se rejournalisent au prochain démarrage ; son chronotype et ses précisions sont "
-                    "gardés"}
+            "note": "ses paramètres se rejournalisent et son caractère se réécrit au prochain démarrage ; son "
+                    "chronotype et ses précisions sont gardés"}
 
 
 async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:

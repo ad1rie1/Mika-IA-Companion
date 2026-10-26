@@ -131,6 +131,9 @@ class Role(enum.StrEnum):
     POLISH = "polish"
     #: répondre en mode pro (ADR 0116) : un travail demandé dans le chat ; retombe sur la réponse
     PRO = "pro"
+    #: écrire son caractère d'après sa matrice (ADR 0139), une fois par tempérament ; retombe sur la réponse (il faut
+    #: un modèle qui écrit bien)
+    CHARACTER = "character"
 
 
 VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Role.JOURNAL, Role.DREAM,
@@ -139,7 +142,7 @@ VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Ro
 #: réponse (le seul rôle qu'une installation neuve configure forcément).
 FALLBACKS = {
     Role.INITIATIVE: Role.REPLY, Role.STEP: Role.REPLY, Role.MURMUR: Role.REPLY, Role.JOURNAL: Role.REPLY,
-    Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY, Role.PRO: Role.REPLY,
+    Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY, Role.PRO: Role.REPLY, Role.CHARACTER: Role.REPLY,
     # un projet travaille d'abord avec le modèle de ses séances ; l'impersonnel, avec celui de ses projets
     Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT,
     Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,

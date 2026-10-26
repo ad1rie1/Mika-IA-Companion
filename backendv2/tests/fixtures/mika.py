@@ -55,8 +55,13 @@ class Deliveries:
         return True
 
 
+#: ce qu'un modèle factice écrit de son caractère (ADR 0139) : un vrai texte, pour qu'il s'écrive une fois et que le
+#: processus ne se rappelle pas
+CHARACTER = "Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée."
+
+
 def reply(text: str) -> Callable[[LLMRequest], LLMResponse]:
-    return lambda req: LLMResponse(text)
+    return lambda req: LLMResponse(CHARACTER if req.role == "character" else text)
 
 
 def build(

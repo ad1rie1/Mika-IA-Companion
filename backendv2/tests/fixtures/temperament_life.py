@@ -35,7 +35,7 @@ from mika.contracts import attention as attention_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
-from mika.faculties.self.character import temperament_in_words, temperament_text
+from mika.faculties.self.character import told
 from mika.kernel.clock import US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
@@ -52,6 +52,10 @@ HURT = ("[EMOTION:sad:0.6]", "[EN_FACE: angry 0.7 | geste : blessant]")
 SHARP = ("[EMOTION:angry:0.75]", "[EN_FACE: frustrated 0.5]")
 GRIEF = ("[EMOTION:sad:0.7]", "[EN_FACE: sad 0.8 | grave : deuil]")
 APOLOGY = ("[EMOTION:relieved:0.4]", "[EN_FACE: sad 0.4 | geste : excuses]")
+
+
+#: ce que le modèle factice écrit de son caractère, quel que soit le tempérament (ADR 0139)
+CHARACTER = "Tu prends le temps avant de répondre, et tu repenses longuement à ce qui t'a marquée."
 
 
 class Voice:
@@ -72,6 +76,8 @@ class Voice:
             return LLMResponse("Je marche dans une ville de nuages, quelqu'un m'appelle de loin.")
         if req.role in ("murmur", "narrative"):
             return LLMResponse("hmm")
+        if req.role == "character":
+            return LLMResponse(CHARACTER)
         if req.role == "initiative":
             return LLMResponse("coucou, ça va ? [EMOTION:happy:0.4]")
         if req.role == "reply":
@@ -86,8 +92,8 @@ class PersonaCall:
 
     role: str
     depth: str
-    carries: bool  # le bloc de son tempérament y est, tel quel
-    in_words: bool = True  # ses traits marqués en mots y sont (en conversation)
+    carries: bool  # son caractère écrit y est, tel quel (ADR 0139)
+    in_words: bool = True  # et aucune mesure ne lui parvient
 
 
 @dataclass
@@ -215,19 +221,20 @@ def live(tmp: Path, temperament: T.Temperament) -> Lived:
     async def main() -> dict[str, Any]:
         await boot(kernel, doc)
         try:
+            await asyncio.sleep(1)  # son caractère s'écrit d'abord (ADR 0139) : sa vie commence avec lui
             return await _days(kernel, voice)
         finally:
             await kernel.stop()
 
     measures = run_virtual(clock, main)
-    block = temperament_text(temperament)
-    words = temperament_in_words(temperament)
+    # ce que lit le modèle qui écrit son caractère : ses traits mesurés (``told``) ; ce que porte sa persona : le texte
+    block = "\n".join(told(temperament))
     lived = Lived(temperament, block, m=measures)
     for req in llm.calls:
         lived.roles.add(str(req.role))
         if req.persona is not None:
-            lived.persona_calls.append(PersonaCall(str(req.role), req.persona.depth, block in req.persona.text,
-                                                   not words or words in req.persona.text))
+            lived.persona_calls.append(PersonaCall(str(req.role), req.persona.depth, CHARACTER in req.persona.text,
+                                                   "%" not in req.persona.text))
     return lived
 
 
@@ -251,16 +258,14 @@ CONVERSATION_ROLES = frozenset({"reply", "initiative"})
 
 
 def assert_her_temperament_everywhere(lived: Lived) -> None:
-    """Hors conversation, chaque appel qui porte sa persona porte aussi le bloc de son tempérament (son journal, ses
-    rêves, son récit, et la persona compacte : un murmure, une séance de travail) ; en conversation (sa réponse, ses
-    initiatives), ses traits marqués en mots, jamais le bloc."""
+    """Chaque appel qui porte sa persona porte son caractère écrit, le même partout (ADR 0139) — sa réponse, ses
+    initiatives, son journal, ses rêves, son récit, et la persona compacte : un murmure, une séance de travail — et
+    jamais une mesure."""
     assert lived.persona_calls, "aucun appel n'a porté sa persona"
-    missing = [c for c in lived.persona_calls if not c.carries and c.role not in CONVERSATION_ROLES]
-    assert missing == [], f"sa persona sans son tempérament : {missing}"
-    told = [c for c in lived.persona_calls if c.carries and c.role in CONVERSATION_ROLES]
-    assert told == [], f"le bloc de son tempérament dit en conversation : {told}"
-    unsaid = [c for c in lived.persona_calls if c.role in CONVERSATION_ROLES and not c.in_words]
-    assert unsaid == [], f"ses traits marqués absents en conversation : {unsaid}"
+    missing = [c for c in lived.persona_calls if not c.carries]
+    assert missing == [], f"sa persona sans son caractère : {missing}"
+    measured = [c for c in lived.persona_calls if not c.in_words]
+    assert measured == [], f"une mesure de sa matrice dite au modèle qui parle : {measured}"
     roles = {c.role for c in lived.persona_calls}
     assert {"reply", "initiative", "journal", "dream", "narrative"} <= roles, roles
     assert any(c.depth == "compact" for c in lived.persona_calls), roles

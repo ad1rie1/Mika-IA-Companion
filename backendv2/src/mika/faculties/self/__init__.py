@@ -27,6 +27,7 @@ from __future__ import annotations
 # l'ordre d'enregistrement est l'ordre de ses sections dans le prompt (``kernel/prompt.py``) : pas de tri
 # isort: off
 from mika.faculties.self import narrative as _narrative  # noqa: F401 — « QUI TU ES DEVENUE » d'abord
+from mika.faculties.self import character as _character  # noqa: F401
 from mika.faculties.self import esteem as _esteem  # noqa: F401
 from mika.faculties.self import model as _model  # noqa: F401
 from mika.faculties.self import interests as _interests  # noqa: F401

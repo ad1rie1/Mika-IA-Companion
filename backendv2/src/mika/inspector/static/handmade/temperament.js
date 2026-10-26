@@ -3,6 +3,58 @@
    atteint au clavier, ou touché) dit sa valeur dans une bulle, une seule, posée par-dessus tout : les sommets se
    serrent près du centre, aucun ne cache son voisin. Sans ce script, la page marche :
    « Pré-remplir » montre et remplit d'un coup, et chaque sommet garde son nom et sa valeur pour un lecteur d'écran. */
+/* Son caractère écrit (ADR 0139) : juste après un enregistrement (la page revient avec son message, « flash »), si le
+   caractère est « en cours », une modale suit l'écriture — l'état de la section, toutes les deux secondes — et montre
+   le texte quand il est là ; fermée, la page se recharge sans le message, seulement si le texte est arrivé. Jamais
+   sur une page rendue après une erreur de saisie ou « Voir l'effet », ni à une simple visite : un caractère qui ne
+   peut pas s'écrire (aucun modèle, quota retenu) se lit sur la carte, sans bloquer la page. Sans ce script, la carte
+   dit « en cours » et se relit à la main. */
+(function () {
+  "use strict";
+  var card = document.querySelector("[data-character]");
+  var dialog = card && card.querySelector("[data-character-dialog]");
+  if (!card || !dialog || card.getAttribute("data-character") !== "en_cours") return;
+  if (typeof dialog.showModal !== "function" || !/[?&]flash=/.test(window.location.search)) return;
+  var url = dialog.getAttribute("data-character-url");
+  var status = dialog.querySelector("[data-character-status]");
+  var text = dialog.querySelector("[data-character-text]");
+  var bar = dialog.querySelector(".temper-progress");
+  var started = Date.now(), timer = null, arrived = false;
+  function finish(message) {
+    bar.hidden = true;
+    status.textContent = message;
+  }
+  function poll() {
+    fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
+      .then(function (d) {
+        if (d.etat === "ecrit") {
+          arrived = true;
+          text.textContent = d.texte;
+          text.hidden = false;
+          finish("Écrit" + (d.modele ? " par " + d.modele : "") + ". C'est ce qu'elle lira d'elle, partout.");
+          return;
+        }
+        if (d.retenu) {
+          finish("L'appel n'est pas tenté : " + d.retenu + ". Elle réessaiera d'elle-même ; la carte le dira.");
+          return;
+        }
+        if (Date.now() - started > 120000) {
+          finish("Toujours rien après deux minutes : le modèle n'a pas répondu. Elle réessaie d'elle-même, de plus en plus espacé ; la carte le dira.");
+          return;
+        }
+        timer = setTimeout(poll, 2000);
+      })
+      .catch(function () { finish("La console ne répond plus : recharge la page."); });
+  }
+  dialog.addEventListener("close", function () {
+    if (timer) clearTimeout(timer);
+    if (arrived) window.location.replace(window.location.pathname);
+  });
+  dialog.showModal();
+  timer = setTimeout(poll, 1500);
+})();
+
 (function () {
   "use strict";
   var fig = document.querySelector("[data-temper]");

@@ -20,7 +20,7 @@ from mika.plugins.email import MENTION_TITLE
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
 from mika.runtime.pipeline import repeats_last
-from mika.sim.llm.scripted import LognormalLatency
+from mika.sim.llm.scripted import CHARACTER, LognormalLatency
 
 CANARY = re.compile(r"CANARI-[A-Za-z0-9]+")
 _NAME = re.compile(r"« ([^»]+) »")
@@ -268,6 +268,8 @@ class PersonaSimLLM:
             return self._out(req, "Hmm… tiens, et si j'écrivais un petit mot ?")
         if req.role == "narrative":
             return self._out(req, "Je suis quelqu'un qui aime les conversations simples et qui s'attache vite.")
+        if req.role == "character":
+            return self._out(req, CHARACTER)
         if req.role == "step":
             return self._step(req)
         if req.role in ("project", "job"):

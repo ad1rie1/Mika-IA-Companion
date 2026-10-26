@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mika.kernel.codec import digest
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
 from mika.kernel.forms import Knob
@@ -187,6 +188,22 @@ class PersonaRevised(Payload):
     persona: PersonaDoc
 
 
+def temperament_hash(t: Temperament) -> str:
+    """L'empreinte d'un tempérament (ses curseurs, ses choix, ses précisions) : le caractère écrit la porte, et ne
+    vaut que pour elle."""
+    return digest(t.model_dump(mode="json"))
+
+
+class CharacterWritten(Payload):
+    """Son caractère, écrit par le modèle d'après sa matrice (ADR 0139) : six à huit phrases qui disent ce que ses
+    traits font ensemble, à la place des 29 mesures. Du texte sur elle, comme son portrait, personne d'autre n'y
+    est : pas un ``Content``. Il ne vaut que pour le tempérament dont il porte l'empreinte."""
+
+    text: str
+    temperament: str
+    voice: VoiceProvenance
+
+
 class Narrated(Payload):
     """Son récit d'elle-même (« Je suis quelqu'un qui… »), écrit par sa voix."""
 
@@ -313,6 +330,7 @@ DISAPPOINTED = reading.DISAPPOINTED
 
 PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=3,
                              upcasters={1: _zone_repaired, 2: _gone_dropped})
+CHARACTER_WRITTEN = event_type("self.character_written", OWNER, CharacterWritten, public=True)
 JOURNALED = event_type("self.journaled", OWNER, Journaled, public=True, content=("text", "shareable"),
                        subjects=("about",),
                        authored=True)
@@ -327,6 +345,9 @@ INTEREST_BORN = event_type("self.interest_born", OWNER, InterestBorn, public=Tru
 REFLECTED = event_type("self.reflected", OWNER, Reflected, public=True)
 
 PERSONA = FactKey("self.persona", type=PersonaDoc)
+#: son caractère écrit par le modèle pour le tempérament courant (ADR 0139) ; « » tant qu'il ne l'est pas — rien
+#: ne le remplace : sa persona ne dit alors rien de son caractère
+CHARACTER = FactKey("self.character", type=str)
 #: L'estime de soi, dans [0,05 ; 0,95] : lente, revenant vers 0,5 (demi-vie de trois jours).
 ESTEEM = FactKey("self.esteem", type=float, time_varying=True)
 #: Ce qu'elle sait d'elle (ADR 0088) : des tendances tirées de ses réussites et de ses ratés récents — des codes

@@ -25,7 +25,7 @@ from mika.ports.llm import LLMRequest, LLMResponse
 from mika.sim import expect
 from mika.sim.clock import SimClock
 from mika.sim.lane import Plan, Result, at_paris, deviation, mood, persona_llm, recalled, stance, valence
-from mika.sim.llm.scripted import ScriptedLLM
+from mika.sim.llm.scripted import CHARACTER, ScriptedLLM
 from mika.sim.metrics import duplicate_items, log_metrics, thread_consistent
 from mika.sim.rng import RngTree
 from mika.sim.world import Driver
@@ -98,6 +98,8 @@ def rollercoaster_llm(clock: SimClock) -> ScriptedLLM:
 
     def respond(req: LLMRequest) -> LLMResponse:
         message = req.messages[-1].content.rsplit("\n\n", 1)[-1]
+        if req.role == "character":
+            return LLMResponse(CHARACTER)
         if req.role != "reply":
             return LLMResponse("[SILENCE]")
         if message in script:

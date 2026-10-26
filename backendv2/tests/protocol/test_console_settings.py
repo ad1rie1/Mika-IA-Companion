@@ -116,7 +116,12 @@ def test_persona_pages_yaml_import_and_back_to_the_file(world):  # noqa: F811
     identite = html_of(client.get(f"{BASE}/identite"))
     assert "Nom" in identite and "Centres d'intérêt" not in identite  # un sujet par page
     assert re.search(r'<select name="timezone"[^>]*>.*?<option value="Europe/Paris" selected', identite, re.S)
-    assert "Ce que pilote chaque curseur" in html_of(client.get(f"{BASE}/temperament"))
+    temperament = html_of(client.get(f"{BASE}/temperament"))
+    assert "Ce que pilote chaque curseur" in temperament and "Son caractère, écrit" in temperament
+    # l'état de la section, pour la modale qui suit l'écriture de son caractère (ADR 0139)
+    probe = client.get(f"{BASE}/temperament/etat")
+    assert probe.status_code == 200 and probe.json()["etat"] in ("ecrit", "en_cours")
+    assert client.get(f"{BASE}/identite/etat").status_code == 404  # une page sans sonde
     kernel = live.kernel
 
     def revisions() -> int:

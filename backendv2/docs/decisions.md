@@ -26,7 +26,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -790,7 +790,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* presque tout ce que la propriétaire attendait dépendait du type de personne, pas d'une règle.
 
-*Révisée par 0102, 0112, 0118, 0137, 0138.*
+*Révisée par 0102, 0112, 0118, 0137, 0138, 0139.*
 
 ### 0107 — Les suites du parcours d'une émotion
 
@@ -1308,6 +1308,20 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* la même personne était écrite deux fois — en prose pour le chat, en listes pour le reste — et les deux avaient dérivé ; sur la console, on éditait la version que le chat ne lisait pas, et le portrait n'était sur aucun formulaire. Le texte contredisait la matrice (« scripts que tu ne finis jamais » contre persévérance 0,7, « pas une intervieweuse » contre l'intérêt pour les autres).
 
 *Révise 0047 (en partie : sa vie rédigée en listes), 0100 (en partie : la persona livrée).*
+
+*Révisée par 0139.*
+
+### 0139 — Son caractère est écrit par le modèle, pas récité en mesures
+
+- Les 29 mesures de sa matrice, chacune avec ce qu'elle veut dire chez elle (`told`, les phrases de `self.temperament`), ne vont plus au modèle qui parle : elles vont à celui qui **écrit son caractère** (rôle `character`, repli sur `reply`) — six à huit phrases à la deuxième personne qui disent ce que ses traits font ensemble, sans pourcentage ni nom de trait, les traits très marqués tels quels, les précisions gardées.
+- Le texte est journalisé (`self.character_written`) avec l'empreinte du tempérament qu'il décrit ; le processus `self.character` l'écrit dès que le tempérament n'a pas le sien (une vie qui commence, un enregistrement dans la console, un profil appliqué) et jamais autrement. Un appel qui ne donne rien se retente en reculant (une minute, puis le double, jusqu'à une fois par jour). Il entre dans sa persona partout où elle est injectée, le même en conversation et hors conversation (`self.CHARACTER`) ; jamais en mode pro.
+- **Pas de repli** : tant qu'il n'est pas écrit, sa persona ne dit rien de son caractère — la physique tourne, elle. Le bloc chiffré et les traits en mots sont retirés. Il n'est pas éditable : pour nuancer un trait, les précisions.
+- La console le montre sur la page Tempérament (le texte, le modèle, quand) ; après « Enregistrer », une modale suit l'écriture (`/inspecteur/reglages/temperament/etat`) et montre le texte quand il est là.
+- Ce que ses traits changent à sa façon d'écrire dans un chat reste dit à part, en phrases toutes faites, dans « TA RÉPONSE » : des consignes mesurées au banc (V5, ADR 0112), pas une description. Le banc du tempérament écrit le caractère de chaque profil avant de juger.
+
+*Pourquoi :* en lignes chiffrées, elle jouait ses traits un à un ; en phrases toutes faites, « anxieuse et sociable » restait la somme de deux phrases. La prose dit la combinaison, et c'est ce que le modèle lit le mieux (le portrait : 4,5 → 7,9 sur 10). Demandé par l'utilisateur le 2026-10-26, sans repli.
+
+*Révise 0100 (en partie : comment le tempérament se dit au modèle), 0138 (en partie).*
 
 ## Les clients, le fil, le monde
 

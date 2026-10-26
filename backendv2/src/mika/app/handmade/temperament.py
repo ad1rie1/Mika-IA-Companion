@@ -22,6 +22,8 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
+from mika.app.handmade import ago
+from mika.contracts import self_ as self_c
 from mika.faculties.self.character import CLEARLY
 from mika.inspector.ui import PREFIX, env
 from mika.kernel import forms
@@ -215,8 +217,22 @@ def _sets(key: str) -> str:
     return " · ".join(moved) or "5 partout"
 
 
-def head(current: Temperament, query: Mapping[str, str]) -> Markup:
-    """Le haut de la page : la forme de son caractère, partir d'un profil, et ses 18 profils (repliés)."""
+def character_state(kernel: Any, held: str = "") -> dict[str, Any]:
+    """Son caractère écrit (ADR 0139), tel que la page et sa modale le lisent : « ecrit » (le texte, le modèle,
+    quand), ou « en_cours » (le tempérament courant n'a pas encore le sien : le processus l'écrit) — avec, s'il y en
+    a une, la raison pour laquelle l'appel n'est pas tenté (``held`` : le quota qui retient le rôle, aucun modèle)."""
+    frame = kernel.mind.frame()
+    text = frame.get(self_c.CHARACTER)
+    if not text:
+        return {"etat": "en_cours", "texte": "", "modele": "", "quand": "", "retenu": held}
+    s = frame.state("self")
+    return {"etat": "ecrit", "texte": text, "modele": s.character_model, "quand": ago(frame.now, s.character_at),
+            "retenu": ""}
+
+
+def head(current: Temperament, query: Mapping[str, str], character: Mapping[str, Any]) -> Markup:
+    """Le haut de la page : son caractère écrit (``character_state``), la forme de son caractère, partir d'un profil,
+    et ses 18 profils (repliés)."""
     chosen = str(query.get(CHOSEN, ""))
     chosen = chosen if chosen in PROFILES else ""
     proposed = apply_profile(current, chosen) if chosen else None
@@ -241,7 +257,7 @@ def head(current: Temperament, query: Mapping[str, str]) -> Markup:
         figure=figure(current, proposed), now=PROFILES[now].label if now else "",
         chosen=PROFILES[chosen].label if chosen else "", proposing=proposed is not None, profiles=profiles,
         reset=PAGE, small_rings=_polygon([1.0] * len(AXES), SMALL), page=PAGE, param=CHOSEN, selected=chosen or now,
-        choices=[(k, f"{p.label} — {p.summary}") for k, p in PROFILES.items()], data=data))
+        choices=[(k, f"{p.label} — {p.summary}") for k, p in PROFILES.items()], data=data, character=character))
 
 
 def prefill(current: Temperament, query: Mapping[str, str]) -> Temperament | None:

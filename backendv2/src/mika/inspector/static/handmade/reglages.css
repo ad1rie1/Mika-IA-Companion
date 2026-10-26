@@ -25,6 +25,21 @@
 :root { --temper-mark: #6544ce; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --temper-mark: #8f6fe3; } }
 :root[data-theme="dark"] { --temper-mark: #8f6fe3; }
+/* son caractère écrit (ADR 0139) : le texte, ou « en cours » ; la modale qui suit l'écriture après Enregistrer */
+.temper-character { display: grid; gap: 10px; }
+.temper-char-text { margin: 0; padding: 10px 14px; border-left: 3px solid var(--temper-mark); background: var(--sunken);
+  border-radius: 0 8px 8px 0; white-space: pre-wrap; line-height: 1.45; }
+.temper-char-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--text-2); }
+.temper-dialog { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); color: var(--text);
+  padding: 20px 22px; width: min(560px, 92vw); }
+.temper-dialog::backdrop { background: color-mix(in srgb, var(--text) 40%, transparent); }
+.temper-dialog h3 { margin: 0 0 6px; }
+.temper-progress { height: 6px; border-radius: 999px; background: var(--sunken); overflow: hidden; margin: 12px 0; }
+.temper-progress span { display: block; width: 40%; height: 100%; border-radius: 999px; background: var(--temper-mark);
+  animation: temper-slide 1.2s ease-in-out infinite alternate; }
+@keyframes temper-slide { from { transform: translateX(-60%); } to { transform: translateX(260%); } }
+.temper-progress[hidden], .temper-char-text[hidden] { display: none; }
+.temper-dialog-actions { display: flex; justify-content: flex-end; margin: 12px 0 0; }
 .temper { display: grid; gap: 14px; }
 .temper-body { display: grid; grid-template-columns: minmax(300px, 600px) minmax(0, 1fr); align-items: center; gap: 18px 32px; }
 .temper-fig { margin: 0; }

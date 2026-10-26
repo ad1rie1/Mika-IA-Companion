@@ -65,7 +65,8 @@ TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
-                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "polish": "voix"}
+                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "polish": "voix",
+                 "character": "voix"}
 
 
 @cache
@@ -447,6 +448,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_authors(cfg)
         return []
 
+    def character_state() -> dict[str, Any]:
+        """Son caractère écrit (ADR 0139), et ce qui retient l'appel qui l'écrirait : aucun modèle, ou le quota."""
+        if not live.gateway.configured or not live.gateway.serving(str(Role.CHARACTER)):
+            held = "aucun modèle ne sert ce rôle (Intelligence › Qui sert quoi)"
+        else:
+            held = live.gateway.held(str(Role.CHARACTER), 2)
+        return temper.character_state(live.kernel, held)
+
     def temperament_effect(ui: Any, t: Temperament) -> list[Any]:
         """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
         return effect(ui, params.preview_temperament(t))
@@ -764,7 +773,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                     "rôle « rendre naturel »."),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
-                        head=lambda query: temper.head(live.persona().temperament, query),
+                        head=lambda query: temper.head(live.persona().temperament, query, character_state()),
+                        probe=character_state,
                         prefill=lambda query: temper.prefill(live.persona().temperament, query),
                         description="Sa matrice de personnalité : des curseurs rangés en familles, une humeur de "
                                     "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
@@ -775,10 +785,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Des curseurs (0,5 = comme la plupart des gens ; la console s'arrête à 0,1 et 0,9), "
                             "une humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. "
                             "Chaque faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
-                            "curseur, mesuré en le poussant à ses deux bouts. Un trait à 0,3 ou moins, à 0,7 ou "
-                            "plus, se dit aussi au modèle (« TON TEMPÉRAMENT »). Un profil les pose tous d'un "
-                            "coup : choisis-le en haut, le formulaire s'ouvre sur ses valeurs, rien n'est enregistré "
-                            "avant « Enregistrer ».")),)),
+                            "curseur, mesuré en le poussant à ses deux bouts. Son caractère, le modèle l'écrit "
+                            "d'après ces curseurs, à chaque enregistrement (en haut de la page). Un profil les pose "
+                            "tous d'un coup : choisis-le en haut, le formulaire s'ouvre sur ses valeurs, rien n'est "
+                            "enregistré avant « Enregistrer ».")),)),
         SettingsSection("notifications", "Notifications du téléphone", "canaux", PushSettings,
                         lambda: _tolerant(PushSettings, service_account=settings.push()), save_push, order=20,
                         description="Ce qu'elle écrit à quelqu'un dont l'application est fermée part par Firebase, "

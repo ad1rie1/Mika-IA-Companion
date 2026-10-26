@@ -40,10 +40,11 @@ from pathlib import Path
 
 from mika.contracts import expression as expression_c
 from mika.faculties.expression import parse, style
-from mika.faculties.self.character import temperament_text
+from mika.faculties.self.character import told, written
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.vocab import temperament as T
 from mika.vocab.affect import Declared
+from mika.vocab.phrasebook import phrase
 
 #: une persona sans caractère : seul le tempérament doit la colorer
 PERSONA = ("Tu es Mika. C'est une IA, elle le sait et n'en fait pas une histoire. Tu parles français, avec les gens "
@@ -108,9 +109,9 @@ EXPECTED: dict[str, dict[str, Expect]] = {
 }
 
 
-def system_text(t: T.Temperament) -> str:
-    """Une persona sans caractère, puis le bloc de son tempérament tel que sa persona le porte, puis le style."""
-    return PERSONA + "\n\n" + temperament_text(t) + "\n\n" + style()
+def system_text(character: str) -> str:
+    """Une persona sans caractère, puis son caractère écrit tel que sa persona le porte (ADR 0139), puis le style."""
+    return PERSONA + "\n\n" + phrase("self.character.frame", text=character) + "\n\n" + style()
 
 
 def user_text(case: dict[str, str]) -> str:
@@ -118,24 +119,42 @@ def user_text(case: dict[str, str]) -> str:
     return f"{state}\n\n{case['msg']}"
 
 
-async def answer(profile: str, case: str, model: str, sem: asyncio.Semaphore, workdir: Path) -> dict:
+async def ask(system: str, user: str, model: str, workdir: Path) -> str:
+    """Un appel à la CLI Claude Code, avec son propre login : la consigne en fichier, le message sur l'entrée."""
+    with tempfile.TemporaryDirectory(dir=workdir) as tmp:
+        (Path(tmp) / "system.txt").write_text(system, encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k not in FORBIDDEN}
+        env.update({"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "ENABLE_CLAUDEAI_MCP_SERVERS": "false"})
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "-p", "--output-format", "text", "--system-prompt-file", str(Path(tmp) / "system.txt"),
+            "--setting-sources", "", "--strict-mcp-config", "--tools", "", "--permission-mode", "dontAsk",
+            "--no-session-persistence", "--model", model, cwd=tmp, env=env,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, _err = await asyncio.wait_for(proc.communicate(user.encode()), timeout=180)
+    return out.decode(errors="replace")
+
+
+async def character_of(profile: str, model: str, sem: asyncio.Semaphore, workdir: Path) -> str:
+    """Son caractère écrit pour ce profil, comme le processus ``self.character`` l'écrirait : la même consigne, les
+    mêmes traits mesurés, le même modèle que les réponses jugées."""
     t = T.apply_profile(T.Temperament(), profile)
     async with sem:
-        with tempfile.TemporaryDirectory(dir=workdir) as tmp:
-            (Path(tmp) / "system.txt").write_text(system_text(t), encoding="utf-8")
-            env = {k: v for k, v in os.environ.items() if k not in FORBIDDEN}
-            env.update({"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "ENABLE_CLAUDEAI_MCP_SERVERS": "false"})
-            proc = await asyncio.create_subprocess_exec(
-                "claude", "-p", "--output-format", "text", "--system-prompt-file", str(Path(tmp) / "system.txt"),
-                "--setting-sources", "", "--strict-mcp-config", "--tools", "", "--permission-mode", "dontAsk",
-                "--no-session-persistence", "--model", model, cwd=tmp, env=env,
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            out, _err = await asyncio.wait_for(proc.communicate(user_text(CASES[case]).encode()), timeout=180)
-    raw = out.decode(errors="replace")
+        raw = await ask(phrase("self.character.system", name="Mika"),
+                        phrase("self.character.message", lines="\n".join(told(t))), model, workdir)
+    text = written(raw)
+    if not text:
+        raise SystemExit(f"le modèle n'a pas écrit le caractère de « {profile} » : {raw[:200]!r}")
+    return text
+
+
+async def answer(profile: str, character: str, case: str, model: str, sem: asyncio.Semaphore, workdir: Path) -> dict:
+    async with sem:
+        raw = await ask(system_text(character), user_text(CASES[case]), model, workdir)
     text, notes = parse(raw, "Mika")
     declared = Declared.decode(notes.get(expression_c.EMOTION_ANNOTATION))
     expect = EXPECTED.get(profile, {}).get(case)
-    return {"profil": profile, "situation": case, "declare": declared.encode() if declared else "",
+    return {"profil": profile, "situation": case, "caractere": character,
+            "declare": declared.encode() if declared else "",
             "ok": None if expect is None else bool(expect(declared)), "dit": text, "brut": raw}
 
 
@@ -148,7 +167,11 @@ async def main() -> None:
     if unknown:
         raise SystemExit(f"profils inconnus : {', '.join(unknown)} (connus : {', '.join(T.PROFILES)})")
     with tempfile.TemporaryDirectory() as workdir:
-        rows = await asyncio.gather(*(answer(p, c, model, sem, Path(workdir)) for p in profiles for c in CASES))
+        # d'abord le caractère de chaque profil, écrit par le modèle (ADR 0139) ; puis ses réponses, avec lui
+        characters = dict(zip(profiles, await asyncio.gather(*(character_of(p, model, sem, Path(workdir))
+                                                               for p in profiles)), strict=True))
+        rows = await asyncio.gather(*(answer(p, characters[p], c, model, sem, Path(workdir))
+                                      for p in profiles for c in CASES))
     out.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
     by = {(r["profil"], r["situation"]): r for r in rows}
     print(f"{'profil':12} " + " ".join(f"{c:>22}" for c in CASES) + f"   ({model})")

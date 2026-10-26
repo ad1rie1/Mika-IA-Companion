@@ -116,7 +116,7 @@ class Her(Frame):
 
     def get(self, key):
         names = {ALICE: "Alice", INES: "Inès"}
-        return {"self.knows": lambda: self.known, "self.interests": lambda: self.views,
+        return {"self.knows": lambda: self.known, "self.interests": lambda: self.views, "self.character": lambda: "",
                 "identity.is_owner": lambda: key.arg == INES, "social.circle": lambda: (ALICE, INES),
                 "social.closeness": lambda: {ALICE: social_c.FRIEND, INES: social_c.CLOSE}.get(key.arg, ""),
                 "identity.identity": lambda: NS(name=names.get(key.arg, "")),

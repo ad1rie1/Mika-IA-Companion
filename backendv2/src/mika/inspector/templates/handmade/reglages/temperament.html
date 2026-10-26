@@ -2,7 +2,32 @@
    en place et, proposée, celle d'un profil ; chaque sommet a sa bulle, au survol ou au clavier, une seule posée
    par-dessus tout, que le script remplit), partir d'un profil
    (changer le sélecteur montre la différence sur la figure, static/handmade/temperament.js ; « Pré-remplir » seul met
-   ses valeurs dans le formulaire, rien n'est enregistré), ses 18 profils et leur silhouette. #}
+   ses valeurs dans le formulaire, rien n'est enregistré), ses 18 profils et leur silhouette. En tête, son caractère
+   écrit par le modèle d'après ses curseurs (ADR 0139) : le texte, ou « en cours » — et la modale qui suit l'écriture
+   après Enregistrer (static/handmade/temperament.js, l'état de la section en JSON à {{ page }}/etat). #}
+<section class="now-card temper-character" aria-labelledby="temper-char-title" data-character="{{ character.etat }}">
+  <header class="now-card-head">
+    <h2 id="temper-char-title">Son caractère, écrit</h2>
+    <p>Le modèle l'écrit d'après ses curseurs, à chaque enregistrement : six à huit phrases qu'elle lit avant de parler, partout. Rien ne le remplace tant qu'il n'est pas écrit.</p>
+  </header>
+  {% if character.etat == "ecrit" %}
+  <blockquote class="temper-char-text">{{ character.texte }}</blockquote>
+  <p class="now-muted">Écrit {{ character.quand }}{% if character.modele %} par {{ character.modele }}{% endif %}.</p>
+  {% else %}
+  {% if character.retenu %}
+  <p class="temper-char-pending"><span class="now-tag warn">retenu</span> Son tempérament n'a pas encore son caractère, et l'appel qui l'écrirait n'est pas tenté : {{ character.retenu }}. D'ici là, sa persona n'en dit rien.</p>
+  {% else %}
+  <p class="temper-char-pending"><span class="now-tag info">en cours</span> Son tempérament n'a pas encore son caractère : le modèle l'écrit. D'ici là, sa persona n'en dit rien.</p>
+  {% endif %}
+  {% endif %}
+  <dialog class="temper-dialog" data-character-dialog data-character-url="{{ page }}/etat" aria-labelledby="temper-dialog-title">
+    <h3 id="temper-dialog-title">J'écris son caractère…</h3>
+    <p data-character-status>Le modèle lit ses curseurs et écrit six à huit phrases.</p>
+    <div class="temper-progress" role="progressbar" aria-label="Écriture en cours"><span></span></div>
+    <blockquote class="temper-char-text" data-character-text hidden></blockquote>
+    <form method="dialog" class="temper-dialog-actions"><button class="btn" type="submit">Fermer</button></form>
+  </dialog>
+</section>
 <section class="now-card temper" aria-labelledby="temper-title">
   <header class="now-card-head">
     <h2 id="temper-title">La forme de son caractère</h2>

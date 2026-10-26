@@ -12,7 +12,7 @@ from typing import Any
 
 from mika.contracts import memory as memory_c
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from tests.fixtures.mika import said
+from tests.fixtures.mika import CHARACTER, said
 
 SIX = ["un", "deux", "trois", "quatre", "cinq", "six"]
 REPLY = "d'accord [EMOTION:happy:0.4]"
@@ -35,6 +35,8 @@ class Script:
         if req.role == "extract":
             args = (self.extract(req.messages[-1].content) if self.extract else None) or {}
             return LLMResponse("", tool_calls=(ToolCall("x", "record_memories", args),), stop="tool_use")
+        if req.role == "character":
+            return LLMResponse(CHARACTER)  # son caractère écrit (ADR 0139), une fois
         if callable(self.reply):
             text = self.reply(message_of(req))
             if text is not None:
