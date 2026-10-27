@@ -23,7 +23,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141 |
@@ -943,6 +943,16 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Un projet qu'on lui a confié ne le demande pas : seuls ses projets à elle le font.
 
 *Pourquoi :* le 2026-10-27, son projet de trading s'est arrêté après trois pannes, et elle n'en a rien dit : une pause pour pannes ne lui parvenait pas, et sa liste de projets disait seulement « en pause ». Il serait resté arrêté jusqu'à ce que quelqu'un ouvre la console.
+
+### 0144 — Ce que son labo de trading a montré : un constant à son rythme, une source ouverte, des parts en %
+
+- `start_project` et `create_project` prennent chaque constant comme un texte (la cadence des réglages) ou comme `{text, cadence_hours}` (`ConstantArg`). Un bilan de la semaine revient ainsi chaque semaine dès la création, comme avec `project_objective_add` ou `project_steer`.
+- Leur description le dit : ce qu'une de ses apps fait déjà à son heure (un relevé, une veille) n'est pas un objectif constant, puisque l'app le fait sans elle.
+- L'exemple de `forge_help veille` lit les taux de référence de la BCE (Frankfurter : ouvert, documenté, sans clé) au lieu de Yahoo Finance. Il suit le cours de l'euro chaque soir de semaine. Le guide ajoute qu'une source peut refuser (429, 403, une page au lieu des données) : préférer une API ouverte et documentée, et l'essayer depuis la Forge avant de bâtir dessus.
+- `forge_edit` compte parmi ce qu'une exécution a changé (`CHANGING`), comme `forge_write` : le compte rendu ne dit plus « aucun outil » d'une app retouchée.
+- Le guide des blocs dit qu'une courbe en `%` porte des parts (0.012 pour 1 %), comme la console les lit (`pct_fr`).
+
+*Pourquoi :* le 2026-10-27, son labo de trading fictif (projet n° 257) avait son « bilan hebdomadaire » toutes les 24 h, faute de pouvoir donner une cadence à la création, et un constant « relever les cours chaque jour » doublait l'agenda de son app. Elle avait pris la source de l'exemple du guide, Yahoo, qui répondait 429 depuis le portable : quatre versions y sont passées. Une exécution qui avait retouché l'app par `forge_edit` disait « outils utilisés : — ». Enfin, ses courbes donnaient des pourcentages là où la console attend des parts : −0,1 % s'affichait « −10 % ».
 
 ## Les sens et les plugins
 

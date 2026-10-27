@@ -218,12 +218,15 @@ def test_a_work_promise_to_her_owner_sets_out_with_the_forge(tmp_path, who, oper
 
 # ── Le guide dit vrai, l'essai couvre tout (L5) ───────────────────────────
 
-#: ce que rendrait le cours du CAC 40 : +2,82 % depuis la clôture de la veille
-QUOTE = json.dumps({"chart": {"result": [{"meta": {"regularMarketPrice": 7300.0, "chartPreviousClose": 7100.0}}]}})
+#: ce que rendraient les taux de la BCE : l'euro à +2,82 % face au dollar depuis le jour ouvré précédent (la livre
+#: aussi, pour une autre devise)
+QUOTE = json.dumps({"amount": 1.0, "base": "EUR", "start_date": "2026-10-16", "end_date": "2026-10-26", "rates": {
+    "2026-10-22": {"USD": 1.12, "GBP": 0.86}, "2026-10-23": {"USD": 1.1, "GBP": 0.86},
+    "2026-10-26": {"USD": 1.131, "GBP": 0.87}}})
 
 
 class WebApi(FakeApi):
-    """L'api d'une app, avec un réseau qui rend toujours le même cours."""
+    """L'api d'une app, avec un réseau qui rend toujours les mêmes taux."""
 
     def __init__(self, config):
         super().__init__(config)
@@ -234,25 +237,25 @@ class WebApi(FakeApi):
         return QUOTE
 
 
-def test_the_watch_example_is_valid_and_watches_a_price():
+def test_the_watch_example_is_valid_and_watches_a_rate():
     manifest, problems = read_manifest(VEILLE_MANIFEST)
     code_problems, functions = signatures(VEILLE_CODE)
     assert problems == [] and code_problems == [] and coherence(manifest, functions) == []
-    assert manifest["schedule"] == "interval:1h" and manifest["context"] and manifest["timeout"] == 20
+    assert manifest["schedule"] == "cron:0 17 * * 1-5" and manifest["context"] and manifest["timeout"] == 20
     assert manifest["allowed_domains"] == []  # son réseau est libre (ADR 0105) : rien à déclarer
     [tool] = manifest["tools"]
-    assert [a["key"] for a in tool["args"]] == ["symbole"] and not tool["args"][0]["required"]
+    assert [a["key"] for a in tool["args"]] == ["devise"] and not tool["args"][0]["required"]
     api = WebApi({f["key"]: f["default"] for f in manifest["config_fields"]})
     app: dict = {}
     exec(compile(VEILLE_CODE, "main.py", "exec"), app)  # noqa: S102 — l'exemple lui-même
     got = app["tick"](api)
-    assert got["ecart"] == 2.82 and api.fetched[0].startswith("https://query1.finance.yahoo.com/")
+    assert got["ecart"] == 2.82 and api.fetched[0].startswith("https://api.frankfurter.dev/")  # une API ouverte
     assert api.signals and "2.82" in api.signals[0]  # un seuil franchi : elle est prévenue…
     app["tick"](api)
-    assert len(api.signals) == 1  # …une fois par jour, pas à chaque heure
-    assert "^FCHI" in app["context"](api) and app["tool_maintenant"](api, {"symbole": ""})["prix"] == 7300.0
-    other = app["tool_maintenant"](api, {"symbole": "AAPL"})  # un autre cours, juste pour le dire
-    assert other["symbole"] == "AAPL" and "AAPL" in api.fetched[-1] and len(api.signals) == 1
+    assert len(api.signals) == 1  # …une fois par jour, pas à chaque battement
+    assert "EUR/USD" in app["context"](api) and app["tool_maintenant"](api, {"devise": ""})["taux"] == 1.131
+    other = app["tool_maintenant"](api, {"devise": "gbp"})  # une autre devise, juste pour le dire
+    assert other["devise"] == "GBP" and "to=GBP" in api.fetched[-1] and len(api.signals) == 1
     text = guide.topic("veille")
     assert "http_get" in text and "file de l'app" in text and "interval:1h" in text and "tick(api)" in text
     assert VEILLE_CODE in text and VEILLE_MANIFEST in text  # l'exemple montré est celui qui tourne
@@ -262,7 +265,7 @@ needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewr
 
 
 def fake_forge(tmp_path: Path):
-    """Un noyau et un hôte réel dont le réseau rend toujours le même cours (rien ne sort de la machine)."""
+    """Un noyau et un hôte réel dont le réseau rend toujours les mêmes taux (rien ne sort de la machine)."""
     forge = ForgeHost(tmp_path / "forge", http_get=lambda url: QUOTE, public=lambda host: True)
     kernel, clock, _, _ = build(tmp_path, reply("d'accord [EMOTION:neutral:0.3]"), ports={"forge": forge})
     return kernel, clock, forge
@@ -309,8 +312,8 @@ def test_forge_test_tries_what_she_wrote_and_its_signals_really_go_to_the_queue(
     out = run_virtual(clock, main)
     assert "Écrite" in _content(out["écrite"])
     tick = _content(out["tick"])
-    assert out["tick"].ok and "7300" in tick and "sa file" in tick  # il irait dans la file de l'app (ADR 0105)
-    assert out["context"].ok and "^FCHI" in _content(out["context"])
+    assert out["tick"].ok and "1.131" in tick and "sa file" in tick  # il irait dans la file de l'app (ADR 0105)
+    assert out["context"].ok and "EUR/USD" in _content(out["context"])
     assert out["tool_maintenant"].ok and "ecart" in _content(out["tool_maintenant"])
     assert not out["tool_inconnu"].ok
     assert out["view_cours"].ok
@@ -509,7 +512,7 @@ def test_each_app_announces_itself_and_its_actions_are_her_tools(tmp_path):
     assert spec.bundle == "forge_apps.cours" and spec.in_hand and "Suivi d'un cours" in spec.description
     assert "cours_pages" in owner and "Suivi d'un cours" in bundles["forge_apps.cours"]  # elle s'annonce
     assert not {"cours_maintenant", "cours_pages"} & set(stranger)  # pas devant n'importe qui
-    assert out["agir"].ok and "7300" in out["agir"].content
+    assert out["agir"].ok and "1.131" in out["agir"].content
     assert out["lire"].ok and "Cours" in out["lire"].content and out["lire"].proof is False  # lire n'est pas faire
     assert not out["coffre"].ok and "promue" in out["coffre"].content  # des secrets : pas en conversation…
     assert out["coffre au travail"].ok  # …mais au travail, oui

@@ -268,9 +268,9 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 - Un but garde la filiation de la pensée d'où il est né (`goals.audible`).
 - Outils : `report_step` (clôt la boucle) et `goal_*`.
 
-**`projects`** (ADR 0031, 0039, 0104, 0133, 0143)
+**`projects`** (ADR 0031, 0039, 0104, 0133, 0143, 0144)
 
-- Des boîtes noires qu'on pilote : des objectifs ponctuels ou constants à cadence. Deux sortes d'exécution, prouvées par un commit ou par un outil qui produit : `WORK` dans son mode à elle (rôle `project`), `JOB` impersonnel (rôle `job`, sans persona ni affect).
+- Des boîtes noires qu'on pilote : des objectifs ponctuels ou constants à cadence (la leur dès la création, `ConstantArg`, sinon celle des réglages). Deux sortes d'exécution, prouvées par un commit ou par un outil qui produit : `WORK` dans son mode à elle (rôle `project`), `JOB` impersonnel (rôle `job`, sans persona ni affect).
 - Les décisions techniques ; la plage de travail en jours et heures.
 - Un atelier par projet (`ateliers/projet-<id>`) avec son dépôt git, distant compris : pousser et récupérer sont des capacités, et le jeton ne passe que par l'environnement de git.
 - Elle ouvre ses projets elle-même (`start_project`, deux au plus) et les clôt ; `create_project` reste à la propriétaire.

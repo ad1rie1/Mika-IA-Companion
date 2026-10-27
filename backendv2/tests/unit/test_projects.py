@@ -323,6 +323,30 @@ def test_only_her_owner_confides_a_project(tmp_path):
                                                                      (c.CONSTANT, "Le garder à jour")]
 
 
+def test_a_constant_given_with_its_cadence_comes_back_at_that_pace(tmp_path):
+    """Un bilan de la semaine ne revient pas chaque jour : dès la création, un constant se donne avec sa cadence (le
+    projet n° 257 avait son « bilan hebdomadaire » toutes les 24 h, ADR 0144) ; un texte seul garde celle des
+    réglages. Les arguments sont lus comme le modèle les envoie."""
+    from mika.faculties.projects.tools import CreateArgs, StartArgs, create_project, start_project
+
+    constants = [{"text": "Faire le bilan de la semaine", "cadence_hours": 168}, "Relire le code"]
+
+    async def scenario(kernel, llm):
+        here = _context(kernel, "start_project", Kind.REPLY, "user_1", Audience(owner=True))
+        mine = await start_project(StartArgs.model_validate(
+            {"title": "Un labo", "objectives": ["Écrire l'app"], "constants": constants}), here)
+        confided = await create_project(CreateArgs.model_validate({"title": "Un site", "constants": constants}),
+                                        _context(kernel, "create_project", Kind.REPLY, "user_1", Audience(owner=True)))
+        return mine, confided, events(kernel, OBJECTIVE_ADDED)
+
+    mine, confided, objectives = live(tmp_path, scenario)
+    assert "Projet ouvert" in mine and "Projet accepté" in confided
+    paces = [(o.data.kind, o.data.text.text, o.data.cadence_us) for o in objectives]
+    assert paces == [(c.ONCE, "Écrire l'app", 0), (c.CONSTANT, "Faire le bilan de la semaine", 168 * HOUR),
+                     (c.CONSTANT, "Relire le code", 0),
+                     (c.CONSTANT, "Faire le bilan de la semaine", 168 * HOUR), (c.CONSTANT, "Relire le code", 0)]
+
+
 # ── Ses décisions ─────────────────────────────────────────────────────────
 
 

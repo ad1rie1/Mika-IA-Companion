@@ -3964,6 +3964,11 @@ projects:
       constant: constant
       once: ponctuel
 
+    constant:
+      # Un constant donné avec sa cadence, à la création d'un projet (start_project, create_project ; ADR 0144).
+      text: ce qui revient, en une phrase
+      cadence_hours: "toutes les combien d'heures il revient (24 : chaque jour ; 168 : chaque semaine ; 0 : la valeur par défaut)"
+
     equip:
       # L'outil project_equip : se donner un lot d'outils de plus, sur un projet à elle, pendant une exécution.
       description: >-
@@ -3988,7 +3993,9 @@ projects:
         dossier, son dépôt git), ses objectifs et ses décisions, et tu y avanceras par exécutions.
       description_arg: "le cadre : ce qu'il faut faire, comment, ce qui est hors sujet"
       objectives: les objectifs à atteindre une fois (un par élément)
-      constants: les objectifs constants, à entretenir (« améliorer la sécurité »)
+      constants: >-
+        les objectifs constants, à entretenir (« améliorer la sécurité ») : un texte revient à la cadence par défaut ;
+        ce qui revient à un autre rythme se donne avec sa cadence en heures (168 : un point chaque semaine)
       mode: "persona : tu y travailles toi-même, avec ton humeur et tes avis ; plain : un travail impersonnel"
       schedule: "asap : dès que possible ; demand : seulement quand on le lance ; interval:2h ; cron:0 9 * * MON-FRI"
       # quelqu'un d'autre. {who} : « Adrien », ou projects.caretaker
@@ -4010,8 +4017,11 @@ projects:
       description_arg: ce que tu veux faire, et pourquoi
       objectives: tes premiers objectifs
       constants: >-
-        ce que tu veux entretenir dans le temps — un travail qui revient (une mise à jour, une veille), jamais une
-        règle : une règle (« pas de conseil », « rester simple ») va dans la description
+        ce que tu veux entretenir dans le temps — un travail qui revient (une mise à jour, une veille, un bilan),
+        jamais une règle : une règle (« pas de conseil », « rester simple ») va dans la description. Un texte
+        revient à la cadence par défaut ; ce qui revient à un autre rythme se donne avec sa cadence en heures (168 :
+        un bilan de la semaine). Ce qu'une de tes apps fait déjà à son heure (un relevé, une veille) n'est pas un
+        constant : elle le fait sans toi
       # l'argument tools (les noms sont lus par le code : memory, rss, forge, forge_apps)
       tools: >-
         ce que tu auras en main en plus de son atelier : forge (écrire et tester une app à toi), forge_apps (te
@@ -5352,6 +5362,9 @@ forge:
         tu pourras lui passer, vérifiés avant l'appel (forge_help outils).
       - cinq battements ratés de suite arrêtent l'app (le disjoncteur) : attrape ce qui peut rater, note-le (api.log)
         et rends quand même quelque chose, plutôt que de faire tomber le battement pour une broutille.
+      - une source peut te refuser : HTTP 429 (trop de demandes), 403, une page au lieu des données. Préfère une API
+        ouverte et documentée à la page d'un site, note dans ton journal ce qui a répondu, et essaie-la depuis ici
+        (forge_test) avant de bâtir dessus.
 
       Essaie tout avant d'y croire : forge_test tick (un vrai battement : réseau, stockage et base compris — ce
       qu'il garde, les battements suivants le trouveront), forge_test context, forge_test tool_<nom> (avec ses
@@ -5365,8 +5378,9 @@ forge:
       - une alerte (« préviens-moi si… ») : un signal quand le seuil est franchi, une fois.
       Ton app a ton heure (ton fuseau) ; ses rythmes cron aussi.
 
-      Un exemple qui marche : le cours d'un indice ou d'une action, relevé toutes les heures, signalé quand il
-      s'écarte de plus de 2 % de la clôture de la veille.
+      Un exemple qui marche : le cours de l'euro face à une autre devise, aux taux de référence de la BCE (une API
+      ouverte et documentée, sans clé), relevé chaque soir de semaine, signalé quand il s'écarte de plus de 1 % du
+      jour précédent.
 
       manifest.yaml :
       {manifest}

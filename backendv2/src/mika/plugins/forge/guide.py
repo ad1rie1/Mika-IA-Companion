@@ -165,7 +165,8 @@ Blocs ("type") :
 - timeline {items: [{at, title, text?, meta?, tone?, href?}], title?, empty?} ;
 - chart {series: [{label, points: [[instant, valeur], …], slot? (0 à 4)}], kind? (line, bars, spark),
   title?, unit? ("", "%", "$"), y? [bas, haut], zero?, since?, until?, empty?, table?} — au plus
-  4 séries, 2 000 points, une seule échelle ;
+  4 séries, 2 000 points, une seule échelle ; avec unit "%", une valeur est une part : 0.012 s'affiche
+  « 1 % » (passe -0.0017 pour -0,17 %, jamais -0.17) ;
 - grid {items: [blocs], columns?} ; section {title, items, description?} ; disclosure {title, items, open?} ;
 - workspace {sidebar: [blocs], items: [blocs]} : navigation latérale, contenu ; empilés sur mobile.
 - toolbar {items: [blocs], title?} : actions côte à côte.
@@ -288,21 +289,22 @@ def action_releves_vider(api, data):
 '''
 
 #: l'exemple de ``forge_help veille`` (ADR 0104) : une app qui va chercher un cours sur le web à heure fixe — valide
-#: (un test l'écrit, la fait tourner sur un faux réseau, lit son contexte, sa vue et son outil)
+#: (un test l'écrit, la fait tourner sur un faux réseau, lit son contexte, sa vue et son outil). Sa source est une
+#: API ouverte et documentée, sans clé : celle de Yahoo Finance répondait 429 depuis le portable (ADR 0144)
 VEILLE_MANIFEST = """\
-title: Suivi d'un cours
-description: Un cours de bourse, relevé chaque heure ; un grand écart me fait signe.
-schedule: interval:1h
+title: Suivi d'un cours de change
+description: Le cours de l'euro (taux de la BCE), relevé chaque soir de semaine ; un grand écart me fait signe.
+schedule: "cron:0 17 * * 1-5"
 timeout: 20
 context: true
 config:
-  - {key: symbole, type: str, label: Symbole, default: "^FCHI"}
-  - {key: seuil, type: float, label: Écart signalé (%), min: 0.5, max: 20, default: 2.0}
+  - {key: devise, type: str, label: Devise, default: USD}
+  - {key: seuil, type: float, label: Écart signalé (%), min: 0.1, max: 20, default: 1.0}
 tools:
   - name: maintenant
     description: Relever un cours tout de suite
     args:
-      - {key: symbole, type: text, label: Symbole, description: "un autre que celui des réglages (AAPL, ^GSPC…)"}
+      - {key: devise, type: text, label: Devise, description: "une autre que celle des réglages (GBP, CHF, JPY…)"}
 views:
   - key: cours
     label: Cours
@@ -312,27 +314,30 @@ VEILLE_CODE = '''\
 import json
 import time
 
-URL = "https://query1.finance.yahoo.com/v8/finance/chart/{s}?range=1d&interval=1h"
+# les taux de référence de la BCE, publiés vers 16 h chaque jour ouvré : une API ouverte, sans clé
+URL = "https://api.frankfurter.dev/v1/{debut}..?from=EUR&to={devise}"
 
 
-def _cours(api, symbole=None):
-    symbole = symbole or api.config("symbole", "^FCHI")
-    meta = json.loads(api.http_get(URL.format(s=symbole)))["chart"]["result"][0]["meta"]
-    return symbole, float(meta["regularMarketPrice"]), float(meta["chartPreviousClose"])
+def _cours(api, devise=None):
+    devise = (devise or api.config("devise", "USD")).upper()
+    debut = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 10 * 86400))  # assez pour deux jours ouvrés
+    jours = json.loads(api.http_get(URL.format(debut=debut, devise=devise)))["rates"]
+    veille, dernier = [float(jours[j][devise]) for j in sorted(jours)[-2:]]
+    return devise, dernier, veille
 
 
 def tick(api):
-    symbole, prix, veille = _cours(api)
-    ecart = round((prix - veille) / veille * 100, 2)
+    devise, taux, veille = _cours(api)
+    ecart = round((taux - veille) / veille * 100, 2)
     releves = api.kv_get("releves", [])
-    releves.append({"at": int(time.time() * 1_000_000), "prix": prix, "ecart": ecart})
+    releves.append({"at": int(time.time() * 1_000_000), "taux": taux, "ecart": ecart})
     api.kv_set("releves", releves[-150:])
     jour = time.strftime("%Y-%m-%d")
-    if abs(ecart) >= api.config("seuil", 2.0) and api.kv_get("signale", "") != jour:
+    if abs(ecart) >= api.config("seuil", 1.0) and api.kv_get("signale", "") != jour:
         api.kv_set("signale", jour)
-        api.signal(symbole + " : " + str(ecart) + " %", pertinence=0.7,
+        api.signal("EUR/" + devise + " : " + str(ecart) + " %", pertinence=0.7,
                    emotion="surprised" if ecart > 0 else "anxious")
-    return {"symbole": symbole, "prix": prix, "ecart": ecart}
+    return {"devise": devise, "taux": taux, "ecart": ecart}
 
 
 def context(api):
@@ -340,13 +345,13 @@ def context(api):
     if not releves:
         return ""
     dernier = releves[-1]
-    return api.config("symbole", "^FCHI") + " : " + str(dernier["prix"]) + " (" + str(dernier["ecart"]) + " %)"
+    return "EUR/" + api.config("devise", "USD") + " : " + str(dernier["taux"]) + " (" + str(dernier["ecart"]) + " %)"
 
 
 def tool_maintenant(api, args):
-    if args.get("symbole"):  # un autre cours, juste pour le dire : rien n'est gardé
-        symbole, prix, veille = _cours(api, args["symbole"])
-        return {"symbole": symbole, "prix": prix, "ecart": round((prix - veille) / veille * 100, 2)}
+    if args.get("devise"):  # une autre devise, juste pour le dire : rien n'est gardé
+        devise, taux, veille = _cours(api, args["devise"])
+        return {"devise": devise, "taux": taux, "ecart": round((taux - veille) / veille * 100, 2)}
     return tick(api)
 
 
@@ -355,11 +360,11 @@ def view_cours(api, params):
     dernier = releves[-1] if releves else None
     return {"version": 2, "blocks": [
         {"type": "stats", "items": [
-            {"label": "Dernier", "value": dernier["prix"] if dernier else "-"},
+            {"label": "Dernier", "value": dernier["taux"] if dernier else "-"},
             {"label": "Ecart", "value": str(dernier["ecart"]) + " %" if dernier else "-"},
         ]},
-        {"type": "chart", "kind": "line", "title": api.config("symbole", "^FCHI"),
-         "series": [{"label": "cours", "points": [[r["at"], r["prix"]] for r in releves]}],
+        {"type": "chart", "kind": "line", "title": "EUR/" + api.config("devise", "USD"),
+         "series": [{"label": "cours", "points": [[r["at"], r["taux"]] for r in releves]}],
          "empty": "pas encore de releve"},
     ]}
 '''

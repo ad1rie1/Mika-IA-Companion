@@ -86,7 +86,7 @@ REPORT, NOTE, DECIDE, OBJECTIVE_ADD = "report_run", "project_note", "project_dec
 EQUIP = "project_equip"
 #: ce qui change quelque chose (le compte rendu le dit) : écrire, modifier, un programme qui a réussi, un
 #: brouillon, une app forgée
-CHANGING = frozenset({"ws_write", "ws_edit", "ws_run", "email_draft", "forge_write"})
+CHANGING = frozenset({"ws_write", "ws_edit", "ws_run", "email_draft", "forge_write", "forge_edit"})
 #: hors de l'atelier (où c'est le commit), ce qui **prouve** qu'une exécution a produit se déclare sur l'outil
 #: (``ToolResult.proof`` : un brouillon, une app essayée qui marche — ADR 0104) : aucun nom ici
 RUNS = list(PROJECT_KINDS)
@@ -423,15 +423,23 @@ def opened(*, title: str, description: str, authority: str, mode: str, owner: st
         auto_push=auto_push, source=source, sensitivity=level)
 
 
-def objectives_of(project: int, lines: list[str], constants: list[str], *, author: str, by: str = "",
+class ConstantArg(BaseModel):
+    """Un constant et sa cadence, dès la création : un bilan de la semaine ne revient pas chaque jour (ADR 0144)."""
+    text: str = Field(min_length=1, max_length=500, description=phrase("projects.tools.constant.text"))
+    cadence_hours: int = Field(default=0, ge=0, le=24 * 30, description=phrase("projects.tools.constant.cadence_hours"))
+
+
+def objectives_of(project: int, lines: list[str], constants: list[str | ConstantArg], *, author: str, by: str = "",
                   owner: str | None, about: tuple[str, ...], level: int, cadence_us: int = 0) -> list[Draft[Any]]:
-    """Les objectifs d'un projet qui vient d'être créé : les ponctuels, puis les constants."""
+    """Les objectifs d'un projet qui vient d'être créé : les ponctuels, puis les constants — chacun à sa cadence,
+    sinon à ``cadence_us`` (0 : celle des réglages)."""
     out: list[Draft[Any]] = []
-    rows = [(t, c.ONCE) for t in lines] + [(t, c.CONSTANT) for t in constants]
-    for i, (text, kind) in enumerate(((t.strip(), k) for t, k in rows if t.strip()), start=1):
+    rows = [(t, c.ONCE, 0) for t in lines] + [
+        (x.text, c.CONSTANT, x.cadence_hours * HOUR or cadence_us) if isinstance(x, ConstantArg)
+        else (x, c.CONSTANT, cadence_us) for x in constants]
+    for i, (text, kind, every) in enumerate(((t.strip(), k, e) for t, k, e in rows if t.strip()), start=1):
         out.append(OBJECTIVE_ADDED.draft(project=project, objective=i, text=Content.of(text[:500], level=level),
-                                         kind=kind, cadence_us=cadence_us if kind == c.CONSTANT else 0,
-                                         author=author, by=by, owner=owner, about=about))
+                                         kind=kind, cadence_us=every, author=author, by=by, owner=owner, about=about))
     return out
 
 
@@ -441,8 +449,8 @@ class CreateArgs(BaseModel):
                              description=phrase("projects.tools.create.description_arg"))
     objectives: list[str] = Field(default_factory=list, max_length=12,
                                   description=phrase("projects.tools.create.objectives"))
-    constants: list[str] = Field(default_factory=list, max_length=12,
-                                 description=phrase("projects.tools.create.constants"))
+    constants: list[str | ConstantArg] = Field(default_factory=list, max_length=12,
+                                               description=phrase("projects.tools.create.constants"))
     mode: Literal["persona", "plain"] = Field(default="persona", description=phrase("projects.tools.create.mode"))
     schedule: str = Field(default="asap", description=phrase("projects.tools.create.schedule"))
 
@@ -479,7 +487,8 @@ class StartArgs(BaseModel):
     description: str = Field(default="", max_length=4000, description=phrase("projects.tools.start.description_arg"))
     objectives: list[str] = Field(default_factory=list, max_length=12,
                                   description=phrase("projects.tools.start.objectives"))
-    constants: list[str] = Field(default_factory=list, max_length=12, description=phrase("projects.tools.start.constants"))
+    constants: list[str | ConstantArg] = Field(default_factory=list, max_length=12,
+                                               description=phrase("projects.tools.start.constants"))
     tools: list[SelfBundle] = Field(default_factory=list, max_length=4, description=phrase("projects.tools.start.tools"))
 
 
