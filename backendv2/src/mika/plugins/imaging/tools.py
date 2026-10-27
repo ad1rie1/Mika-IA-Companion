@@ -65,7 +65,9 @@ def _quality(asked: str, default: str, allow_high: bool) -> str:
     return "normal" if quality == "high" and not allow_high else quality
 
 
-@IMAGING.tool(DRAW_TOOL, acts=True, description=phrase("imaging.tools.draw.description"), args=DrawArgs, bundle=c.BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=2)
+@IMAGING.tool(DRAW_TOOL, acts=True, description=phrase("imaging.tools.draw.description"), args=DrawArgs, bundle=c.BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=2,
+              rule="jamais sous le plancher légal ; le contenu adulte pour toi seule ; pour une autre personne, ses "
+                   "« Dessins par personne et par jour » au plus")
 async def draw(args: DrawArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):

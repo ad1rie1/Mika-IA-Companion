@@ -1,7 +1,9 @@
 """Les sens (M7) : ce qui vient d'ailleurs, par ses intentions.
 
 - un mail remarqué est un signal : dosé, habitué, jamais une consigne — cité
-  dans le prompt, montré à ses propriétaires seulement ;
+  dans le prompt, montré à ses propriétaires seulement ; ce qu'il lui fait,
+  c'est le tri qui le dit, parmi toutes ses émotions (le repli ne lui fait
+  rien ressentir, ADR 0147) ;
 - un mail important, sa propriétaire présente : elle le lui dit — compté à
   l'énoncé, le mail sous les yeux ; un silence, une initiative devancée, un
   « finalement non » le laissent à dire, sans insister au-delà de deux essais
@@ -31,6 +33,7 @@ from mika.kernel.events import Origin
 from mika.kernel.prompt import UNTRUSTED_NOTE
 from mika.kernel.state import FrozenDict
 from mika.plugins.email import MENTION_TITLE, EmailParams
+from mika.plugins.email.poll import heuristic, read_triage, triage_system
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import Mail
@@ -38,6 +41,7 @@ from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.sim.outside import FakeFeeds, FakeMail
+from mika.vocab.affect import Emotion
 from tests.fixtures.endings import ENDINGS, initiative_ends
 from tests.fixtures.mika import at_paris, boot, build, connect, disconnect, said
 
@@ -230,6 +234,17 @@ def r_of(kernel, t):
     return [e for e in events(kernel) if e.type.name == t.name]
 
 
+class Worried(PersonaSimLLM):
+    """Le tri dit de chaque mail qu'il l'inquiète, nettement."""
+
+    async def complete(self, req):
+        if req.role == "triage":
+            self.calls.append(req)
+            return LLMResponse('{"importance": 0.9, "resume": "", "reponse": false, "emotion": "anxious", '
+                               '"intensite": 0.5}')
+        return await super().complete(req)
+
+
 def test_a_burst_of_urgent_mails_is_one_small_emotion_not_ten(tmp_path):
     box = FakeMail()
     for i in range(10):
@@ -238,11 +253,31 @@ def test_a_burst_of_urgent_mails_is_one_small_emotion_not_ten(tmp_path):
     async def scenario(kernel, llm, mail_, feeds):
         await asyncio.sleep(30 * MINUTE / US)
 
-    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box)
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box, model=Worried)
+    # le modèle trie les cinq premiers (« Mails triés par le modèle ») et dit ce que chacun lui fait ; le repli ne lui
+    # fait rien ressentir (ADR 0147)
+    told = [(n.data.emotion, n.data.intensity) for n in r.of(email_c.NOTICED)]
+    assert told.count(("anxious", 0.5)) == 5 and told.count(("", 0.0)) == 5
     heard = [h.data for h in r.of(attention_c.NOTICED) if h.data.source == "email"]
-    assert len(heard) == 10 and all(h.emotion for h in heard)
+    moved = [h for h in heard if h.emotion]
+    assert len(heard) == 10 and len(moved) == 5
+    assert moved[0].intensity == 0.5  # ce que le modèle a dit, pas une intensité fixée par le code
     assert sum(h.intensity for h in heard) <= 0.6 + 1e-9  # le dosage : une source, une petite émotion
-    assert heard[-1].intensity == 0.0  # au-delà, plus rien
+    assert moved[-1].intensity == 0.0  # au-delà, plus rien
+
+
+def test_the_triage_says_what_a_mail_does_to_her_among_all_her_emotions():
+    """Le tri rend une émotion de tout son vocabulaire et son intensité ; sans intensité, rien ; le repli devine
+    l'importance et la réponse attendue, jamais une émotion (ADR 0147)."""
+    guess = heuristic(mail(1, "URGENT", "Tu peux me répondre ?"))
+    assert (guess["importance"], guess["reponse"], guess["emotion"], guess["intensite"]) == (0.8, True, "", 0.0)
+    told = read_triage('{"importance": 0.7, "resume": "Une insulte.", "reponse": false, "emotion": "angry", '
+                       '"intensite": 0.6}', guess)
+    assert (told["importance"], told["emotion"], told["intensite"]) == (0.7, "angry", 0.6)
+    assert read_triage('{"importance": 0.7, "emotion": "angry"}', guess)["emotion"] == ""
+    assert read_triage("pas de JSON", guess) == guess
+    system = triage_system("Nova")
+    assert all(e.value in system for e in Emotion if e is not Emotion.NEUTRAL)
 
 
 def test_headlines_that_do_not_touch_her_go_unnoticed(tmp_path):

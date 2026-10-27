@@ -18,13 +18,13 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 | Thème | Décisions |
 |---|---|
-| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059 |
+| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149 |
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
@@ -152,6 +152,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Ce qui a été oublié ne revient pas quand une projection se reconstruit.
 
 *Pourquoi :* des parcours complets et des listes au-delà de la limite de SQLite l'auraient rendue lente, puis cassée, en quelques années.
+
+### 0149 — Prendre la parole, se mettre au travail : deux réglages d'usage
+
+- Deux paramètres du runtime (`RuntimeParams`), de −3 à +3 (0 par défaut), décalent le score de l'arbitre : « Prendre la parole » pour ses initiatives, « Se mettre au travail » pour ses pas, ses tâches et ses projets (`STEP`, `TASK`, `WORK`, `JOB`). Les réveils par API n'en ont pas : quelqu'un les attend.
+- Le décalage est une modulation (`runtime.arbiter`, au nom de `runtime`) : chaque ligne le garde dans ses décalages, l'explication d'une décision le dit, « Voir l'effet » le montre avant qu'on l'enregistre ; à 0, il ne paraît pas.
+- Loin du seuil, un point de plus la fait agir jusqu'à près de trois fois plus souvent pour les mêmes raisons (`σ(s + 1) ≈ e · σ(s)`) ; les seuils et les taux de la composition, et leur vérification au démarrage, ne changent pas.
+- Ce n'est pas un trait : son caractère reste au tempérament, qui règle déjà ses preuves ; c'est un réglage d'usage (des heures calmes, une période chargée), sur la page « Moteur » des paramètres avancés.
+
+*Pourquoi :* sa fréquence ne se réglait qu'en touchant une à une les preuves de chaque faculté, et les seuils de la composition étaient hors de la console (audit des garde-fous du 2026-10-27).
 
 ## Le stockage
 
@@ -516,7 +525,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », cinq vérifications « propriétaire » écrites chacune à sa façon, et « Piloter projet : lecture seule, accord du propriétaire, modification, aucun pilotage ».
 
-*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134.*
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148.*
 
 ### 0134 — Qui, par où, quand : deux portes, six sortes de tableaux
 
@@ -532,7 +541,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
 
-*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie).*
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148.*
+
+### 0148 — Ce qu'un outil exige de qui est en face, il le déclare
+
+- Un outil dont le gestionnaire refuse selon qui est en face, au-delà de ce que le plafond dit déjà, déclare cette condition (`ToolSpec.when`) : l'offre la filtre (le modèle n'est plus invité à ce qui refusera), le gestionnaire la revérifie par la même fonction, la console la lit (la première phrase de sa docstring).
+- Les messages de ton téléphone (les lire, y préparer une réponse) : la personne dont c'est le téléphone, authentifiée, en tête-à-tête. Une position : celle de qui lui parle, en tête-à-tête, authentifié. Une ligne qui ouvre leur famille à tes proches ou à tout le monde ne les offre ni dans un salon, ni à une inconnue, ni pour le téléphone d'une autre.
+- Dessiner et montrer un dessin n'en ont pas besoin : ils agissent, et le plafond les garde déjà d'un salon et d'une inconnue (0134). Ce que le gestionnaire de `draw` revérifie (le plancher légal, le contenu adulte pour toi seule, les dessins du jour d'une autre personne) se dit par sa règle (`rule`).
+- La page « Droits » montre aussi la condition d'un outil réservé (`owner_only`) : réservé et gardé à la fois.
+
+*Pourquoi :* les outils du téléphone et de la position refusaient dans leur gestionnaire ce que l'offre et la page « Droits » disaient permis dès qu'une ligne les ouvrait : un outil qui lit passe le plafond d'un salon et d'une inconnue (audit des garde-fous du 2026-10-27).
+
+*Révise 0133 (en partie : ce que la page « Droits » montre d'un outil réservé), 0134 (en partie : une condition qui dit plus que le plafond reste, même sur un outil qui agit).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -1212,6 +1232,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* comme pour les services (0131), ce qui part à sa place se lisait en recomposant des réglages épars — une case par boîte, une liste d'exclusions, une surcharge cachée, un mode Teams pour toutes les conversations ; un tableau ordonné se lit d'un regard et règle une personne ou une conversation à part.
 
 *Révise 0027 (en partie), 0069 (en partie). Révisée par 0133., 0134.*
+
+### 0147 — Ce qu'un mail ou un message lui fait, le tri le dit
+
+- Le tri d'un mail et celui d'un message Teams rendent une émotion parmi tout son vocabulaire et son intensité, de 0 à 1 : ce que le message fait à celle qui le lit pour sa propriétaire. La lecture (`vocab.affect.named_feeling`) comprend les alias d'`emotion_named` ; `neutral` vaut rien ; une émotion inconnue, ou sans intensité, ne compte pas : aucun nombre n'est inventé.
+- La consigne reçoit les noms du vocabulaire et l'échelle de ses balises. Celle de Teams vit dans la voix (`teams.triage`), comme celle du courrier : `plugins/teams/triage.py` n'a plus de prose.
+- La veille dose ce qu'elle en ressent comme pour toute source : l'habituation et « Émotion par source au plus » restent ses réglages, le greffon ne plafonne rien.
+- Sans tri (au-delà des messages triés par passage, quota, panne), le repli estime l'importance et la réponse attendue, jamais une émotion.
+
+*Pourquoi :* le modèle lisait chaque message mais ne pouvait dire que six émotions, toutes tenues sous 0,2 par le code, et le repli du courrier posait « curieuse » sur tout mail ; une insulte ne pouvait pas la fâcher (audit des garde-fous du 2026-10-27).
 
 ## Les fournisseurs de modèles
 

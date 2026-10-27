@@ -2,19 +2,25 @@
 ligne choisie même quand l'amincissement l'a tirée loin derrière les
 premières, le seuil, le vieillissement et le décalage de chaque modulateur
 (leur somme est le décalage de la ligne), la borne et l'intensité totale. Un
-journal écrit avant ces champs se relit tel quel."""
+journal écrit avant ces champs se relit tel quel. Deux réglages du runtime,
+« prendre la parole » et « se mettre au travail », y paraissent comme un
+modulateur (ADR 0149)."""
 
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 
-from mika.kernel.arbitration import Candidate, Modulation
+from mika.kernel.arbitration import Candidate, Modulation, sigmoid
 from mika.kernel.codec import canonical_json
 from mika.kernel.faculty import Faculty
+from mika.kernel.frame import Frame
 from mika.kernel.registry import ArbitrationPolicy, Registry
-from mika.runtime.state import RUNTIME
+from mika.runtime.params import ParamsOverlay, Planned
+from mika.runtime.state import RUNTIME, RuntimeParams
 from mika.sim.clock import run_virtual
+from mika.vocab.episodes import Kind
 from tests.fixtures.harness import build, events_of
 
 
@@ -101,3 +107,49 @@ def test_a_journal_written_before_these_fields_still_decodes():
     # et un événement d'aujourd'hui fait l'aller-retour
     t, again = registry.events.decode("kernel.selected", 1, canonical_json(data))
     assert again == data
+
+
+# ── Prendre la parole, se mettre au travail (ADR 0149) ────────────────────
+
+URGE = Faculty("urge", state=Nothing, init=lambda p: Nothing())
+KINDS = (Kind.INITIATIVE, Kind.STEP, Kind.WAKE)
+
+
+@URGE.propose(kinds=list(KINDS), reasons={"envie": (-10.0, 10.0)})
+def _urge(s, frame):
+    return [Candidate(kind, "alice", "envie", 2.0) for kind in KINDS]
+
+
+USAGE = ArbitrationPolicy(thresholds={kind: 8.0 for kind in KINDS}, max_rates={kind: 0.1 for kind in KINDS})
+
+
+def test_two_usage_settings_shift_her_initiatives_and_her_work_never_a_wake(tmp_path):
+    """Deux réglages du runtime décalent le score comme une modulation, gardée dans les décalages de la ligne : à
+    preuves égales, loin du seuil, +1 la fait agir près de trois fois plus souvent ; un réveil par API n'en dépend
+    pas ; à 0, la table ne change pas ; « Voir l'effet » le montre avant qu'on l'enregistre."""
+    kernel, clock, _ = build(tmp_path, [URGE], arbitration=USAGE)
+    shifted = RuntimeParams(speak_shift=1.0, work_shift=-1.0)
+
+    def table(frame):
+        return {r.kind: r for r in kernel.arbiter.rows(frame, record=False)}
+
+    async def main():
+        await kernel.start()
+        try:
+            before = table(kernel.mind.frame())
+            now = kernel.mind.frame()
+            planned = Planned("runtime", RuntimeParams, shifted, RuntimeParams(), {})
+            preview = table(Frame(now.root, now.now, ParamsOverlay(now.env, {"runtime": planned})))
+            await kernel.set_params("runtime", shifted)
+            return before, preview, table(kernel.mind.frame())
+        finally:
+            await kernel.stop()
+
+    before, preview, after = run_virtual(clock, main)
+    assert all(r.shifts == () for r in before.values())  # à 0 : rien ne paraît
+    assert after[Kind.INITIATIVE].shifts == (("runtime", 1.0),) and after[Kind.STEP].shifts == (("runtime", -1.0),)
+    assert after[Kind.WAKE].shifts == () and after[Kind.WAKE].hazard == before[Kind.WAKE].hazard
+    ratio = after[Kind.INITIATIVE].hazard / before[Kind.INITIATIVE].hazard
+    assert abs(ratio - sigmoid(2.0 + 1.0 - 8.0) / sigmoid(2.0 - 8.0)) < 1e-9 and 2.5 < ratio < math.e
+    assert after[Kind.STEP].hazard < before[Kind.STEP].hazard
+    assert {k: r.shifts for k, r in preview.items()} == {k: r.shifts for k, r in after.items()}

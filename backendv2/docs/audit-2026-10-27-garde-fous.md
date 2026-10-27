@@ -8,6 +8,9 @@ texte hors de sa voix), et lesquels de ces garde-fous vont contre l'objectif : q
 qu'on lui impose un comportement ? C'est le principe de l'ADR 0141 (« informer, pas ordonner »), porté du prompt au
 code.
 
+**État, le 2026-10-27 au soir.** Le lot 1 est codé (non commité) : ADR 0147 (§ 2.1), 0148 (§ 2.3, corrigé au
+codage), 0149 (§ 2.2). Le codage a relevé deux émotions fixées de plus, ajoutées au tableau A (RSS, caméra).
+
 **Déjà réglable, donc hors de ce document :** les `Knob` des facultés et des plugins, les 28 curseurs du tempérament
 (seuls les coefficients de dérivation sont en dur), les règles d'accès de la console (ADR 0131–0134). `persona/voix.yaml`
 se change dans le fichier, avec un redémarrage.
@@ -27,7 +30,8 @@ probabiliste (`λ_max · σ(score)`, ADR 0003) et elle peut toujours répondre `
 
 | Où | Ce que le code tranche | Lot |
 |---|---|---|
-| `plugins/email/poll.py:47`, `:135` ; `plugins/teams/triage.py:33`, `:148` | Le tri ne peut rendre que six émotions (jamais la colère), à une intensité fixée à `0,2 × importance` | **1** |
+| `plugins/email/poll.py:47`, `:135` ; `plugins/teams/triage.py:33`, `:148` | Le tri ne peut rendre que six émotions (jamais la colère), à une intensité fixée à `0,2 × importance` | **1** (fait : 0147) |
+| `plugins/rss/__init__.py:336` ; `plugins/camera/__init__.py:152` | Un titre qui la touche la rend toujours « curieuse », à `0,25 × score` ; ce que voit la caméra, « curieuse » à 0,15 (relevé au codage du lot 1) | 3 |
 | `faculties/others/faculty.py:515`, `:644`, `:864`, `:943`, `:1005`, `:1055`, `:1095` ; `faculties/attention/faculty.py:822`, `:1460` ; `faculties/attention/watch.py:222`, `:557` ; `faculties/needs/__init__.py:948`, `:964` ; `faculties/agency/__init__.py:485` | Porte `in (FRIEND, CLOSE)` : l'inquiétude, la prise de nouvelles, encourager, fêter, le mot de deuil (proche seulement), le remords, la jalousie, le manque, la joie du retour et la relance n'existent pas pour une connaissance | 2 |
 | `faculties/others/faculty.py:560` | `CONTAGION_BY_CLOSENESS` : l'humeur d'une inconnue ne la colore jamais | 2 |
 | `faculties/social/initiative.py:304` | Veto `GRUDGE` total : pas même un bonjour une fois le seuil franchi | 2 |
@@ -107,8 +111,8 @@ murmure 80, `app/composition.py:141`) ne plafonnent rien chez ses fournisseurs :
 
 ## 2. Le lot 1
 
-Trois changements indépendants. Chacun écrit son entrée dans `decisions.md` au moment du code, au numéro libre alors
-(0147 si personne ne l'a pris d'ici là), et l'ajoute à la carte.
+Trois changements indépendants, codés le 2026-10-27 : leurs entrées sont dans `decisions.md` (0147, 0148, 0149), qui
+fait foi sur ce qui suit.
 
 ### 2.1 Le tri dit ce qu'un mail ou un message lui fait
 
@@ -152,16 +156,11 @@ Le simulateur n'imite pas le tri : rien à y changer.
 console) : la part des messages qui la touchent, et leurs intensités. Si c'est trop fort, on baisse « Émotion par
 source au plus » ; on ne remet pas de plafond dans le plugin.
 
-**L'entrée** (section « Les sens et les plugins ») :
+**Au codage.** La lecture est `vocab.affect.named_feeling` (`felt` était déjà pris) ; `neutral` y vaut rien. Le
+simulateur répond au tri sans JSON : le test du dosage (`tests/unit/test_senses.py`) a reçu un modèle scripté qui dit
+l'inquiétude.
 
-> ### NNNN — Ce qu'un mail ou un message lui fait, le tri le dit
->
-> - Le tri d'un mail et celui d'un message Teams rendent une émotion parmi tout son vocabulaire (`vocab.affect.emotion_named`, alias compris) et son intensité, de 0 à 1 : ce que le message lui fait, à elle qui le lit pour sa propriétaire. Une émotion inconnue ou sans intensité ne compte pas.
-> - La consigne reçoit les noms du vocabulaire et l'échelle de ses balises ; celle de Teams vit dans la voix (`teams.triage.system`), comme celle du courrier.
-> - La veille dose ce qu'elle en ressent comme pour toute source : l'habituation et l'émotion par source au plus restent ses réglages.
-> - Sans tri (quota, panne, au-delà du relevé), le repli estime l'importance et la réponse attendue, jamais une émotion.
->
-> *Pourquoi :* le modèle lisait chaque message mais ne pouvait dire que six émotions, toutes tenues sous 0,2 par le code ; une insulte ne pouvait pas la fâcher (audit des garde-fous du 2026-10-27).
+**L'entrée** : ADR 0147.
 
 ### 2.2 Prendre la parole, se mettre au travail : deux réglages
 
@@ -206,24 +205,20 @@ dessiner.
 - à 0, la table est inchangée ;
 - `test_params_documented` couvre les deux champs.
 
-**L'entrée** (section « Le noyau : journal, arbitrage, pipeline ») :
+**Au codage.** La page « Moteur » est rangée dans la famille « Action » des paramètres avancés, à côté des
+initiatives (`app/console.py`, `PARAM_FAMILIES`).
 
-> ### NNNN — Prendre la parole, se mettre au travail : deux réglages d'usage
->
-> - Deux paramètres du runtime, de −3 à +3 (0 par défaut), décalent le score de l'arbitre : « prendre la parole » pour ses initiatives, « se mettre au travail » pour ses pas, ses tâches et ses projets. Les réveils par API n'en ont pas : quelqu'un les attend.
-> - Le décalage est une modulation : chaque ligne le garde dans ses décalages, l'explication d'une décision le dit, « Voir l'effet » le montre avant qu'on l'enregistre.
-> - Loin du seuil, un point de plus la fait agir près de trois fois plus souvent pour les mêmes raisons ; les seuils de la composition et leur vérification au démarrage ne changent pas.
-> - Ce n'est pas un trait : son caractère reste au tempérament, qui règle déjà ses preuves ; c'est un réglage d'usage (des heures calmes, une période chargée).
->
-> *Pourquoi :* sa fréquence ne se réglait qu'en touchant une à une les preuves de chaque faculté, et les seuils de la composition étaient hors de la console.
+**L'entrée** : ADR 0149.
 
 ### 2.3 Une condition d'audience se déclare sur l'outil
 
+**Correction au codage.** Ce qui suit disait les dessins offerts dans un salon et devant une inconnue : c'était faux.
+`draw` et `show_drawing` agissent, et le plafond d'un salon et d'une inconnue ne laisse aucune action (ADR 0134,
+`vocab/access.py:239`) : leur condition (`plugins/imaging/policy.py:65`) coïncide avec le plafond. Ils n'ont reçu que
+la règle de `draw` (`rule`). L'écart réel est celui des outils qui lisent, que le plafond laisse passer, et de la
+condition « la propriétaire » du téléphone, qu'aucun plafond ne dit.
+
 **Aujourd'hui.**
-- **Les dessins.** `draw` et `show_drawing` (`plugins/imaging/tools.py:68`, `:122`) n'ont pas de condition d'offre. Le
-  modèle se les voit proposer dans un salon ou devant une inconnue, puis le gestionnaire refuse (`tools.py:53`, par
-  `offered`, `plugins/imaging/policy.py:65`). C'est l'inverse de ce que dit `ToolSpec.when` : « un outil qui ne peut
-  rien y faire n'invite pas le modèle à essayer » (`kernel/faculty.py:197`).
 - **Le téléphone et la position.** `phone_messages`, `phone_draft` (`plugins/phone/__init__.py:320`, `:349`) et
   `location_where` (`plugins/location/__init__.py:126`) sont `owner_only` : un minimum vital qu'une ligne d'opérateur
   peut ouvrir (ADR 0134). Mais leur gestionnaire revérifie en silence un tête-à-tête authentifié, et pour le téléphone
@@ -233,37 +228,26 @@ dessiner.
   (`app/handmade/rights.py:220`, un `elif`).
 
 **Ce qui change.**
-- **`when=offered` sur ces cinq outils.** Le gestionnaire garde sa vérification, par la même fonction. La phrase de la
-  condition est déjà la première phrase de la docstring d'`offered` (`inspector/pages/tools.py:179`) : aucun texte
-  neuf.
+- **`when=offered` sur les trois outils du téléphone et de la position.** Le gestionnaire garde sa vérification, par
+  la même fonction. La phrase de la condition est déjà la première phrase de la docstring d'`offered`
+  (`inspector/pages/tools.py:179`) : aucun texte neuf.
 - **La page « Droits » montre aussi la condition d'un outil réservé.** Dans `fixed_tools`, `owner_only` et `when` ne
-  s'excluent plus.
-- **Le contenu adulte**, réservé à toi dans le gestionnaire (`plugins/imaging/tools.py:84`), se dit par `rule=` sur
-  `draw`. C'est un texte de console : le plafond de `plugins/imaging/tools.py` est relevé dans `test_no_new_prose`, en
-  disant pourquoi (précédent : la règle de `project_steer`, dans `faculties/projects/tools.py`).
+  s'excluent plus ; le gabarit les liste déjà dans deux listes.
+- **Ce que `draw` revérifie** (le plancher légal, le contenu adulte pour toi seule, les dessins du jour d'une autre
+  personne) se dit par `rule=`. C'est un texte de console : le plafond de `plugins/imaging/tools.py` est relevé dans
+  `test_no_new_prose`, en disant pourquoi.
 - **Hors du lot : les outils de projets.** `start_project` et ses voisins (`faculties/projects/tools.py:701`,
-  `owner_speaks`) ont le même écart, mais une autre session travaille ces fichiers : à faire avec elle.
+  `owner_speaks`) ont le même écart, à reprendre au prochain passage sur les projets.
 
 **Fichiers.** `plugins/imaging/tools.py`, `plugins/phone/__init__.py`, `plugins/location/__init__.py`,
-`app/handmade/rights.py` (et son gabarit si un outil y paraît deux fois), `tests/architecture/test_no_new_prose.py`.
+`app/handmade/rights.py`, `tests/architecture/test_no_new_prose.py`.
 
-**Tests** :
-- dans un salon et devant une inconnue, l'offre (`runtime.tools.offer`) ne contient pas `draw` ; en tête-à-tête avec
-  un compte, elle le contient ;
-- `fixed_tools` liste `phone_messages` à la fois comme réservé et comme gardé ;
-- `tests/architecture/test_tools_described.py` passe toujours.
+**Tests** (`tests/unit/test_tools_declare_their_audience.py`) : les familles ouvertes à tout le monde, l'offre ne
+contient le téléphone que pour toi, la position que pour toi et un compte, rien dans un salon ni pour une inconnue —
+`draw` suit le plafond seul ; l'offre et le gestionnaire jugent par la même fonction ; `fixed_tools` montre ces outils
+réservés et gardés. Une mutation (les conditions retirées) fait échouer le test.
 
-**L'entrée** (section « Identité et divulgation ») :
-
-> ### NNNN — Ce qu'un outil exige de qui est en face, il le déclare
->
-> - Un outil dont le gestionnaire refuse selon qui est en face déclare cette condition (`ToolSpec.when`) : l'offre la filtre (le modèle n'est plus invité à ce qui refusera), le gestionnaire la revérifie par la même fonction, la page « Droits » la lit (la première phrase de sa docstring).
-> - Dessiner et montrer un dessin : en tête-à-tête, avec toi ou une personne qui a un compte ; le contenu adulte, toi seule, dit par la règle de l'outil (`rule`). Les messages de ton téléphone : toi, authentifiée, en tête-à-tête. Une position : celle de qui lui parle, en tête-à-tête, authentifié.
-> - Un outil réservé (`owner_only`, un minimum vital qu'une ligne peut ouvrir) montre aussi sa condition : une ligne qui l'ouvre à tes proches ne le fait pas croire offert dans un salon.
->
-> *Pourquoi :* trois plugins refusaient dans leur gestionnaire ce que l'offre et la page « Droits » disaient permis (audit des garde-fous du 2026-10-27).
->
-> *Révise 0133 (en partie : ce que la page « Droits » montre d'un outil réservé).*
+**L'entrée** : ADR 0148.
 
 ### 2.4 L'ordre et la vérification
 

@@ -498,6 +498,25 @@ def tag_intensity(raw: str | None, percent: bool = False) -> float:
     return max(0.0, min(1.0, value))
 
 
+def named_feeling(name: object, intensity: object) -> tuple[str, float]:
+    """Ce qu'une chose lui fait, dit par un modèle hors de ses balises (le tri d'un mail, d'un message, ADR 0147) :
+    l'émotion d'après tout nom qu'``emotion_named`` comprend, l'intensité lue comme celle d'une balise — ou
+    ``("", 0.0)``. Un nom inconnu, ``neutral`` (rien), une intensité absente, illisible ou nulle ne comptent pas :
+    aucun nombre n'est inventé."""
+    found = emotion_named(name) if isinstance(name, str) else None
+    if found is None or found is Emotion.NEUTRAL or isinstance(intensity, bool) \
+            or not isinstance(intensity, (int, float, str)):
+        return "", 0.0
+    raw = str(intensity).strip()
+    try:
+        value = float(raw.replace(",", "."))
+    except ValueError:
+        return "", 0.0
+    if not math.isfinite(value) or value <= 0:
+        return "", 0.0
+    return found.value, tag_intensity(raw)
+
+
 #: Une facette d'un ressenti (ADR 0083) : une émotion (son nom canonique) et son intensité, de 0 à 1. Un ressenti en a
 #: plusieurs (« colère 0,8, dégoût 0,4 ») : la plus forte d'abord.
 Facet = tuple[str, float]

@@ -22,14 +22,15 @@ from pydantic import BaseModel
 from mika.app.composition import faculties
 from mika.kernel import forms
 from mika.kernel.builtin import KERNEL
+from mika.runtime.state import RUNTIME
 from mika.vocab.temperament import Temperament
 
 Derive = Callable[[Temperament], BaseModel]
 
 #: (propriétaire, modèle de paramètres, dérivation depuis le tempérament — ou ``None``) : toute la
-#: composition, et le noyau ; une faculté ajoutée y entre d'elle-même
+#: composition, le noyau et le runtime ; une faculté ajoutée y entre d'elle-même
 MODELS: list[tuple[str, type[BaseModel], Derive | None]] = [
-    (f.name, f.params, f.derive) for f in [KERNEL, *faculties()] if f.params is not None]
+    (f.name, f.params, f.derive) for f in [KERNEL, RUNTIME, *faculties()] if f.params is not None]
 
 #: Les nombres laissés sans bornes (lecture seule dans la console) : « propriétaire.chemin » → pourquoi.
 #: Cette liste ne peut que rétrécir.

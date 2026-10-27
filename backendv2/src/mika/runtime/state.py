@@ -16,11 +16,14 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import runtime as rt
 from mika.kernel.events import Draft
 from mika.kernel.faculty import CAPABILITY_LANE, Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import REPLY_ABSTAINED, REPLY_FAILED, Delivery, EmotionView
 from mika.runtime.boundary import Failed, acall
@@ -77,9 +80,28 @@ class RuntimeState:
     effects: FrozenDict[int, PendingEffect] = FrozenDict()
 
 
+class RuntimeParams(BaseModel):
+    """Deux réglages d'usage de l'arbitre (ADR 0149) : des décalages en log-odds, ajoutés au score de ses lignes
+    comme une modulation (``runtime.arbiter``). Ce ne sont pas des traits : son caractère reste au tempérament, qui
+    règle ses preuves."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    speak_shift: Annotated[float, Knob(
+        label="Prendre la parole", group="Fréquence", advanced=False, lo=-3.0, hi=3.0, step=0.25,
+        help="Décale son envie de prendre la parole d'elle-même, quelles qu'en soient les raisons : +1, jusqu'à près "
+             "de trois fois plus souvent ; −1, jusqu'à trois fois moins ; 0, comme ses raisons le disent. Un réglage "
+             "d'usage (des heures calmes, une période chargée) : son caractère reste au tempérament.")] = 0.0
+    work_shift: Annotated[float, Knob(
+        label="Se mettre au travail", group="Fréquence", advanced=False, lo=-3.0, hi=3.0, step=0.25,
+        help="Décale son envie d'avancer seule (ses pas sur un but, ses tâches comme un brouillon, ses projets) : "
+             "+1, jusqu'à près de trois fois plus souvent ; −1, jusqu'à trois fois moins. Les réveils par API n'en "
+             "dépendent pas : quelqu'un les attend.")] = 0.0
+
+
 # version 2 : une question en attente sait son salon (le tour de conversation)
-RUNTIME = Faculty("runtime", state=RuntimeState, init=lambda p: RuntimeState(), namespaces=rt.NAMESPACES,
-                  state_version=2)
+RUNTIME = Faculty("runtime", state=RuntimeState, init=lambda p: RuntimeState(), params=RuntimeParams,
+                  namespaces=rt.NAMESPACES, state_version=2)
 RUNTIME.declare(*rt.ALL)
 
 

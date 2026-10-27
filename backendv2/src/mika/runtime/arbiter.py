@@ -33,6 +33,8 @@ from mika.kernel.frame import Frame
 from mika.kernel.registry import Registry
 from mika.kernel.state import Root
 from mika.runtime.boundary import Failed, call
+from mika.runtime.state import RUNTIME
+from mika.vocab.episodes import Kind
 
 if TYPE_CHECKING:
     from mika.runtime.scheduler import ProcessContext
@@ -49,6 +51,10 @@ LAST_ROWS_KEPT = 256
 RECENT_KEPT = 512
 #: le veto d'une ligne dont le fournisseur refuserait l'appel d'avance (``LLMGateway.held``, ADR 0127)
 HELD = "held"
+#: les réglages d'usage du runtime (``RuntimeParams``, ADR 0149) : le décalage de chaque sorte d'épisode — prendre
+#: la parole, se mettre au travail ; les réveils par API n'en ont pas, quelqu'un les attend
+USAGE_SHIFTS = {Kind.INITIATIVE: "speak_shift", Kind.STEP: "work_shift", Kind.TASK: "work_shift",
+                Kind.WORK: "work_shift", Kind.JOB: "work_shift"}
 
 
 class Arbiter:
@@ -109,9 +115,15 @@ class Arbiter:
                 proposals.append((spec.owner, c))
 
         held: dict[str, str] = {}
+        # lus dans le cadre : « Voir l'effet » les lit sous les paramètres prévus
+        usage = frame.env.params_of(RUNTIME.name, frame.root) if RUNTIME.name in reg.faculties else None
 
         def modulate(view: RowView) -> list[tuple[str, Modulation]]:
             out: list[tuple[str, Modulation]] = []
+            knob = USAGE_SHIFTS.get(view.kind)
+            shift = getattr(usage, knob, 0.0) if knob is not None else 0.0
+            if shift:
+                out.append((RUNTIME.name, Modulation(shift=shift)))
             if self._held is not None:
                 # un épisode que son fournisseur refuserait d'avance ne se lance pas : il finirait en zéro seconde,
                 # sans rien faire, et un but le compterait (ADR 0127)

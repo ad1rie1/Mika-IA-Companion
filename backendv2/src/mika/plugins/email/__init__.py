@@ -93,7 +93,8 @@ class EmailParams(BaseModel):
     triage_per_poll: Annotated[int, Knob(
         label="Mails triés par le modèle", group="Relevé", lo=0, hi=50,
         help="Parmi eux, au plus autant (hors envois en masse) sont triés par un appel au modèle (importance, "
-             "émotion, réponse attendue) ; les autres par une simple heuristique.")] = 5
+             "ce que le mail lui fait, réponse attendue) ; les autres par une simple heuristique, qui ne lui fait "
+             "rien ressentir.")] = 5
     mention_from: Annotated[float, Knob(
         label="Important à partir de", group="Le dire", lo=0.0, hi=1.0, step=0.05,
         help="Un mail non lu dont l'importance atteint ce seuil est « important » : elle peut en parler d'elle-même "

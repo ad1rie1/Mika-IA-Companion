@@ -12,7 +12,9 @@
 - une tâche Teams n'a pas sa mémoire (sa mémoire contient la vie de la personne et ce que d'autres lui ont confié) ;
 - la signature est ajoutée par le serveur, jamais écrite par elle ;
 - personne ne l'envoie à temps : elle ne part plus ;
-- oublier un collègue atteint le journal et le cache.
+- oublier un collègue atteint le journal et le cache ;
+- ce qu'un message lui fait, c'est le tri qui le dit, parmi toutes ses émotions ; le repli ne lui fait rien
+  ressentir (ADR 0147).
 """
 
 from __future__ import annotations
@@ -32,11 +34,14 @@ from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Origin
 from mika.plugins.teams import RECEIVED
+from mika.plugins.teams.triage import heuristic, place_of, read_triage, triage_system
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
+from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import DOC, at_paris, build, connect
 
 START = at_paris(2026, 10, 6, 10, 0)
@@ -520,3 +525,53 @@ def test_a_message_deleted_in_teams_leaves_the_cache(tmp_path):
         return store.message(message_ref(DM, "1759000000001"))
 
     assert live(tmp_path, Model(), scenario).text == ""
+
+
+# ── Ce qu'un message lui fait ─────────────────────────────────────────────
+
+
+class Upset(Model):
+    """Le tri dit que le message la met en colère."""
+
+    def __call__(self, req):
+        if req.role == "triage":
+            return LLMResponse('{"importance": 0.7, "resume": "", "question": true, "aide": true, "emotion": "angry", '
+                               '"intensite": 0.7}')
+        return super().__call__(req)
+
+
+def test_what_a_message_does_to_her_is_what_the_triage_says(tmp_path):
+    """Le tri dit ce que le message lui fait, parmi toutes ses émotions : le signal porte son intensité, que la veille
+    dose ensuite comme pour toute source (ADR 0147)."""
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM, kind="dm")])
+        await sleep(10 * MINUTE)
+        return {"noticed": events(kernel, teams_c.NOTICED), "heard": events(kernel, attention_c.NOTICED),
+                "triage": [c for c in llm.calls if c.role == "triage"]}
+
+    out = live(tmp_path, Upset(), scenario, cfg=TeamsConfig(display_name="Adrien"))
+    [noticed] = out["noticed"]
+    assert (noticed.data.emotion, noticed.data.intensity) == ("angry", 0.7)
+    [heard] = [h for h in out["heard"] if h.data.source == "teams"]
+    assert heard.data.emotion == "angry" and heard.data.intensity == 0.6  # « Émotion par source au plus »
+    [call] = out["triage"]
+    assert "angry" in call.system_stable and "Adrien" in call.system_stable
+    assert call.messages[0].content.startswith(phrase("teams.triage.place", place=phrase("teams.where.dm")))
+    assert "TCP et UDP" in call.messages[0].content
+
+
+def test_the_triage_reads_any_emotion_she_knows_and_never_invents_one():
+    """Un alias est compris, un nom inconnu ou sans intensité ne compte pas ; le repli ne pose jamais d'émotion ; la
+    consigne cite chacune de ses émotions (ADR 0147)."""
+    guess = heuristic("Tu peux m'aider ?", True, "dm")
+    assert (guess["question"], guess["emotion"], guess["intensite"]) == (True, "", 0.0)
+    told = read_triage('{"importance": 0.8, "resume": "", "question": false, "aide": false, "emotion": "dégoût", '
+                       '"intensite": 0.4}', guess)
+    assert (told["importance"], told["emotion"], told["intensite"]) == (0.8, "disgusted", 0.4)
+    assert read_triage('{"importance": 0.8, "emotion": "angry"}', guess)["emotion"] == ""
+    assert read_triage('{"importance": 0.8, "emotion": "bof", "intensite": 0.4}', guess)["emotion"] == ""
+    system = triage_system("Adrien", "Nova")
+    assert all(e.value in system for e in Emotion if e is not Emotion.NEUTRAL)
+    assert place_of("chat", "") == phrase("teams.where.other")  # une sorte inconnue
+    assert "Projet" in place_of("group", "Projet")

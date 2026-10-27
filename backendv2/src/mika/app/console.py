@@ -94,7 +94,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "attachments", "transcript")),
     ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
+    ("Action", ("agency", "runtime", "goals", "projects", "shares", "imaging", "world")),
     ("Plugins", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )

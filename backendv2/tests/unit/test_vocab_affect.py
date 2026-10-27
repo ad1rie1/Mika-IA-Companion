@@ -162,6 +162,27 @@ def test_names_in_french_and_synonyms():
     assert A.emotion_of("triste") is None  # le nom canonique reste strict
 
 
+@pytest.mark.parametrize("name, intensity, expected", [
+    ("angry", 0.7, ("angry", 0.7)),  # hors des six émotions d'avant l'ADR 0147
+    ("en colère", "0,6", ("angry", 0.6)),  # un nom français, une virgule
+    ("dégoût", 8, ("disgusted", 0.8)),  # une échelle sur 10, lue comme une balise
+    ("bof", 0.5, ("", 0.0)),  # un nom inconnu
+    ("neutral", 0.4, ("", 0.0)),  # rien
+    ("", 0.4, ("", 0.0)),
+    (None, 0.5, ("", 0.0)),
+    (["sad"], 0.5, ("", 0.0)),
+    ("sad", None, ("", 0.0)),  # sans intensité : aucun nombre inventé
+    ("sad", "forte", ("", 0.0)),
+    ("sad", True, ("", 0.0)),
+    ("sad", 0, ("", 0.0)),
+    ("sad", -0.3, ("", 0.0)),
+    ("sad", float("nan"), ("", 0.0)),
+])
+def test_a_feeling_named_outside_her_tags(name, intensity, expected):
+    """Ce qu'une chose lui fait, dit par un tri : tout son vocabulaire, jamais une intensité inventée (ADR 0147)."""
+    assert A.named_feeling(name, intensity) == expected
+
+
 def test_every_emotion_has_a_noun():
     assert {e for e in Emotion} == set(A.NOUN)
     assert partitive(Emotion.ANGRY) == "de colère" and partitive(Emotion.AMUSED) == "d'amusement"

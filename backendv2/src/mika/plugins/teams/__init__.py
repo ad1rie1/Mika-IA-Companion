@@ -69,7 +69,8 @@ class TeamsParams(BaseModel):
     triage_per_run: Annotated[int, Knob(
         label="Messages triés par le modèle", group="Remarquer", lo=0, hi=50,
         help="Parmi eux, au plus autant (ceux qu'on adresse à la personne) sont triés par un appel au modèle "
-             "(importance, question à laquelle elle peut aider) ; les autres par une simple heuristique.")] = 8
+             "(importance, question à laquelle elle peut aider, ce que le message lui fait) ; les autres par une "
+             "simple heuristique, qui ne lui fait rien ressentir.")] = 8
     shown_for_us: Annotated[int, Knob(
         label="Montrés pendant", group="Remarquer", lo=HOUR, hi=3 * DAY,
         help="Un message reçu reste sous ses yeux (« TES MESSAGES TEAMS ») au plus ce temps.")] = 12 * HOUR

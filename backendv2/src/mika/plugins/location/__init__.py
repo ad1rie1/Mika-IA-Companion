@@ -124,7 +124,7 @@ class WhereArgs(BaseModel):
 
 
 @LOCATION.tool("location_where", description=phrase("location.tools.where.description"), args=WhereArgs,
-               bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True)
+               bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True, when=offered)
 async def location_where(args: WhereArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     ep, aud = frame.episode, frame.audience

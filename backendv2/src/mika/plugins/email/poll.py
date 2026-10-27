@@ -34,26 +34,30 @@ from mika.plugins.email import (
 )
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.preprocess import inert
+from mika.vocab.affect import Emotion, named_feeling
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 
 def triage_system(name: str) -> str:
-    """La consigne du tri, pour la boîte de celle qui lit (son nom, celui de sa persona : jamais écrit ici)."""
-    return phrase("email.triage.system", name=name)
+    """La consigne du tri, pour la boîte de celle qui lit (son nom, celui de sa persona : jamais écrit ici) ; les
+    émotions qu'un mail peut lui faire sont celles de son vocabulaire (ADR 0147)."""
+    return phrase("email.triage.system", name=name,
+                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL))
 
 _JSON = re.compile(r"\{.*\}", re.S)
-EMOTIONS = frozenset({"curious", "happy", "surprised", "anxious", "sad", "thinking", ""})
 #: au-delà, un mail qu'elle annonce ne « vient » plus d'arriver : elle dit l'heure où il est arrivé
 FRESH_FOR = 30 * MINUTE
 
 
 def heuristic(m: Any) -> dict[str, Any]:
+    """Sans tri (au-delà du relevé, quota, panne) : l'importance et la réponse attendue, devinées ; jamais une
+    émotion — ce qu'un mail lui fait, seul le modèle le dit (ADR 0147)."""
     low = f"{m.subject} {m.body[:500]}".lower()
     importance = 0.1 if m.bulk else 0.8 if any(w in low for w in ("urgent", "important", "asap")) else 0.45
     asks = not m.bulk and ("?" in m.body[:2000] or any(w in low for w in ("réponds", "répondre", "dis-moi")))
-    return {"importance": importance, "resume": "", "reponse": asks, "emotion": "" if m.bulk else "curious"}
+    return {"importance": importance, "resume": "", "reponse": asks, "emotion": "", "intensite": 0.0}
 
 
 def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -70,9 +74,9 @@ def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
         importance = max(0.0, min(1.0, float(data.get("importance", fallback["importance"]))))
     except (TypeError, ValueError):
         importance = fallback["importance"]
-    emotion = str(data.get("emotion") or "")
+    emotion, intensity = named_feeling(data.get("emotion"), data.get("intensite"))
     return {"importance": importance, "resume": str(data.get("resume") or "")[:300],
-            "reponse": bool(data.get("reponse")), "emotion": emotion if emotion in EMOTIONS else ""}
+            "reponse": bool(data.get("reponse")), "emotion": emotion, "intensite": intensity}
 
 
 @EMAIL.process("email.poll", wake_on=[*body_c.ALL, POLL_ASKED], lane="background", catch_up=CatchUp.ONCE,
@@ -129,11 +133,11 @@ class Poll:
                 author = keeper_name(frame, answered.by) if answered.by and not answered.draft else \
                     phrase("email.noticed.you")
                 summary = phrase("email.noticed.answer", who=author) + summary
-            emotion = triage["emotion"]
+            # ce qu'il lui fait, tel que le tri le dit : la veille le dose comme pour toute source (ADR 0147)
             drafts.append(c.NOTICED.draft(
                 source="email", kind=c.MAIL, summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)),
-                pertinence=triage["importance"], emotion=emotion, intensity=0.2 * triage["importance"] if emotion
-                else 0.0, sensitivity=int(Sensitivity.PERSONAL), bundle=BUNDLE, mail=m.ref,
+                pertinence=triage["importance"], emotion=triage["emotion"], intensity=triage["intensite"],
+                sensitivity=int(Sensitivity.PERSONAL), bundle=BUNDLE, mail=m.ref,
                 sender=m.sender[:200], address=m.address, importance=triage["importance"],
                 needs_reply=bool(triage["reponse"]) and not m.bulk, account=m.account, folder=m.folder,
                 about=tuple(h for h in (c.address_handle(m.address),) if h), dedupe_key=f"mail:{m.ref}"))

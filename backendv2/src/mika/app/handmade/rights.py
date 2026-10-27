@@ -211,13 +211,14 @@ def detail(ui: UI, key: str) -> dict[str, Any] | None:
 
 def fixed_tools(ui: UI) -> dict[str, Any]:
     """Ce que le code déclare, lu des outils mêmes : ceux dont le minimum vital est à toi et elle seule
-    (``owner_only``), par famille ; ceux qu'une condition garde (``when``), regroupés par sa phrase."""
+    (``owner_only``), par famille ; ceux qu'une condition garde (``when``), regroupés par sa phrase. Un outil réservé
+    peut être gardé aussi : une ligne qui l'ouvre ne lève pas sa condition (ADR 0148)."""
     reserved: dict[str, list[str]] = {}
     guarded: dict[str, list[str]] = {}
     for spec in sorted(ui.kernel.registry.tools.values(), key=lambda t: t.name):
         if spec.owner_only:
             reserved.setdefault(ui.names.bundle(spec.bundle), []).append(spec.name)
-        elif spec.when is not None:
+        if spec.when is not None:
             guarded.setdefault(catalog.condition(spec), []).append(spec.name)
     return {"reserved": sorted(reserved.items()), "guarded": sorted(guarded.items(), key=lambda x: -len(x[1])),
             "count": sum(len(n) for n in reserved.values()), "guarded_count": sum(len(n) for n in guarded.values())}

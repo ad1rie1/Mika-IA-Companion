@@ -318,7 +318,7 @@ def _line(frame: Frame, m: Msg, texts: Mapping[str, str], owner: str) -> str:
 
 
 @PHONE.tool("phone_messages", description=phrase("phone.tools.messages.description"), args=MessagesArgs,
-            bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=3, owner_only=True)
+            bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=3, owner_only=True, when=offered)
 async def phone_messages(args: MessagesArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     person = whose(frame)
@@ -347,7 +347,7 @@ async def phone_messages(args: MessagesArgs, ctx: Any) -> Any:
 
 
 @PHONE.tool("phone_draft", acts=True, description=phrase("phone.tools.draft.description"), args=DraftArgs, bundle=BUNDLE,
-            episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True)
+            episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True, when=offered)
 async def phone_draft(args: DraftArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     person = whose(frame)
