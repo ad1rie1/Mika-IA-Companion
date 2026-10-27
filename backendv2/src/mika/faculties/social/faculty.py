@@ -70,8 +70,9 @@ class SocialParams(BaseModel):
         help="L'écart habituel prêté à une amie tant que son rythme n'est pas mesurable.")] = 7.0
     fallback_other_days: Annotated[float, Knob(
         label="Rythme supposé : les autres (jours)", group="Rythme d'une relation", lo=1, hi=90, step=0.5,
-        help="Celui prêté à une connaissance ou une inconnue. Il ne change que la lecture (fiche, silence ÷ "
-             "rythme) : elle ne relance que ses amies et ses proches.")] = 14.0
+        help="Celui prêté à une connaissance ou une inconnue tant que son rythme n'est pas mesurable : leur "
+             "silence se lit sur ce long rythme (fiche, silence ÷ rythme), et elle n'y reprend contact qu'au cran de "
+             "leur lien (« Aller vers quelqu'un, selon la proximité »).")] = 14.0
     # la proximité naît de l'histoire vécue (jours distincts, messages reçus) et
     # de ce qu'elle a installé (le regard d'``affect`` : jamais amie d'une rancune)
     # s'être parlé deux jours différents…

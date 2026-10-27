@@ -28,10 +28,11 @@ from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.agency import _budget, holding_back, restraint
+from mika.faculties.agency import AgencyParams, _budget, follow_up_after, holding_back, restraint
 from mika.kernel.arbitration import RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.events import Content, Origin, VoiceProvenance
+from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMResponse
 from mika.runtime.effects import with_content
 from mika.sim.clock import run_virtual
@@ -58,9 +59,9 @@ class Script:
         return LLMResponse(self.reply)
 
 
-def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 17, 0), script=None):
+def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 17, 0), script=None, **built):
     script = script or Script()
-    kernel, clock, llm, out = build(tmp_path, script, start=start)
+    kernel, clock, llm, out = build(tmp_path, script, start=start, **built)
 
     async def main():
         await boot(kernel)
@@ -191,6 +192,43 @@ def test_a_friend_who_answers_keeps_getting_initiatives(tmp_path):
 
     sent = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
     assert len(sent) >= 4, [local(e.at, PARIS).strftime("%a %H:%M") for e in sent]
+
+
+def test_an_acquaintance_gets_her_gentle_follow_up_later_by_the_share_of_her_table(tmp_path):
+    """Au cran de leur lien (``follow_up_by_closeness``, ADR 0150) : après une initiative restée sans réponse, la
+    relance douce vers une connaissance attend deux fois plus que vers une amie (sa part : la moitié) ; vers une
+    inconnue, jamais. L'arbitre ne tire rien : on lit la retenue, rien ne part."""
+    def voice():
+        return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
+
+    def veto(kernel, handle):
+        frame = kernel.mind.frame()
+        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", handle, 5.0, ("thought",))).veto
+
+    async def scenario(kernel, script, out, llm):
+        for handle, level in (("ext_1", social_c.FRIEND), ("ext_2", social_c.ACQUAINTANCE),
+                              ("ext_3", social_c.STRANGER)):
+            await befriend(kernel, handle, level)
+            p = await kernel.perceive(said(handle, "coucou", channel="external"))
+            await p.reply
+        await asyncio.sleep(13 * HOUR / US)
+        for n, handle in enumerate(("ext_1", "ext_2", "ext_3")):
+            await kernel.mind.append([rt.UTTERANCE.draft(
+                kind="INITIATIVE", text=Content.of("tu vas bien ?"), target=handle, channel="external",
+                voice=voice())], emitter="runtime", correlation=f"genese{n}", origin=Origin.GENESIS)
+        frame = kernel.mind.frame()
+        p = frame.env.params_of("agency", frame.root) or AgencyParams()
+        wait = {h: follow_up_after(frame, h, h, p) for h in ("ext_1", "ext_2")}
+        start, got = kernel.mind.clock.now(), {}
+        for label, after in (("amie", wait["ext_1"]), ("connaissance", 2 * wait["ext_2"])):
+            await asyncio.sleep((start + after + MINUTE - kernel.mind.clock.now()) / US)
+            got[label] = {h: veto(kernel, h) for h in ("ext_1", "ext_2", "ext_3")}
+        return wait, got
+
+    wait, got = run(tmp_path, scenario, arbitration=ArbitrationPolicy())
+    # passé le délai de l'amie, elle seule peut être relancée ; passé deux fois celui de la connaissance, elle aussi
+    assert got["amie"] == {"ext_1": None, "ext_2": agency_c.UNANSWERED, "ext_3": agency_c.UNANSWERED}
+    assert got["connaissance"] == {"ext_1": None, "ext_2": None, "ext_3": agency_c.UNANSWERED}
 
 
 @pytest.mark.slow

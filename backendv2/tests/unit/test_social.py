@@ -31,11 +31,15 @@ from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.social.faculty import Contact, SocialParams, lived, owner_floored, rhythm
+from mika.faculties.social.faculty import Contact, SocialParams, lived, owner_floored, params, rhythm
+from mika.faculties.social.initiative import _reach_out
 from mika.kernel.arbitration import Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.events import Content, Origin
+from mika.kernel.frame import Frame
+from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMResponse
+from mika.runtime.params import ParamsOverlay, Planned
 from mika.sim.clock import run_virtual
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
@@ -192,9 +196,9 @@ class Script:
         return LLMResponse(f"ah oui ? {self.tag}")
 
 
-def run(tmp_path, scenario, start=at_paris(2026, 9, 28, 18, 0), *, with_llm=False):
+def run(tmp_path, scenario, start=at_paris(2026, 9, 28, 18, 0), *, with_llm=False, **built):
     script = Script()
-    kernel, clock, llm, out = build(tmp_path, script, start=start)
+    kernel, clock, llm, out = build(tmp_path, script, start=start, **built)
 
     async def main():
         await boot(kernel)
@@ -262,6 +266,38 @@ def test_she_never_writes_to_an_absent_friend_at_night(tmp_path):
     hours = [t.hour + t.minute / 60 for t, reason in fired
              if {social_c.RECONTACT, social_c.CHAT} & set(reason.split(","))]
     assert hours and all(10 <= h <= 20.5 for h in hours), fired  # elle écrit habituellement vers 23 h
+
+
+def test_she_reaches_out_to_an_acquaintance_at_the_share_her_table_gives(tmp_path):
+    """Au cran de leur lien (``reach_out_by_closeness``, ADR 0150) : une connaissance silencieuse lui donne envie de
+    reprendre contact à la part de sa table (la moitié, d'abord) ; à 0, plus rien. Elle est dans ``social.KNOWN``, pas
+    dans ``CIRCLE`` ; une amie n'en dépend pas. L'arbitre ne tire rien : l'envie se lit sans qu'on lui écrive."""
+    async def scenario(kernel, clock, script):
+        for day in range(5):
+            await evening(kernel, "ext_1")  # une amie : cinq soirs
+            if day < 3:
+                await evening(kernel, "ext_2")  # une connaissance : trois soirs, trop peu de messages pour une amie
+            await asyncio.sleep(DAY / US - 8 * 60)
+        await asyncio.sleep((at_paris(2026, 10, 6, 12, 0) - clock.now()) / US)
+        now = kernel.mind.frame()
+        p = params(now.env.params_of("social", now.root))
+
+        def reach(share):
+            table = {**p.reach_out_by_closeness, social_c.ACQUAINTANCE: share}
+            value = p.model_copy(update={"reach_out_by_closeness": table})
+            frame = Frame(now.root, now.now, ParamsOverlay(now.env, {"social": Planned("social", SocialParams, value,
+                                                                                       value, {})}))
+            return {c.target: (c.reason, c.evidence) for c in _reach_out(now.state("social"), frame)}
+
+        levels = (now.get(social_c.CLOSENESS("ext_1")), now.get(social_c.CLOSENESS("ext_2")))
+        return levels, now.get(social_c.KNOWN), now.get(social_c.CIRCLE), {x: reach(x) for x in (0.0, 0.5, 1.0)}
+
+    levels, known, circle, wants = run(tmp_path, scenario, arbitration=ArbitrationPolicy())
+    assert levels == (social_c.FRIEND, social_c.ACQUAINTANCE)
+    assert {"ext_1", "ext_2"} <= set(known) and "ext_1" in circle and "ext_2" not in circle
+    assert "ext_2" not in wants[0.0] and wants[0.0]["ext_1"] == wants[0.5]["ext_1"] == wants[1.0]["ext_1"]
+    (reason, half), (same, full) = wants[0.5]["ext_2"], wants[1.0]["ext_2"]
+    assert reason == same and abs(half - full / 2) <= 0.001
 
 
 def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):

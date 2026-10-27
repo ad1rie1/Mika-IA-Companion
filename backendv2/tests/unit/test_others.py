@@ -30,10 +30,20 @@ from mika.contracts import social as social_c
 from mika.faculties.agency import AgencyParams
 from mika.faculties.attention.faculty import AttentionParams, reply_window
 from mika.faculties.needs import NeedsParams
-from mika.faculties.others.faculty import Model, OthersParams, OthersState, brief, current, learn, receptivity
+from mika.faculties.others.faculty import (
+    Model,
+    OthersParams,
+    OthersState,
+    _check_in,
+    brief,
+    current,
+    learn,
+    receptivity,
+)
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin
+from mika.kernel.registry import ArbitrationPolicy
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
@@ -68,9 +78,9 @@ class Script:
         return LLMResponse(f"d'accord {self.tag}{self.reads.tag(req) if req.role == 'reply' else ''}")
 
 
-def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0), with_llm=False):
+def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0), with_llm=False, **built):
     script = Script()
-    kernel, clock, llm, out = build(tmp_path, script, start=start)
+    kernel, clock, llm, out = build(tmp_path, script, start=start, **built)
 
     async def main():
         await boot(kernel)
@@ -222,6 +232,27 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
             assert delays[0][0] >= P.checkin_after_us, delays
     else:
         assert delays == []
+
+
+def test_an_acquaintance_worries_her_by_half_and_a_stranger_not_at_all(tmp_path):
+    """Au cran de leur lien (``concern_by_closeness``, ADR 0150) : la même lassitude après des jours légers, d'une amie,
+    d'une connaissance, d'une inconnue — l'amie l'inquiète, la connaissance à moitié (ce qu'elle en ressent, et la
+    preuve de l'envie de prendre de ses nouvelles), l'inconnue pas du tout. L'arbitre ne tire rien : l'envie se lit
+    sans qu'une prise de nouvelles l'éteigne."""
+    async def scenario(kernel, script, out):
+        for handle, level in (("user_1", social_c.FRIEND), ("user_2", social_c.ACQUAINTANCE),
+                              ("user_3", social_c.STRANGER)):
+            await befriend(kernel, handle, level)
+            await connect(kernel, handle, handle)
+            await chat(kernel, handle, LIGHT + ["j'en ai marre, je suis épuisée"])
+        await asyncio.sleep((at_paris(2026, 9, 28, 19, 0) - kernel.mind.clock.now()) / US)  # la rampe est pleine
+        frame = kernel.mind.frame()
+        worried = {e.data.handle: e.data.concern_share for e in events(kernel, others_c.READ.name) if e.data.concern}
+        return worried, {c.target: c.evidence for c in _check_in(frame.state("others"), frame)}
+
+    worried, wants = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0), arbitration=ArbitrationPolicy())
+    assert worried == {"user_1": 1.0, "user_2": 0.5}
+    assert wants == {"user_1": P.checkin_evidence, "user_2": P.checkin_evidence / 2}
 
 
 # ── Apprendre de l'expérience ─────────────────────────────────────────────
