@@ -189,6 +189,25 @@ def test_a_revision_brings_the_framing_back_with_their_words(tmp_path):
     assert [cand.args["subject"] for cand in candidates] == [frame_subject(p.id)]  # une séance de cadrage, de nouveau
 
 
+def test_a_project_from_before_gets_a_plan_when_asked_to_revise_it(tmp_path):
+    """Un projet d'avant (ou de la console) n'a pas de plan : le revoir lui en donne un, ses mots sous les yeux."""
+    from tests.unit.test_projects import create
+
+    async def scenario(kernel, llm):
+        pid = await create(kernel, "p1", title="Le labo", objectives="Relever les cours")
+        before = kernel.mind.frame().state("projects").projects[pid].plan_state
+        asked = await kernel.perceive(said("user_1", "refais le plan du labo : je veux que tu lises les actus"))
+        said_back = await project_steer(SteerArgs(project=str(pid), what="revise", text="lire les actus"),
+                                        _ctx(kernel, "project_steer", Kind.REPLY, "user_1", reply_to=asked.seq))
+        frame = kernel.mind.frame()
+        s = frame.state("projects")
+        return before, said_back, s.projects[pid], _run(s, frame)
+
+    before, said_back, p, candidates = live(tmp_path, scenario)
+    assert before == c.UNPLANNED and "reprendras ton plan" in said_back and p.plan_state == c.TO_FRAME
+    assert [cand.args["subject"] for cand in candidates] == [frame_subject(p.id)]
+
+
 def test_a_notable_pass_of_a_constant_is_told_like_a_finished_objective(tmp_path):
     async def scenario(kernel, llm):
         pid = await _asked_project(kernel)

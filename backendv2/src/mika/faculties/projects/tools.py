@@ -957,7 +957,7 @@ async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title
         return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_not_theirs", title=title))
     if args.what == APPROVE and p.plan_state != c.PROPOSED:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_none", title=title))
-    if args.what == REVISE and p.plan_state not in (c.PROPOSED, c.PLANNED):
+    if args.what == REVISE and p.plan_state == c.TO_FRAME:  # une séance de cadrage est déjà due
         return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_none", title=title))
     said = their_words(ctx) or args.text.strip()
     if args.what == REVISE and not said:

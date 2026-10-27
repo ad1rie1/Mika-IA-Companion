@@ -3871,6 +3871,8 @@ projects:
     plan_head: "Ton plan pour le projet « {title} » :"
     plan_steps: "Tes étapes :"
     plan_questions: "Tes questions, avec ce que tu recommandes :"
+    # où voir ce que ses apps montrent : leur fiche dans la console ; {apps} : leurs titres, entre guillemets
+    apps: "Ce qu'en montrent tes apps se voit dans la console, sur leur fiche : {apps}."
 
   # ── « TES PROJETS » ─────────────────────────────────────────────────────────────────────────────────────────
   # En conversation (réponse et initiative) : ses projets — « tu travailles sur quoi ? » est une question sur sa vie
@@ -3935,6 +3937,9 @@ projects:
         questions avec ce que tu recommandes, pour qu'un « vas-y » suffise. L'essentiel, comme tu le dirais, pas une
         fiche.
       remind: "Tu as proposé ton plan à {who} hier, sans réponse : reviens-y une fois, simplement, sans insister."
+      changed: >-
+        Tu as revu ton plan pour le projet que {who} t'a demandé : dis-lui en quelques lignes ce qui change et pourquoi
+        — rien n'empêche de te demander autre chose.
       start: >-
         Tu as réfléchi au projet que {who} t'a demandé et tu t'y mets : dis-lui en quelques lignes ce que tu vas faire
         et ce qui l'attend au bout — rien n'empêche de te demander de changer.

@@ -602,7 +602,7 @@ PLAN_FR = {c.TO_FRAME: ("à cadrer", "info"), c.PROPOSED: ("plan proposé, il at
 def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section | None:
     """Ce qu'on lui a demandé, ses mots tels quels, et son plan (ADR 0145) : sa réponse se donne ici quand il
     attend."""
-    if p.plan_state == c.UNPLANNED and not p.request_ref:
+    if p.plan_state == c.UNPLANNED and not p.request_ref and p.status != c.ACTIVE:
         return None
     label, tone = PLAN_FR.get(p.plan_state, ("sans plan", "muted"))
     items: list[Any] = [Fields((("son plan", Badge(label, tone)),
@@ -617,8 +617,9 @@ def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section
     slots = []
     if p.status == c.ACTIVE and p.plan_state == c.PROPOSED:
         slots.append(ActionSlot("projects.plan_valider", (), title="Valider le plan", presentation="button"))
-    if p.status == c.ACTIVE and p.plan_state in (c.PROPOSED, c.PLANNED):
-        slots.append(ActionSlot("projects.plan_reviser", (), title="Demander une révision"))
+    if p.status == c.ACTIVE and p.plan_state != c.TO_FRAME:
+        slots.append(ActionSlot("projects.plan_reviser", (), title="Demander une révision" if p.plan_state
+                                else "Lui faire écrire un plan"))
     if slots:
         items.append(Toolbar(tuple(slots), title="Sa réponse"))
     return Section("Le plan", tuple(items), description="Ce qu'on lui a demandé et comment elle s'y prend : ses "

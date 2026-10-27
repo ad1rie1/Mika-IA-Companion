@@ -650,11 +650,11 @@ def _plan_waits(s: ProjectsState, frame: Frame, key: str) -> bool:
 
 def _plan_revisable(s: ProjectsState, frame: Frame, key: str) -> bool:
     p = project_at(s, key)
-    return p is not None and p.status == c.ACTIVE and p.plan_state in (c.PROPOSED, c.PLANNED)
+    return p is not None and p.status == c.ACTIVE and p.plan_state != c.TO_FRAME
 
 
 @PROJECTS.action("plan_valider", title="Valider le plan", args=NoArgs, emits=[PLAN_ANSWERED], subject="project",
-                 order=3, available=_plan_waits,
+                 order=3, available=_plan_waits, inline=True,
                  description="Son plan attend une réponse : validé, le projet le suit et elle s'y met (ADR 0145).")
 def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
@@ -669,7 +669,7 @@ class ReviseArgs(BaseModel):
 
 
 @PROJECTS.action("plan_reviser", title="Demander une révision du plan", args=ReviseArgs, emits=[PLAN_ANSWERED],
-                 subject="project", order=4, available=_plan_revisable,
+                 subject="project", order=4, available=_plan_revisable, inline=True,
                  description="Elle reprend son plan (une séance de cadrage), avec ce que tu lui dis (ADR 0145).")
 def _plan_revise(s: ProjectsState, frame: Frame, args: ReviseArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)

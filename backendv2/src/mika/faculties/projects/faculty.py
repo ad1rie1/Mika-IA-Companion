@@ -1176,8 +1176,8 @@ def _plan_answered(s: ProjectsState, e, cx) -> ProjectsState:
     consigne) sous les yeux."""
     d = e.data
     p = s.projects.get(d.project)
-    if p is None or p.status == c.ARCHIVED or p.plan_state == c.UNPLANNED:
-        return s
+    if p is None or p.status == c.ARCHIVED or (p.plan_state == c.UNPLANNED and d.verdict != REVISE):
+        return s  # un projet d'avant n'a pas de plan à valider ; le revoir lui en donne un
     words = d.words.ref if d.words is not None and d.words.ref else ""
     if words:
         p = replace(p, instructions=(*p.instructions, words)[-INSTRUCTIONS_KEPT:])
@@ -1327,7 +1327,7 @@ def pass_untold(o: Objective) -> bool:
     return o.kind == c.CONSTANT and o.status == c.OPEN and bool(o.pass_ref) and o.passed_at > o.told_at
 
 
-def finished_at(o: Objective) -> int:
+def achieved_at(o: Objective) -> int:
     """Quand ce qu'un récit dirait de cet objectif a eu lieu : sa clôture, ou le passage d'un constant."""
     return o.passed_at if o.kind == c.CONSTANT else o.closed_at
 

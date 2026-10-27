@@ -35,9 +35,9 @@ from mika.faculties.projects.faculty import (
     Objective,
     Project,
     ProjectsState,
+    achieved_at,
     busy,
     daily_cap,
-    finished_at,
     frame_subject,
     in_window,
     next_due,
@@ -251,7 +251,7 @@ def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
 def untold(p: Project, now: int, pm: Any) -> list[Objective]:
     """Ce qu'elle a mené à bout dans ce projet sans l'avoir encore raconté, du plus ancien au plus récent : ce
     qu'un récit dit d'une fois."""
-    return sorted((o for o in p.objectives if _shareable(o, p, now, pm)), key=lambda o: (finished_at(o), o.id))
+    return sorted((o for o in p.objectives if _shareable(o, p, now, pm)), key=lambda o: (achieved_at(o), o.id))
 
 
 def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: Any) -> bool:
@@ -260,7 +260,7 @@ def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: An
     retient pas le récit)."""
     if busy(s, p.id) or outgoing(p, frame.now):
         return False
-    if frame.now - finished_at(last) >= pm.share_settle_us:
+    if frame.now - achieved_at(last) >= pm.share_settle_us:
         return True
     at = next_run_at(p, s, frame)
     return at is None or at - frame.now >= pm.share_settle_us
@@ -375,7 +375,9 @@ def _plan(s: ProjectsState, frame: Frame) -> list[Candidate]:
             continue
         seen.add(address)
         who = _who_words(frame, person, address)
-        if p.plan_state != c.PROPOSED:
+        if p.plan_state != c.PROPOSED and p.plan_version > 1:  # un plan revu : ce qui change, et pourquoi
+            brief = phrase("projects.brief.plan.changed", who=who)
+        elif p.plan_state != c.PROPOSED:
             brief = phrase("projects.brief.plan.start", who=who)
         elif due == "remind":
             brief = phrase("projects.brief.plan.remind", who=who)

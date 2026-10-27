@@ -459,7 +459,7 @@ def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -
 
 
 @PROJECTS.section("project_share", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=90,
-                  title=phrase("projects.share.title"))
+                  title=phrase("projects.share.title"), reads=[forge_c.APPS])
 def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce qu'elle a mené à bout dans un projet depuis son dernier récit — à la mesure du lien avec qui l'écoute ;
     ou, quand elle a besoin de qui le lui a confié, ce qui la bloque ; ou un projet à elle que des pannes ont
@@ -509,6 +509,8 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
             elif result:
                 line += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
             lines.append(line)
+        if where := _apps_where(p, frame):
+            lines.append(where)
         return SectionBody("\n".join(lines), level=level, provenance=(f"project:{p.id}",))
     result = store.get(_result_ref(o), "")
     body = phrase("projects.share.one", title=title, objective=objective or phrase("projects.share.an_objective"))
@@ -516,7 +518,15 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
         body += "\n" + phrase("projects.share.drawn", result=result)
     elif result:
         body += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
+    if where := _apps_where(p, frame):
+        body += "\n" + where
     return SectionBody(body, level=level, provenance=(f"project:{p.id}",))
+
+
+def _apps_where(p: Project, frame: Frame) -> str:
+    """Où voir ce que ses apps montrent : leur fiche dans la console, où sont leurs vues (ADR 0145)."""
+    titles = [a.title for a in frame.get(forge_c.APPS) or () if a.project == p.id and a.title]
+    return phrase("projects.share.apps", apps=", ".join(f"« {x} »" for x in titles)) if titles else ""
 
 
 def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody:

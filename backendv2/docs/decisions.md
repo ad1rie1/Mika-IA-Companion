@@ -965,7 +965,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
   - trois questions au plus, chacune avec sa recommandation.
   Les objectifs donnés à la création ne sont que des idées de départ : le plan les garde, les réécrit ou les retire.
 - **L'avis de qui l'a demandé.** Un plan qui pose des questions, sur un projet que quelqu'un a demandé, attend sa réponse (« plan proposé »). Elle le lui dit par la ligne de ses demandes (raison `project_plan`), une fois, puis le relance une fois au bout d'un jour. Un plan sans question, ou sans personne qui l'ait demandé, est validé d'office : elle dit à qui l'a demandé ce qu'elle va faire, et s'y met.
-- **La réponse.** La personne répond en conversation (`project_steer` : `approve` ou `revise`, ses mots gardés tels quels) ou dans la console (« Valider le plan », « Demander une révision »). Une révision relance une séance de cadrage, avec ses mots sous les yeux.
+- **La réponse.** La personne répond en conversation (`project_steer` : `approve` ou `revise`, ses mots gardés tels quels) ou dans la console (« Valider le plan », « Demander une révision »). Une révision relance une séance de cadrage, avec ses mots sous les yeux. Un projet d'avant, sans plan, se révise aussi : il en reçoit un.
 - **Planifié, le projet suit son plan.**
   - Un objectif, ponctuel ou constant, attend celui dont il dépend.
   - Un « fait » sur un objectif qui a un critère dit comment il est rempli (`how_met`).
