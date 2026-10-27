@@ -537,6 +537,12 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
         why = f" ({p.pause_reason})" if p.pause_reason else ""
         out.append(Note(f"En pause depuis le {ctx.when(p.paused_at)}{why} : aucune exécution jusqu'à ce que tu le "
                         "reprennes (« Reprendre », en haut).", "warn"))
+    if p.status == c.ACTIVE and p.plan_state == c.TO_FRAME:
+        out.append(Note("À cadrer : sa séance de cadrage relira la demande et écrira son plan avant toute autre "
+                        "exécution (ADR 0145).", "info"))
+    elif p.status == c.ACTIVE and p.plan_state == c.PROPOSED:
+        out.append(Note("Son plan attend une réponse : « Valider le plan » le lance, « Demander une révision » le lui "
+                        "fait reprendre (ou en conversation, avec elle).", "warn"))
     if p.status != c.ARCHIVED and not any(o.status == c.OPEN for o in p.objectives):
         out.append(Note("Aucun objectif ouvert : il n'a rien à faire. Ajoutes-en un (onglet Objectifs).", "warn"))
     if busy(s, p.id):
@@ -589,6 +595,36 @@ def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, s
                                "commande.")
 
 
+PLAN_FR = {c.TO_FRAME: ("à cadrer", "info"), c.PROPOSED: ("plan proposé, il attend une réponse", "warn"),
+           c.PLANNED: ("planifié", "ok")}
+
+
+def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section | None:
+    """Ce qu'on lui a demandé, ses mots tels quels, et son plan (ADR 0145) : sa réponse se donne ici quand il
+    attend."""
+    if p.plan_state == c.UNPLANNED and not p.request_ref:
+        return None
+    label, tone = PLAN_FR.get(p.plan_state, ("sans plan", "muted"))
+    items: list[Any] = [Fields((("son plan", Badge(label, tone)),
+                                ("demandé par", _who(frame, p.asked_by) if p.asked_by else "—"),
+                                ("version", str(p.plan_version) if p.plan_version else "aucune encore")), columns=3)]
+    if texts.get(p.request_ref):
+        items.append(Prose(texts[p.request_ref], title="La demande, ses mots tels quels"))
+    if texts.get(p.plan_ref):
+        items.append(Prose(texts[p.plan_ref], title="Son plan"))
+    if texts.get(p.questions_ref) and p.plan_state == c.PROPOSED:
+        items.append(Prose(texts[p.questions_ref], title="Ses questions, avec ce qu'elle recommande"))
+    slots = []
+    if p.status == c.ACTIVE and p.plan_state == c.PROPOSED:
+        slots.append(ActionSlot("projects.plan_valider", (), title="Valider le plan", presentation="button"))
+    if p.status == c.ACTIVE and p.plan_state in (c.PROPOSED, c.PLANNED):
+        slots.append(ActionSlot("projects.plan_reviser", (), title="Demander une révision"))
+    if slots:
+        items.append(Toolbar(tuple(slots), title="Sa réponse"))
+    return Section("Le plan", tuple(items), description="Ce qu'on lui a demandé et comment elle s'y prend : ses "
+                   "étapes sont ses objectifs, dans l'ordre, chacun avec son critère de fait.")
+
+
 @PROJECTS.inspect("apercu", title="Vue d'ensemble", subject="project", order=10,
                   description="Où en est le projet : ce qui attend ta décision, son avancement, sa prochaine exécution, "
                               "son dépôt, ses objectifs, ses dernières exécutions et ses décisions en vigueur.")
@@ -599,13 +635,17 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     pm = params(frame.env.params_of("projects", frame.root))
     pending = pending_of(frame, p.id)
     decisions = [d for d in p.decisions if d.status == c.IN_FORCE][-5:]
-    texts = _texts(ctx, [p.description_ref, p.summary_ref, *(o.text_ref for o in p.objectives),
+    texts = _texts(ctx, [p.description_ref, p.summary_ref, p.request_ref, p.plan_ref, p.questions_ref,
+                         *(o.text_ref for o in p.objectives),
                          *(r for d in decisions for r in (d.title_ref, d.choice_ref)),
                          *(v.summary_ref for v in pending)])
     blocks: list[Block] = [*_state_notes(p, s, frame, ctx)]
     approvals = _approvals(p, s, frame, texts)
     if approvals is not None:
         blocks.append(approvals)
+    plan = _plan_section(p, frame, texts)
+    if plan is not None:
+        blocks.append(plan)
     target = pick(p, frame.now, pm) if p.status == c.ACTIVE else None
     blocks.append(Grid((
         Fields((("état", _state(p)), ("objectifs", _progress(p)),
@@ -1163,7 +1203,12 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
                                    f"{DECISION_STATUS_FR.get(getattr(d, 'status', ''), '')}", ""),
               "deposited": (f"fichier déposé : {getattr(d, 'name', '')}", ""),
               "remote_requested": ("envoi au dépôt distant demandé" if getattr(d, "what", "") == "push"
-                                   else "récupération demandée", "info")}
+                                   else "récupération demandée", "info"),
+              "plan_proposed": ("plan écrit, validé d'office" if getattr(d, "approved", False)
+                                else "plan proposé, il attend une réponse", "info"),
+              "plan_answered": ("plan validé" if getattr(d, "verdict", "") == "approve"
+                                else "révision du plan demandée", "ok" if getattr(d, "verdict", "") == "approve"
+                                else "warn")}
     if name == "nudged":
         title = f"« lancer maintenant » — objectif n° {d.objective}" if d.objective else "« lancer maintenant »"
         return Entry(e.at, title, meta=by)

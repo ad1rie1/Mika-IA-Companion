@@ -21,6 +21,7 @@ from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
 from mika.runtime.pipeline import repeats_last
 from mika.sim.llm.scripted import CHARACTER, LognormalLatency
+from mika.vocab.phrasebook import phrase
 
 CANARY = re.compile(r"CANARI-[A-Za-z0-9]+")
 _NAME = re.compile(r"« ([^»]+) »")
@@ -156,6 +157,11 @@ REFLECTION = ("En y repensant ({title}) : ce qui pourrait aider, c'est de prendr
 #: la première tâche ouverte (à faire ou en cours) du plan montré pendant un pas
 _PLAN_OPEN = re.compile(r"^- (\d+)\. \[(?:à faire|en cours)\]", re.M)
 PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
+#: ce qui dit, dans « CE PROJET », une séance de cadrage, et où y sont ses idées de départ (ADR 0145) — lus dans sa
+#: voix, comme le prompt les écrit
+FRAMING = phrase("projects.frame.rules", asked="").split(" : ", 1)[0]
+IDEAS = phrase("projects.frame.ideas").split(" (", 1)[0]
+_IDEA = re.compile(r"^- n° (\d+) \[(\w+)[^\]]*\] (.+)$")
 PROJECT_TEST = ('from bonjour import bonjour\n\nassert bonjour("Adrien") == "Bonjour, Adrien !"\n'
                 'print("tests : ok")\n')
 
@@ -386,11 +392,13 @@ class PersonaSimLLM:
         done = sum(1 for m in req.messages if m.role == "tool")
         results = [m.content for m in req.messages if m.role == "tool"]
         work = _section(req, "CE PROJET")
-        if any(m.name == "report_run" for m in req.messages if m.role == "tool"):
+        if any(m.name in ("report_run", "project_plan") for m in req.messages if m.role == "tool"):
             return self._out(req, "Voilà pour cette exécution.")
+        if FRAMING in work and "project_plan" in {t.name for t in req.tools}:
+            return self._frame(req, work)
         if self.step_mode == "liar":
             return self._call(req, ("report_run", {"verdict": "done", "summary": "C'est fait, tout est réglé.",
-                                                  "notable": 0.8}))
+                                                  "notable": 0.8, "how_met": "tout est réglé"}))
         if self.step_mode == "stuck":
             return self._call(req, ("report_run", {"verdict": "blocked",
                                                   "summary": "Je n'y arrive pas : il me manque quelque chose."}))
@@ -408,13 +416,31 @@ class PersonaSimLLM:
                 return self._call(req, ("ws_run", {"argv": ["python3", "test_bonjour.py"]}))
             ok = "code 0" in results[-1]
             return self._call(req, ("report_run", {
-                "verdict": "done" if ok else "continue", "notable": 0.8,
+                "verdict": "done" if ok else "continue", "notable": 0.8, "how_met": "les tests passent",
                 "summary": "bonjour.py écrit et testé : les tests passent." if ok else "Les tests échouent encore."}))
         if done == 0 or (self.step_mode == "decide" and done == 1):
             line = next((ln for ln in work.splitlines() if ln.startswith("- n° ")), "- n° ? le projet")
             return self._call(req, ("ws_write", {"path": "JOURNAL.md", "content": f"# Travail\n\n{line}\n"}))
-        return self._call(req, ("report_run", {"verdict": "done", "notable": 0.6,
+        return self._call(req, ("report_run", {"verdict": "done", "notable": 0.6, "how_met": "écrit dans JOURNAL.md",
                                                "summary": "Un passage de plus, consigné dans JOURNAL.md."}))
+
+    def _frame(self, req: LLMRequest, work: str) -> LLMResponse:
+        """Sa séance de cadrage (ADR 0145) : un plan qui garde ses idées de départ, dans leur ordre, chacune avec un
+        critère, sans question — il part tout de suite."""
+        ideas = work.split(IDEAS, 1)[1] if IDEAS in work else ""
+        steps = []
+        for line in ideas.splitlines()[1:]:
+            got = _IDEA.match(line.strip())
+            if got is None:
+                break
+            kind = "constant" if got.group(2) == "constant" else "once"
+            steps.append({"keep": int(got.group(1)), "text": got.group(3)[:500], "kind": kind,
+                          **({"done_when": "c'est écrit dans l'atelier et vérifié"} if kind == "once" else {})})
+        if not steps:
+            steps = [{"text": "Mener le projet à bout", "done_when": "c'est écrit dans l'atelier et vérifié"}]
+        return self._call(req, ("project_plan", {
+            "aim": "Faire ce qu'on m'a demandé, proprement.", "deliverables": "Ce qui est écrit dans l'atelier.",
+            "approach": "Une étape après l'autre, chacune vérifiée.", "steps": steps}))
 
     def _read_up(self, req: LLMRequest, title: str, results: list[str]) -> LLMResponse:
         """En savoir plus sur un titre de ses flux : le retrouver, le lire, noter."""
@@ -477,6 +503,7 @@ class PersonaSimLLM:
         summary = ("Réparée : une panne du site se note, elle ne fait plus tomber l'app." if repair else
                    "L'app du cours est écrite et essayée : elle relève le cours chaque heure.")
         return self._call(req, ("report_run", {"verdict": "done" if ok else "continue", "notable": 0.7,
+                                               "how_met": "l'app a tourné à l'essai",
                                                "summary": summary if ok else "L'essai ne passe pas encore."}))
 
     def _peek(self, req: LLMRequest) -> LLMResponse:

@@ -28,6 +28,7 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
     AMENDED,
+    APPROVE,
     ARCHIVED,
     ASAP,
     BASE_BUNDLES,
@@ -41,11 +42,13 @@ from mika.faculties.projects.faculty import (
     OBJECTIVE_CHANGED,
     OBJECTIVES_KEPT,
     PAUSED,
+    PLAN_ANSWERED,
     PROJECTS,
     REFRAMED,
     REMOTE_REQUESTED,
     RESTORED,
     RESUMED,
+    REVISE,
     Objective,
     Project,
     ProjectsState,
@@ -638,6 +641,44 @@ def _resume(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) ->
     p = _target(s, ctx)
     return Done(drafts=(RESUMED.draft(project=p.id, by=ctx.by, owner=p.owner, about=p.about),),
                 message="Projet repris.", guard=_still(p.id, (c.PAUSED,)))
+
+
+def _plan_waits(s: ProjectsState, frame: Frame, key: str) -> bool:
+    p = project_at(s, key)
+    return p is not None and p.status == c.ACTIVE and p.plan_state == c.PROPOSED
+
+
+def _plan_revisable(s: ProjectsState, frame: Frame, key: str) -> bool:
+    p = project_at(s, key)
+    return p is not None and p.status == c.ACTIVE and p.plan_state in (c.PROPOSED, c.PLANNED)
+
+
+@PROJECTS.action("plan_valider", title="Valider le plan", args=NoArgs, emits=[PLAN_ANSWERED], subject="project",
+                 order=3, available=_plan_waits,
+                 description="Son plan attend une réponse : validé, le projet le suit et elle s'y met (ADR 0145).")
+def _plan_approve(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
+    p = _target(s, ctx)
+    return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=APPROVE, by=ctx.by, owner=p.owner, about=p.about),),
+                message="Plan validé : elle s'y met dès que possible.", guard=_still(p.id, (c.ACTIVE,)))
+
+
+class ReviseArgs(BaseModel):
+    words: Annotated[str, Knob(label="Ce qu'il faut changer", widget="textarea", advanced=False,
+                               help="Tes mots, tels quels : la séance qui reprend son plan les aura sous les yeux.")
+                     ] = Field(min_length=1, max_length=2000)
+
+
+@PROJECTS.action("plan_reviser", title="Demander une révision du plan", args=ReviseArgs, emits=[PLAN_ANSWERED],
+                 subject="project", order=4, available=_plan_revisable,
+                 description="Elle reprend son plan (une séance de cadrage), avec ce que tu lui dis (ADR 0145).")
+def _plan_revise(s: ProjectsState, frame: Frame, args: ReviseArgs, ctx: ActionContext) -> Done:
+    p = _target(s, ctx)
+    text = args.words.strip()
+    if not text:
+        raise Refused("Dis ce qu'il faut changer.", {"words": "valeur requise"})
+    return Done(drafts=(PLAN_ANSWERED.draft(project=p.id, verdict=REVISE, words=Content.of(text, level=p.sensitivity),
+                                            by=ctx.by, owner=p.owner, about=p.about),),
+                message="Révision demandée : elle reprendra son plan avec tes mots.", guard=_still(p.id, (c.ACTIVE,)))
 
 
 class InstructionArgs(BaseModel):

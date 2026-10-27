@@ -23,10 +23,10 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -954,6 +954,32 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* le 2026-10-27, son labo de trading fictif (projet n° 257) avait son « bilan hebdomadaire » toutes les 24 h, faute de pouvoir donner une cadence à la création, et un constant « relever les cours chaque jour » doublait l'agenda de son app. Elle avait pris la source de l'exemple du guide, Yahoo, qui répondait 429 depuis le portable : quatre versions y sont passées. Une exécution qui avait retouché l'app par `forge_edit` disait « outils utilisés : — ». Enfin, ses courbes donnaient des pourcentages là où la console attend des parts : −0,1 % s'affichait « −10 % ».
 
+### 0145 — Un projet naît d'un plan : le cadrage
+
+- **Les mots de la demande.** Un projet ouvert en conversation (`start_project`, `create_project`) garde les mots de qui le demande, tels quels : ses messages depuis la dernière réponse de Mika, 2 000 caractères au plus (`request`, avec leurs sujets). Il garde aussi qui l'a demandé (`asked_by`). Chaque exécution les cite.
+- **Il naît « à cadrer »** (`plan_state`). Son statut reste « actif » : pause, reprise et archivage ne changent pas. Mais aucune exécution ne vise un objectif tant qu'il n'a pas de plan.
+- **La séance de cadrage.** C'est une exécution sans objectif (sujet `frame:<id>`). Elle relit la demande, cherche ce qu'il faut et conclut par `project_plan`, qui porte :
+  - le plan : le but, ce que la personne verra au bout, l'approche, ce qui est hors sujet ;
+  - les objectifs dans l'ordre, chacun avec son critère de fait et l'étape dont il dépend ;
+  - les constants, avec leur cadence ;
+  - trois questions au plus, chacune avec sa recommandation.
+  Les objectifs donnés à la création ne sont que des idées de départ : le plan les garde, les réécrit ou les retire.
+- **L'avis de qui l'a demandé.** Un plan qui pose des questions, sur un projet que quelqu'un a demandé, attend sa réponse (« plan proposé »). Elle le lui dit par la ligne de ses demandes (raison `project_plan`), une fois, puis le relance une fois au bout d'un jour. Un plan sans question, ou sans personne qui l'ait demandé, est validé d'office : elle dit à qui l'a demandé ce qu'elle va faire, et s'y met.
+- **La réponse.** La personne répond en conversation (`project_steer` : `approve` ou `revise`, ses mots gardés tels quels) ou dans la console (« Valider le plan », « Demander une révision »). Une révision relance une séance de cadrage, avec ses mots sous les yeux.
+- **Planifié, le projet suit son plan.**
+  - Un objectif, ponctuel ou constant, attend celui dont il dépend.
+  - Un « fait » sur un objectif qui a un critère dit comment il est rempli (`how_met`).
+  - Pendant une exécution, elle peut revoir le plan (`project_plan`), et dire le changement à la personne s'il la touche.
+- **Ce que voit une exécution** : la demande, le plan, ses cinq derniers comptes rendus, les résultats des objectifs faits, et une consigne de méthode.
+- **Son budget** : 24 tours, 15 minutes, et la borne des résultats d'outils du mode pro (120 000 caractères). Le rappel de conclure vient après 18 appels.
+- **Les récits.** Un passage notable d'un constant (un bilan de la semaine) se raconte, comme un ponctuel mené à bout. Un récit dit où voir les apps du projet : leur fiche dans la console, où sont leurs vues.
+- **Les consignes.** Une consigne de vive voix (`project_steer instruct`) garde aussi les mots de la personne, à côté des siens.
+- **Hors du cadrage** : un projet ouvert par une séance d'exploration, un projet ouvert par la console, et les projets d'avant.
+
+*Pourquoi :* l'audit du 2026-10-27 (`docs/audit-2026-10-27-projets.md`) est parti du projet n° 257. Ce jour-là, le cadre du projet s'était écrit dans sa réponse, au milieu d'une conversation, sous la consigne « ouvre le projet maintenant ». La demande d'Adrien (« du trading par IA ») s'était perdue dans une paraphrase. La première exécution était partie dans la minute, sur un objectif constant. Et aucune exécution ne pouvait revoir un cadre fait à la hâte. Adrien voulait « une réflexion pour définir ses objectifs correctement, un plan, quitte à demander l'avis de l'utilisateur ».
+
+*Révise 0031 (en partie), 0104 (en partie).*
+
 ## Les sens et les plugins
 
 ### 0022 — Les sens : ce qui vient d'ailleurs est un signal, et une citation
@@ -1370,7 +1396,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0112 (en partie : la consigne de style), 0114 (en partie), 0124 (en partie : le chat sans réglage).*
 
-*Révisée par 0141.*
+*Révisée par 0141, 0146.*
 
 ### 0141 — Informer, pas ordonner : ses questions ne sont plus commandées
 
@@ -1382,6 +1408,17 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* sept endroits parlaient de ses questions, trois en ordre contraire ; l'équilibre questions/réactions est à elle, pas aux consignes.
 
 *Révise 0112 (en partie : la relecture), 0137 (en partie : SA JOURNÉE en fait), 0139 (en partie : plus de phrases de traits dans « TA RÉPONSE »), 0140 (en partie : la discipline des questions).*
+
+### 0146 — Le découpage en bulles suit le fond, sans plafond
+
+- Les codes livrés de « Message » ne disent plus « des messages de quelques mots ». La forme suit le fond. Pour réagir, plaisanter ou rebondir sur une petite chose, elle écrit des messages de quelques mots, souvent deux ou trois d'affilée. Pour ce qui a du fond (raconter, expliquer, donner son avis et pourquoi, faire le point), elle écrit un vrai message qui le dit d'un trait, long s'il le faut, sans le hacher en une phrase par message. L'exemple livré montre les deux.
+- Le cadre de la seconde passe ne redit plus la longueur des messages : le fil de référence n'y montre que la forme d'un échange, et les codes portent le reste (ADR 0140). « Une ligne par SMS » précise qu'un SMS peut tenir plusieurs phrases.
+- Aucun plafond de bulles dans le code, ni rapporté au premier jet : un compte fixe ne sait pas distinguer un point qui a du fond d'une suite de réactions. Seuls les codes en décident.
+- Des codes de « Message » enregistrés dans Réglages › Personnage › Autrices font foi (ADR 0124) : ceux-ci ne s'appliquent qu'à une autrice livrée dont le champ est vide.
+
+*Pourquoi :* le 2026-10-27, un point sur son labo de trading est parti en neuf à treize bulles d'une phrase chacune, là où le premier jet d'Opus en avait quatre. « Des messages de quelques mots » et « garder ce qu'elle veut dire » ne laissaient à l'autrice qu'une issue : tout dire, en miettes. Le fil qu'elle relit montrait ensuite Mika envoyant dix SMS d'affilée, et la dérive s'entretenait. Un garde-fou en nombre de bulles a été proposé puis refusé par l'utilisateur : le découpage doit s'adapter à ce qu'elle a à dire.
+
+*Révise 0140 (en partie : les codes livrés de « Message »).*
 
 ## Les clients, le fil, le monde
 

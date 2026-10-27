@@ -42,7 +42,8 @@ CEILING = {
     # raisons de clôture, gardées au journal ; règle de project_steer (console) ; +1 le 2026-10-25 : la description
     # de la capacité projects.steer, piloter sur ton accord (console, ADR 0133)
     "faculties/projects/tools.py": 4,
-    "faculties/projects/work.py": 8,  # « pourquoi pas maintenant » (console)
+    # « pourquoi pas maintenant » (console) ; +2 le 2026-10-27 : un plan qui attend, une séance de cadrage (ADR 0145)
+    "faculties/projects/work.py": 10,
     "faculties/transcript/__init__.py": 10,  # inspection du fil (console)
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/camera/__init__.py": 10,  # panneaux de console

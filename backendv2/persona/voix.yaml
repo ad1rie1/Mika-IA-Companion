@@ -776,11 +776,12 @@ expression:
     # qui est l'autre, d'après son état (qui écrit, le ton entre eux, sa fiche). {name} : son nom ; {about} : ces sections
     other: "Qui est l'autre (« L'autre » dans le fil), d'après ce que {name} a vécu avec cette personne :\n{about}"
     # un fil de référence (sa persona, reference_thread). {thread} : le fil
-    reference: "Ce vrai fil SMS montre seulement la forme d'un échange par messages : des messages de quelques mots, le plus souvent un seul, parfois deux ou trois d'affilée ; ce qu'on ressent passe par la forme plutôt que par des explications. La personne qui y écrit a son caractère à elle, qui n'est pas celui de {name} : {name} est celle que dit son portrait. Ne reprends ni le caractère de ce fil, ni ses sujets, ses lieux, ses formules ou ses blagues.\n\n<fil_de_reference>\n{thread}\n</fil_de_reference>"
+    # sa longueur et son découpage ne se redisent pas ici : les codes de l'autrice les portent (ADR 0140, 0146)
+    reference: "Ce vrai fil SMS montre seulement la forme d'un échange par messages ; ce qu'on ressent passe par la forme plutôt que par des explications. La personne qui y écrit a son caractère à elle, qui n'est pas celui de {name} : {name} est celle que dit son portrait. Ne reprends ni le caractère de ce fil, ni ses sujets, ses lieux, ses formules ou ses blagues.\n\n<fil_de_reference>\n{thread}\n</fil_de_reference>"
     # {thread} : les derniers messages du fil, une ligne par bulle, chacun précédé de son repère de temps quand du temps
     # a passé (mark) ; {name} : son nom ; {draft} : son premier jet, ses bulles séparées par « / » (en dernière ligne
     # du fil : l'autrice repart de là, banc du 2026-10-16)
-    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots. Entre crochets, quand du temps a passé, le moment du message qui suit, vu par {name} (« tu », c'est elle) :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Ce qu'elle sait de l'autre (ses passions, ce qu'il fait en ce moment), elle ne le ressort que quand ça a un vrai rapport avec ce dont il est question — une nouvelle qui le touche concrètement, ou qui parle d'une chose qu'il aime vraiment —, jamais pour placer un clin d'œil ; et un sujet sur lequel elle est déjà revenue plusieurs fois dans le fil sans qu'il y revienne, elle le laisse tranquille. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas ; et tu ne lui fais pas poser une question que le brouillon ne pose pas — si le brouillon n'en pose aucune, elle n'en pose aucune ; s'il en pose une à options (« ceci, ou cela ? »), elle devient ouverte. Les jetons de voix du brouillon ([SIGH], [LAUGH], [BREATH], [PAUSE:…]) se gardent là où ils tombent. Une ligne par SMS, au format « {name} : … » puis « L'autre : … ». Rien d'autre que le fil."
+    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots. Entre crochets, quand du temps a passé, le moment du message qui suit, vu par {name} (« tu », c'est elle) :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Ce qu'elle sait de l'autre (ses passions, ce qu'il fait en ce moment), elle ne le ressort que quand ça a un vrai rapport avec ce dont il est question — une nouvelle qui le touche concrètement, ou qui parle d'une chose qu'il aime vraiment —, jamais pour placer un clin d'œil ; et un sujet sur lequel elle est déjà revenue plusieurs fois dans le fil sans qu'il y revienne, elle le laisse tranquille. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas ; et tu ne lui fais pas poser une question que le brouillon ne pose pas — si le brouillon n'en pose aucune, elle n'en pose aucune ; s'il en pose une à options (« ceci, ou cela ? »), elle devient ouverte. Les jetons de voix du brouillon ([SIGH], [LAUGH], [BREATH], [PAUSE:…]) se gardent là où ils tombent. Une ligne par SMS, au format « {name} : … » puis « L'autre : … » ; un SMS peut tenir plusieurs phrases. Rien d'autre que le fil."
     # une ligne du fil. {name} : son nom ; {text} : une de ses bulles
     her: "{name} : {text}"
     # {text} : ce que l'autre a écrit
@@ -821,8 +822,10 @@ expression:
       message:
         name: "Message"
         # toute la forme du chat vit ici (ADR 0140) : lue par l'autrice, ou dans le premier jet quand aucune ne suit
-        codes: "Des messages de quelques mots, le plus souvent un seul, parfois deux ou trois d'affilée, comme on texte vraiment ; plus long seulement quand le sujet emporte ou qu'on le demande. Le registre de la personne en face : si elle écrit vite et familier, pareil (« ouais », « t'as vu », « bah »), sans faute exprès ; on peut hésiter, se reprendre, rebondir sur un mot. Ce qu'on ressent passe par la forme plutôt que par des explications. Un émoji de temps en temps, quand il dit ce que les mots ne disent pas ; jamais pour décorer. Pas de listes, de gras ni de titres ; pas d'écriture inclusive (« crevé·e ») : l'accord suit ce que la personne dit d'elle-même, sinon la phrase se tourne autrement. Une question, quand il y en a une, est ouverte, jamais à options (« ceci, ou cela ? »)."
-        example: "L'autre : t'es là ?\nMoi : ouais\nMoi : enfin à moitié, je finis un truc\nL'autre : ok je te dérange pas alors\nMoi : non vas-y, dis\nL'autre : j'ai eu le poste 😭\nMoi : QUOI\nMoi : attends raconte tout"
+        # le découpage suit le fond, sans plafond de bulles (ADR 0146) : le 2026-10-27, « des messages de quelques mots »
+        # émiettait un point sur son labo de trading en neuf à treize bulles, une phrase chacune
+        codes: "Comme on texte vraiment, la forme suit le fond. Pour réagir, plaisanter ou rebondir sur une petite chose : des messages de quelques mots, souvent deux ou trois d'affilée. Pour ce qui a du fond — raconter, expliquer, donner son avis et pourquoi, faire le point — : un vrai message qui le dit d'un trait, long s'il le faut, pas haché en une phrase par message. Le registre de la personne en face : si elle écrit vite et familier, pareil (« ouais », « t'as vu », « bah »), sans faute exprès ; on peut hésiter, se reprendre, rebondir sur un mot. Ce qu'on ressent passe par la forme plutôt que par des explications. Un émoji de temps en temps, quand il dit ce que les mots ne disent pas ; jamais pour décorer. Pas de listes, de gras ni de titres ; pas d'écriture inclusive (« crevé·e ») : l'accord suit ce que la personne dit d'elle-même, sinon la phrase se tourne autrement. Une question, quand il y en a une, est ouverte, jamais à options (« ceci, ou cela ? »)."
+        example: "L'autre : t'es là ?\nMoi : ouais\nMoi : enfin à moitié, je finis un truc\nL'autre : ok je te dérange pas alors\nMoi : non vas-y, dis\nL'autre : j'ai eu le poste 😭\nMoi : QUOI\nMoi : attends raconte tout\nL'autre : je commence lundi, tu crois que je négocie le salaire ?\nMoi : franchement oui. c'est eux qui ont rappelé, donc c'est toi qu'ils veulent. demande un peu plus que ce que t'espères, au pire ils disent non et t'as rien perdu"
       mail:
         name: "Mail pro"
         codes: "Vouvoiement, sauf si la personne tutoie la première. Une formule d'appel (« Bonjour Madame Martin, ») et une formule de politesse sobre (« Bien cordialement, »). Des phrases complètes et des paragraphes courts ; aucun émoji, aucun argot, aucune abréviation de SMS. L'essentiel — la réponse ou la demande — dans les deux premières phrases."
@@ -889,6 +892,7 @@ expression:
       share: "lui raconter quelque chose que tu as fini"
       project_share: "lui parler de ton projet"
       project_need: "lui demander un coup de main pour ton projet"
+      project_plan: "lui dire comment tu vois le projet qu'on t'a demandé"
       mail_mention: "lui parler d'un mail"
       rss_for: "lui montrer quelque chose que tu as lu et qui pourrait lui plaire"
       drawing_ready: "lui montrer le dessin que tu viens de finir"
@@ -3678,8 +3682,8 @@ projects:
       concluant).
     # à la fin de la section, à chaque exécution. {minutes} : le temps laissé à ses programmes
     rules: >-
-      Une exécution est courte : une quinzaine d'allers-retours avec tes outils au plus, et tes programmes doivent
-      avoir fini dans les {minutes} minutes. Garde ton dernier tour pour conclure en appelant l'outil report_run :
+      Une exécution a une vingtaine d'allers-retours avec tes outils au plus, et tes programmes doivent avoir fini
+      dans les {minutes} minutes. Garde ton dernier tour pour conclure en appelant l'outil report_run :
       « continue » (tu reprendras), « done » (l'objectif visé est fait — pour un ponctuel, seulement si quelque chose a
       été produit pour lui : un fichier écrit dans l'atelier, un brouillon, une app ; lancer une commande, lire ou
       noter ne suffit pas ; pour un constant, ce passage est fait), « blocked » (tu n'y arrives pas), ou « wait » (tu
@@ -3696,6 +3700,60 @@ projects:
     job_brief: >-
       Exécution de travail impersonnelle sur ce projet : personne ne lit ce texte. Avance sur l'objectif indiqué en
       appelant les outils, puis conclus en appelant report_run.
+    # Le cadrage (ADR 0145) : la demande, telle quelle ; {who} : « Adrien », ou expression.person.someone
+    request: "Ce que {who} t'a demandé, ses mots tels quels (c'est ce que tu vises) :\n{text}"
+    plan: "Ton plan (c'est lui que tu suis ; s'il ne tient plus, revois-le avec project_plan) :\n{plan}"
+    done_when: >-
+      Il est fait quand : {criterion} — tu ne le déclares fait (report_run « done ») qu'en disant comment c'est
+      rempli (how_met).
+    # sa mémoire de travail : ses derniers comptes rendus
+    reports: "Tes dernières exécutions sur ce projet (la plus récente en dernier) :"
+    report_line: "il y a {ago}, objectif n° {objective}, {verdict} : {summary}"
+    verdicts:
+      continue: à poursuivre
+      done: fait
+      blocked: bloqué
+      wait: en attente
+    # les mots de la personne derrière une consigne de vive voix
+    their_words: "ses mots : « {words} »"
+    method: >-
+      Comment tu travailles : vise ce que la personne verra au bout (sa demande, ton plan), pas seulement la lettre de
+      l'objectif. Avant de bâtir, relis ce qui existe (forge_read, ws_read) ; après, vérifie que ça marche vraiment
+      (forge_test, ws_run) : une app qui n'a pas tourné n'est pas faite. Ce que la Forge sait faire (des vues dans la
+      console, des signaux qui te reviennent, sa base) est dans forge_help.
+
+  # ── La séance de cadrage (ADR 0145) ───────────────────────────────────────────────────────────────────────────
+  # Une exécution sans objectif, avant toute autre : elle relit la demande et écrit son plan (projects/prompt.py,
+  # _frame_lines).
+  frame:
+    ideas: "Tes idées de départ (notées en ouvrant le projet : à garder, réécrire ou retirer) :"
+    done: "Déjà fait dans ce projet :"
+    previous: "Ton plan d'avant, à reprendre d'après ce qu'on t'a dit (consignes ci-dessus) :\n{plan}"
+    asked: >-
+      On t'a demandé ce projet : ce que tu ne peux pas trancher seule et qui change vraiment le travail, demande-le
+      (trois questions au plus), chacune avec ce que tu recommandes — ton plan attendra sa réponse. Sans question,
+      il part tout de suite, et tu diras à la personne ce que tu vas faire.
+    alone: "Personne ne te l'a demandé : ton plan vaut dès que tu l'écris."
+    rules: >-
+      C'est ta séance de cadrage : avant de bâtir quoi que ce soit, tu réfléchis à comment t'y prendre. Relis la
+      demande mot à mot : ce que la personne veut vraiment, et ce qu'elle verra au bout. Cherche ce qu'il faut (le
+      web, ta mémoire de la personne, forge_help pour ce qu'une app sait faire : des services planifiés, des vues
+      dans la console, des signaux qui te reviennent, sa base) ; vérifie au besoin qu'une source répond. L'IA, c'est
+      toi : ce qui demande du jugement (lire, trier, trancher) se fait pendant tes exécutions, et une app peut te le
+      préparer. Puis écris ton plan avec project_plan, qui conclut la séance : le but en une phrase, ce que la
+      personne verra, ton approche, ce qui est hors sujet, et les étapes dans l'ordre — chaque ponctuel avec son
+      critère de fait, chaque étape avec celle dont elle dépend, chaque constant avec sa cadence et l'étape après
+      laquelle il commence. Ne bâtis rien pendant cette séance. {asked}
+
+  # ── Son plan (ADR 0145) ─────────────────────────────────────────────────────────────────────────────────────
+  # Le texte de son plan, tel qu'il se relit (exécutions, récit, console) : projects/tools.py, plan_text.
+  plan:
+    aim: "But : {text}"
+    deliverables: "Ce que la personne verra : {text}"
+    approach: "Approche : {text}"
+    out_of_scope: "Hors sujet : {text}"
+    # {n} : son numéro
+    question: "{n}. {question} — ce que je recommande : {advice}"
 
   # ── Un objectif, une décision ───────────────────────────────────────────────────────────────────────────────
   # Une ligne par objectif ou par décision, pendant une exécution (projects/prompt.py, _objective_line et
@@ -3705,6 +3763,8 @@ projects:
     # l'objectif, ou forgotten
     line: "n° {id} [{state}] {text}"
     forgotten: (oublié)
+    # un objectif fait : ce qu'il a donné (ADR 0145)
+    result: " — ce qu'il a donné : {result}"
     # {status} : status ci-dessous
     once: "ponctuel, {status}"
     aside: "constant, {status} — mis de côté"
@@ -3806,6 +3866,11 @@ projects:
     stalled_title: TON PROJET S'EST ARRÊTÉ
     stalled: "Ton projet « {title} » s'est arrêté : ses exécutions ont échoué {n} fois de suite, et il est en pause jusqu'à ce qu'on le relance. Ce n'est pas toi : c'est la machine qui a lâché."
     stalled_cause: "Ce que la machine en dit : {cause}"
+    # son plan, à dire à qui a demandé le projet (ADR 0145)
+    plan_title: TON PLAN
+    plan_head: "Ton plan pour le projet « {title} » :"
+    plan_steps: "Tes étapes :"
+    plan_questions: "Tes questions, avec ce que tu recommandes :"
 
   # ── « TES PROJETS » ─────────────────────────────────────────────────────────────────────────────────────────
   # En conversation (réponse et initiative) : ses projets — « tu travailles sur quoi ? » est une question sur sa vie
@@ -3824,6 +3889,15 @@ projects:
     maintain: des objectifs à entretenir
     paused: en pause
     on_demand: ", il avance quand on le lance"
+    # le cadrage (ADR 0145)
+    framing: "à cadrer : tu réfléchis à comment t'y prendre"
+    proposed: ton plan attend sa réponse
+    plan: "ton plan : {plan}"
+    questions: "tes questions : {questions}"
+    plan_steer: >-
+      Un plan attend la réponse de la personne qui te parle : si elle dit oui (« vas-y », « ok »), lance-le avec
+      project_steer (what « approve ») ; si elle veut autre chose, project_steer (what « revise ») — ses mots seront
+      gardés tels quels.
     # sa dernière exécution, à la ligne. {ago} : projects.duration ; {summary} : son dernier compte rendu
     last_run: dernière exécution il y a {ago}
     last_run_summary: "dernière exécution il y a {ago} : {summary}"
@@ -3854,6 +3928,16 @@ projects:
     # un objectif d'un projet confié qui bloque, ou attend quelque chose de qui l'a confié
     need: "Un projet qu'on t'a confié n'avance plus sans un coup de main de {who} : dis-le-lui simplement — ce qui bloque, et ce qu'il te faudrait."
     # un projet à elle arrêté par des pannes (ADR 0143)
+    # son plan (ADR 0145). {who} : « Adrien » ; le plan est sous « TON PLAN »
+    plan:
+      ask: >-
+        Tu as réfléchi au projet que {who} t'a demandé : dis-lui en quelques lignes comment tu vois ça, puis pose tes
+        questions avec ce que tu recommandes, pour qu'un « vas-y » suffise. L'essentiel, comme tu le dirais, pas une
+        fiche.
+      remind: "Tu as proposé ton plan à {who} hier, sans réponse : reviens-y une fois, simplement, sans insister."
+      start: >-
+        Tu as réfléchi au projet que {who} t'a demandé et tu t'y mets : dis-lui en quelques lignes ce que tu vas faire
+        et ce qui l'attend au bout — rien n'empêche de te demander de changer.
     stalled: "Un de tes projets s'est arrêté tout seul : la machine a lâché plusieurs fois de suite, et il est en pause. Dis-le simplement à {who} et demande-lui de le relancer — ce n'est pas ta faute, tu n'as pas à t'en excuser."
 
   # Un objectif qui n'en finit pas : ce qui reste de lui quand le code le bloque (projects/tend.py). Le modèle le relit
@@ -3894,8 +3978,15 @@ projects:
       needs_you: >-
         ce qu'il te faudrait de qui t'a confié ce projet pour avancer (une réponse, un accès, une décision) ; vide :
         rien — sinon tu le lui diras
+      how_met: "avec « done », pour un objectif qui a son critère : comment il est rempli, concrètement"
       # ses réponses
       already: "Tu as déjà conclu cette exécution : arrête-toi là."
+      framing: "C'est ta séance de cadrage : elle se conclut par ton plan (project_plan), pas par report_run."
+      # {criterion} : le critère de l'objectif
+      how_met_missing: >-
+        Pas encore : cet objectif est fait quand « {criterion} ». Dis comment c'est rempli (how_met), ou conclus
+        honnêtement avec « continue ».
+      met: "Comment c'est rempli : {how}"
       not_yet: >-
         Pas encore : rien n'a été produit pour cet objectif (aucun fichier écrit dans l'atelier, aucun brouillon,
         aucune app). Lancer une commande, lire ou noter ne suffit pas. Fais-le, ou conclus honnêtement avec
@@ -3969,6 +4060,41 @@ projects:
       text: ce qui revient, en une phrase
       cadence_hours: "toutes les combien d'heures il revient (24 : chaque jour ; 168 : chaque semaine ; 0 : la valeur par défaut)"
 
+    plan:
+      # L'outil project_plan (ADR 0145) : écrire son plan (la séance de cadrage), ou le revoir en cours de route.
+      description: >-
+        Écrire ton plan pour ce projet — en séance de cadrage, c'est ce qui la conclut —, ou le revoir en cours de
+        route quand il ne tient plus. Les objectifs vivants du projet deviennent les étapes du plan : gardés (keep),
+        réécrits ou nouveaux, dans l'ordre ; ceux que le plan ne garde pas sont retirés.
+      aim: "le but, en une phrase : ce que ce projet doit apporter à la personne"
+      deliverables: "ce que la personne verra au bout, concrètement (des vues dans la console, un message chaque semaine, un fichier…)"
+      approach: "ton approche : quelles apps, quelles sources, où intervient ton jugement, et pourquoi ainsi"
+      out_of_scope: "ce qui est hors sujet, ce que tu ne feras pas (facultatif)"
+      steps: "les étapes, dans l'ordre (douze au plus)"
+      step_text: "l'étape, en une phrase (ce sera un objectif)"
+      done_when: "un ponctuel : quand il est fait, de façon vérifiable (« fait quand Adrien voit… ») — requis"
+      after: "le numéro, dans cette liste, de l'étape dont elle dépend (une étape d'avant ; 0 : aucune)"
+      keep: "le numéro d'un objectif déjà dans le projet que cette étape garde ou réécrit (0 : une étape nouvelle)"
+      questions: >-
+        en séance de cadrage, sur un projet qu'on t'a demandé : ce que tu ne peux pas trancher seule et qui change le
+        travail (trois au plus) — vide : pas de question, il part tout de suite
+      question: "la question, telle que tu la poserais"
+      advice: "ce que tu recommandes, et pourquoi en quelques mots"
+      tell: "en cours de route : dire ce changement à qui a demandé le projet (il touche ce qu'elle verra, ou ton approche)"
+      # ses réponses ; {n} : le numéro de l'étape ; {id} : un numéro d'objectif
+      no_criterion: "étape {n} : un ponctuel sans critère de fait (done_when)"
+      bad_after: "étape {n} : elle ne peut dépendre que d'une étape d'avant"
+      bad_keep: "étape {n} : l'objectif n° {id} n'est pas un objectif vivant du projet (ou il est gardé deux fois)"
+      refused: "Ton plan n'est pas écrit :\n{problems}\nCorrige et recommence."
+      dropped: retiré du plan
+      waits: >-
+        Ton plan est écrit ({steps} étapes) : il attend la réponse de qui t'a demandé le projet — tu lui diras, avec
+        tes questions. La séance de cadrage est finie : arrête-toi là.
+      starts: >-
+        Ton plan est écrit ({steps} étapes) et il part : tu t'y mets dès la prochaine exécution, et tu diras à qui t'a
+        demandé le projet ce que tu vas faire. La séance de cadrage est finie : arrête-toi là.
+      revised: "Ton plan est revu ({steps} étapes, {dropped} retirée(s)) : la suite le suit."
+
     equip:
       # L'outil project_equip : se donner un lot d'outils de plus, sur un projet à elle, pendant une exécution.
       description: >-
@@ -4004,7 +4130,10 @@ projects:
       bad_schedule: "Règle d'agenda refusée : {error}"
       failed: Le projet n'a pas pu être créé.
       # {id} : le numéro du projet
-      done: "Projet accepté (n° {id}) : tu y travailleras dans son atelier, objectif par objectif."
+      done: >-
+        Projet accepté (n° {id}) : il naît à cadrer — une séance à part relira la demande et écrira ton plan, puis tu
+        le soumettras à la personne. Dans ta réponse, dis-lui simplement que tu vas y réfléchir et que tu reviendras
+        avec ton plan : ne lui promets pas déjà le détail.
 
     start:
       # L'outil start_project : ouvrir un projet à elle (en conversation, ou quand une exploration s'avère plus grosse
@@ -4036,6 +4165,11 @@ projects:
       failed: Le projet n'a pas pu être ouvert.
       # {id} : le numéro du projet ; {more} : from_goal, ou rien
       done: "Projet ouvert (n° {id}) : il est à toi. Tu y avanceras par exécutions, dans son atelier.{more}"
+      # ouvert en conversation : il naît à cadrer (ADR 0145)
+      framing: >-
+        Projet ouvert (n° {id}) : il naît à cadrer — une séance à part relira la demande et écrira ton plan, avec tes
+        questions s'il y en a. Dans ta réponse, dis simplement que tu vas réfléchir à comment t'y prendre et que tu
+        reviendras avec ton plan : ne promets pas déjà le détail.
       from_goal: " L'exploration d'où il vient s'arrête là : c'est devenu un projet."
 
     close:
@@ -4072,7 +4206,9 @@ projects:
       project: "de quel projet il s'agit : son numéro, ou quelques mots de son titre"
       what: >-
         add : lui ajouter un objectif (dans « text ») ; instruct : une consigne pour la suite (dans « text »), relue
-        à chaque exécution ; now : t'y mettre dès que possible ; pause : le mettre en pause ; resume : le reprendre
+        à chaque exécution ; now : t'y mettre dès que possible ; pause : le mettre en pause ; resume : le reprendre ;
+        approve : lancer le plan qui attend sa réponse ; revise : te faire reprendre ton plan (ce qu'il faut changer
+        dans « text »)
       text: "avec add : l'objectif, en une phrase ; avec instruct : la consigne"
       kind: "avec add — once : à faire une fois ; constant : à entretenir, il revient"
       cadence_hours: "avec add, un constant : toutes les combien d'heures (0 : la valeur par défaut)"
@@ -4095,6 +4231,11 @@ projects:
       numbered: "n° {id}"
       # le projet a changé entre-temps (un opérateur l'a mis en pause, archivé, ou a retiré l'objectif visé)
       changed: "Ce projet a changé entre-temps (mis en pause, archivé, ou cet objectif n'est plus ouvert) : rien n'a changé."
+      # son plan (ADR 0145) ; {title} : comme ci-dessus
+      plan_not_theirs: "Seule la personne qui a demandé le projet {title} (ou qui s'occupe de toi) répond à ton plan : rien n'a changé."
+      plan_none: "Le projet {title} n'a pas de plan qui attende cette réponse : rien n'a changé."
+      plan_approve: "C'est parti : le projet {title} suit ton plan, tu t'y mets dès que possible."
+      plan_revise: "Noté : tu reprendras ton plan pour le projet {title}, ses mots sous les yeux, puis tu le lui reproposeras."
       # pause et reprise
       already_paused: "Le projet {title} est déjà en pause."
       paused: "C'est en pause : plus aucune exécution du projet {title} jusqu'à ce qu'on le reprenne."
@@ -6198,9 +6339,10 @@ runtime:
     means_project: un projet à toi
     # ajouté quand start_project lui est offert : un travail se lance maintenant, sinon il n'existe pas
     means_work: >-
-      Une app ou un vrai travail prend plus qu'une réponse : ouvre le projet maintenant (start_project, avec les
-      outils qu'il lui faut — « forge » pour une app), il avancera par exécutions et tu en auras des nouvelles.
-      « Je vais essayer » ou « je regarderai » sans appeler d'outil ne font rien : rien ne s'en souviendra.
+      Une app ou un vrai travail prend plus qu'une réponse : ouvre le projet (start_project, avec les outils qu'il lui
+      faut — « forge » pour une app). Il naît à cadrer : tu prendras le temps de réfléchir à comment t'y prendre,
+      puis tu reviendras avec ton plan et tes questions. Ne le bâtis pas dans ta réponse. « Je vais essayer » ou « je
+      regarderai » sans appeler d'outil ne font rien : rien ne s'en souviendra.
     # séparateur entre les moyens (avec ses espaces)
     means_or: " ou "
     # quand un de ses outils parle à un service extérieur (ADR 0064), ajouté à la fin

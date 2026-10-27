@@ -167,6 +167,13 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
   - `tools/banc_conversation` (ADR 0112) fait vivre des conversations au vrai noyau (Sonnet par la CLI, effort high),
     face à un Adrien simulé (Haiku), jugées par Opus : un score sur 100, des scénarios réservés, chaque mesure sur une
     copie figée du code (`--variante`, `--profil`, `--voix api:sonnet`). Tout changement de sa voix s'y mesure.
+  - `tools/banc_travail` (ADR 0145) mesure le travail sur un projet demandé, au regard de la demande :
+    - le vrai noyau, avec la voix en Opus par la CLI ;
+    - une Adrien simulée (Haiku) qui suit une fiche d'intention cachée ;
+    - la Forge réelle, sur des sources figées ;
+    - un juge Opus qui note le plan (/30), le travail (/50) et le suivi (/20).
+    `--sec` fait tout tourner sans modèle ni réseau. Une mesure réelle coûte de 60 à 160 appels Opus par scénario :
+    la demander d'abord.
   - pour les lancer : `PYTHONPATH=src .venv/bin/python tools/<banc>/banc.py [modèle] [parallèle] [sortie.json]`.
 - **La sonde** (`sim sonde --semaine 1|2`) fait vivre une semaine au vrai modèle configuré ; elle refuse `claude_code`.
   Après une sonde réelle, on corrige tout ce qu'elle montre, puis on revalide en réel.

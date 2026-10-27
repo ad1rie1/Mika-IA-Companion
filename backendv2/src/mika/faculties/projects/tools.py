@@ -3,7 +3,9 @@
 Pendant une exécution (``WORK`` ou ``JOB``) : ``report_run`` (le verdict, qui la
 clôt), ``project_note`` (son carnet), ``project_decide`` (une décision
 technique, qui peut en remplacer une autre), ``project_objective_add`` (un
-objectif de plus). En conversation : ``create_project`` (un projet qu'on lui
+objectif de plus), ``project_plan`` (son plan : ce qui conclut une séance de
+cadrage, ou le revoir en cours de route — ADR 0145). En conversation :
+``create_project`` (un projet qu'on lui
 confie — seulement quelqu'un qui s'occupe d'elle), ``start_project`` (un
 projet à elle — aussi pendant une exploration qui s'avère plus grosse qu'une
 envie) et ``project_steer`` (le piloter de vive voix avec qui s'occupe d'elle :
@@ -27,14 +29,17 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.access import steering
 from mika.faculties.projects.faculty import (
     AMENDED,
+    APPROVE,
     ARCHIVED,
     DECIDED,
     DECISIONS_KEPT,
@@ -42,12 +47,16 @@ from mika.faculties.projects.faculty import (
     NOTED,
     NUDGED,
     OBJECTIVE_ADDED,
+    OBJECTIVE_CHANGED,
     OBJECTIVES_KEPT,
     PAUSED,
+    PLAN_ANSWERED,
+    PLAN_PROPOSED,
     PROJECTS,
     PUSH,
     REFRAMED,
     RESUMED,
+    REVISE,
     SELF_BUNDLES,
     STEER_ASKED,
     Objective,
@@ -58,6 +67,7 @@ from mika.faculties.projects.faculty import (
     cadence,
     check_schedule,
     decision_at,
+    frame_of,
     in_force,
     live,
     living,
@@ -107,6 +117,42 @@ def current(ctx: Any) -> tuple[Project, Objective | None] | None:
     return p, o
 
 
+#: ce qu'on garde des mots de qui parle (ADR 0145) : ses derniers messages avant sa réponse, au plus
+REQUEST_CHARS, REQUEST_LINES = 2000, 8
+
+
+def their_words(ctx: Any) -> str:
+    """Les mots de la personne à qui elle répond, tels quels : ses messages en privé depuis la dernière réponse de
+    Mika, jusqu'à celui auquel elle répond, du plus ancien au plus récent — ce qu'un projet garde de sa demande, ce
+    qu'une consigne garde de sa voix (ADR 0145). Rien hors d'une réponse, ni dans un salon."""
+    store = ctx.ports.get("store")
+    ep = ctx.frame.episode
+    if store is None or ep is None or ep.kind != Kind.REPLY or not ep.target or ep.attrs.get("room"):
+        return ""
+    person = ctx.frame.get(identity_c.PERSON(ep.target))
+    handles = list(ctx.frame.get(identity_c.HANDLES(person)) or ()) if person else []
+    t = transcript_c.thread_table()
+    query = select(t.c.role, t.c.text).where(t.c.person.in_(handles or [ep.target]), t.c.room.is_(None))
+    upto = ep.attrs.get("reply_to")
+    if isinstance(upto, int):
+        query = query.where(t.c.id <= upto)
+    said: list[str] = []
+    for role, text in store.query_mind(query.order_by(t.c.id.desc()).limit(REQUEST_LINES * 2)):
+        if role != "user":
+            break  # sa dernière réponse : ce qui précède a déjà eu la sienne
+        if str(text or "").strip():
+            said.append(str(text).strip())
+        if len(said) >= REQUEST_LINES:
+            break
+    return "\n".join(reversed(said))[-REQUEST_CHARS:]
+
+
+def framing_run(ctx: Any, p: Project) -> bool:
+    """Cette exécution est-elle la séance de cadrage de ``p`` (ADR 0145) ?"""
+    ep = ctx.frame.episode
+    return ep is not None and p.plan_state == c.TO_FRAME and frame_of(ep.attrs.get("subject")) == p.id
+
+
 def text_of(ctx: Any, ref: str, level: int, empty: str) -> Content:
     store = ctx.ports.get("store")
     text = store.content([ref]).get(ref) if store is not None and ref else None
@@ -150,6 +196,7 @@ class ReportArgs(BaseModel):
     notable: float = Field(default=0.5, ge=0.0, le=1.0, description=phrase("projects.tools.report.notable"))
     wait_minutes: int = Field(default=0, ge=0, le=1440)
     needs_you: str = Field(default="", max_length=600, description=phrase("projects.tools.report.needs_you"))
+    how_met: str = Field(default="", max_length=600, description=phrase("projects.tools.report.how_met"))
 
 
 def _proof(ctx: Any, sha: str, o: Objective | None = None) -> str:
@@ -184,8 +231,16 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
     if any(name == REPORT and ok for name, ok in ctx.calls):
         return ToolResult(ok=False, content=phrase("projects.tools.report.already"))
     p, o = got
+    if framing_run(ctx, p):  # une séance de cadrage conclut par son plan (ADR 0145)
+        return ToolResult(ok=False, content=phrase("projects.tools.report.framing"))
+    how = args.how_met.strip()
+    if args.verdict == c.DONE and o is not None and o.kind == c.ONCE and o.done_when_ref and not how:
+        criterion = _contents(ctx, [o.done_when_ref]).get(o.done_when_ref, "")
+        return ToolResult(ok=False, content=phrase("projects.tools.report.how_met_missing", criterion=criterion))
     worked = tuple(sorted({name for name, ok in ctx.calls if ok and name in CHANGING}))
     summary = args.summary.strip()
+    if how:
+        summary = f"{summary}\n{phrase('projects.tools.report.met', how=how)}"[:2000]
     port = ctx.ports.get("workshop")
     sha = ""
     if port is not None and port.exists(p.id):
@@ -359,6 +414,131 @@ async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     return wrap_up(ctx, phrase("projects.tools.objective_add.done", id=number, kind=kind))
 
 
+PLAN_TOOL = "project_plan"
+#: les étapes d'un plan, ses questions, au plus
+PLAN_STEPS, PLAN_QUESTIONS = 12, 3
+
+
+class PlanStep(BaseModel):
+    """Une étape de son plan : un objectif, gardé (``keep``), réécrit ou nouveau."""
+
+    text: str = Field(min_length=1, max_length=500, description=phrase("projects.tools.plan.step_text"))
+    done_when: str = Field(default="", max_length=500, description=phrase("projects.tools.plan.done_when"))
+    kind: Literal["once", "constant"] = Field(default="once", description=phrase("projects.tools.objective_add.kind"))
+    cadence_hours: int = Field(default=0, ge=0, le=24 * 30,
+                               description=phrase("projects.tools.constant.cadence_hours"))
+    after: int = Field(default=0, ge=0, le=PLAN_STEPS, description=phrase("projects.tools.plan.after"))
+    keep: int = Field(default=0, ge=0, description=phrase("projects.tools.plan.keep"))
+
+
+class PlanQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=400, description=phrase("projects.tools.plan.question"))
+    advice: str = Field(min_length=1, max_length=400, description=phrase("projects.tools.plan.advice"))
+
+
+class PlanArgs(BaseModel):
+    aim: str = Field(min_length=1, max_length=600, description=phrase("projects.tools.plan.aim"))
+    deliverables: str = Field(min_length=1, max_length=1200, description=phrase("projects.tools.plan.deliverables"))
+    approach: str = Field(min_length=1, max_length=2500, description=phrase("projects.tools.plan.approach"))
+    out_of_scope: str = Field(default="", max_length=800, description=phrase("projects.tools.plan.out_of_scope"))
+    steps: list[PlanStep] = Field(min_length=1, max_length=PLAN_STEPS, description=phrase("projects.tools.plan.steps"))
+    questions: list[PlanQuestion] = Field(default_factory=list, max_length=PLAN_QUESTIONS,
+                                          description=phrase("projects.tools.plan.questions"))
+    tell: bool = Field(default=False, description=phrase("projects.tools.plan.tell"))
+
+
+def plan_text(args: PlanArgs) -> str:
+    """Son plan en clair, tel qu'il se relit (exécutions, récit, console)."""
+    lines = [phrase("projects.plan.aim", text=args.aim.strip()),
+             phrase("projects.plan.deliverables", text=args.deliverables.strip()),
+             phrase("projects.plan.approach", text=args.approach.strip())]
+    if args.out_of_scope.strip():
+        lines.append(phrase("projects.plan.out_of_scope", text=args.out_of_scope.strip()))
+    return "\n".join(lines)
+
+
+def questions_text(args: PlanArgs) -> str:
+    return "\n".join(phrase("projects.plan.question", n=i, question=q.question.strip(), advice=q.advice.strip())
+                     for i, q in enumerate(args.questions, start=1))
+
+
+def _plan_problems(p: Project, steps: list[PlanStep]) -> list[str]:
+    """Ce qui ne va pas dans ses étapes, en mots (rien : il s'écrit)."""
+    alive = {o.id for o in p.objectives if o.status in (c.OPEN, c.BLOCKED)}
+    problems: list[str] = []
+    kept: set[int] = set()
+    for i, step in enumerate(steps, start=1):
+        if step.kind == c.ONCE and not step.done_when.strip():
+            problems.append(phrase("projects.tools.plan.no_criterion", n=i))
+        if step.after and step.after >= i:
+            problems.append(phrase("projects.tools.plan.bad_after", n=i))
+        if step.keep and (step.keep not in alive or step.keep in kept):
+            problems.append(phrase("projects.tools.plan.bad_keep", n=i, id=step.keep))
+        kept.add(step.keep)
+    return problems
+
+
+@PROJECTS.tool(PLAN_TOOL, acts=True, description=phrase("projects.tools.plan.description"), args=PlanArgs,
+               bundle="projects", episodes=RUNS, max_calls_per_episode=2)
+async def project_plan(args: PlanArgs, ctx: Any) -> Any:
+    """Écrire son plan (une séance de cadrage), ou le revoir en cours de route (ADR 0145) : ses objectifs vivants
+    deviennent ceux du plan — gardés, réécrits ou nouveaux, dans son ordre, chacun avec son critère et ce dont il
+    dépend ; ceux qu'il ne garde pas sont retirés (sauf une réparation d'app). Un plan qui pose des questions sur un
+    projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office."""
+    got = current(ctx)
+    if got is None:
+        return gone()
+    p, _ = got
+    problems = _plan_problems(p, args.steps)
+    if problems:
+        return ToolResult(ok=False, content=phrase("projects.tools.plan.refused", problems="\n".join(problems)))
+    kept = {s.keep for s in args.steps if s.keep}
+    dropped = [o for o in p.objectives if o.status in (c.OPEN, c.BLOCKED) and o.id not in kept and not o.app]
+    if living(p) - len(dropped) + sum(1 for s in args.steps if not s.keep) > OBJECTIVES_KEPT:
+        return ToolResult(ok=False, content=phrase("projects.tools.objective_add.full", count=OBJECTIVES_KEPT))
+    level = written(p)
+    who: dict[str, Any] = {"owner": p.owner, "about": p.about}
+    ids, number = [], p.objective_seq
+    for step in args.steps:
+        if step.keep:
+            ids.append(step.keep)
+        else:
+            number += 1
+            ids.append(number)
+    drafts: list[Draft[Any]] = [OBJECTIVE_CHANGED.draft(
+        project=p.id, objective=o.id, status=c.DROPPED, note=Content.of(phrase("projects.tools.plan.dropped"),
+                                                                         level=level), **who) for o in dropped]
+    for i, (step, oid) in enumerate(zip(args.steps, ids, strict=True), start=1):
+        text = Content.of(step.text.strip(), level=level)
+        done_when = Content.of(step.done_when.strip(), level=level) if step.done_when.strip() else None
+        every = step.cadence_hours * HOUR if step.kind == c.CONSTANT else 0
+        after = ids[step.after - 1] if step.after else 0
+        if step.keep:
+            old = objective_at(p, oid)
+            reopened = c.OPEN if old is not None and old.status == c.BLOCKED else None  # un plan neuf, une chance neuve
+            drafts.append(OBJECTIVE_CHANGED.draft(project=p.id, objective=oid, status=reopened, text=text,
+                                                  kind=step.kind, cadence_us=every, done_when=done_when, after=after,
+                                                  rank=i, **who))
+        else:
+            drafts.append(OBJECTIVE_ADDED.draft(project=p.id, objective=oid, text=text, kind=step.kind,
+                                                cadence_us=every, done_when=done_when, after=after, rank=i,
+                                                author="self", **who))
+    framing_now = p.plan_state in (c.TO_FRAME, c.PROPOSED)
+    asked = bool(p.asked_by)
+    approved = not framing_now or not args.questions or not asked
+    tell = asked if framing_now else args.tell
+    questions = questions_text(args)
+    drafts.append(PLAN_PROPOSED.draft(project=p.id, plan=Content.of(plan_text(args), level=level),
+                                      questions=Content.of(questions, level=level) if questions else None,
+                                      approved=approved, tell=tell, **who))
+    await ctx.emit(*drafts)
+    if not framing_now:
+        return wrap_up(ctx, phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped)))
+    if not approved:
+        return phrase("projects.tools.plan.waits", steps=len(args.steps))
+    return phrase("projects.tools.plan.starts", steps=len(args.steps))
+
+
 class EquipArgs(BaseModel):
     tool: SelfBundle = Field(description=phrase("projects.tools.equip.tool"))
     why: str = Field(min_length=1, max_length=300, description=phrase("projects.tools.equip.why"))
@@ -412,15 +592,18 @@ def opened(*, title: str, description: str, authority: str, mode: str, owner: st
            about: tuple[str, ...], level: int, source: str, schedule_rule: str = "", approval: bool = True,
            priority: str = c.NORMAL, bundles: tuple[str, ...] = DEFAULT_BUNDLES, days: str = c.EVERY_DAY,
            start_min: int = 0, end_min: int = 24 * 60, runs_per_day: int = 0, remote: str = "",
-           branch: str = "main", auto_push: bool = False) -> Draft[Any]:
-    """L'ouverture d'un projet (par une propriétaire, un opérateur, ou elle)."""
+           branch: str = "main", auto_push: bool = False, request: str = "", asked_by: str | None = None,
+           framing: bool = False) -> Draft[Any]:
+    """L'ouverture d'un projet (par une propriétaire, un opérateur, ou elle) ; né en conversation, il garde les mots
+    de qui l'a demandé et naît à cadrer (ADR 0145)."""
     return c.PROJECT_CREATED.draft(
         title=Content.of(title.strip(), level=level),
         description=Content.of(description.strip(), level=level) if description.strip() else None,
         authority=authority, mode=mode, owner=owner, address=address, about=about, bundles=bundles,
         schedule=schedule_rule.strip(), days=days, start_min=start_min, end_min=end_min, runs_per_day=runs_per_day,
         approval=approval, priority=priority, remote=remote.strip(), branch=branch.strip() or "main",
-        auto_push=auto_push, source=source, sensitivity=level)
+        auto_push=auto_push, source=source, sensitivity=level,
+        request=Content.of(request, level=level) if request.strip() else None, asked_by=asked_by, framing=framing)
 
 
 class ConstantArg(BaseModel):
@@ -468,7 +651,8 @@ async def create_project(args: CreateArgs, ctx: Any) -> Any:
     level = int(Sensitivity.PERSONAL)
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.USER, mode=args.mode, owner=person,
-        address=handle, about=(person,), level=level, source="tool", schedule_rule=rule))
+        address=handle, about=(person,), level=level, source="tool", schedule_rule=rule, request=their_words(ctx),
+        asked_by=person, framing=True))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
         return ToolResult(ok=False, content=phrase("projects.tools.create.failed"))
@@ -552,16 +736,22 @@ async def start_project(args: StartArgs, ctx: Any) -> Any:
         level = max(goal.sensitivity if goal is not None else 0, int(Sensitivity.PERSONAL) if about else 0)
         # l'exploration devenue projet garde ses mains (la Forge d'une app à réparer, ses flux…)
         inherited = goal.bundles if goal is not None else ()
+    # en conversation, il naît à cadrer, avec les mots de qui le demande ; né d'une exploration, elle y a déjà
+    # réfléchi (ADR 0145)
+    talking = ep is not None and ep.kind == Kind.REPLY
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.SELF, mode=c.PERSONA, owner=None, address=None,
-        about=about, level=level, source=source, bundles=own_bundles(args.tools, inherited)))
+        about=about, level=level, source=source, bundles=own_bundles(args.tools, inherited),
+        request=their_words(ctx) if talking else "", asked_by=who[1] if talking and who is not None else None,
+        framing=talking))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
         return ToolResult(ok=False, content=phrase("projects.tools.start.failed"))
     goals = args.objectives or ([] if args.constants else [args.title])
     await ctx.emit(*objectives_of(pid, goals, args.constants, author="self", owner=None, about=about, level=level))
-    more = phrase("projects.tools.start.from_goal") if gid is not None else ""
-    return phrase("projects.tools.start.done", id=pid, more=more)
+    if gid is not None:
+        return phrase("projects.tools.start.done", id=pid, more=phrase("projects.tools.start.from_goal"))
+    return phrase("projects.tools.start.framing", id=pid)
 
 
 class CloseArgs(BaseModel):
@@ -599,6 +789,8 @@ async def project_close(args: CloseArgs, ctx: Any) -> Any:
 
 STEER = "project_steer"
 ADD, INSTRUCT, NOW, PAUSE, RESUME = "add", "instruct", "now", "pause", "resume"
+#: répondre à son plan (ADR 0145) : le lancer, ou le lui faire reprendre
+PLAN_VERDICTS = (APPROVE, REVISE)
 #: un projet qu'on pilote encore (archivé, il ne fait plus rien)
 STEERABLE = (c.ACTIVE, c.PAUSED)
 #: les projets, les objectifs qu'elle énumère quand elle ne sait pas duquel il s'agit
@@ -609,7 +801,7 @@ PAUSED_IN_TALK = "mis en pause en conversation"
 
 class SteerArgs(BaseModel):
     project: str = Field(min_length=1, max_length=200, description=phrase("projects.tools.steer.project"))
-    what: Literal["add", "instruct", "now", "pause", "resume"] = Field(
+    what: Literal["add", "instruct", "now", "pause", "resume", "approve", "revise"] = Field(
         description=phrase("projects.tools.steer.what"))
     text: str = Field(default="", max_length=2000, description=phrase("projects.tools.steer.text"))
     kind: Literal["once", "constant"] = Field(default="once", description=phrase("projects.tools.steer.kind"))
@@ -708,6 +900,8 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     p = s.projects[pid]
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
         phrase("projects.tools.steer.numbered", id=p.id)
+    if args.what in PLAN_VERDICTS:
+        return await _answer_plan(args, ctx, p, person, title)
     if steerable(p, aud, frame) == c.STEER_ASK:
         return await _ask_steer(args, ctx, p, person, title)
     if args.what == NOW:
@@ -731,7 +925,9 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.no_objective") if args.what == ADD
                           else phrase("projects.tools.steer.no_instruction"))
     if args.what == INSTRUCT:
+        said = their_words(ctx)  # ses mots à elle ou lui, tels quels, à côté de ce qu'elle en a retenu (ADR 0145)
         draft = AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=person,
+                              words=Content.of(said, level=p.sensitivity) if said else None,
                               owner=p.owner, about=p.about)
         if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
             return _changed()
@@ -751,6 +947,28 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
     kind = phrase("projects.tools.objective_add.constant") if args.kind == c.CONSTANT else \
         phrase("projects.tools.objective_add.once")
     return phrase("projects.tools.steer.added", id=number, title=title, kind=kind)
+
+
+async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title: str) -> Any:
+    """Sa réponse à un plan (ADR 0145) — seulement qui l'a demandé, ou qui s'occupe d'elle : le lancer (un plan qui
+    attend), ou le lui faire reprendre (ses mots, tels quels, deviennent une consigne de la séance qui le reprend)."""
+    frame: Frame = ctx.frame
+    if person != p.asked_by and not frame.get(identity_c.IS_OWNER(person)):
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_not_theirs", title=title))
+    if args.what == APPROVE and p.plan_state != c.PROPOSED:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_none", title=title))
+    if args.what == REVISE and p.plan_state not in (c.PROPOSED, c.PLANNED):
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.plan_none", title=title))
+    said = their_words(ctx) or args.text.strip()
+    if args.what == REVISE and not said:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.no_instruction"))
+    draft = PLAN_ANSWERED.draft(project=p.id, verdict=args.what, words=Content.of(said, level=p.sensitivity)
+                                if said else None, by=person, owner=p.owner, about=p.about)
+    if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,))) is None:
+        return _changed()
+    if args.what == APPROVE:
+        return phrase("projects.tools.steer.plan_approve", title=title)
+    return phrase("projects.tools.steer.plan_revise", title=title)
 
 
 async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, person: str, title: str) -> Any:

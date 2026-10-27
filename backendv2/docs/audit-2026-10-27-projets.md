@@ -269,3 +269,27 @@ Chaque lot a son ADR, sa doc dans `ARCHITECTURE.md` et ses tests. Le banc mesure
    CLI.
 5. **Le banc** : des sources figées pour la reproductibilité, et une passe sur le vrai réseau à la fin
    (recommandé) ?
+
+---
+
+## 6. Suites (même jour)
+
+La proposition est retenue telle quelle, avec les recommandations du § 5 comme décisions :
+1. un projet demandé attend le feu vert ; un projet né d'une envie à elle, elle le valide seule ;
+2. sans réponse, une relance au bout d'un jour, puis elle attend ;
+3. un plan sans question, elle le dit et le lance ;
+4. le budget du mode pro ;
+5. des sources figées dans le banc.
+
+Ce qui est fait, et dans quel ADR :
+- **L1, L3 à L6** : ADR 0145.
+  - L1 : la demande gardée.
+  - L3 : la séance de cadrage et `project_plan`.
+  - L4 : l'initiative du plan, `project_steer approve/revise`, et la section « Le plan » de la fiche avec ses deux actions.
+  - L5 : l'ordre et les dépendances, le critère et `how_met`, les cinq derniers comptes rendus, la méthode, le budget.
+  - L6 : le récit des constants, et un récit qui dit où voir les apps du projet.
+- **L2, le banc du travail** (`tools/banc_travail/`) : construit à part, en mode sec seulement. La première mesure réelle, sur le code d'avant puis sur celui-ci, attend l'accord d'Adrien, car elle consomme du quota de la CLI.
+
+Ce qui n'est pas fait :
+- **C11, la preuve.** Une app écrite dans une exécution en échec ne se prouve toujours pas à l'essai suivant. L'ADR 0142 a supprimé la cause qui l'avait montré.
+- **Les projets ouverts par une séance d'exploration** ne passent pas par le cadrage : l'exploration a déjà réfléchi, mais ce qu'elle a trouvé ne passe toujours pas au projet (C4).

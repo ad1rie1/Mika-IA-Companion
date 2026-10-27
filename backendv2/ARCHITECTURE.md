@@ -268,10 +268,17 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 - Un but garde la filiation de la pensée d'où il est né (`goals.audible`).
 - Outils : `report_step` (clôt la boucle) et `goal_*`.
 
-**`projects`** (ADR 0031, 0039, 0104, 0133, 0143, 0144)
+**`projects`** (ADR 0031, 0039, 0104, 0133, 0143, 0144, 0145)
 
 - Des boîtes noires qu'on pilote : des objectifs ponctuels ou constants à cadence (la leur dès la création, `ConstantArg`, sinon celle des réglages). Deux sortes d'exécution, prouvées par un commit ou par un outil qui produit : `WORK` dans son mode à elle (rôle `project`), `JOB` impersonnel (rôle `job`, sans persona ni affect).
 - Les décisions techniques ; la plage de travail en jours et heures.
+- **Le cadrage** (ADR 0145).
+  - Un projet ouvert en conversation (`start_project`, `create_project`) garde les mots de qui le demande, tels quels (`request`, `asked_by`), et naît à cadrer (`plan_state`, son statut reste « actif »).
+  - Sa séance de cadrage (une exécution sans objectif, sujet `frame:<id>`) écrit son plan avec `project_plan` : le but, ce que la personne verra, l'approche, les étapes ordonnées (chacune avec son critère et l'étape dont elle dépend), trois questions au plus.
+  - Un plan qui pose des questions attend la réponse de qui l'a demandé. Elle la lui demande (initiative `project_plan`, une relance au bout d'un jour) ; la réponse passe par `project_steer` (`approve`, `revise`) ou par la console (« Valider le plan », « Demander une révision »).
+  - Planifié, `pick` suit son ordre et ses dépendances. Un « fait » dit comment le critère est rempli (`how_met`).
+  - Chaque exécution relit la demande, le plan et ses cinq derniers comptes rendus. Elle a le budget du mode pro : 24 tours, 15 min, 120 000 caractères de résultats d'outils.
+  - Un passage notable d'un constant se raconte.
 - Un atelier par projet (`ateliers/projet-<id>`) avec son dépôt git, distant compris : pousser et récupérer sont des capacités, et le jeton ne passe que par l'environnement de git.
 - Elle ouvre ses projets elle-même (`start_project`, deux au plus) et les clôt ; `create_project` reste à la propriétaire.
 - Qui peut quoi sur un projet se dit en lignes d'accès, journalisées (`projects.access_set`, onglet « Accès » de sa fiche, `faculties/projects/console_access.py`) : qui (toi, tes proches, tout le monde, des personnes), par où (un canal), quand, le voir, le piloter (`STEERS` : lecture seule, accord du propriétaire, modification, aucun pilotage), ses fichiers (`files` : en recevoir, `shares.may_share`), ce qu'elle fait d'un outil de ses apps qui lit et d'un outil qui agit, à quels outils ; un projet jamais réglé : `UNSET` (toi et elle seule, tout ; la personne qui l'a confié le voit, le pilote sur ton accord et en reçoit les fichiers ; les autres l'entendent selon sa confidentialité, en lecture seule). Le voir décide de « TES PROJETS » (`access.sees`, que « tout le monde » ouvre aussi dans un salon ou à une inconnue), la lecture seule du détail qu'elle en donne (`access.reads`) ; changer, de `project_steer` (un objectif, une consigne, maintenant, pause, reprise — jamais le cadre), offert par `fits` à qui une ligne le permet (`access.steering`, `CHANGES`) : en modification, le geste s'écrit au nom de la personne ; sur l'accord du propriétaire, la demande est gardée (`projects.steer_asked`, son texte effaçable) et proposée dans la console (capacité `projects.steer`, son aperçu), le geste s'écrit une fois acceptée — toi en face, aussitôt.

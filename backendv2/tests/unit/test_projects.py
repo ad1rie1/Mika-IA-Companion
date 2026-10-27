@@ -510,8 +510,9 @@ def test_a_confided_project_is_written_and_tested_in_its_real_workshop(tmp_path)
     folder = tmp_path / "ateliers" / f"projet-{done.data.project}"
     assert (folder / "bonjour.py").is_file() and (folder / "test_bonjour.py").is_file()
     log = subprocess.run(["git", "-C", str(folder), "log", "--format=%s"], capture_output=True, text=True).stdout
-    # un message de commit neutre : il peut partir vers un dépôt distant, il ne raconte rien de sa vie
-    assert log.splitlines() == ["exécution 1 · objectif n° 1", "atelier ouvert"]
+    # un message de commit neutre : il peut partir vers un dépôt distant, il ne raconte rien de sa vie ; l'exécution 1
+    # était sa séance de cadrage (ADR 0145), qui n'écrit rien dans l'atelier
+    assert log.splitlines() == ["exécution 2 · objectif n° 1", "atelier ouvert"]
     assert any("code 0" in x and "tests : ok" in x for x in ran)  # le test a vraiment tourné, isolé
 
 

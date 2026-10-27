@@ -14,6 +14,10 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
 - **Demander** : un objectif qui bloque ou attend quelque chose, à qui l'a confié
   (ou à une propriétaire) ; un projet à elle arrêté par des pannes, à une
   propriétaire, pour qu'on le relance (ADR 0143).
+- **Le cadrage** (ADR 0145) : un projet né en conversation a d'abord sa séance
+  de cadrage (sujet ``frame:<id>``), qui écrit son plan ; son plan se dit à qui
+  l'a demandé (``plan:<id>``) — ses questions, qui attendent sa réponse, ou ce
+  qu'elle va faire.
 """
 
 from __future__ import annotations
@@ -33,12 +37,16 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     busy,
     daily_cap,
+    finished_at,
+    frame_subject,
     in_window,
     next_due,
     nudged,
     outgoing,
     params,
+    pass_untold,
     pick,
+    plan_subject,
     rank,
     run_bundles,
     runs_today,
@@ -69,10 +77,24 @@ def _still(project: int) -> Guard:
     return Guard("projet actif", predicate=lambda view, p=project: view.get(c.STATUS(p)) == c.ACTIVE)
 
 
+def frame_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
+    """Quand sa séance de cadrage peut partir (ADR 0145) : à cadrer, dès que possible — sous l'espacement et le
+    plafond du jour, sans attendre son agenda ni sa plage (ils règlent son travail, pas sa réflexion)."""
+    if p.status != c.ACTIVE or p.plan_state != c.TO_FRAME or busy(s, p.id) or outgoing(p, frame.now):
+        return None
+    pm = params(frame.env.params_of("projects", frame.root))
+    at = max(frame.now, p.tried_at + pm.run_spacing_us if p.tried_at else p.created_at)
+    if runs_today(p, frame.now) >= daily_cap(p, pm):
+        at = max(at, min(t for t in p.runs_at if frame.now - t < DAY) + DAY)
+    return at
+
+
 def next_run_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
-    """Quand ce projet peut avoir sa prochaine exécution (``None`` : pas en vue)."""
+    """Quand ce projet peut avoir sa prochaine exécution (``None`` : pas en vue) — sa séance de cadrage d'abord."""
     pm = params(frame.env.params_of("projects", frame.root))
     now = frame.now
+    if p.plan_state == c.TO_FRAME:
+        return frame_at(p, s, frame)
     if p.status != c.ACTIVE or busy(s, p.id) or not p.objectives or outgoing(p, now):
         return None
     if p.schedule == ON_DEMAND and not nudged(p):  # « sur demande » : il ne part que quand on le lance
@@ -114,14 +136,17 @@ def _run(s: ProjectsState, frame: Frame) -> list[Candidate]:
             continue
         if runs_today(p, frame.now) >= daily_cap(p, pm):
             continue
-        target = pick(p, frame.now, pm)
-        if target is None:
-            continue
         evidence = max(0.0, min(12.0, pm.run_evidence + pm.priority_step * rank(p)))
+        if p.plan_state == c.TO_FRAME:  # sa séance de cadrage : aucun objectif, le projet entier (ADR 0145)
+            subject = frame_subject(p.id)
+        else:
+            target = pick(p, frame.now, pm)
+            if target is None:
+                continue
+            subject = subject_of(p.id, target.id)
         out.append(Candidate(
             kind_of(p), project_target(p.id), c.RUN, round(evidence, 4), resources=frozenset({c.run_lease(p.id)}),
-            guards=(_still(p.id),),
-            args=FrozenDict({"bundles": ",".join(run_bundles(p)), "subject": subject_of(p.id, target.id)})))
+            guards=(_still(p.id),), args=FrozenDict({"bundles": ",".join(run_bundles(p)), "subject": subject})))
     return out
 
 
@@ -148,6 +173,11 @@ def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> str:
         return "une exécution est en cours"
     if outgoing(p, now):
         return "une commande, un envoi ou une récupération sont en route : l'atelier les attend"
+    if p.plan_state == c.PROPOSED:
+        return "son plan attend la réponse de qui l'a demandé (« Valider le plan », ou en conversation)"
+    if p.plan_state == c.TO_FRAME:
+        at = frame_at(p, s, frame)
+        return "" if at is not None and at <= now else "sa séance de cadrage attend l'espacement ou le plafond du jour"
     if not p.objectives or not any(o.status == c.OPEN for o in p.objectives):
         return "aucun objectif ouvert : ajoutes-en un"
     if p.schedule == ON_DEMAND and not nudged(p):
@@ -208,6 +238,11 @@ def confidant(p: Project, frame: Frame) -> tuple[str, str, str] | None:
 
 
 def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
+    """Un ponctuel mené à bout, ou le passage d'un constant qui a produit (un bilan de la semaine, ADR 0145), jugé
+    notable et pas encore raconté."""
+    if o.kind == c.CONSTANT:
+        return (pass_untold(o) and o.share_attempts < pm.share_attempts and o.pass_notable >= pm.share_notable_from
+                and now - o.passed_at <= pm.share_within_us)
     return (o.kind == c.ONCE and o.status == c.DONE and not o.shared
             and o.share_attempts < pm.share_attempts and o.notable >= pm.share_notable_from
             and now - o.closed_at <= pm.share_within_us)
@@ -216,7 +251,7 @@ def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
 def untold(p: Project, now: int, pm: Any) -> list[Objective]:
     """Ce qu'elle a mené à bout dans ce projet sans l'avoir encore raconté, du plus ancien au plus récent : ce
     qu'un récit dit d'une fois."""
-    return sorted((o for o in p.objectives if _shareable(o, p, now, pm)), key=lambda o: (o.closed_at, o.id))
+    return sorted((o for o in p.objectives if _shareable(o, p, now, pm)), key=lambda o: (finished_at(o), o.id))
 
 
 def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: Any) -> bool:
@@ -225,7 +260,7 @@ def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: An
     retient pas le récit)."""
     if busy(s, p.id) or outgoing(p, frame.now):
         return False
-    if frame.now - last.closed_at >= pm.share_settle_us:
+    if frame.now - finished_at(last) >= pm.share_settle_us:
         return True
     at = next_run_at(p, s, frame)
     return at is None or at - frame.now >= pm.share_settle_us
@@ -292,6 +327,63 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
             args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, told[-1].id), "share": level})))
+    return out
+
+
+def plan_reader(p: Project, frame: Frame) -> tuple[str, str] | None:
+    """À qui dire son plan : qui a demandé le projet (s'il s'occupe d'elle), sinon une propriétaire — et où."""
+    candidates = [x for x in (p.asked_by, p.owner) if x]
+    candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
+    for person in candidates:
+        if frame.get(identity_c.IS_OWNER(person)):
+            address = _address(frame, person)
+            if address is not None:
+                return person, address
+    return None
+
+
+def plan_due(p: Project, now: int, pm: Any) -> str:
+    """Son plan est-il à dire maintenant (ADR 0145) ? ``ask`` (la première fois), ``remind`` (une fois, un jour sans
+    réponse à un plan qui attend), ``""`` sinon."""
+    if p.status != c.ACTIVE or not p.plan_at or not p.plan_tell or p.plan_state not in (c.PROPOSED, c.PLANNED):
+        return ""
+    if not p.plan_asked:
+        return "ask" if p.plan_attempts < pm.share_attempts else ""
+    if p.plan_state == c.PROPOSED and not p.plan_reminded and now - p.plan_asked_at >= DAY:
+        return "remind"
+    return ""
+
+
+@PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.PLAN: (0.0, 10.0)},
+                  reads=[identity_c.OWNERS, identity_c.IS_OWNER, identity_c.HANDLES, identity_c.REACHABLE,
+                         presence_c.PRESENT, identity_c.IDENTITY])
+def _plan(s: ProjectsState, frame: Frame) -> list[Candidate]:
+    """« Voilà comment je vois ça » : son plan, à qui a demandé le projet — ses questions et ce qu'elle recommande
+    (il attend sa réponse), ou ce qu'elle va faire (elle s'y met) ; une relance au bout d'un jour sans réponse, une
+    seule (ADR 0145). Une demande à la fois par personne, comme ses demandes d'aide."""
+    pm = params(frame.env.params_of("projects", frame.root))
+    out, seen = [], set()
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        due = plan_due(p, frame.now, pm)
+        if not due:
+            continue
+        reader = plan_reader(p, frame)
+        if reader is None:
+            continue
+        person, address = reader
+        if address in seen:
+            continue
+        seen.add(address)
+        who = _who_words(frame, person, address)
+        if p.plan_state != c.PROPOSED:
+            brief = phrase("projects.brief.plan.start", who=who)
+        elif due == "remind":
+            brief = phrase("projects.brief.plan.remind", who=who)
+        else:
+            brief = phrase("projects.brief.plan.ask", who=who)
+        out.append(Candidate(
+            Kind.INITIATIVE, address, c.PLAN, pm.need_evidence, resources=frozenset({floor(address)}),
+            args=FrozenDict({"brief:projects": brief, "subject": plan_subject(p.id), "share": FULL})))
     return out
 
 

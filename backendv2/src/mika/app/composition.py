@@ -126,6 +126,10 @@ STEP_IN_HAND = frozenset({"goals", "memory"})
 PROJECT_IN_HAND = frozenset({"projects", "workshop", "memory"})
 WAKE_IN_HAND = frozenset({"wakeup"})
 
+#: le budget d'une exécution sur un projet (ADR 0145) : celui du mode pro — ses tours d'outils, son délai, ce qu'un
+#: résultat d'outil peut rendre (un fichier entier qu'elle relit)
+WORK_TURNS, WORK_DEADLINE_S, WORK_OUTSIDE_CHARS = 24, 900.0, 120_000
+
 #: les ouvriers de chaque voie d'épisodes : trois réponses à des personnes différentes se composent en même temps
 #: — Bob qui écrit « coucou » n'attend pas la fin d'une recherche faite pour Alice — ; une seule par personne, une
 #: seule initiative à la fois (``runtime/lanes.py``). La passerelle ordonne déjà leurs appels de modèle (ADR 0038).
@@ -155,16 +159,18 @@ def policies() -> dict[str, EpisodePolicy]:
                                                          "rss", "camera", "forge", "forge_apps", EXTERNAL}),
                                  core_bundles=STEP_IN_HAND),
         # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
-        # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)
+        # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat). Le budget d'une
+        # séance de travail, celui du mode pro (ADR 0145) : une app s'écrit, s'essaie et se corrige dans une exécution
         Kind.WORK: EpisodePolicy(kind=Kind.WORK, role=Role.PROJECT, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=or_wake(work_brief),
-                                 max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=PROJECT_TOOLS,
+                                 max_tool_turns=WORK_TURNS, max_tokens=8192, deadline_s=WORK_DEADLINE_S,
+                                 outside_chars=WORK_OUTSIDE_CHARS, tool_bundles=PROJECT_TOOLS,
                                  core_bundles=PROJECT_IN_HAND),
         # une exécution impersonnelle : aucune persona, aucune section affective
         Kind.JOB: EpisodePolicy(kind=Kind.JOB, role=Role.JOB, voice=False, priority=2, lane="background",
-                                visible=False, delivered=False, brief=or_wake(job_brief), max_tool_turns=16,
-                                max_tokens=4096,
-                                deadline_s=600.0, tool_bundles=PROJECT_TOOLS, core_bundles=PROJECT_IN_HAND,
+                                visible=False, delivered=False, brief=or_wake(job_brief), max_tool_turns=WORK_TURNS,
+                                max_tokens=8192, deadline_s=WORK_DEADLINE_S, outside_chars=WORK_OUTSIDE_CHARS,
+                                tool_bundles=PROJECT_TOOLS, core_bundles=PROJECT_IN_HAND,
                                 muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
         # un réveil par API sans projet (ADR 0068) : ce qu'un appel lui demande, avec les outils du réveil — dans son
         # mode à elle (sa voix compacte, comme un projet), ou impersonnel ; pour elle seule, ni fil ni livraison
