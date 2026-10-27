@@ -49,12 +49,14 @@ from mika.faculties.projects.faculty import (
     params,
     pick,
     run_bundles,
+    stall_of,
 )
 from mika.faculties.projects.tools import RUNS, steerable, written
 from mika.faculties.projects.work import FULL, MENTION, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
+from mika.kernel.inspect import describe_error
 from mika.kernel.prompt import SectionBody
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
 from mika.vocab.phrasebook import family, phrase
@@ -78,6 +80,8 @@ def _project(s: ProjectsState, frame: Frame) -> tuple[Project, Objective | None]
     got = objective_of(ep.attrs.get("subject"))
     if pid is None and got is not None:
         pid = got[0]
+    if pid is None:
+        pid = stall_of(ep.attrs.get("subject"))
     p = s.projects.get(pid) if pid is not None else None
     if p is None:
         return None
@@ -388,8 +392,12 @@ def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -
                   title=phrase("projects.share.title"))
 def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce qu'elle a mené à bout dans un projet depuis son dernier récit — à la mesure du lien avec qui l'écoute ;
-    ou, quand elle a besoin de qui le lui a confié, ce qui la bloque."""
+    ou, quand elle a besoin de qui le lui a confié, ce qui la bloque ; ou un projet à elle que des pannes ont
+    arrêté (ADR 0143)."""
     ep = frame.episode
+    stalled = s.projects.get(stall_of(ep.attrs.get("subject"))) if ep is not None else None
+    if stalled is not None:
+        return _stall_body(stalled, frame, enrich)
     got = objective_of(ep.attrs.get("subject")) if ep is not None else None
     p = s.projects.get(got[0]) if got is not None else None
     o = next((x for x in p.objectives if x.id == got[1]), None) if p is not None and got is not None else None
@@ -436,6 +444,23 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     elif result:
         body += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
     return SectionBody(body, level=level, provenance=(f"project:{p.id}",))
+
+
+def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody:
+    """Son projet s'est arrêté : combien de pannes, leur cause telle que la machine la dit, et ce qu'il attend (qu'on
+    le relance) — rien de ce qu'il contient : un titre suffit à le reconnaître."""
+    ep, aud = frame.episode, frame.audience
+    title = ((enrich.get("projects") or {}).get("texts") or {}).get(p.title_ref)
+    person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
+    if aud is None or not title or not hearable(p.about, written(p), person, aud.level, aud.witness_level,
+                                                aud.private_ok):
+        return SectionBody(phrase("projects.share.something"), level=0)
+    body = phrase("projects.share.stalled", title=title, n=p.failures)
+    if p.last_failure:
+        body += "\n" + phrase("projects.share.stalled_cause", cause=describe_error(p.last_failure))
+    level = written(p) if any(a != person for a in p.about) else 0
+    return SectionBody(body, level=level, title=phrase("projects.share.stalled_title"),
+                       provenance=(f"project:{p.id}",))
 
 
 def _next_words(p: Project, texts: Mapping[str, str], now: int, pm: Any) -> str:

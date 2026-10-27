@@ -296,6 +296,11 @@ class Project:
     #: la cause de la dernière tentative en panne (le détail de sa fin d'épisode, « NomDeClasse: message ») : la
     #: pause qui suit dit la vraie (ADR 0142)
     last_failure: str = ""
+    #: mis en pause pour pannes à cet instant (0 : non, ou repris) : un projet à elle, elle le dit à qui s'occupe
+    #: d'elle (« il ne tourne plus, tu peux le relancer ? »), une fois, quelques tentatives au plus (ADR 0143)
+    stalled_at: int = 0
+    stall_asked: bool = False
+    stall_attempts: int = 0
     summary_ref: str = ""
     last_commit: str = ""
     #: « lancer maintenant » demandé à cet instant, sur cet objectif (0 : celui qui vient)
@@ -324,7 +329,7 @@ class Project:
 class Run:
     project: int
     objective: int
-    purpose: str  # "run" | "share" | "need"
+    purpose: str  # "run" | "share" | "need" | "stalled" (dire qu'il s'est arrêté : ADR 0143)
     reported: bool = False
     #: son départ, et la dernière exécution d'avant (du projet, de l'objectif) : ce qu'un crédit rendu restaure
     started: int = 0
@@ -376,7 +381,8 @@ STEERS_KEPT = 50
 #: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois ;
 #:     un objectif qui bloque après cette réponse se dit aussi (« ça bloque »).
 #: v8 : ses accès (ADR 0133) et les demandes de pilotage sur ton accord (``access``, ``steers``).
-#: v9 : la cause de la dernière panne (``last_failure``), que dit la pause (ADR 0142).
+#: v9 : la cause de la dernière panne (``last_failure``), que dit la pause (ADR 0142) ; une pause pour pannes, qu'elle
+#:     dit à qui s'occupe d'elle (``stalled_at``, ``stall_asked``, ``stall_attempts`` : ADR 0143).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
                    state_version=9)
 PROJECTS.declare(*c.ALL)
@@ -478,6 +484,8 @@ class StateChanged(Payload):
     #: elle clôt elle-même un projet à elle : ``done`` (il a fait son temps : un soulagement) ou ``dropped``
     #: (elle y renonce : une mélancolie) ; vide : un opérateur, ou une panne
     ending: str = ""
+    #: une pause pour pannes (``projects.tend``) : un projet à elle, elle le dira (ADR 0143)
+    broke: bool = False
     owner: str | None = None
     about: tuple[str, ...] = ()
 
@@ -936,7 +944,8 @@ def _paused(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.ACTIVE:
         return s
-    return _set(s, replace(p, status=c.PAUSED, paused_at=e.at, pause_reason=e.data.reason[:300]))
+    return _set(s, replace(p, status=c.PAUSED, paused_at=e.at, pause_reason=e.data.reason[:300],
+                           stalled_at=e.at if e.data.broke else 0, stall_asked=False, stall_attempts=0))
 
 
 @PROJECTS.reducer(RESUMED)
@@ -944,7 +953,7 @@ def _resumed(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.PAUSED:
         return s
-    return _set(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0))
+    return _set(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0, stalled_at=0))
 
 
 @PROJECTS.reducer(ARCHIVED)
@@ -1058,6 +1067,19 @@ def subject_of(project: int, objective: int) -> str:
     return f"objective:{project}:{objective}"
 
 
+def stall_subject(project: int) -> str:
+    """Le sujet d'une initiative qui dit qu'un projet s'est arrêté (ADR 0143) : le projet, sans objectif."""
+    return f"stalled:{project}"
+
+
+def stall_of(subject: str | None) -> int | None:
+    """Le projet d'un sujet ``stall_subject``, sinon ``None``."""
+    if not subject or not subject.startswith("stalled:"):
+        return None
+    tail = subject[len("stalled:"):]
+    return int(tail) if tail.isdigit() else None
+
+
 def objective_of(subject: str | None) -> tuple[int, int] | None:
     """``(projet, objectif)`` d'un sujet d'exécution (ou d'un récit), sinon ``None``."""
     if not subject or not subject.startswith("objective:"):
@@ -1091,6 +1113,10 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
         return _set(s, p)
     got = objective_of(d.subject)
     reasons = d.reason.split(",")
+    stalled = stall_of(d.subject)
+    if d.kind == Kind.INITIATIVE and stalled in s.projects and c.NEED in reasons:
+        run = Run(stalled, 0, "stalled", started=e.at, address=d.target or "")
+        return replace(s, running=s.running.set(e.correlation, run))
     if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects:
         return s
     o = objective_at(s.projects[got[0]], got[1])
@@ -1112,9 +1138,11 @@ def _story(p: Project, run: Run) -> frozenset[int]:
 @PROJECTS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
 def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     run = s.running.get(e.correlation)
-    if run is None or run.purpose not in ("share", "need") or run.project not in s.projects:
+    if run is None or run.purpose not in ("share", "need", "stalled") or run.project not in s.projects:
         return s
     p = s.projects[run.project]
+    if run.purpose == "stalled":  # c'est dit : elle ne le redira pas, il attend qu'on le relance
+        return _set(s, replace(p, stall_asked=True))
     o = objective_at(p, run.objective)
     if o is None:
         return s
@@ -1175,6 +1203,11 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None:
         return s
     o = objective_at(p, run.objective)
+    if run.purpose == "stalled":
+        renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+        if p.stall_asked or not agency_c.tried(e.data.outcome, run.started, renounced):
+            return _set(s, p)
+        return _set(s, replace(p, stall_attempts=p.stall_attempts + 1))
     if run.purpose in ("share", "need"):
         renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
         if o is None or not agency_c.tried(e.data.outcome, run.started, renounced):
@@ -1195,7 +1228,8 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
         p = replace(p, runs=max(0, p.runs - 1), failures=p.failures + (1 if broke else 0),
                     runs_at=tuple(t for t in p.runs_at if t != run.started), last_run_at=run.previous)
         if broke:
-            cause = e.data.detail or ("TimeoutError" if e.data.outcome == "timeout" else "")
+            # sans détail, la sorte de fin parle pour elle (« délai dépassé », « erreur ») : la pause dit une cause
+            cause = e.data.detail or ("TimeoutError()" if e.data.outcome == "timeout" else "RuntimeError()")
             p = replace(p, last_failure=cause[:FAILURE_KEPT])
         if not broke:
             s = replace(s, runs_at=tuple(t for t in s.runs_at if t != run.started))

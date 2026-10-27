@@ -3801,6 +3801,11 @@ projects:
     drawn: "Ce que tu en as tiré : {result}"
     # l'essentiel, derrière l'objectif (avec son tiret de tête). {first} : la première phrase de ce qu'elle en a tiré
     in_short: " — en bref : {first}"
+    # un projet à elle que des pannes ont arrêté (ADR 0143). {title} : son titre ; {n} : les exécutions de suite en
+    # échec ; {cause} : la cause de la dernière, en mots (« prompt trop long pour le budget : … »)
+    stalled_title: TON PROJET S'EST ARRÊTÉ
+    stalled: "Ton projet « {title} » s'est arrêté : ses exécutions ont échoué {n} fois de suite, et il est en pause jusqu'à ce qu'on le relance. Ce n'est pas toi : c'est la machine qui a lâché."
+    stalled_cause: "Ce que la machine en dit : {cause}"
 
   # ── « TES PROJETS » ─────────────────────────────────────────────────────────────────────────────────────────
   # En conversation (réponse et initiative) : ses projets — « tu travailles sur quoi ? » est une question sur sa vie
@@ -3848,6 +3853,8 @@ projects:
     report: "Un projet qu'on t'a confié a avancé : fais-en un compte rendu factuel à {who}, en une ou deux phrases — c'est un travail, pas une fierté."
     # un objectif d'un projet confié qui bloque, ou attend quelque chose de qui l'a confié
     need: "Un projet qu'on t'a confié n'avance plus sans un coup de main de {who} : dis-le-lui simplement — ce qui bloque, et ce qu'il te faudrait."
+    # un projet à elle arrêté par des pannes (ADR 0143)
+    stalled: "Un de tes projets s'est arrêté tout seul : la machine a lâché plusieurs fois de suite, et il est en pause. Dis-le simplement à {who} et demande-lui de le relancer — ce n'est pas ta faute, tu n'as pas à t'en excuser."
 
   # Un objectif qui n'en finit pas : ce qui reste de lui quand le code le bloque (projects/tend.py). Le modèle le relit
   # sous « CE QUI TE BLOQUE » (Ce qu'il te faudrait : …). {n} : le nombre d'exécutions

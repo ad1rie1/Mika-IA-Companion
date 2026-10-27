@@ -23,7 +23,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141 |
@@ -934,6 +934,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* sans web au travail, ni outils typés, ni réseau utile, elle bâtissait à l'aveugle, et chaque correctif d'une app à clé attendait l'opérateur.
 
 *Révise 0104 (en partie), 0033 (en partie), 0066 (en partie). Révisée par 0118.*
+
+### 0143 — Un projet arrêté par des pannes, elle vient le dire
+
+- Un projet à elle que des pannes mettent en pause (`projects.tend`, `broke`) devient une demande à une propriétaire : « il ne tourne plus, tu peux le relancer ? ». Elle passe par le chemin des demandes d'aide : la même ligne d'arbitrage (`need`), la même personne (`_reader`), une demande à la fois par personne, quelques tentatives au plus, dans le même délai que ses récits.
+- Le sujet de l'initiative est le projet (`stalled:<id>`), pas un objectif. Une fois dite, elle ne la redit pas ; repris, le projet n'attend plus rien.
+- Elle lit combien d'exécutions ont échoué et la cause de la dernière, telle que la machine la dit. Rien ne la culpabilise : c'est la machine qui a lâché, et son estime n'en est pas touchée.
+- Un projet qu'on lui a confié ne le demande pas : seuls ses projets à elle le font.
+
+*Pourquoi :* le 2026-10-27, son projet de trading s'est arrêté après trois pannes, et elle n'en a rien dit : une pause pour pannes ne lui parvenait pas, et sa liste de projets disait seulement « en pause ». Il serait resté arrêté jusqu'à ce que quelqu'un ouvre la console.
 
 ## Les sens et les plugins
 

@@ -3,7 +3,8 @@
 **Tenir** (``projects.tend``) : un objectif qui n'a rien conclu trois
 exécutions de suite bloque ; un ponctuel à bout d'exécutions aussi ; un projet
 dont le modèle ne répond plus trois fois d'affilée se met en pause (« en
-panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne. Un
+panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne ; un
+projet à elle, elle vient le dire à qui s'occupe d'elle (ADR 0143). Un
 projet **à elle** qui n'a plus rien d'ouvert depuis quelques jours, elle le
 clôt (soulagée s'il a abouti, un peu mélancolique sinon) : il ne reste pas
 « en cours » pour toujours.
@@ -121,7 +122,7 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
 def pause_reason(p: Project) -> str:
     """Pourquoi un projet en panne se met en pause : combien d'échecs, et la cause du dernier telle qu'elle a été
     (un prompt trop long n'est ni un modèle muet ni un délai passé : ADR 0142)."""
-    cause = describe_error(p.last_failure) if p.last_failure else "le modèle n'a pas répondu"
+    cause = describe_error(p.last_failure)
     return f"en panne : {p.failures} exécutions de suite ont échoué (la dernière : {cause})"
 
 
@@ -160,8 +161,8 @@ class Tend:
                     project=p.id, objective=o.id, status=c.BLOCKED, note=Content.of(why, level=p.sensitivity),
                     owner=p.owner, about=p.about, dedupe_key=key))
         for p in broken(s, frame):
-            drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p), owner=p.owner, about=p.about,
-                                       dedupe_key=f"panne:{p.id}:{p.tried_at}"))
+            drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p), broke=True, owner=p.owner,
+                                       about=p.about, dedupe_key=f"panne:{p.id}:{p.tried_at}"))
         done_now = finished(s, frame)
         for p in done_now:  # elle le clôt elle-même : il a fait son temps (ou elle y renonce, rien n'a abouti)
             ending = "done" if any(o.status == c.DONE for o in p.objectives) else "dropped"

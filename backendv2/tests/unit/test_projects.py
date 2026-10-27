@@ -426,6 +426,7 @@ def test_three_failures_pause_the_project_without_blaming_her(tmp_path):
     assert closed == [] and project.objectives[0].status == c.OPEN  # une panne n'est ni un échec ni un blocage
     # la vraie cause de la dernière, pas « le modèle n'a pas répondu » pour toutes (ADR 0142)
     assert "la dernière : connexion impossible : panne simulée" in p.data.reason
+    assert p.data.broke and project.stalled_at == p.at  # une pause pour pannes : à dire, si le projet est à elle
 
 
 def test_runs_that_never_conclude_block_the_objective(tmp_path):
@@ -1086,6 +1087,64 @@ def test_an_initiative_is_a_request_or_a_story_by_its_subject_not_by_the_reasons
     told, asked = s.projects[1].objectives
     assert asked.asked and asked.asked_to == "user_1"  # la demande est dite : elle attend sa réponse
     assert not told.shared  # le récit n'a pas été fait : il reviendra
+
+
+def test_her_own_project_stopped_by_breakdowns_is_said_to_her_owner_once(tmp_path):
+    """Son projet de trading s'est arrêté après trois pannes, et elle n'en disait rien (2026-10-27). Un projet à elle
+    mis en pause pour pannes devient une demande à sa propriétaire, par le chemin de ses demandes d'aide : ce qui
+    s'est arrêté, la cause telle que la machine la dit, sans qu'elle s'en excuse. Dite, elle ne la redit pas ;
+    repris, le projet n'attend plus rien (ADR 0143)."""
+    from types import SimpleNamespace
+
+    from mika.faculties.projects.faculty import RESUMED, _resumed, _started, _uttered, stall_subject
+    from mika.faculties.projects.prompt import _share_section
+    from mika.faculties.projects.tools import StartArgs, start_project
+    from mika.faculties.projects.work import _need
+
+    async def scenario(kernel, llm):
+        reply = _context(kernel, "start_project", Kind.REPLY, "user_1", Audience(owner=True))
+        await start_project(StartArgs(title="Trading fictif", objectives=["Relever les cours"], tools=["forge"]), reply)
+        pid = events(kernel, c.PROJECT_CREATED)[-1].seq
+        await kernel.mind.append([PAUSED.draft(project=pid, reason="en panne", broke=True)], emitter="projects",
+                                 correlation="panne", origin=Origin.KERNEL)
+        frame = kernel.mind.frame()
+        # en tête-à-tête avec Adrien, sa propriétaire : il peut tout entendre de ses projets à elle
+        private = Audience(persons=("user_1",), public=False, level=4, witness_level=4, private_ok=True,
+                           person="user_1", owner=True)
+        asking = _context(kernel, "start_project", Kind.INITIATIVE, "user_1", private)
+        asking.frame = asking.frame.with_episode(EpisodeRef(asking.episode_id, Kind.INITIATIVE, target="user_1",
+                                                            attrs=FrozenDict({"subject": stall_subject(pid)})),
+                                                 asking.frame.audience)
+        p = frame.state("projects").projects[pid]
+        body = _share_section(frame.state("projects"), asking.frame,
+                              {"projects": {"texts": {p.title_ref: "Trading fictif"}}})
+        return pid, _need(frame.state("projects"), frame), body, frame.state("projects")
+
+    pid, candidates, body, s = live(tmp_path, scenario)
+    [cand] = candidates
+    assert cand.target == "user_1" and cand.reason == c.NEED and cand.args["subject"] == f"stalled:{pid}"
+    assert "relancer" in cand.args["brief:projects"] and "pas ta faute" in cand.args["brief:projects"]
+    assert "« Trading fictif » s'est arrêté" in body.content and "la machine qui a lâché" in body.content
+
+    cx = SimpleNamespace(params=params(None), facts=SimpleNamespace(get=lambda key: None))
+    t = s.projects[pid].stalled_at + MINUTE
+    said = _started(s, SimpleNamespace(correlation="i", at=t, data=rt.EpisodeStarted(
+        kind="INITIATIVE", target="user_1", reason=f"{c.NEED},greeting", subject=stall_subject(pid))), cx)
+    said = _uttered(said, SimpleNamespace(correlation="i", at=t + US, data=SimpleNamespace()), cx)
+    assert said.projects[pid].stall_asked  # dit : elle ne le redira pas
+    resumed = _resumed(said, SimpleNamespace(at=t + HOUR, data=RESUMED.payload(project=pid, by="user_1")), cx)
+    assert resumed.projects[pid].status == c.ACTIVE and not resumed.projects[pid].stalled_at
+
+
+@pytest.mark.parametrize("ending,counts", [(("superseded", None), False), (("failed", None), True)])
+def test_saying_a_stopped_project_counts_only_real_tries(ending, counts):
+    """Comme ses autres demandes : devancée, elle reste à dire ; essayée pour de vrai, elle compte (ADR 0143)."""
+    from mika.faculties.projects.faculty import Project, ProjectsState, _ended, _set, _started, stall_subject
+
+    p = Project(id=1, title_ref="t", authority=c.SELF, created_at=0, owner="user_1", status=c.PAUSED,
+                stalled_at=at_paris(2026, 9, 28, 14, 0))
+    s = initiative_ends((_started, _ended), _set(ProjectsState(), p), params(None), c.NEED, stall_subject(1), ending)
+    assert s.projects[1].stall_attempts == (2 if counts else 0) and not s.projects[1].stall_asked
 
 
 def test_two_projects_waiting_on_the_same_person_make_one_wish_not_a_double_one(tmp_path):

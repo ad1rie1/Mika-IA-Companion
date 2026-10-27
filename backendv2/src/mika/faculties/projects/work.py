@@ -11,6 +11,9 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
   mesure du lien — jamais d'un appel au modèle. Un point quand le travail
   s'est posé (rien en cours, rien de dû avant un moment), qui dit d'une fois
   tout ce qui a été mené à bout depuis le précédent.
+- **Demander** : un objectif qui bloque ou attend quelque chose, à qui l'a confié
+  (ou à une propriétaire) ; un projet à elle arrêté par des pannes, à une
+  propriétaire, pour qu'on le relance (ADR 0143).
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from mika.faculties.projects.faculty import (
     rank,
     run_bundles,
     runs_today,
+    stall_subject,
     subject_of,
     window_opens,
 )
@@ -300,23 +304,36 @@ def _needy(o: Objective, now: int, pm: Any) -> bool:
     return o.status == c.OPEN and bool(o.need_ref)
 
 
+def _stalled(p: Project, now: int, pm: Any) -> bool:
+    """Un projet à elle mis en pause par des pannes depuis peu, qu'elle n'a pas encore dit (ADR 0143)."""
+    return p.status == c.PAUSED and p.authority == c.SELF and bool(p.stalled_at) and not p.stall_asked \
+        and p.stall_attempts < pm.share_attempts and now - p.stalled_at <= pm.share_within_us
+
+
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.NEED: (0.0, 10.0)},
                   reads=[identity_c.OWNERS, identity_c.IS_OWNER, identity_c.HANDLES, identity_c.REACHABLE,
                          presence_c.PRESENT, identity_c.IDENTITY])
 def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
     """« J'ai besoin de toi pour… » : un objectif bloque, ou attend quelque chose (une clé, un accord, un outil) — elle
     le dit à qui l'a confié, ou, pour un projet à elle, à qui s'occupe d'elle (une fois, quelques tentatives au
-    plus), dans les deux modes. Un projet à elle qui bloquait faute d'un accès ne demandait rien (ADR 0104)."""
+    plus), dans les deux modes. Un projet à elle qui bloquait faute d'un accès ne demandait rien (ADR 0104). Un
+    projet à elle arrêté par des pannes se dit de même : « il ne tourne plus, tu peux le relancer ? » — la machine a
+    lâché, pas elle (ADR 0143)."""
     pm = params(frame.env.params_of("projects", frame.root))
     out, seen = [], set()
     for p in sorted(s.projects.values(), key=lambda p: p.id):
-        if p.status != c.ACTIVE:
+        o = next((x for x in p.objectives if _needy(x, frame.now, pm)), None) if p.status == c.ACTIVE else None
+        if o is None and not _stalled(p, frame.now, pm):
             continue
-        o = next((x for x in p.objectives if _needy(x, frame.now, pm)), None)
-        reader = _reader(p, frame) if o is not None else None
-        if o is None or reader is None:
+        reader = _reader(p, frame)
+        if reader is None:
             continue
         person, address = reader
+        who = _who_words(frame, person, address)
+        if o is not None:
+            subject, brief = subject_of(p.id, o.id), phrase("projects.brief.need", who=who)
+        else:
+            subject, brief = stall_subject(p.id), phrase("projects.brief.stalled", who=who)
         if address in seen:
             # une demande à la fois par personne : deux projets qui attendent ne font pas une envie double — un
             # message n'en porte qu'une, et la seconde partait huit secondes après la première (sonde du 2026-10-13)
@@ -324,6 +341,5 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         seen.add(address)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.NEED, pm.need_evidence, resources=frozenset({floor(address)}),
-            args=FrozenDict({"brief:projects": phrase("projects.brief.need", who=_who_words(frame, person, address)),
-                             "subject": subject_of(p.id, o.id), "share": FULL})))
+            args=FrozenDict({"brief:projects": brief, "subject": subject, "share": FULL})))
     return out
