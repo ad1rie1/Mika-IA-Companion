@@ -500,9 +500,9 @@ def _resented(handle="user_9", hostility=0.4):
     ((email_c.MENTION,), None, P.grudge_inform_shift, "prévenir d'un mail important : décalé, pas empêché"),
     ((projects_c.NEED,), None, P.grudge_inform_shift, "« j'ai besoin de toi pour ton projet » : décalé"),
     ((goals_c.REMIND, email_c.MENTION), None, 0.0, "une promesse à tenir l'emporte"),
-    ((social_c.GREETING, social_c.PRESENT_PERSON), social_c.GRUDGE, 0.0, "pas même une salutation (ADR 0013)"),
-    ((social_c.CHAT,), social_c.GRUDGE, 0.0, "pas d'envie de bavarder"),
-    ((others_c.FOLLOW_UP,), social_c.GRUDGE, 0.0, "« alors, cet entretien ? » n'est pas dû"),
+    ((social_c.GREETING, social_c.PRESENT_PERSON), None, P.grudge_shift, "une salutation recule (ADR 0013, 0150)"),
+    ((social_c.CHAT,), None, P.grudge_shift, "l'envie de bavarder recule"),
+    ((others_c.FOLLOW_UP,), None, P.grudge_shift, "« alors, cet entretien ? » n'est pas dû : il recule"),
 ])
 def test_a_grudge_holds_back_the_ordinary_never_a_promise(reasons, veto, shift, why):
     from mika.faculties.social.initiative import _restraint
@@ -524,7 +524,7 @@ def test_what_is_owed_is_declared_once_and_every_restraint_reads_it():
     frame = _resented()
     assert [m(None, frame, row) for m in (_restraint, _budget, _receptive)] == [Modulation()] * 3
     assert agency_c.OWED <= agency_c.NOT_SPEAKING_UP and agency_c.INFORMS.isdisjoint(agency_c.NOT_SPEAKING_UP)
-    assert social_c.GREETING not in agency_c.OWED  # saluer n'est pas dû : la rancune l'empêche
+    assert social_c.GREETING not in agency_c.OWED  # saluer n'est pas dû : la rancune le fait reculer
 
 
 def test_she_keeps_her_word_even_to_someone_she_resents(tmp_path):

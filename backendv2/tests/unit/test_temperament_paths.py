@@ -297,7 +297,7 @@ def test_mask_who_sees_her_face(tmp_path):
 
 def test_jealousy_she_waits_for_an_answer_and_they_write_to_others(tmp_path):
     """Son dernier message à une amie attend la réponse ; l'amie écrit dans un salon, sans s'adresser à elle. La
-    jalouse le ressent (une fois par attente) ; au milieu, rien."""
+    jalouse le ressent (une fois par attente) ; au milieu, un peu — sans coupure (ADR 0150)."""
     async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
         await befriend(kernel, "user_1")
         await say(kernel, voice, "user_1", "[EMOTION:happy:0.4]")
@@ -313,7 +313,7 @@ def test_jealousy_she_waits_for_an_answer_and_they_write_to_others(tmp_path):
     assert got["jalouse"][0]
     assert len(got["jalouse"][1]) == 1 and got["jalouse"][1][0].intensity > 0  # une fois par attente
     assert len(got["yandere"][1]) == 1
-    assert got["milieu"][1] == []
+    assert len(got["milieu"][1]) == 1 and 0 < got["milieu"][1][0].intensity < got["jalouse"][1][0].intensity
 
 
 def test_shyness_greeting_a_stranger_who_arrives(tmp_path):

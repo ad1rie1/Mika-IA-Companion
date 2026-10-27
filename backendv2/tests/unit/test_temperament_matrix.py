@@ -83,12 +83,12 @@ def test_every_slider_drives_something_and_is_told():
         assert phrase(f"self.temperament.name.{slider}")
 
 
-def test_inquisitiveness_asks_about_their_day_only_above_the_middle_and_sooner_the_higher():
-    """L'intérêt pour les autres (ADR 0137) : jamais au milieu ni en dessous (24 h, la valeur d'avant), puis de plus en
-    plus tôt, jusqu'à midi au plus haut que permet la console."""
+def test_inquisitiveness_asks_about_their_day_sooner_the_higher_without_a_cutoff():
+    """L'intérêt pour les autres (ADR 0137, sans coupure depuis l'ADR 0150) : jamais tout en bas (24 h), puis de plus
+    en plus tôt — passé 23 h au plus bas que permet la console, 21 h au milieu —, jusqu'à midi au plus haut."""
     hours = [social_derive(_t(inquisitiveness=x)).their_day_from_h for x in (0.0, T.LOWEST, 0.5, 0.6, 0.8, T.HIGHEST)]
-    assert hours[:3] == [24.0, 24.0, 24.0]
-    assert 24.0 > hours[3] > hours[4] > hours[5] == 12.0
+    assert hours[0] == 24.0 and hours[2] == 21.0
+    assert 24.0 > hours[1] > 23.0 and hours[1] > hours[2] > hours[3] > hours[4] > hours[5] == 12.0
     assert social_derive(_t(inquisitiveness=1.0)).their_day_from_h == 12.0
 
 
@@ -106,16 +106,23 @@ def test_her_reaction_and_her_defense_drive_the_affect_too():
     assert set(ph.DEFENSE_FACE) == {k for k, _l in T.DEFENSES if k}
 
 
+#: ce qu'une coupure retirée de la dérivation a changé au milieu (ADR 0150) : voulu, et dit ici — la jalousie y pique
+#: un peu, l'intérêt pour les autres y demande sa journée à 21 h
+UNCUT = {("attention", "envy_intensity"): 0.15, ("social", "their_day_from_h"): 21.0}
+
+
 def test_at_the_middle_every_new_slider_gives_back_the_values_from_before():
     """Au milieu, ce que pilote un curseur né avec la matrice vaut exactement le défaut d'avant elle : un journal
-    existant se rejoue tel quel, et Mika ne change pas tant qu'on n'y touche pas."""
+    existant se rejoue tel quel, et Mika ne change pas tant qu'on n'y touche pas — sauf ce qu'une coupure retirée a
+    changé (``UNCUT``, ADR 0150)."""
     for fac in faculties():
         if fac.derive is None or fac.params is None:
             continue
         moved = {path for slider, where in params.influence(fac, T.Temperament()).items() if slider in NEW
                  for path, _lo, _hi in where}
         middle, before = forms.flatten(fac.derive(T.Temperament(), None)), forms.flatten(fac.params())
-        changed = {path: (before[path], middle[path]) for path in moved if middle[path] != before[path]}
+        changed = {path: (before[path], middle[path]) for path in moved if middle[path] != before[path]
+                   and UNCUT.get((fac.name, path)) != middle[path]}
         assert changed == {}, f"{fac.name} : {changed}"
 
 
@@ -414,10 +421,12 @@ def test_the_mask_who_sees_what():
     assert shown_factor(affect_derive(T.Temperament()), "close", True)(Emotion.LOVE) < 1.0  # refermée
 
 
-def test_jealousy_weighs_what_she_declares_and_wakes_only_above_the_middle():
+def test_jealousy_weighs_what_she_declares_and_its_sting_grows_without_a_cutoff():
     jealous = Declared(Emotion.JEALOUS, 0.4)
     assert ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(T.Temperament()).jealous_weight}) is jealous
     assert ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(_t(jealousy=0.9)).jealous_weight}).intensity > 0.4 \
         > ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(_t(jealousy=0.1)).jealous_weight}).intensity
-    assert attention_derive(T.Temperament()).envy_intensity == 0 == attention_derive(_t(jealousy=0.1)).envy_intensity
-    assert attention_derive(_t(jealousy=0.9)).envy_intensity > 0
+    # sans coupure (ADR 0150) : rien tout en bas, un peu au milieu, la piqûre tout en haut
+    stings = [attention_derive(_t(jealousy=x)).envy_intensity for x in (0.0, T.LOWEST, 0.5, T.HIGHEST, 1.0)]
+    assert stings[0] == 0.0 < stings[1] < stings[2] < stings[3] < stings[4] == 0.6
+    assert attention_derive(T.Temperament()).envy_intensity == stings[2] == 0.15

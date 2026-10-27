@@ -234,9 +234,15 @@ class AttentionParams(BaseModel):
     envy_intensity: Annotated[float, Knob(
         label="Jalousie : quand on l'attend et qu'on écrit aux autres", group="Révision, manque, blocage", lo=0.0,
         hi=1.0, step=0.05,
-        help="Ce qu'elle ressent (de la jalousie, pour elle et envers la personne) quand une amie ou une proche dont "
-             "elle attend la réponse écrit aux autres sans s'adresser à elle — une fois par attente, davantage pour sa "
-             "propriétaire. Dérivé de la jalousie : 0 au milieu et en dessous.")] = 0.0
+        help="Ce qu'elle ressent (de la jalousie, pour elle et envers la personne) quand quelqu'un dont elle attend "
+             "la réponse écrit aux autres sans s'adresser à elle — une fois par attente, davantage pour sa "
+             "propriétaire, au cran de leur lien (ci-dessous). Dérivé de la jalousie, sans coupure : rien tout en "
+             "bas, 0,15 au milieu, 0,6 tout en haut.")] = 0.0
+    envy_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Jalousie, selon la proximité", group="Révision, manque, blocage", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette jalousie à chaque cran de leur lien (son intensité en est multipliée), de 0 "
+             "(jamais) à 1 (entière) : une connaissance la pique moins qu'une amie.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
     broken_promise_felt: Annotated[float, Knob(
         label="Promesse non tenue : la gêne ressentie", group="Promesses", lo=0.0, hi=1.0, step=0.05,
         help="Ce qu'elle ressent (de la gêne, pour elle et envers la personne) quand une promesse passe son échéance "
@@ -295,12 +301,17 @@ class AttentionParams(BaseModel):
              "jours.")] = 1.5
     remorse_from: Annotated[float, Knob(
         label="Avoir été dure : une colère d'au moins", group="Révision, manque, blocage", lo=0.1, hi=1.0, step=0.05,
-        help="Quand elle répond à une amie ou une proche avec de la colère, de l'agacement ou du dégoût au moins "
-             "aussi intenses (sa balise d'émotion), une pensée lui reste (« J'ai été dure avec Alice ») — l'envie de "
-             "revenir vers elle. Jamais envers une inconnue : un troll n'appelle pas d'excuses.")] = 0.6
+        help="Quand elle répond à quelqu'un avec de la colère, de l'agacement ou du dégoût au moins aussi intenses "
+             "(sa balise d'émotion), une pensée lui reste (« J'ai été dure avec Alice ») — l'envie de revenir vers "
+             "elle, au cran de leur lien (ci-dessous).")] = 0.6
     remorse_intensity: Annotated[float, Knob(
         label="Avoir été dure : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de cette pensée (gênée) à sa naissance.")] = 0.55
+    remorse_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Avoir été dure, selon la proximité", group="Révision, manque, blocage", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette pensée à chaque cran de leur lien (son intensité en est multipliée), de 0 (jamais) "
+             "à 1 (entière). Rien envers une inconnue, d'abord : un troll n'appelle pas d'excuses.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
     lie_intensity: Annotated[float, Knob(
         label="Avoir menti : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="Quand elle a menti à quelqu'un (sa marque de mensonge), une pensée gênée lui reste (« J'ai menti à "
@@ -382,6 +393,11 @@ class AttentionParams(BaseModel):
     glad_evidence: Annotated[float, Knob(
         label="Poids d'un bel échange", group="Relancer", lo=0.0, hi=4.0, step=0.1,
         help="La preuve (log-odds) de cette envie : faible — elle le fait si elle y pense, pas à coup sûr.")] = 2.5
+    glad_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Un bel échange, selon la proximité", group="Relancer", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette envie à chaque cran de leur lien (sa preuve en est multipliée), de 0 (jamais) à 1 "
+             "(entière) : une connaissance, rarement.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
     # ce qu'elle attend (ADR 0086)
     anticipation_ramp_us: Annotated[int, Knob(
         label="Attendre : depuis combien de temps avant", group="Ce qu'elle attend", lo=HOUR, hi=14 * DAY,
@@ -609,8 +625,8 @@ def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
         "reflective_from": around(t.introspection, 0.25, 1 / 1.6),
         # y repenser la nuit : une âme introspective digère davantage (au milieu, un tiers reste au matin)
         "digest_factor": around(t.introspection, 1 / 3, 1 / 1.6),
-        # la jalousie : rien au milieu ni en deçà ; jalouse, un silence qui écrit aux autres la pique
-        "envy_intensity": round(0.6 * max(0.0, 2.0 * t.jealousy - 1.0), 4),
+        # la jalousie, sans coupure (ADR 0150) : rien tout en bas, un peu au milieu, la piqûre tout en haut
+        "envy_intensity": round(0.6 * t.jealousy ** 2, 4),
     }
     values.update(dict(overrides or {}))
     return AttentionParams(**values)
@@ -738,18 +754,18 @@ def watching(s: AttentionState, person: str) -> bool:
 HARSH = frozenset({Emotion.ANGRY, Emotion.FRUSTRATED, Emotion.DISGUSTED})
 
 
-def _remorse(s: AttentionState, person: str, source: int, at: int, p: AttentionParams) -> AttentionState:
-    """Elle a été dure avec une amie : une pensée (« J'ai été dure avec Alice »), une seule par personne à la fois
-    — une dispute qui dure la ravive, elle n'en crée pas dix."""
+def _remorse(s: AttentionState, person: str, source: int, at: int, p: AttentionParams,
+             felt: float) -> AttentionState:
+    """Elle a été dure avec quelqu'un : une pensée (« J'ai été dure avec Alice »), à ``felt`` (l'intensité au cran de
+    leur lien), une seule par personne à la fois — une dispute qui dure la ravive, elle n'en crée pas dix."""
     alive = [t for t in _alive(s, at, p).values() if t.origin == c.REMORSE and person in t.about]
     if alive:
         t = min(alive, key=lambda t: t.id)
-        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=max(current(t, at, p),
-                                                                                  p.remorse_intensity), touched_at=at)))
-    if p.remorse_intensity <= 0 or any(q.origin == c.REMORSE and q.person == person for q in s.pending):
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=max(current(t, at, p), felt),
+                                                                touched_at=at)))
+    if felt <= 0 or any(q.origin == c.REMORSE and q.person == person for q in s.pending):
         return s
-    return replace(s, pending=(*s.pending, Pending(source, c.REMORSE, person, Emotion.EMBARRASSED.value,
-                                                   p.remorse_intensity, at)))
+    return replace(s, pending=(*s.pending, Pending(source, c.REMORSE, person, Emotion.EMBARRASSED.value, felt, at)))
 
 
 def _lied(s: AttentionState, person: str, source: int, at: int, p: AttentionParams) -> AttentionState:
@@ -818,9 +834,11 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, glad=s.glad.delete(person))  # elle lui a reparlé depuis : l'envie s'est dite, ou est passée
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
     if d.kind == Kind.REPLY and d.room is None and declared is not None and declared.emotion in HARSH \
-            and declared.intensity >= p.remorse_from \
-            and cx.facts.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE):
-        s = _remorse(s, person, d.reply_to or e.seq, e.at, p)
+            and declared.intensity >= p.remorse_from:
+        # au cran de leur lien (ADR 0150) : une amie entière, une connaissance un peu, un troll rien
+        felt = p.remorse_intensity * p.remorse_by_closeness.get(cx.facts.get(social_c.CLOSENESS(person)), 0.0)
+        if felt > 0:
+            s = _remorse(s, person, d.reply_to or e.seq, e.at, p, round(felt, 3))
     if d.annotation(expression_c.LIE_ANNOTATION) is not None:
         s = _lied(s, person or d.target, e.seq, e.at, p)
     if d.kind != Kind.REPLY or declared is None or not _marking(declared, p):
@@ -1452,14 +1470,14 @@ def _envied_felt(e, cx) -> list[Appraisal]:
 
 
 def envy(s: AttentionState, person: str, closeness: str, weight: float, p: Any) -> float:
-    """Ce que lui fait une personne qui écrit aux autres sans s'adresser à elle (0 : rien) : seulement une amie ou une
-    proche, dont son dernier message attend encore la réponse, une fois par attente — davantage pour sa propriétaire
-    (``social.WEIGHT``). Au milieu de la jalousie et en deçà : rien."""
+    """Ce que lui fait une personne qui écrit aux autres sans s'adresser à elle (0 : rien) : quelqu'un dont son dernier
+    message attend encore la réponse, une fois par attente, au cran de leur lien (``envy_by_closeness``, ADR 0150) —
+    davantage pour sa propriétaire (``social.WEIGHT``)."""
     ex = s.exchanges.get(person)
-    if p.envy_intensity <= 0 or ex is None or not ex.unanswered or ex.envied_at >= ex.last_out \
-            or closeness not in (social_c.FRIEND, social_c.CLOSE):
+    share = p.envy_by_closeness.get(closeness, 0.0)
+    if p.envy_intensity <= 0 or share <= 0 or ex is None or not ex.unanswered or ex.envied_at >= ex.last_out:
         return 0.0
-    return round(min(1.0, p.envy_intensity * weight), 3)
+    return round(min(1.0, p.envy_intensity * weight * share), 3)
 
 
 @ATTENTION.appraisal(c.EXPECTATION_MISSED)

@@ -98,8 +98,9 @@ from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 
 SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attention_c.SIGNAL})
-#: une inquiétude, une peine, un doute, une frustration (quelque chose qui ne marche pas) donnent envie
-#: d'y voir clair ; une insulte (la colère, le dégoût), non
+#: une inquiétude, une peine, un doute, une frustration (quelque chose qui ne marche pas) donnent envie d'y voir clair,
+#: entières ; les autres couleurs (la colère, le dégoût, la joie), à une part de leur intensité (``seed_other_share``,
+#: ADR 0150)
 SEEDING_EMOTIONS = frozenset({"sad", "anxious", "scared", "confused", "lonely", "melancholic", "thinking",
                               "surprised", "curious", "nostalgic", "frustrated"})
 #: une exploration peut devenir un projet à elle (``start_project``) quand elle s'avère plus grosse qu'une envie ;
@@ -283,7 +284,8 @@ class Seed:
     def _thoughts(self, s: GoalsState, frame: Frame, p: Any) -> list[attention_c.ThoughtReading]:
         busy = _live_sources(s, frame.now)
         return [t for t in frame.get(attention_c.THOUGHTS)
-                if t.origin in SEEDING_ORIGINS and t.emotion in SEEDING_EMOTIONS and t.intensity >= p.seed_thought_from
+                if t.origin in SEEDING_ORIGINS
+                and t.intensity * (1.0 if t.emotion in SEEDING_EMOTIONS else p.seed_other_share) >= p.seed_thought_from
                 and not (t.origin == attention_c.SIGNAL and t.bundle in UNEXPLORED_SOURCES)
                 and not {f"thought:{t.id}", subject_key(f"thought:{t.id}", t.about)} & busy
                 and not _recently_closed(s, subject_key(f"thought:{t.id}", t.about), frame.now, p)]

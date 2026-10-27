@@ -146,10 +146,14 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.RECONTACT: (0.0, 12.0), c.COMFORT: (0.0, 12.0),
                                                   c.CHAT: (0.0, 3.5)},
-                reads=[c.CIRCLE, c.CONTACT, c.CLOSENESS, c.WEIGHT, identity_c.HANDLES, identity_c.REACHABLE,
+                reads=[c.CIRCLE, c.KNOWN, c.CONTACT, c.CLOSENESS, c.WEIGHT, identity_c.HANDLES, identity_c.REACHABLE,
                        identity_c.IDENTITY, presence_c.PRESENT, affect_c.MOOD, affect_c.WARMTH, transcript_c.LAST_FROM])
 def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
+    """Aller vers quelqu'un qu'elle connaît : reprendre contact après un silence, chercher du réconfort quand elle
+    va mal, juste discuter — au cran de leur lien (``reach_out_by_closeness``, ADR 0150 : une amie entière, une
+    connaissance rarement)."""
     p = params(frame.env.params_of("social", frame.root))
+    reach = p.reach_out_by_closeness
     if not _daytime(frame, p.day_start_min, p.day_end_min):
         return []
     out: list[Candidate] = []
@@ -157,12 +161,15 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
     mood = frame.get(affect_c.MOOD)
     distressed = (A.valence(mood.felt) <= p.distress_valence and mood.felt_intensity >= p.distress_intensity
                   and frame.now - s.comforted_at >= p.comfort_spacing_us)
-    for person in frame.get(c.CIRCLE):  # ses amies et proches seulement : les inconnues ne coûtent rien ici
+    # celles qu'elle connaît (ses connaissances seulement si la table leur laisse quelque chose) : les inconnues ne
+    # coûtent rien ici
+    for person in frame.get(c.KNOWN if reach.get(c.ACQUAINTANCE, 0.0) > 0 else c.CIRCLE):
         if not is_identifiable(person) or person.startswith("name:") \
                 or contact_of(s, person, frame.get(identity_c.HANDLES(person))) is None:
             continue
         level = frame.get(c.CLOSENESS(person))
-        if _RANK[level] < _RANK[c.FRIEND]:
+        share = reach.get(level, 0.0)
+        if share <= 0:
             continue
         reading = frame.get(c.CONTACT(person))
         if not reading.last_in:
@@ -177,26 +184,26 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
             habit = (phrase("social.initiative.recontact.habit", habit=_habit_words(reading.rhythm_days))
                      if reading.measured else "")
             brief = phrase("social.initiative.recontact.brief", silence=_silence_words(silent), habit=habit, who=who)
-            out.append(Candidate(Kind.INITIATIVE, address, c.RECONTACT, p.recontact_evidence,
+            out.append(Candidate(Kind.INITIATIVE, address, c.RECONTACT, round(p.recontact_evidence * share, 3),
                                  resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                                  args=FrozenDict({"brief:social": brief})))
         elif distressed and frame.now - reading.last_out >= p.comfort_spacing_us:
             warmth = frame.get(affect_c.WARMTH(person))
-            comfort.append((_RANK[level] + warmth, person, address))
+            comfort.append((_RANK[level] + warmth, person, address, share))
         elif reading.silence_ratio >= p.chat_ratio and \
                 frame.now - max(reading.last_in, reading.last_out) >= p.chat_after_us:
             # juste l'envie de discuter : peu de chose seule, assez quand le besoin de compagnie s'y ajoute
             warmth = frame.get(affect_c.WARMTH(person))
-            evidence = (p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth
+            evidence = ((p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth) * share
             brief = phrase("social.initiative.chat.brief", who=who)
             out.append(Candidate(Kind.INITIATIVE, address, c.CHAT, evidence, resources=frozenset({floor(address)}),
                                  guards=(_guard(frame, person),), args=FrozenDict({"brief:social": brief})))
     if comfort:
-        _score, person, address = max(comfort)
+        _score, person, address, share = max(comfort)
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
         who = f"« {name} »" if name else phrase("social.initiative.comfort.someone")
         brief = phrase("social.initiative.comfort.brief", mood=A.FR[mood.felt], who=who)
-        out.append(Candidate(Kind.INITIATIVE, address, c.COMFORT, p.comfort_evidence,
+        out.append(Candidate(Kind.INITIATIVE, address, c.COMFORT, round(p.comfort_evidence * share, 3),
                              resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))
     return out
@@ -284,12 +291,14 @@ def _in_conversation(s: SocialState, frame: Frame, row: RowView) -> Modulation:
 
 @SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.HOSTILITY])
 def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
-    """Rien d'ordinaire vers quelqu'un qui a installé une rancune — même pas
-    une salutation. Tenir parole (``agency.OWED`` : le rappel qu'il lui a
-    demandé) n'en dépend pas ; prévenir (``agency.INFORMS``) n'est que décalé :
-    on prévient quelqu'un même fâchée contre lui, sans se presser. (Ne pas
-    harceler quelqu'un qui ne répond pas, quelle que soit la raison, est la
-    retenue du budget d'initiatives : ``agency``.)"""
+    """Vers quelqu'un qui a installé une rancune, l'ordinaire recule fortement
+    (``grudge_shift``) — même une salutation devient rare, sans être interdite
+    (ADR 0150 : un recul, plus un veto) ; si elle lui écrit, la conversation
+    lui dit ce qu'elle lui garde. Tenir parole (``agency.OWED`` : le rappel
+    qu'il lui a demandé) n'en dépend pas ; prévenir (``agency.INFORMS``) n'est
+    que décalé : on prévient quelqu'un même fâchée contre lui, sans se presser.
+    (Ne pas harceler quelqu'un qui ne répond pas, quelle que soit la raison, est
+    la retenue du budget d'initiatives : ``agency``.)"""
     if row.target in ("any", "none") or not is_identifiable(row.target):
         return Modulation()
     p = params(frame.env.params_of("social", frame.root))
@@ -301,4 +310,4 @@ def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
         return Modulation()
     if agency_c.INFORMS & reasons:
         return Modulation(shift=p.grudge_inform_shift) if p.grudge_inform_shift else Modulation()
-    return Modulation(veto=c.GRUDGE)
+    return Modulation(shift=p.grudge_shift) if p.grudge_shift else Modulation()

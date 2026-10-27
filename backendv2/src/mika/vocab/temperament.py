@@ -156,13 +156,13 @@ class Temperament(BaseModel):
     empathy: Annotated[float, _slider("Empathie", "Combien elle se soucie des autres : s'inquiéter, prendre des "
                                       "nouvelles, être triste avec quelqu'un.", 135, "indifférente",
                                       "se soucie de chacun", OTHERS)] = Slider
-    #: Ce que vivent les autres l'intéresse (ADR 0137) : au-dessus du milieu, elle demande à une amie, une fois par
-    #: jour, comment se passe sa journée (``social.their_day_from_h``) — et se dit au modèle. Distinct de la curiosité
-    #: (apprendre, explorer) et de l'empathie (s'inquiéter de qui va mal).
+    #: Ce que vivent les autres l'intéresse (ADR 0137, 0150) : elle demande à une amie, une fois par jour, comment se
+    #: passe sa journée, d'autant plus tôt qu'elle s'y intéresse (``social.their_day_from_h``) — et se dit au modèle.
+    #: Distinct de la curiosité (apprendre, explorer) et de l'empathie (s'inquiéter de qui va mal).
     inquisitiveness: Annotated[float, _slider("Intérêt pour les autres", "Combien ce que vivent les gens "
                                               "l'intéresse : leur demander comment se passe leur journée, ce qu'ils "
-                                              "font, y revenir. Au-dessus du milieu, elle le demande à ses amis une "
-                                              "fois par jour, d'autant plus tôt qu'elle s'y intéresse.", 137,
+                                              "font, y revenir. Elle le demande à ses amis une fois par jour, "
+                                              "d'autant plus tôt qu'elle s'y intéresse (tout en bas, jamais).", 137,
                                               "ne demande rien", "veut tout savoir", OTHERS)] = Slider
     #: Fermée avec les inconnus : ce qu'une inconnue comble de son besoin de compagnie, saluer qui arrive.
     shyness: Annotated[float, _slider("Timidité", "Comment elle va vers qui elle ne connaît pas : la saluer, ce que "

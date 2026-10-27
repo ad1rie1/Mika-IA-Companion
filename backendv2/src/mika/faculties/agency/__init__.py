@@ -167,7 +167,7 @@ class AgencyParams(BaseModel):
     follow_up_min_us: Annotated[int, Knob(
         label="Relance douce : au plus tôt après", group="Ne pas harceler", lo=HOUR, hi=14 * DAY,
         help="Après une initiative restée sans réponse, plus rien vers la personne tant qu'elle n'a pas écrit — "
-             "sauf une relance douce, vers une amie ou une proche, pas avant ce délai…")] = DAY
+             "sauf une relance douce, selon leur proximité (ci-dessous), pas avant ce délai…")] = DAY
     follow_up_rhythms: Annotated[float, Knob(
         label="Relance douce : au moins tant de fois son rythme", group="Ne pas harceler", lo=1, hi=10, step=0.5,
         help="… ni avant ce multiple du rythme habituel de la relation (on n'écrit pas deux fois en deux jours à "
@@ -182,6 +182,11 @@ class AgencyParams(BaseModel):
         help="Combien de fois elle relance quelqu'un qui ne lui répond pas (chacune prend de ses nouvelles, la "
              "suivante dit ce que ce silence lui fait), avant de ne plus rien lui écrire tant qu'il ne revient "
              "pas.")] = 1
+    follow_up_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Relance douce, selon la proximité", group="Ne pas harceler", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde l'envie de relancer à chaque cran de leur lien, de 0 (jamais) à 1 (entière) : le délai "
+             "d'une relance en est divisé — une connaissance à 0,5 attend deux fois plus longtemps qu'une amie.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,7 +460,8 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     plus d'initiative ordinaire vers la personne tant qu'elle n'a pas écrit —
     sauf des relances (``follow_ups``, selon son tempérament), chacune après un
     délai tiré au sort (compté depuis la lecture quand son application la dit ;
-    jamais avant qu'elle l'ait lue), vers une amie ou une proche ; après la
+    jamais avant qu'elle l'ait lue), au cran de leur lien (``follow_up_by_closeness``,
+    ADR 0150 : une connaissance plus tard qu'une amie, jamais une inconnue) ; après la
     dernière, plus rien — sinon, des mois plus tard, prendre de ses nouvelles
     une seule fois (``ONCE_MORE``, ADR 0058). Si son dernier message (réponse comprise) attend
     encore, quelques heures de retenue — davantage s'il posait une question ;
@@ -482,10 +488,11 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     if mine.initiatives:
         if mine.unseen:
             return c.UNANSWERED  # elle ne l'a pas encore lu (son application le dit) : on ne relance pas
-        friendly = frame.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE)
+        # au cran de leur lien (ADR 0150) : une connaissance, plus tard qu'une amie ; une inconnue, jamais
+        share = p.follow_up_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
         # le délai d'une relance se compte depuis la lecture, quand on la sait
         since = frame.now - max(mine.last_initiative_at, mine.seen_at)
-        if friendly and since >= follow_up_after(frame, target, person, p):
+        if share > 0 and since * share >= follow_up_after(frame, target, person, p):
             return None  # une relance (la consigne le lui dit : prendre de ses nouvelles)
         return c.UNANSWERED
     if mine.closed_at and frame.now - mine.closed_at < p.farewell_quiet_us:

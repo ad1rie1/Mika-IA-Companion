@@ -45,13 +45,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
-from typing import Any
+from typing import Annotated, Any
 
 from sqlalchemy import BigInteger, Column, Index, Table
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.forms import Knob
 from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table
 
 OWNER = "social"
@@ -64,12 +65,22 @@ COMFORT = "comfort"
 CHAT = "chat"
 #: Reprendre des nouvelles d'une amie partie sans plus répondre, longtemps après — une fois (ADR 0058).
 REKINDLE = "rekindle"
-#: Veto : on ne va pas vers quelqu'un qui a installé une rancune. (Ne pas écrire deux fois de suite à
-#: quelqu'un qui n'a pas répondu est la retenue d'``agency`` : ``agency.UNANSWERED``.)
+#: Une rancune installée : ses initiatives vers la personne reculent (``grudge_shift`` — un recul depuis l'ADR 0150,
+#: plus un veto) ; c'est aussi le critère qui défait une amitié. (Ne pas écrire deux fois de suite à quelqu'un qui n'a
+#: pas répondu est la retenue d'``agency`` : ``agency.UNANSWERED``.)
 GRUDGE = "grudge"
 
 STRANGER, ACQUAINTANCE, FRIEND, CLOSE = "stranger", "acquaintance", "friend", "close"
 CLOSENESS_LEVELS = (STRANGER, ACQUAINTANCE, FRIEND, CLOSE)
+#: Les crans, tels que la console les nomme dans une table par proximité (ADR 0150)
+CLOSENESS_NAMES: tuple[tuple[str, str], ...] = ((STRANGER, "pas encore de lien"), (ACQUAINTANCE, "connaissance"),
+                                                (FRIEND, "amitié"), (CLOSE, "proche"))
+#: … sans l'inconnue : la table d'un geste envers quelqu'un qu'elle connaît (ses attentions passent en revue
+#: ``KNOWN``, jamais les inconnues de passage)
+KNOWN_NAMES = CLOSENESS_NAMES[1:]
+#: Une table par proximité (ADR 0150) : ce qu'un geste ou un ressenti garde de sa force à chaque cran, de 0 (rien)
+#: à 1 (entier) — un cran absent vaut 0.
+ByCloseness = dict[str, Annotated[float, Knob(lo=0.0, hi=1.0, step=0.05)]]
 
 
 class ProfileRevised(Payload):
@@ -215,6 +226,10 @@ MISSED = FactKey("social.missed", type=tuple, time_varying=True)
 #: propriétaire) : un tri bon marché, sans affect, qui contient toute amie ou proche d'aujourd'hui — ce qui ne
 #: regarde que les amies ne paie pas le prix de toutes les inconnues de passage.
 CIRCLE = FactKey("social.circle", type=tuple)
+#: Celles qui sont — ou ont pu être — au moins des connaissances (ADR 0150) : le même tri bon marché que ``CIRCLE``,
+#: un cran plus bas ; ce qui regarde aussi les connaissances (ses attentions) ne paie pas le prix des inconnues de
+#: passage.
+KNOWN = FactKey("social.known", type=tuple)
 #: Les personnes avec qui celle-ci a un lien (elles étaient ensemble dans une petite conversation, ou l'une l'a
 #: nommée en lui racontant sa vie), telles qu'elles valent maintenant (ADR 0058).
 TIES = FactFamily("social.ties", arg=str, type=tuple)

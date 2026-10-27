@@ -160,6 +160,12 @@ class SocialParams(BaseModel):
         label="Preuve d'une relance", group="Reprendre contact", lo=0, hi=12, step=0.5,
         help="Preuve d'initiative (log-odds) d'un manque. Au-dessus du seuil d'initiative (9 par défaut), une "
              "relance part seule ; plafonnée à 12 par l'arbitrage.")] = 10.5
+    reach_out_by_closeness: Annotated[c.ByCloseness, Knob(
+        label="Aller vers quelqu'un, selon la proximité", group="Reprendre contact", keys=c.KNOWN_NAMES,
+        help="Ce que gardent ses envies d'aller vers quelqu'un qu'elle connaît — reprendre contact après un "
+             "silence, chercher du réconfort, juste discuter — à chaque cran de leur lien : leur preuve en est "
+             "multipliée, de 0 (jamais) à 1 (entière). Une connaissance à 0,5 : rarement.")] = {
+        c.ACQUAINTANCE: 0.5, c.FRIEND: 1.0, c.CLOSE: 1.0}
     # longtemps après : une amie partie sans plus répondre, elle reprend de ses nouvelles une fois (ADR 0058)
     rekindle_after_us: Annotated[int, Knob(
         label="Longtemps après : un silence d'au moins", group="Reprendre des nouvelles, longtemps après",
@@ -231,11 +237,17 @@ class SocialParams(BaseModel):
         label="Écrire d'elle-même : jusqu'à", group="Heures d'initiative", lo=0, hi=24 * 60,
         help="Heure locale après laquelle elle ne le fait plus. Avant le début, la plage passe minuit (un "
              "tempérament nocturne : de 18 h à 1 h).")] = 20 * 60 + 30
-    # une rancune (hostilité installée) : ni initiative vers elle, ni amitié naissante
+    # une rancune (hostilité installée) : ses initiatives reculent, et pas d'amitié naissante
     grudge: Annotated[float, Knob(
         label="Seuil de rancune", group="Retenue", lo=0.05, hi=1, step=0.05,
-        help="À partir de cette hostilité installée (affect), aucune initiative ordinaire vers la personne — pas "
-             "même une salutation. Plus bas : la moindre contrariété coupe les ponts.")] = 0.2
+        help="À partir de cette hostilité installée (affect), ses initiatives ordinaires vers la personne reculent "
+             "(ci-dessous) — même une salutation devient rare. Plus bas : la moindre contrariété l'éloigne.")] = 0.2
+    grudge_shift: Annotated[float, Knob(
+        label="Envers une rancune : recul", group="Retenue", lo=-12, hi=0, step=0.5,
+        help="Ce que recule (log-odds) toute initiative ordinaire vers quelqu'un qu'elle garde en rancune — saluer, "
+             "bavarder, prendre des nouvelles : −6, presque jamais ; 0, comme envers tout le monde. Ce qui est dû "
+             "et ce qui prévient ont leur règle (ci-dessous). Si elle lui écrit quand même, la conversation lui dit "
+             "ce qu'elle lui garde.")] = -6.0
     grudge_inform_shift: Annotated[float, Knob(
         label="Prévenir malgré une rancune", group="Retenue", lo=-6, hi=0, step=0.5,
         help="Une rancune n'arrête ni ce qui est dû (un rappel promis part à l'heure, tel quel) ni ce qui prévient "
@@ -257,8 +269,9 @@ class SocialParams(BaseModel):
         label="Lui demander sa journée à partir de (heure)", group="Sa journée", lo=0.0, hi=24.0, step=0.25,
         help="À partir de cette heure, une fois par jour, elle a envie de savoir comment se passe la journée d'une "
              "amie ou d'une proche à qui elle parle en privé, et le lui demande — sauf si elle en a déjà parlé, ou "
-             "quand quelque chose de grave la touche. 24 : jamais. Dérivé de l'intérêt pour les autres : jamais au "
-             "milieu ni en dessous, de plus en plus tôt au-dessus (21 h à peine marqué, midi au plus haut).")] = 24.0
+             "quand quelque chose de grave la touche. 24 : jamais. Dérivé de l'intérêt pour les autres, sans "
+             "coupure : jamais tout en bas, de plus en plus tôt ensuite (passé 23 h au plus bas, 21 h au milieu, "
+             "midi au plus haut).")] = 24.0
     grudge_demote: Annotated[float, Knob(
         label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
         help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "
@@ -401,17 +414,17 @@ class SocialState:
     asked_day: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
-#: l'intérêt pour les autres : sous ce seuil (le milieu compris), elle ne demande jamais sa journée à personne
-_ASKS_ABOVE = 0.5
+#: l'intérêt pour les autres au milieu du curseur : 21 h
+_MIDDLE = 0.5
 
 
 def their_day_from(inquisitiveness: float) -> float:
-    """L'heure à partir de laquelle elle demande sa journée à une amie (ADR 0137) : 24 (jamais) au milieu et en
-    dessous — la valeur d'avant —, puis de 21 h, à peine au-dessus du milieu, à midi au plus haut que permet la
-    console (0,9)."""
-    if inquisitiveness <= _ASKS_ABOVE:
-        return 24.0
-    return round(lerp(21.0, 12.0, (inquisitiveness - _ASKS_ABOVE) / (0.9 - _ASKS_ABOVE)), 2)
+    """L'heure à partir de laquelle elle demande sa journée à une amie (ADR 0137, sans coupure depuis l'ADR 0150) :
+    24 (jamais) tout en bas, passé 23 h au plus bas que permet la console (0,1), 21 h au milieu, puis de plus en plus
+    tôt, jusqu'à midi au plus haut (0,9)."""
+    if inquisitiveness <= _MIDDLE:
+        return round(lerp(24.0, 21.0, inquisitiveness / _MIDDLE), 2)
+    return round(lerp(21.0, 12.0, (inquisitiveness - _MIDDLE) / (0.9 - _MIDDLE)), 2)
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -1064,6 +1077,11 @@ def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
     return max(ct.total_days, len(ct.days)) >= p.friend_days and ct.inbound >= p.friend_messages
 
 
+def _could_be_acquainted(ct: Contact, p: SocialParams) -> bool:
+    """Assez d'histoire pour avoir pu être une connaissance (jours de contact, ou messages) : en deçà, une inconnue."""
+    return max(ct.total_days, len(ct.days)) >= p.acquaintance_days or ct.inbound >= p.acquaintance_messages
+
+
 def closeness_trace(s: SocialState, person: str, p: SocialParams, today: int,
                     get: Callable[[Any], Any]) -> ClosenessTrace:
     """Déclarée, sinon vécue ; le plancher d'une propriétaire — pas à pas. ``get`` lit les faits (``cx.facts.get``
@@ -1121,6 +1139,28 @@ def _circle(s: SocialState, cx) -> tuple[str, ...]:
     out |= {person for person, parts in lived_by.items()
             if person not in s.declared and _could_be_friends(_union(parts), p)}
     if p.owner_floor == c.FRIEND:
+        out |= {o for o in cx.facts.get(identity_c.OWNERS) if o not in s.declared}
+    return tuple(sorted(out))
+
+
+@SOCIAL.fact(c.KNOWN, reads=[identity_c.OWNERS, identity_c.PERSON])
+def _known(s: SocialState, cx) -> tuple[str, ...]:
+    """Celles qui sont — ou ont pu être — au moins des connaissances (ADR 0150) : le tri de ``CIRCLE``, un cran plus
+    bas — assez de jours de contact ou de messages pour une connaissance, une proximité déclarée au-dessus de
+    l'inconnue, une propriétaire au plancher d'une connaissance ou plus. Toute connaissance, amie ou proche
+    d'aujourd'hui en est."""
+    p = params(cx.params)
+
+    def person_of(key: str) -> str:
+        return cx.facts.get(identity_c.PERSON(key)) or key
+
+    out = {person_of(person) for person, level in s.declared.items() if level != c.STRANGER}
+    lived_by: dict[str, list[Contact]] = {}
+    for key, ct in sorted(s.contacts.items()):
+        lived_by.setdefault(person_of(key), []).append(ct)
+    out |= {person for person, parts in lived_by.items()
+            if person not in s.declared and _could_be_acquainted(_union(parts), p)}
+    if p.owner_floor != c.STRANGER:
         out |= {o for o in cx.facts.get(identity_c.OWNERS) if o not in s.declared}
     return tuple(sorted(out))
 

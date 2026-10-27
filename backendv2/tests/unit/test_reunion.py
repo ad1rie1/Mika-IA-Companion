@@ -4,7 +4,7 @@
   sa proche : une cause qui est un état se dit au passé dès qu'il a pris fin (« tu t'es sentie seule une partie de
   la journée ; il t'en reste un peu ») ;
 - retrouver une amie ou une proche après une journée creuse lui fait du bien (``needs.reunited``) — le rendez-vous
-  de chaque soir, pas seulement le retour de quelqu'un qui lui manquait ;
+  de chaque soir, pas seulement le retour de quelqu'un qui lui manquait ; une connaissance, à moitié (ADR 0150) ;
 - contre-exemple : le message d'une inconnue met fin à « personne ne t'a parlé », mais ne la soulage pas.
 """
 
@@ -68,8 +68,16 @@ def test_a_close_friend_after_a_hollow_day_does_her_good_and_her_mood_says_it_in
     assert any("seule une partie de la journée" in p for p in prompts) or after.cause != "lonely"
 
 
+def test_an_acquaintance_relieves_her_by_half_what_a_close_friend_does(tmp_path):
+    _, _, close, _ = evening_after_a_hollow_day(tmp_path / "proche", social_c.CLOSE)
+    _, _, known, _ = evening_after_a_hollow_day(tmp_path / "connaissance", social_c.ACQUAINTANCE)
+    assert [r.after for r in known] == [needs_c.LONELY]  # au cran de leur lien (ADR 0150)
+    assert abs(known[0].intensity - close[0].intensity / 2) <= 0.001
+
+
 def test_a_strangers_message_ends_the_silence_but_does_not_relieve_her(tmp_path):
-    before, after, reunited, prompts = evening_after_a_hollow_day(tmp_path, None)
+    # une vraie inconnue : écrire deux jours de suite fait déjà une connaissance (``acquaintance_days``)
+    before, after, reunited, prompts = evening_after_a_hollow_day(tmp_path, social_c.STRANGER)
     assert before.cause == "lonely"
     assert not reunited  # une inconnue ne comble pas une solitude
     assert after.position[0] - before.position[0] < 0.03

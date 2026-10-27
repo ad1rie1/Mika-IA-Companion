@@ -9,7 +9,7 @@ nomme ce qui n'existe plus.
 
 Les vetos ne sont pas déclarés au registre (une modulation les rend à la volée) :
 ils sont lus dans le code, par l'AST, là où une modulation les pose — directement
-(``Modulation(veto=c.GRUDGE)``) ou par une fonction du même module qui rend le veto
+(``Modulation(veto=c.ASLEEP)``) ou par une fonction du même module qui rend le veto
 (``veto = harassing(…)`` : ce que ``harassing`` peut rendre).
 
 Le murmure (``expression.why()``, ``expression.murmur.why`` dans sa voix) dit en clair ce qui la pousse à écrire : chaque
@@ -25,6 +25,7 @@ from pathlib import Path
 from mika.app import console
 from mika.app.composition import arbitration, faculties
 from mika.contracts import agency as agency_c
+from mika.contracts import body as body_c
 from mika.contracts import social as social_c
 from mika.faculties.expression import why
 from mika.inspector.names import EVENTS as CONSOLE_EVENTS
@@ -138,7 +139,7 @@ def test_no_label_names_something_that_no_longer_exists():
 
 def test_every_veto_the_code_can_set_is_named():
     vetoes = _vetoes()
-    assert {social_c.GRUDGE, agency_c.UNANSWERED, agency_c.AWAITING_REPLY} <= set(vetoes)  # le garde voit loin
+    assert {body_c.ASLEEP, agency_c.UNANSWERED, agency_c.AWAITING_REPLY} <= set(vetoes)  # le garde voit loin
     missing = {v: where for v, where in vetoes.items() if v not in console.VETO_LABELS}
     assert not missing, f"vetos à nommer dans app/console.py (VETO_LABELS) : {missing}"
 

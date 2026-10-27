@@ -156,6 +156,12 @@ class GoalsParams(BaseModel):
         label="Pensée qui fait entreprendre", group="Entreprendre d'elle-même", lo=0.0, hi=1.0, step=0.05,
         help="Une pensée (échange, croyance révisée, signal) qui la préoccupe ou l'intrigue, au moins aussi "
              "intense, peut devenir une exploration « y voir plus clair ».")] = 0.35
+    seed_other_share: Annotated[float, Knob(
+        label="Pensée d'une autre couleur : part qui compte", group="Entreprendre d'elle-même", lo=0.0, hi=1.0,
+        step=0.05,
+        help="Une pensée qui ne la préoccupe ni ne l'intrigue — de la colère, du dégoût, de la joie — compte pour "
+             "cette part de son intensité contre le seuil ci-dessus : à 0,5, une colère vive peut lui donner envie "
+             "d'y repenser, une petite contrariété non. 0 : jamais.")] = 0.5
     seed_thought_age_us: Annotated[int, Knob(
         label="Âge d'une pensée avant d'entreprendre", group="Entreprendre d'elle-même", lo=0, hi=DAY,
         help="La pensée doit avoir tenu ce temps : ce qui passe vite ne vaut pas un chantier.")] = 30 * MINUTE

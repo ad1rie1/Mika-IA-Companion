@@ -97,6 +97,9 @@ class ToneRead(Payload):
     surprise: float = 0.0
     #: nettement plus sombre que d'habitude, chez quelqu'un qui compte : elle s'inquiète
     concern: bool = False
+    #: ce que garde son inquiétude au cran de leur proximité (``concern_by_closeness``, ADR 0150) ; 1 dans un journal
+    #: d'avant, où seule une amie ou une proche l'inquiétait
+    concern_share: float = 1.0
     public: bool = False
     #: un événement grave (un deuil, une maladie, une rupture, des mots de détresse) : il inquiète
     #: venant d'une amie, quel que soit son ton habituel

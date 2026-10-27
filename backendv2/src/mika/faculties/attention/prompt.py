@@ -195,14 +195,15 @@ def _address(frame: Frame, person: str) -> str | None:
 
 
 def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candidate]:
-    """Un bel échange avec une amie ou une proche, le lendemain, sans autre contact depuis : l'envie (faible) de
-    lui en reparler — « encore bravo pour le poste, j'y repensais ce matin ! ». Pas envers une amie qui écrit
-    presque chaque jour : elle repassera, c'est là qu'elle le lui dira."""
+    """Un bel échange avec quelqu'un, le lendemain, sans autre contact depuis : l'envie (faible) de lui en reparler
+    — « encore bravo pour le poste, j'y repensais ce matin ! » —, au cran de leur lien (``glad_by_closeness``,
+    ADR 0150). Pas envers une amie qui écrit presque chaque jour : elle repassera, c'est là qu'elle le lui dira."""
     out: list[Candidate] = []
     for person, (_thought, born) in sorted(s.glad.items()):
         if person in seen or not born + p.glad_after_us <= frame.now <= born + p.glad_until_us:
             continue
-        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+        share = p.glad_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0:
             continue
         contact = frame.get(social_c.CONTACT(person))
         if contact.measured and contact.rhythm_days <= p.alone_daily_rhythm_days:
@@ -217,7 +218,7 @@ def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candi
         name = frame.get(identity_c.IDENTITY(person)).name or phrase("attention.insist.someone")
         brief = phrase("attention.insist.glad", name=name)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
-        out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, p.glad_evidence,
+        out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, round(p.glad_evidence * share, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:attention": brief})))
     return out

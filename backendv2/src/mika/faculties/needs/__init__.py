@@ -226,10 +226,15 @@ class NeedsParams(BaseModel):
              "de l'ennui.")] = 0.8
     reunited_gain: Annotated[float, Knob(
         label="Retrouver une amie après le vide", group="Le vide", lo=0, hi=2, step=0.05,
-        help="Après un vide ressenti, le premier message d'une amie ou d'une proche lui fait du bien : un "
+        help="Après un vide ressenti, le premier message de quelqu'un qu'elle connaît lui fait du bien : un "
              "soulagement (après la solitude) ou de la joie (après l'ennui), d'autant plus que le vide pesait — "
-             "son intensité multipliée par ce facteur. 0 : ça ne lui fait rien. Une inconnue n'y change rien de "
-             "tel.")] = 0.8
+             "son intensité multipliée par ce facteur, et par sa proximité (ci-dessous). 0 : ça ne lui fait "
+             "rien.")] = 0.8
+    reunited_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Retrouver quelqu'un, selon la proximité", group="Le vide", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde ce bien-être à chaque cran de leur lien, de 0 (rien) à 1 (entier) : une inconnue ne "
+             "comble pas une solitude, une connaissance un peu.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
     matter_moment_ahead_us: Annotated[int, Knob(
         label="Ce qui va lui arriver, dans les", group="De quoi parler", lo=0, hi=7 * DAY,
         help="Un moment de sa vie qu'une personne lui a annoncé (un entretien, un départ) devient une matière "
@@ -403,7 +408,7 @@ def _company(get: Any, handle: str, p: NeedsParams) -> float:
         return p.stranger_company
     person = get(identity_c.PERSON(handle))
     closeness = get(social_c.CLOSENESS(person))
-    share = 1.0 if closeness in REUNITING else (
+    share = 1.0 if closeness in (social_c.FRIEND, social_c.CLOSE) else (
         p.acquaintance_company if closeness == social_c.ACQUAINTANCE else p.stranger_company)
     if get(affect_c.HOSTILITY(person)) >= p.hostile_from:
         return min(share, p.hostile_company)
@@ -944,15 +949,12 @@ def _empty_felt(e, cx) -> Appraisal:
     return Appraisal(emotion, e.data.intensity, reason=e.data.feeling)
 
 
-#: qui elle est contente de retrouver après le vide (une inconnue ne comble pas une solitude)
-REUNITING = frozenset({social_c.FRIEND, social_c.CLOSE})
-
-
 @NEEDS.interpret(rt.PERCEPTION_RECEIVED)
 def _reunited(s: NeedsState, frame: Frame, ev: Any, ports: Any) -> list[Any]:
-    """Le premier message d'une amie ou d'une proche après un vide ressenti (depuis que quelqu'un lui a parlé
-    pour la dernière fois) : ça lui fait du bien, d'autant plus que le vide pesait. Le rendez-vous de chaque
-    soir après une journée creuse, pas seulement le retour de quelqu'un qui manquait (HUM-5)."""
+    """Le premier message de quelqu'un qu'elle connaît après un vide ressenti (depuis que quelqu'un lui a parlé
+    pour la dernière fois) : ça lui fait du bien, d'autant plus que le vide pesait, au cran de leur lien
+    (``reunited_by_closeness``, ADR 0150). Le rendez-vous de chaque soir après une journée creuse, pas seulement le
+    retour de quelqu'un qui manquait (HUM-5)."""
     d = ev.data
     if not d.addressed or not is_identifiable(d.handle) or s.heard_at != ev.at:
         return []
@@ -961,10 +963,9 @@ def _reunited(s: NeedsState, frame: Frame, ev: Any, ports: Any) -> list[Any]:
     if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
         return []  # un message de nuit attend son réveil : ce n'est pas un moment partagé
     person = frame.get(identity_c.PERSON(d.handle))
-    if frame.get(social_c.CLOSENESS(person)) not in REUNITING:
-        return []
     p = params(frame.env.params_of("needs", frame.root))
-    intensity = round(min(1.0, p.reunited_gain * s.felt_level), 3)
+    share = p.reunited_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+    intensity = round(min(1.0, p.reunited_gain * s.felt_level * share), 3)
     if intensity <= 0:
         return []
     return [c.REUNITED.draft(person=person, handle=d.handle, message=ev.seq, after=s.felt, intensity=intensity)]

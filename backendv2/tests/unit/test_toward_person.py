@@ -78,9 +78,13 @@ def test_what_a_person_makes_her_live_touches_her_toward_them():
 
 def test_worrying_for_a_friend_is_toward_her_but_catching_her_anger_is_not():
     p = OthersParams()
-    worried = _read_felt(NS(data=NS(surprise=0.0, concern=True, contagion=0.0, contagion_emotion="",
-                                    person="user_2")), NS(params=p))
+    worried = _read_felt(NS(data=NS(surprise=0.0, concern=True, concern_share=1.0, contagion=0.0,
+                                    contagion_emotion="", person="user_2")), NS(params=p))
     assert _toward(worried) == {"user_2": (Emotion.ANXIOUS, p.worry_intensity)}
+    # au cran de leur lien (ADR 0150) : une connaissance l'inquiète à moitié
+    known = _read_felt(NS(data=NS(surprise=0.0, concern=True, concern_share=0.5, contagion=0.0,
+                                  contagion_emotion="", person="user_2")), NS(params=p))
+    assert _toward(known) == {"user_2": (Emotion.ANXIOUS, p.worry_intensity * 0.5)}
     angry = _read_felt(NS(data=NS(surprise=0.0, concern=False, contagion=0.2, contagion_emotion="angry",
                                   person="user_2")), NS(params=p))
     assert [a.emotion for a in angry] == [Emotion.ANGRY] and not _toward(angry)

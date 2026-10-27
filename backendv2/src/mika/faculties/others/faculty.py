@@ -47,6 +47,7 @@ import functools
 import math
 import re
 import statistics
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from typing import Annotated, Any
@@ -239,8 +240,8 @@ class OthersParams(BaseModel):
         label="Un jour difficile : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
         help="Le jour où revient une date lourde qu'une proche lui a confiée (la date d'un deuil), l'envie de lui "
              "écrire un mot doux, une fois, dans ses heures pour prendre des nouvelles — si elles ne se sont pas "
-             "déjà parlé ce jour-là. Seulement une proche ; au-dessus du seuil d'initiative (9), elle écrit "
-             "seule.")] = 10.0
+             "déjà parlé ce jour-là. Selon la proximité (ci-dessous : une proche seulement, d'abord) ; au-dessus du "
+             "seuil d'initiative (9), elle écrit seule.")] = 10.0
     cheer_evidence: Annotated[float, Knob(
         label="Encourager la veille : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
         help="La veille au soir (ou le matin même, pour un moment l'après-midi), l'envie de lui souhaiter bonne "
@@ -251,6 +252,20 @@ class OthersParams(BaseModel):
         help="Heure locale (minutes depuis minuit) à partir de laquelle, la veille, elle peut lui souhaiter bonne "
              "chance (jusqu'à la fin de ses heures pour prendre des nouvelles). Si elles se sont parlé depuis, la "
              "conversation en était l'occasion.")] = 18 * 60
+    care_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Ses attentions, selon la proximité", group="Demander comment ça s'est passé",
+        keys=social_c.KNOWN_NAMES,
+        help="La force de ses attentions envers quelqu'un qu'elle connaît — l'encourager la veille, demander comment "
+             "ça s'est passé, souhaiter ce qui se fête — à chaque cran de leur lien : la preuve de chaque envie en "
+             "est multipliée, de 0 (jamais) à 1 (entière). Une connaissance à 0,5 : rarement.")] = {
+        social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
+    remembrance_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Un jour difficile, selon la proximité", group="Demander comment ça s'est passé",
+        keys=social_c.KNOWN_NAMES,
+        help="Le mot doux le jour où revient une date lourde, à chaque cran de leur lien : sa preuve en est "
+             "multipliée, de 0 (jamais) à 1 (entière). D'abord une proche seulement : une amie, ce jour-là, n'en "
+             "reçoit rien d'elle-même (si elles se parlent, la conversation le lui dit).")] = {
+        social_c.ACQUAINTANCE: 0.0, social_c.FRIEND: 0.0, social_c.CLOSE: 1.0}
     # les heures où elle écrit
     hours_min_days: Annotated[int, Knob(
         label="Ses heures : jours vus avant d'en tenir compte", group="Les heures où elle écrit", lo=2, hi=30,
@@ -283,12 +298,17 @@ class OthersParams(BaseModel):
         help="Quand elle répond à une amie triste, anxieuse ou effrayée au moins à ce point (sa balise d'émotion), "
              "c'est que le message l'a inquiétée — même si les mots ne le disaient pas : elle prendra de ses "
              "nouvelles. Pas chez quelqu'un dont c'est le ton habituel.")] = 0.6
+    concern_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="S'inquiéter, selon la proximité", group="Surprise et inquiétude", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde son inquiétude pour quelqu'un à chaque cran de leur lien — ce qu'elle en ressent, et la "
+             "preuve de l'envie de prendre de ses nouvelles : de 0 (jamais) à 1 (entière). Une connaissance à 0,5 "
+             "l'inquiète un peu, et elle en prend rarement des nouvelles.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
     # la contagion : son ton du moment la colore un peu, selon leur proximité
     contagion_gain: Annotated[float, Knob(
         label="Contagion : force", group="Contagion", lo=0.0, hi=0.5, step=0.01,
-        help="Le ton du moment de quelqu'un la colore d'autant (× l'intensité du ton × la proximité : rien d'une "
-             "inconnue, la moitié d'une connaissance, tout d'une proche). Elle s'allège avec quelqu'un de joyeux, "
-             "se tend avec quelqu'un de stressé.")] = 0.12
+        help="Le ton du moment de quelqu'un la colore d'autant (× l'intensité du ton × sa proximité, ci-dessous). "
+             "Elle s'allège avec quelqu'un de joyeux, se tend avec quelqu'un de stressé.")] = 0.12
     contagion_from: Annotated[float, Knob(
         label="Contagion : un ton d'au moins", group="Contagion", lo=0.0, hi=1.0, step=0.05,
         help="Un message plus neutre que ça ne la colore pas.")] = 0.25
@@ -299,6 +319,11 @@ class OthersParams(BaseModel):
     contagion_window_us: Annotated[int, Knob(
         label="Contagion : fenêtre", group="Contagion", lo=MINUTE, hi=DAY,
         help="La fenêtre du plafond ci-dessus.")] = 10 * MINUTE
+    contagion_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Contagion, selon la proximité", group="Contagion", keys=social_c.CLOSENESS_NAMES,
+        help="La part de la contagion à chaque cran de leur lien (× la force ci-dessus), de 0 à 1 : rien d'une "
+             "inconnue, la moitié d'une connaissance, l'essentiel d'une amie, tout d'une proche.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 0.8, social_c.CLOSE: 1.0}
 
 
 def derive(t: Temperament, overrides: Any = None) -> OthersParams:
@@ -512,18 +537,20 @@ def _read(s: OthersState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]
     expected, _ = current(m, ev.at, p)
     level = frame.get(social_c.CLOSENESS(person))
     known = confidence(m, p, level)
-    close = level in (social_c.FRIEND, social_c.CLOSE)
+    # ce que garde son inquiétude au cran de leur lien (ADR 0150) : une amie entière, une connaissance un peu
+    share = p.concern_by_closeness.get(level, 0.0)
     grave = bool(their.grave)
-    # un événement grave inquiète venant d'une amie, quel que soit son ton habituel ; un message lourd, seulement
-    # s'il tranche avec ce qu'elle attendait d'elle
-    concern = close and (grave or (known >= p.concern_confidence and valence <= p.concern_below
-                                   and expected - valence >= p.concern_drop))
+    # un événement grave inquiète venant de quelqu'un qui compte, quel que soit son ton habituel ; un message lourd,
+    # seulement s'il tranche avec ce qu'elle attendait d'elle
+    concern = share > 0 and (grave or (known >= p.concern_confidence and valence <= p.concern_below
+                                       and expected - valence >= p.concern_drop))
     contagion, emotion = _contagion(s, person, their.felt, valence, level, ev.at, p,
                                     frame.get(social_c.WEIGHT(person)))
     hard = frame.get(memory_c.HARD_TIMES(person)) > 0
     return [c.READ.draft(person=person, handle=d.target, message=d.reply_to, valence=valence, arousal=arousal,
                          felt=their.felt, expected=round(expected, 3), confidence=round(known, 3),
                          surprise=round(abs(valence - expected) * known, 3), concern=concern,
+                         concern_share=round(share, 3) if concern else 1.0,
                          public=bool(getattr(d, "room", None)), grave=grave,
                          grave_kind=their.grave if their.grave != OTHER else "",
                          relief=reassuring(m, valence, text, p, hard=hard), contagion=contagion,
@@ -556,11 +583,6 @@ def reassuring(m: Model, valence: float, text: str, p: OthersParams, *, hard: bo
     return len(text.split()) >= p.relief_min_words and valence >= m.usual_valence - p.relief_margin
 
 
-#: L'intensité de la contagion selon leur proximité : rien d'une inconnue, tout d'une proche.
-CONTAGION_BY_CLOSENESS = {social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 0.8,
-                          social_c.CLOSE: 1.0}
-
-
 def _contagion(s: OthersState, person: str, felt: tuple[tuple[str, float], ...], valence: float, level: str,
                at: int, p: OthersParams, weight: float = 1.0) -> tuple[float, str]:
     """Ce que ce qu'elle ressent lui transmet : sa facette la plus forte, telle que le modèle l'a lue (une amie
@@ -568,7 +590,7 @@ def _contagion(s: OthersState, person: str, felt: tuple[tuple[str, float], ...],
     à leur proximité (sa propriétaire, davantage : ``weight``), plafonnée par fenêtre."""
     if not felt or abs(valence) < p.contagion_from:
         return 0.0, ""
-    raw = p.contagion_gain * abs(valence) * CONTAGION_BY_CLOSENESS.get(level, 0.0) * weight
+    raw = p.contagion_gain * abs(valence) * p.contagion_by_closeness.get(level, 0.0) * weight
     start, used = s.contagion.get(person, (at, 0.0))
     if at - start >= p.contagion_window_us:
         used = 0.0
@@ -641,7 +663,7 @@ def _worried_reply(s: OthersState, e: Any, cx: Any) -> OthersState:
     if declared is None or not any(Emotion(e) in WORRIED and x >= p.declared_concern_from for e, x in declared.all):
         return s
     person = cx.facts.get(identity_c.PERSON(d.target))
-    if person in s.concerns or cx.facts.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+    if person in s.concerns or p.concern_by_closeness.get(cx.facts.get(social_c.CLOSENESS(person)), 0.0) <= 0:
         return s
     m = model_of(s, person, cx.facts.get(identity_c.HANDLES(person)))
     if m is not None and m.usual_valence <= p.concern_below:
@@ -805,8 +827,9 @@ def _read_felt(e, cx) -> list[Appraisal]:
     if d.concern:
         # s'inquiéter pour quelqu'un suit la contagion du tempérament ; c'est pour elle qu'elle s'inquiète : sa
         # posture envers elle le porte aussi
-        out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, reason=causes.WORRIED, relational=True))
-        out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, toward=d.person, reason=causes.WORRIED,
+        worry = p.worry_intensity * d.concern_share  # au cran de leur lien (ADR 0150)
+        out.append(Appraisal(Emotion.ANXIOUS, worry, reason=causes.WORRIED, relational=True))
+        out.append(Appraisal(Emotion.ANXIOUS, worry, toward=d.person, reason=causes.WORRIED,
                              relational=True))
     emotion = emotion_of(d.contagion_emotion) if d.contagion > 0 else None
     if emotion is not None:
@@ -849,8 +872,10 @@ def _address(frame: Frame, person: str) -> str | None:
                 reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
                        social_c.CLOSENESS, transcript_c.LAST_FROM])
 def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
-    """Une amie qui n'avait pas l'air bien, et plus rien depuis : quelques
-    heures plus tard, elle prend de ses nouvelles."""
+    """Quelqu'un qui n'avait pas l'air bien, et plus rien depuis : quelques
+    heures plus tard, elle prend de ses nouvelles — au cran de leur lien
+    (``concern_by_closeness``, ADR 0150 : une amie, entière ; une connaissance,
+    rarement)."""
     if not s.concerns:
         return []
     p = params(frame.env.params_of("others", frame.root))
@@ -861,7 +886,8 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
     for person, (_message, at, opens) in sorted(s.concerns.items()):
         if frame.now < opens or frame.now - at > p.checkin_until_us:
             continue
-        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+        share = p.concern_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0:
             continue
         address = _address(frame, person)
         if address is None:
@@ -872,7 +898,7 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         ramp = min(1.0, (frame.now - opens) / p.checkin_ramp_us)
-        evidence = p.checkin_evidence_start + (p.checkin_evidence - p.checkin_evidence_start) * ramp
+        evidence = (p.checkin_evidence_start + (p.checkin_evidence - p.checkin_evidence_start) * ramp) * share
         out.append(Candidate(Kind.INITIATIVE, address, c.CHECK_IN, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief})))
@@ -927,20 +953,21 @@ def _minor(ev: memory_c.LifeEvent) -> bool:
 
 @OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.CHEER: (0.0, 12.0)},
                 reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
-                       social_c.CIRCLE, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
+                       social_c.CIRCLE, social_c.KNOWN, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
                        memory_c.HARD_TIMES])
 def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
     """Une amie lui avait dit ce qui l'attendait (« demain, mon entretien chez Ubisoft ») : la veille au soir, un
     mot pour l'encourager — si elles ne se sont pas déjà parlé depuis midi (la conversation en était
     l'occasion), une fois. Plus faible que demander comment ça s'est passé : elle le fait si elle y pense.
     Seulement ce que la personne lui a dit elle-même ; rien d'ordinaire quand quelque chose de grave la touche
-    ces jours-ci (pas de « bonne chance chez le dentiste » le lendemain d'un deuil). Seules ses amies sont
-    passées en revue (``social.CIRCLE``, un tri bon marché) : les inconnues de passage ne coûtent rien ici."""
+    ces jours-ci (pas de « bonne chance chez le dentiste » le lendemain d'un deuil). Au cran de leur lien
+    (``care_by_closeness``, ADR 0150) ; seules celles qu'elle connaît sont passées en revue (``_reviewed``, un tri bon
+    marché) : les inconnues de passage ne coûtent rien ici."""
     p = params(frame.env.params_of("others", frame.root))
     out: list[Candidate] = []
-    circle = set(frame.get(social_c.CIRCLE))
-    for person in sorted(circle.intersection(heard(s))):
-        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+    for person in sorted(set(_reviewed(frame, p.care_by_closeness)).intersection(heard(s))):
+        share = p.care_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0:
             continue
         last = _last_from(frame, person)
         hard = _hard(frame, person)
@@ -961,11 +988,17 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         ramp = min(1.0, (frame.now - start) / p.checkin_ramp_us)
-        evidence = p.checkin_evidence_start + (p.cheer_evidence - p.checkin_evidence_start) * ramp
+        evidence = (p.checkin_evidence_start + (p.cheer_evidence - p.checkin_evidence_start) * ramp) * share
         out.append(Candidate(Kind.INITIATIVE, address, c.CHEER, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
+
+
+def _reviewed(frame: Frame, table: Mapping[str, float]) -> tuple[str, ...]:
+    """Celles qu'une attention passe en revue : ses amies et ses proches (``CIRCLE``), et ses connaissances quand la
+    table leur laisse quelque chose (``KNOWN``, ADR 0150) — jamais les inconnues de passage."""
+    return frame.get(social_c.KNOWN if table.get(social_c.ACQUAINTANCE, 0.0) > 0 else social_c.CIRCLE)
 
 
 def _day_start(t: int, frame: Frame) -> int:
@@ -982,7 +1015,7 @@ def _follow_from(ev: memory_c.LifeEvent, frame: Frame, p: OthersParams) -> int:
 
 @OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.FOLLOW_UP: (0.0, 12.0)},
                 reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
-                       social_c.CIRCLE, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
+                       social_c.CIRCLE, social_c.KNOWN, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
                        memory_c.HARD_TIMES])
 def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
     """Une amie lui avait dit ce qui l'attendait (un entretien jeudi à 14 h) : quelques heures après, si elles
@@ -1001,8 +1034,9 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
     if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
         return []
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
-        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+    for person in sorted(set(_reviewed(frame, p.care_by_closeness)).intersection(heard(s))):
+        share = p.care_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0:
             continue
         last = _last_from(frame, person)
         hard = _hard(frame, person)
@@ -1028,7 +1062,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         full = p.followup_minor_evidence if (_minor(ev) or ev.festive or hard) else p.followup_evidence
         ramp = min(1.0, (frame.now - _follow_from(ev, frame, p)) / p.checkin_ramp_us)
-        evidence = min(full, p.checkin_evidence_start) + (full - min(full, p.checkin_evidence_start)) * ramp
+        evidence = (min(full, p.checkin_evidence_start) + (full - min(full, p.checkin_evidence_start)) * ramp) * share
         out.append(Candidate(Kind.INITIATIVE, address, c.FOLLOW_UP, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
@@ -1037,7 +1071,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
 
 @OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.CELEBRATE: (0.0, 12.0)},
                 reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
-                       social_c.CIRCLE, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
+                       social_c.CIRCLE, social_c.KNOWN, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS,
                        memory_c.HARD_TIMES])
 def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
     """Le jour d'un anniversaire, d'un mariage qu'une amie lui avait annoncé : elle le lui souhaite, d'elle-même,
@@ -1051,8 +1085,9 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
-        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+    for person in sorted(set(_reviewed(frame, p.care_by_closeness)).intersection(heard(s))):
+        share = p.care_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if ev.festive and not ev.ongoing and not ev.vague and not ev.followed_at and set(ev.told_by) <= {person}
@@ -1070,7 +1105,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         # fait »), pas une initiative de plus
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
-        out.append(Candidate(Kind.INITIATIVE, address, c.CELEBRATE, p.celebrate_evidence,
+        out.append(Candidate(Kind.INITIATIVE, address, c.CELEBRATE, round(p.celebrate_evidence * share, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
@@ -1078,12 +1113,12 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
 
 @OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.REMEMBRANCE: (0.0, 12.0)},
                 reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
-                       social_c.CIRCLE, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
+                       social_c.CIRCLE, social_c.KNOWN, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
 def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
     """Le jour où revient une date lourde qu'une proche lui a confiée elle-même (« demain, ça fera un an que mon père
     est parti ») : un mot doux, d'elle-même, une fois, dans ses heures pour prendre des nouvelles — rien de festif,
-    aucune question. Une proche seulement : une amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se parlent,
-    « CE QUI SE PASSE DANS SA VIE » le lui dit). Si elles se sont déjà parlé aujourd'hui, la conversation en était
+    aucune question. Au cran de leur lien (``remembrance_by_closeness``, ADR 0150), d'abord une proche seulement : une
+    amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se parlent, « CE QUI SE PASSE DANS SA VIE » le lui dit). Si elles se sont déjà parlé aujourd'hui, la conversation en était
     l'occasion ; ce qu'elle en a repris en mots aussi."""
     p = params(frame.env.params_of("others", frame.root))
     local = frame.local()
@@ -1091,8 +1126,9 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
-        if frame.get(social_c.CLOSENESS(person)) != social_c.CLOSE or _last_from(frame, person) >= today:
+    for person in sorted(set(_reviewed(frame, p.remembrance_by_closeness)).intersection(heard(s))):
+        share = p.remembrance_by_closeness.get(frame.get(social_c.CLOSENESS(person)), 0.0)
+        if share <= 0 or _last_from(frame, person) >= today:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if memory_c.heavy_date(ev) and not ev.followed_at and set(ev.told_by) <= {person}
@@ -1106,7 +1142,7 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
         brief = phrase("others.initiative.remembrance", who=who)
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
-        out.append(Candidate(Kind.INITIATIVE, address, c.REMEMBRANCE, p.remembrance_evidence,
+        out.append(Candidate(Kind.INITIATIVE, address, c.REMEMBRANCE, round(p.remembrance_evidence * share, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
