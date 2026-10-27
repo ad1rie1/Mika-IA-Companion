@@ -577,21 +577,35 @@ def _thread(history: Sequence[Any], name: str) -> list[str]:
     return [line for entry in entries[-_POLISH_THREAD:] for line in entry]
 
 
+def _unquoted(text: str) -> str:
+    """Une ligne tout entière entre guillemets, sans eux ; ceux d'une citation qui la finit restent (le 2026-10-27,
+    « … un simple « j'achète et je touche plus à rien » » perdait son guillemet fermant, et il ne comprenait plus)."""
+    m = _QUOTED.match(text)
+    return next(g for g in m.groups() if g is not None).strip() if m else text
+
+
 def authored(text: str, name: str) -> str:
     """Ses messages dans la suite écrite par l'autrice : les lignes « {name} : … » (ou sans nom) jusqu'à la première
-    de l'autre, une bulle chacune (séparées par une ligne vide) ; « » si l'autrice ne lui fait rien dire."""
+    de l'autre ou au premier repère de temps, une bulle chacune (séparées par une ligne vide) ; « » si l'autrice ne
+    lui fait rien dire. Un repère (« [le soir, mardi 19h04] ») dit que du temps a passé : ce qui suit est un message
+    d'après, inventé avec la suite du fil (le 2026-10-27, « alors, cette terrasse ? » du soir est parti à 9h51)."""
     out: list[str] = []
-    # deux messages sur une ligne (« … Mika : … », « … L'autre : … ») : chacun sur la sienne
+    # deux messages sur une ligne (« … Mika : … », « … [plus tard] L'autre : … ») : chacun sur la sienne
     them = phrase("expression.polish.them", text="").strip()
-    split = re.compile(rf"\s+(?=(?:{re.escape(name)}|{re.escape(them.rstrip(':').strip())})\s*:)")
+    split = re.compile(rf"\s+(?=(?:\[[^\]\n]*\]\s*)?(?:{re.escape(name)}|{re.escape(them.rstrip(':').strip())})\s*:)")
     for line in (part for raw in (text or "").splitlines() for part in split.split(raw)):
-        line = line.strip().strip("«»\"").strip()
+        line = _unquoted(line.strip())
+        mark = _TIME_MARK.match(line)
+        if mark and not A.PROSODY.match(line) and not line.startswith(A.SILENCE_TOKEN):
+            if out:
+                break
+            line = line[mark.end():]  # le repère de ce message-ci, redit avant lui
         if not line:
             continue
         who = _SPEAKER.match(line)
         label = who.group(1).strip() if who else ""
         if label and fold(label.split("(")[0].strip().lower()) == fold(name.lower()):  # « Mika (brouillon) »
-            said = who.group(2).strip()
+            said = _unquoted(who.group(2).strip())  # « Mika : « coucou » »
         elif label[:1].isupper():
             break  # l'autre (« L'autre : … », un prénom) : la suite n'est plus à elle
         else:
@@ -614,6 +628,11 @@ def _section(state: str, title: str) -> str:
 
 #: « Nom : … » en tête d'une ligne de SMS (un nom court, éventuellement en gras)
 _SPEAKER = re.compile(r"^\**([^:*\n]{1,24}?)\**\s*:\s*(.*)$")
+#: un repère de temps en tête de ligne, comme ceux du fil (``expression.polish.mark``) — un jeton de voix aussi, que
+#: l'appelant écarte
+_TIME_MARK = re.compile(r"^\[[^\]\n]*\]\s*")
+#: une ligne tout entière entre guillemets, sans autre guillemet dedans
+_QUOTED = re.compile(r'^(?:«([^«»]*)»|"([^"]*)"|“([^“”]*)”)$')
 
 
 def polish(draft: str, messages: Sequence[Any], heard: str = "",

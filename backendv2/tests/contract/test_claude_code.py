@@ -46,6 +46,7 @@ from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, ChatPrompt
 from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, ToolDecl
+from mika.ports.llm_budget import LLMLimits
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_claude.py"
@@ -784,6 +785,31 @@ async def test_a_closing_word_after_the_last_results_finishes_the_live_session(t
         await asyncio.sleep(0.2)
     assert final.stop == "end" and "noté (souvenir #3)" in final.text and "sans appeler d'outil" in final.text
     assert not be._runs and not _alive(pid) and len(relay) == 0
+
+
+async def test_the_live_session_receives_its_results_whole_whatever_the_budget(tmp_path, cli):
+    """Le tour suivant ne rend que ses résultats à la session vivante, qui tient le reste du fil : la passerelle ne le
+    mesure pas contre le budget (ADR 0142). Mesuré entier, un long résultat y était coupé, et un long appel d'outil
+    (une app écrite dans la boucle) refusé — le travail fait, l'épisode en échec."""
+    page = "y" * 3_000
+
+    async def read(args: AddArgs, ctx: Any) -> ToolResult:
+        return ToolResult(content=page)
+
+    spec = ToolSpec(owner="notes", name="note_read", description="Lit une note.", args=AddArgs, handler=read,
+                    bundle="notes", episodes=frozenset({"REPLY"}))
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        gateway = Gateway({"cc": be}, {"reply": "cc"}, clock=ManualClock(0),
+                          limits={"cc": LLMLimits(context_tokens=4_000, chars_per_token=1.0)})
+        req = LLMRequest(role="reply", call_id="lg-1#0", messages=(Message("user", "lis la note"),),
+                         system_stable=scenario(calls=[[["mika", "note_read", {"what": "app"}]]], say="{results}"),
+                         tools=declare([spec]))
+        loop = await run_tool_loop(gateway, req, {spec.name: spec}, lambda s, call_id: SimpleNamespace(call_id=call_id),
+                                   max_turns=4)
+    assert loop.stop == "end" and f"note_read={page}" in loop.text  # entier, sans marque de coupe
+    assert [t.outcome for t in gateway.traces] == ["ok", "ok"]
 
 
 async def test_the_system_prompt_holds_the_stable_zone_only_and_the_volatile_travels_framed(tmp_path, cli, monkeypatch):

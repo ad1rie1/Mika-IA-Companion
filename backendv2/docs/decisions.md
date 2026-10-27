@@ -25,7 +25,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
@@ -1180,7 +1180,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* penser par la vraie CLI sur l'abonnement de sa propriétaire, sans réutiliser son jeton OAuth ni contourner les gardes du runtime.
 
-*Révisée par 0036, 0038, 0072, 0073.*
+*Révisée par 0036, 0038, 0072, 0073, 0142.*
 
 ### 0072 — Claude Code : les outils d'un même message en un seul tour
 
@@ -1225,6 +1225,16 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Un fournisseur qui ne répond pas laisse la fiche telle quelle : il est redemandé au prochain enregistrement. Une passerelle fournie de l'extérieur (tests, simulateur) n'interroge personne ; la CLI garde ce qui a été lu, sans rien lire.
 
 *Pourquoi :* le contexte se réglait à l'aveugle (24 000 pour un Sonnet qui en lit un million, ou plus que la fenêtre d'un petit modèle Ollama), et le remplir avec la capacité du modèle aurait multiplié le coût de chaque tour : la capacité dit ce que le modèle peut lire, pas ce qu'il faut lui envoyer.
+
+### 0142 — Le budget mesure ce qui part, une boucle finit où elle a commencé
+
+- Le budget d'un fournisseur (`LLMLimits.fit`) mesure ce qui part vraiment. Un tour suivant que la CLI de Claude Code tient déjà (`carries` : sa session vivante attend ces résultats) ne lui envoie que les nouveaux résultats. Il n'est donc pas mesuré contre le contexte déclaré. Le premier tour l'est toujours. Le reste du fil vit dans la fenêtre de la CLI, qui le compacte elle-même.
+- Une boucle d'outils ouverte finit sur la passerelle où elle a commencé. Enregistrer les réglages des modèles installe une nouvelle passerelle, mais l'ancienne sert encore ses boucles ouvertes et ses appels en cours, puis s'efface (`LiveGateway`, `Gateway.busy`). Une boucle sans nouvelles depuis une heure ne la retient plus.
+- Un projet mis en pause après des pannes dit la cause de la dernière (`last_failure`), au lieu de « le modèle n'a pas répondu, ou le délai d'une exécution est passé » pour toutes.
+
+*Pourquoi :* le 2026-10-27, le projet n° 257 s'est mis en pause après trois échecs. Deux fois, elle avait écrit son app dans la boucle (le code entier dans les arguments, jusqu'à quatre versions), puis le tour suivant, un simple résultat à rendre à la CLI, a été refusé (« requête trop longue ») : le travail était fait, l'épisode était en échec. La troisième fois, les réglages enregistrés en pleine boucle ont envoyé son quatrième tour de l'API vers la CLI, qui refuse une boucle commencée ailleurs. La pause disait « le modèle n'a pas répondu ».
+
+*Révise 0026 (en partie).*
 
 ## Sa voix, sa persona, la genèse
 

@@ -19,7 +19,10 @@
   appel dont l'épisode n'a plus de temps n'est pas tenté (issue ``expired``,
   pas « timeout » : le fournisseur n'a pas manqué).
 - Une erreur est journalisée et propagée, sans changement de fournisseur.
-- Une boucle d'outils reste sur son fournisseur pendant toute sa durée.
+- Une boucle d'outils reste sur son fournisseur pendant toute sa durée — et sur sa passerelle : une boucle
+  ouverte (``continues``) y finit même quand les réglages en installent une autre (``LiveGateway``, ADR 0142).
+- Le budget (``LLMLimits.fit``) mesure ce qui part : un tour qu'un fournisseur à session tient déjà
+  (``carries`` : la CLI de Claude Code n'en reçoit que les nouveaux résultats) n'y est pas mesuré.
 - Une réponse coupée par son plafond de jetons, sans appel d'outil : une sortie
   structurée (extraction, profil…) est redemandée une fois avec un plafond
   doublé ; une parole (rôle voix) est coupée à sa dernière phrase complète —
@@ -82,6 +85,10 @@ MIN_RETRY_S = 5.0
 CUT_RETRY_CEILING = 8192
 #: les boucles d'outils dont on retient le fournisseur (collant par ``call_id``)
 STICKY_KEPT = 4096
+#: une boucle ouverte sans nouvelles depuis aussi longtemps (microsecondes) ne retient plus une passerelle remplacée :
+#: plus long que le plus long épisode (le mode pro : quinze minutes), une boucle abandonnée sans ``release`` n'y
+#: reste pas pour toujours
+OPEN_LOOP_STALE_US = 3_600 * 1_000_000
 #: la priorité d'un essai de la console : derrière tout le fond
 TRIAL_PRIORITY = 9
 #: l'entrée réelle (jetons du fournisseur, cache compris) rapportée à l'entrée estimée (caractères du budget) : hors
@@ -208,6 +215,11 @@ class Gateway:
         self.limits = dict(limits or {})
         #: boucle d'outils (``call_id``) → le fournisseur qui la tient
         self._sticky: OrderedDict[str, str] = OrderedDict()
+        #: les boucles ouvertes (``call_id`` → quand sa dernière réponse a demandé des outils) : leur prochain tour
+        #: viendra ici
+        self._open: OrderedDict[str, int] = OrderedDict()
+        #: les appels en cours
+        self._inflight = 0
         #: fournisseur → quand son estimation d'entrée a été dite fausse pour la dernière fois
         self._estimate_warned: dict[str, int] = {}
 
@@ -341,15 +353,42 @@ class Gateway:
         budget = self.deadline_of(req)
         loop = asyncio.get_running_loop()
         start = loop.time()
-        resp = await self._on(name, req, budget)
-        self._stick(req.call_id, name)
-        return await self._after_cut(name, req, resp, budget - (loop.time() - start))
+        self._inflight += 1
+        try:
+            resp = await self._on(name, req, budget)
+            self._stick(req.call_id, name)
+            resp = await self._after_cut(name, req, resp, budget - (loop.time() - start))
+            self._mark(req.call_id, resp)
+            return resp
+        finally:
+            self._inflight -= 1
 
     def _stick(self, call_id: str, name: str) -> None:
         self._sticky[call_id] = name
         self._sticky.move_to_end(call_id)
         while len(self._sticky) > STICKY_KEPT:
             self._sticky.popitem(last=False)
+
+    def _mark(self, call_id: str, resp: LLMResponse) -> None:
+        """Une réponse qui demande des outils laisse sa boucle ouverte (son prochain tour viendra ici) ; une autre
+        la ferme."""
+        if not resp.tool_calls:
+            self._open.pop(call_id, None)
+            return
+        self._open[call_id] = self.clock.now()
+        self._open.move_to_end(call_id)
+        while len(self._open) > STICKY_KEPT:
+            self._open.popitem(last=False)
+
+    def continues(self, req: LLMRequest) -> bool:
+        """``req`` est-elle le tour suivant d'une boucle ouverte ici ?"""
+        return req.call_id in self._open and in_tool_loop(req)
+
+    def busy(self) -> bool:
+        """Tient-elle encore quelque chose : un appel en cours, ou une boucle ouverte qui a eu des nouvelles depuis
+        moins de ``OPEN_LOOP_STALE_US`` ? Remplacée par les réglages, elle sert jusque-là ses boucles (ADR 0142)."""
+        now = self.clock.now()
+        return bool(self._inflight) or any(now - at < OPEN_LOOP_STALE_US for at in self._open.values())
 
     async def _after_cut(self, name: str, req: LLMRequest, resp: LLMResponse, remaining: float) -> LLMResponse:
         """Une réponse coupée par son plafond, sans appel d'outil (voir l'en-tête)."""
@@ -382,6 +421,7 @@ class Gateway:
         """La boucle d'outils ``call_id`` est finie : oublier son fournisseur, et
         laisser celui-ci relâcher ce qu'il tient encore (une CLI en attente)."""
         name = self._sticky.pop(call_id, None)
+        self._open.pop(call_id, None)
         for backend in ([self.backends[name]] if name in self.backends else self.backends.values()):
             hook = getattr(backend, "release", None)
             if callable(hook):
@@ -439,7 +479,8 @@ class Gateway:
             raise TimeoutError(f"plus de temps devant l'épisode pour l'appel {req.call_id}")
         try:
             async with asyncio.timeout(budget):
-                req = self.limits.get(name, LLMLimits()).fit(req, self._sent(name, req))
+                if not _carried(backend, req):
+                    req = self.limits.get(name, LLMLimits()).fit(req, self._sent(name, req))
                 token = await slots.acquire(req.priority, preempt=name in self.preempt)
                 t0 = self.clock.now()
                 resp = await backend.complete(req)
@@ -500,6 +541,15 @@ class Gateway:
         log.warning("%s : l'entrée réelle fait %.2f× l'estimation (%d jetons pour %d estimés à %.1f car./jeton, "
                     "soit %.1f réels) — « chars_per_token » du fournisseur est à régler",
                     backend, ratio, real, tr.estimated_input_tokens, chars_per_token, chars_per_token / ratio)
+
+
+def _carried(backend: LLMBackend, req: LLMRequest) -> bool:
+    """Le fournisseur tient-il déjà le fil de ``req`` (``carries``, facultatif : une CLI dont la session vivante attend
+    ces résultats) ? Seuls les nouveaux résultats partent alors : mesurer tout le fil refusait un tour qui n'envoyait
+    presque rien (projet n° 257, 2026-10-27 : une app écrite quatre fois dans la boucle, puis le tour suivant refusé,
+    « requête trop longue », le travail fait et l'épisode en échec)."""
+    carries = getattr(backend, "carries", None)
+    return bool(carries(req)) if callable(carries) else False
 
 
 def _inherit(req: LLMRequest) -> LLMRequest:

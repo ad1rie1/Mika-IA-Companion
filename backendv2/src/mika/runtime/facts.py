@@ -10,11 +10,17 @@ Elle écrit comme on parle — « trois idées », « à seize heures », « le 
 les ordinaux, les mois, midi et minuit, « pour cent » et « degrés » sont ramenés
 en chiffres avant la comparaison (``in_digits``). Un premier jet qui disait
 « trois » n'impose rien : ses faits restent ses chiffres et ses liens.
+
+Un jeton de voix n'est pas un fait : la durée de « [PAUSE:400] » n'est pas un nombre
+qu'elle dit, et l'autrice ne voit pas les jetons du premier jet (le 2026-10-26, tout
+premier jet qui marquait une pause partait tel quel).
 """
 
 from __future__ import annotations
 
 import re
+
+from mika.vocab.affect import strip_prosody
 
 #: un nombre : des chiffres, des blancs (« 1 234 », « 14 °C »), une unité ; un point, une virgule ou deux-points
 #: seulement entre deux chiffres (« 1 234,50 », « 16:30 ») — « 1999, 2 fois » fait deux faits, pas un
@@ -52,7 +58,8 @@ _HOURS = {"midi": 12, "minuit": 0}
 def facts_of(text: str, *, spelled: bool = False) -> frozenset[str]:
     """Les faits d'un texte, normalisés : ses nombres sans blancs ni ponctuation finale (« 14 °C » → « 14°C »,
     « 1 234,50 » → « 1234,50 »), ses liens sans la ponctuation qui les suit. ``spelled`` : ses nombres en lettres
-    comptent aussi (le côté récrit)."""
+    comptent aussi (le côté récrit). Ses jetons de voix n'en sont pas."""
+    text = strip_prosody(text or "")
     if spelled:
         text = in_digits(text)
     numbers = {n for raw in _NUMBER.findall(text) if (n := re.sub(r"\s", "", raw).rstrip(".,:"))}

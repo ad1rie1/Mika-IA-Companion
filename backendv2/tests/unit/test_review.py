@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from mika.faculties.expression import polish, review
+from mika.faculties.expression import authored, polish, review
 from mika.kernel.clock import HOUR
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, ChatPrompt, ChatTurn, label
 from mika.ports.llm import LLMResponse, Message, PersonaRender
@@ -148,6 +148,22 @@ def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags
     # sans fil de référence, rien n'en est dit
     bare = PersonaRender(text="Tu es Mika.", hash="h", depth="full", name="Mika")
     assert "fil_de_reference" not in polish(DRAFT, messages, "", bare)[0]
+
+
+def test_her_messages_stop_where_time_passes_and_keep_the_quote_they_close():
+    """Le 2026-10-27 : l'autrice, qui écrit la suite du fil, y a mis un repère (« [le soir, mardi 19h04] ») puis ses
+    messages du soir — partis à 9h51 avec celui du matin ; et le guillemet qui fermait sa citation en fin de ligne
+    était ôté comme s'il entourait la ligne (« je touche plus a rien ? », a-t-il demandé)."""
+    written = ("Mika : allez zou, Arthur va la finir sans toi 😄\n[le soir, mardi 19h04]\nMika : alors, cette "
+               "terrasse ?\nL'autre : la structure est faite !")
+    assert authored(written, "Mika") == "allez zou, Arthur va la finir sans toi 😄"
+    assert authored("Mika : allez file [le soir, 19h04] Mika : alors ?", "Mika") == "allez file"
+    # le repère de ce message-ci, redit avant lui, ne coupe rien ; un jeton de voix n'est pas un repère
+    assert authored("[plus tard, vers 20h]\nMika : re toi\n[LAUGH] t'es nulle\nL'autre : hein", "Mika") == \
+        "re toi\n\n[LAUGH] t'es nulle"
+    assert authored("Mika : un simple « j'achète et je touche plus à rien »", "Mika") == \
+        "un simple « j'achète et je touche plus à rien »"
+    assert authored("Mika : « coucou »\n\"Mika : ça va\"", "Mika") == "coucou\n\nça va"
 
 
 def _as_sent(prompt: ChatPrompt) -> list[Message]:

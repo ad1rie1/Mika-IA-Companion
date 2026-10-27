@@ -293,6 +293,9 @@ class Project:
     #: le départ de la dernière tentative, aboutie ou non : l'espacement se compte depuis elle
     tried_at: int = 0
     failures: int = 0
+    #: la cause de la dernière tentative en panne (le détail de sa fin d'épisode, « NomDeClasse: message ») : la
+    #: pause qui suit dit la vraie (ADR 0142)
+    last_failure: str = ""
     summary_ref: str = ""
     last_commit: str = ""
     #: « lancer maintenant » demandé à cet instant, sur cet objectif (0 : celui qui vient)
@@ -373,8 +376,9 @@ STEERS_KEPT = 50
 #: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois ;
 #:     un objectif qui bloque après cette réponse se dit aussi (« ça bloque »).
 #: v8 : ses accès (ADR 0133) et les demandes de pilotage sur ton accord (``access``, ``steers``).
+#: v9 : la cause de la dernière panne (``last_failure``), que dit la pause (ADR 0142).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=8)
+                   state_version=9)
 PROJECTS.declare(*c.ALL)
 
 
@@ -1157,6 +1161,8 @@ REFUND = frozenset({"failed", "timeout", "superseded", "preempted", "cancelled",
 #: …et parmi elles, une panne du modèle : elle a pu coûter des appels (le plafond horaire ne la rend pas), et
 #: trois d'affilée mettent le projet en pause
 BROKEN = frozenset({"failed", "timeout"})
+#: ce qu'on garde de la cause d'une panne (caractères)
+FAILURE_KEPT = 300
 
 
 @PROJECTS.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
@@ -1188,6 +1194,9 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
         broke = e.data.outcome in BROKEN
         p = replace(p, runs=max(0, p.runs - 1), failures=p.failures + (1 if broke else 0),
                     runs_at=tuple(t for t in p.runs_at if t != run.started), last_run_at=run.previous)
+        if broke:
+            cause = e.data.detail or ("TimeoutError" if e.data.outcome == "timeout" else "")
+            p = replace(p, last_failure=cause[:FAILURE_KEPT])
         if not broke:
             s = replace(s, runs_at=tuple(t for t in s.runs_at if t != run.started))
         if o is not None:

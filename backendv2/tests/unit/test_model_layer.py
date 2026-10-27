@@ -184,6 +184,10 @@ def test_the_facts_of_a_text_are_its_numbers_and_links_normalized():
     assert not keeps_facts(draft, "14°C, averses à 16h, 1234,50 €, voir https://meteo.example/mauges")
     assert not keeps_facts("rendez-vous à 16:30", "rendez-vous à 16h30")  # prudence : le premier jet part
     assert keeps_facts("rien de chiffré", "toujours rien")
+    # la durée d'une pause n'est pas un fait (le 2026-10-26 : tout premier jet qui en marquait une partait tel quel,
+    # l'autrice ne voyant pas ses jetons)
+    assert facts_of("6 ans, c'est un manège. [PAUSE:400] Il a dit quoi ?") == {"6"}
+    assert keeps_facts("6 ans, c'est un manège. [PAUSE:400] Il a dit quoi ?", "6 ans, juge sévère. il a dit quoi ?")
 
 
 # ── L'extraction ───────────────────────────────────────────────────────────

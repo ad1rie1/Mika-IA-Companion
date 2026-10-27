@@ -424,6 +424,8 @@ def test_three_failures_pause_the_project_without_blaming_her(tmp_path):
     [p] = paused
     assert "en panne" in p.data.reason and project.status == c.PAUSED and project.runs == 0  # le crédit est rendu
     assert closed == [] and project.objectives[0].status == c.OPEN  # une panne n'est ni un échec ni un blocage
+    # la vraie cause de la dernière, pas « le modèle n'a pas répondu » pour toutes (ADR 0142)
+    assert "la dernière : connexion impossible : panne simulée" in p.data.reason
 
 
 def test_runs_that_never_conclude_block_the_objective(tmp_path):

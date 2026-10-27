@@ -27,7 +27,9 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   rendu dans l'ordre où le modèle les a écrits (ils arrivent au relais dans
   l'ordre de leurs requêtes HTTP) ;
 - tour suivant (les résultats dans la requête) : ils sont rendus à la CLI, qui
-  continue ; son message ``result`` fait la réponse finale. Si le runtime clôt
+  continue — rien d'autre ne part, et la passerelle ne mesure pas contre le budget le
+  fil que la session tient déjà (``carries``, ADR 0142) ; son message ``result`` fait
+  la réponse finale. Si le runtime clôt
   la boucle (les résultats suivis d'un dernier mot à elle : « réponds
   maintenant, sans outil »), ce mot accompagne les résultats rendus — la session
   vivante finit sa réponse, rien n'est refait ;
@@ -428,6 +430,13 @@ class ClaudeCodeBackend:
         except BaseException:
             await self._stop(req.call_id)
             raise
+
+    def carries(self, req: LLMRequest) -> bool:
+        """``req`` poursuit-elle une boucle dont la session est vivante (elle attend ces résultats) ? Alors seuls ses
+        nouveaux résultats partent : le reste du fil est déjà dans la session, que la CLI tient dans sa propre
+        fenêtre — la passerelle ne le mesure pas contre le budget (ADR 0142)."""
+        run = self._runs.get(req.call_id)
+        return run is not None and self._answers(run, req)
 
     def _answers(self, run: _Run, req: LLMRequest) -> bool:
         results = _results_of(req.messages)

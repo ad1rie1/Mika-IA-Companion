@@ -54,6 +54,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.kernel.inspect import describe_error
 from mika.vocab.phrasebook import phrase
 
 #: l'écart minimal entre deux passes de « tenir » qui trouvent encore quelque chose à faire
@@ -117,6 +118,13 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
     return out
 
 
+def pause_reason(p: Project) -> str:
+    """Pourquoi un projet en panne se met en pause : combien d'échecs, et la cause du dernier telle qu'elle a été
+    (un prompt trop long n'est ni un modèle muet ni un délai passé : ADR 0142)."""
+    cause = describe_error(p.last_failure) if p.last_failure else "le modèle n'a pas répondu"
+    return f"en panne : {p.failures} exécutions de suite ont échoué (la dernière : {cause})"
+
+
 @PROJECTS.process("projects.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.PERCEPTION_RECEIVED],
                   lane="background",
                   catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
@@ -152,9 +160,7 @@ class Tend:
                     project=p.id, objective=o.id, status=c.BLOCKED, note=Content.of(why, level=p.sensitivity),
                     owner=p.owner, about=p.about, dedupe_key=key))
         for p in broken(s, frame):
-            drafts.append(PAUSED.draft(project=p.id, reason=f"en panne : {p.failures} exécutions de suite ont échoué "
-                                                            "(le modèle n'a pas répondu, ou le délai d'une exécution "
-                                                            "est passé)", owner=p.owner, about=p.about,
+            drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p), owner=p.owner, about=p.about,
                                        dedupe_key=f"panne:{p.id}:{p.tried_at}"))
         done_now = finished(s, frame)
         for p in done_now:  # elle le clôt elle-même : il a fait son temps (ou elle y renonce, rien n'a abouti)

@@ -419,14 +419,28 @@ def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace]
 
 class LiveGateway:
     """La passerelle en service, remplaçable sans redémarrer (nouvelle clé,
-    nouveau modèle). Sans configuration, tout appel échoue proprement."""
+    nouveau modèle). Sans configuration, tout appel échoue proprement. Une boucle
+    d'outils ouverte finit sur la passerelle où elle a commencé : remplacée, celle-ci
+    sert encore ses boucles (et ses appels en cours), puis s'efface (ADR 0142)."""
 
     def __init__(self, gateway: Gateway | None = None) -> None:
         self._inner = gateway
+        #: les passerelles remplacées qui tiennent encore quelque chose (``Gateway.busy``)
+        self._retired: list[Gateway] = []
         self.traces: deque[LLMTrace] = deque(maxlen=TRACES_KEPT)
 
     def set(self, gateway: Gateway | None) -> None:
-        self._inner = gateway
+        old, self._inner = self._inner, gateway
+        if old is not None and old is not gateway:
+            self._retired.append(old)
+        self._prune()
+
+    def _prune(self) -> None:
+        self._retired = [g for g in self._retired if g.busy()]
+
+    def _serving(self, req: LLMRequest) -> Gateway | None:
+        """La passerelle de ``req`` : celle d'avant qui tient sa boucle ouverte, sinon celle en service."""
+        return next((g for g in self._retired if g.continues(req)), self._inner)
 
     def budget(self, role: str, max_tokens: int):
         return self._inner.budget(role, max_tokens) if self._inner is not None else LLMLimits().budget(max_tokens)
@@ -492,9 +506,13 @@ class LiveGateway:
     async def call(self, req: LLMRequest) -> LLMResponse:
         if self.is_voice(req.role) and req.persona is None:
             raise MissingPersona(f"le rôle voix « {req.role} » exige une persona")
-        if self._inner is None:
+        gateway = self._serving(req)
+        if gateway is None:
             raise UnconfiguredRole(req.role)
-        return await self._inner.call(req)
+        try:
+            return await gateway.call(req)
+        finally:
+            self._prune()
 
     async def try_on(self, name: str, req: LLMRequest) -> Trial:
         """Un essai de la console sur le fournisseur ``name`` (voir ``Gateway.try_on``)."""
@@ -503,13 +521,16 @@ class LiveGateway:
         return await self._inner.try_on(name, req)
 
     def release(self, call_id: str) -> None:
-        """La boucle d'outils ``call_id`` est finie (voir ``Gateway.release``)."""
-        if self._inner is not None:
-            self._inner.release(call_id)
+        """La boucle d'outils ``call_id`` est finie (voir ``Gateway.release``), où qu'elle ait tourné."""
+        for gateway in (*self._retired, self._inner):
+            if gateway is not None:
+                gateway.release(call_id)
+        self._prune()
 
     async def aclose(self) -> None:
-        """Arrête ce que les fournisseurs tiennent encore (les CLI de Claude Code)."""
-        for backend in (self._inner.backends.values() if self._inner is not None else ()):
-            close = getattr(backend, "aclose", None)
-            if close is not None:
-                await close()
+        """Arrête ce que les fournisseurs tiennent encore (les CLI de Claude Code), ceux d'avant compris."""
+        for gateway in (*self._retired, self._inner):
+            for backend in (gateway.backends.values() if gateway is not None else ()):
+                close = getattr(backend, "aclose", None)
+                if close is not None:
+                    await close()

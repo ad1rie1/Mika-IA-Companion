@@ -6,7 +6,9 @@
   fait pendant une réponse hérite de sa priorité ;
 - chaque appel a un délai ; le repli reçoit le temps qui reste ;
 - une boucle d'outils reste sur son fournisseur, et ne bascule jamais vers un
-  fournisseur qui referait ses outils ;
+  fournisseur qui referait ses outils ; elle finit sur sa passerelle quand les
+  réglages en installent une autre, et un tour que la session du fournisseur tient
+  déjà n'est pas mesuré contre le budget (ADR 0142) ;
 - une sortie coupée par son plafond : redemandée (structurée) ou coupée à la
   dernière phrase (parole) ;
 - un 400 sur la *valeur* de ``max_tokens`` ne fait pas changer de paramètre ;
@@ -28,8 +30,15 @@ from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel
 
 from mika.adapters.llm.claude import ClaudeBackend
-from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend, build_gateway, failure_fr
-from mika.adapters.llm.gateway import Gateway, last_sentence, trim_speech
+from mika.adapters.llm.config import (
+    BackendSpec,
+    LiveGateway,
+    LLMConfig,
+    build_backend,
+    build_gateway,
+    failure_fr,
+)
+from mika.adapters.llm.gateway import OPEN_LOOP_STALE_US, Gateway, last_sentence, trim_speech
 from mika.adapters.llm.ollama import OllamaBackend
 from mika.adapters.llm.openai_compat import OpenAICompatBackend
 from mika.adapters.llm.pricing import price_usd
@@ -255,6 +264,71 @@ async def test_a_failed_loop_can_resume_on_its_original_provider():
     main.fail = False
     await gw.call(replace(req, messages=MID_LOOP))
     assert len(main.seen) == 2 and not spare.seen
+
+
+class Session(Quick):
+    """Un fournisseur à session (la CLI de Claude Code) : il écrit une app dans un appel d'outil, puis tient le fil
+    — le tour suivant ne lui apporte que le résultat (``carries``)."""
+
+    def __init__(self, name: str = "session") -> None:
+        super().__init__(name, resumes=False)
+        self.live: set[str] = set()
+
+    def carries(self, req: LLMRequest) -> bool:
+        return req.call_id in self.live
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        self.seen.append(req)
+        if req.call_id in self.live:
+            self.live.discard(req.call_id)
+            return LLMResponse("écrit", model="m")
+        self.live.add(req.call_id)
+        return LLMResponse("", stop="tool_use", model="m",
+                           tool_calls=(ToolCall("t1", "forge_write", {"code": "x" * 5_000}),))
+
+
+def answered(req: LLMRequest, asked: LLMResponse) -> LLMRequest:
+    call = asked.tool_calls[0]
+    return req.extend(Message("assistant", asked.text, tool_calls=asked.tool_calls),
+                      Message("tool", "écrite", tool_call_id=call.id, name=call.name))
+
+
+async def test_a_turn_a_live_session_carries_is_not_measured_against_the_budget():
+    """La session tient déjà le fil : le tour suivant ne lui rend que le résultat. Mesuré entier, il était refusé
+    après un long appel d'outil (une app écrite dans la boucle) — le travail fait, l'épisode en échec (ADR 0142). Un
+    fournisseur qui reçoit tout le fil à chaque tour y est toujours mesuré."""
+    small = LLMLimits(context_tokens=4_000, chars_per_token=1.0)
+    session = Session()
+    gw = Gateway({"s": session}, {"extract": "s"}, clock=ManualClock(0), limits={"s": small})
+    first = LLMRequest(role="extract", call_id="ep#0", system_stable="s", messages=(Message("user", "écris l'app"),))
+    then = answered(first, await gw.call(first))
+    assert (await gw.call(then)).text == "écrit"
+    with pytest.raises(PromptBudgetError):
+        small.fit(then)
+
+
+async def test_a_loop_open_when_the_settings_change_finishes_on_its_gateway():
+    """Les réglages enregistrés en pleine boucle installent une autre passerelle : la boucle ouverte finit sur la
+    sienne, au fournisseur qui l'a commencée — son tour suivant partait vers la CLI, qui refuse une boucle commencée
+    ailleurs (ADR 0142). Un nouvel appel va à la nouvelle ; l'ancienne s'efface quand sa boucle est finie, ou quand
+    une boucle abandonnée n'a plus donné de nouvelles depuis une heure."""
+    clock = ManualClock(0)
+    api, cli = Session("api"), Quick("cli", resumes=False)
+    live = LiveGateway(Gateway({"api": api}, {"extract": "api"}, clock=clock))
+    first = LLMRequest(role="extract", call_id="ep#0", system_stable="s", messages=(Message("user", "travaille"),))
+    asked = await live.call(first)
+    live.set(Gateway({"api": Quick("api"), "cli": cli}, {"extract": "cli"}, clock=clock))
+    assert (await live.call(answered(first, asked))).text == "écrit" and cli.seen == []
+    await live.call(LLMRequest(role="extract", call_id="ep2#0", system_stable="s"))
+    assert len(cli.seen) == 1 and live._retired == []
+
+    abandoned = LiveGateway(Gateway({"api": Session("api")}, {"extract": "api"}, clock=clock))
+    await abandoned.call(first)
+    abandoned.set(Gateway({"cli": cli}, {"extract": "cli"}, clock=clock))
+    assert len(abandoned._retired) == 1
+    clock.advance(OPEN_LOOP_STALE_US)
+    abandoned.set(Gateway({"cli": cli}, {"extract": "cli"}, clock=clock))
+    assert abandoned._retired == []
 
 
 # ── Coupé par le plafond ──────────────────────────────────────────────────
