@@ -6,15 +6,18 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from mika.app.composition import READING, faculties
 from mika.kernel.events import Payload
 from mika.kernel.facts import FactKey
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.registry import ArbitrationPolicy, CompositionError, Registry
+from mika.runtime.state import RUNTIME
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,9 +35,10 @@ def fac(name: str) -> Faculty:
     return Faculty(name, state=S, init=lambda p: S())
 
 
-def problems(*faculties: Faculty, arbitration: ArbitrationPolicy | None = None) -> list[str]:
+def problems(*faculties: Faculty, arbitration: ArbitrationPolicy | None = None,
+             reading: Sequence[str] | None = None) -> list[str]:
     with pytest.raises(CompositionError) as info:
-        Registry(list(faculties), arbitration=arbitration)
+        Registry(list(faculties), arbitration=arbitration, reading=reading)
     return info.value.problems
 
 
@@ -68,15 +72,26 @@ def test_fact_cycle():
     assert any("cycle de faits" in p for p in problems(a))
 
 
-def test_section_cycle_and_unknown_anchor():
+def test_the_reading_order_names_every_section_once():
+    """L'ordre de lecture (ADR 0151) nomme chaque section une fois : une section oubliée, une clé inconnue, une clé
+    redite sont des erreurs de composition — jamais un ordre que personne n'a choisi."""
     a = fac("a")
-    a.section("x", zone=Zone.VOLATILE, episodes=["REPLY"], after=["y"])(lambda s, f, e: None)
-    a.section("y", zone=Zone.VOLATILE, episodes=["REPLY"], after=["x"])(lambda s, f, e: None)
-    a.section("z", zone=Zone.VOLATILE, episodes=["REPLY"], before=["fantome"])(lambda s, f, e: None)
-    ps = problems(a)
-    assert any("cycle dans l'ordre des sections" in p for p in ps)
-    assert any("ancre inconnue" in p for p in ps)
+    for key in ("x", "y", "z"):
+        a.section(key, zone=Zone.VOLATILE, episodes=["REPLY"])(lambda s, f, e: None)
+    ps = problems(a, reading=("x", "y", "y", "fantome"))
+    assert any("« z » n'y figure pas" in p for p in ps)
+    assert any("section inconnue « fantome »" in p for p in ps)
+    assert any("« y » y figure deux fois" in p for p in ps)
+    assert [s.key for s in Registry([a], reading=("z", "x", "y")).sections] == ["z", "x", "y"]
+    assert [s.key for s in Registry([a]).sections] == ["x", "y", "z"]  # sans ordre : celui de la déclaration
 
+
+def test_her_composition_declares_the_reading_order_of_her_prompt():
+    """Toutes ses sections sont dans ``READING`` : le registre de sa composition se construit sans problème, et le
+    prompt suit cet ordre (la personne en face juste avant sa parole, sa réponse en dernier)."""
+    keys = [s.key for s in Registry([RUNTIME, *faculties()], reading=READING).sections]
+    assert keys == list(READING)
+    assert keys[-1] == "answer" and keys.index("who") < keys.index("their_state") < keys.index("habits")
 
 def test_unreachable_threshold():
     a = fac("a")

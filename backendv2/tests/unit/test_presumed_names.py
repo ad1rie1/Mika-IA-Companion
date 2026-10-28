@@ -19,7 +19,8 @@ from __future__ import annotations
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as mc
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory.consolidation import Consolidate, known_beliefs
 from mika.faculties.memory.extraction import (
     CONFIDENCE_CAP,
     Conversation,
@@ -254,7 +255,7 @@ async def test_a_later_request_for_silence_still_reaches_a_mention_of_this_conve
     vectors = await index(db, [VectorItem(1, mc.BELIEF, text, ())])
     conv = Conversation("private:user_3", BOB, (Line(101, Frame.now, "Bob", "pour Alice, garde-le pour toi", "user_3"),))
     people = People.of(BOB, {}, "Mika", scope="private:user_3")
-    known = await Consolidate()._known_beliefs(db, vectors, conv, people, {})
+    known = await known_beliefs(db, vectors, conv, people, {})
     assert [i for i, _t in known] == [1]
     db.conn.close()
 
@@ -308,14 +309,14 @@ def test_rooms_are_read_once_then_only_what_follows():
     for i, who, room in rows:
         db.execute("INSERT INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
                    (i, Frame.now, "user", who, "…", room))
-    cons = Consolidate()
-    first = cons._rooms(Frame(), db)
+    process = Consolidate()
+    first = process._rooms(Frame(), db)
     db.execute("INSERT INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
                (4, Frame.now, "user", "user_5", "…", "atelier"))
-    second = cons._rooms(Frame(), db)
-    assert first == {"user_2": {"salon"}, "user_3": {"salon"}} and cons.rooms_read == 4
+    second = process._rooms(Frame(), db)
+    assert first == {"user_2": {"salon"}, "user_3": {"salon"}} and process.rooms_read == 4
     assert second["user_5"] == {"atelier"}
-    assert Consolidate._near(Conversation("private:user_3", BOB, ()), second) == ("user_2", "user_3")
+    assert cons._near(Conversation("private:user_3", BOB, ()), second) == ("user_2", "user_3")
     db.conn.close()
 
 

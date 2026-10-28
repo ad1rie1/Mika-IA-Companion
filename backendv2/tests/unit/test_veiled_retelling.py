@@ -468,7 +468,7 @@ def test_a_veiled_story_never_proves_an_identity():
 def test_the_composer_drops_a_veiled_block_next_to_the_name():
     from mika.kernel.faculty import SectionSpec, Zone
 
-    spec = SectionSpec("memory", "veiled", Zone.VOLATILE, frozenset({"REPLY"}), lambda *_: None, (), (), 28, 0,
+    spec = SectionSpec("memory", "veiled", Zone.VOLATILE, frozenset({"REPLY"}), lambda *_: None, 28, 0,
                        frozenset(), frozenset(), "SANS NOM", False)
     body = SectionBody(f"- {LAYOFF}", level=2, veils=("Alice Durand", "Alice"))
     common = dict(kind="REPLY", audience_level=1, muted_tags=frozenset(), budget=Budget(max_tokens=24_000),

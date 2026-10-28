@@ -56,6 +56,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
 from mika.ports.preprocess import inert
+from mika.vocab.affect import Emotion, named_feeling
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -119,38 +120,58 @@ def _views(s: CameraState, cx) -> tuple[c.View, ...]:
 _JSON = re.compile(r"\{.*\}", re.S)
 
 
-def read_look(text: str) -> tuple[str, bool]:
+@dataclass(frozen=True, slots=True)
+class Sight:
+    """Ce que la description dit d'une image : ce qu'on y voit, si ça mérite l'attention, et ce que ça lui fait —
+    une émotion de son vocabulaire et son intensité, ou rien (``named_feeling``, ADR 0153)."""
+
+    description: str
+    notable: bool = False
+    emotion: str = ""
+    intensity: float = 0.0
+
+
+def read_look(text: str) -> Sight:
     found = _JSON.search(text or "")
     if found:
         try:
             data = json.loads(found.group(0))
             if isinstance(data, dict):
-                return inert(str(data.get("description") or ""), 600), bool(data.get("notable"))
+                emotion, intensity = named_feeling(data.get("emotion"), data.get("intensite"))
+                return Sight(inert(str(data.get("description") or ""), 600), bool(data.get("notable")), emotion,
+                            intensity)
         except ValueError:
             pass
-    return inert(text or "", 600), False
+    return Sight(inert(text or "", 600))
 
 
-def look(name: str) -> str:
+def look(name: str, persona: str) -> str:
     """La consigne de la description, pour celle qui ne voit pas l'image (son nom, celui de sa persona : jamais
-    écrit ici)."""
-    return phrase("camera.look.system", name=name)
+    écrit ici) : ce que l'image lui fait se juge à qui elle est (``persona``, sa persona rendue :
+    ``self.portrayed``), parmi les émotions de son vocabulaire (ADR 0153)."""
+    return phrase("camera.look.system", name=name,
+                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL)) + "\n\n" + phrase(
+        "self.portrayed.intro", name=name, persona=persona)
 
 
-def request(snap: Any, call_id: str, name: str) -> LLMRequest:
+def request(snap: Any, call_id: str, frame: Frame) -> LLMRequest:
     image = Image(snap.mime, base64.b64encode(snap.data).decode())
-    return LLMRequest(role="caption", call_id=call_id, system_stable=look(name),
+    system = look(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact")))
+    return LLMRequest(role="caption", call_id=call_id, system_stable=system,
                       messages=(Message("user", phrase("camera.look.ask"), images=(image,)),), max_tokens=200,
                       lane="background", priority=3)
 
 
-def seen_draft(snap: Any, description: str, notable: bool) -> Any:
+def seen_draft(snap: Any, seen: Sight) -> Any:
+    """Ce qu'elle a vu, avec ce que ça lui fait tel que la description le dit : la veille le dose comme pour toute
+    source (aucune émotion posée d'office, ADR 0153)."""
     level = int(Sensitivity.PERSONAL)
     return c.SEEN.draft(
         source="camera", kind=c.VIEW,
-        summary=Content.of(phrase("camera.seen", device=inert(snap.device, 40), description=description), level=level),
-        pertinence=0.7 if notable else 0.2, emotion="curious" if notable else "", intensity=0.15 if notable else 0.0,
-        sensitivity=level, bundle=BUNDLE, device=snap.device, digest=snap.digest, notable=notable,
+        summary=Content.of(phrase("camera.seen", device=inert(snap.device, 40), description=seen.description),
+                           level=level),
+        pertinence=0.7 if seen.notable else 0.2, emotion=seen.emotion, intensity=seen.intensity,
+        sensitivity=level, bundle=BUNDLE, device=snap.device, digest=snap.digest, notable=seen.notable,
         dedupe_key=f"vu:{snap.device}:{snap.digest}:{snap.at}")
 
 
@@ -189,12 +210,12 @@ class Look:
             return
         p = params(frame.env.params_of("camera", frame.root))
         for i, snap in enumerate(self._due(ctx.state, frame, port, p)[:2]):
-            resp = await ctx.ask(request(snap, f"{ctx.run_id}#{i}", self_c.name_of(frame.get(self_c.PERSONA))))
+            resp = await ctx.ask(request(snap, f"{ctx.run_id}#{i}", frame))
             if resp is None:
                 continue
-            description, notable = read_look(resp.text)
-            if description:
-                await ctx.emit(seen_draft(snap, description, notable))
+            seen = read_look(resp.text)
+            if seen.description:
+                await ctx.emit(seen_draft(snap, seen))
 
 
 def _for_owner(frame: Frame) -> bool:
@@ -253,12 +274,12 @@ async def camera_look(args: LookArgs, ctx: Any) -> Any:
     if frame.now - snap.at > p.fresh_us:  # une image figée n'est pas ce qu'on voit maintenant
         return ToolResult(ok=False, content=phrase("camera.tools.look.frozen", ago=_ago(frame.now - snap.at),
                                                    device=device))
-    resp = await llm.call(request(snap, f"{ctx.call_id}:look", self_c.name_of(frame.get(self_c.PERSONA))))
-    description, notable = read_look(resp.text)
-    if not description:
+    resp = await llm.call(request(snap, f"{ctx.call_id}:look", frame))
+    seen = read_look(resp.text)
+    if not seen.description:
         return ToolResult(ok=False, content=phrase("camera.tools.look.unreadable"))
-    await ctx.emit(seen_draft(snap, description, notable))
-    return phrase("camera.tools.look.result", description=description)
+    await ctx.emit(seen_draft(snap, seen))
+    return phrase("camera.tools.look.result", description=seen.description)
 
 
 

@@ -173,9 +173,13 @@ def day_fr(dt: date) -> str:
                   day=phrase("circadian.date.first") if dt.day == 1 else dt.day, month=MONTHS_FR[dt.month - 1])
 
 
+#: sous ce niveau d'énergie, elle tombe de sommeil (``circadian.feel.falling_asleep``)
+FALLING_ASLEEP_BELOW = 0.12
+
+
 def energy_feel(value: float) -> str:
-    """Ce que son énergie lui fait, en mots (jamais un nombre) ; vide quand il
-    n'y a rien à en dire."""
+    """Ce que son énergie lui fait, en mots (jamais un nombre, jamais une consigne : ce qu'elle en fait dans sa
+    réponse est à elle, ADR 0154) ; vide quand il n'y a rien à en dire. La seule maison de sa fatigue."""
     if value >= 0.7:
         return phrase("circadian.feel.great")
     if value >= 0.5:
@@ -184,7 +188,9 @@ def energy_feel(value: float) -> str:
         return ""
     if value >= 0.2:
         return phrase("circadian.feel.tired")
-    return phrase("circadian.feel.exhausted")
+    if value >= FALLING_ASLEEP_BELOW:
+        return phrase("circadian.feel.exhausted")
+    return phrase("circadian.feel.falling_asleep")
 
 
 def describe(dt: datetime, profile: Profile = DEFAULT, level: float | None = None) -> str:

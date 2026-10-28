@@ -30,6 +30,7 @@ from collections import OrderedDict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from functools import partial
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
@@ -73,7 +74,7 @@ from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import TOO_LATE
 from mika.ports.llm import LLMRequest, Message
-from mika.ports.llm_budget import fits_context
+from mika.ports.llm_budget import fit_by_halving, halved
 from mika.ports.paging import fold_text
 from mika.ports.sql import HANDLE_MAX, fit, json_values, upsert
 from mika.ports.store import Sql
@@ -776,10 +777,24 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
 
 
-def compact_system(name: str) -> str:
+def compact_system(name: str, persona: str) -> str:
     """La consigne du résumé d'un fil long, au nom de celle qui s'en souviendra (celui de sa persona : jamais écrit
-    ici)."""
-    return phrase("transcript.compact.system", name=name)
+    ici), puis qui elle est (``persona``, sa persona rendue : ``self.portrayed``) — le résumé est écrit à sa place, et
+    épinglé dans son fil (ADR 0153)."""
+    intro = phrase("self.portrayed.intro", name=name, persona=persona)
+    return phrase("transcript.compact.system", name=name) + "\n\n" + intro
+
+
+def _compact_request(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], previous: str | None,
+                     withheld: Collection[int], p: TranscriptParams, times: int, *, system: str,
+                     call_id: str) -> tuple[LLMRequest, bool]:
+    """L'appel du résumé, avec le début du fil divisé par deux ``times`` fois (``fit_by_halving``) ; et s'il reste
+    de quoi diviser."""
+    cut = halved(rows, times, least=1)
+    prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
+        phrase("transcript.compact.next") + "\n" + _compact_lines(frame, person, cut, p.mark_after_us, withheld)
+    return LLMRequest(role="compact", call_id=call_id, system_stable=system, messages=(Message("user", prompt),),
+                      max_tokens=p.compact_max_tokens, lane="background", priority=3), len(cut) > 1
 
 
 def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int,
@@ -890,20 +905,14 @@ class Compact:
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
             withheld = secret_sources(store, room, folded[-1]["id"]) & {int(r["id"]) for r in folded} if room else set()
-            lines = _compact_lines(frame, person, folded, p.mark_after_us, withheld)
-            prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
-                phrase("transcript.compact.next") + "\n" + lines
             self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
-            request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}",
-                                 system_stable=compact_system(self_c.name_of(frame.get(self_c.PERSONA))),
-                                 messages=(Message("user", prompt),), max_tokens=p.compact_max_tokens,
-                                 lane="background", priority=3)
-            while len(folded) > 1 and not fits_context(ctx.llm, request):
-                folded = folded[:max(1, len(folded) // 2)]
-                lines = _compact_lines(frame, person, folded, p.mark_after_us, withheld)
-                prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
-                    phrase("transcript.compact.next") + "\n" + lines
-                request = replace(request, messages=(Message("user", prompt),))
+            system = compact_system(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact")))
+
+            # le début du fil se replie par moitiés jusqu'à tenir : la suite attend le passage d'après
+            request, times = fit_by_halving(ctx.llm, partial(
+                _compact_request, frame, person, folded, previous, withheld, p, system=system,
+                call_id=f"{ctx.run_id}#{person}"))
+            folded = halved(folded, times, least=1)
             response, text = None, ""
             try:
                 response = await ctx.llm.call(request)

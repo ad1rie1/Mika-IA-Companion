@@ -1,7 +1,9 @@
 """Ce qu'elle sait de ses dessins en parlant, et ce qui la pousse à les montrer (ADR 0063).
 
 - La section « TES DESSINS » (réponse et initiative, pour la personne en face) : ce qu'elle dessine en ce moment
-  pour elle (« en cours depuis 3 min »), ce qui est prêt (« montre-le avec show_drawing »), ce qui a raté (à dire).
+  pour elle (« en cours depuis 3 min »), ce qui est prêt (et que l'outil show_drawing montre), ce qui a raté et
+  pourquoi. Des faits, à elle (ce qu'elle a demandé, ce qu'elle y voit) : rien n'y est cité comme venu d'ailleurs,
+  et rien n'y dit quoi en faire.
 - L'initiative due : un dessin prêt se montre (``DELIVER``), un dessin raté se dit (``COULD_NOT``) — comme un
   rappel, ce n'est pas « prendre la parole » (``agency.OWED``). Elle part vers l'adresse où la personne est
   maintenant (connectée, sinon joignable), sinon celle d'où venait la demande ; une garde l'annule si le dessin a
@@ -78,8 +80,7 @@ def line(j: Job, texts: Mapping[str, str], now: int) -> str:
 
 
 @IMAGING.section("dessins", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
-                 title=phrase("imaging.section.title"),
-                 untrusted=True, reads=[identity_c.PERSON, identity_c.HANDLES])
+                 title=phrase("imaging.section.title"), reads=[identity_c.PERSON, identity_c.HANDLES])
 def _section(s: ImagingState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     jobs = _relevant(s, frame)
     if not jobs:

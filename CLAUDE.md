@@ -159,7 +159,7 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
 - **Les montages** :
   - `conftest.make_mind(tmp, faculties, clock=…)` donne un Mind nu ;
   - `tests/fixtures/mika.py::build(tmp, respond)` donne le vrai Kernel composé, avec `boot`, `connect`, `befriend`,
-    `said`. La relecture et la seconde passe (ADR 0112) y sont coupées par défaut : `review=True`, `polish=True` ;
+    `said`. La seconde passe (ADR 0114) y est coupée par défaut : `polish=True` ;
   - `tests/fixtures/harness.py` donne des facultés jouets.
 - **Les bancs de mesure** (`tools/`) mesurent le vrai modèle par la CLI Claude Code, avec `claude-haiku-5-5` par défaut :
   - `tools/banc_lecture` mesure la lecture `[EN_FACE]` ;

@@ -79,10 +79,11 @@ def section(prompt: str, title: str) -> str:
     return prompt.split(marker, 1)[1].split("\n--- ", 1)[0]
 
 
-async def thought(kernel, text, *, origin, about=(), sensitivity=2, emotion="anxious", intensity=0.8):
+async def thought(kernel, text, *, origin, about=(), sensitivity=2, emotion="anxious", intensity=0.8,
+                  foreign=False):
     await kernel.mind.append([attention_c.THOUGHT_BORN.draft(
         text=Content.of(text, level=sensitivity), emotion=emotion, intensity=intensity, origin=origin,
-        about=tuple(about), sensitivity=sensitivity)], emitter="attention", correlation="genese",
+        about=tuple(about), sensitivity=sensitivity, foreign=foreign)], emitter="attention", correlation="genese",
         origin=Origin.GENESIS)
 
 
@@ -124,7 +125,8 @@ def test_her_thoughts_say_when_and_what_it_does_to_her(tmp_path):
         return section(prompts(llm, "user_1")[-1], "CE QUI TE TROTTE DANS LA TÊTE")
 
     shown = run(tmp_path, scenario)
-    assert shown.startswith("- cet après-midi : Alice m'a dit")
+    # ses mots à elle (à la première personne), dits comme tels dans un prompt qui lui parle à la deuxième
+    assert shown.startswith("- cet après-midi, tu t'es dit : Alice m'a dit")
     assert "— ça te met en colère, et ça te revient" in shown and "(en colère" not in shown
 
 
@@ -157,17 +159,39 @@ def test_what_a_signal_left_in_her_head_is_quoted_never_an_instruction(tmp_path)
 
     async def scenario(kernel, script, llm):
         await connect(kernel, "user_1", "Alice")
-        await thought(kernel, hostile, origin=attention_c.SIGNAL, sensitivity=1, emotion="curious", intensity=0.6)
+        await thought(kernel, hostile, origin=attention_c.SIGNAL, sensitivity=1, emotion="curious", intensity=0.6,
+                      foreign=True)
         p = await kernel.perceive(said("user_1", "coucou"))
         await p.reply
         return prompts(llm, "user_1")[-1]
 
     prompt = run(tmp_path, scenario)
     noticed = section(prompt, "CE QUE TU AS REMARQUÉ")
-    assert UNTRUSTED_NOTE in noticed
-    assert all(line.startswith(">") for line in noticed.splitlines()[1:] if line.strip())
+    note, head, *quoted = [line for line in noticed.splitlines() if line.strip()]
+    # ce qu'elle en ressent est à elle ; seul le texte venu d'ailleurs est cité, l'avertissement dit une fois, en tête
+    assert head.startswith("- ") and "ça t'intrigue" in head and "CANARI-SIGNAL" not in head
+    assert note == UNTRUSTED_NOTE and quoted and all(line.startswith(">") for line in quoted)
+    assert noticed.count(UNTRUSTED_NOTE) == 1
     assert "CANARI-SIGNAL" in noticed and "CANARI-SIGNAL" not in section(prompt, "CE QUI TE TROTTE DANS LA TÊTE")
     assert prompt.count(CONTEXT_FOOTER) == 1  # la seule vraie fin de l'état interne
+
+
+def test_what_she_tells_herself_from_a_signal_is_hers_never_cited(tmp_path):
+    """Un signal écrit par le code (« c'est presque toujours moi qui écris la première », un lien qui change) est une
+    pensée à elle : dans ce qui lui trotte dans la tête, jamais présentée comme venue d'ailleurs."""
+    async def scenario(kernel, script, llm):
+        await befriend(kernel, "user_1", social_c.CLOSE)
+        await connect(kernel, "user_1", "Alice")
+        await thought(kernel, "C'est presque toujours moi qui écris la première à Alice.", origin=attention_c.SIGNAL,
+                      about=("user_1",), sensitivity=2, emotion="thinking", intensity=0.6)
+        p = await kernel.perceive(said("user_1", "coucou"))
+        await p.reply
+        return prompts(llm, "user_1")[-1]
+
+    prompt = run(tmp_path, scenario)
+    mine = section(prompt, "CE QUI TE TROTTE DANS LA TÊTE")
+    assert "toujours moi qui écris la première" in mine and UNTRUSTED_NOTE not in mine
+    assert "toujours moi" not in section(prompt, "CE QUE TU AS REMARQUÉ")
 
 
 LIGHT = ["haha trop bien", "super journée, trop cool", "j'ai hâte de te raconter haha", "trop bien ce film !",
@@ -237,7 +261,9 @@ def test_she_knows_her_inner_state_is_hers_and_how_strong_a_tag_is(tmp_path):
 
     req = run(tmp_path, scenario)
     stable = req.system_stable
-    assert "C'est ta tête à toi" in stable and "réponds d'abord à ce qu'on vient de te dire" in stable
+    assert "C'est ta tête à toi" in stable and "rien de tout ça n'a sa place dans ta réponse" in stable
+    # « réagis d'abord à ce qu'on vient de te dire » n'a qu'une maison : « TA RÉPONSE », en dernier (ADR 0154)
+    assert "Réagis d'abord à ce que la personne vient de dire" in req.messages[-1].content
     assert "0.2 à peine, 0.5 nettement, 0.8 fortement, c'est rare, 1.0 submergée" in stable  # l'échelle (PSY-27, avec WP1)
     assert "[PAUSE:500] (une durée en millisecondes)" in stable and "[SILENCE]" in stable
 

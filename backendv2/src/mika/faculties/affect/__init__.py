@@ -476,7 +476,7 @@ def _mood_section(s: AffectState, frame: Frame, enrich: Any) -> str:
     return prose.mood(frame.get(c.MOOD), p, current=_target_person(frame))
 
 
-@AFFECT.section("stance", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], after=["who"],
+@AFFECT.section("stance", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE],
                 trim_rank=75, title=phrase("affect.stance.title"),
                 reads=[c.STANCE, identity_c.PERSON, identity_c.IDENTITY])
 def _stance_section(s: AffectState, frame: Frame, enrich: Any) -> str | None:

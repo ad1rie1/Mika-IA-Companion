@@ -598,7 +598,7 @@ def _awaiting(frame: Frame, p: Project, person: str) -> str:
     return phrase("projects.live.awaiting", who=_who(frame, person), what=", ".join(words))
 
 
-@PROJECTS.section("projects", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["goals"], trim_rank=44,
+@PROJECTS.section("projects", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=44,
                   title=phrase("projects.live.title"),
                   reads=[identity_c.PERSON, identity_c.IS_OWNER, rt.PENDING_EFFECTS])
 def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:

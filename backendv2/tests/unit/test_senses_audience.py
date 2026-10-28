@@ -205,7 +205,9 @@ def _outside_her_own_life(prompt: str) -> str:
     return _HER_OWN_LIFE.sub("", prompt)
 
 
-def test_an_important_mail_shows_in_a_light_reply_but_not_to_someone_who_is_hurting(tmp_path):
+def test_an_important_mail_shows_in_a_reply_whatever_the_tone_she_is_the_one_who_judges(tmp_path):
+    """Le code l'informe, il ne choisit pas pour elle : un mail important est sous ses yeux en réponse, que la
+    personne aille bien ou mal (la règle de Teams) ; rien ne lui dit que c'est « de l'arrière-plan »."""
     box = FakeMail()
     box.deliver(urgent(1, "URGENT : le toit fuit", "C'est urgent, appelle le plombier."))
 
@@ -222,10 +224,9 @@ def test_an_important_mail_shows_in_a_light_reply_but_not_to_someone_who_is_hurt
     calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "user_1"]
     light = "\n".join(m.content for m in calls[0].messages)
     heavy = "\n".join(m.content for m in calls[-1].messages)
-    assert "TES MAILS NON LUS — de l'arrière-plan" in light and "le toit fuit" in light
-    # à quelqu'un qui va mal, le mail ne s'invite pas : ni sa section, ni hors de ce qu'elle-même en pense. Ce qu'elle
-    # sent de la personne, c'est le modèle qui le lit en lui répondant (ADR 0093) : dès la réponse suivante
-    assert "TES MAILS" not in heavy and "toit" not in _outside_her_own_life(heavy.split(CONTEXT_FOOTER)[0])
+    for prompt in (light, heavy):
+        assert "--- TES MAILS NON LUS ---" in prompt and "le toit fuit" in prompt
+        assert "TES MAILS NON LUS —" not in prompt  # son titre est un titre, pas une consigne
 
 
 # ── Ce qu'un mail a choisi reste cité (CON-4, EDG-9) ──────────────────────
@@ -287,6 +288,21 @@ def test_a_frozen_camera_image_is_not_described_as_what_she_sees_now():
     group = tool_ctx(public=True, room="ext_chat_-1", ports={"camera": fresh, "llm": Llm()}, now=now,
                      params=camera_plugin.CameraParams())
     assert not asyncio.run(camera_plugin.camera_look(camera_plugin.LookArgs(), group)).ok  # jamais devant un salon
+
+
+def test_what_the_camera_shows_makes_her_feel_what_the_description_says():
+    """Ce que voit la caméra lui fait ce que dit la description — une émotion de son vocabulaire et son intensité, ou
+    rien : plus de « curieuse » posée d'office sur ce qui est notable ; la description sait qui elle est (ADR 0153)."""
+    snap = NS(device="salon", digest="d1", at=0, mime="image/jpeg", data=b"\xff\xd8image")
+    moved = camera_plugin.read_look('{"description": "Adrien rentre avec des fleurs.", "notable": true, '
+                                    '"emotion": "joie", "intensite": 0.5}')
+    seen = camera_plugin.seen_draft(snap, moved).data
+    assert (seen.emotion, seen.intensity, seen.notable) == ("happy", 0.5, True)
+    calm = camera_plugin.seen_draft(snap, camera_plugin.read_look(
+        '{"description": "Quelqu\'un traverse la pièce.", "notable": true}')).data
+    assert (calm.emotion, calm.intensity) == ("", 0.0)
+    system = camera_plugin.look("Nova", "PORTRAIT-CANARI")
+    assert "PORTRAIT-CANARI" in system and "angry" in system and "intensite" in system
 
 
 # ── Les pièces jointes (EDG-30, EDG-3) ─────────────────────────────────────

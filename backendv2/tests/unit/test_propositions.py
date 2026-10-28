@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from mika.contracts import memory as mc
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory import knowledge as kn
-from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.extraction import Conversation, Extraction, People, XCroyance
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.knowledge import pooled
@@ -138,8 +138,8 @@ async def test_discretion_asked_by_the_person_concerned_is_for_everyone():
     db.put(believed("Alice quitte la boîte", (ALICE,), (BOB,)), 1)
     conv = Conversation("private:user_2", ALICE_SPEAKS, (alice_says("garde ça pour toi stp"),))
     people = People.of(ALICE_SPEAKS, {}, "Mika", scope=conv.key)
-    out = await Consolidate()._drafts(Extraction(confidentiel=[1]), FRAME, MemoryState(), db, conv, people,
-                                      [(1, "Alice quitte la boîte")], [], None, MemoryParams(), "audit")
+    out = await cons._drafts(Extraction(confidentiel=[1]), FRAME, MemoryState(), db, conv, people,
+                             [(1, "Alice quitte la boîte")], [], None, MemoryParams(), "audit")
     (closing,) = [d for d in out if d.type.name == mc.ATTESTED.name]
     assert closing.data.restricts and closing.data.everyone and closing.data.item == 1
     db.conn.close()
@@ -165,8 +165,8 @@ async def test_discretion_also_closes_the_souvenir_of_the_same_words():
     assert verdict_of(FRAME, item(db, 1), CAROL, FRIEND, {}, db).ok  # contrôle : il se disait à une amie
     conv = Conversation("private:user_2", ALICE_SPEAKS, (alice_says("garde-le pour toi stp", seq=80),))
     people = People.of(ALICE_SPEAKS, {}, "Mika", scope=conv.key)
-    out = await Consolidate()._drafts(Extraction(confidentiel=[3]), FRAME, MemoryState(), db, conv, people,
-                                      [(3, "Alice quitte sa boîte")], [], None, MemoryParams(), "audit")
+    out = await cons._drafts(Extraction(confidentiel=[3]), FRAME, MemoryState(), db, conv, people,
+                             [(3, "Alice quitte sa boîte")], [], None, MemoryParams(), "audit")
     assert [d.data.item for d in out if d.type.name == mc.REINFORCED.name] == [1]  # pas le souvenir du chat
     for n, d in enumerate(out, start=4):
         db.put(d, n)

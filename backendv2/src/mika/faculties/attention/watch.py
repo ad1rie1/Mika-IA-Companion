@@ -510,7 +510,7 @@ class Watch:
                     text=Content.of(_clip(text, 240), level=level), emotion=x.emotion or Emotion.CURIOUS.value,
                     intensity=round(min(p.signal_thought_max, x.pertinence * weight * p.signal_thought_factor), 3),
                     origin=c.SIGNAL, about=x.about, sensitivity=level, source=x.seq, bundle=x.bundle,
-                    dedupe_key=f"pensée:signal:{x.seq}"))
+                    foreign=x.foreign, dedupe_key=f"pensée:signal:{x.seq}"))
         return out
 
     def _missing(self, state: AttentionState, frame: Frame, p: Any) -> list[Draft[Any]]:

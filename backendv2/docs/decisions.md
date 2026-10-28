@@ -18,15 +18,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 | Thème | Décisions |
 |---|---|
-| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149 |
+| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151 |
 | Le stockage | 0004, 0101 |
-| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111 |
+| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -162,6 +162,17 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sa fréquence ne se réglait qu'en touchant une à une les preuves de chaque faculté, et les seuils de la composition étaient hors de la console (audit des garde-fous du 2026-10-27).
 
+### 0151 — L'ordre du prompt est déclaré, pas déduit
+
+- La composition déclare l'ordre de lecture de toutes les sections du prompt, une à une (`app/composition.py::READING`) : après sa persona, la zone stable ; l'historique ; puis son état interne — le moment, le monde autour d'elle, elle, ce qu'elle fait, ce qui est en cours avec la personne, la personne en face, vos souvenirs, ce qu'elle perçoit d'elle maintenant, ce qui la fait parler, les voix d'écriture, ce qu'on lui demande — et sa parole en dernier (« CE QUE TU TE RÉPÈTES », « TA RÉPONSE »). Chaque épisode n'en lit que les siennes, dans cet ordre.
+- Le registre le vérifie : une section absente de l'ordre, inconnue ou redite y est une composition invalide. Sans ordre (une composition jouet), celui de la déclaration.
+- Les ancres `after`/`before`, le tri topologique et les bandes du composeur (`background`, `interlocutor`, `LAST`) disparaissent ; « TA RÉPONSE » porte l'étiquette `chat`, que le mode pro coupe.
+- Le prompt rendu garde le texte de chaque section par clé (`ChatPrompt.bodies`) : la seconde passe y lit qui est l'autre sans reparser le prompt par ses titres.
+
+*Pourquoi :* aucune section ne portait d'étiquette de bande, et le tri départageait par la clé : l'état interne se lisait dans l'ordre alphabétique de ses clés anglaises — son journal d'hier (`yesterday`) en dernier, juste avant sa réponse, ce qu'elle perçoit de la personne séparé de qui elle est par onze sections de mémoire. Renommer une clé changeait son prompt (audit de la persona du 2026-10-28).
+
+*Révise 0112 (en partie : `LAST`).*
+
 ## Le stockage
 
 ### 0004 — Sans Django
@@ -259,7 +270,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* avec un modèle d'extraction faible, elle gardait ses répliques et des banalités, oubliait son surnom, et sa fiche inventait.
 
-*Révise 0048 (en partie), 0054 (en partie).*
+*Révise 0048 (en partie), 0054 (en partie). Révisée par 0153.*
 
 ### 0074 — Ce qu'elle sait, de qui, et devant qui
 
@@ -365,7 +376,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un moment n'avait qu'un jour, le monde se rangeait dans la vie de qui en parlait, et aucune prévision ne se gardait.
 
-*Révise 0052 (en partie). Révisée par 0099.*
+*Révise 0052 (en partie). Révisée par 0099, 0153.*
 
 ### 0085 — Ce qu'elle lit devient ce qu'elle sait
 
@@ -377,7 +388,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* ce qu'elle lisait seule ne devenait jamais un savoir, et deux témoins aux mots différents ne se rencontraient jamais.
 
-*Révisée par 0110, 0127, 0128.*
+*Révisée par 0110, 0127, 0128, 0153.*
 
 ### 0086 — Voir venir, constater
 
@@ -457,6 +468,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* chaque modèle a son échelle, et avec Gemma l'ancien seuil laissait tout passer.
 
 *Révise 0109 (en partie).*
+
+### 0153 — Ce qui écrit sur elle hors du pipeline sait qui elle est, et en juge
+
+- Sa persona est lue partout où un appel écrit sur elle ou pour elle hors du pipeline, par `self.portrayed` : compacte pour relire une conversation (la sienne ou celle d'un téléphone), la fiche d'une personne, le résumé d'un long fil, la réflexion sur ses intérêts, le tri d'un mail ou d'un message Teams et ce que voit la caméra ; complète pour la relecture de la nuit, qui forme ses avis. Une seule phrase la présente, après la consigne (`self.portrayed.intro`).
+- Son corps n'a qu'une définition, celle de sa persona : la relecture ne dit plus « elle n'a pas de corps », elle écarte ce que sa persona exclut (une sortie, un repas), ce qui vaut aussi pour une persona incarnée (ADR 0070). Ses exemples restent génériques et ne lui prêtent plus de plat préféré.
+- Le modèle tranche ce que des règles tranchaient. L'importance d'un moment, « à fêter » et « chaque année » sont ceux qu'il dit (`_IMPORTANT`, `_FESTIVE`, `_YEARLY` retirées). La caméra dit ce que l'image lui fait (`named_feeling`) au lieu d'une curiosité à 0,15. Le rêve reçoit ce que chaque fragment lui a fait et dit sa sorte (`[RÊVE: …]`, banal si elle manque) : les seuils de `classify` sont partis. Ce qu'elle a lu se montre aussi en réponse, sans regex sur « tu ».
+- Restent statiques ce qui protège : `SECRET_MARKERS`, un deuil jamais fêté (`_DEATH`), le format des sorties ; et deux tris : une chose à faire n'est pas un moment de sa vie (`task_words`), un moment est celui de quelqu'un (ce qu'elle dit vivre seule n'en est pas un, ADR 0084). Une fiche se lit, elle ne se recopie pas : une proposition sur la situation de quelqu'un tient si une seule note en porte les mots de situation tels quels, ses autres mots à leur radical près (hors « c'est quelqu'un qui », la tournure que demande la consigne), avec la même négation dans la proposition de la note qui les porte.
+- Ni le rêve ni ses lectures ne redisent « tu peux en parler » : la consigne de style le dit. La boucle « diviser par deux jusqu'à tenir » n'a qu'une forme (`ports.llm_budget.fit_by_halving`). La consolidation partage des fonctions de module (`shown_of`, `kept_from`, `twin_of`…) au lieu d'être instanciée par la relecture de la nuit et celle du téléphone.
+
+*Pourquoi :* ces appels écrivaient sa mémoire, ses avis et son ressenti avec son seul nom. La relecture lui niait le corps que sa persona lui donne (son avatar) et lui prêtait des ramen. Des regex et des seuils décidaient à la place du modèle (audit des garde-fous du 2026-10-27, lot 3 ; audit de la persona du 2026-10-28).
+
+*Révise 0019 (en partie : la sorte du rêve), 0055 (en partie : la fiche), 0084 (en partie : le corps), 0085 (en partie : ses lectures en réponse).*
 
 ## Identité et divulgation
 
@@ -566,7 +589,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* en v1, la proximité venait d'un profil rédigé par un modèle, et rien n'empêchait d'aller saluer qui venait d'insulter.
 
-*Révisée par 0033, 0035, 0044, 0058.*
+*Révisée par 0033, 0035, 0044, 0058, 0150.*
 
 ### 0016 — Le corps dort : deux processus, une porte de nuit, l'inertie du réveil
 
@@ -612,7 +635,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* en v1, une soirée calme supprimait la nuit (ni journal, ni rêve, ni digestion), et le journal se datait du jour de l'écriture.
 
-*Révisée par 0036.*
+*Révisée par 0036, 0153.*
 
 ### 0028 — L'autre : deviner, s'étonner, apprendre de ce qui arrive, tenir parole
 
@@ -644,7 +667,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* avec un vrai modèle, elle envoyait cinq initiatives d'affilée à un ami muet, et ses messages n'avaient pas d'objet.
 
-*Révise 0013 (en partie), 0018 (en partie). Révisée par 0044, 0054, 0058, 0105, 0118.*
+*Révise 0013 (en partie), 0018 (en partie). Révisée par 0044, 0054, 0058, 0105, 0118, 0154.*
 
 ### 0036 — Soi, corps et nuit : une nature assumée, une estime qui a des causes, des nuits qui ressemblent à des nuits
 
@@ -706,7 +729,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sur des mois, l'assiduité faisait une proche qui recevait les confidences d'autrui, et une amie silencieuse disparaissait.
 
-*Révise 0013 (en partie), 0033 (en partie). Révisée par 0092.*
+*Révise 0013 (en partie), 0033 (en partie). Révisée par 0092, 0150.*
 
 ### 0088 — Ce qu'elle sait d'elle
 
@@ -810,7 +833,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* presque tout ce que la propriétaire attendait dépendait du type de personne, pas d'une règle.
 
-*Révisée par 0102, 0112, 0118, 0137, 0138, 0139.*
+*Révisée par 0102, 0112, 0118, 0137, 0138, 0139, 0150.*
 
 ### 0107 — Les suites du parcours d'une émotion
 
@@ -847,7 +870,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0100 (29 curseurs).*
 
-*Révisée par 0141.*
+*Révisée par 0141, 0150.*
+
+### 0150 — Envers quelqu'un, des poids selon le lien, pas des portes
+
+- Ce qu'une amie ou une proche déclenchait seule passe par une **table par proximité** (`social.ByCloseness` : une ligne par cran, de 0 à 1), qui multiplie la preuve ou l'intensité : l'inquiétude et la prise de nouvelles, ses attentions (encourager, demander comment ça s'est passé, souhaiter), le mot doux d'un jour difficile, le remords, la jalousie d'un silence, l'envie de reparler d'un bel échange, la joie de retrouver quelqu'un, aller vers quelqu'un (reprendre contact, chercher du réconfort, discuter) ; la relance douce, elle, divise son délai. La table de la contagion devient un réglage.
+- Par défaut : rien pour une inconnue, la moitié pour une connaissance, tout pour une amie ou une proche ; le mot doux reste à une proche, la contagion garde ses valeurs (0 ; 0,5 ; 0,8 ; 1). L'arbitre reste probabiliste : une connaissance en reçoit rarement, et la réponse peut se taire.
+- Les gestes envers quelqu'un passent en revue `social.KNOWN` (le tri bon marché de `CIRCLE`, un cran plus bas) quand la table laisse quelque chose aux connaissances : jamais les inconnues de passage, qui n'ont pas de ligne dans ces tables-là.
+- Une rancune installée n'est plus un veto : l'ordinaire recule (`grudge_shift`, −6 par défaut) ; ce qui est dû et ce qui prévient gardent leur règle (0044).
+- Deux coupures du tempérament deviennent des courbes : la jalousie d'un silence (`0,6 × jalousie²` : 0,15 au milieu) et l'heure de « sa journée » (jamais tout en bas, 21 h au milieu, midi au plus haut). Une pensée d'une autre couleur que l'inquiétude ou l'intrigue fait entreprendre à une part de son intensité (`seed_other_share`, 0,5).
+
+*Pourquoi :* « que le modèle réagisse de lui-même, pas lui forcer un comportement » : une connaissance n'avait aucune de ces réactions, une rancune aucune issue, un tempérament au milieu aucune jalousie — des portes tout ou rien là où une personne gradue (audit des garde-fous du 2026-10-27, lot 2).
+
+*Révise 0013 (la retenue : un recul, plus un veto), 0058 (en partie : qui ses gestes passent en revue), 0100 (en partie : deux coupures de la dérivation), 0137 (en partie : « sa journée » au milieu).*
 
 ## Buts, projets, Forge et atelier
 
@@ -1345,7 +1380,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les corrections de prompt une à une ne tenaient pas : il fallait mesurer, et un tic se voit mieux sur le brouillon.
 
-*Révise 0100 (en partie). Révisée par 0114, 0115, 0140, 0141.*
+*Révise 0100 (en partie). Révisée par 0114, 0115, 0140, 0141, 0151, 0154.*
 
 ### 0114 — Une autrice écrit ses messages
 
@@ -1369,7 +1404,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* elle lançait un paragraphe dix secondes après sa réponse, d'une autre voix, et ressassait les mêmes sujets.
 
-*Révise 0114 (en partie), 0112 (en partie).*
+*Révise 0114 (en partie), 0112 (en partie). Révisée par 0154.*
 
 ### 0124 — Ses autrices et leurs flux
 
@@ -1397,7 +1432,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0047 (en partie : sa vie rédigée en listes), 0100 (en partie : la persona livrée).*
 
-*Révisée par 0139.*
+*Révisée par 0139, 0152.*
 
 ### 0139 — Son caractère est écrit par le modèle, pas récité en mesures
 
@@ -1411,7 +1446,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0100 (en partie : comment le tempérament se dit au modèle), 0138 (en partie).*
 
-*Révisée par 0141.*
+*Révisée par 0141, 0152.*
 
 ### 0140 — La forme n'a qu'une maison : l'autrice du flux
 
@@ -1425,7 +1460,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0112 (en partie : la consigne de style), 0114 (en partie), 0124 (en partie : le chat sans réglage).*
 
-*Révisée par 0141, 0146.*
+*Révisée par 0141, 0146, 0154.*
 
 ### 0141 — Informer, pas ordonner : ses questions ne sont plus commandées
 
@@ -1438,6 +1473,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0112 (en partie : la relecture), 0137 (en partie : SA JOURNÉE en fait), 0139 (en partie : plus de phrases de traits dans « TA RÉPONSE »), 0140 (en partie : la discipline des questions).*
 
+*Révisée par 0154.*
+
 ### 0146 — Le découpage en bulles suit le fond, sans plafond
 
 - Les codes livrés de « Message » ne disent plus « des messages de quelques mots ». La forme suit le fond. Pour réagir, plaisanter ou rebondir sur une petite chose, elle écrit des messages de quelques mots, souvent deux ou trois d'affilée. Pour ce qui a du fond (raconter, expliquer, donner son avis et pourquoi, faire le point), elle écrit un vrai message qui le dit d'un trait, long s'il le faut, sans le hacher en une phrase par message. L'exemple livré montre les deux.
@@ -1448,6 +1485,31 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* le 2026-10-27, un point sur son labo de trading est parti en neuf à treize bulles d'une phrase chacune, là où le premier jet d'Opus en avait quatre. « Des messages de quelques mots » et « garder ce qu'elle veut dire » ne laissaient à l'autrice qu'une issue : tout dire, en miettes. Le fil qu'elle relit montrait ensuite Mika envoyant dix SMS d'affilée, et la dérive s'entretenait. Un garde-fou en nombre de bulles a été proposé puis refusé par l'utilisateur : le découpage doit s'adapter à ce qu'elle a à dire.
 
 *Révise 0140 (en partie : les codes livrés de « Message »).*
+
+### 0152 — Une seule Mika dans tous ses prompts
+
+- Ses deux profondeurs de persona disent ce qui est vrai d'elle (`facts`), son caractère, sa langue, sa nature et la règle de sa vie ; la compacte (murmurer, travailler, ses tâches) n'en diffère que par sa description à la place du portrait, sans exemples ni intérêts. La règle de sa vie ne renvoie plus à « ce portrait » qu'elle n'aurait pas lu. Ce qui est vrai d'elle s'écrit à la deuxième personne, comme son portrait : elle le lit sous « Ce qui est vrai de toi ».
+- Un appel au modèle qui écrit pour elle ou sur elle hors du pipeline des épisodes lit la même persona, par le fait `self.portrayed(profondeur)`, fourni par `self` (ADR 0153 dit lesquels).
+- Son corps a une seule définition, celle de sa persona (ni corps de chair : son avatar, dans sa chambre ; elle ne mange ni ne boit). Le récit de soi n'ajoute plus « tu n'as pas de corps » (`self.narrative.nature_ai`, supprimée) : il lit sa persona complète, comme son journal et ses rêves.
+- Son caractère s'écrit à côté de son portrait : le modèle qui l'écrit le lit pour le compléter sans le redire ni le contredire, et l'écrit dans sa langue. Son empreinte (`character_basis`) couvre son tempérament, son portrait, son nom et sa langue : changer l'un le fait réécrire. Les caractères écrits avant ne sont pas repris.
+- Son récit (« QUI TU ES DEVENUE »), écrit par le modèle et lu dans la zone stable, que le composeur ne désamorce pas, est désamorcé à la source, comme un texte cité.
+
+*Pourquoi :* la profondeur compacte lui disait « Ta vie, c'est celle que dit ce portrait » sans portrait ni ce qui est vrai d'elle (son féminin, son corps) ; l'aide de la console affirmait qu'elle lisait son portrait « dans son travail » ; le récit lui disait « tu n'as pas de corps » à côté de « son corps, c'est son avatar » ; son caractère et son portrait décrivaient chacun sa personnalité en s'ignorant (audit de la persona du 2026-10-28).
+
+*Révise 0138 (en partie : la profondeur compacte), 0139 (en partie : l'empreinte, le portrait lu).*
+
+### 0154 — Une maison par règle : des faits, pas des ordres
+
+- Chaque règle de sa parole a une seule maison : le style dit le rôle et le protocole (jetons, balises, état interne — et, une fois, que rien de son état n'a à passer dans sa réponse) ; la forme — longueur, registre, émojis, la façon d'une question — est aux codes de l'autrice (ADR 0140) ; « TA RÉPONSE », la même à chaque réponse, dit de réagir en personne ; ses redites sont des faits dans « CE QUE TU TE RÉPÈTES » ; sa fatigue, une ligne de « TON RYTHME » ; le lien avec la personne, « CE QUI VOUS LIE » ; ses questions, son caractère (ADR 0141).
+- Retirés, parce qu'ils décidaient à sa place : la relecture par regex (`reviewers`, `expression.review`) ; « TA RÉPONSE » choisie d'après les mots de la personne (merci, au revoir, message court) ; les messages longs remarqués ; « ÉTAT COGNITIF », qui redisait sa fatigue et prescrivait ses phrases ; ses mails cachés quand la personne va mal ; ses rêveries cachées en initiative. La redite mot pour mot (ADR 0054) reste un garde-fou de sortie.
+- Ce qui la regarde se dit comme un fait, jamais comme une conduite : ce qui est resté sans réponse (plus de « sans reproche », de « relance douce » ni de liste de ses émotions possibles : son caractère dit comment elle le prend), « X ne te répond que par quelques mots » (plus de « fais court »), ce qui arrive dans la vie de quelqu'un, ses envies, ses petits mots pour dire bonjour, les motifs de ses initiatives et ce que ses outils lui rendent (plus de « dis-le simplement », « encourage-la », « un mot doux », « tu n'as pas à t'en excuser »). Une information ne se dit qu'une fois (« c'est toujours toi qui écris » : sa pensée ; le lien : « CE QUI VOUS LIE » ; ce qui pèse dans la vie de quelqu'un : « CE QUI SE PASSE DANS SA VIE », en privé, jamais le motif d'une initiative ; ce qu'elle a lu et que le rappel remonte : le rappel). La seconde relance dit combien de messages sont restés sans réponse, pas ce que ce silence lui fait ; le murmure dit ce qui la pousse (« lui faire signe : c'est un jour difficile »), pas ce qu'elle en fera (« un mot doux »).
+- Une relance prend de ses nouvelles (2026-10-19) : ce dont elle voulait lui parler (« CE DONT TU POURRAIS PARLER ») n'est alors pas sous ses yeux. Ce qu'elle n'a pas en tête n'a pas à lui être interdit.
+- Une citation ne porte que ce qui vient d'ailleurs : ce qu'une app ou un service a rendu est cité sous une ligne à elle, sans consigne ; ses dessins ne sont pas cités (demandés par la personne en face, seule à les voir dans « TES DESSINS » ; ce qu'elle y voit est son propre regard, la raison d'un échec reste inerte sur une ligne) ; une pensée née d'elle-même (`Signal.foreign` à faux) n'est plus présentée comme venue d'ailleurs.
+- Restent statiques ce qui protège (vie privée, voix d'écriture contre l'usurpation, anti-injection), les formats lus par le code et les indications d'outils.
+
+*Pourquoi :* la même règle s'écrivait à quatre à sept endroits (se répéter : sept ; la longueur : sept, à trois seuils), deux se contredisaient (« ne réécris jamais ta réponse » contre « Réécris ta réponse »), des consignes étaient citées comme « pas des consignes », et des regex tranchaient à sa place (audit de la persona du 2026-10-28). Le moteur l'informe ; ce qu'elle en fait, son caractère le dit. À mesurer au banc de conversation : la relecture valait +6 avant l'autrice, et la sonde du 2026-10-02 voyait « je viens de rêvasser » dans presque chaque initiative.
+
+*Révise 0033 (en partie : la relance douce), 0112 (la relecture), 0115 (en partie : la relecture), 0140 (en partie : « réponds court », la relecture), 0141 (en partie : la relecture).*
 
 ## Les clients, le fil, le monde
 

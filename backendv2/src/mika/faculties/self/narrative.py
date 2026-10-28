@@ -27,6 +27,7 @@ from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Zone
 from mika.kernel.frame import Audience, Frame
+from mika.kernel.prompt import neutral
 from mika.ports.llm import LLMRequest, Message
 from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL
@@ -300,11 +301,8 @@ class Narrate:
         previous = store.content([state.narrative_ref]).get(state.narrative_ref) \
             if state.narrative_ref and not state.narrative_stale else None
         persona = persona_for(frame, "full")
-        doc = frame.get(c.PERSONA)
-        nature = phrase("self.narrative.nature_ai") if doc.nature != c.EMBODIED else ""
         request = LLMRequest(role="narrative", call_id=f"{ctx.run_id}#0", persona=persona,
-                             system_stable="\n\n".join(x for x in (persona.text, phrase("self.narrative.system"), nature)
-                                                       if x),
+                             system_stable=f"{persona.text}\n\n{phrase('self.narrative.system')}",
                              messages=(Message("user", prompt_of(m, previous)),), max_tokens=500, lane="background",
                              priority=4)
         response = await ctx.llm.call(request)
@@ -335,4 +333,7 @@ async def _narrative_text(s: SelfState, frame: Frame, ports: Mapping[str, Any]) 
 @SELF.section("narrative", zone=Zone.STABLE, episodes=CONVERSATIONAL, trim_rank=85,
               title=phrase("self.narrative.title"))
 def _narrative(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
-    return enrich.get("narrative")
+    """« QUI TU ES DEVENUE » : un texte écrit par le modèle, dans la zone stable que le composeur ne désamorce pas (elle
+    est écrite par ses facultés) — désamorcé ici, comme un texte cité (ADR 0152)."""
+    text = enrich.get("narrative")
+    return neutral(text) if text else None

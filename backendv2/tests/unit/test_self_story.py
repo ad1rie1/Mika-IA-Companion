@@ -220,12 +220,13 @@ async def write(frame: Frame, text: str = "Je suis quelqu'un qui écoute.", stor
     return voice, emitted
 
 
-async def test_embodied_she_hears_nothing_of_an_ai_and_her_story_names_no_one():
+async def test_her_story_reads_her_persona_only_and_names_no_one():
+    # sa nature et son corps sont ceux de sa persona (ADR 0152) : le récit n'en ajoute aucune règle
     ai, emitted = await write(Her())
-    assert "Tu n'as pas de corps" in ai.requests[0].system_stable and emitted
+    assert "Tu n'as pas de corps" not in ai.requests[0].system_stable and emitted
     assert emitted[0].data.about == (ALICE, INES) and emitted[0].data.knows == (self_c.PROMISES_KEPT,)
     embodied, _ = await write(Her(nature=self_c.EMBODIED))
-    assert "Tu n'as pas de corps" not in embodied.requests[0].system_stable
+    assert "IA" not in embodied.requests[0].system_stable
     named, nothing = await write(Her(), "Je suis quelqu'un qui écoute Alice parler de jazz.")
     assert named.requests and nothing == []  # un prénom de son cercle : il ne s'écrit pas
     empty, none = await write(Her(), store=Store())

@@ -15,7 +15,7 @@ from dataclasses import replace
 import pytest
 
 from mika.contracts import memory as mc
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.extraction import (
     IMPORTANCE,
     Extraction,
@@ -47,8 +47,8 @@ JAZZ, NO_JAZZ = "J'aime le jazz", "Je n'aime plus le jazz"
 def said_of_herself(db: Store, text: str, genre: str | None = None, *, remplace: int | None = None,
                     known: tuple[int, ...] = ()) -> list:
     """Ce que la relecture garde d'une de ses répliques sur elle-même."""
-    return Consolidate()._about_self(XCroyance(texte=text, genre=genre, sur_elle=True, remplace=remplace), db,
-                                     lambda _: ((1,), (), []), "self", set(known))
+    return cons._about_self(XCroyance(texte=text, genre=genre, sur_elle=True, remplace=remplace), db,
+                            lambda _: ((1,), (), []), "self", set(known))
 
 
 def item(db: Store, seq: int) -> Item:

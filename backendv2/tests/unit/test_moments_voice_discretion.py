@@ -17,7 +17,7 @@ import pytest
 
 from mika.app.server import _warm
 from mika.contracts import memory as mc
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.extraction import (
     Conversation,
     Extraction,
@@ -52,8 +52,8 @@ def _monday() -> str:
 async def _drafts(db: Store, ex: Extraction, line: str, moments) -> list:
     conv = Conversation("private:user_2", ALICE, (alice_says(line),))
     people = People.of(ALICE, {}, "Mika", scope=conv.key)
-    return await Consolidate()._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(),
-                                       "audit", moments=moments)
+    return await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None, MemoryParams(), "audit",
+                              moments=moments)
 
 
 # ── un moment déplacé ─────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ def test_the_extraction_sees_the_upcoming_moments_with_their_numbers():
     db = Store()
     old = _interview(db)
     conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
-    shown, upcoming = Consolidate._moments(FRAME, db, MemoryState(), conv, {"user_2": "Alice [P1]"})
+    shown, upcoming = cons._moments(FRAME, db, MemoryState(), conv, {"user_2": "Alice [P1]"})
     assert [i for i, _w, _t in shown] == [old] and set(upcoming) == {old}
     text = render(conv, now=FRAME.local(), beliefs=(), promises=(), moments=shown)
     assert phrase("memory.extraction.render.moments") in text
@@ -77,7 +77,7 @@ async def test_a_postponed_moment_replaces_the_one_it_moves_and_inherits_its_sec
     db = Store()
     old = _interview(db, secret=True)
     conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
-    _shown, upcoming = Consolidate._moments(FRAME, db, MemoryState(), conv, {})
+    _shown, upcoming = cons._moments(FRAME, db, MemoryState(), conv, {})
     ex = Extraction(evenements=[XEvenement(texte="son entretien chez Ubisoft, reporté à lundi", quand=_monday(),
                                            personnes=["P1"], messages=[10000], remplace=old)])
     events = [d.data for d in await _drafts(db, ex, "finalement il est reporté à lundi", upcoming)
@@ -120,8 +120,8 @@ async def test_the_souvenir_written_in_carols_place_becomes_what_carol_told_her(
     ex = Extraction(souvenirs=[XSouvenir(texte="J'ai eu une petite fille, Jeanne : je suis épuisée mais tellement "
                                                "heureuse.", personnes=["P1"], messages=[10000], importance=3)])
     people = People.of(CAROL, {}, "Mika", scope=conv.key)
-    got = [d.data for d in await Consolidate()._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None,
-                                                       MemoryParams(), "audit")
+    got = [d.data for d in await cons._drafts(ex, FRAME, MemoryState(), db, conv, people, [], [], None,
+                                              MemoryParams(), "audit")
            if d.type.name == mc.REMEMBERED.name]
     assert len(got) == 1 and got[0].text.text.startswith("Carol") and got[0].told_by == ("user_4",)
     db.conn.close()

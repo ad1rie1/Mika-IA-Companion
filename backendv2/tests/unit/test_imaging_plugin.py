@@ -158,7 +158,9 @@ def test_above_the_floor_the_owner_has_no_quota_and_an_account_has_one(tmp_path)
     assert all(got[f"propriétaire-{i}"].ok for i in range(3))  # pas de quota pour elle
     adult = [e for e in requested if e.data.adult]
     assert len(adult) == 1 and adult[0].data.owner and adult[0].data.target == "user_1"
-    assert "c'est lancé" in got["compte-1"].content.lower() and "ne le décris pas" in got["compte-1"].content.lower()
+    # ce qu'elle ne sait pas encore, dit comme un fait — pas « dis-lui que tu t'y mets » (ADR 0154)
+    started = got["compte-1"].content.lower()
+    assert "c'est lancé" in started and "tu ne l'as pas vu" in started and "dis-lui" not in started
 
 
 def test_an_adult_request_needs_a_provider_that_accepts_it(tmp_path):
@@ -265,5 +267,11 @@ def test_a_refusal_is_said_and_a_ready_drawing_is_owed(tmp_path):
     assert all(cand.args["bundles"] == (c.BUNDLE,) and cand.args["subject"].startswith("dessin:") for cand in candidates)
     assert {c.DELIVER, c.COULD_NOT} <= agency_c.OWED  # ce qui est dû : ni plafond ni période réfractaire
     assert "n'a pas pu se faire" in prompt and "modération" in prompt
+    # des faits, à elle — l'outil qui montre un dessin prêt est une information ; rien ne lui dit quoi en dire, et
+    # rien de la section n'est présenté comme venu d'ailleurs
+    drawings = prompt.split("--- TES DESSINS ---", 1)[1].split("\n--- ", 1)[0]
+    assert "l'outil show_drawing le montre" in drawings
+    assert "Dis-le" not in drawings and "réessayer" not in drawings and "Montre-le" not in drawings
+    assert not any(line.startswith(">") for line in drawings.splitlines())
     statuses = sorted(j.status for j in state.jobs.values())
     assert statuses == sorted([c.TOLD, c.READY])  # l'échec est dit par sa réponse ; le prêt attend show_drawing

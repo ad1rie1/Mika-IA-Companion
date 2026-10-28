@@ -20,7 +20,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import _birth_felt
 from mika.faculties.expression import parse
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.extraction import Conversation, Line, Speaker, render
 from mika.faculties.memory.lies import false_part
 from mika.kernel.clock import HOUR, US
@@ -169,7 +169,7 @@ def test_the_extraction_knows_her_lied_line_is_not_true():
 
     lines = (Line(10, FRAME.now, "Bob [P1]", ASKED, "ext_1"), Line(11, FRAME.now, "Mika", "Aucune idée, honnêtement."),
              Line(12, FRAME.now, "Mika", "Tu lui as demandé ?"))
-    conv = Consolidate._her_lines(Store(), Conversation("private:ext_1", (Speaker("P1", "ext_1", "Bob"),), lines))
+    conv = cons._her_lines(Store(), Conversation("private:ext_1", (Speaker("P1", "ext_1", "Bob"),), lines))
     assert [ln.lie for ln in conv.lines] == [False, True, False]
     text = render(conv, now=FRAME.local(), beliefs=(), promises=())
     assert "Mika : Aucune idée, honnêtement. (un mensonge)" in text and "demandé ? (un mensonge)" not in text

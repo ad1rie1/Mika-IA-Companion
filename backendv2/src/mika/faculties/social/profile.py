@@ -14,7 +14,9 @@ proximité, elle, ne se juge pas : elle se vit (``faculty.lived``).
 personne (en couple ou non, enfants, famille, travail, âge, où et avec qui
 elle vit) doit se lire dans ce que le modèle a relu : sinon la proposition
 tombe (la sonde réelle du 2026-10-03 avait écrit « Sam a 30 ans, célibataire »,
-que personne n'avait dit). Ce qui l'intéresse, ce sont ses goûts, pas ses
+que personne n'avait dit). Se lire, pas se recopier (ADR 0153) : une seule de
+ses notes doit en porter les mots de situation tels quels, les autres mots à
+leur radical près, et la même négation. Ce qui l'intéresse, ce sont ses goûts, pas ses
 tracas du moment (« sa santé dentaire », « son anniversaire »). Les matériaux
 sont choisis par importance, sans les banalités (« allez j'y vais ») ni les
 répliques de Mika recopiées par une extraction ancienne ; ce qui n'appartient
@@ -43,7 +45,7 @@ from mika.vocab.knowledge import knowns
 from mika.vocab.lineage import admits
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, private_to
-from mika.vocab.words import banal, elided, fold
+from mika.vocab.words import banal, elided, fold, stems
 
 TOOL_NAME = "record_profile"
 
@@ -62,9 +64,11 @@ def tool(name: str) -> ToolDecl:
     return ToolDecl(TOOL_NAME, phrase("social.profile.tool", name=name), XProfile.model_json_schema())
 
 
-def system(name: str) -> str:
-    """La consigne de la fiche, au nom de celle qui la tient (celui de sa persona : jamais écrit ici)."""
-    return phrase("social.profile.system", name=name)
+def system(name: str, persona: str) -> str:
+    """La consigne de la fiche, au nom de celle qui la tient (celui de sa persona : jamais écrit ici), puis qui elle
+    est (``persona``, sa persona rendue : ``self.portrayed``, ADR 0153)."""
+    intro = phrase("self.portrayed.intro", name=name, persona=persona)
+    return phrase("social.profile.system", name=name) + "\n\n" + intro
 
 
 def parse(resp: LLMResponse) -> XProfile | None:
@@ -131,35 +135,53 @@ _SECOND_PERSON = re.compile(r"\b(?:tu|toi|ton|ta|tes)\b|\bt'")
 _QUOTE = re.compile(r"«[^»]*»|\"[^\"]*\"")
 _SENTENCE = re.compile(r"(?<=[.!?…])\s+")
 _CLAUSE = re.compile(r",\s+|;\s+|\s+[—–-]\s+")
+#: une négation (repliée) : « il n'est pas marié » ne fonde pas « il est marié »
+_NEGATION = re.compile(r"\b(?:ne|pas|plus|jamais|aucune?|sans|ni)\b|\bn'")
+#: les mots qui ouvrent une note comme la consigne le demande (« C'est quelqu'un qui… ») : pas des mots de sa situation
+_FRAMING = stems("quelqu'un quelqu'une")
 
 
 def _folded(text: str) -> str:
     return " ".join(fold(text).replace("’", "'").split())
 
 
-def supported(clause: str, notes: str) -> bool:
-    """Ce que cette proposition dit de sa situation, ses notes l'abordent-elles ? (``notes`` : replié)"""
+def supported(clause: str, notes: Sequence[str], names: Sequence[str] = ()) -> bool:
+    """Ce que cette proposition dit de sa situation, une de ses notes le dit-elle ? (``notes`` : repliées, une par
+    élément relu ; ``names`` : les prénoms, qui ne comptent pas parmi ses mots)"""
     said = _folded(clause)
+    joined = " ".join(notes)
     for found in _AGE.finditer(said):
-        if found.group(0) not in notes:
+        if found.group(0) not in joined:
             return False
-    # Une même catégorie (« couple ») ne prouve ni le statut ni la polarité. Pour ces données
-    # biographiques, seule une proposition présente dans les preuves est gardée.
-    if any(pattern.search(said) for pattern in SITUATION.values()):
-        return said.rstrip(".!?…") in notes
-    return True
+    terms = {found.group(0) for pattern in SITUATION.values() for found in pattern.finditer(said)}
+    if not terms:
+        return True
+    # Une même catégorie (« couple ») ne prouve ni le statut ni la polarité : une seule note porte ses mots de
+    # situation tels quels, tous ses autres mots à leur radical près (« adore son boulot » : « il adore son
+    # boulot ») — rien d'ajouté, ni une date (« depuis l'été ») — et la même négation.
+    wanted = stems(said) - stems(" ".join(names)) - _FRAMING
+    negated = bool(_NEGATION.search(said))
+
+    def carries(part: str) -> bool:
+        return all(re.search(rf"\b{re.escape(t)}\b", part) for t in terms)
+
+    # la négation se juge sur la proposition de la note qui porte ces mots (« il vit avec sa copine, il n'a pas
+    # d'enfants » fonde « il vit avec sa copine »)
+    return any(carries(note) and wanted <= stems(note)
+               and any(bool(_NEGATION.search(part)) == negated for part in _CLAUSE.split(note) if carries(part))
+               for note in notes)
 
 
-def grounded(summary: str, notes: str) -> str:
-    """Le portrait sans ce qu'il invente de sa situation : une proposition qui en parle sans que ses notes
-    l'abordent tombe — toute la phrase quand c'est son début (le sujet), sinon la proposition seule (« Sam a 30
-    ans, célibataire, vit avec son chat » → « Sam a 30 ans. »)."""
+def grounded(summary: str, notes: Sequence[str], names: Sequence[str] = ()) -> str:
+    """Le portrait sans ce qu'il invente de sa situation : une proposition qui en parle sans qu'une de ses notes le
+    dise tombe — toute la phrase quand c'est son début (le sujet), sinon la proposition seule (« Sam a 30 ans,
+    célibataire, vit avec son chat » → « Sam a 30 ans. »)."""
     out = []
     for sentence in _SENTENCE.split(" ".join(summary.split())):
         clauses = _CLAUSE.split(sentence)
-        if not clauses or not supported(clauses[0], notes):
+        if not clauses or not supported(clauses[0], notes, names):
             continue
-        kept = [c for c in clauses if supported(c, notes)]
+        kept = [c for c in clauses if supported(c, notes, names)]
         text = ", ".join(kept).strip()
         if text and text[-1] not in ".!?…":
             text += "."
@@ -258,16 +280,17 @@ class Revise:
                      and admits(k.lineage, person, floor, resolve=resolve, presumed=presumed).ok][: p.profile_max_items]
             if not items:
                 continue
-            notes = _folded(" ".join(str(t) for _i, t, _imp in items))
-            prompt = self._prompt(frame, state, person, items, store, notes)
-            request = LLMRequest(role="profile", call_id=f"{ctx.run_id}#{person}", system_stable=system(her),
+            notes = [_folded(str(t)) for _i, t, _imp in items]
+            prompt = self._prompt(frame, state, person, items, store, notes, names)
+            request = LLMRequest(role="profile", call_id=f"{ctx.run_id}#{person}",
+                                 system_stable=system(her, frame.get(self_c.PORTRAYED("compact"))),
                                  messages=(Message("user", prompt),), tools=(tool(her),), max_tokens=900,
                                  lane="background", priority=3)
             response = await ctx.llm.call(request)
             got = parse(response)
             if got is None:
                 continue
-            summary = grounded(got.resume, notes)
+            summary = grounded(got.resume, notes, names)
             if not summary:
                 continue  # rien qui tienne : la fiche d'avant reste
             tone = got.ton.strip()[:300]
@@ -281,7 +304,7 @@ class Revise:
             self.retry_at = 0  # plus rien n'attend ; sinon le délai posé plus haut tient : pas de rafale
 
     def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any,
-                notes: str = "") -> str:
+                notes: Sequence[str] = (), names: Sequence[str] = ()) -> str:
         view = frame.get(identity_c.IDENTITY(person))
         name = view.name or phrase("social.profile.someone")
         # ni comptes ni ressenti : un modèle qui voit « 15 messages » ou « de la sympathie » les recopie dans la
@@ -292,7 +315,7 @@ class Revise:
         if previous is not None and not previous.stale:  # ce qu'il reprenait a changé : on ne le recopie pas
             text = store.content([previous.summary_ref]).get(previous.summary_ref) if previous.summary_ref else None
             # ce qu'une fiche d'avant avait inventé ne se redonne pas à recopier (« célibataire »)
-            text = grounded(text, notes) if text and notes else text
+            text = grounded(text, notes, names) if text and notes else text
             if text:
                 lines.append(phrase("social.profile.previous", text=text))
         lines.append("")
@@ -309,16 +332,3 @@ def register(level: str) -> str:
     registers = family("social.register.levels")
     return registers.get(level) or registers[c.STRANGER]
 
-
-def describe_level(level: str, name: str = "") -> str:
-    """Ce qu'est la personne pour elle, en français, sans genre imposé : son prénom plutôt que « elle ou lui »."""
-    who = f"« {name} »" if name else phrase("social.level.someone")
-    if level == c.CLOSE:
-        return phrase("social.level.close", who=who)
-    if level == c.FRIEND:
-        return phrase("social.level.friend", who=who)
-    if level == c.ACQUAINTANCE:
-        return phrase("social.level.acquaintance", who=who)
-    if name:
-        return phrase("social.level.stranger_named", name=name)
-    return phrase("social.level.stranger")

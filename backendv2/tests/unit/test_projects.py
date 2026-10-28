@@ -237,7 +237,7 @@ def test_impersonal_work_has_no_persona_no_feelings_and_keeps_its_window_while_s
     jobs = [r for r in calls if r.role == "job"]
     assert jobs and all(r.persona is None for r in jobs)  # aucune persona
     prompt = "\n".join([jobs[0].system_stable, *(m.content for m in jobs[0].messages)])
-    assert "Mode impersonnel" in prompt and "TON ÉTAT ÉMOTIONNEL" not in prompt and "ÉTAT COGNITIF" not in prompt
+    assert "Mode impersonnel" in prompt and "--- TON HUMEUR ---" not in prompt and "ÉTAT COGNITIF" not in prompt
     assert esteem[0] == esteem[1]  # le travail impersonnel ne l'émeut pas
 
 
@@ -251,7 +251,7 @@ def test_in_her_mode_she_works_with_her_persona_and_her_mood(tmp_path):
     calls = live(tmp_path, scenario)
     assert calls and calls[0].persona is not None
     prompt = "\n".join([calls[0].system_stable, *(m.content for m in calls[0].messages)])
-    assert "TON ÉTAT ÉMOTIONNEL ACTUEL" in prompt and "avec ton humeur et tes avis" in prompt
+    assert "--- TON HUMEUR ---" in prompt and "avec ton humeur et tes avis" in prompt
     assert "Ranger le carnet" in _section(calls[0], "CE PROJET")
 
 
@@ -1117,8 +1117,9 @@ def test_an_initiative_is_a_request_or_a_story_by_its_subject_not_by_the_reasons
 def test_her_own_project_stopped_by_breakdowns_is_said_to_her_owner_once(tmp_path):
     """Son projet de trading s'est arrêté après trois pannes, et elle n'en disait rien (2026-10-27). Un projet à elle
     mis en pause pour pannes devient une demande à sa propriétaire, par le chemin de ses demandes d'aide : ce qui
-    s'est arrêté, la cause telle que la machine la dit, sans qu'elle s'en excuse. Dite, elle ne la redit pas ;
-    repris, le projet n'attend plus rien (ADR 0143)."""
+    s'est arrêté, la cause telle que la machine la dit — des faits, que son brief ne double pas d'une conduite
+    (« demande-lui », « tu n'as pas à t'en excuser » : ADR 0154). Dite, elle ne la redit pas ; repris, le projet
+    n'attend plus rien (ADR 0143)."""
     from types import SimpleNamespace
 
     from mika.faculties.projects.faculty import RESUMED, _resumed, _started, _uttered, stall_subject
@@ -1148,7 +1149,10 @@ def test_her_own_project_stopped_by_breakdowns_is_said_to_her_owner_once(tmp_pat
     pid, candidates, body, s = live(tmp_path, scenario)
     [cand] = candidates
     assert cand.target == "user_1" and cand.reason == c.NEED and cand.args["subject"] == f"stalled:{pid}"
-    assert "relancer" in cand.args["brief:projects"] and "pas ta faute" in cand.args["brief:projects"]
+    brief = cand.args["brief:projects"]
+    assert "s'est arrêté tout seul" in brief and "le relance" in brief
+    assert "excuser" not in brief and "demande-lui" not in brief  # un fait, pas une conduite
+    # que ce soit la machine, pas elle, la section du sujet le dit (une fois)
     assert "« Trading fictif » s'est arrêté" in body.content and "la machine qui a lâché" in body.content
 
     cx = SimpleNamespace(params=params(None), facts=SimpleNamespace(get=lambda key: None))

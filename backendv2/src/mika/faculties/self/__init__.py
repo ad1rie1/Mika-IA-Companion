@@ -1,15 +1,17 @@
 """``self`` : la persona (un seul document pour toutes ses voix), le tempérament dont les autres facultés dérivent
 leurs paramètres, l'estime de soi, le récit qu'elle fait d'elle-même et ses nuits.
 
-Carte des modules — l'ordre des imports ci-dessous fixe l'ordre de ses sections dans le prompt :
+Carte des modules (l'ordre de ses sections dans le prompt est celui de la composition, ``READING``) :
 
 - ``faculty`` : l'état (``SelfState``), la faculté (``SELF``), le jour vécu ;
 - ``knobs`` : ses réglages (``SelfParams``) ;
 - ``records`` : ce que l'état garde (coups, efforts, actes, marques, intérêts, pistes, journaux, rêves) et les codes
   d'actes ;
-- ``persona`` : le document de persona et son rendu (``load``, ``render``, ``persona_for``) ;
+- ``persona`` : le document de persona et son rendu (``load``, ``render``, ``persona_for``, le fait
+  ``self.portrayed``) ;
 - ``narrative`` : le récit « Je suis quelqu'un qui… », sur tout ce qu'elle sait d'elle (section ``narrative``) ;
-- ``character`` : son tempérament dit au modèle, trait par trait avec sa mesure — un bloc de sa persona, partout où elle est injectée (ADR 0100) ;
+- ``character`` : son caractère, écrit par le modèle d'après sa matrice et à côté de son portrait — un bloc de sa
+  persona, partout où elle est injectée (ADR 0139, 0152) ;
 - ``esteem`` : l'estime, ce que les autres lui disent d'elle, ses actes (section ``self_state``) ;
 - ``model`` : ce qu'elle sait d'elle — tenir parole, mener au bout, voir venir, ses changements d'avis (section
   ``self_model``) ;
@@ -24,9 +26,8 @@ Carte des modules — l'ordre des imports ci-dessous fixe l'ordre de ses section
 
 from __future__ import annotations
 
-# l'ordre d'enregistrement est l'ordre de ses sections dans le prompt (``kernel/prompt.py``) : pas de tri
 # isort: off
-from mika.faculties.self import narrative as _narrative  # noqa: F401 — « QUI TU ES DEVENUE » d'abord
+from mika.faculties.self import narrative as _narrative  # noqa: F401
 from mika.faculties.self import character as _character  # noqa: F401
 from mika.faculties.self import esteem as _esteem  # noqa: F401
 from mika.faculties.self import model as _model  # noqa: F401

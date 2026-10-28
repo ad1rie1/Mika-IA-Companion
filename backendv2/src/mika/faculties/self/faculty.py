@@ -21,9 +21,10 @@ from mika.kernel.state import FrozenDict
 class SelfState:
     persona: c.PersonaDoc = field(default_factory=c.PersonaDoc)
     revisions: int = 0
-    #: son caractère écrit par le modèle (ADR 0139), l'empreinte du tempérament qu'il décrit, quand et par quel modèle
+    #: son caractère écrit par le modèle (ADR 0139), l'empreinte de la persona dont il est écrit
+    #: (``character_basis``, ADR 0152), quand et par quel modèle
     character: str = ""
-    character_hash: str = ""
+    character_basis: str = ""
     character_at: int = 0
     character_model: str = ""
     esteem: float = 0.5  # à ``esteem_at``

@@ -1,18 +1,16 @@
-"""Son caractère, écrit par le modèle d'après sa matrice (ADR 0100, 0139).
+"""Son caractère, écrit par le modèle d'après sa matrice (ADR 0100, 0139, 0152).
 
 La matrice de personnalité règle la physique de ses émotions (chaque faculté en dérive ses paramètres) ; mais c'est
 le modèle qui écrit ses mots et choisit sa balise d'émotion. Sans le lui dire, une Mika anxieuse ou tsundere aurait
 les balises et les répliques d'une Mika au milieu partout. Ses 29 mesures, chacune avec ce qu'elle veut dire chez
 elle (``told`` : « Introspection : 90 % — tu repenses longuement… », les phrases de ``self.temperament`` dans
-``persona/voix.yaml``), ne vont plus au modèle qui parle : elles vont à celui qui **écrit son caractère** — six à
-huit phrases, à la deuxième personne, qui disent ce que ses traits font ensemble (``self.character.system``). En
-listes chiffrées, elle jouait ses traits un à un ; en phrases toutes faites, « anxieuse et sociable » restait la somme
-de deux phrases. Le texte est journalisé (``self.character_written``) avec l'empreinte du tempérament qu'il décrit :
-le processus ``self.character`` le réécrit dès que le tempérament change (un enregistrement dans la console, un
-profil appliqué), et jamais autrement. Tant qu'il n'est pas écrit, sa persona ne dit rien de son caractère (pas de
-repli : demandé par l'utilisateur le 2026-10-26). Ce que ses traits changent à sa façon d'écrire dans un chat reste
-dit à part, en phrases toutes faites, dans « TA RÉPONSE » (``expression.marked_traits``) : des consignes mesurées au
-banc, pas une description.
+``persona/voix.yaml``), ne vont pas au modèle qui parle : elles vont à celui qui **écrit son caractère** — six à
+huit phrases, à la deuxième personne, qui disent ce que ses traits font ensemble (``self.character.system``). Il lit
+aussi son portrait, pour le compléter sans le redire ni le contredire, et l'écrit dans sa langue. Le texte est
+journalisé (``self.character_written``) avec l'empreinte de ce dont il est écrit (``character_basis`` : tempérament,
+portrait, nom, langue) : le processus ``self.character`` le réécrit dès que l'un d'eux change (un enregistrement dans
+la console, un profil appliqué), et jamais autrement. Tant qu'il n'est pas écrit, sa persona ne dit rien de son
+caractère (pas de repli : demandé par l'utilisateur le 2026-10-26).
 """
 
 from __future__ import annotations
@@ -98,12 +96,20 @@ def told(t: T.Temperament) -> list[str]:
 
 
 def request_for(doc: c.PersonaDoc, call_id: str) -> LLMRequest:
-    """L'appel qui écrit son caractère : la consigne, puis ses traits mesurés."""
-    return LLMRequest(role="character", call_id=call_id,
-                      system_stable=phrase("self.character.system", name=c.name_of(doc)),
+    """L'appel qui écrit son caractère : la consigne, son portrait s'il est écrit, puis ses traits mesurés."""
+    portrait = doc.portrait.strip()
+    system = phrase("self.character.system", name=c.name_of(doc), language=doc.language)
+    if portrait:
+        system += "\n\n" + phrase("self.character.portrait", portrait=portrait)
+    return LLMRequest(role="character", call_id=call_id, system_stable=system,
                       messages=(Message("user", phrase("self.character.message",
                                                        lines="\n".join(told(doc.temperament)))),),
                       max_tokens=700, lane="background", priority=2)
+
+
+def current(s: SelfState) -> str:
+    """Son caractère écrit, s'il est écrit pour la persona courante (``character_basis``) ; sinon « »."""
+    return s.character if s.character and s.character_basis == c.character_basis(s.persona) else ""
 
 
 def written(raw: str | None) -> str:
@@ -121,31 +127,30 @@ def written(raw: str | None) -> str:
 @SELF.reducer(c.CHARACTER_WRITTEN)
 def _written(s: SelfState, e, cx) -> SelfState:
     d = e.data
-    return replace(s, character=d.text, character_hash=d.temperament, character_at=e.at, character_model=d.voice.model)
+    return replace(s, character=d.text, character_basis=d.basis, character_at=e.at, character_model=d.voice.model)
 
 
 @SELF.fact(c.CHARACTER)
 def _character(s: SelfState, cx) -> str:
-    """Son caractère écrit, s'il décrit le tempérament courant ; sinon rien."""
-    return s.character if s.character and s.character_hash == c.temperament_hash(s.persona.temperament) else ""
+    return current(s)
 
 
 @SELF.process("self.character", wake_on=[c.PERSONA_REVISED], priority=10, lane="background", catch_up=CatchUp.ONCE,
               max_quantum_s=600)
 class WriteCharacter:
-    """Écrit son caractère dès que son tempérament n'a pas le sien : au démarrage d'une vie, après un enregistrement
+    """Écrit son caractère dès que sa persona n'a pas le sien : au démarrage d'une vie, après un enregistrement
     dans la console, un profil appliqué. Un appel qui ne donne rien (ou qui lève, ou aucun modèle) se retente en
-    reculant : une minute, deux, quatre… jusqu'à une fois par jour ; un tempérament qui change remet le compte à
+    reculant : une minute, deux, quatre… jusqu'à une fois par jour ; une persona qui change remet le compte à
     zéro."""
 
     def __init__(self) -> None:
         self.retry_at = 0
         self.tries = 0
-        self.tried_for = ""  # l'empreinte du tempérament que les essais visent
+        self.tried_for = ""  # l'empreinte de la persona que les essais visent
 
     def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
-        wanted = c.temperament_hash(state.persona.temperament)
-        if state.character_hash == wanted and state.character:
+        wanted = c.character_basis(state.persona)
+        if state.character_basis == wanted and state.character:
             return None
         if wanted != self.tried_for:
             self.tried_for, self.tries, self.retry_at = wanted, 0, 0
@@ -170,5 +175,5 @@ class WriteCharacter:
         self.tries, self.retry_at = 0, 0
         # écrit sans persona (le rôle n'en porte pas) : ``persona_hash`` reste vide
         await ctx.emit(c.CHARACTER_WRITTEN.draft(
-            text=text, temperament=c.temperament_hash(doc.temperament),
+            text=text, basis=c.character_basis(doc),
             voice=VoiceProvenance(call_id=request.call_id, persona_hash="", role="character", model=response.model)))

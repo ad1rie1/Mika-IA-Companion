@@ -20,10 +20,10 @@ en reste.
 - **Les rêves** : en sommeil paradoxal, au plus deux par nuit, espacés, à
   partir de fragments des derniers jours — des souvenirs nés ou revécus
   (renforcés, repris en parlant) depuis trois jours : une vie routinière rêve
-  encore (ADR 0058) — et d'une pensée qui insiste ; un
-  cauchemar seulement quand ce qu'elle vit est vraiment sombre ou qu'une peur
-  la travaille, sinon un rêve mélancolique. Tirés au sort par cycle, d'un
-  hasard dérivé de la nuit : le rejeu retombe sur les mêmes.
+  encore (ADR 0058) — et d'une pensée qui insiste, chacun avec ce qu'il lui a
+  fait ressentir ; c'est le modèle qui dit, en écrivant le rêve, de quelle
+  sorte il est (cauchemar, doux, mélancolique…, ADR 0153). Tirés au sort par
+  cycle, d'un hasard dérivé de la nuit : le rejeu retombe sur les mêmes.
 - **Le réveil** (``self.woke_with``) : elle se souvient — une ou deux fois par
   semaine — du rêve le plus vif ; ce qu'il lui laisse et ce que la nuit a
   apaisé se ressentent à ce moment-là, pas en pleine nuit.
@@ -692,35 +692,28 @@ def _mood_line(frame: Frame, felt: list[tuple[int, str]]) -> str:
 
 # ── Les rêves ─────────────────────────────────────────────────────────────
 
-#: les peurs qui font les cauchemars
-FEARS = frozenset({A.Emotion.SCARED, A.Emotion.ANXIOUS})
-#: ce qui menace : sans menace, un vécu même très triste fait un rêve mélancolique, pas un cauchemar
-THREATS = frozenset({A.Emotion.SCARED, A.Emotion.ANXIOUS, A.Emotion.ANGRY, A.Emotion.DISGUSTED})
+#: ce que chaque sorte de rêve lui laisse au réveil
+FEELING_OF = {c.NIGHTMARE: A.Emotion.SCARED, c.PLEASANT: A.Emotion.DREAMY, c.MELANCHOLIC: A.Emotion.MELANCHOLIC,
+              c.ASSOCIATIVE: A.Emotion.CONFUSED, c.MUNDANE: A.Emotion.DREAMY}
+#: la sorte du rêve, que le modèle écrit en dernière ligne (« [RÊVE: melancholic] ») : le format, lu par le code
+_KIND = re.compile(r"\[\s*r[eê]ve\s*:\s*([^\]]*)\]", re.IGNORECASE)
 
 
-def classify(emotions: list[str], thoughts: list[tuple[str, float]] = ()) -> tuple[str, str]:
-    """La sorte d'un rêve et sa couleur. Un cauchemar, seulement quand une peur
-    la travaille (une pensée de peur ou d'angoisse au-dessus de 0,5) ou que ce
-    qu'elle vit est vraiment sombre (valence moyenne sous −0,4) et menaçant
-    (de la peur, de la colère, du dégoût) ; un vécu triste sans menace — un
-    seul souvenir triste, un deuil — donne un rêve mélancolique."""
-    known = [e for e in (A.emotion_of(x) for x in [*emotions, *(e for e, _ in thoughts)]) if e is not None]
-    if any(A.emotion_of(e) in FEARS and i > 0.5 for e, i in thoughts):
-        return c.NIGHTMARE, A.Emotion.SCARED.value
-    if not known:
-        return c.MUNDANE, A.Emotion.DREAMY.value
-    values = [A.valence(e) for e in known]
-    neg, pos = [v for v in values if v < -0.15], [v for v in values if v > 0.15]
-    mean = sum(values) / len(values)
-    if mean < -0.4 and THREATS & set(known):
-        return c.NIGHTMARE, A.Emotion.SCARED.value
-    if mean < -0.15 or (neg and not pos):
-        return c.MELANCHOLIC, A.Emotion.MELANCHOLIC.value
-    if mean > 0.2 and not neg:
-        return c.PLEASANT, A.Emotion.DREAMY.value
-    if neg and pos:
-        return c.ASSOCIATIVE, A.Emotion.CONFUSED.value
-    return c.MUNDANE, A.Emotion.DREAMY.value
+def dream_of(text: str) -> tuple[str, str, str]:
+    """Le rêve tel que le modèle l'a écrit : son texte sans la balise, sa sorte — celle que dit la balise (ADR 0153 :
+    ni seuil ni moyenne ne la choisissent) ; absente ou inconnue, un rêve banal, la plus neutre — et ce qu'il lui
+    laisse au réveil."""
+    said = [k.strip().lower() for k in _KIND.findall(text)]
+    kind = said[-1] if said and said[-1] in c.DREAM_KINDS else c.MUNDANE
+    return _KIND.sub("", text).strip(), kind, FEELING_OF[kind].value
+
+
+def felt_words(emotion: str | None, intensity: float = 1.0) -> str:
+    """Ce qu'un fragment lui a fait ressentir, en mots (« tristesse », « un peu d'inquiétude ») ; rien sans émotion."""
+    found = A.emotion_of(emotion) if emotion else None
+    if found is None or found is A.Emotion.NEUTRAL:
+        return ""
+    return A.NOUN[found] if intensity >= 0.5 else phrase("self.night.dream.light", what=A.partitive(found))
 
 
 def vividness_of(rng: random.Random, kind: str, emotions: list[str]) -> float:
@@ -786,8 +779,6 @@ class Dreaming:
         if not picked and not texts:
             return  # rien à rêver
         emotions = [k.emotion for k in picked if k.emotion]
-        kind, emotion = classify(emotions, [(t.emotion, t.intensity) for t in thoughts])
-        vividness = vividness_of(rng, kind, emotions + [t.emotion for t in thoughts])
         about: set[str] = {a for t in thoughts for a in t.about}
         sensitivity = max([k.sensitivity for k in picked] + [t.sensitivity for t in thoughts] + [1])
         for k in picked:
@@ -795,19 +786,22 @@ class Dreaming:
         # rêvé de ce qu'elle sait, il n'est pas plus libre que ce qu'elle sait : le secret que Bob a confié sur
         # Sam ne se raconte pas à Sam parce qu'elle en a rêvé (audit du 2026-10-09)
         lineage = merged(*(k.lineage for k in picked), *(_thought_lineage(t) for t in thoughts if t.text_ref in texts))
-        fragments = [f"- {clean_tokens(k.text)}" for k in picked] + \
-            [f"- {phrase('self.night.dream.worrying', thought=t)}" for t in texts.values()]
+        # ce que chaque fragment lui a fait : une information — la sorte du rêve, c'est le modèle qui la dit
+        fragments = [_fragment(clean_tokens(k.text), felt_words(k.emotion)) for k in picked] + \
+            [_fragment(phrase("self.night.dream.worrying", thought=texts[t.text_ref]),
+                       felt_words(t.emotion, t.intensity)) for t in thoughts if texts.get(t.text_ref)]
+        kinds = ", ".join(f"{kind} ({phrase(f'self.night.dream.tone.{kind}')})" for kind in c.DREAM_KINDS)
         persona = persona_for(frame, "full")
         request = LLMRequest(role="dream", call_id=f"{ctx.run_id}#{night}:{cycle}", persona=persona,
-                             system_stable=persona.text + "\n\n" + phrase(
-                                 "self.night.dream.system", tone=phrase(f"self.night.dream.tone.{kind}")),
+                             system_stable=persona.text + "\n\n" + phrase("self.night.dream.system", kinds=kinds),
                              messages=(Message("user", phrase("self.night.dream.fragments") + "\n"
                                                + "\n".join(fragments)),), max_tokens=400,
                              lane="background", priority=5)
         response = await ctx.llm.call(request)
-        text = (response.text or "").strip()
+        text, kind, emotion = dream_of((response.text or "").strip())
         if silent(text):
             return
+        vividness = vividness_of(rng, kind, emotions + [t.emotion for t in thoughts])
         await ctx.emit(c.DREAMT.draft(
             night=night, text=Content.of(text[:2000], level=sensitivity), kind=kind, vividness=vividness,
             emotion=emotion, about=tuple(sorted(about)), sensitivity=sensitivity,
@@ -815,6 +809,11 @@ class Dreaming:
             voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="dream",
                                   model=response.model),
             dedupe_key=f"rêve:{night}:{cycle}"))
+
+
+def _fragment(text: str, felt: str) -> str:
+    """Un fragment du rêve, une puce, avec ce qu'il lui a fait ressentir quand c'est dit."""
+    return "- " + (phrase("self.night.dream.felt", text=text, feeling=felt) if felt else text)
 
 
 def _thought_lineage(t: Any) -> Lineage:

@@ -251,7 +251,9 @@ def test_the_preset_is_journaled_like_any_configuration(tmp_path):
 
     posed, wrote, again, lifted, names, values = run_virtual(clock, main)
     assert posed and wrote and not again, "posé une fois : le reposer ne journalise rien"
-    assert lifted and set(names) == {"kernel.params_changed"}
+    # son caractère s'écrit au début d'une vie, par son propre processus (ADR 0139) : rien à voir avec le préréglage
+    assert lifted and set(names) - {"self.character_written"} == {"kernel.params_changed"}
+    assert names.count("self.character_written") <= 1, "son caractère s'écrit une fois, pas à chaque réglage"
     assert values.live_self_max > 0 and values.musings_per_day > 0
 
 

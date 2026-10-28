@@ -17,8 +17,8 @@ from mika.contracts import memory as memory_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.archive import recall_life
-from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.extraction import Conversation, Extraction, People, XEvenement, render
 from mika.faculties.memory.faculty import (
     MemoryParams,
@@ -117,13 +117,13 @@ async def test_a_relapse_the_reread_designates_reopens_its_thread():
                                           about=("user_2",), told_by=("user_2",), heard_by=("user_2",)), seq)
         db.put(memory_c.SITUATION_ENDED.draft(event=seq), seq + 1, FRAME.now - ended * DAY)
     conv = Conversation("private:user_2", ALICE, (alice_says("oh non, il recommence à plus rien avaler"),))
-    ended, gone = Consolidate._ended_situations(FRAME, db, MemoryState(), conv, MemoryParams(), {"user_2": "Alice"})
+    ended, gone = cons._ended_situations(FRAME, db, MemoryState(), conv, MemoryParams(), {"user_2": "Alice"})
     assert [i for i, _w, _t in ended] == [1]  # pas celle finie il y a dix mois
     assert "[#1] (Alice) du " in render(conv, now=FRAME.local(), beliefs=[], promises=[], ended=ended)
     ex = Extraction(evenements=[XEvenement(texte="Rechute de son matou", quand="2026-10-08", en_cours=True,
                                            personnes=["P1"], messages=[10000], remplace=1)])
-    out = await Consolidate()._drafts(ex, FRAME, MemoryState(), db, conv, People.of(ALICE, {}, "Mika", scope=conv.key),
-                                      [], [], None, MemoryParams(), "audit", moments=gone)
+    out = await cons._drafts(ex, FRAME, MemoryState(), db, conv, People.of(ALICE, {}, "Mika", scope=conv.key),
+                             [], [], None, MemoryParams(), "audit", moments=gone)
     (noted,) = [d for d in out if d.type.name == memory_c.EVENT_NOTED.name]
     assert noted.data.recurs == 1 and noted.data.ongoing and noted.data.replaces is None  # la même, de nouveau
     db.conn.close()

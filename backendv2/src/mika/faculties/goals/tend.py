@@ -132,7 +132,10 @@ READ_ONLY_SOURCES = frozenset({"rss", "camera", "forge"})
 #: ce qui arrive à son corps dans sa chambre (un geste qui n'a pas abouti, ``world``) se ressent et se dit, ça ne
 #: s'explore pas : il n'y a rien à lire ailleurs sur une fenêtre qui ne s'est pas ouverte. Ce que ses apps lui
 #: signalent non plus : leurs trouvailles se lisent dans l'app (et se racontent à qui son projet concerne), leur panne
-#: a son propre chemin, direct (ADR 0104 — par une pensée, elle attendait un seuil et devenait « en savoir plus »)
+#: a son propre chemin, direct (ADR 0104 — par une pensée, elle attendait un seuil et devenait « en savoir plus »).
+#: Ce qu'elle se dit elle-même d'un signal écrit par le code (``ThoughtReading.foreign`` faux : un lien qui change,
+#: que c'est toujours elle qui écrit) non plus : rien à lire ailleurs — et l'exploration citait ses propres mots
+#: comme venus d'ailleurs (audit des garde-fous, 2026-10-28)
 UNEXPLORED_SOURCES = frozenset({"world", "forge"})
 #: où elle peut aller chercher du neuf sur un de ses centres d'intérêt
 INTEREST_SOURCES = ("rss",)
@@ -286,7 +289,7 @@ class Seed:
         return [t for t in frame.get(attention_c.THOUGHTS)
                 if t.origin in SEEDING_ORIGINS
                 and t.intensity * (1.0 if t.emotion in SEEDING_EMOTIONS else p.seed_other_share) >= p.seed_thought_from
-                and not (t.origin == attention_c.SIGNAL and t.bundle in UNEXPLORED_SOURCES)
+                and not (t.origin == attention_c.SIGNAL and (t.bundle in UNEXPLORED_SOURCES or not t.foreign))
                 and not {f"thought:{t.id}", subject_key(f"thought:{t.id}", t.about)} & busy
                 and not _recently_closed(s, subject_key(f"thought:{t.id}", t.about), frame.now, p)]
 

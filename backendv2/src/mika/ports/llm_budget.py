@@ -9,12 +9,16 @@ Seuls les résultats d'outils, accompagnés d'un marqueur de coupe, peuvent êtr
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from typing import TypeVar
 
 from mika.kernel.prompt import Budget, PromptBudgetError
 from mika.ports.llm import LLMRequest
 
 TOOL_CUT = "\n[résultat abrégé pour le contexte ; préciser la recherche pour la suite]"
+
+T = TypeVar("T")
 
 
 def fits_context(gateway, req: LLMRequest) -> bool:
@@ -25,6 +29,23 @@ def fits_context(gateway, req: LLMRequest) -> bool:
     budget = budget_of(req.role, req.max_tokens)
     counter = LLMLimits(chars_per_token=budget.chars_per_token)
     return counter.size(req) <= budget.max_chars
+
+
+def halved(items: Sequence[T], times: int, *, least: int = 0) -> list[T]:
+    """Les premiers éléments, leur nombre divisé par deux ``times`` fois (jamais moins de ``least``)."""
+    return list(items[:max(least, len(items) >> times)])
+
+
+def fit_by_halving(gateway, build: Callable[[int], tuple[LLMRequest, bool]]) -> tuple[LLMRequest, int]:
+    """La première requête qui tient dans le contexte du rôle routé. ``build(n)`` la construit avec ce qui est
+    facultatif divisé par deux ``n`` fois (``halved``), et dit s'il en reste à diviser ; quand il n'en reste plus, la
+    dernière est rendue même trop longue — à l'appelant de le voir (``fits_context``). Rend la requête et ``n``."""
+    times = 0
+    while True:
+        request, more = build(times)
+        if not more or fits_context(gateway, request):
+            return request, times
+        times += 1
 
 
 @dataclass(frozen=True, slots=True)

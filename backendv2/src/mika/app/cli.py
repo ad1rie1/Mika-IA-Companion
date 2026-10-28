@@ -57,7 +57,7 @@ from mika.adapters.vectors import SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
 from mika.app import backup, composition, datadir, embeddings, schema
 from mika.app import persona as persona_file
-from mika.app.composition import faculties, for_simulation
+from mika.app.composition import READING, faculties, for_simulation
 from mika.app.paths import PERSONA
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
@@ -117,7 +117,8 @@ def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
     bases = schema.targets(data)
     schema.migrate_data(data, bases)
     store = SqlStore(bases["mind"], bases["views"], threaded=False)
-    return Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen(), snapshot_every=snapshot_every)
+    return Mind(Registry([RUNTIME, *faculties()], reading=READING), store, RealClock(), RandomIdGen(),
+                snapshot_every=snapshot_every)
 
 
 def _state(mind: Mind) -> str:

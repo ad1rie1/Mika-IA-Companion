@@ -284,22 +284,15 @@ def _who_words(frame: Frame, person: str, address: str) -> str:
     return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
-def share_brief(level: str, who: str) -> str:
-    """Ce qu'elle se dit avant de raconter : rien du contenu (le murmure s'entend), aucune référence à une section."""
-    if level == FULL:
-        return phrase("projects.brief.share.full", who=who)
-    if level == SUMMARY:
-        return phrase("projects.brief.share.summary", who=who)
-    return phrase("projects.brief.share.mention", who=who)
-
-
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},
                   reads=[identity_c.OWNERS, identity_c.IS_OWNER, social_c.CLOSENESS, identity_c.HANDLES,
                          identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
 def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
     """Raconter ce qu'elle a mené à bout (mode Mika, à la mesure du lien) ; en mode impersonnel, un compte rendu
     factuel à qui l'a confié. Un point quand le travail se pose, pas un message par objectif coché : le récit dit
-    tout ce qui a été mené à bout depuis le précédent, sous le sujet du dernier fini."""
+    tout ce qui a été mené à bout depuis le précédent, sous le sujet du dernier fini. Le brief dit ce qui la pousse,
+    pas combien en dire : ce qu'elle en sait est déjà à la mesure du lien (la section du sujet, ``share``) — ADR
+    0154."""
     pm = params(frame.env.params_of("projects", frame.root))
     out, seen = [], set()
     for p in sorted(s.projects.values(), key=lambda p: p.id):
@@ -312,15 +305,15 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
             chosen = confidant(p, frame)
             if chosen is None:
                 continue
-            person, address, level = chosen
-            brief = share_brief(level, _who_words(frame, person, address))
+            _person, address, level = chosen
+            brief = phrase("projects.brief.share")
         else:
             reader = _reader(p, frame)
             if reader is None:
                 continue
-            person, address = reader
+            _person, address = reader
             level = FULL
-            brief = phrase("projects.brief.report", who=_who_words(frame, person, address))
+            brief = phrase("projects.brief.report")
         if address in seen:  # un récit à la fois par personne : les autres projets suivront (une seule envie)
             continue
         seen.add(address)

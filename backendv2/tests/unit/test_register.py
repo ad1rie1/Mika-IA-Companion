@@ -1,6 +1,6 @@
-"""Le ton selon le lien (ADR 0046, audit HUM-15) : rien ne traduisait la proximité en manière d'être — elle
-taquinait une inconnue dès son premier message. Une inconnue : chaleureuse, sans taquinerie ; une proche : la
-complicité, la taquinerie permise."""
+"""Ce qui vous lie (ADR 0046, audit HUM-15) : rien ne disait la proximité — elle taquinait une inconnue dès son
+premier message. Le code le lui dit, une fois (« CE QUI VOUS LIE ») : une inconnue, une proche — le lien, jamais la
+conduite (taquiner ou non est à elle, à son caractère et à la conversation)."""
 
 from __future__ import annotations
 
@@ -12,11 +12,12 @@ from mika.sim.clock import run_virtual
 from tests.fixtures.memory import section
 from tests.fixtures.mika import befriend, boot, build, connect, said
 
-TONE = "LE TON ENTRE VOUS"
+TIE = "CE QUI VOUS LIE"
 
 
-@pytest.mark.parametrize("level", [None, social_c.CLOSE])
-def test_she_does_not_tease_a_stranger_but_may_tease_a_close_friend(tmp_path, level):
+@pytest.mark.parametrize("level, said_", [(None, "Tu ne connais pas encore cette personne."),
+                                          (social_c.CLOSE, "Cette personne compte parmi tes proches.")])
+def test_she_knows_what_ties_her_to_the_person_never_how_to_behave(tmp_path, level, said_):
     calls = []
 
     def script(req):
@@ -36,8 +37,8 @@ def test_she_does_not_tease_a_stranger_but_may_tease_a_close_friend(tmp_path, le
 
     run_virtual(clock, main)
     reply = next(r for r in calls if r.role == "reply")
-    tone = section("\n".join(m.content for m in reply.messages), TONE)
-    if level is None:
-        assert "ne la taquine pas" in tone, tone
-    else:
-        assert "tu peux la taquiner" in tone and "ne la taquine pas" not in tone, tone
+    state = "\n".join(m.content for m in reply.messages)
+    tie = section(state, TIE)
+    assert said_ in tie, tie
+    assert "taquin" not in tie and "charri" not in tie and "plaisant" not in tie, tie  # le lien, pas la conduite
+    assert state.count(said_) == 1  # une seule maison : ni sa fiche, ni « QUI TU AS EN FACE » ne le redisent

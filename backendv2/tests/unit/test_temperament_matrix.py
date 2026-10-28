@@ -106,23 +106,17 @@ def test_her_reaction_and_her_defense_drive_the_affect_too():
     assert set(ph.DEFENSE_FACE) == {k for k, _l in T.DEFENSES if k}
 
 
-#: ce qu'une coupure retirée de la dérivation a changé au milieu (ADR 0150) : voulu, et dit ici — la jalousie y pique
-#: un peu, l'intérêt pour les autres y demande sa journée à 21 h
-UNCUT = {("attention", "envy_intensity"): 0.15, ("social", "their_day_from_h"): 21.0}
-
-
 def test_at_the_middle_every_new_slider_gives_back_the_values_from_before():
     """Au milieu, ce que pilote un curseur né avec la matrice vaut exactement le défaut d'avant elle : un journal
-    existant se rejoue tel quel, et Mika ne change pas tant qu'on n'y touche pas — sauf ce qu'une coupure retirée a
-    changé (``UNCUT``, ADR 0150)."""
+    existant se rejoue tel quel, et Mika ne change pas tant qu'on n'y touche pas. (Les deux coupures retirées par
+    l'ADR 0150 ont déplacé le défaut avec le milieu : 0,15 de jalousie, « sa journée » à 21 h.)"""
     for fac in faculties():
         if fac.derive is None or fac.params is None:
             continue
         moved = {path for slider, where in params.influence(fac, T.Temperament()).items() if slider in NEW
                  for path, _lo, _hi in where}
         middle, before = forms.flatten(fac.derive(T.Temperament(), None)), forms.flatten(fac.params())
-        changed = {path: (before[path], middle[path]) for path in moved if middle[path] != before[path]
-                   and UNCUT.get((fac.name, path)) != middle[path]}
+        changed = {path: (before[path], middle[path]) for path in moved if middle[path] != before[path]}
         assert changed == {}, f"{fac.name} : {changed}"
 
 

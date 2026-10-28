@@ -37,10 +37,10 @@ from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import decode
-from mika.faculties.memory.consolidation import Consolidate, resolution
+from mika.faculties.memory.consolidation import resolution, target_of, testimonies_of, twin_of
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
-from mika.faculties.memory.recall import addresses_her, items_by_id, names_of, query_of, verdict_of
+from mika.faculties.memory.recall import items_by_id, names_of, verdict_of
 from mika.faculties.memory.salience import Item, age_words
 from mika.kernel.clock import DAY, local_date_of_night
 from mika.kernel.events import Content, Draft
@@ -400,7 +400,6 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
                     world: Mapping[int, tuple[c.LifeEvent, str]] | None = None) -> list[Draft[Any]]:
     """Ce que la nuit garde de ce que le modèle a proposé, jugé par le code (voir le module)."""
     tz = frame.env.tz_of(frame.root)
-    consolidate = Consolidate()
     by_n = dict(enumerate(lus, start=1))
     known_ids, opinion_ids = {i for i, _ in known}, {i for i, _ in opinions}
     # ce qu'on a montré d'une paire ne devient jamais le texte d'une lecture (un secret ne se blanchit pas)
@@ -414,17 +413,17 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
         born += 1
         source, nature = lu.source, "prediction" if fold(b.genre or "").startswith("prev") else "claim"
         heard = (lu.asked_by,) if lu.asked_by else ()  # lu pour quelqu'un : il l'a entendu sur le moment
-        twin = await consolidate._twin(store, vectors, b.texte, c.BELIEF, (), p, told_by=(source,),
-                                       knowledge_kind=nature, holder=source if nature == "prediction" else None)
+        twin = await twin_of(store, vectors, b.texte, c.BELIEF, (), p, told_by=(source,), knowledge_kind=nature,
+                             holder=source if nature == "prediction" else None)
         confidence = x.born_confidence(0.7, c.READ, nature)
         if twin is not None:
             out.append(c.ATTESTED.draft(item=twin, told_by=(source,), heard_by=heard, source=source, origin=c.READ,
                                         confidence=confidence, sensitivity=int(Sensitivity.ANODYNE),
                                         sources=(lu.seq,), call_id=call_id))
             continue
-        target = Consolidate._target_of(store, b.remplace if b.remplace in known_ids else None, nature, None)
-        verdict = judge(Consolidate._testimonies(store, target), Testimony(0, (source,), (), 0, False, 0.0,
-                                                                          origin=c.READ)) if target else None
+        target = target_of(store, b.remplace if b.remplace in known_ids else None, nature, None)
+        verdict = judge(testimonies_of(store, target), Testimony(0, (source,), (), 0, False, 0.0,
+                                                                 origin=c.READ)) if target else None
         span = timespan.parse(b.quand, tz) if b.quand else None
         predicted = dict(expected=span.point, expected_until=span.end if span.vague else None,
                          expected_precision=span.precision, valid_until=span.end) \
@@ -455,11 +454,11 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
             scope=c.WORLD, official=m.date_officielle,
             likelihood=lk.likelihood(lk.OFFICIAL if m.date_officielle else lk.REPORTED, m.probabilite, p)))
     for a in [a for a in rel.avis if not x.echoes(a.texte, shown, set())][:p.opinions_from_reading]:
-        if await consolidate._twin(store, vectors, a.texte, c.BELIEF, (), p, knowledge_kind="opinion",
-                                   about_self=True) is not None:
+        if await twin_of(store, vectors, a.texte, c.BELIEF, (), p, knowledge_kind="opinion",
+                         about_self=True) is not None:
             continue  # elle le pense déjà
-        target = Consolidate._target_of(store, a.remplace if a.remplace in opinion_ids else None, "opinion", None,
-                                        about_self=True)
+        target = target_of(store, a.remplace if a.remplace in opinion_ids else None, "opinion", None,
+                           about_self=True)
         out.append(c.BELIEVED.draft(
             text=Content.of(a.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
             importance=x.IMPORTANCE[3], confidence=x.born_confidence(0.9, c.OBSERVED, "opinion"), origin=c.OBSERVED,
@@ -479,11 +478,11 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
         if relation.startswith(("meme", "same", "identique")):
             joined.append((pr.old, pr.new))  # la plus ancienne garde ; l'autre devient un de ses témoignages
         elif relation.startswith(("contred", "contra")):
-            newest = Consolidate._testimonies(store, pr.new)
+            newest = testimonies_of(store, pr.new)
             said = max(newest, key=lambda t: t.seq) if newest else None
             if said is None:
                 continue
-            if judge(Consolidate._testimonies(store, pr.old), said) == SUPERSEDE:
+            if judge(testimonies_of(store, pr.old), said) == SUPERSEDE:
                 supersedes.append((pr.new, pr.old))
             else:
                 contests.append((pr.old, pr.new))
@@ -559,8 +558,10 @@ class Reread:
         names = names_of(frame, tellers)
         prompt = render(frame, lus, known, opinions, paires, names, world)
         call_id = f"{ctx.run_id}#0"
-        request = LLMRequest(role="extract", call_id=call_id, system_stable=phrase("memory.reread.system", name=her,
-                                                                                    opinions=p.opinions_from_reading),
+        # ses avis se forment à ce qu'elle est : son portrait dit ses goûts et sa façon de lire (ADR 0153)
+        system = phrase("memory.reread.system", name=her, opinions=p.opinions_from_reading) + "\n\n" + phrase(
+            "self.portrayed.intro", name=her, persona=frame.get(self_c.PORTRAYED("full")))
+        request = LLMRequest(role="extract", call_id=call_id, system_stable=system,
                              messages=(Message("user", prompt),), tools=(tool(her),), max_tokens=x.MAX_OUTPUT_TOKENS,
                              lane="background", priority=3, meta={"night": night})
         try:
@@ -602,8 +603,8 @@ class Reread:
 
 #: au plus tant de lectures retenues montrées
 LEARNED_SHOWN = 4
-#: quand elle écrit d'elle-même, travaille, ou qu'on lui parle d'elle (« t'as lu des trucs ? ») ; sinon, en réponse,
-#: ce qu'elle a lu revient par le rappel, s'il y touche
+#: quand elle écrit d'elle-même, travaille ou répond : en réponse, ce qu'elle a lu est là comme le reste de ce qu'elle
+#: sait — en parler ou non, c'est elle qui en juge (ADR 0153 ; une regex ne le montrait que si le message disait « tu »)
 LEARNED_EPISODES = (Kind.INITIATIVE, Kind.REPLY, Kind.STEP, Kind.WORK)
 
 
@@ -623,8 +624,6 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
     store, ep, aud = ports.get("store"), frame.episode, frame.audience
     if store is None or ep is None:
         return None
-    if ep.kind == Kind.REPLY and not addresses_her(query_of(frame, store)):
-        return None  # « salut » ne lui fait pas réciter ses lectures ; « et toi, quoi de neuf ? », si
     p = params(frame.env.params_of("memory", frame.root))
     since = frame.now - round(p.learned_fresh_days * DAY)
     # le dernier témoignage de chaque élément appris d'une lecture, ``told_by`` compris : une fenêtre, jamais une
@@ -672,13 +671,15 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
                 title=phrase("memory.learned.title"))
 def _learned_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """« CE QUE TU AS APPRIS EN LISANT » : de quoi dire « j'ai lu que… » — une fois par personne (ce qu'elle en a
-    raconté est noté, ``memory_told``)."""
-    got: list[Learned] | None = enrich.get("learned")
+    raconté est noté, ``memory_told``). Ce que le rappel remonte déjà (« CE QUI TE REVIENT », avec sa lecture) ne se
+    redit pas ici."""
+    recall = enrich.get("recall")
+    recalled = {r.item.id for r in (*recall.souvenirs, *recall.beliefs)} if recall is not None else set()
+    got = [lr for lr in enrich.get("learned") or () if lr.item.id not in recalled]
     if not got:
         return None
     lines = [phrase("memory.learned.line", text=clean_tokens(lr.item.text), source=lr.source,
                     age=age_words(lr.at, frame.now)) for lr in got]
-    lines.append(phrase("memory.learned.advice"))
     return SectionBody("\n".join(lines), level=max(lr.level for lr in got),
                        provenance=tuple(f"memory:{lr.item.id}" for lr in got))
 

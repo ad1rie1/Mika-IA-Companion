@@ -448,7 +448,7 @@ def _subject_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     return SectionBody(body, level=got[0], witness=got[1], title=heading, provenance=(f"goal:{g.id}",))
 
 
-@GOALS.section("goals", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["thoughts"], trim_rank=45,
+@GOALS.section("goals", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=45,
                title=phrase("goals.live.title"), reads=[identity_c.PERSON])
 def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts: Mapping[str, str] = (enrich.get("goals") or {}).get("texts") or {}
@@ -456,7 +456,6 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     if aud is None:
         return None
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    initiative = ep is not None and ep.kind == Kind.INITIATIVE
     lines, level, witness, theirs = [], 0, False, False
     tz = frame.env.tz_of(frame.root)
     for g in _recent(s, frame.now)[-SHOWN * 2:]:
@@ -464,11 +463,9 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         if not title or not audible(g, person, frame):
             continue
         if musing(g):
-            # une rêverie n'est ni une nouvelle ni une réussite : rien de neuf n'est arrivé. Elle peut le dire si on
-            # lui demande ce qu'elle fait ; elle n'en fait pas la matière d'un message (sonde du 2026-10-02 : « je
-            # viens de finir de rêvasser autour de… » dans presque chaque initiative)
-            if initiative:
-                continue
+            # une rêverie n'est ni une nouvelle ni une réussite : la ligne le dit (rien de neuf), en réponse comme en
+            # initiative — ce qu'elle en fait est à elle. À surveiller au banc : la sonde du 2026-10-02 trouvait « je
+            # viens de finir de rêvasser autour de… » dans presque chaque initiative, et le code les taisait alors
             if g.status == c.ACHIEVED:
                 lines.append("- " + phrase("goals.live.mused", when=when_words(g.closed_at, frame.now, frame),
                                            title=title))

@@ -15,7 +15,8 @@ from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.contracts import memory as mc
 from mika.contracts import social as sc
 from mika.contracts.transcript import thread_table
-from mika.faculties.memory.consolidation import Consolidate, Index, _item_vector
+from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory.consolidation import Index, _item_vector
 from mika.faculties.memory.extraction import Conversation, Extraction, Line, People, Speaker, XCroyance, parse
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _noted
 from mika.faculties.memory.projections import ITEM_COLUMNS, Chunks, Items
@@ -139,9 +140,9 @@ def test_valid_extraction_does_not_drop_promises_above_the_old_cap():
 
 
 def test_profiles_do_not_validate_opposite_relationship_status():
-    assert grounded("Alice est célibataire.", "alice est mariee.") == ""
-    assert grounded("Alice est mariée.", "alice est mariee.") == "Alice est mariée."
-    assert grounded("Alice est mariée.", "alice n'est pas mariee.") == ""
+    assert grounded("Alice est célibataire.", ["alice est mariee."]) == ""
+    assert grounded("Alice est mariée.", ["alice est mariee."]) == "Alice est mariée."
+    assert grounded("Alice est mariée.", ["alice n'est pas mariee."]) == ""
 
 
 async def drafts_for(db, text, *, teller="user_2", old=None, genre=None):
@@ -158,8 +159,8 @@ async def drafts_for(db, text, *, teller="user_2", old=None, genre=None):
     people = People.of(speakers, {"alice": ("user_2",)}, "Mika")
     ex = Extraction(croyances=[XCroyance(texte=text, personnes=["Alice"], messages=[101],
                                         remplace=old[0] if old else None, genre=genre)])
-    return await Consolidate()._drafts(ex, frame, MemoryState(), db, conv, people, [old] if old else [],
-                                      [], vectors, MemoryParams(), "audit")
+    return await cons._drafts(ex, frame, MemoryState(), db, conv, people, [old] if old else [],
+                              [], vectors, MemoryParams(), "audit")
 
 
 async def test_semantic_similarity_cannot_give_bob_alices_secret(db):
@@ -200,8 +201,8 @@ async def test_exact_deduplication_survives_many_confidants_without_vector_candi
     text = "Alice habite à Lyon"
     Items().apply(db, [event(mc.BELIEVED.draft(text=Content.of(text), about=("user_2",),
         told_by=(f"user_{i}",), heard_by=(f"user_{i}",), holder=f"user_{i}"), i) for i in range(1, 101)], "")
-    item = await Consolidate()._twin(db, None, text, mc.BELIEF, ("user_2",), MemoryParams(),
-                                   told_by=("user_100",), heard_by=("user_100",), holder="user_100")
+    item = await cons.twin_of(db, None, text, mc.BELIEF, ("user_2",), MemoryParams(),
+                              told_by=("user_100",), heard_by=("user_100",), holder="user_100")
     # la même proposition, quel qu'en soit le témoin (ADR 0080) : la plus ancienne — un fait rapporté n'est à
     # personne, son porteur d'avant (le témoin) ne la sépare plus
     assert item == 1
@@ -227,7 +228,7 @@ async def test_an_opinion_keeps_its_holder_distinct_from_its_subject(db):
 
 @pytest.mark.parametrize("genre,nature", [("avis", "opinion"), ("gout", "preference"), ("fait", "claim")])
 async def test_her_own_opinions_are_not_reclassified_as_facts(db, genre, nature):
-    drafts = Consolidate()._about_self(XCroyance(texte="Mika aime le jazz", genre=genre, sur_elle=True),
+    drafts = cons._about_self(XCroyance(texte="Mika aime le jazz", genre=genre, sur_elle=True),
         db, lambda _: ((1,), (), []), "audit-self", set())
     assert drafts[0].data.knowledge_kind == nature and drafts[0].data.about_self and drafts[0].data.durable
 

@@ -18,7 +18,6 @@ from mika.faculties.body import (
     BodyState,
     Night,
     energy,
-    fog,
     gate,
     last_night,
     night,
@@ -222,7 +221,6 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
     nxt = sl.next_transition(sleep, now, p.sleep, tz, p.shift_minutes, night(p))
     what = "se réveiller" if sleep.asleep else "s'endormir"
     start, end = night(p)
-    foggy = fog(level) or ""
     tired = level < p.tired_below
     phase = circadian.phase_of(frame.local(), profile)
     since = now - DAY
@@ -238,7 +236,7 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
             Stat("prochaine transition", When(nxt) if nxt is not None else Text("pas dans les 48 h", kind="muted"),
                  sub=what),
         ), title="Son corps"),
-        Note(circadian.describe(frame.local(), profile, level) + (f" {foggy}" if foggy else "")),
+        Note(circadian.describe(frame.local(), profile, level)),
         Chart((Series("Énergie", tuple(ctx.series("body.energie", since, now)), slot=1),
                Series("Pression de sommeil", tuple(ctx.series("body.pression", since, now)), slot=2)),
               kind="line", title="Énergie et pression de sommeil (24 h)", unit="%", y=(0.0, 1.0), since=since,

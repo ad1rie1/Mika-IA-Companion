@@ -27,7 +27,8 @@ from mika.adapters.mcp.hub import granted
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts.transcript import thread_table
-from mika.faculties.memory.consolidation import Consolidate, floored
+from mika.faculties.memory import consolidation as cons
+from mika.faculties.memory.consolidation import floored
 from mika.faculties.memory.extraction import Conversation, Line, Speaker, render
 from mika.faculties.memory.night import _disclosure
 from mika.faculties.memory.projections import Chunks
@@ -481,7 +482,7 @@ def _conversation() -> Conversation:
 def test_the_reread_sees_neither_an_unkept_reply_nor_the_request_it_followed():
     store = Said(s11={"unkept": True, "floor": CONFIDENCE, "reply_to": 10, "answers": [10]},
                  s13={"floor": CONFIDENCE, "reply_to": 12, "answers": [12]}, s15={"reply_to": 14})
-    conv = Consolidate._her_lines(store, _conversation())
+    conv = cons._her_lines(store, _conversation())
     assert [(ln.seq, ln.unkept, ln.floor) for ln in conv.lines] == [
         (10, True, CONFIDENCE), (11, True, CONFIDENCE), (12, False, CONFIDENCE), (13, False, CONFIDENCE),
         (14, False, 0), (15, False, 0)]
@@ -489,12 +490,12 @@ def test_the_reread_sees_neither_an_unkept_reply_nor_the_request_it_followed():
     assert "relevé" not in text and "1 234" not in text and text.count(UNKEPT) == 2
     assert "La facture 12 fait 400 €." in text and "et ma dernière facture ?" in text  # une confidence se relit
     # rien de tout ça : la conversation telle quelle
-    plain = Consolidate._her_lines(Said(), _conversation())
+    plain = cons._her_lines(Said(), _conversation())
     assert not any(ln.unkept or ln.floor for ln in plain.lines)
 
 
 def test_what_a_confidential_service_fed_becomes_a_secret_at_least_that_sensitive():
-    conv = Consolidate._her_lines(Said(s13={"floor": CONFIDENCE, "reply_to": 12, "answers": [12]}), _conversation())
+    conv = cons._her_lines(Said(s13={"floor": CONFIDENCE, "reply_to": 12, "answers": [12]}), _conversation())
     drafts = [memory_c.REMEMBERED.draft(text=Content.of("Alice a une facture de 400 €"), sources=(13,), sensitivity=1),
               memory_c.BELIEVED.draft(text=Content.of("Alice doit 400 €"), sources=(12, 14), sensitivity=2),
               memory_c.REMEMBERED.draft(text=Content.of("Alice m'a remerciée"), sources=(14, 15), sensitivity=1),

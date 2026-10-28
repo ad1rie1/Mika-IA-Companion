@@ -2,16 +2,16 @@
 
 Au démarrage, toute incohérence est une erreur de composition, listée en
 entier : événement privé réduit par un autre propriétaire, fait inconnu ou
-fourni deux fois, cycle de faits ou de sections, ancre de section inconnue,
-seuil d'arbitrage inatteignable, noms d'outils ou de processus en double.
+fourni deux fois, cycle de faits, section absente de l'ordre de lecture ou
+inconnue de lui, seuil d'arbitrage inatteignable, noms d'outils ou de
+processus en double.
 """
 
 from __future__ import annotations
 
-import heapq
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
@@ -76,7 +76,10 @@ class ArbitrationPolicy:
 
 
 class Registry:
-    def __init__(self, faculties: Iterable[Faculty[Any, Any]], *, arbitration: ArbitrationPolicy | None = None) -> None:
+    def __init__(self, faculties: Iterable[Faculty[Any, Any]], *, arbitration: ArbitrationPolicy | None = None,
+                 reading: Sequence[str] | None = None) -> None:
+        """``reading`` : l'ordre de lecture de toutes les sections du prompt (leurs clés, chacune une fois), tel que
+        la composition le déclare ; ``None`` : l'ordre de leur déclaration (une composition jouet)."""
         facs = [KERNEL] + [f for f in faculties if f is not KERNEL]
         problems: list[str] = []
         self.faculties: dict[str, Faculty[Any, Any]] = {}
@@ -151,37 +154,27 @@ class Registry:
             problems.append("plusieurs receveurs d'évaluations : " + ", ".join(s.owner for s in feels))
         self.feel: FeelSpec | None = feels[0] if feels else None
 
-        # sections
-        self.sections: list[SectionSpec] = []
+        # sections, dans l'ordre de lecture : celui que la composition déclare (``reading``), sinon celui de leur
+        # déclaration — jamais un ordre que personne n'a choisi
         keys: dict[str, SectionSpec] = {}
         for f in facs:
             for spec in f.sections:
                 if spec.key in keys:
                     problems.append(f"section déclarée deux fois : {spec.key}")
                 keys[spec.key] = spec
-        edges: dict[str, list[str]] = {k: [] for k in keys}
         for k, spec in keys.items():
-            for a in spec.after:
-                if a not in keys:
-                    problems.append(f"section {k} : ancre inconnue « after={a} »")
-                else:
-                    edges[a].append(k)
-            for b in spec.before:
-                if b not in keys:
-                    problems.append(f"section {k} : ancre inconnue « before={b} »")
-                else:
-                    edges[k].append(b)
             for r in spec.reads:
                 if r not in self.providers:
                     problems.append(f"section {k} : lit un fait inconnu {r}")
-        for k, spec in keys.items():
             if spec.untrusted and spec.zone is not Zone.VOLATILE:
                 problems.append(f"section {k} : des données venues d'ailleurs vont en zone volatile")
-        order = _topo(edges)
-        if order is None:
-            problems.append("cycle dans l'ordre des sections")
-        else:
-            self.sections = [keys[k] for k in order]
+        order = list(keys)
+        if reading is not None:
+            order = list(dict.fromkeys(reading))
+            problems += [f"ordre de lecture : « {k} » y figure deux fois" for k, n in Counter(reading).items() if n > 1]
+            problems += [f"ordre de lecture : section inconnue « {k} »" for k in order if k not in keys]
+            problems += [f"ordre de lecture : la section « {k} » n'y figure pas" for k in keys if k not in order]
+        self.sections: list[SectionSpec] = [keys[k] for k in order if k in keys]
 
         # autres contributions
         self.enrichers: list[EnricherSpec] = [s for f in facs for s in f.enrichers]
@@ -577,23 +570,3 @@ def _find_cycle(graph: Mapping[str, Sequence[str]]) -> list[str] | None:
                 return found
     return None
 
-
-def _topo(edges: Mapping[str, Sequence[str]]) -> list[str] | None:
-    """Tri topologique stable (égalités départagées par la clé)."""
-    indeg = dict.fromkeys(edges, 0)
-    for _n, outs in edges.items():
-        for m in outs:
-            indeg[m] += 1
-    ready = [n for n, d in indeg.items() if d == 0]
-    heapq.heapify(ready)
-    out: list[str] = []
-    while ready:
-        n = heapq.heappop(ready)
-        out.append(n)
-        for m in sorted(edges[n]):
-            indeg[m] -= 1
-            if indeg[m] == 0:
-                heapq.heappush(ready, m)
-    if len(out) != len(edges):
-        return None
-    return out

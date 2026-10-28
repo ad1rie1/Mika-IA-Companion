@@ -308,7 +308,7 @@ def test_an_impersonal_project_reports_facts_and_a_confided_one_that_blocks_asks
 
     initiatives = live(tmp_path, scenario)
     report = [p for p in initiatives if "compte rendu factuel" in p]
-    assert report and "c'est un travail, pas une fierté" in report[0]
+    assert report and "en mode impersonnel" in report[0]  # le mode choisi dit ce qu'est le compte rendu
     help_ = [p for p in initiatives if "coup de main" in p]
     assert help_ and "l'adresse et un accès au serveur de test" in help_[0]
 

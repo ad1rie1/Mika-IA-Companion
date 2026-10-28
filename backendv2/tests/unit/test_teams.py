@@ -571,7 +571,8 @@ def test_the_triage_reads_any_emotion_she_knows_and_never_invents_one():
     assert (told["importance"], told["emotion"], told["intensite"]) == (0.8, "disgusted", 0.4)
     assert read_triage('{"importance": 0.8, "emotion": "angry"}', guess)["emotion"] == ""
     assert read_triage('{"importance": 0.8, "emotion": "bof", "intensite": 0.4}', guess)["emotion"] == ""
-    system = triage_system("Adrien", "Nova")
+    system = triage_system("Adrien", "Nova", "Tu es Nova. PORTRAIT-CANARI")
     assert all(e.value in system for e in Emotion if e is not Emotion.NEUTRAL)
+    assert "PORTRAIT-CANARI" in system  # ce qu'un message lui fait se juge à qui elle est (ADR 0153)
     assert place_of("chat", "") == phrase("teams.where.other")  # une sorte inconnue
     assert "Projet" in place_of("group", "Projet")

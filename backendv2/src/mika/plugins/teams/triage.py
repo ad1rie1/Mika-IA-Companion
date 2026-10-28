@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from mika.contracts import body as body_c
+from mika.contracts import self_ as self_c
 from mika.contracts import teams as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -28,11 +29,13 @@ ADDRESSED = frozenset({"dm", "group"})
 CONTEXT = 3
 
 
-def triage_system(owner: str, name: str) -> str:
+def triage_system(owner: str, name: str, persona: str) -> str:
     """La consigne du tri : les messages de ``owner``, qu'elle lit pour l'aider (``name``, le nom de sa persona) ;
-    les émotions qu'un message peut lui faire sont celles de son vocabulaire (ADR 0147)."""
+    les émotions qu'un message peut lui faire sont celles de son vocabulaire (ADR 0147), et ce qu'il lui fait se
+    juge à qui elle est (``persona``, sa persona rendue : ``self.portrayed``, ADR 0153)."""
     return phrase("teams.triage.system", owner=owner, name=name,
-                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL))
+                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL)) + "\n\n" + phrase(
+        "self.portrayed.intro", name=name, persona=persona)
 
 
 def place_of(kind: str, title: str) -> str:
@@ -117,7 +120,7 @@ class Triage:
         fetched = await port.fetch_new(p.per_run)
         name = her(ctx.frame)
         owner = port.voice().display_name or phrase("teams.triage.caretaker", name=name)
-        system = triage_system(inert(owner, 60), name)
+        system = triage_system(inert(owner, 60), name, ctx.frame.get(self_c.PORTRAYED("compact")))
         drafts: list[Any] = []
         asked = 0
         for m in fetched:

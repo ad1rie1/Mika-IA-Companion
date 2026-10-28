@@ -382,6 +382,7 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
     from mika.kernel.clock import MINUTE, US
     from mika.kernel.events import Content, Origin
     from mika.kernel.frame import Audience
+    from mika.kernel.prompt import UNTRUSTED_NOTE
     from mika.plugins.forge import WriteArgs, _news, concerns, forge_write
     from mika.plugins.forge.guide import VEILLE_CODE, VEILLE_MANIFEST
     from mika.sim.clock import run_virtual
@@ -392,8 +393,8 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
     from tests.unit.test_projects import _context, events
 
     forge = ForgeHost(tmp_path / "forge", http_get=lambda url: QUOTE, public=lambda host: True)
-    kernel, clock, _, _ = build(tmp_path, _judging_llm("le CAC a bougé de 2,82 %", ""),
-                                ports={"forge": forge, "workshop": Atelier()})
+    kernel, clock, llm, _ = build(tmp_path, _judging_llm("le CAC a bougé de 2,82 %", ""),
+                                  ports={"forge": forge, "workshop": Atelier()})
 
     async def main():
         await boot(kernel)
@@ -433,6 +434,12 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
     assert "Suivi d'un cours" in cand.args["brief:forge"] and "2,82" not in cand.args["brief:forge"]  # rien du contenu
     assert len(got["énoncés"]) == 1  # elle l'a dit, une fois
     assert got["dite"].told and got["après"] == []  # …et ne le redira pas
+    # la section ne cite que la trouvaille : son titre dit qu'elle n'est pas encore dite, rien ne lui dit quoi en faire
+    title = "--- CE QUE TES APPS ONT TROUVÉ POUR CETTE PERSONNE, PAS ENCORE DIT ---"
+    shown = [c.messages[-1].content for c in llm.calls if c.role == "initiative" and title in c.messages[-1].content]
+    news = shown[0].split(title, 1)[1].split("\n--- ", 1)[0].strip().splitlines()
+    assert news[0] == UNTRUSTED_NOTE and all(line.startswith("> ") for line in news[1:]) and "2,82" in news[1]
+    assert not any("Tu ne l'as pas encore dit" in line or "passions" in line for line in news)
 
 
 def test_only_a_strong_recent_untold_finding_about_that_person_is_to_tell():

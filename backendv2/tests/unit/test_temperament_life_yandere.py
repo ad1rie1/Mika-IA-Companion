@@ -31,10 +31,10 @@ def test_her_temperament_reaches_every_voice(lives):  # type: ignore[no-untyped-
 
 def test_he_writes_to_others_while_she_waits_and_she_is_jealous_once(lives):  # type: ignore[no-untyped-def]
     """Sa réponse à Adrien attend ; il écrit deux fois dans un salon, sans s'adresser à elle : elle en est jalouse —
-    une fois pour cette attente. Au milieu, rien."""
+    une fois pour cette attente. Au milieu, une piqûre bien plus légère (sans coupure depuis l'ADR 0150)."""
     her, middle = lives
-    assert her.m["envied"] == 1
-    assert middle.m["envied"] == 0
+    assert her.m["envied"] == 1 == middle.m["envied"]
+    assert her.m["envied_felt"] > 2 * middle.m["envied_felt"] > 0
 
 
 def test_she_attaches_fast_and_her_owner_counts_above_all(lives):  # type: ignore[no-untyped-def]

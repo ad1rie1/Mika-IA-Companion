@@ -301,11 +301,11 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
                              level=int(Sensitivity.ANODYNE)),
             excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
             asked_by=asked_by[:200]))
-    # ce qu'elle lit pour quelqu'un se raconte : la consigne de son prompt ne suffisait pas (2026-10-14 : « c'est
-    # la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le début de la page »)
-    told = "\n" + phrase("mcp.tools.read_aloud") if reads_world and asked_by and result.text else ""
+    # comment raconter ce qu'elle a lu a une seule maison, ses outils dans son prompt (runtime.tools.acting) : la
+    # réponse de l'outil n'y ajoute pas de consigne (ADR 0154 ; la sonde du 2026-10-14 l'entendait commenter la
+    # page, « je n'ai lu que le début » — à surveiller au banc)
     return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
-                              + (cite(result.text, t.max_result_chars) or phrase("mcp.tools.nothing")) + told,
+                              + (cite(result.text, t.max_result_chars) or phrase("mcp.tools.nothing")),
                       floor=FLOORS.get(keep, 0), unkept=keep == "rien")
 
 

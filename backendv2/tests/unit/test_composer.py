@@ -10,10 +10,8 @@ import pytest
 
 from mika.kernel.faculty import SectionSpec, Zone
 from mika.kernel.prompt import (
-    BACKGROUND,
     CONTEXT_FOOTER,
     CONTEXT_HEADER,
-    INTERLOCUTOR,
     TRIM_MARK,
     Budget,
     ChatPrompt,
@@ -241,15 +239,17 @@ def test_provenance_only_counts_what_was_rendered():
 # ── L'ordre de l'état interne ─────────────────────────────────────────────
 
 
-def test_background_first_and_the_person_last_just_before_her_message():
+def test_the_inner_state_reads_in_the_order_it_is_given():
+    """L'état interne se lit dans l'ordre du registre — celui que la composition déclare (ADR 0151) : ni bande, ni
+    ordre alphabétique ; une section citée prend sa place comme les autres."""
     feed = spec("feed", Zone.VOLATILE, title="DANS TES FLUX", untrusted=True)
-    journal = spec("journal", Zone.VOLATILE, title="TON FIL D'HIER", tags=(BACKGROUND,))
-    stance = spec("a_stance", Zone.VOLATILE, title="CE QUE TU RESSENS POUR ELLE", tags=(INTERLOCUTOR,))
-    blocks = [ME, (stance, SectionBody("de la tendresse")), (MOOD, SectionBody("joyeuse")),
-              (journal, SectionBody("une bonne journée")), (feed, SectionBody("un titre"))]
+    journal = spec("journal", Zone.VOLATILE, title="TON FIL D'HIER")
+    stance = spec("a_stance", Zone.VOLATILE, title="CE QUE TU RESSENS POUR ELLE")
+    blocks = [ME, (MOOD, SectionBody("joyeuse")), (journal, SectionBody("une bonne journée")),
+              (feed, SectionBody("un titre")), (stance, SectionBody("de la tendresse"))]
     prompt, _ = _compose(blocks)
     titles = [line for line in prompt.system_volatile.splitlines() if line.startswith("--- ")]
-    assert titles == ["--- TON FIL D'HIER ---", "--- DANS TES FLUX ---", "--- TON HUMEUR ---",
+    assert titles == ["--- TON HUMEUR ---", "--- TON FIL D'HIER ---", "--- DANS TES FLUX ---",
                       "--- CE QUE TU RESSENS POUR ELLE ---"]
 
 

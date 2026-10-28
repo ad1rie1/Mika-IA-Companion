@@ -31,8 +31,8 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.expression import ExpressionParams
-from mika.faculties.goals.faculty import GoalsParams
-from mika.faculties.goals.tend import inherited, jitter_min
+from mika.faculties.goals.faculty import GoalsParams, GoalsState
+from mika.faculties.goals.tend import Seed, inherited, jitter_min
 from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.codec import digest
@@ -172,11 +172,13 @@ def test_a_worry_becomes_a_reflection_that_soothes_then_she_takes_news_of_the_pe
     shares = _shares(r.llm)
     assert shares and shares[0][0] == "user_1" and "Ce que ta réflexion t'a apporté" in shares[0][1]
     assert "--- CE À QUOI TU AS REPENSÉ ---" in shares[0][1] and "MENÉ À BOUT" not in shares[0][1]
-    # …mais une inquiétude n'est pas une bonne nouvelle : à lui, elle prend de ses nouvelles ; la consigne ne
-    # renvoie à aucune section (le murmure qui la précède l'entend aussi)
-    assert "prends de ses nouvelles" in shares[0][1] and "bonne nouvelle" not in shares[0][1]
+    # …mais une inquiétude n'est pas une bonne nouvelle : le brief dit à quoi elle a repensé, un fait — ni « prends
+    # de ses nouvelles » ni « glisse-le » (ADR 0154) ; il ne renvoie à aucune section (le murmure qui la précède
+    # l'entend aussi)
+    assert "bonne nouvelle" not in shares[0][1]
     brief = phrase("goals.brief.worry", who="« Adrien »")  # (d'autres envies du moment ont les leurs, à côté)
     assert brief in shares[0][1] and "MENÉ À BOUT" not in brief and "plus haut" not in brief
+    assert "prends de ses nouvelles" not in brief and "repensé à ce que « Adrien » t'avait confié" in brief
     # au travail : le but dans ses mots, qui le lui a confié et quand — jamais « Sorte : … » ; ses mots à lui, cités
     step = next(c for c in r.llm.calls if c.role == "step")
     work = _section(step, "CE À QUOI TU TRAVAILLES")
@@ -789,3 +791,36 @@ def test_a_zero_abandon_threshold_never_divides_by_zero():
     goal = SimpleNamespace(kind=gc.EXPLORATION, desire=0.5, desire_at=10)
     assert _worn_out_at(goal, SimpleNamespace(abandon_below=0.0, desire_half_life_us=HOUR)) is None
     assert _worn_out_at(goal, SimpleNamespace(abandon_below=0.25, desire_half_life_us=HOUR)) == 10 + HOUR
+
+
+def test_a_thought_of_another_color_seeds_at_a_share_of_its_intensity():
+    """Ce qui la préoccupe ou l'intrigue fait entreprendre à son intensité ; une autre couleur — la colère, le dégoût,
+    la joie — à une part (``seed_other_share``, ADR 0150) : une colère vive, oui ; une petite contrariété, non ; à 0,
+    jamais."""
+    def thought(id_, emotion, intensity):
+        return attention_c.ThoughtReading(id=id_, text_ref="", emotion=emotion, intensity=intensity,
+                                          origin=attention_c.EXCHANGE, about=("user_1",), sensitivity=0, born_at=0)
+
+    thoughts = (thought(1, "anxious", 0.4), thought(2, "angry", 0.8), thought(3, "angry", 0.5),
+                thought(4, "happy", 0.6))
+    frame = SimpleNamespace(now=DAY, get=lambda key: thoughts if key == attention_c.THOUGHTS else None)
+    p = GoalsParams()
+    assert p.seed_thought_from == 0.35 and p.seed_other_share == 0.5  # le décor
+    assert [t.id for t in Seed()._thoughts(GoalsState(), frame, p)] == [1, 2]
+    never = p.model_copy(update={"seed_other_share": 0.0})
+    assert [t.id for t in Seed()._thoughts(GoalsState(), frame, never)] == [1]
+
+
+def test_what_she_tells_herself_from_a_signal_is_not_something_to_look_into():
+    """« C'est presque toujours moi qui écris la première à Alice » naît d'un signal écrit par le code : il n'y a rien à
+    lire ailleurs, et l'exploration citait ses propres mots comme venus d'ailleurs. Contre-exemple : un titre lu (un
+    signal venu d'ailleurs) donne envie d'en savoir plus."""
+    def thought(id_, foreign):
+        return attention_c.ThoughtReading(id=id_, text_ref="", emotion="curious", intensity=0.8,
+                                          origin=attention_c.SIGNAL, about=(), sensitivity=0, born_at=0, bundle="",
+                                          foreign=foreign)
+
+    thoughts = (thought(1, False), thought(2, True))
+    frame = SimpleNamespace(now=DAY, get=lambda key: thoughts if key == attention_c.THOUGHTS else None)
+    assert [t.id for t in Seed()._thoughts(GoalsState(), frame, GoalsParams())] == [2]
+

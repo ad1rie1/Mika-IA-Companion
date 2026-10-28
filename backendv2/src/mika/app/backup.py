@@ -81,7 +81,7 @@ from mika.adapters.database import Target, as_target
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.app import backup_server, datadir, schema
-from mika.app.composition import faculties
+from mika.app.composition import READING, faculties
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.inspect import describe_error
@@ -204,7 +204,7 @@ def _replay_on(mind_at: Path | Target, views_at: Path | Target, genesis: bool) -
 
     async def replay() -> tuple[int, str, list[str]]:
         store = SqlStore(mind_at, views_at, threaded=False)
-        mind = Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen())
+        mind = Mind(Registry([RUNTIME, *faculties()], reading=READING), store, RealClock(), RandomIdGen())
         report = await mind.boot(append_boot=False)
         state = digest({o: mind.root.slices[o] for o in mind.registry.persisted_owners()})
         tainted = sorted(mind.root.tainted.keys())

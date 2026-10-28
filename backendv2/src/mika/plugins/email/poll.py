@@ -40,11 +40,13 @@ from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 
-def triage_system(name: str) -> str:
+def triage_system(name: str, persona: str) -> str:
     """La consigne du tri, pour la boîte de celle qui lit (son nom, celui de sa persona : jamais écrit ici) ; les
-    émotions qu'un mail peut lui faire sont celles de son vocabulaire (ADR 0147)."""
+    émotions qu'un mail peut lui faire sont celles de son vocabulaire (ADR 0147), et ce qu'il lui fait se juge à qui
+    elle est (``persona``, sa persona rendue : ``self.portrayed``, ADR 0153)."""
     return phrase("email.triage.system", name=name,
-                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL))
+                  names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL)) + "\n\n" + phrase(
+        "self.portrayed.intro", name=name, persona=persona)
 
 _JSON = re.compile(r"\{.*\}", re.S)
 #: au-delà, un mail qu'elle annonce ne « vient » plus d'arriver : elle dit l'heure où il est arrivé
@@ -108,12 +110,13 @@ class Poll:
         labels = {a.key: a.name for a in port.accounts()}
         several = len(labels) > 1
         drafts: list[Any] = []
+        system = triage_system(self_c.name_of(frame.get(self_c.PERSONA)), frame.get(self_c.PORTRAYED("compact"))) \
+            if mails else ""
         for i, m in enumerate(mails):
             guess = heuristic(m)
             triage = guess
             if i < p.triage_per_poll and not m.bulk:
-                req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{i}",
-                                 system_stable=triage_system(self_c.name_of(frame.get(self_c.PERSONA))),
+                req = LLMRequest(role="triage", call_id=f"{ctx.run_id}#{i}", system_stable=system,
                                  messages=(Message("user", phrase("email.header.from", who=m.sender) + "\n"
                                                    + phrase("email.header.subject", subject=m.subject)
                                                    + f"\n\n{m.body[:3000]}"),),

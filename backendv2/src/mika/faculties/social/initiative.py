@@ -135,8 +135,7 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         # « vient d'arriver » se lisait comme un voyage (sonde réelle du 2026-10-03 : « t'es bien arrivé, j'espère que
         # t'as pas galéré pour venir jusqu'ici ») : on se connecte, on n'arrive de nulle part
         who = f"« {name} »" if name else phrase("social.initiative.greet.someone")
-        brief = phrase("social.initiative.greet.brief", who=who,
-                       whom=f"« {name} »" if name else phrase("social.initiative.this_person"))
+        brief = phrase("social.initiative.greet.brief", who=who)  # un fait : saluer ou non, c'est à elle (ADR 0154)
         # timide, elle salue moins qui elle connaît peu (ADR 0100) ; une amie, une proche : toujours
         evidence = p.stranger_greeting if frame.get(c.CLOSENESS(person)) in _LITTLE_KNOWN else GREETING_EVIDENCE
         out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, evidence, resources=resources,

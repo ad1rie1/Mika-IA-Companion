@@ -649,7 +649,8 @@ async def _news_texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> 
                title=phrase("forge.news.title"), untrusted=True)
 def _news_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce que ses apps viennent de trouver pour la personne à qui elle parle (de son initiative ou en répondant), pas
-    encore dit : le texte du signal, cité. L'énoncé qui suit le dit (sa provenance la marque dite)."""
+    encore dit (le titre le dit) : le texte du signal, cité — rien d'autre, ni consigne ni mot à elle dans la
+    citation. L'énoncé qui suit le dit (sa provenance la marque dite)."""
     ep, aud = frame.episode, frame.audience
     if ep is None or aud is None or not ep.target:
         return None
@@ -671,7 +672,7 @@ def _news_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         level = max(level, n.level if any(a != person for a in n.about) else 0)
     if not lines:
         return None
-    return SectionBody("\n".join([*lines, phrase("forge.news.tell")]), level=level, provenance=tuple(refs))
+    return SectionBody("\n".join(lines), level=level, provenance=tuple(refs))
 
 
 def _ago(us: int) -> str:

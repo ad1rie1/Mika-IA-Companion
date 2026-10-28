@@ -202,7 +202,7 @@ def choose(frame: Frame, store: Any, candidates: Sequence[Candidate], listener: 
     return out
 
 
-@MEMORY.section("veiled", zone=Zone.VOLATILE, episodes=[Kind.REPLY], after=["memories"], trim_rank=28,
+@MEMORY.section("veiled", zone=Zone.VOLATILE, episodes=[Kind.REPLY], trim_rank=28,
                 title=phrase("memory.veiled.title"))
 def _veiled(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """« CE QUE TU PEUX RACONTER SANS NOMMER PERSONNE » : ce qu'elle peut raconter, si ça vient, sans dire de qui il

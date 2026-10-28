@@ -18,9 +18,10 @@
 - **Pour qui** : ses propriétaires en privé, ou elle quand elle travaille ; un
   courrier est personnel (niveau « personnel », au titre de témoin : la
   propriétaire le reçoit, un salon jamais).
-- **Quand** : c'est de l'arrière-plan. En initiative ou au travail, elle a
-  tout sous les yeux ; en réponse à quelqu'un, seulement les mails
-  importants, et seulement quand le ton de la personne est assez léger.
+- **Quand** : en initiative ou au travail, elle a tout sous les yeux ; en
+  réponse à quelqu'un, ce qui compte (important, ou qui attend une réponse) —
+  la même règle que Teams, une sélection : jamais selon le ton de la personne
+  (ce qu'elle en dit, et quand, est à elle).
 - **Ce qui est l'objet de l'épisode** (le mail qu'elle annonce, celui auquel
   elle prépare une réponse) est cité comme le reste, donc coupé en premier
   quand la place manque — mais jamais sous son plancher : elle ne rédige pas
@@ -35,8 +36,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from mika.contracts import email as c
-from mika.contracts import identity as identity_c
-from mika.contracts import others as others_c
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
@@ -66,7 +65,7 @@ from mika.plugins.email import (
 from mika.ports.mail import AccountInfo, Draft, Mail, split_ref
 from mika.ports.preprocess import inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
-from mika.vocab.people import fold, is_identifiable
+from mika.vocab.people import fold
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
@@ -142,30 +141,16 @@ def _task_box(mail: str, found: Mail | None) -> str:
     return found.account if found is not None else split_ref(mail)[0]
 
 
-def light(frame: Frame) -> bool:
-    """Le courrier est de l'arrière-plan : en réponse à quelqu'un, il ne vient que si le ton du
-    moment de la personne est assez léger (une initiative, un travail : toujours)."""
-    ep = frame.episode
-    if ep is None or ep.kind != Kind.REPLY:
-        return True
-    if not ep.target or not is_identifiable(ep.target):
-        return False
-    reading = frame.get(others_c.MIND(frame.get(identity_c.PERSON(ep.target))))
-    return reading.current_valence >= params_of(frame).background_from
-
-
 def _shown_unread(frame: Frame) -> list[c.MailView]:
-    """Les mails non lus qu'elle a sous les yeux : tous (cinq) en initiative ou au travail ; en
-    réponse à quelqu'un, les importants seulement, et rien si la conversation est lourde. Ceux qu'une
-    initiative annonce ont leur propre section."""
+    """Les mails non lus qu'elle a sous les yeux : tous (cinq) en initiative ou au travail ; en réponse à
+    quelqu'un, ce qui compte — important, ou qui attend une réponse (la règle de Teams). Ceux qu'une initiative
+    annonce ont leur propre section."""
     told = set(announced(frame))
     unread = [m for m in frame.get(c.UNREAD) if m.mail not in told]
     ep = frame.episode
     if ep is not None and ep.kind == Kind.REPLY:
-        if not light(frame):
-            return []
         p = params_of(frame)
-        unread = [m for m in unread if m.importance >= p.mention_from]
+        unread = [m for m in unread if m.importance >= p.mention_from or m.needs_reply]
     return unread[:5]
 
 
@@ -250,7 +235,7 @@ def _mention_section(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> 
 
 
 @EMAIL.section("mails", zone=Zone.VOLATILE, episodes=TALK, trim_rank=20, title=phrase("email.unread.title"),
-               untrusted=True, reads=[c.UNREAD, others_c.MIND, identity_c.PERSON])
+               untrusted=True, reads=[c.UNREAD])
 def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     texts, accounts = got.get("texts") or {}, got.get("accounts") or {}
@@ -273,9 +258,7 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
             lines.append(phrase("email.unread.sent", ref=k, who=who, text=inert(text)))
     if not lines:
         return None
-    ep = frame.episode
-    title = phrase("email.unread.background_title") if ep is not None and ep.kind == Kind.REPLY else None
-    return SectionBody("\n".join(lines), level=LEVEL, witness=True, title=title)
+    return SectionBody("\n".join(lines), level=LEVEL, witness=True)
 
 
 # ── Ses brouillons : ce qu'elle a fait, mais à qui et à quel propos vient d'un mail (cité) ─

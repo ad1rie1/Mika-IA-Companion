@@ -15,7 +15,7 @@ from types import SimpleNamespace as NS
 
 from mika.contracts import memory as mc
 from mika.contracts import runtime as rt
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.extraction import (
     Conversation,
     Extraction,
@@ -59,7 +59,7 @@ def test_the_reread_starts_from_what_she_said_she_felt():
              Line(11, FRAME.now, "Mika", "Oh non, Alice… je suis là."),
              Line(12, FRAME.now, "Mika", "Tu veux en parler ?"),
              Line(13, FRAME.now, "Mika", "Une amie a vécu ça aussi."))
-    conv = Consolidate._her_lines(Events(), Conversation(f"private:{ALICE}", (Speaker("P1", ALICE, "Alice"),), lines))
+    conv = cons._her_lines(Events(), Conversation(f"private:{ALICE}", (Speaker("P1", ALICE, "Alice"),), lines))
     text = render(conv, now=FRAME.local(), beliefs=(), promises=())
     assert "je suis là. (en l'écrivant : tristesse et un peu d'inquiétude)" in text
     assert "en parler ? " not in text and "0.6" not in text and "0,6" not in text

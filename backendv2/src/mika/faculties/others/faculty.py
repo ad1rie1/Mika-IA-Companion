@@ -1056,8 +1056,6 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
             brief = phrase("others.initiative.follow_up_festive", who=who)
         else:
             brief = phrase("others.initiative.follow_up", who=f"{who[0].upper()}{who[1:]}")
-            if hard:
-                brief += phrase("others.initiative.follow_up_hard")
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         full = p.followup_minor_evidence if (_minor(ev) or ev.festive or hard) else p.followup_evidence
@@ -1078,7 +1076,8 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
     une fois, dans ses heures pour prendre des nouvelles — plus fort qu'une question (sonde réelle du 2026-10-03 :
     le samedi des 30 ans de Sam, son initiative de 11 h était un « prendre des nouvelles », le « joyeux
     anniversaire » n'est venu qu'à la réponse suivante). Qu'elle l'ait souhaité en répondant (ses mots reprennent
-    le moment) suffit : rien de plus. Quand quelque chose de grave la touche ces jours-ci, avec douceur."""
+    le moment) suffit : rien de plus. Quand quelque chose de grave la touche ces jours-ci, le brief le dit aussi —
+    un fait ; ce qu'elle en fait est à elle (ADR 0154)."""
     p = params(frame.env.params_of("others", frame.root))
     local = frame.local()
     if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
@@ -1098,9 +1097,8 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         ev = due[0]
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
         who = f"« {name} »" if name else phrase("others.initiative.someone")
+        # ce qui pèse ces jours-ci, la section le dit (« CE QUI SE PASSE DANS SA VIE », en privé) : pas le motif
         brief = phrase("others.initiative.celebrate", who=who)
-        if _hard(frame, person):
-            brief += phrase("others.initiative.celebrate_hard")
         # si la personne écrit entre-temps, c'est sa réponse qui le lui souhaite (« souhaite-le-lui si ce n'est pas
         # fait »), pas une initiative de plus
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
@@ -1116,8 +1114,8 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
                        social_c.CIRCLE, social_c.KNOWN, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
 def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
     """Le jour où revient une date lourde qu'une proche lui a confiée elle-même (« demain, ça fera un an que mon père
-    est parti ») : un mot doux, d'elle-même, une fois, dans ses heures pour prendre des nouvelles — rien de festif,
-    aucune question. Au cran de leur lien (``remembrance_by_closeness``, ADR 0150), d'abord une proche seulement : une
+    est parti ») : l'envie de lui écrire, d'elle-même, une fois, dans ses heures pour prendre des nouvelles — le
+    brief dit le jour, pas le ton (ADR 0154). Au cran de leur lien (``remembrance_by_closeness``, ADR 0150), d'abord une proche seulement : une
     amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se parlent, « CE QUI SE PASSE DANS SA VIE » le lui dit). Si elles se sont déjà parlé aujourd'hui, la conversation en était
     l'occasion ; ce qu'elle en a repris en mots aussi."""
     p = params(frame.env.params_of("others", frame.root))
@@ -1185,7 +1183,7 @@ def curt(words: tuple[str, ...]) -> bool:
     return len(words) >= CURT_RUN and all(_few_words(w) for w in words[-CURT_RUN:])
 
 
-@OTHERS.section("their_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], trim_rank=40,
+@OTHERS.section("their_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=40,
                 title=phrase("others.state.title"), reads=[identity_c.PERSON, identity_c.IDENTITY, c.MIND])
 def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | None:
     """En privé, ce qui tranche ces derniers temps avec le ton habituel de la personne (ce qu'elle a senti de ses

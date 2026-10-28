@@ -73,7 +73,6 @@ def build(
     seed: int = 0,
     clock: SimClock | None = None,
     polish: bool = False,
-    review: bool = False,
     **kw: Any,
 ) -> tuple[Kernel, SimClock, ScriptedLLM, Deliveries]:
     clock = clock or SimClock(start)
@@ -84,10 +83,6 @@ def build(
     gateway = Gateway({"fake": llm}, routes, clock=clock,
                       voice_roles=frozenset(str(r) for r in VOICE_ROLES), slots={"fake": 1},
                       preempt=frozenset({"fake"}))
-    # la relecture (ADR 0112) : sur demande (``review``) — un faux modèle qui répond toujours pareil (« d'accord… »)
-    # la déclencherait à chaque réponse, et chaque test compterait un appel de plus
-    if not review:
-        kw.setdefault("reviewers", [])
     store = SqlStore(*backend.store_targets(tmp), threaded=False)
     deliveries = Deliveries()
     ports = {"delivery": deliveries, "vectors": SqliteVectorIndex(store, HashEmbedder()), **kw.pop("ports", {})}

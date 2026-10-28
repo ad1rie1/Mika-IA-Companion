@@ -249,7 +249,10 @@ def test_the_eve_of_a_big_moment_she_cheers_her_friend_once(tmp_path, talked_tha
         assert cheers[0].data.subject.startswith("moment:")
         assert at_paris(2026, 9, 30, 18, 0) <= cheers[0].at <= at_paris(2026, 9, 30, 22, 0), "la veille au soir"
         prompt = script.prompts("initiative", "ext_1")[-1]
-        assert "encourager" in prompt and "Ubisoft" in section(prompt, LIFE)
+        # ce qui la pousse est un fait — demain, quelque chose de prévu —, pas « un petit mot pour l'encourager »
+        # (ADR 0154) : ce qu'elle en fait est à elle
+        assert "quelque chose de prévu demain" in prompt and "petit mot pour l'encourager" not in prompt
+        assert "Ubisoft" in section(prompt, LIFE)
 
 
 # ── Ce qui dure dans sa vie (HUM-7) ───────────────────────────────────────

@@ -10,6 +10,7 @@ from mika.faculties.expression import pending_question, repeats, said_of_herself
 from mika.kernel.clock import HOUR, MINUTE
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, boot, build, connect, said
 
 M = MINUTE
@@ -73,11 +74,11 @@ def test_the_reply_prompt_tells_her_she_repeats_herself(tmp_path):
     assert "CE QUE TU TE RÉPÈTES" in prompts[-1] and "« Adrien… Je »" in prompts[-1]
 
 
-def test_three_long_messages_in_a_row_are_heard():
+def test_long_messages_are_left_to_the_author():
+    """La longueur est une forme : elle n'a qu'une maison, les codes de l'autrice (ADR 0140, 0154). Trois longs
+    messages d'affilée ne se remarquent plus ici."""
     long = "Oh wow, " + "c'est vraiment une super nouvelle et je suis tellement contente pour toi, " * 6
-    assert any("longs" in f for f in repeats([(0, long), (M, long + " encore"), (2 * M, long + " et puis")], 3 * M))
-    # contre-exemple : un long message entre deux courts
-    assert not any("longs" in f for f in repeats([(0, "ah ok"), (M, long), (2 * M, "haha")], 3 * M))
+    assert not any("long" in f for f in repeats([(0, long), (M, long + " encore"), (2 * M, long + " et puis")], 3 * M))
 
 
 def test_the_same_way_of_coming_to_someone_is_heard_across_conversations():
@@ -105,9 +106,9 @@ def test_a_question_she_just_asked_is_not_asked_again_when_the_answer_is_only_he
     assert pending_question([(0, "Hey Sam, je pensais à toi.")], "re", M) is None
 
 
-def test_the_reply_prompt_tells_her_not_to_ask_again(tmp_path):
+def test_the_reply_prompt_tells_her_her_question_is_still_open(tmp_path):
     """De bout en bout : son message se termine par une question, la personne dit « re » : le prompt de la réponse
-    le lui dit ; à une vraie réponse, rien."""
+    le lui dit, comme un fait (ADR 0154) ; à une vraie réponse, rien."""
     # des phrases différentes (une phrase redite à l'identique ne part plus du tout), une question à chaque fois
     lines = iter(["Hey ! te voilà, ça roule ?", "Coucou ! tu as passé une bonne journée ?", "Et sinon, ton week-end ?",
                   "Ah trop bien, raconte ?"])
@@ -129,10 +130,10 @@ def test_the_reply_prompt_tells_her_not_to_ask_again(tmp_path):
         await kernel.stop()
 
     run_virtual(clock, main)
-    # les premiers jets (une réponse relue se réécrit : ``RELIS-TOI``, test_review.py)
-    prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply" and "RELIS-TOI" not in c.messages[-1].content]
-    assert "Ne repose pas la question" in prompts[1]
-    assert "Ne repose pas la question" not in prompts[2], "contre-exemple : une vraie réponse"
+    prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply"]
+    still_open = "son bonjour n'y répond pas encore"
+    assert still_open in prompts[1] and "Ne repose pas" not in prompts[1]
+    assert still_open not in prompts[2], "contre-exemple : une vraie réponse"
 
 
 def test_she_never_says_the_same_message_twice_in_a_row(tmp_path):
@@ -247,9 +248,9 @@ def test_three_messages_asking_questions_in_a_row_are_heard():
     asking = [(0, "Et ce shopping, tu as trouvé quelque chose, ou tu as surtout tourné en rond ?"),
               (M, "Des jeans, bien. Un seul ou tu en as pris plusieurs ?"),
               (2 * M, "Voilà ce que je lis. C'est ce sujet-là que tu avais en tête, ou autre chose ? [EMOTION:curious:0.4]")]
-    assert any("posent tous des questions" in f for f in repeats(asking, 3 * M))
+    assert phrase("expression.habits.questions") in repeats(asking, 3 * M)
     calm = [asking[0], (M, "Des jeans, valeur sûre. Mission accomplie."), asking[2]]
-    assert not any("posent tous des questions" in f for f in repeats(calm, 3 * M))
+    assert phrase("expression.habits.questions") not in repeats(calm, 3 * M)
 
 
 def test_what_she_said_of_herself_earlier_in_the_conversation_is_quoted_too():

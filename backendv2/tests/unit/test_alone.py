@@ -92,7 +92,7 @@ def test_otherwise_one_that_counts_and_never_one_just_back_nor_too_fresh():
     rows = [row(1, "Une longue discussion sur la cuisine.", NOW - 40 * DAY, importance=0.9),
             row(3, "Hier, une recette ratée.", NOW - DAY, importance=1.0)]  # trop frais : pas un souvenir qui remonte
     d = reminiscence(AttentionState(), frame(), Store(rows), P)
-    assert d.data.source == 1 and d.data.text.text.startswith("Un souvenir te revient")
+    assert d.data.source == 1 and d.data.text.text.startswith("Un souvenir me revient")
     back = AttentionState(reminisced=((NOW - 2 * DAY, 1),))
     assert reminiscence(back, frame(), Store(rows), P) is None  # il vient de revenir
     no_feeling = reminiscence(AttentionState(), frame(), Store([row(4, "Une balade.", NOW - 9 * DAY, emotion="")]),

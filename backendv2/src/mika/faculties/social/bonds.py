@@ -192,7 +192,7 @@ class Bonds:
             drafts.append(c.BOND_SHIFTED.draft(
                 source="social", kind="bond_shifted", summary=Content.of(_text(x, name), level=level),
                 pertinence=PERTINENCE, emotion=Emotion.THINKING.value, intensity=0.0, about=(x.person,),
-                sensitivity=level, person=x.person, before=x.before, after=x.after, cause=x.cause,
+                sensitivity=level, person=x.person, before=x.before, after=x.after, cause=x.cause, foreign=False,
                 dedupe_key=f"lien:{x.person}:{x.after}:{x.since}"))
         if drafts:
             await ctx.emit(*drafts)

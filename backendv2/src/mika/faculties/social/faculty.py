@@ -272,7 +272,7 @@ class SocialParams(BaseModel):
              "amie ou d'une proche à qui elle parle en privé, et le lui demande — sauf si elle en a déjà parlé, ou "
              "quand quelque chose de grave la touche. 24 : jamais. Dérivé de l'intérêt pour les autres, sans "
              "coupure : jamais tout en bas, de plus en plus tôt ensuite (passé 23 h au plus bas, 21 h au milieu, "
-             "midi au plus haut).")] = 24.0
+             "midi au plus haut).")] = 21.0
     grudge_demote: Annotated[float, Knob(
         label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
         help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "

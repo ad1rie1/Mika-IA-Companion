@@ -78,6 +78,8 @@ class ThoughtBorn(Payload):
     #: ce qu'elle sait d'où la pensée vient (une croyance révisée : l'ancienne et la nouvelle) et devant qui ses
     #: sources permettent de la redire ; ``None`` : une pensée d'avant, ou qui ne vient pas de ce qu'elle sait
     lineage: Lineage | None = None
+    #: son texte vient d'ailleurs (le résumé d'un signal ``foreign``) : il se montre cité, jamais comme ses mots
+    foreign: bool = False
 
     @model_validator(mode="after")
     def _inherited_subjects(self):
@@ -104,6 +106,10 @@ class Signal(Payload):
     sensitivity: int = 1
     #: les outils qui vont avec (pour en savoir plus : « rss », « email »…)
     bundle: str = ""
+    #: le résumé porte un texte venu d'ailleurs (un titre, un mail, ce qu'une app a trouvé) : la pensée qui en naît
+    #: se montre citée. Faux pour ce qu'elle se dit elle-même, écrit par le code (qu'un lien change, que c'est
+    #: toujours elle qui écrit) : une pensée à elle, dite comme les autres.
+    foreign: bool = True
 
 
 class Noticed(Payload):
@@ -227,6 +233,8 @@ class ThoughtReading:
     bundle: str = ""
     #: devant qui ses sources permettent de la redire (``None`` : la règle de ses personnes et de sa sensibilité)
     lineage: Lineage | None = None
+    #: son texte vient d'ailleurs (``ThoughtBorn.foreign``) : cité, jamais comme ses mots
+    foreign: bool = False
 
 
 @dataclass(frozen=True, slots=True)

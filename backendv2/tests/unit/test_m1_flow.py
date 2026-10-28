@@ -49,7 +49,7 @@ def test_greets_on_arrival_then_replies(tmp_path):
     reply_call = next(c for c in llm.calls if c.role == "reply")
     assert reply_call.messages[-1].content.endswith("salut ça va ?")
     assert "QUI TU AS EN FACE" in reply_call.messages[-1].content
-    assert "depuis aujourd'hui seulement" in reply_call.messages[-1].content  # pas de passé commun inventé
+    assert "Vous vous connaissez depuis aujourd'hui." in reply_call.messages[-1].content  # pas de passé commun inventé
     assert "Tu es Mika" in reply_call.system_stable
 
 
@@ -100,8 +100,9 @@ def test_acquaintance_says_how_long_they_have_known_each_other():
             return PARIS
 
     frame = Frame(None, AFTERNOON, Env())  # type: ignore[arg-type]
-    assert "aujourd'hui seulement" in acquaintance(AFTERNOON - 2 * HOUR, frame)
-    assert "hier seulement" in acquaintance(AFTERNOON - DAY, frame)
+    # depuis quand, seulement : qu'elle ne la connaît pas encore se dit une fois, dans « CE QUI VOUS LIE »
+    assert acquaintance(AFTERNOON - 2 * HOUR, frame) == "Vous vous connaissez depuis aujourd'hui."
+    assert acquaintance(AFTERNOON - DAY, frame) == "Vous vous connaissez depuis hier."
     assert "5 jours" in acquaintance(AFTERNOON - 5 * DAY, frame)
     assert "3 semaines" in acquaintance(AFTERNOON - 21 * DAY, frame)
     assert "mois" in acquaintance(AFTERNOON - 90 * DAY, frame)

@@ -237,7 +237,7 @@ class AttentionParams(BaseModel):
         help="Ce qu'elle ressent (de la jalousie, pour elle et envers la personne) quand quelqu'un dont elle attend "
              "la réponse écrit aux autres sans s'adresser à elle — une fois par attente, davantage pour sa "
              "propriétaire, au cran de leur lien (ci-dessous). Dérivé de la jalousie, sans coupure : rien tout en "
-             "bas, 0,15 au milieu, 0,6 tout en haut.")] = 0.0
+             "bas, 0,15 au milieu, 0,6 tout en haut.")] = 0.15
     envy_by_closeness: Annotated[social_c.ByCloseness, Knob(
         label="Jalousie, selon la proximité", group="Révision, manque, blocage", keys=social_c.CLOSENESS_NAMES,
         help="Ce que garde cette jalousie à chaque cran de leur lien (son intensité en est multipliée), de 0 "
@@ -446,6 +446,8 @@ class Thought:
     forgiven_at: int = 0  # quand des excuses l'ont apaisée (0 : jamais)
     #: devant qui ses sources permettent de la redire (``None`` : la règle de ses personnes et de sa sensibilité)
     lineage: Lineage | None = None
+    #: son texte vient d'ailleurs (``ThoughtBorn.foreign``) : cité, jamais comme ses mots
+    foreign: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +465,8 @@ class SignalHeard:
     sensitivity: int
     bundle: str
     at: int
+    #: le résumé vient d'ailleurs (``Signal.foreign``)
+    foreign: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -1152,7 +1156,7 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     waited = next((q for q in s.pending if q.source == d.source and q.origin == d.origin), None)
     forgiven = waited.forgiven_at if waited is not None else 0
     thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
-                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven, lineage=d.lineage)
+                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven, lineage=d.lineage, foreign=d.foreign)
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
@@ -1182,7 +1186,7 @@ def _signaled(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
     heard = SignalHeard(e.seq, d.source, d.kind, d.summary.ref or "", d.pertinence, d.emotion, d.intensity,
-                        tuple(d.about), d.sensitivity, d.bundle, e.at)
+                        tuple(d.about), d.sensitivity, d.bundle, e.at, d.foreign)
     return replace(s, signals=(*s.signals, heard)[-p.signals_kept:])
 
 
@@ -1338,7 +1342,7 @@ def _felt_ignored(s: AttentionState, person: str, source: int, at: int, p: Atten
 
 def readings(s: AttentionState, now: int, p: AttentionParams) -> tuple[c.ThoughtReading, ...]:
     out = [c.ThoughtReading(t.id, t.text_ref, t.emotion, round(current(t, now, p), 4), t.origin, t.about,
-                            t.sensitivity, t.born_at, t.bundle, t.lineage)
+                            t.sensitivity, t.born_at, t.bundle, t.lineage, t.foreign)
            for t in s.thoughts.values() if current(t, now, p) >= p.fade_below]
     return tuple(sorted(out, key=lambda r: (-r.intensity, r.id)))
 

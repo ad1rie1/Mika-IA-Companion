@@ -90,6 +90,8 @@ class Night:
     def get(self, key):
         if key.name == "identity.identity":
             return NS(name=self.names.get(key.arg, ""))
+        if key.name == "self.portrayed":
+            return f"PORTRAIT-{key.arg}"
         return {"body.asleep_since": self.now - HOUR, "self.interests": self.views, "self.persona": c.PersonaDoc(),
                 "social.circle": tuple(self.names)}.get(key.name)
 
@@ -244,6 +246,7 @@ async def test_the_night_reflection_births_and_attaches_once():
     await Reflect().run(ctx)
     prompt = llm.requests[0].messages[0].content
     assert "[I1] Le jazz" in prompt and "[P1]" in prompt and "city pop" in prompt
+    assert "PORTRAIT-compact" in llm.requests[0].system_stable  # elle sait qui elle est (ADR 0153)
     born, reflected = (d.data for d in emitted)
     assert born.label.text == "la city pop" and born.about == ("user_2",) and born.evidence == (11, 12)
     assert reflected.attached == ((13, JAZZ),) and reflected.upto == 13

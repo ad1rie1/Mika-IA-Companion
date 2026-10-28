@@ -332,9 +332,12 @@ def self_names(name: str) -> frozenset[str]:
     return SELF_NAMES | {n for n in (folded, *folded.split()[:1]) if n}
 
 
-def system(name: str) -> str:
-    """La consigne de la relecture, au nom de celle dont c'est la mémoire (celui de sa persona : jamais écrit ici)."""
-    return phrase("memory.extraction.system", name=name)
+def system(name: str, persona: str) -> str:
+    """La consigne de la relecture, au nom de celle dont c'est la mémoire (celui de sa persona : jamais écrit ici),
+    puis qui elle est (``persona``, sa persona rendue : ``self.portrayed``) — ce qu'elle garde d'elle-même se juge à
+    ce qui est vrai d'elle, et ce qu'elle ressent à son caractère (ADR 0153)."""
+    intro = phrase("self.portrayed.intro", name=name, persona=persona)
+    return phrase("memory.extraction.system", name=name) + "\n\n" + intro
 
 
 @dataclass(frozen=True, slots=True)
@@ -867,21 +870,6 @@ def scoped_secrets(ex: Extraction, lines: Sequence[Line]) -> list[str]:
 #: « lui rappeler de… », « appeler sa mère » — pas ce qui lui arrive (« prendre l'avion pour Tokyo » en est un)
 _TASK = re.compile(r"^\s*(?:lui\s+|me\s+|se\s+)?(?:rappeler|prendre\s+(?:un\s+)?(?:rdv|rendez)|appeler|reserver|"
                    r"acheter|payer|envoyer|commander|repondre|remplir|renvoyer|penser a|ne pas oublier)\b")
-#: ce qui compte à coup sûr, quoi qu'en dise le modèle (replié, sans accents) : la consigne demande une importance,
-#: un modèle faible l'oublie — « son entretien chez Ubisoft » n'est jamais un détail
-_IMPORTANT = re.compile(r"\b(?:entretiens?|examens?|exam|partiels?|concours|soutenance|oral de|operation|operee?|"
-                        r"chirurgie|accouchement|naissance|mariage|enterrement|obseques|demenagement|permis|bac|"
-                        r"diplome|resultats?|greffe|biopsie|audience|proces)\b")
-#: ce qui se fête (replié, sans accents)…
-_FESTIVE = re.compile(r"\b(?:anniv\w*|mariage|noces|fiancailles|cremaillere|bapteme|fete|soiree d'anniv\w*|"
-                      r"enterrement de vie de \w+|pot de depart|baby shower)\b")
-#: … sauf le souvenir d'un deuil (« l'anniversaire de la mort de son père »)
-#: ce qui revient chaque année, quoi qu'en dise le modèle (replié, sans accents) : « son anniversaire »,
-#: « l'anniversaire de la mort de son père », « ça fera un an que… » — pas « la soirée d'anniversaire de Léa » ni
-#: « l'anniversaire de Léa » où elle va, une fête qui n'a lieu qu'une fois pour qui y va
-_YEARLY = re.compile(r"\b(?:son|sa|ses|leur|mon|ma|ton|ta)\s+anniv\w*|"
-                     r"\bl'anniv\w*\s+de\s+(?:la\s+mort|sa\s+mort|son\s+deces|mariage|leur\s+rencontre)\b|"
-                     r"\bca\s+(?:fera|fait)\s+(?:un|deux|trois|\d+)\s+ans?\s+qu")
 
 
 def task_words(text: str) -> bool:
@@ -919,25 +907,22 @@ def charged(importance: float, felt: Sequence[tuple[str, float]], empathy: Seque
 
 
 def moment_importance(ev: XEvenement) -> float:
-    """Ce qu'un moment pèse : ce qu'en dit le modèle, et au moins « important » pour ce qui l'est à coup sûr (un
-    entretien, un examen, une opération, un mariage) ; « marquant » pour une date qui revient chaque année et qui fait
-    mal — la date d'un deuil, d'une séparation."""
+    """Ce qu'un moment pèse : ce qu'en dit le modèle (ADR 0153 : aucun mot ne le relève) ; « marquant » pour une date
+    qui revient chaque année et qui fait mal — la date d'un deuil, d'une séparation."""
     rated = IMPORTANCE.get(ev.importance, 0.45)
-    if yearly(ev) and _painful(ev):
-        return max(rated, IMPORTANCE[4])
-    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(fold(ev.texte)) else rated
+    return max(rated, IMPORTANCE[4]) if yearly(ev) and _painful(ev) else rated
 
 
 def festive(ev: XEvenement) -> bool:
-    """Un moment qui se fête : le modèle le dit, ou ses mots (« son anniversaire de 30 ans ») — jamais ce qui fait
-    mal (« l'anniversaire de la mort de son père », une date que la personne vit douloureusement)."""
-    return (ev.a_feter or bool(_FESTIVE.search(fold(ev.texte)))) and not _painful(ev)
+    """Un moment qui se fête, quand le modèle le dit (« a_feter ») — jamais ce qui fait mal (« l'anniversaire de la
+    mort de son père », une date que la personne vit douloureusement)."""
+    return ev.a_feter and not _painful(ev)
 
 
 def yearly(ev: XEvenement) -> bool:
-    """Une date qui revient chaque année (un anniversaire, la date d'un deuil) : le modèle le dit, ou ses mots
-    (« son anniversaire », « ça fera un an que… ») — jamais une situation qui dure."""
-    return not ev.en_cours and (ev.chaque_annee or bool(_YEARLY.search(fold(ev.texte))))
+    """Une date qui revient chaque année (un anniversaire, la date d'un deuil), quand le modèle le dit
+    (« chaque_annee ») — jamais une situation qui dure."""
+    return not ev.en_cours and ev.chaque_annee
 
 
 #: ce qui date un élément sans dire de quoi il parle : deux souvenirs du même mois ne se ressemblent pas pour autant

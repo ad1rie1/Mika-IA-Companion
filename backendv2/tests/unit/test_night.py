@@ -36,7 +36,7 @@ from mika.faculties.body import BodyParams
 from mika.faculties.body import sleep as sl
 from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
-from mika.faculties.self.night import CYCLE, JournalArgs, classify, recall_chance, self_journal, vividness_of
+from mika.faculties.self.night import CYCLE, JournalArgs, dream_of, recall_chance, self_journal, vividness_of
 from mika.faculties.self.records import Dream
 from mika.faculties.world import WorldParams
 from mika.faculties.world import plan as world_plan
@@ -388,8 +388,9 @@ def _remembered_per_week(recall: float, nights: int = 210) -> float:
                 tried.add(cycle)
                 if rng.random() < sp.dream_chance:
                     emotions = rng.choice(moods)
-                    kind, emotion = classify(emotions)
-                    tonight.append(Dream(len(tonight), "", "", kind, vividness_of(rng, kind, emotions), emotion,
+                    # la sorte, c'est le modèle qui la dit (ADR 0153) : aucun de ces vécus n'en fait un cauchemar
+                    kind = self_c.PLEASANT
+                    tonight.append(Dream(len(tonight), "", "", kind, vividness_of(rng, kind, emotions), "dreamy",
                                          (), 1, t))
             t += 15 * MINUTE
         if tonight:
@@ -403,13 +404,38 @@ def test_she_remembers_a_dream_once_or_twice_a_week():
     assert _remembered_per_week(1.0) > 2.5  # contrôle : une mémoire des rêves à fond, presque chaque matin
 
 
-def test_a_nightmare_needs_a_real_threat():
-    assert classify(["sad"])[0] == self_c.MELANCHOLIC  # un souvenir triste : un rêve mélancolique
-    assert classify(["sad", "lonely", "melancholic"])[0] == self_c.MELANCHOLIC  # même un deuil
-    assert classify(["sad", "angry", "scared"])[0] == self_c.NIGHTMARE  # sombre et menaçant
-    assert classify(["happy"], [("anxious", 0.7)])[0] == self_c.NIGHTMARE  # une angoisse qui la travaille
-    assert classify(["happy"], [("anxious", 0.3)])[0] != self_c.NIGHTMARE  # une angoisse légère, non
-    assert classify(["happy", "curious"])[0] == self_c.PLEASANT
+def test_the_dream_says_its_own_kind():
+    """La sorte d'un rêve, c'est le modèle qui la dit, sur sa dernière ligne (ADR 0153) : la balise est retirée du
+    texte et colore le réveil ; absente ou inconnue, un rêve banal."""
+    assert dream_of("Je cours dans un couloir sans fin.\n[RÊVE: nightmare]") == \
+        ("Je cours dans un couloir sans fin.", self_c.NIGHTMARE, "scared")
+    assert dream_of("Une plage, la nuit. [reve:Melancholic]")[1:] == (self_c.MELANCHOLIC, "melancholic")
+    assert dream_of("Je vole.") == ("Je vole.", self_c.MUNDANE, "dreamy")
+    assert dream_of("Je vole.\n[RÊVE: épique]")[:2] == ("Je vole.", self_c.MUNDANE)
+
+
+def test_the_dreamer_sees_what_each_fragment_made_her_feel_and_names_the_kind(tmp_path):
+    """Les fragments arrivent avec ce qu'ils lui ont fait ressentir — une information, aucun seuil ne choisit le ton ;
+    le rêve gardé n'a plus sa balise, et sa sorte est celle que le modèle a dite."""
+    script = Script()
+    script.dream = "Je cherche Pixel dans une maison qui n'en finit pas.\n[RÊVE: melancholic]"
+
+    async def scenario(kernel):
+        await kernel.set_params("self", SelfParams(dream_chance=1.0))
+        await genesis(kernel, memory_c.REMEMBERED.draft(
+            text=Content.of("Adrien m'a dit que son chat Pixel est mort", level=2), about=("user_1",), sensitivity=2,
+            importance=0.8, emotion="sad"))
+        await until(kernel, at_paris(2026, 9, 29, 9, 0))
+        dreams = events(kernel, self_c.DREAMT.name)
+        return dreams, kernel.mind.store.content([d.data.text.ref for d in dreams])
+
+    (dreams, texts), llm = build_run(tmp_path, scenario, script=script)
+    asked = [c for c in llm.calls if c.role == "dream"]
+    assert asked and "Pixel est mort (tristesse)" in asked[0].messages[-1].content
+    assert "[RÊVE: …]" in asked[0].system_stable and "melancholic (" in asked[0].system_stable
+    assert dreams and {d.data.kind for d in dreams} == {self_c.MELANCHOLIC}
+    assert {d.data.emotion for d in dreams} == {"melancholic"}
+    assert texts and all("RÊVE" not in t and "Pixel" in t for t in texts.values())
 
 
 def test_what_the_night_leaves_is_felt_on_waking_not_at_three(tmp_path):

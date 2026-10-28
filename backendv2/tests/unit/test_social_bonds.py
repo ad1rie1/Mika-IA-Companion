@@ -108,10 +108,12 @@ def test_she_notices_when_she_always_writes_first_and_her_reaching_out_slows_dow
         other = _one_sided(state, frame, RowView("INITIATIVE", "ext_2", 5.0, (social_c.CHAT,)))
         thoughts = events(kernel, attention_c.THOUGHT_BORN.name)
         texts = kernel.mind.store.content([t.data.text.ref for t in thoughts])
+        # ce qu'elle se dit est à elle : jamais cité comme venu d'ailleurs (« CE QUE TU AS REMARQUÉ »)
+        foreign = [t.data.foreign for t in thoughts if "toujours moi" in texts.get(t.data.text.ref, "")]
         return (frame.get(social_c.CONTACT("ext_1")), frame.get(social_c.CONTACT("ext_2")), modulation, other,
-                events(kernel, social_c.ONE_SIDED.name), list(texts.values()))
+                events(kernel, social_c.ONE_SIDED.name), list(texts.values()), foreign)
 
-    (one, both, modulation, other, noticed, thoughts), _llm, _s = run(tmp_path, scenario)
+    (one, both, modulation, other, noticed, thoughts, foreign), _llm, _s = run(tmp_path, scenario)
     assert one.one_sided and one.her_starts >= 5 and one.their_starts == 0
     assert not both.one_sided and both.their_starts >= 3  # contrôle : une amie qui écrit autant qu'elle
     assert modulation[social_c.CHAT].shift < 0 and modulation[social_c.RECONTACT].shift < 0
@@ -120,6 +122,7 @@ def test_she_notices_when_she_always_writes_first_and_her_reaching_out_slows_dow
     assert other.shift == 0
     assert [e.data.about for e in noticed] == [("ext_1",)]  # une fois, pour elle seule
     assert any("toujours moi qui écris la première" in t for t in thoughts)
+    assert foreign and not any(foreign) and not any(e.data.foreign for e in noticed)  # sa pensée, pas une citation
 
 
 # ── MEM-6 (b) : les mots d'un profil s'oublient avec la personne ──────────
@@ -188,9 +191,11 @@ def test_who_says_when_they_last_talked_in_calendar_words_without_mechanism(tmp_
     assert "Avant cette conversation, « Alice » t'avait écrit pour la dernière fois hier soir (lundi vers 18 h)." in who
     assert "presque pas de passé commun" not in who  # une proche : on ne se contredit pas
     assert "Vous vous parlez ici depuis hier." in who
-    about = text.split("--- CE QUE TU SAIS DE CETTE PERSONNE ---", 1)[1].split("\n--- ", 1)[0]
-    assert "« Alice » compte parmi tes proches." in about
-    assert "elle ou lui" not in about and "elle ou il" not in who
+    # ce qu'elle est pour elle : dit une fois, dans « CE QUI VOUS LIE » — ni dans sa fiche, ni dans « QUI TU AS EN FACE »
+    tie = text.split("--- CE QUI VOUS LIE ---", 1)[1].split("\n--- ", 1)[0]
+    assert "Cette personne compte parmi tes proches." in tie
+    assert text.count("compte parmi tes proches") == 1 and "proche" not in who
+    assert "elle ou lui" not in tie and "elle ou il" not in who
 
 
 def test_a_stranger_is_someone_she_does_not_know_yet(tmp_path):

@@ -1,14 +1,12 @@
 """Le prompt comme projection.
 
-Chaque faculté déclare des sections (clé, zone, types d'épisode, ancres
-avant/après, rang de coupe, plancher, étiquettes) ; le composeur, générique :
+Chaque faculté déclare des sections (clé, zone, types d'épisode, rang de
+coupe, plancher, étiquettes) ; le composeur, générique :
 
 1. filtre — type d'épisode, étiquettes coupées par l'épisode (p. ex. l'affect
    en mode travail), sensibilité au-dessus du niveau de l'audience ;
-2. ordonne — l'ordre du registre (tri topologique des ancres) ; dans l'état
-   interne, l'arrière-plan d'abord (ce qui vient d'ailleurs, ce qui est
-   étiqueté ``background``), ce qui concerne la personne en face en dernier
-   (``interlocutor``), juste avant son message ;
+2. ordonne — l'ordre du registre : l'ordre de lecture que la composition
+   déclare, section par section (ADR 0151) ;
 3. neutralise — seul le composeur écrit des titres de section et les bornes
    de l'état interne : dans l'état interne, les tours de l'historique et le
    message, un tel marqueur est désamorcé (``neutral``) ; la zone stable,
@@ -45,17 +43,6 @@ HEADER_FMT = "--- {title} ---"
 #: l'ancre d'une section sans titre : ses premiers caractères (``ComposeTrace.anchors``)
 ANCHOR_CHARS = 80
 RESUME_MARKER = "(reprise de la conversation)"
-
-#: Étiquettes de section qui rangent l'état interne : l'arrière-plan (ce qui se
-#: passe autour d'elle — flux, courrier, journal, projets) en tête ; ce qui
-#: concerne la personne en face en dernier, juste avant son message. Une
-#: section sans l'une ni l'autre se place entre les deux ; une section venue
-#: d'ailleurs (``untrusted``) est de l'arrière-plan.
-BACKGROUND = "background"
-INTERLOCUTOR = "interlocutor"
-#: Le tout dernier mot de l'état interne, juste avant son message (même après la personne en face) : ce qui doit
-#: peser sur sa réponse elle-même — une consigne placée en tête du prompt ne tient pas contre un tic du modèle.
-LAST = "last"
 
 #: Combien de fils le composeur garde en mémoire pour l'hystérésis de leur coupe.
 HISTORY_KEYS_MAX = 512
@@ -106,18 +93,19 @@ def _quoted(raw: str) -> str:
     return _DASH_RUN_CLOSING.sub("—", line)
 
 
-def cited(text: str, limit: int = UNTRUSTED_MAX) -> str:
+def cited(text: str, limit: int = UNTRUSTED_MAX, *, note: bool = True) -> str:
     """Un texte venu d'ailleurs, rendu comme une citation : chaque ligne
     préfixée, aucune ne peut imiter un titre de section ou la fin de l'état
     interne (``_quoted`` : les tirets qui ouvrent ou ferment une ligne, les
     mots de l'état interne), longueur bornée — coupée à une frontière (ligne,
     phrase, mot), jamais au milieu d'un mot ou d'un nombre (le modèle
     compléterait le demi-fait) ; le plancher à la moitié garde quelque chose
-    d'une ligne géante."""
+    d'une ligne géante. ``note`` : précédé de ``UNTRUSTED_NOTE`` — faux pour
+    une section qui cite plusieurs textes et ne le dit qu'une fois, en tête."""
     body = "\n".join("> " + _quoted(raw) for raw in text.strip().splitlines())
     if len(body) > limit:
         body = _trim_at_boundary(body, limit, limit // 2) + TRIM_MARK
-    return f"{UNTRUSTED_NOTE}\n{body}"
+    return f"{UNTRUSTED_NOTE}\n{body}" if note else body
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +232,9 @@ class ChatPrompt:
     #: coupé) : donné par l'appelant (``persona/voix.yaml``, le composeur n'a pas de voix) — un fournisseur écarte un
     #: bloc vide, et une conversation qui finit sur un tour de l'assistant est refusée (400)
     silence: str = ""
+    #: le texte rendu de chaque section de la zone stable et de l'état interne (clé, corps sans son titre), dans
+    #: l'ordre du prompt : pour qui le relit après l'appel (la seconde passe), sans le reparser
+    bodies: tuple[tuple[str, str], ...] = ()
 
     def chat_messages(self) -> list[dict[str, str]]:
         msgs: list[dict[str, str]] = []
@@ -320,15 +311,6 @@ class _Block:
     text: str = ""
     turns: tuple[ChatTurn, ...] = ()
     trimmed: bool = False
-
-
-def _band(spec: SectionSpec) -> int:
-    """La place d'une section dans l'état interne : arrière-plan, elle, la personne en face."""
-    if spec.untrusted or BACKGROUND in spec.tags:
-        return 0
-    if LAST in spec.tags:
-        return 3
-    return 2 if INTERLOCUTOR in spec.tags else 1
 
 
 def _defused(turn: ChatTurn) -> ChatTurn:
@@ -419,8 +401,7 @@ class Composer:
                     dropped.append((b.spec.key, "le nom qu'elle tait paraît ailleurs"))
 
         stable = [b for b in kept if b.spec.zone is Zone.STABLE]
-        # tri stable : l'ordre du registre au sein de chaque bande
-        volatile = sorted((b for b in kept if b.spec.zone is Zone.VOLATILE), key=lambda b: _band(b.spec))
+        volatile = [b for b in kept if b.spec.zone is Zone.VOLATILE]
         history = [b for b in kept if b.spec.zone is Zone.HISTORY]
 
         current = next((b.body.current for b in history if b.body.current is not None), None)
@@ -529,6 +510,8 @@ class Composer:
         volatile = [b for b in volatile if b.text]
         prompt = replace(prompt, system_volatile="\n\n".join(
             self.render_block(b.spec, b.body, b.text) for b in volatile))
+
+        prompt = replace(prompt, bodies=tuple((b.spec.key, b.text) for b in (*stable, *volatile)))
 
         # Ce qui a été réellement rendu : un bloc d'historique dont tous les tours
         # ont été coupés, une section tombée hors budget, ne comptent pas.

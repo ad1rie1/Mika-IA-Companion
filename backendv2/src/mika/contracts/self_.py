@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.forms import Knob
 from mika.vocab import reading
 from mika.vocab.lineage import Lineage, subjects
@@ -84,9 +84,10 @@ class PersonaDoc(BaseModel):
     portrait: Annotated[str, Knob(
         label="Portrait", group="Portrait", widget="textarea", advanced=False, order=25,
         help="Qui elle est, écrit comme on décrit quelqu'un : en prose, à la deuxième personne (« Tu es… »), avec sa "
-             "vie, ses goûts, ses avis, ce qui l'agace. Le seul texte qui la décrit : elle le lit partout (en "
-             "conversation, dans son journal, ses rêves, son travail). Ce qu'elle ressent et montre, c'est son "
-             "tempérament qui le dit : ne l'écris pas ici, il l'emporterait sur les curseurs.")] = ""
+             "vie, ses goûts, ses avis, ce qui l'agace. Le seul texte qui la décrit : elle le lit quand elle parle à "
+             "quelqu'un, la nuit (son journal, ses rêves) et quand elle se raconte ; ses prompts courts (murmurer, "
+             "travailler) lisent sa description. Ce qu'elle ressent et montre, c'est son tempérament qui le dit : ne "
+             "l'écris pas ici, il l'emporterait sur les curseurs.")] = ""
     reference_thread: Annotated[str, Knob(
         label="Fil de référence (registre)", group="Sa parole", widget="textarea", advanced=False, order=45,
         help="Un vrai fil de SMS entre deux personnes, tel qu'on voudrait qu'elle écrive : la longueur des messages, "
@@ -97,7 +98,8 @@ class PersonaDoc(BaseModel):
                                   group="Identité", advanced=False, order=30)] = "français"
     facts: Annotated[tuple[str, ...], _lines(
         "Ce qui est vrai d'elle", "Ce que rien d'autre ne dit et qu'elle ne doit ni esquiver ni inventer : son "
-        "corps, son âge, comment elle parle d'elle (le tutoiement, le féminin), ce qu'elle ne fait pas.", 30)] = ()
+        "corps, son âge, comment elle parle d'elle (le tutoiement, le féminin), ce qu'elle ne fait pas. À la "
+        "deuxième personne, comme le portrait (« Tu ne manges pas… »).", 30)] = ()
     interests: Annotated[tuple[str, ...], _lines(
         "Centres d'intérêt", "Ce qui la passionne. Un sujet court d'abord, puis « — » et le détail (« Le dessin — "
         "illustration, aquarelle ») : le sujet seul titre ses explorations, et leurs mots décident des titres de ses "
@@ -188,19 +190,20 @@ class PersonaRevised(Payload):
     persona: PersonaDoc
 
 
-def temperament_hash(t: Temperament) -> str:
-    """L'empreinte d'un tempérament (ses curseurs, ses choix, ses précisions) : le caractère écrit la porte, et ne
-    vaut que pour elle."""
-    return digest(t.model_dump(mode="json"))
+def character_basis(doc: PersonaDoc) -> str:
+    """L'empreinte de ce dont son caractère s'écrit : son tempérament (curseurs, choix, précisions), son portrait, son
+    nom et sa langue (ADR 0152). Le caractère écrit la porte, et ne vaut que pour elle."""
+    return digest({"temperament": doc.temperament.model_dump(mode="json"), "portrait": doc.portrait.strip(),
+                   "name": name_of(doc), "language": doc.language})
 
 
 class CharacterWritten(Payload):
-    """Son caractère, écrit par le modèle d'après sa matrice (ADR 0139) : six à huit phrases qui disent ce que ses
-    traits font ensemble, à la place des 29 mesures. Du texte sur elle, comme son portrait, personne d'autre n'y
-    est : pas un ``Content``. Il ne vaut que pour le tempérament dont il porte l'empreinte."""
+    """Son caractère, écrit par le modèle d'après sa matrice et à côté de son portrait (ADR 0139, 0152) : six à huit
+    phrases qui disent ce que ses traits font ensemble. Du texte sur elle, comme son portrait, personne d'autre n'y
+    est : pas un ``Content``. Il ne vaut que pour la persona dont il porte l'empreinte (``character_basis``)."""
 
     text: str
-    temperament: str
+    basis: str
     voice: VoiceProvenance
 
 
@@ -348,6 +351,10 @@ PERSONA = FactKey("self.persona", type=PersonaDoc)
 #: son caractère écrit par le modèle pour le tempérament courant (ADR 0139) ; « » tant qu'il ne l'est pas — rien
 #: ne le remplace : sa persona ne dit alors rien de son caractère
 CHARACTER = FactKey("self.character", type=str)
+#: sa persona rendue, à une profondeur (``full`` : son portrait, ses intérêts, ce qui est vrai d'elle ; ``compact`` :
+#: sa description et ce qui est vrai d'elle — toutes deux avec son caractère, sa langue, sa nature et la règle de sa
+#: vie) : ce que lit un appel qui écrit pour elle ou sur elle hors d'une conversation (ADR 0152)
+PORTRAYED = FactFamily("self.portrayed", arg=str, type=str)
 #: L'estime de soi, dans [0,05 ; 0,95] : lente, revenant vers 0,5 (demi-vie de trois jours).
 ESTEEM = FactKey("self.esteem", type=float, time_varying=True)
 #: Ce qu'elle sait d'elle (ADR 0088) : des tendances tirées de ses réussites et de ses ratés récents — des codes

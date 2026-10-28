@@ -138,12 +138,6 @@ class EmailParams(BaseModel):
     draft_within_us: Annotated[int, Knob(
         label="Préparer dans les", group="Brouillons", lo=HOUR, hi=7 * DAY,
         help="Passé ce délai après son arrivée, un mail n'appelle plus de réponse préparée d'elle-même.")] = 2 * DAY
-    background_from: Annotated[float, Knob(
-        label="Conversation assez légère à partir de", group="Le dire", lo=-1.0, hi=1.0, step=0.05,
-        help="Ses mails sont de l'arrière-plan. Quand elle répond à quelqu'un, elle n'a sous les yeux que les "
-             "mails importants, et seulement si le ton du moment de la personne (de -1, lourd, à 1, léger) "
-             "atteint ce seuil : on ne parle pas d'un rendez-vous chez le dentiste à quelqu'un qui annonce un "
-             "deuil. En initiative ou au travail, ce filtre ne s'applique pas.")] = -0.15
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +238,10 @@ class PollAsked(Payload):
 
 #: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4)
+#: ``background_from`` (retiré le 2026-10-28) : les mails se taisaient en réponse quand le ton de la personne était
+#: lourd — une décision de comportement ; elle voit ce qui compte, et juge
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4,
+                retired_params=("background_from",))
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
 READ = EMAIL.event("read", MailRead)

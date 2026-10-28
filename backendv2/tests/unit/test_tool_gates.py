@@ -359,5 +359,5 @@ def test_her_file_on_someone_is_read_back_to_them_but_never_to_a_stranger(tmp_pa
             await kernel.stop()
 
     run_virtual(clock, main)
-    assert answers["user_1"].startswith("« Adrien » fait partie de tes amis")
+    assert answers["user_1"].startswith("Cette personne fait partie de tes amis.")  # où vous en êtes, puis sa fiche
     assert "ne peux pas relire" in answers["web_inconnu"]

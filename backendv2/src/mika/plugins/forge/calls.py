@@ -8,7 +8,8 @@ expire — comme l'appel d'un service extérieur (``plugins/mcp/calls.py``).
   cela : c'est elle qu'on accepte. Une app changée, arrêtée ou cassée depuis la demande, une demande expirée, bloque.
 - *La capacité* appelle et garde ce qu'il a rendu le temps qu'il soit journalisé (``ForgePort.keep``) ; *le retour*
   (``came_back``) l'écrit comme un contenu (``forge.answered``, l'oubli l'atteint) et vit ce que l'app a signalé ou
-  émis ; la section et l'initiative due le disent à qui l'avait demandé.
+  émis ; la section et l'initiative due le disent à qui l'avait demandé. La section est à elle (ses demandes) : seul ce
+  que l'app a répondu est cité, une donnée — avec les phrases des services (``mcp.section``), une seule maison.
 - *L'expiration* : sans accord à temps (10 min dans le chat, un jour pour l'opérateur), refusée au nom du délai.
 """
 
@@ -57,6 +58,8 @@ FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
 CARD_TTL, OPERATOR_TTL, TOO_LATE = 10 * MINUTE, DAY, 6 * HOUR
 #: ce qu'on garde des demandes, d'une réponse (le contenu journalisé), ce que la section en montre
 CALLS_KEPT, ANSWER_KEPT, SHOWN_CHARS, SHOWN_MAX = 100, 8000, 2000, 4
+#: ce que la raison d'un échec montre d'elle
+WHY_CHARS = 300
 #: qui signe un refus faute d'accord à temps
 EXPIRER = "délai"
 PROVENANCE = "forge-call:"
@@ -92,8 +95,8 @@ async def ask(ctx: Any, app: App, name: str, tool: str, function: str, values: M
         summary=Content.of(phrase("forge.calls.summary", tool=inert(tool, 80), app=inert(app.title, 60),
                                   args=shown)[:400], level=int(Sensitivity.PERSONAL)),
         approval=True, context=f"forge:{name}", about=(target,) if target else ()))
-    who = phrase("forge.calls.in_chat") if in_chat else phrase("forge.calls.operator")
-    return ToolResult(content=phrase("forge.calls.asked", who=who))
+    who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
+    return ToolResult(content=phrase("mcp.tools.asked", who=who))
 
 
 def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
@@ -261,24 +264,27 @@ async def _texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> dict[
 
 
 def line(r: AppCall, texts: Mapping[str, str]) -> str:
+    """Où en est une demande : ses mots à elle (les phrases des services, ``mcp.section``) ; ce que l'app a répondu,
+    cité en dessous — une donnée, jamais une consigne."""
     what = phrase("forge.calls.what", tool=inert(r.tool, 80))
     if r.status == WAITING:
-        who = phrase("forge.calls.by_chat") if r.approval == "conversation" else phrase("forge.calls.by_operator")
-        return "- " + phrase("forge.calls.waiting", what=what, who=who)
+        who = phrase("mcp.section.by_chat") if r.approval == "conversation" else phrase("mcp.section.by_operator")
+        return "- " + phrase("mcp.section.waiting", what=what, who=who)
     said = texts.get(r.text_ref, "")
     if r.status == ANSWERED:
-        return ("- " + phrase("forge.calls.answered", what=what) + "\n"
-                + (cite(said, SHOWN_CHARS) or phrase("forge.calls.nothing")) + "\n" + phrase("forge.calls.say_it"))
+        return "- " + phrase("mcp.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
+                                                                          or phrase("mcp.tools.nothing"))
     if r.status == FAILED:
-        why = phrase("forge.calls.why", said=inert(said, 300)) if said else ""
-        return "- " + phrase("forge.calls.failed", what=what, why=why)
+        if not said.strip():
+            return "- " + phrase("mcp.section.failed", what=what)
+        return "- " + phrase("mcp.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
     if r.status == EXPIRED:
-        return "- " + phrase("forge.calls.expired", what=what)
-    return "- " + phrase("forge.calls.refused", what=what)
+        return "- " + phrase("mcp.section.expired", what=what)
+    return "- " + phrase("mcp.section.refused", what=what)
 
 
 @FORGE.section("app_calls", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
-               title=phrase("forge.calls.title"), untrusted=True, reads=[identity_c.PERSON, identity_c.HANDLES])
+               title=phrase("forge.calls.title"), reads=[identity_c.PERSON, identity_c.HANDLES])
 def _section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     reqs = _relevant(s, frame)
     if not reqs:

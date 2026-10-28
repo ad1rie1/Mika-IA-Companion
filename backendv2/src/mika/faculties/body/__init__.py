@@ -16,7 +16,7 @@
   qu'elle a dormi, qui l'a tirée du sommeil, si elle s'est couchée tard — au
   réveil, elle sait comment s'est passée sa nuit (``body.last_night``) ;
 - ses sections : son rythme (la date, l'heure, ce qu'elle ressent ; « ce
-  message t'a réveillée » ; sa nuit, le matin), et le brouillard de la fatigue.
+  message t'a réveillée » ; sa nuit, le matin) — sa fatigue y est dite en mots.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import circadian
-from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.temperament import Temperament, around, shift
@@ -729,29 +729,6 @@ def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     text = circadian.describe(frame.local(), profile, frame.get(c.ENERGY))
     lines = [line for line in (_woke_line(s, frame), _night_line(s, frame)) if line]
     return " ".join((text, *lines))
-
-
-#: le brouillard de la fatigue : sous tant d'énergie, sa phrase (``body.fog.…`` dans sa voix)
-FOG = (
-    (0.12, "falling_asleep"),
-    (0.2, "very_tired"),
-    (0.3, "tired"),
-)
-
-
-def fog(energy: float) -> str | None:
-    """Ce que la fatigue fait à sa façon de parler, à ce niveau d'énergie (``None`` : rien)."""
-    for limit, key in FOG:
-        if energy < limit:
-            return phrase(f"body.fog.{key}")
-    return None
-
-
-@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
-              after=["rhythm"],
-              trim_rank=45, tags=[Tag.AFFECTIVE], title=phrase("body.fog.title"), reads=[c.ENERGY])
-def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
-    return fog(frame.get(c.ENERGY))
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

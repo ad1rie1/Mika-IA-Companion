@@ -276,8 +276,9 @@ def test_the_triage_says_what_a_mail_does_to_her_among_all_her_emotions():
     assert (told["importance"], told["emotion"], told["intensite"]) == (0.7, "angry", 0.6)
     assert read_triage('{"importance": 0.7, "emotion": "angry"}', guess)["emotion"] == ""
     assert read_triage("pas de JSON", guess) == guess
-    system = triage_system("Nova")
+    system = triage_system("Nova", "Tu es Nova. PORTRAIT-CANARI")
     assert all(e.value in system for e in Emotion if e is not Emotion.NEUTRAL)
+    assert "PORTRAIT-CANARI" in system  # ce qu'un mail lui fait se juge à qui elle est (ADR 0153)
 
 
 def test_headlines_that_do_not_touch_her_go_unnoticed(tmp_path):

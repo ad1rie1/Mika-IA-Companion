@@ -440,7 +440,8 @@ def test_someone_who_no_longer_answers_gets_no_more_news_only_one_word_asking_ho
     assert got["hello"] == agency_c.UNANSWERED  # pas de « hello ! » sous son message resté sans réponse
     for brief in (got["brief_hello"], got["brief_news"]):  # la relance prend de ses nouvelles
         assert "c'est de ses nouvelles que tu as envie" in brief and "« Adrien »" in brief, brief
-    assert "relance douce" in got["brief_mail"]  # prévenir d'un mail : la retenue d'avant, sans plus
+    # prévenir d'un mail : ce qui est resté sans réponse, dit comme un fait — comment elle le prend, c'est son caractère
+    assert "pas de réponse depuis" in got["brief_mail"] and "reproche" not in got["brief_mail"]
     assert got["later"] is None and got["second"] == 2
     assert got["after"] == agency_c.UNANSWERED and got["news_after"] == agency_c.UNANSWERED  # puis plus rien
 
@@ -460,7 +461,7 @@ def test_how_many_times_she_follows_up_is_her_temperament(insists, follow_ups):
 
 def test_her_follow_ups_ask_how_he_is_then_say_what_the_silence_does_then_stop(tmp_path):
     """Réglée pour relancer deux fois : la première relance prend de ses nouvelles ; la seconde dit ce que ce silence
-    lui fait — à sa façon, inquiète, vexée ou agacée — et sait que c'est la dernière ; puis plus rien. Chaque délai
+    lui fait — à sa façon, que son caractère dit (ADR 0154) — et sait que c'est la dernière ; puis plus rien. Chaque délai
     est tiré au sort autour du jour (2026-10-19 : « ça doit être assez aléatoire, une fois par jour »)."""
     def voice():
         return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
@@ -482,7 +483,9 @@ def test_her_follow_ups_ask_how_he_is_then_say_what_the_silence_does_then_stop(t
     assert len(sent) == 3, [local(e.at, PARIS).strftime("%a %d %H:%M") for e in sent]  # une, puis deux relances
     first, again = [b for b in briefs if "c'est de ses nouvelles" in b], [b for b in briefs if "sans réponse, la" in b]
     assert len(first) == 1 and "dernière relance" not in first[0]
-    assert len(again) == 1 and "ce que ce silence te fait" in again[0] and "C'est ta dernière relance" in again[0]
+    assert len(again) == 1 and "Tu as écrit 2 fois" in again[0] and "C'est ta dernière relance" in again[0]
+    # un fait : ce que ce silence lui fait n'est pas dicté, ni ses émotions possibles (ADR 0154)
+    assert "vexée" not in again[0] and "te fait quelque chose" not in again[0]
     gaps = [b.at - a.at for a, b in zip(sent, sent[1:], strict=False)]
     assert all(gap >= 0.6 * 3 * DAY for gap in gaps), gaps  # le rythme (trois jours) tiré à ± 40 %
     assert 0.6 <= draws["ext_1"][1] <= 1.4  # (quand, le tirage)

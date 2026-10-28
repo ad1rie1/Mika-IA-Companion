@@ -283,10 +283,11 @@ async def test_what_she_reads_working_or_for_someone_is_kept():
     assert McpServer.model_fields["default_keep"].default == "rien"
 
 
-async def test_what_she_reads_for_someone_she_tells_as_news():
-    """2026-10-14 : « c'est la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le
-    début de la page » — la consigne de son prompt ne suffisait pas. Ce qu'une lecture du monde lui rend en
-    conversation lui rappelle de le raconter (ce qui l'a frappée, ce qu'elle en pense) ; en travaillant, rien."""
+async def test_what_she_reads_for_someone_comes_back_without_a_rule():
+    """Ce qu'une lecture du monde lui rend en conversation est la même donnée citée qu'au travail : comment le
+    raconter a une seule maison, ses outils dans son prompt (``runtime.tools.acting``) — la réponse de l'outil n'y
+    ajoute pas de consigne (ADR 0154). La sonde du 2026-10-14 (« c'est la page de flash info de RTL […] je n'ai lu
+    que le début de la page ») est à surveiller au banc."""
     async def result(kind: str, target: str | None) -> str:
         async def emit(*drafts):
             pass
@@ -294,8 +295,7 @@ async def test_what_she_reads_for_someone_she_tells_as_news():
         return (await _call(_search(), ExternalArgs(q="comète"), ctx, "public")).content
 
     told = await result(Kind.REPLY, ALICE)
-    assert "3 novembre" in told and "Raconte-le comme quelqu'un qui vient de le lire" in told
-    assert "Raconte-le" not in await result(Kind.STEP, None)
+    assert "3 novembre" in told and told == await result(Kind.STEP, None)
 
 
 async def test_the_night_keeps_only_the_news_of_what_she_read_for_someone():
@@ -310,6 +310,7 @@ async def test_the_night_keeps_only_the_news_of_what_she_read_for_someone():
     out = await night(db, llm)
     assert "[1] web — « search » (lu pour quelqu'un)" in llm.calls[0].messages[0].content
     assert "lu pour quelqu'un" in llm.calls[0].system_stable  # ce qu'elle peut en garder
+    assert "Tu es Mika (persona full)." in llm.calls[0].system_stable  # ses avis se forment à son portrait (0153)
     (b,) = of(out, mc.BELIEVED)
     assert (b.about, b.told_by, b.heard_by, b.origin) == ((), ("mcp:web",), (ALICE,), mc.READ)
     (believed,) = [d for d in out if d.type.name == mc.BELIEVED.name]
@@ -348,10 +349,10 @@ async def test_she_says_jai_lu_que_once_per_person():
     assert f"- {WEBB} (lu dans « Science »" in body  # ce qu'elle a lu, et où
     assert "Pixel" not in body and "Lune" not in body  # pas ce qu'on lui a dit ; plus ce qu'elle a lu il y a 9 jours
     ask(db, "salut !")
-    assert await section(CAROL, Kind.REPLY) is None  # un bonjour ne lui fait pas réciter ses lectures
-    db.execute("DELETE FROM thread")
-    ask(db, "et toi, t'as lu des trucs intéressants ?")
-    assert WEBB in await section(CAROL, Kind.REPLY)  # on lui parle d'elle
+    # en réponse aussi, ce qu'elle a lu est là : en parler ou non, c'est elle qui en juge (ADR 0153 — un « tu » dans
+    # le message ne le décide plus)
+    shown = await section(CAROL, Kind.REPLY)
+    assert WEBB in shown and "Tu peux en parler" not in shown
     said = NS(type=NS(name=rt.UTTERANCE.name), data=NS(visible=True, target=CAROL, provenance=("memory:12",)), at=NOW)
     Told().apply(db, [said], "")  # elle l'a raconté à Carol
     assert await section(CAROL) is None

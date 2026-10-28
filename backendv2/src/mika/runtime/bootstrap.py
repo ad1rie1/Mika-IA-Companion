@@ -79,12 +79,11 @@ class KernelDeps:
     gateway: LLMGateway | None = None
     policies: Mapping[str, EpisodePolicy] = field(default_factory=dict)
     arbitration: ArbitrationPolicy | None = None
+    #: l'ordre de lecture des sections du prompt (``Registry``, ADR 0151) ; ``None`` : leur ordre de déclaration
+    reading: Sequence[str] | None = None
     persona: PersonaProvider | None = None
     audience_of: AudienceResolver | None = None
     parsers: Sequence[Parser] = ()
-    #: la relecture de ses paroles (``pipeline.Reviewer``) et les sortes d'épisode qu'elle relit
-    reviewers: Sequence[Any] = ()
-    reviewed: Sequence[str] = ()
     polishers: Sequence[Any] = ()
     polished: Sequence[str] = ()
     #: les annotations d'une parole récrite par la seconde passe (``pipeline.Reannotator``)
@@ -167,7 +166,7 @@ class Perceived:
 class Kernel:
     def __init__(self, deps: KernelDeps) -> None:
         self.deps = deps
-        registry = Registry([RUNTIME, *deps.faculties], arbitration=deps.arbitration)
+        registry = Registry([RUNTIME, *deps.faculties], arbitration=deps.arbitration, reading=deps.reading)
         self.mind = Mind(registry, deps.store, deps.clock, deps.ids, code=deps.code,
                          snapshot_every=deps.snapshot_every)
         #: ce que chaque épisode a eu sous les yeux (``views.db``, jetable)
@@ -178,7 +177,7 @@ class Kernel:
         self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
-            audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
+            audience_of=deps.audience_of, parsers=deps.parsers,
             polishers=deps.polishers, polished=deps.polished, reannotators=deps.reannotators, modes=deps.modes,
             budget=deps.budget, ports=ports,
             traces=self.traces, authors=deps.authors,

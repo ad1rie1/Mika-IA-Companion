@@ -185,7 +185,8 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
         key = _local(e.at).strftime("%a")
         per_day[key] = per_day.get(key, 0) + 1
     asleep_speaking = [e for e in said if _asleep_at(spans, e.at)]
-    double = _double_texts(events)
+    agency = driver.kernel.mind.frame().env.params_of("agency", driver.kernel.mind.root)
+    double = _double_texts(events, round(agency.follow_up_min_us * (1.0 - agency.follow_up_jitter)))
     nights = [(a, b) for a, b in spans if (b - a) >= 5 * HOUR]
     thoughts = [e for e in events if e.type.name == "attention.thought_born"]
     alive_old = [t for t in driver.kernel.mind.frame().get(attention_c.THOUGHTS) if end - t.born_at > 3 * DAY]
@@ -199,7 +200,7 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("jamais plus de cinq initiatives par jour", all(n <= 5 for n in per_day.values()),
                          "le plafond quotidien est une politique", f"{per_day}"),
         expect.invariant("jamais deux fois de suite sans réponse", not double,
-                         "à quelqu'un qui n'a pas répondu, au plus une relance douce, un jour plus tard au plus tôt",
+                         "à quelqu'un qui n'a pas répondu, au plus une relance douce, tirée autour du jour (ADR 0118)",
                          f"{double[:3]}"),
         expect.invariant("ses pensées s'éteignent", not alive_old,
                          "une pensée de plus de trois jours ne trotte plus", f"{len(alive_old)}"),
@@ -211,10 +212,11 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
     ]
 
 
-def _double_texts(events: list[Any]) -> list[tuple[str, str]]:
+def _double_texts(events: list[Any], earliest: int) -> list[tuple[str, str]]:
     """Ses initiatives restées sans réponse qu'elle a doublées trop vite vers la
-    même personne : une deuxième moins d'un jour après la première, ou une
-    troisième (ADR 0033 : une seule relance douce, après un long délai)."""
+    même personne : une deuxième avant ``earliest`` (le plus tôt d'une relance
+    douce : un jour à ± sa part de hasard, ADR 0118), ou une troisième (ADR 0033 :
+    une seule relance douce)."""
     since: dict[str, list[int]] = {}
     out = []
     for e in events:
@@ -222,7 +224,7 @@ def _double_texts(events: list[Any]) -> list[tuple[str, str]]:
             since.pop(e.data.handle, None)
         elif e.type.name == rt.UTTERANCE.name and e.data.kind == "INITIATIVE" and e.data.target:
             sent = since.setdefault(e.data.target, [])
-            if len(sent) >= 2 or (sent and e.at - sent[0] < DAY):
+            if len(sent) >= 2 or (sent and e.at - sent[0] < earliest):
                 out.append((e.data.target, _local(e.at).strftime("%a %H:%M")))
             sent.append(e.at)
     return out

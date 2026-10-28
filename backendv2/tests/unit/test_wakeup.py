@@ -157,7 +157,7 @@ def test_an_impersonal_call_has_no_persona_and_no_mood(tmp_path):
     assert got.status == DONE and len(jobs) == 1 and persona == []
     state, brief = split(jobs[0])
     assert jobs[0].persona is None
-    assert "TON ÉTAT ÉMOTIONNEL ACTUEL" not in state and "impersonnel" in brief
+    assert "--- TON HUMEUR ---" not in state and "impersonnel" in brief
 
 
 def test_a_model_that_keeps_failing_is_retried_then_the_call_fails(tmp_path):

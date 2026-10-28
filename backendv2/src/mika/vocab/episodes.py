@@ -162,3 +162,5 @@ class Tag(enum.StrEnum):
     AFFECTIVE = "affective"
     #: Ne concerne que la vie intérieure (coupé dans les voix compactes).
     INNER = "inner"
+    #: Ne vaut que pour une conversation de chat : sa consigne de réponse (coupée en mode pro).
+    CHAT = "chat"

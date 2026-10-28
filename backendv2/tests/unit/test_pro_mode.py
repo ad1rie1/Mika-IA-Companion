@@ -56,7 +56,7 @@ def _life(tmp_path, *, mode: str = "pro", tools: bool = True, polish: bool = Tru
 
     shown = Shown()
     kernel, clock, _llm, deliveries = build(tmp_path, respond, start=at_paris(2026, 10, 15, 18, 0), polish=polish,
-                                            review=True, ports={"activity": shown})
+                                            ports={"activity": shown})
     seen: dict = {}
 
     async def main():
@@ -115,17 +115,17 @@ def test_her_pro_calls_carry_the_fifteen_minutes_of_the_mode(tmp_path):
     assert {c.deadline_s for c in calls if c.role in ("reply", "polish")} == {180.0}
 
 
-def test_a_pro_answer_without_tools_is_neither_reviewed_nor_rewritten(tmp_path):
+def test_a_pro_answer_without_tools_is_not_rewritten(tmp_path):
     seen, calls, shown, _said = _life(tmp_path, tools=False)
-    assert len([c for c in calls if c.role == "pro"]) == 1  # pas de relecture
+    assert len([c for c in calls if c.role == "pro"]) == 1
     assert not [c for c in calls if c.role == "polish"]  # pas d'autrice
     assert seen["report"].text == ANSWER
     assert [a.phase for a in shown] == [DONE]
 
 
 def test_the_same_message_without_mode_gets_her_ordinary_reply(tmp_path):
-    """Le contre-exemple : sans mode, la réponse est passée par l'autrice (qui dispense de la relecture, ADR 0115), et
-    rien ne se montre en direct ; sans modèle pour l'autrice, elle est relue (la question à options)."""
+    """Le contre-exemple : sans mode, la réponse est passée par l'autrice, et rien ne se montre en direct ; sans modèle
+    pour l'autrice, le premier jet part tel quel (un seul appel : plus de relecture, ADR 0154)."""
     seen, calls, shown, said_to_him = _life(tmp_path / "autrice", mode="", tools=False)
     assert not [c for c in calls if c.role == "pro"]
     replies = [c for c in calls if c.role == "reply"]
@@ -133,8 +133,8 @@ def test_the_same_message_without_mode_gets_her_ordinary_reply(tmp_path):
     assert STYLE in replies[0].system_stable + "".join(m.content for m in replies[0].messages)
     assert seen["report"].text == "récrit par l'autrice" and seen["utterance"].mode == ""
     assert shown == [] and [d.mode for d in said_to_him] == [""]
-    _seen, calls, _shown, _said = _life(tmp_path / "relue", mode="", tools=False, polish=False)
-    assert len([c for c in calls if c.role == "reply"]) == 2  # le brouillon, puis sa réécriture après la relecture
+    _seen, calls, _shown, _said = _life(tmp_path / "seule", mode="", tools=False, polish=False)
+    assert len([c for c in calls if c.role == "reply"]) == 1
 
 
 def test_an_unknown_mode_is_the_ordinary_conversation(tmp_path):

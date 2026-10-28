@@ -272,6 +272,7 @@ def test_memory_rereads_the_conversation_once_it_settles(tmp_path):
     assert early == []  # la conversation n'est pas encore posée
     [req] = calls
     prompt = req.messages[-1].content
+    assert "Ce qui est vrai de toi" in req.system_stable  # elle sait qui elle est (ADR 0153)
     assert phrase("memory.extraction.render.relayed", owner="Adrien", app="WhatsApp",
                   who="Léa [P1], Adrien [P2]") in prompt
     assert "Je déménage à Lyon en novembre !" in prompt and "Trop bien !" in prompt

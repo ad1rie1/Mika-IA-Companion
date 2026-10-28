@@ -60,8 +60,6 @@ class Prompt:
         self.paras = record["systeme"].split("\n\n")
         self.messages = [Message(m["role"], m["texte"]) for m in record["messages"]]
         last = self.messages[-1].content
-        # le premier jet : sans la remarque d'une relecture
-        last = re.sub(r"--- RELIS-TOI ---\n.*?(?=--- FIN ETAT INTERNE ---)", "", last, flags=re.S)
         head, _, self.heard = last.partition(CONTEXT_FOOTER)
         self.heard = self.heard.strip()
         self.sections: dict[str, str] = {}

@@ -1300,19 +1300,14 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
         # sonde réelle du 2026-10-02 : sans cette ligne, interrogée là-dessus, elle mentait (« il ne m'a rien dit »)
         parts.extend(Fragment(line) for line in [phrase("memory.recall.unsaid"), *hidden,
                                                 phrase("memory.recall.unsaid_advice")])
-    shown = souvenirs + beliefs
-    if shown:
-        advice = phrase("memory.recall.advice")
-        if any(r.label != r.item.text for r in shown):
-            advice += phrase("memory.recall.advice_private")
-        parts.append(Fragment(advice))
+    shown = souvenirs + beliefs  # ce qu'on lui a confié porte son étiquette (``memory.tag``), ligne par ligne
     return SectionBody("\n".join(f.text for f in parts), level=max((r.verdict.level for r in shown), default=0),
                        provenance=tuple(f"memory:{i}" for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
                        tied=any(r.verdict.tied for r in shown),
                        fragments=tuple(parts))
 
 
-@MEMORY.section("acquainted", zone=Zone.VOLATILE, episodes=[Kind.REPLY], after=["stance"], trim_rank=40,
+@MEMORY.section("acquainted", zone=Zone.VOLATILE, episodes=[Kind.REPLY], trim_rank=40,
                 title=phrase("memory.acquainted.title"))
 def _acquainted(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """« LES GENS QU'ON NOMME » : un prénom qu'elle connaît dans son cercle — elle le connaît, peut-être pas la même
@@ -1332,14 +1327,14 @@ def _acquainted(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Sect
     return SectionBody("\n".join(lines))
 
 
-@MEMORY.section("memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=30,
+@MEMORY.section("memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=30,
                 title=phrase("memory.recall.title"))
 def _memories(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall = enrich.get("recall")
     return _body(recall, frame, witness=False) if recall else None
 
 
-@MEMORY.section("shared_memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["memories"], trim_rank=31,
+@MEMORY.section("shared_memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=31,
                 title=phrase("memory.recall.shared_title"))
 def _shared(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall = enrich.get("recall")
@@ -1356,7 +1351,7 @@ def shown_since(enrich: Mapping[str, Any]) -> int | None:
     return min(ids) if ids else None
 
 
-@MEMORY.section("past_exchanges", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["memories"], trim_rank=20,
+@MEMORY.section("past_exchanges", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
                 title=phrase("memory.exchanges.title"))
 def _exchanges(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall: Recall | None = enrich.get("recall")
@@ -1400,7 +1395,7 @@ def when_words(t: int, frame: Frame, *, all_day: bool = True) -> str:
     return phrase("memory.when.date", date=date_words(then.date()), at=at)
 
 
-@MEMORY.section("promises", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=60,
+@MEMORY.section("promises", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=60,
                 title=phrase("memory.promises.title"))
 def _promises(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall: Recall | None = enrich.get("recall")
@@ -1421,7 +1416,7 @@ def _promises(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     return SectionBody("\n".join(lines), provenance=tuple(f"memory:{pid}" for pid, *_ in recall.promised))
 
 
-@MEMORY.section("life", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=55,
+@MEMORY.section("life", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
                 title=phrase("memory.life.title"))
 def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall: Recall | None = enrich.get("recall")
@@ -1435,7 +1430,7 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         # ligne le dit
         lines.append(phrase("memory.life.hard"))
     for m in recall.moments:
-        lines.append(_moment_line(m, frame, recall.close, recall.hard))
+        lines.append(_moment_line(m, frame, recall.close))
     return SectionBody("\n".join(lines), level=max((m.verdict.level for m in recall.moments), default=0),
                        provenance=tuple(f"memory:{m.event.id}" for m in recall.moments),
                        tied=any(m.verdict.tied for m in recall.moments))
@@ -1483,7 +1478,7 @@ def _ahead_moments(frame: Frame, store: Any, person: str | None, aud: Audience, 
     return out
 
 
-@MEMORY.section("ahead", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["life"], trim_rank=50,
+@MEMORY.section("ahead", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=50,
                 title=phrase("memory.ahead.title"))
 def _ahead(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """« CE QUI VIENT » : le monde et ce qu'elle vivra à travers quelqu'un, avec leur vraisemblance en mots."""
@@ -1506,11 +1501,11 @@ def _today(ev: c.LifeEvent, frame: Frame) -> bool:
     return frame.local(ev.when).date() == frame.local().date()
 
 
-def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> str:
-    """Un moment, dit comme on y pense : à venir ; le jour d'une fête, ses vœux ; le jour où revient la date d'un
-    deuil, de la douceur ; passé — envers une amie, si ça compte, c'est la première chose qu'elle demanderait (après
-    des nouvelles d'elle, quand quelque chose de grave la touche) ; sinon, si ça vient ; une situation qui dure, ou
-    qu'on vient de lui dire finie ; ce dont vous venez de reparler."""
+def _moment_line(m: Moment, frame: Frame, close: bool) -> str:
+    """Un moment, dit comme un fait : à venir, ou déjà évoqué ; ce qui se fête, souhaité ou pas encore ; le jour où
+    revient une date lourde ; passé, et s'il comptait pour une amie ; une situation qui dure, ou qu'on vient de lui
+    dire finie ; ce dont vous venez de reparler. Ce qu'elle en fait (demander, souhaiter, se taire), son caractère et
+    la conversation le disent — rien ici ne le lui dicte."""
     ev = m.event
     if ev.ongoing and ev.ended_at:
         return phrase("memory.life.ended", label=m.label)
@@ -1539,7 +1534,7 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
             phrase("memory.life.outcome.moved")
         return f"- {when} : {m.label}" + outcome
     if ev.festive:
-        return _festive_line(m, frame, when, hard)
+        return _festive_line(m, frame, when)
     if ev.outcome == c.HAPPENED and not ev.followed_at:
         return f"- {when} : {m.label}" + phrase("memory.life.outcome.happened")
     if ev.followed_at:
@@ -1551,28 +1546,24 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
         return phrase("memory.life.yearly_today", label=m.label)
     if ev.when > frame.now:
         return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")
-    important = ev.importance >= c.IMPORTANT_MOMENT
-    if hard:
-        return f"- {when} : {m.label}" + phrase("memory.life.past_hard")
-    if close and important:
+    if close and ev.importance >= c.IMPORTANT_MOMENT:
         return f"- {when} : {m.label}" + phrase("memory.life.past_close")
     return f"- {when} : {m.label}" + phrase("memory.life.past")
 
 
-def _festive_line(m: Moment, frame: Frame, when: str, hard: bool) -> str:
-    """Ce qui se fête : le jour même, ses vœux (une fois) ; jamais « comment ça s'est passé » quand c'est fait."""
+def _festive_line(m: Moment, frame: Frame, when: str) -> str:
+    """Ce qui se fête : souhaité ou pas encore, le jour même ou passé."""
     ev = m.event
-    soft = phrase("memory.life.festive_soft") if hard else ""
     if ev.followed_at:
         return f"- {when} : {m.label}" + phrase("memory.life.festive_wished")
     if frame.local(ev.when).date() == frame.local().date():
-        return phrase("memory.life.festive_today", soft=soft, label=m.label)
+        return phrase("memory.life.festive_today", label=m.label)
     if ev.when > frame.now:
         return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")
     return f"- {when} : {m.label}" + phrase("memory.life.festive_missed")
 
 
-@MEMORY.section("self_said", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["memories"], trim_rank=35,
+@MEMORY.section("self_said", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35,
                 title=phrase("memory.self_said.title"))
 def _self_said_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ses goûts, ses avis, sa vie, tels qu'elle les a déjà dits : on lui parle d'elle, elle ne se contredit pas
@@ -1582,5 +1573,4 @@ def _self_said_section(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) 
         return None
     lines = [phrase("memory.self_said.line", age=age_words(it.born_at, frame.now), text=it.text)
              for it in recall.self_said]
-    lines.append(phrase("memory.self_said.coherent"))
     return SectionBody("\n".join(lines), provenance=tuple(f"memory:{it.id}" for it in recall.self_said))

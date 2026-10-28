@@ -116,7 +116,7 @@ SECTION_LABELS: dict[str, str] = {
     "who": "Qui elle a en face", "history": "Le fil de la conversation", "memories": "Ses souvenirs rappelés",
     "shared_memories": "Ce qu'ils ont vécu ensemble", "past_exchanges": "Des échanges passés",
     "promises": "Ce qu'elle a promis", "rhythm": "Son rythme (heure, énergie)",
-    "fog": "Sa fatigue (brouillard)", "mood": "Son humeur", "stance": "Sa posture envers la personne",
+    "mood": "Son humeur", "stance": "Sa posture envers la personne",
     "needs": "Ses besoins", "their_state": "Ce qu'elle devine de l'autre", "thoughts": "Ce qui lui trotte dans la tête",
     "narrative": "Qui elle est devenue (récit de soi)",
     "self_state": "Son estime d'elle-même", "self_model": "Ce qu'elle sait d'elle (tendances, changements d'avis)",
@@ -139,11 +139,11 @@ SECTION_LABELS: dict[str, str] = {
     "project_network": "Ce que le réseau a rendu",
     "project_answer": "La réponse à sa demande d'aide (un projet)",
     # ADR 0047
-    "greeting_tone": "Le ton de ses bonjours (sa persona)",
+    "greeting_tone": "Ses petits mots pour saluer (sa persona)",
     # ADR 0046
-    "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
+    "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Ce qui les lie (leur lien)",
     # ADR 0137
-    "their_day": "Sa journée (lui demander comment elle se passe)",
+    "their_day": "Sa journée (ce qu'elle n'en sait pas encore)",
     # ADR 0140
     "form": "Comment elle écrit ici (les codes de son autrice)",
     # ADR 0062
@@ -179,7 +179,7 @@ REASON_LABELS: dict[str, str] = {
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet", "project_plan": "Dire son plan à qui a demandé un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
-    "remembrance": "Un mot doux à une proche, le jour où revient la date d'un deuil",
+    "remembrance": "Faire signe à une proche, le jour où revient la date d'un deuil",
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068

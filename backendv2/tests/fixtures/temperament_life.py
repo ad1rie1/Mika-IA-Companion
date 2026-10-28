@@ -168,7 +168,9 @@ async def _days(kernel: Any, voice: Voice) -> dict[str, Any]:
     for text in ("on se fait un resto ce soir ?", "je réserve pour 20 h"):
         await kernel.perceive(said(OWNER, text, room="copains", addressed=False))
         await asyncio.sleep(60)
-    out["envied"] = len(_events(kernel, attention_c.ENVIED.name))
+    envied = _events(kernel, attention_c.ENVIED.name)
+    out["envied"] = len(envied)
+    out["envied_felt"] = max((e.data.intensity for e in envied), default=0.0)
 
     await _until(kernel, at_paris(2026, 9, 28, 11, 0))
     await befriend(kernel, ALICE)

@@ -37,7 +37,7 @@ from tests.fixtures.memory import SIX, kept, section, seq_of, token
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 
 REVIENT = "CE QUI TE REVIENT"
-REGISTER = "LE TON ENTRE VOUS"
+REGISTER = "CE QUI VOUS LIE"
 PROMISED = "CE QUE TU LUI AS PROMIS"
 LIFE = "CE QUI SE PASSE DANS SA VIE"
 MONDAY = at_paris(2026, 10, 5, 8, 45)
@@ -357,18 +357,48 @@ def test_the_nickname_she_gives_is_theirs_even_from_her_own_lines(tmp_path, betw
         assert stored == [] and ours == []
 
 
+# ── Ce qu'elle garde d'elle-même se juge à ce qui est vrai d'elle (ADR 0153) ─
+
+
+def test_the_reading_of_a_conversation_knows_who_she_is(tmp_path):
+    """La relecture lit sa persona : ce qui est vrai d'elle (« elle ne mange pas »), pas une règle « elle n'a pas
+    de corps » écrite en dur, ni des exemples qui la contrediraient (un plat préféré)."""
+    script = Script()
+
+    async def scenario(kernel):
+        await connect(kernel, "user_1", "Sam")
+        await chat(kernel, "user_1", SIX)
+        await asyncio.sleep(15 * MINUTE / US)
+
+    run(tmp_path, scenario, script)
+    system = next(r.system_stable for r in script.calls if r.role == "extract")
+    assert "Tu es la mémoire de Mika" in system and "Tu ne manges pas et tu ne bois pas" in system
+    assert "n'a pas de corps" not in system and "plat préféré" not in system
+
+
 # ── Constat 3 : une fiche qui n'invente pas ───────────────────────────────
 
 
 def test_the_pure_rules_of_a_profile():
-    notes = "sam a 30 ans et son anniversaire est samedi. le chat de sam s'appelle pixel. sam adore les jeux de rythme"
-    assert grounded("Sam a 30 ans, célibataire, vit avec son chat Pixel. Il adore les jeux de rythme.", notes) == \
-        "Sam a 30 ans. Il adore les jeux de rythme."
-    assert grounded("Sam est célibataire depuis l'été.", notes + " sam est celibataire") == "", \
+    notes = ["sam a 30 ans et son anniversaire est samedi", "le chat de sam s'appelle pixel",
+             "sam adore les jeux de rythme"]
+    assert grounded("Sam a 30 ans, célibataire, vit avec son chat Pixel. Il adore les jeux de rythme.", notes,
+                    ["Sam"]) == "Sam a 30 ans. Il adore les jeux de rythme."
+    assert grounded("Sam est célibataire depuis l'été.", [*notes, "sam est celibataire"]) == "", \
         "le statut ne prouve pas la date : ne pas inventer depuis quand"
-    assert "célibataire" in grounded("Sam est célibataire depuis l'été.", notes + " sam est celibataire depuis l'ete"), \
+    assert "célibataire" in grounded("Sam est célibataire depuis l'été.", [*notes, "sam est celibataire depuis l'ete"]), \
         "la proposition entièrement étayée se garde"
     assert grounded("Sam a la trentaine.", notes) == "", "un âge que ses notes ne disent pas"
+    # se lire, pas se recopier (ADR 0153) : une note qui le dit avec d'autres mots autour suffit…
+    work = ["sam est infirmier de nuit, il adore son boulot"]
+    assert grounded("Sam est infirmier de nuit et adore son boulot.", work, ["Sam"]) == \
+        "Sam est infirmier de nuit et adore son boulot."
+    # … mais pas deux notes recousues, ni la négation inverse
+    assert grounded("Sam est infirmier de nuit et adore son boulot.",
+                    ["sam est infirmier de nuit", "sam adore les jeux de rythme"], ["Sam"]) == ""
+    assert grounded("Sam a des enfants.", ["sam m'a dit qu'il n'a pas d'enfants"], ["Sam"]) == ""
+    assert grounded("Sam n'a pas d'enfants.", ["sam m'a dit qu'il n'a pas d'enfants"], ["Sam"]) == \
+        "Sam n'a pas d'enfants."
     assert tastes(["son chat Pixel", "sa santé dentaire", "son anniversaire", "les jeux de rythme"]) == \
         ["son chat Pixel", "les jeux de rythme"]
     assert not note_worthy("Sam est parti en disant 'allez j'y vais'", ["Sam"])
@@ -419,6 +449,8 @@ def test_a_profile_does_not_invent_his_situation_and_lists_tastes(tmp_path, said
     assert "santé" not in interests and "anniversaire" not in interests and "jeux de rythme" in interests
     shown = script.of("profile")[0]
     assert "allez j'y vais" not in shown and "Dors bien" not in shown, "ni banalité ni réplique recopiée"
+    system = next(r.system_stable for r in script.calls if r.role == "profile")
+    assert "Ce qui est vrai de toi" in system, "la fiche sait qui la tient (ADR 0153)"
     assert "jeux de rythme" in shown, "contre-exemple : ce qu'il a dit, le modèle le voit"
 
 

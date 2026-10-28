@@ -768,7 +768,7 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     for t in live:
         if t.about == (person,) and t.origin in WITH_THEM:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, tuple(t.about), t.sensitivity,
-                            external=t.origin == attention_c.SIGNAL, lineage=getattr(t, "lineage", None))
+                            external=t.foreign, lineage=getattr(t, "lineage", None))
     weighed: list[tuple[tuple[float, int, int, str], c.Matter]] = []
     for m in moments:
         weight = float(getattr(m, "importance", memory_c.IMPORTANT_MOMENT))
@@ -793,7 +793,7 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     for t in live:
         if not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, (), t.sensitivity,
-                            external=t.origin == attention_c.SIGNAL, lineage=getattr(t, "lineage", None))
+                            external=t.foreign, lineage=getattr(t, "lineage", None))
     for d in reversed(s.done):
         if now - d.at <= p.matter_done_us and _for(person, d.about, d.sensitivity) and d.ref not in used:
             return c.Matter(c.DONE_MATTER, d.ref, d.at, d.about, d.sensitivity)
@@ -994,24 +994,27 @@ def describe(r: c.NeedsReading) -> list[str]:
     return lines
 
 
-@NEEDS.section("needs", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["mood"], trim_rank=55,
+@NEEDS.section("needs", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
                tags=[Tag.AFFECTIVE], title=phrase("needs.wants.title"), reads=[c.NEEDS])
 def _needs_section(s: NeedsState, frame: Frame, enrich: Any) -> str | None:
-    r = frame.get(c.NEEDS)
-    lines = describe(r)
-    if r.social >= 0.55:
-        # le manque se sent dans l'envie de parler, il ne se fait pas payer à l'autre (sonde réelle du 2026-10-02 :
-        # « je me sentais un peu seule cet après-midi » à qui rentre du travail, « enfin tu es là ! »)
-        lines.append(phrase("needs.wants.no_reproach"))
+    """Ses envies, des faits : ce qu'elle fait de son envie de compagnie (la dire, ou non), son caractère le dit."""
+    lines = describe(frame.get(c.NEEDS))
     return "\n".join(lines) if lines else None
 
 
 def _wanted(frame: Frame) -> c.Matter | None:
-    """La matière de l'initiative en cours, quand ce sont ses envies qui la poussent."""
+    """La matière de l'initiative en cours, quand ce sont ses envies qui la poussent — jamais pour une relance : elle
+    prend de ses nouvelles, et ce dont elle voulait lui parler attend sa réponse (``agency_c.checking_in`` ;
+    sur le portable, ses relances n'étaient qu'une suite d'actualités, 2026-10-19). Ce qu'elle n'a pas en tête ne se
+    dit pas : nul besoin de le lui interdire."""
     ep = frame.episode
     if ep is None or ep.kind != Kind.INITIATIVE or not ep.target:
         return None
-    if not (URGES | {social_c.CHAT}) & set(ep.attrs.get("reasons") or ()):
+    reasons = set(ep.attrs.get("reasons") or ())
+    if not (URGES | {social_c.CHAT}) & reasons:
+        return None
+    if is_identifiable(ep.target) and agency_c.checking_in(
+            reasons, frame.get(attention_c.AWAITING(frame.get(identity_c.PERSON(ep.target)))).initiatives):
         return None
     got = frame.get(c.MATTER(ep.target))
     return got if isinstance(got, c.Matter) else None
@@ -1061,9 +1064,10 @@ def _lead(m: c.Matter, frame: Frame, name: str) -> str:
 DREAM_PROVENANCE = "dream:"
 
 
-@NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], after=["needs"], trim_rank=60,
+@NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=60,
                title=phrase("needs.matter.title"),
-               reads=[c.MATTER, identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, self_c.DREAM_RESIDUE])
+               reads=[c.MATTER, identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, self_c.DREAM_RESIDUE,
+                      attention_c.AWAITING])
 def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce dont elle pourrait parler, quand c'est l'envie de compagnie qui la
     pousse : une chose, concrète, jamais inventée. Ce qui vient d'ailleurs est
@@ -1085,8 +1089,7 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     known = frame.get(identity_c.IDENTITY(person)).name
     name = f"« {known} »" if known else phrase("expression.person.unnamed")
     body = " ".join(text.split())
-    lines = [f"{_lead(m, frame, name)} :", cited(body, 400) if m.external else body,
-             phrase("needs.matter.start_there")]
+    lines = [f"{_lead(m, frame, name)} :", cited(body, 400) if m.external else body]
     # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici ; sa
     # provenance voyage dans l'énoncé (dite, elle ne resert pas) — un rêve dit ne revient pas non plus sous « CE QUE
     # TU AS RÊVÉ CETTE NUIT »

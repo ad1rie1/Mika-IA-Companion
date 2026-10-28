@@ -355,8 +355,9 @@ class Reflect:
         call_id = f"{ctx.run_id}#0"
         her = c.name_of(frame.get(c.PERSONA))
         span = phrase("self.reflect.span_days", days=p.birth_min_days) if p.birth_min_days > 1 else ""
-        request = LLMRequest(role="extract", call_id=call_id,
-                             system_stable=phrase("self.reflect.system", name=her, span=span),
+        system = phrase("self.reflect.system", name=her, span=span) + "\n\n" + phrase(
+            "self.portrayed.intro", name=her, persona=frame.get(c.PORTRAYED("compact")))
+        request = LLMRequest(role="extract", call_id=call_id, system_stable=system,
                              messages=(Message("user", "\n".join(lines)),), tools=(tool(),), max_tokens=1500,
                              lane="background", priority=4, meta={"night": night})
         try:

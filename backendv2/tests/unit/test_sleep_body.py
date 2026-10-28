@@ -22,7 +22,7 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.body import FOG, BodyParams, BodyState, energy, fog
+from mika.faculties.body import BodyParams, BodyState, energy
 from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant, local
 from mika.kernel.inspect import Timeline
@@ -31,6 +31,7 @@ from mika.runtime.inspection import find, run_view
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab import circadian
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 
 TZ = ZoneInfo("Europe/Paris")
@@ -88,7 +89,8 @@ def test_kept_awake_past_her_bedtime_she_ends_up_falling_asleep_on_her_feet():
     near, past, late = (energy(s, onset - 10 * MINUTE, P, TZ), energy(s, onset + HOUR, P, TZ),
                         energy(s, onset + 2 * HOUR + 30 * MINUTE, P, TZ))
     assert near > past > late
-    assert late < FOG[0][0]  # « tu tombes de sommeil »
+    assert late < circadian.FALLING_ASLEEP_BELOW  # « tu tombes de sommeil »
+    assert phrase("circadian.feel.falling_asleep") in circadian.energy_feel(late)
 
 
 def test_her_rhythm_says_the_date_and_hour_plainly():
@@ -99,7 +101,10 @@ def test_her_rhythm_says_the_date_and_hour_plainly():
     for text in (late, noon):
         assert "%" not in text and "phase" not in text and "mode" not in text  # ni pourcentage ni jargon
     assert "tu as la pêche" not in noon and "tu es en forme" in noon
-    assert all("gentille" not in (fog(limit - 0.01) or "") for limit, _ in FOG)  # fatiguée, elle n'est pas tenue d'être gentille
+    # sa fatigue, dite en mots — jamais une consigne sur sa façon de répondre (ADR 0154)
+    for level in (0.3, 0.15, 0.05):
+        felt = circadian.energy_feel(level)
+        assert felt and "réponses" not in felt and "phrases" not in felt
 
 
 # ── La nuit, de bout en bout ──────────────────────────────────────────────

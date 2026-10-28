@@ -23,8 +23,8 @@ from mika.faculties.attention.anticipation import _anticipated_felt, _anticipati
 from mika.faculties.attention.faculty import AttentionParams, AttentionState
 from mika.faculties.goals.faculty import GoalsParams, GoalsState
 from mika.faculties.goals.tend import Seed
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory import likelihood as lk
-from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.extraction import (
     Conversation,
     Extraction,
@@ -81,8 +81,8 @@ async def constats(db: Store, passed: dict[int, mc.LifeEvent], lines: tuple[Line
                    speakers=(Speaker("P1", ALICE, "Alice"),), frame=FRAME, upcoming=None) -> list:
     conv = Conversation(f"private:{speakers[0].person}", speakers, lines)
     people = People.of(speakers, {}, "Mika", scope=conv.key)
-    return await Consolidate()._drafts(Extraction(constats=list(found)), frame, MemoryState(), db, conv, people, [],
-                                       [], None, P, "audit", moments=upcoming, passed=passed)
+    return await cons._drafts(Extraction(constats=list(found)), frame, MemoryState(), db, conv, people, [],
+                              [], None, P, "audit", moments=upcoming, passed=passed)
 
 
 def of(out: list, et) -> list:
@@ -178,10 +178,10 @@ async def test_reschedules_lower_the_next_likelihood():
     # le report se constate quand la date change de jour ; préciser une période (novembre → le 12) n'en est pas un
     db = store()
     ev = moment(db, 5, "Son entretien chez Ubisoft", NOW + DAY)
-    later = Consolidate._moved(ev, NOW + 5 * DAY, FRAME, (ALICE,), (10000,), "audit")
+    later = cons._moved(ev, NOW + 5 * DAY, FRAME, (ALICE,), (10000,), "audit")
     assert [(d.data.outcome, d.data.teller) for d in later] == [(mc.MOVED, ALICE)]
     month = moment(db, 6, "Son déménagement", NOW + 20 * DAY, until=NOW + 50 * DAY, precision="month")
-    assert Consolidate._moved(month, NOW + 30 * DAY, FRAME, (ALICE,), (10000,), "audit") == []
+    assert cons._moved(month, NOW + 30 * DAY, FRAME, (ALICE,), (10000,), "audit") == []
     # et le moment suivant qu'elle annonce est moins sûr
     out = await _noting(s, "jeudi j'ai mon rendez-vous à la banque",
                         XEvenement(texte="Son rendez-vous à la banque", quand="2026-10-15", personnes=["P1"],
@@ -194,8 +194,8 @@ async def _noting(state: MemoryState, said: str, *events: XEvenement) -> list:
     db = store()
     conv = Conversation("private:user_2", (Speaker("P1", ALICE, "Alice"),), (alice_says(said),))
     people = People.of(conv.speakers, {}, "Mika", scope=conv.key)
-    out = await Consolidate()._drafts(Extraction(evenements=list(events)), FRAME, state, db, conv, people, [], [],
-                                      None, P, "audit")
+    out = await cons._drafts(Extraction(evenements=list(events)), FRAME, state, db, conv, people, [], [],
+                             None, P, "audit")
     db.conn.close()
     return of(out, mc.EVENT_NOTED)
 
@@ -445,29 +445,29 @@ async def test_a_forecast_that_came_true_is_constated_and_she_learns_from_it():
                              holder=ALICE, likelihood=0.7, expected=NOW - DAY), 7, NOW - 10 * DAY)
     speakers = (Speaker("P1", ALICE, "Alice"),)
     conv = Conversation(f"private:{ALICE}", speakers, (alice_says("j'ai été prise !!"),))
-    shown, foreseen = Consolidate._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"})
+    shown, foreseen = cons._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"})
     assert [i for i, _w, _t in shown] == [7] and "une prévision" in shown[0][2]
-    behind, _past, _f = Consolidate()._behind(FRAME, db, MemoryState(), conv, P, {ALICE: "Alice [P1]"})
+    behind, _past, _f = cons._behind(FRAME, db, MemoryState(), conv, P, {ALICE: "Alice [P1]"})
     assert 7 in [i for i, _w, _t in behind]  # montrée à la relecture, avec les moments passés
     people = People.of(speakers, {}, "Mika", scope=conv.key)
-    out = await Consolidate()._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu", messages=[10000])]),
-                                      FRAME, MemoryState(), db, conv, people, [], [], None, P, "audit",
-                                      foreseen=foreseen)
+    out = await cons._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu", messages=[10000])]),
+                             FRAME, MemoryState(), db, conv, people, [], [], None, P, "audit",
+                             foreseen=foreseen)
     (r,) = of(out, mc.RESOLVED)
     assert (r.event, r.outcome, r.by, r.teller, r.nature) == (7, mc.HAPPENED, ALICE, ALICE, mc.PREDICTION)
     s = _moment_resolved(MemoryState(), NS(data=r, seq=9, at=NOW), CX)
     assert s.track[ALICE] == (1, 0) and s.calibration[mc.PREDICTION] == (1, pytest.approx(0.09))
     bob = (Speaker("P1", BOB, "Bob"),)
     rumor = Conversation(f"private:{BOB}", bob, (Line(10000, NOW, "Bob", "Alice a été prise, il paraît", BOB),))
-    _shown, seen_by_bob = Consolidate._forecasts(FRAME, db, rumor, P, {BOB: "Bob [P1]"})
+    _shown, seen_by_bob = cons._forecasts(FRAME, db, rumor, P, {BOB: "Bob [P1]"})
     assert seen_by_bob == {}  # pas une personne qu'elle concerne : ni montrée…
-    told = await Consolidate()._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu",
-                                                                     messages=[10000])]),
-                                       FRAME, MemoryState(), db, rumor, People.of(bob, {}, "Mika", scope=rumor.key),
-                                       [], [], None, P, "audit", foreseen=foreseen)
+    told = await cons._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu",
+                                                            messages=[10000])]),
+                              FRAME, MemoryState(), db, rumor, People.of(bob, {}, "Mika", scope=rumor.key),
+                              [], [], None, P, "audit", foreseen=foreseen)
     assert of(told, mc.RESOLVED) == []  # … ni constatée par ce qu'un autre en dit
     db.put(mc.RESOLVED.draft(**r.model_dump()), 11, NOW)
-    assert Consolidate._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"}) == ([], {})
+    assert cons._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"}) == ([], {})
     db.conn.close()
 
 

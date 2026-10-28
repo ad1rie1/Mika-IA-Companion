@@ -78,7 +78,9 @@ def test_an_evening_greeting_after_a_day_of_daydreams_has_nothing_finished_to_te
     assert greetings, "elle salue Adrien qui arrive"
     for prompt in greetings:
         assert "mené à bout" not in prompt and "Ce que tu as fini" not in prompt
-        assert "Rêvasser" not in prompt  # en initiative, ses rêveries ne sont même pas montrées
+        # ses rêveries se montrent comme ce qu'elles sont — rien de neuf —, jamais comme une nouvelle ; ce qu'elle en
+        # fait est à elle (le code ne les tait plus en initiative)
+        assert all("une rêverie, rien de neuf" in line for line in prompt.splitlines() if "Rêvasser" in line)
 
 
 def test_a_real_exploration_stays_something_to_tell_and_lifts_her_a_little(tmp_path):

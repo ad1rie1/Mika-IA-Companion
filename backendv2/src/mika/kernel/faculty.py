@@ -122,8 +122,6 @@ class SectionSpec:
     zone: Zone
     episodes: frozenset[str]
     fn: Callable[..., Any]
-    after: tuple[str, ...] = ()
-    before: tuple[str, ...] = ()
     trim_rank: int = 50
     floor_chars: int = 0
     tags: frozenset[str] = frozenset()
@@ -569,8 +567,6 @@ class Faculty(Generic[S, Pm]):
         *,
         zone: Zone,
         episodes: Iterable[str],
-        after: Iterable[str] = (),
-        before: Iterable[str] = (),
         trim_rank: int = 50,
         floor_chars: int = 0,
         tags: Iterable[str] = (),
@@ -581,8 +577,8 @@ class Faculty(Generic[S, Pm]):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.sections.append(
                 SectionSpec(
-                    self.name, key, zone, frozenset(episodes), fn, tuple(after), tuple(before),
-                    trim_rank, floor_chars, frozenset(tags), _names(reads), title, untrusted,
+                    self.name, key, zone, frozenset(episodes), fn, trim_rank, floor_chars, frozenset(tags),
+                    _names(reads), title, untrusted,
                 )
             )
             return fn

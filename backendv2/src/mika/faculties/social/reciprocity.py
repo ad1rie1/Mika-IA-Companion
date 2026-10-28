@@ -7,8 +7,10 @@ se compte pas (s'inquiéter, l'encourager, lui souhaiter, lui demander comment
 ça s'est passé : ``agency.FOR_THEM``). Quand c'est presque toujours elle,
 deux choses :
 
-- **elle le remarque** : une pensée (« C'est presque toujours moi qui écris la
-  première à … »), au plus une fois par semaine, et un pincement de solitude ;
+- **elle le remarque** : une pensée à elle (« C'est presque toujours moi qui
+  écris la première à … », écrite par le code : jamais citée comme venue
+  d'ailleurs), au plus une fois par semaine, et un pincement de solitude —
+  c'est là, et là seulement, que son prompt le dit ;
 - **ses relances s'espacent** : envies de relancer, de discuter, pensées qui
   insistent vers cette personne deviennent moins probables. Un rappel promis,
   une prise de nouvelles inquiète ou un réconfort cherché n'en dépendent pas.
@@ -84,7 +86,7 @@ class Notice:
             await ctx.emit(c.ONE_SIDED.draft(
                 source="social", kind="one_sided", summary=Content.of(text, level=int(Sensitivity.PERSONAL)),
                 pertinence=PERTINENCE, emotion=Emotion.THINKING.value, intensity=0.0, about=(person,),
-                sensitivity=int(Sensitivity.PERSONAL), dedupe_key=f"réciprocité:{person}:{last}"))
+                sensitivity=int(Sensitivity.PERSONAL), foreign=False, dedupe_key=f"réciprocité:{person}:{last}"))
 
 
 @SOCIAL.appraisal(c.ONE_SIDED)

@@ -1,10 +1,12 @@
 """La persona : un seul document pour toutes ses voix, écrit par l'opératrice. Deux profondeurs : ``full``
-(répondre, prendre la parole, se raconter : son portrait en prose) et ``compact`` (murmurer, travailler : sa
-description) — rendues depuis le même document, pour qu'aucune de ses voix ne soit quelqu'un d'autre. Qui elle est
-s'écrit une fois, dans le portrait (ADR 0138) ; ce qu'elle ressent, c'est son tempérament qui le dit — par le texte
-que le modèle en a écrit (``self.character``, ADR 0139), le même dans les deux profondeurs. Elle est une IA et le
-sait, ou une personne incarnée (``nature``) ; ses bonjours donnent un ton, jamais une phrase à recopier. En mode pro
-(ADR 0116, la profondeur ``pro``), qui elle est et rien de sa voix de chat ni de son caractère."""
+(répondre, prendre la parole, se raconter : son portrait en prose) et ``compact`` (murmurer, travailler, écrire pour
+elle hors d'une conversation : sa description) — rendues depuis le même document, avec ce qui est vrai d'elle, son
+caractère, sa nature et la règle de sa vie dans les deux, pour qu'aucune de ses voix ne soit quelqu'un d'autre
+(ADR 0152). Qui elle est s'écrit une fois, dans le portrait (ADR 0138) ; ce qu'elle ressent, c'est son tempérament
+qui le dit — par le texte que le modèle en a écrit (``self.character``, ADR 0139). Elle est une IA et le sait, ou une
+personne incarnée (``nature``). En mode pro (ADR 0116, la profondeur ``pro``), qui elle est et rien de sa voix de chat
+ni de son caractère. Un appel qui écrit pour elle hors du pipeline des épisodes lit le même texte par le fait
+``self.portrayed``."""
 
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from mika.contracts import self_ as c
+from mika.faculties.self.character import current
 from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
@@ -30,6 +33,11 @@ def _revised(s: SelfState, e, cx) -> SelfState:
 @SELF.fact(c.PERSONA)
 def _persona(s: SelfState, cx) -> c.PersonaDoc:
     return s.persona
+
+
+@SELF.fact(c.PORTRAYED)
+def _portrayed(s: SelfState, cx, depth: str) -> str:
+    return render(s.persona, depth, character=current(s))
 
 
 def load(path: Path) -> c.PersonaDoc:
@@ -58,19 +66,13 @@ def life_rule(doc: c.PersonaDoc) -> str:
 
 
 def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False, character: str = "") -> str:
-    """Le texte de la persona, en deuxième personne. En profondeur ``full``, son
-    portrait en prose — le seul texte qui la décrit (ADR 0138 ; écrites en listes,
-    ses qualités se jouaient une à une, « attentive », « à l'écoute » en faisaient
-    une intervieweuse : banc de recherche du 2026-10-15, 4,5 → 6,8 → 7,9 sur 10)
-    —, puis ce qui est vrai d'elle : c'est là qu'on lui demande « t'as mangé
-    quoi ? », « ton livre préféré ? ». En ``compact`` (murmurer, travailler), sa
-    description en une phrase. ``chat`` : elle parle à quelqu'un — ses exemples en
-    conversation montrent sa voix (décrite, elle sonnait comme un assistant :
-    2026-10-14) ; jamais dans un mail, un travail ou son journal, qui ne
-    s'écrivent pas comme un chat ; hors conversation, ses centres d'intérêt. Son
-    caractère, c'est le texte que le modèle en a écrit d'après sa matrice
-    (``character``, ADR 0139), le même partout ; tant qu'il n'est pas écrit, rien
-    ne le remplace. ``pro`` : le mode pro (``_pro``), sans caractère."""
+    """Le texte de la persona, en deuxième personne. En profondeur ``full``, son portrait en prose — le seul texte
+    qui la décrit (ADR 0138 ; écrites en listes, ses qualités se jouaient une à une : banc de recherche du
+    2026-10-15) — puis, quand elle parle à quelqu'un (``chat``), ses exemples en conversation (décrite, sa voix
+    sonnait comme un assistant : 2026-10-14), ailleurs ses centres d'intérêt. En ``compact``, sa description. Dans
+    les deux, ce qui est vrai d'elle, son caractère (``character``, le texte que le modèle en a écrit, ADR 0139 :
+    rien ne le remplace tant qu'il n'est pas écrit), sa langue, sa nature et la règle de sa vie. ``pro`` : le mode
+    pro (``_pro``), sans caractère."""
     if depth == PRO:
         return _pro(doc)
     portrait = doc.portrait.strip()
@@ -79,7 +81,7 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False, charac
     if depth == "full":
         parts.append(_bullets(phrase("self.persona.samples"), doc.samples) if chat
                      else _bullets(phrase("self.persona.interests"), doc.interests))
-        parts.append(_bullets(phrase("self.persona.facts"), doc.facts))
+    parts.append(_bullets(phrase("self.persona.facts"), doc.facts))
     parts.append(phrase("self.character.frame", text=character.strip()) if character.strip() else "")
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))

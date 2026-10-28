@@ -22,8 +22,8 @@ from hypothesis import strategies as st
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory import extraction as x
-from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.extraction import Conversation, Line, Speaker
 from mika.faculties.memory.faculty import MemoryState, _promised
 from mika.faculties.memory.recall import _recall, feelings
@@ -933,9 +933,9 @@ def test_a_room_reread_sees_only_the_promises_the_room_heard():
         s = _promised(s, e, CX)
     speaker = (Speaker("P1", alice, "Alice"),)
     line = (Line(10000, FRAME.now, "Alice [P1]", "coucou tout le monde", alice),)
-    in_room = Consolidate()._promises(FRAME, db, s, Conversation("room:salon", speaker, line, "salon"))
+    in_room = cons._promises(FRAME, db, s, Conversation("room:salon", speaker, line, "salon"))
     assert [i for i, _to, _t in in_room] == [2]  # le salon a entendu la playlist, pas l'avocate
-    in_private = Consolidate()._promises(FRAME, db, s, Conversation(f"private:{alice}", speaker, line))
+    in_private = cons._promises(FRAME, db, s, Conversation(f"private:{alice}", speaker, line))
     assert [i for i, _to, _t in in_private] == [1, 2]  # contrôle : en privé, tout
     db.conn.close()
 
@@ -966,7 +966,7 @@ def test_a_discretion_reaches_a_souvenir_the_night_merged_into_another():
                                    heard_by=(alice,), sensitivity=2, sources=(501,)), 4, FRAME.now - DAY)
     conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
                         (Line(10000, FRAME.now, "Alice [P1]", "garde ce que je t'ai dit hier pour toi", alice),))
-    assert [d.data.item for d in Consolidate._closed_souvenirs(FRAME, db, conv, [4])] == [1]
+    assert [d.data.item for d in cons._closed_souvenirs(FRAME, db, conv, [4])] == [1]
     db.conn.close()
 
 
@@ -982,7 +982,7 @@ def test_a_discretion_closes_a_souvenir_without_making_it_last_longer():
                                    heard_by=(alice,), sensitivity=2, sources=(500,)), 2, born)
     conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
                         (Line(10000, FRAME.now, "Alice [P1]", "garde-le pour toi", alice),))
-    for n, draft in enumerate(Consolidate._closed_souvenirs(FRAME, db, conv, [2]), start=3):
+    for n, draft in enumerate(cons._closed_souvenirs(FRAME, db, conv, [2]), start=3):
         db.put(draft, n, FRAME.now)
     row = db.query(f"SELECT importance, touched_at, secret, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE id=1")
     assert row == [(0.5, born, 1, int(Sensitivity.CONFIDENCE))]  # fermé, sans durer davantage

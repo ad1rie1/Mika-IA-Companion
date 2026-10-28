@@ -232,8 +232,8 @@ class MemoryParams(BaseModel):
              "personne.")] = 7.0
     learned_fresh_days: Annotated[float, Knob(
         label="Ce qu'elle a appris en lisant : fraîcheur (jours)", group="Ce qu'elle lit", lo=0.5, hi=14,
-        help="Ce qu'elle a appris en lisant lui revient quand elle prend d'elle-même la parole ou travaille, pendant "
-             "tant de jours — jamais redit à qui l'a déjà entendu.")] = 2.0
+        help="Ce qu'elle a appris en lisant lui revient quand elle parle (qu'elle réponde ou prenne d'elle-même la "
+             "parole) ou travaille, pendant tant de jours — jamais redit à qui l'a déjà entendu.")] = 2.0
     # ce qu'on lui montre de son téléphone (ADR 0120)
     relayed_quiet_us: Annotated[int, Knob(
         label="Messages du téléphone : relus après un calme de", group="Ce qu'on lui montre", lo=MINUTE, hi=DAY,

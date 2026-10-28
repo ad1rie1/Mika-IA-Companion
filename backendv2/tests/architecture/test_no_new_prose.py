@@ -4,7 +4,8 @@ Une heuristique cherche, dans le code des facultés et des greffons, les chaîne
 française (au moins cinq mots, des mots-outils du français). Elle ignore ce qui n'est pas pour elle : les
 docstrings, les journaux techniques, les exceptions de programmation, les libellés des réglages (``Knob``), les
 raisons d'humeur (des codes gardés au journal), les expressions régulières, les fichiers de console et le greffon
-Teams hors de son tri (ses autres textes restent à migrer : lot 4 de ``docs/audit-2026-10-27-garde-fous.md``).
+Teams hors de son tri et de ce qu'elle en lit (``voice.py``, migré le 2026-10-28 ; ses autres textes restent à
+migrer : lot 4 de ``docs/audit-2026-10-27-garde-fous.md``).
 
 Ce qui reste a été trié pendant la migration : des textes de la console de l'opératrice, des valeurs gardées au
 journal, des listes de mots, un serveur autonome (``plugins/web/serveur.py``) qui ne peut pas lire la voix. Le
@@ -22,7 +23,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 ROOTS = ("faculties", "plugins")
 SKIPPED_FILES = re.compile(r"(^|/)((inspect|actions|console[^/]*|params|knobs|reglages)\.py$|console/|"
-                           r"teams/(?!triage\.py$))")
+                           r"teams/(?!(triage|voice)\.py$))")
 NOT_FOR_HER = {"debug", "info", "warning", "error", "exception", "critical", "log", "ValueError", "TypeError",
                "RuntimeError", "KeyError", "AssertionError", "Knob", "Setting", "Action", "Panel", "Row", "Column",
                "Appraisal", "compile"}

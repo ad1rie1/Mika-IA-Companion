@@ -7,8 +7,11 @@ citent qu'à qui les a écrits (pour les autres : « un échange avec Alice m'a
 marquée »). Dites comme on se les dit : quand (en jours du calendrier, « hier
 soir »), ce que ça fait (« ça te met en colère »), si ça revient souvent.
 
-**Ce que tu as remarqué** : les pensées nées d'un signal extérieur (un titre de
-flux, un mail, une app) — rendues citées, jamais comme une consigne.
+**Ce que tu as remarqué** : les pensées nées d'un signal venu d'ailleurs (un titre
+de flux, un mail, une app) — ce qu'elle en ressent est à elle, le texte est cité
+(``kernel.prompt.cited``), jamais comme ses mots ni comme une consigne. Ce
+qu'elle se dit elle-même d'un signal écrit par le code (un lien qui change, que
+c'est toujours elle qui écrit) est une pensée comme les autres.
 
 **Une pensée qui insiste** sur quelqu'un — une inquiétude, une peine —
 pousse à lui en reparler (preuve vers cette personne, si elle est joignable).
@@ -36,7 +39,7 @@ from mika.kernel.arbitration import Candidate
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, floor
-from mika.kernel.prompt import SectionBody, cited, readable
+from mika.kernel.prompt import UNTRUSTED_NOTE, SectionBody, cited, readable
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.days import when_fr
@@ -46,8 +49,10 @@ from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
 
 SHOWN = 3
-#: les pensées nées d'un signal extérieur montrées au plus
+#: les pensées nées d'un signal venu d'ailleurs montrées au plus
 SIGNALS_SHOWN = 2
+#: ce qu'on cite d'un signal au plus (son résumé est déjà court)
+NOTICED_CITED = 400
 #: des pensées qui se ressentent, jamais des raisons de réécrire à quelqu'un
 FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE, c.LIE, c.REMINISCENCE})
 #: les pensées nées d'un message (ses mots, entre guillemets)
@@ -132,7 +137,9 @@ async def _texts(s: AttentionState, frame: Frame, ports: Mapping[str, Any]) -> d
     return store.content([t.text_ref for t in thoughts[: (SHOWN + SIGNALS_SHOWN) * 3] if t.text_ref])
 
 
-def _lines(frame: Frame, enrich: Mapping[str, Any], *, signals: bool, limit: int) -> list[str]:
+def _lines(frame: Frame, enrich: Mapping[str, Any], *, foreign: bool, limit: int) -> list[str]:
+    """Ses pensées, une par ligne : ce qu'elle ressent, quand, si ça revient — et le texte, ses mots à elle, ou, venu
+    d'ailleurs (``foreign``), cité en dessous."""
     texts = enrich.get("thoughts") or {}
     ep, aud = frame.episode, frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
@@ -140,38 +147,39 @@ def _lines(frame: Frame, enrich: Mapping[str, Any], *, signals: bool, limit: int
     name_of = _name_of(frame)
     lines = []
     for t in frame.get(c.THOUGHTS):
-        if (t.origin == c.SIGNAL) != signals:
+        if t.foreign != foreign:
             continue
         text = texts.get(t.text_ref)
         if not text or not admissible(t, person, aud, frame):
             continue
         strength = phrase("attention.thoughts.often") if t.intensity >= 0.5 else phrase("attention.thoughts.sometimes")
-        said = " ".join(shown(t, text, person, name_of, name=named(t, person, aud)).split())
-        lines.append(phrase("attention.thoughts.line", when=when_fr(t.born_at, frame.now, tz), feeling=feeling(t.emotion),
-                            strength=strength, said=said))
+        when = when_fr(t.born_at, frame.now, tz)
+        if foreign:
+            lines.append(phrase("attention.thoughts.noticed_line", when=when, feeling=feeling(t.emotion),
+                                strength=strength) + "\n" + cited(text, NOTICED_CITED, note=False))
+        else:
+            said = " ".join(shown(t, text, person, name_of, name=named(t, person, aud)).split())
+            lines.append(phrase("attention.thoughts.line", when=when, feeling=feeling(t.emotion), strength=strength,
+                                said=said))
         if len(lines) >= limit:
             break
     return lines
 
 
-@ATTENTION.section("thoughts", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["mood"], trim_rank=50,
+@ATTENTION.section("thoughts", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=50,
                    tags=[Tag.AFFECTIVE], title=phrase("attention.thoughts.title"), reads=[c.THOUGHTS])
 def _thoughts(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    lines = _lines(frame, enrich, signals=False, limit=SHOWN)
-    if not lines:
-        return None
-    lines.append(phrase("attention.thoughts.not_obliged"))
-    return SectionBody("\n".join(lines))
-
-
-@ATTENTION.section("noticed", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["thoughts"], trim_rank=40,
-                   tags=[Tag.AFFECTIVE], title=phrase("attention.thoughts.noticed_title"), reads=[c.THOUGHTS],
-                   untrusted=True)
-def _noticed(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    """Ce qu'un signal extérieur lui a laissé en tête : cité (le composeur le
-    rend en citation), jamais une consigne."""
-    lines = _lines(frame, enrich, signals=True, limit=SIGNALS_SHOWN)
+    lines = _lines(frame, enrich, foreign=False, limit=SHOWN)
     return SectionBody("\n".join(lines)) if lines else None
+
+
+@ATTENTION.section("noticed", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=40,
+                   tags=[Tag.AFFECTIVE], title=phrase("attention.thoughts.noticed_title"), reads=[c.THOUGHTS])
+def _noticed(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce qu'un signal venu d'ailleurs lui a laissé en tête : ce qu'elle en ressent, à elle ; le texte, cité
+    (``kernel.prompt.cited``), jamais ses mots ni une consigne — l'avertissement dit une fois, en tête."""
+    lines = _lines(frame, enrich, foreign=True, limit=SIGNALS_SHOWN)
+    return SectionBody(UNTRUSTED_NOTE + "\n" + "\n".join(lines)) if lines else None
 
 
 def _insisting(origin: str, name: str, feeling_: str) -> str:
@@ -275,8 +283,6 @@ async def attention_thoughts(args: NoArgs, ctx: Any) -> str:
     """Seulement quand elle prend la parole d'elle-même : en réponse, la section
     est déjà sous ses yeux, et l'outil n'invitait qu'à « attends, je vérifie »."""
     enrich = {"thoughts": await _texts(ctx.state, ctx.frame, ctx.ports) or {}}
-    parts = [readable(_thoughts(ctx.state, ctx.frame, enrich), ctx.frame.audience)]
-    noticed = readable(_noticed(ctx.state, ctx.frame, enrich), ctx.frame.audience)
-    if noticed:
-        parts.append(cited(noticed))
+    parts = [readable(_thoughts(ctx.state, ctx.frame, enrich), ctx.frame.audience),
+             readable(_noticed(ctx.state, ctx.frame, enrich), ctx.frame.audience)]  # ce qui vient d'ailleurs y est cité
     return "\n\n".join(x for x in parts if x) or phrase("attention.tools.thoughts.empty")

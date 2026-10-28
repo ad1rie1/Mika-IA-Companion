@@ -214,19 +214,15 @@ def worry_of(g: Goal, person: str | None) -> bool:
     return worry and person is not None and (person == g.owner or person in g.about)
 
 
-def share_brief(g: Goal, person: str, address: str, level: str, frame: Frame) -> str:
-    """Ce qu'elle se dit avant de raconter, selon d'où venait le but : une inquiétude pour quelqu'un n'est pas un
-    résultat à annoncer à cette personne-là (elle prend de ses nouvelles). La consigne ne renvoie à aucune section
+def share_brief(g: Goal, person: str, address: str, frame: Frame) -> str:
+    """Ce qui la pousse à raconter, selon d'où venait le but : ce qu'elle a mené à bout, ou ce à quoi elle a repensé
+    de ce que cette personne lui avait confié — un fait ; combien en dire, et comment, est à elle (ADR 0154 : ce
+    qu'elle en sait est déjà à la mesure du lien, dans la section du sujet). La consigne ne renvoie à aucune section
     et ne dit rien du contenu (le murmure qui la précède s'entend)."""
-    name = _name(frame, person) or _name(frame, address)
-    who = f"« {name} »" if name else phrase("expression.person.unnamed")
     if worry_of(g, person):
-        return phrase("goals.brief.worry", who=who)
-    if level == FULL:
-        return phrase("goals.brief.share.full", who=who)
-    if level == SUMMARY:
-        return phrase("goals.brief.share.summary", who=who)
-    return phrase("goals.brief.share.mention", who=who)
+        name = _name(frame, person) or _name(frame, address)
+        return phrase("goals.brief.worry", who=f"« {name} »" if name else phrase("expression.person.unnamed"))
+    return phrase("goals.brief.share")
 
 
 def worry_due(g: Goal, person: str, frame: Frame, p: GoalsParams) -> bool:
@@ -261,7 +257,7 @@ def _share(s: GoalsState, frame: Frame) -> list[Candidate]:
         person, address, level = chosen
         if worry_of(g, person) and not worry_due(g, person, frame, p):
             continue
-        brief = share_brief(g, person, address, level, frame)
+        brief = share_brief(g, person, address, frame)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, p.share_evidence, resources=frozenset({floor(address)}),
             guards=(_still(g.id, (c.ACHIEVED,)),),

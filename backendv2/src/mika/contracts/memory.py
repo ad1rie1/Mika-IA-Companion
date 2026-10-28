@@ -457,8 +457,8 @@ class EventNoted(Payload):
     #: ``world`` : ce qui arrive dans le monde (des élections, la sortie d'un film, un jour férié) — la vie de
     #: personne, ``about`` vide ; toujours dit par quelqu'un (``told_by``), qu'on peut oublier
     scope: Literal["person", "world"] = "person"
-    #: un moment de quelqu'un qu'elle vivra à travers lui (« samedi Sam m'emmène au salon, il me montrera ») : elle
-    #: n'a pas de corps, elle vit à travers ses relations
+    #: un moment de quelqu'un qu'elle vivra à travers lui (« samedi Sam m'emmène au salon, il me montrera ») : ses
+    #: moments à elle passent par ses relations (ADR 0084)
     shared: bool = False
     #: une date publique officielle (un scrutin, un jour férié)
     official: bool = False

@@ -6,6 +6,6 @@ p = Path("src/mika/runtime/pipeline.py")
 s = p.read_text()
 a = '''                tools = self._tools(policy, req.kind, audience,'''
 assert a in s
-s = s.replace(a, '''                tools = {} if req.kind in self.reviewed else self._tools(policy, req.kind, audience,''')
+s = s.replace(a, '''                tools = {} if req.kind in CONVERSATIONAL else self._tools(policy, req.kind, audience,''')
 p.write_text(s)
 print("pas d'outils en conversation")

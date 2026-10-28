@@ -167,7 +167,8 @@ class AgencyParams(BaseModel):
     follow_up_min_us: Annotated[int, Knob(
         label="Relance douce : au plus tôt après", group="Ne pas harceler", lo=HOUR, hi=14 * DAY,
         help="Après une initiative restée sans réponse, plus rien vers la personne tant qu'elle n'a pas écrit — "
-             "sauf une relance douce, selon leur proximité (ci-dessous), pas avant ce délai…")] = DAY
+             "sauf une relance douce, selon leur proximité (ci-dessous), autour de ce délai (tiré au sort, à ± la "
+             "part du hasard)…")] = DAY
     follow_up_rhythms: Annotated[float, Knob(
         label="Relance douce : au moins tant de fois son rythme", group="Ne pas harceler", lo=1, hi=10, step=0.5,
         help="… ni avant ce multiple du rythme habituel de la relation (on n'écrit pas deux fois en deux jours à "
@@ -448,8 +449,8 @@ def _composing(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
 
 
 def follow_up_after(frame: Frame, target: str, person: str, p: AgencyParams) -> int:
-    """Le délai avant une relance : au moins un jour (selon sa sociabilité), et au moins le rythme de la relation —
-    tiré au sort à sa dernière initiative (± ``follow_up_jitter``)."""
+    """Le délai avant une relance : un jour (selon sa sociabilité), ou le rythme de la relation s'il est plus long —
+    tiré au sort autour, à sa dernière initiative (± ``follow_up_jitter``, ADR 0118)."""
     rhythm = frame.get(social_c.CONTACT(person)).rhythm_days
     draw = frame.state("agency").follow_up_draws.get(target, (0, 1.0))[1]
     return round(draw * max(p.follow_up_min_us, round(p.follow_up_rhythms * rhythm * DAY)))
@@ -566,7 +567,7 @@ def crossed_motive(reasons: Any) -> str | None:
     return None
 
 
-@AGENCY.section("crossed", zone=Zone.VOLATILE, episodes=[Kind.REPLY], after=["who"], trim_rank=50)
+@AGENCY.section("crossed", zone=Zone.VOLATILE, episodes=[Kind.REPLY], trim_rank=50)
 def _crossed(s: AgencyState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     """« J'allais justement t'écrire » : le message auquel elle répond est arrivé pendant qu'elle était en train
     d'écrire d'elle-même à cette personne. Un fait, pas une consigne : elle en dispose. Le motif (prendre de ses
@@ -598,9 +599,10 @@ def _checking_in(frame: Frame, target: str, reasons: Any) -> bool:
 
 
 def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
-    """Ce qu'elle se dit avant d'écrire à quelqu'un qui ne lui a pas répondu :
-    prendre de ses nouvelles, une relance douce, ou ne pas revenir sur ce qui
-    est resté sans réponse."""
+    """Ce qu'elle sait avant d'écrire à quelqu'un qui ne lui a pas répondu : ce qui
+    est resté sans réponse, depuis quand, et, pour une première relance, l'envie de
+    prendre de ses nouvelles. Des faits : comment elle le prend, c'est son caractère
+    (ADR 0154)."""
     if not is_identifiable(target) or (_uncounted(reasons) and not _greets_the_silent(frame, target, reasons)):
         return None
     person = frame.get(identity_c.PERSON(target))
@@ -611,7 +613,7 @@ def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
         when = when_fr(mine.last_initiative_at, frame.now, tz)
         if not _checking_in(frame, target, reasons):
             return phrase("agency.brief.nudge", who=who, when=when)
-        # la première relance prend de ses nouvelles ; les suivantes disent ce que ce silence lui fait
+        # la première relance prend de ses nouvelles ; les suivantes disent combien sont restés sans réponse
         said = phrase("agency.brief.check_in", who=who, when=when) if mine.initiatives == 1 else \
             phrase("agency.brief.check_in_again", who=who, when=when, count=mine.initiatives)
         if mine.initiatives + 1 >= frame.get(c.AGENCY).gives_up_after:
@@ -713,8 +715,8 @@ def brief(frame: Frame, req: Any) -> str:
     """Le dernier tour d'une initiative : personne ne lui a écrit, c'est elle
     qui parle — et pourquoi : la raison la plus forte, au plus une seconde ;
     quand ce sont ses envies, de quoi parler ; et si la personne ne lui a pas
-    répondu, la retenue que ça demande — ou, si c'est une relance, seulement
-    prendre de ses nouvelles."""
+    répondu, ce qui est resté sans réponse, dit comme un fait (ADR 0154) — ou,
+    si c'est une relance, seulement l'envie de prendre de ses nouvelles."""
     ep = frame.episode
     reasons = tuple(ep.attrs.get("reasons") or ()) if ep is not None else ()
     target = ep.target if ep is not None else None

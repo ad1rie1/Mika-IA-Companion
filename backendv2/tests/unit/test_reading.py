@@ -305,11 +305,12 @@ def test_her_face_shows_her_declared_ambivalence():
 def test_a_painful_date_is_heavy_by_what_is_felt_and_a_death_never_festive():
     """Une date annuelle que la personne vit douloureusement (son ressenti, jugé par la relecture) pèse, même sans
     deuil (« l'anniversaire de leur séparation ») ; un moment qui parle d'une mort (un fait, pas une émotion) ne se
-    fête jamais, ressenti oublié ou non ; un anniversaire, si."""
+    fête jamais, même quand la relecture le dit à fêter ; un anniversaire, si — quand elle le dit (ADR 0153)."""
     split = x.XEvenement(texte="l'anniversaire de leur séparation", quand="2026-11-02", chaque_annee=True,
-                         ressenti={"sad": 0.7})
-    death = x.XEvenement(texte="l'anniversaire de la mort de son père", quand="2026-11-02", chaque_annee=True)
-    birthday = x.XEvenement(texte="son anniversaire de 30 ans", quand="2026-11-02", chaque_annee=True)
+                         ressenti={"sad": 0.7}, a_feter=True)
+    death = x.XEvenement(texte="l'anniversaire de la mort de son père", quand="2026-11-02", chaque_annee=True,
+                         a_feter=True)
+    birthday = x.XEvenement(texte="son anniversaire de 30 ans", quand="2026-11-02", chaque_annee=True, a_feter=True)
     assert x.moment_importance(split) >= x.IMPORTANCE[4] and not x.festive(split)
     assert x.moment_importance(death) >= x.IMPORTANCE[4] and not x.festive(death)
     assert x.festive(birthday) and x.moment_importance(birthday) < x.IMPORTANCE[4]

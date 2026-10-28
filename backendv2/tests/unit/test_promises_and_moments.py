@@ -144,20 +144,22 @@ def _messages(prompt: str) -> str:
 
 
 def test_what_is_a_task_what_is_festive_and_what_counts():
-    def ev(text, importance=2, a_feter=False):
-        return x.XEvenement(texte=text, quand="2026-10-07", importance=importance, a_feter=a_feter)
+    def ev(text, importance=2, a_feter=False, chaque_annee=False):
+        return x.XEvenement(texte=text, quand="2026-10-07", importance=importance, a_feter=a_feter,
+                            chaque_annee=chaque_annee)
 
     assert x.task_words("prendre rendez-vous chez le dentiste") and not x.task_words("son rendez-vous chez le dentiste")
     assert x.task_words("prendre rdv chez le dentiste") and not x.task_words("prendre l'avion pour Tokyo")
     assert same_task("lui rappeler de prendre rendez-vous chez le dentiste mercredi", "prendre rdv chez le dentiste")
     assert not same_task("lui rappeler d'appeler sa mère mercredi", "prendre rdv chez le dentiste mercredi"), \
         "le même jour et le même verbe ne font pas la même chose à faire"
-    assert x.festive(ev("son anniversaire de 30 ans")) and x.festive(ev("leur pendaison", a_feter=True))
-    assert not x.festive(ev("l'anniversaire de la mort de son père")), "un deuil ne se fête pas"
-    assert not x.festive(ev("son entretien chez Ubisoft"))
-    assert x.moment_importance(ev("son entretien chez Ubisoft")) >= memory_c.IMPORTANT_MOMENT, \
-        "un entretien compte, même si le modèle ne le dit pas"
-    assert x.moment_importance(ev("son rendez-vous chez le coiffeur")) < memory_c.IMPORTANT_MOMENT
+    # ce qui se fête, revient chaque année ou compte, c'est la relecture qui le dit : aucun mot ne le force (ADR 0153)
+    assert x.festive(ev("leur pendaison", a_feter=True)) and not x.festive(ev("son anniversaire de 30 ans"))
+    assert not x.festive(ev("l'anniversaire de la mort de son père", a_feter=True)), "un deuil ne se fête pas"
+    assert x.yearly(ev("son anniversaire", chaque_annee=True)) and not x.yearly(ev("son anniversaire"))
+    assert x.moment_importance(ev("son entretien chez Ubisoft", importance=3)) >= memory_c.IMPORTANT_MOMENT
+    assert x.moment_importance(ev("son entretien chez Ubisoft")) < memory_c.IMPORTANT_MOMENT, \
+        "dit ordinaire par la relecture, il l'est"
     assert wishes("Joyeux anniv Sam !! 🎂") and wishes("bon anniversaire") and wishes("Félicitations à vous deux")
     assert not wishes("c'est quand ton anniversaire ?")
 
@@ -317,9 +319,10 @@ def test_an_appointment_he_has_is_a_moment_of_his_life(tmp_path):
 def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(tmp_path, grief):
     """Sam a un rendez-vous chez le dentiste mercredi à 14 h (un moment ordinaire) et un entretien le matin (un
     moment qui compte). Mardi soir, son chat est mort : elle lui répond profondément triste. Mercredi, elle prend
-    de ses nouvelles ; ni initiative ni ligne pour lui demander comment s'est passé le dentiste ; l'entretien passe
-    après des nouvelles de lui. Contre-exemple : un mardi ordinaire, l'entretien est dit comme un moment qui
-    comptait, le dentiste comme un moment passé."""
+    de ses nouvelles ; ni initiative ni ligne pour lui demander comment s'est passé le dentiste ; l'entretien reste,
+    dit comme un fait (il comptait pour lui) — rien ne lui dicte de prendre de ses nouvelles d'abord : sa ligne dit
+    que quelque chose de dur lui est arrivé. Contre-exemple : un mardi ordinaire, l'entretien est dit comme un moment
+    qui comptait, le dentiste comme un moment passé."""
 
     def reply(message, req):
         if "parti" in message:
@@ -351,8 +354,7 @@ def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(t
         assert hard > 0, "un deuil la touche : sa peine pour lui le dit, même sans le mot « mort »"
         assert proposed == [], "pas de « comment s'est passé ton dentiste ? » le lendemain d'un deuil"
         assert "dentiste" not in life and "quelque chose de dur" in life
-        assert "Ubisoft" in life and "après avoir pris de ses nouvelles" in life
-        assert phrase("memory.life.past_close") not in life
+        assert "Ubisoft" in life and "nouvelles" not in life  # des faits, jamais « prends d'abord de ses nouvelles »
         assert checked and checked[0].at < at_paris(2026, 10, 7, 16, 30), "elle prend de ses nouvelles"
     else:
         assert hard == 0
@@ -388,7 +390,8 @@ def test_a_grave_message_touches_her_without_her_being_sad(tmp_path):
 def test_a_birthday_is_wished_on_the_day_once_neither_the_eve_nor_the_day_after(tmp_path, morning):
     """Samedi, les 30 ans de Sam : elle le lui souhaite d'elle-même, une fois — pas de « bonne chance » vendredi
     soir, pas de « comment s'est passé ton anniversaire ? » dimanche. S'il passe dès 8 h 30 et qu'elle le lui
-    souhaite en répondant (« souhaite-le-lui si ce n'est pas fait »), c'est fait : pas d'initiative de plus. S'il
+    souhaite en répondant (sa ligne dit qu'elle ne le lui a pas encore souhaité), c'est fait : pas d'initiative de
+    plus. S'il
     le dit lui-même et qu'elle répond à côté, ce n'est pas le lui avoir souhaité : elle le fait ensuite."""
     in_reply = morning == "salut Mika"
 
@@ -418,12 +421,15 @@ def test_a_birthday_is_wished_on_the_day_once_neither_the_eve_nor_the_day_after(
     if in_reply:
         assert celebrations == [], "elle le lui a souhaité en répondant : rien de plus"
         prompt = script.prompts("reply", "ext_1")[-1][1]
-        assert "souhaite-le-lui si ce n'est pas fait" in section(prompt, LIFE)
+        assert phrase("memory.life.festive_today", label="").split(" — ", 1)[1] in section(prompt, LIFE)
+        assert "souhaite-le-lui" not in section(prompt, LIFE)  # un fait, pas une consigne
     else:
         assert len(celebrations) == 1 and celebrations[0].data.subject == f"moment:{moment}", celebrations
         assert at_paris(2026, 10, 10, 9, 0) <= celebrations[0].at <= at_paris(2026, 10, 10, 22, 0), "le jour même"
         prompt = script.prompts("initiative", "ext_1")[-1][1]
-        assert "souhaite-le-lui" in prompt and "son anniversaire" in section(prompt, LIFE)
+        # ce qui la pousse est un fait (ADR 0154) : le jour, pas « souhaite-le-lui »
+        assert "un jour qui se fête" in prompt and "souhaite-le-lui" not in prompt
+        assert "son anniversaire" in section(prompt, LIFE)
 
 
 def test_an_interview_keeps_its_eve_cheer_and_its_follow_up(tmp_path):
@@ -519,15 +525,17 @@ def test_what_she_could_talk_about_starts_from_what_weighs_most(tmp_path, weight
 
 
 def test_a_situation_that_lasts_is_spoken_of_in_the_present():
-    """« son chat malade » depuis trois jours n'est ni « à venir » ni « passé » : elle prend de ses nouvelles (« Ce
-    qui lui est arrivé, il y a 3 jours… comment ça s'est passé ? » sonnait faux). Contre-exemple : un moment
-    ponctuel passé garde sa question."""
+    """« son chat malade » depuis trois jours n'est ni « à venir » ni « passé » : il le vit encore (« Ce qui lui est
+    arrivé, il y a 3 jours… » sonnait faux). Contre-exemple : un moment ponctuel passé est dit passé. Ni l'un ni
+    l'autre ne lui dicte quoi en faire (« prends de ses nouvelles », « comment ça s'est passé ? »)."""
     now = at_paris(2026, 10, 8, 18, 0)
     frame = SimpleNamespace(now=now, root=None, env=SimpleNamespace(tz_of=lambda root: PARIS))
     lasting = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",), ongoing=True)
     done = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",))
     assert _lead(lasting, frame, "« Sam »").startswith("Ce que « Sam » vit en ce moment, depuis 3 jours")
-    assert "comment ça s'est passé" in _lead(done, frame, "« Sam »")
+    assert _lead(done, frame, "« Sam »").startswith("Ce qui lui est arrivé, ")
+    assert not any(x in _lead(m, frame, "« Sam »") for m in (lasting, done)
+                   for x in ("(", "nouvelles", "comment ça s'est passé"))
 
 
 def test_an_upcoming_moment_she_already_mentioned_is_not_brought_up_again(tmp_path):

@@ -49,6 +49,9 @@ def test_a_long_thread_folds_into_a_summary(tmp_path):
     lines = folded.split("Suite des échanges :\n", 1)[1].splitlines()
     assert lines[0].startswith("[lundi 28 septembre, 14h") and "Alice : message numéro 0" in lines[0]
     assert "Elle ou lui" not in folded
+    # écrit à sa place et épinglé dans son fil : le résumé sait qui elle est (ADR 0153)
+    system = [r for r in llm.calls if r.role == "compact"][0].system_stable
+    assert "Ce qui est vrai de toi" in system and "Tu ne manges pas" in system
 
 
 def test_a_backlog_folds_oldest_first_in_bounded_batches(tmp_path):

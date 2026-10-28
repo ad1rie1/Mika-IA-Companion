@@ -27,7 +27,6 @@ from mika.faculties.expression import EXPRESSION, polish_draft, pro_style
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.expression import polish as polish_reply
 from mika.faculties.expression import reannotate as reannotate_reply
-from mika.faculties.expression import review as review_reply
 from mika.faculties.goals import GOALS, step_brief
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.memory import MEMORY
@@ -46,7 +45,6 @@ from mika.kernel.events import Origin
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
-from mika.kernel.prompt import LAST
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.camera import CAMERA
 from mika.plugins.email import EMAIL
@@ -136,6 +134,45 @@ WORK_TURNS, WORK_DEADLINE_S, WORK_OUTSIDE_CHARS = 24, 900.0, 120_000
 LANES = {"conversation": 3, "background": 2}
 
 
+#: L'ordre de lecture de son prompt (ADR 0151), section par section : chacune y figure une fois, et le registre
+#: refuse une composition qui en oublie une. Après sa persona, la zone stable ; puis l'historique ; puis son état
+#: interne, de ce qui l'entoure à ce qui touche la personne en face, sa parole en dernier, juste avant le message.
+#: Chaque épisode n'en lit que les siennes, dans cet ordre.
+READING = (
+    # la zone stable, après sa persona : qui elle est devenue, comment on parle ici
+    "narrative", "style", "form",
+    "history",
+    # le moment
+    "rhythm", "absence",
+    # le monde autour d'elle : ses flux, ce qu'elle voit, ses boîtes, ses apps, ce qu'elle a lu, ce qui vient
+    "headlines", "views", "mails", "teams_messages", "apps", "app_news", "learned", "ahead",
+    # elle : ce qu'elle ressent, ce qu'elle sait d'elle, ce qui lui trotte dans la tête, sa nuit
+    "mood", "needs", "self_state", "self_model", "self_said", "thoughts", "noticed", "dream", "yesterday",
+    # ce qu'elle fait : ses buts, ses projets, ses réveils, ce qu'elle prépare pour sa propriétaire
+    "goals", "projects", "wake_reports", "drafts", "teams_drafts", "phone_offers",
+    # ce qui est en cours avec la personne en face : ce que ses apps et ses services ont rendu, ses dessins, ce
+    # qu'elle lui a envoyé, ce qu'elle lui a promis
+    "app_calls", "services", "dessins", "sent_files", "promises",
+    # la personne en face : qui, ce qui vous lie, ce qu'elle en sait, sa vie, les gens qu'on nomme
+    "who", "crossed", "register", "stance", "about_person", "life", "their_day", "acquainted",
+    # vos souvenirs
+    "memories", "shared_memories", "past_exchanges", "veiled",
+    # ce qu'elle perçoit de la personne en face, là, juste avant son message
+    "their_state",
+    # une initiative : ce qui la fait parler
+    "matter", "subject", "project_share", "mail_mention", "greeting_tone",
+    # comment elle écrit ailleurs (un mail, Teams)
+    "voice", "teams_voice",
+    # ce qu'on lui demande : un pas sur un but, un projet, un réveil, une tâche de rédaction — la matière, puis la
+    # demande
+    "step_origin", "step_exchange", "step_life", "step",
+    "project", "project_network", "project_answer", "wake_text", "wake_order",
+    "app_consignes", "app_signals", "task_mail", "edits", "task_ask", "teams_task", "teams_ask",
+    # sa parole : ce qu'elle se répète, puis sa réponse
+    "habits", "answer",
+)
+
+
 def policies() -> dict[str, EpisodePolicy]:
     return {
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
@@ -200,15 +237,15 @@ def modes() -> dict[str, EpisodeMode]:
     """Les façons de répondre qu'un message peut demander. Le mode pro (ADR 0116) : un travail que son opératrice lui
     demande dans le chat, comme dans Claude Code — son rôle de modèle à lui (``pro``, qui retombe sur la réponse), une
     persona sans voix de chat ni tempérament, ses sections affectives et intérieures coupées avec sa consigne de
-    style et « TA RÉPONSE », ni relecture ni seconde passe ; la place de travailler (24 tours d'outils, 15 min) et
+    style et « TA RÉPONSE », ni seconde passe ; la place de travailler (24 tours d'outils, 15 min) et
     d'écrire long, en Markdown ; ses outils montrés en direct."""
     return {
         # un service branché (un dépôt, des fichiers) rend des fichiers entiers qu'elle récrit ensuite : la borne
         # ordinaire (24 000 caractères) en cacherait la fin
         PRO: EpisodeMode(kinds=frozenset({Kind.REPLY}), role=Role.PRO, persona_depth=PRO, max_tool_turns=24,
                          max_tokens=8192, deadline_s=900.0, outside_chars=120_000,
-                         muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, LAST}),
-                         reviewed=False, polished=False, live=True, markdown=True, instruction=pro_style),
+                         muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, Tag.CHAT}),
+                         polished=False, live=True, markdown=True, instruction=pro_style),
     }
 
 
@@ -234,13 +271,12 @@ def deps(**kw: Any) -> KernelDeps:
     simulateur)."""
     base: dict[str, Any] = {
         "faculties": faculties(),
+        "reading": READING,
         "policies": policies(),
         "arbitration": arbitration(),
         "persona": persona_for,
         "audience_of": audience_for,
         "parsers": [parse_reply],
-        "reviewers": [review_reply],
-        "reviewed": sorted(CONVERSATIONAL),
         # la seconde passe, l'autrice : seulement si l'opératrice donne un modèle au rôle « polish » ; sur ses
         # réponses et ses initiatives, pour qu'un message qu'elle lance sonne comme ses réponses (ADR 0115)
         "polishers": [polish_reply],

@@ -19,7 +19,7 @@ from mika.contracts import forge as forge_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Origin
 from mika.kernel.frame import Frame
-from mika.plugins.forge import written_draft
+from mika.plugins.forge import FORGE, written_draft
 from mika.plugins.forge.calls import _section
 from mika.runtime.tools import offer
 from mika.vocab.access import OWNER, PERSON
@@ -120,3 +120,8 @@ def test_her_apps_follow_the_access_of_their_project_and_on_approval_what_comes_
     [answered] = out["answered"]
     assert answered.data.ok and "AAPL" in answered.data.text.text and answered.data.about == ("user_2",)
     assert "« cours_cours » a rendu" in out["section"] and "AAPL" in out["section"]
+    # sa demande est à elle (jamais citée comme venue d'ailleurs) ; ce que l'app a rendu est cité ; aucune consigne
+    assert all(line.startswith("> ") for line in out["section"].splitlines() if "AAPL" in line)
+    assert not any(line.startswith(">") for line in out["section"].splitlines() if "a rendu" in line)
+    assert "Dis-le" not in out["section"]
+    assert not next(s for s in FORGE.sections if s.key == "app_calls").untrusted

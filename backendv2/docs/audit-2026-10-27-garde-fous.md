@@ -8,8 +8,9 @@ texte hors de sa voix), et lesquels de ces garde-fous vont contre l'objectif : q
 qu'on lui impose un comportement ? C'est le principe de l'ADR 0141 (« informer, pas ordonner »), porté du prompt au
 code.
 
-**État, le 2026-10-27 au soir.** Le lot 1 est codé (non commité) : ADR 0147 (§ 2.1), 0148 (§ 2.3, corrigé au
-codage), 0149 (§ 2.2). Le codage a relevé deux émotions fixées de plus, ajoutées au tableau A (RSS, caméra).
+**État, le 2026-10-28.** Le lot 1 est codé : ADR 0147 (§ 2.1), 0148 (§ 2.3, corrigé au codage), 0149 (§ 2.2) ; son
+codage a relevé deux émotions fixées de plus, ajoutées au tableau A (RSS, caméra). Le lot 2 est codé : ADR 0150 (§ 3) ;
+quatre lignes du tableau A ont changé de famille en le codant (dites au § 3).
 
 **Déjà réglable, donc hors de ce document :** les `Knob` des facultés et des plugins, les 28 curseurs du tempérament
 (seuls les coefficients de dérivation sont en dur), les règles d'accès de la console (ADR 0131–0134). `persona/voix.yaml`
@@ -31,17 +32,17 @@ probabiliste (`λ_max · σ(score)`, ADR 0003) et elle peut toujours répondre `
 | Où | Ce que le code tranche | Lot |
 |---|---|---|
 | `plugins/email/poll.py:47`, `:135` ; `plugins/teams/triage.py:33`, `:148` | Le tri ne peut rendre que six émotions (jamais la colère), à une intensité fixée à `0,2 × importance` | **1** (fait : 0147) |
-| `plugins/rss/__init__.py:336` ; `plugins/camera/__init__.py:152` | Un titre qui la touche la rend toujours « curieuse », à `0,25 × score` ; ce que voit la caméra, « curieuse » à 0,15 (relevé au codage du lot 1) | 3 |
-| `faculties/others/faculty.py:515`, `:644`, `:864`, `:943`, `:1005`, `:1055`, `:1095` ; `faculties/attention/faculty.py:822`, `:1460` ; `faculties/attention/watch.py:222`, `:557` ; `faculties/needs/__init__.py:948`, `:964` ; `faculties/agency/__init__.py:485` | Porte `in (FRIEND, CLOSE)` : l'inquiétude, la prise de nouvelles, encourager, fêter, le mot de deuil (proche seulement), le remords, la jalousie, le manque, la joie du retour et la relance n'existent pas pour une connaissance | 2 |
-| `faculties/others/faculty.py:560` | `CONTAGION_BY_CLOSENESS` : l'humeur d'une inconnue ne la colore jamais | 2 |
-| `faculties/social/initiative.py:304` | Veto `GRUDGE` total : pas même un bonjour une fois le seuil franchi | 2 |
-| `faculties/attention/faculty.py:613` ; `faculties/social/faculty.py:405` | Coupures dans la dérivation : aucune jalousie d'un silence sous 0,5 du curseur, jamais « sa journée » au milieu du curseur ou en dessous | 2 |
-| `faculties/self/greeting.py:33` ; `faculties/goals/tend.py:244` | Une inconnue reçoit toujours le bonjour simple ; seule une promesse faite à la propriétaire devient un travail | 2 |
-| `faculties/goals/tend.py:103` | `SEEDING_EMOTIONS` : ni la colère, ni le dégoût, ni la joie ne font naître une exploration | 2 |
-| `faculties/memory/extraction.py:872-928` | `_IMPORTANT` force l'importance à 0,7, une date douloureuse à 0,95, quoi qu'en dise le modèle | 3 |
+| `plugins/rss/__init__.py:336` ; `plugins/camera/__init__.py:152` | Un titre qui la touche la rend toujours « curieuse », à `0,25 × score` ; ce que voit la caméra, « curieuse » à 0,15 (relevé au codage du lot 1) | 3 (caméra faite : 0153) |
+| `faculties/others/faculty.py:515`, `:644`, `:864`, `:943`, `:1005`, `:1055`, `:1095` ; `faculties/attention/faculty.py:822`, `:1460` ; `faculties/attention/watch.py:222`, `:557` ; `faculties/needs/__init__.py:948`, `:964` ; `faculties/agency/__init__.py:485` | Porte `in (FRIEND, CLOSE)` : l'inquiétude, la prise de nouvelles, encourager, fêter, le mot de deuil (proche seulement), le remords, la jalousie, le manque, la joie du retour et la relance n'existent pas pour une connaissance | 2 (fait : 0150, sauf le manque) |
+| `faculties/others/faculty.py:560` | `CONTAGION_BY_CLOSENESS` : l'humeur d'une inconnue ne la colore jamais | 2 (fait : un réglage) |
+| `faculties/social/initiative.py:304` | Veto `GRUDGE` total : pas même un bonjour une fois le seuil franchi | 2 (fait : 0150) |
+| `faculties/attention/faculty.py:613` ; `faculties/social/faculty.py:405` | Coupures dans la dérivation : aucune jalousie d'un silence sous 0,5 du curseur, jamais « sa journée » au milieu du curseur ou en dessous | 2 (fait : 0150) |
+| `faculties/self/greeting.py:33` ; `faculties/goals/tend.py:244` | Une inconnue reçoit toujours le bonjour simple ; seule une promesse faite à la propriétaire devient un travail | — (reclassés, § 3) |
+| `faculties/goals/tend.py:103` | `SEEDING_EMOTIONS` : ni la colère, ni le dégoût, ni la joie ne font naître une exploration | 2 (fait : 0150) |
+| `faculties/memory/extraction.py:872-928` | `_IMPORTANT` force l'importance à 0,7, une date douloureuse à 0,95, quoi qu'en dise le modèle | 3 (fait : 0153, avec `_FESTIVE` et `_YEARLY` ; la date douloureuse reste) |
 | `faculties/memory/extraction.py:955` ; `faculties/memory/recall.py:468` ; `faculties/memory/life.py:85` | Échos par mots : deux mots en commun avec un secret font un secret, un radical commun avec un sujet délicat fait une confidence, un radical commun tient un moment pour repris | 3 |
 | `faculties/memory/recall.py:109` | `PHATIC` (« comment », « pourquoi », « souvenir ») : un message fait de ces mots ne réveille aucun souvenir | 3 |
-| `faculties/social/profile.py:110-149` ; `faculties/goals/tend.py:121` | Regex de la fiche (`SITUATION`, `_AGE`, `_WORRY`) ; une recommandation reconnue en français seulement (`RECOMMENDS`) | 3 |
+| `faculties/social/profile.py:110-149` ; `faculties/goals/tend.py:121` | Regex de la fiche (`SITUATION`, `_AGE`, `_WORRY`) ; une recommandation reconnue en français seulement (`RECOMMENDS`) | 3 (`SITUATION` assoupli : 0153) |
 | `faculties/body/__init__.py:236` | `_URGENT` : l'urgence qui la réveille la nuit, devinée par des mots, même venant d'une inconnue | 3 |
 | `vocab/farewell.py:14` | L'au revoir reconnu à sa forme (choix de l'ADR 0093, à réviser par une entrée) | 3 |
 | `faculties/goals/faculty.py:1042` ; `faculties/projects/faculty.py:1714` | Intensités fixes à la clôture d'un but ou d'un projet (fière 0,4, frustrée 0,35…) alors que le pas de travail passe par le modèle | 3 |
@@ -61,6 +62,11 @@ Le modèle peut être manipulé par la personne en face : ces règles ne dépend
   (`plugins/teams/triage.py:71`).
 - **Les plafonds d'audience** : ceux de `vocab/access.py:239` (inconnue, salon). Ceux que vérifient seuls les
   gestionnaires sont déclarés par le lot 1 (§ 2.3).
+- **Ce qu'elle dit d'elle et des autres selon le lien** (relevé au lot 2) : à qui elle raconte un but ou un projet, et
+  avec quel détail (`faculties/goals/work.py:185`, `faculties/projects/work.py:221`) — la divulgation graduée, comme la
+  certitude d'identité.
+- **Le travail pour quelqu'un d'autre** (relevé au lot 2) : seule une promesse faite à la propriétaire devient un
+  travail (`faculties/goals/tend.py:244`) ; un travail tourne avec ses outils et ses droits à elle.
 - **Les gardes de qualité sur sa sortie** : la redite (`runtime/pipeline.py:164`), la seconde passe écartée
   (`runtime/pipeline.py:129`, `runtime/facts.py`), les déclencheurs de la relecture
   (`faculties/expression/__init__.py:441`). Elles écartent une sortie ratée, elles n'imposent rien.
@@ -78,8 +84,9 @@ déclenche quand même, rarement (`kernel/arbitration.py:148-150`).
 
 Ce qui manque à la console :
 - **la fréquence** de ses initiatives et de son travail (lot 1, § 2.2) ;
-- **les tables par proximité** : `faculties/others/faculty.py:560`, `faculties/memory/recall.py:731`,
-  `faculties/goals/work.py:185`, `faculties/projects/work.py:221` (lot 2, avec la porte amie/proche) ;
+- **les tables par proximité** : la contagion et les tables du lot 2 sont réglables (ADR 0150) ; le plancher
+  d'attachement d'un souvenir (`faculties/memory/recall.py:731`) reste de la physique de l'oubli, et les tables de
+  divulgation (`goals/work.py:185`, `projects/work.py:221`) sont des garde-fous (B) ;
 - **les délais** (lot 4) :
   - un message trop vieux n'est plus dit après 10 min (`runtime/effects.py:55`) ;
   - une carte d'accord vaut refus après 10 min (`plugins/mcp/__init__.py:76`) ;
@@ -264,12 +271,24 @@ réservés et gardés. Une mutation (les conditions retirées) fait échouer le 
 
 ## 3. Les lots suivants (esquisse)
 
-- **Lot 2 : les portes deviennent des poids.**
-  - Concerne la porte amie/proche, la contagion, le veto de rancune, les coupures (jalousie, « sa journée »), le
-    bonjour d'une inconnue, les promesses et les graines d'exploration.
-  - Chaque porte devient une preuve graduée par la proximité, avec des tables par proximité réglables ; le modèle se
-    tait s'il le juge.
-  - Les décisions qu'il révise restent à relever. Il se mesure au banc de conversation et en sonde réelle.
+- **Lot 2 : les portes deviennent des poids — codé le 2026-10-28 (ADR 0150).**
+  - Fait : dix tables par proximité (de 0 à 1, une ligne par cran) dans `others`, `attention`, `needs`, `agency` et
+    `social` ; `social.KNOWN` pour passer en revue les connaissances ; la rancune recule (`grudge_shift`, −6) au lieu
+    d'un veto ; les coupures de la jalousie et de « sa journée » deviennent des courbes ; `seed_other_share`. Par
+    défaut : rien pour une inconnue, la moitié pour une connaissance, tout pour une amie ou une proche.
+  - Au codage, une porte de plus : `_reach_out` (`faculties/social/initiative.py`, reprendre contact, réconfort,
+    discuter), qui exigeait l'amitié sans passer par le motif `in (FRIEND, CLOSE)` cherché par l'audit.
+  - Ce qui change pour Mika telle qu'elle est (« Réfléchie », jalousie 0,5) : une petite jalousie (0,15) quand
+    quelqu'un qu'elle attend écrit aux autres ; « sa journée » ne bouge pas (son intérêt, 0,8, est au-dessus du milieu).
+  - Reclassés en le codant : le bonjour d'une inconnue informe le modèle (sa formulation relève de la relecture de la
+    voix, ci-dessous) ; les promesses et les tables de divulgation vont en B ; le plancher d'attachement des souvenirs
+    reste en C. Laissés : le manque (il suit `social.MISSED`, qui ne regarde que les amitiés) et l'heure où une amie
+    repasse d'habitude (`attention/watch.py:222`, une prévision, pas une réaction).
+  - Au codage aussi : les valeurs par défaut de la jalousie (0,15) et de « sa journée » (21 h) suivent désormais le
+    milieu du tempérament ; le contrôle S07 du simulateur exigeait un jour entre une initiative et sa relance, plus
+    strict que l'ADR 0118 (« tiré au sort, ±40 %, autour du jour ») : aligné. S05 a le même désaccord (il exige deux
+    jours) et échouait déjà avant le lot : laissé, à trancher.
+  - Reste à mesurer : au banc de conversation et en sonde réelle, après le déploiement.
 - **Lot 3 : la mémoire et les lectures rendues au modèle.**
   - L'importance forcée et les échos par mots (secret, confidence, moment repris) : la passe de nuit, qui appelle déjà
     le modèle, en juge.

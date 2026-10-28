@@ -4,11 +4,16 @@
   fiche, donc seulement quand elle est ouverte (jamais en public, jamais
   sous la barre de certitude). Le profil ne se nourrit que de ce que la
   personne a dit elle-même (``profile``) ; ce qu'il dit d'autres gens, elle
-  l'a raconté elle-même : la section se mesure au niveau « témoin ».
+  l'a raconté elle-même : la section se mesure au niveau « témoin ». Que ce
+  soit presque toujours elle qui écrit la première n'y est plus : c'est une
+  pensée à elle (``reciprocity``), dite une fois, dans ce qui lui trotte dans
+  la tête.
 
-- **Le ton entre vous** : la manière d'être selon ce qui vous lie — et, avec
-  une amie ou une proche, en privé, ce qui n'appartient qu'à vous (comment elle
-  t'appelle, le surnom que tu lui donnes, vos blagues : ``memory``, colonne
+- **Ce qui vous lie** : ce qu'est la personne pour elle (une inconnue, une
+  connaissance, une amie, une proche) — le lien, jamais la conduite qui irait
+  avec, dit une seule fois dans le prompt, même quand la fiche est fermée — et,
+  avec une amie ou une proche, en privé, ce qui n'appartient qu'à vous (comment
+  elle t'appelle, le surnom que tu lui donnes, vos blagues : ``memory``, colonne
   ``between_us``, ADR 0055). Jamais avec une inconnue, jamais en public.
 
 - **Sa journée** (ADR 0137) : quand ce que vivent les autres l'intéresse (son
@@ -33,8 +38,8 @@ from pydantic import BaseModel
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as c
-from mika.faculties.social.faculty import SOCIAL, THEIR_DAY, THEM, Profile, SocialState, contact_of, params
-from mika.faculties.social.profile import describe_level, lines_of, register
+from mika.faculties.social.faculty import SOCIAL, THEIR_DAY, Profile, SocialState, params
+from mika.faculties.social.profile import lines_of, register
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, readable
@@ -61,31 +66,18 @@ def refs_of(profile: Profile) -> list[str]:
     return [r for r in (profile.summary_ref, profile.tone_ref, profile.interests_ref, profile.sensitive_ref) if r]
 
 
-def _they_opened(s: SocialState, frame: Frame, person: str) -> bool:
-    """La conversation en cours, c'est la personne qui l'a ouverte (la dernière ouverture comptée est la sienne, le
-    jour où elle a commencé) : lui souffler que ça lui pèse, c'est l'accueillir d'un reproche au moment même où elle
-    fait le pas."""
-    gap = params(frame.env.params_of("social", frame.root)).conversation_gap_us
-    ct = contact_of(s, person, frame.get(identity_c.HANDLES(person)))
-    if ct is None or not ct.starts or frame.now - ct.last_activity >= gap:
-        return False  # pas de conversation en cours : ce qu'elle va écrire en ouvrira une
-    return ct.starts[-1] == (frame.local(ct.since).date().toordinal(), THEM)
-
-
-@SOCIAL.section("about_person", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], before=["stance"],
+@SOCIAL.section("about_person", zone=Zone.VOLATILE, episodes=CONVERSATIONAL,
                 trim_rank=65, title=phrase("social.about.title"),
-                reads=[identity_c.PERSON, identity_c.IDENTITY, identity_c.HANDLES, c.CONTACT, c.CLOSENESS,
-                       memory_c.HARD_TIMES])
+                reads=[identity_c.PERSON, identity_c.IDENTITY, c.CONTACT])
 def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     aud, ep = frame.audience, frame.episode
     if aud is None or ep is None or not ep.target or not aud.private_ok:
         return None  # sa fiche : jamais en public, jamais sous la barre
     person = frame.get(identity_c.PERSON(ep.target))
-    level = frame.get(c.CLOSENESS(person))
     reading = frame.get(c.CONTACT(person))
     name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(ep.target)).name
     who = f"« {name} »" if name else phrase("social.about.someone")
-    lines = [describe_level(level, name)]
+    lines: list[str] = []  # ce qu'elle est pour toi : « CE QUI VOUS LIE » (``register``), une seule fois
     profile = s.profiles.get(person)
     if profile is not None:
         summary, tone, interests, sensitive = profile_parts(profile, enrich.get("profile_text") or {})
@@ -100,10 +92,7 @@ def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
     if reading.days >= 3 and reading.measured:
         n = round(reading.rhythm_days)
         lines.append(phrase("social.about.rhythm_daily") if n <= 1 else phrase("social.about.rhythm_days", days=n))
-    # ni pendant ses jours durs (on ne tient pas de comptes), ni quand la personne vient d'écrire la première
-    if reading.one_sided and not frame.get(memory_c.HARD_TIMES(person)) and not _they_opened(s, frame, person):
-        lines.append(phrase("social.about.one_sided"))
-    if len(lines) == 1 and level == c.STRANGER:
+    if not lines:
         return None
     # sa propre fiche : ce qu'elle dit d'autres gens, la personne l'a raconté elle-même (témoin)
     return SectionBody("\n".join(lines), level=int(Sensitivity.PERSONAL), witness=True)
@@ -115,7 +104,7 @@ EVENING_H = 17
 
 
 @SOCIAL.section(THEIR_DAY, zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE],
-                after=["about_person"], before=["stance"], trim_rank=60, title=phrase("social.their_day.title"),
+                trim_rank=60, title=phrase("social.their_day.title"),
                 reads=[identity_c.PERSON, identity_c.IDENTITY, c.CLOSENESS, memory_c.HARD_TIMES])
 def _their_day(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     """Elle a envie de savoir comment se passe la journée d'une amie (ADR 0137) : en lui répondant, ou en la saluant
@@ -154,16 +143,27 @@ def to_you(text: str) -> str:
     return text
 
 
-@SOCIAL.section("register", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], before=["about_person"],
-                trim_rank=70, title=phrase("social.register.title"), reads=[identity_c.PERSON, c.CLOSENESS])
-def _register(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    """Comment être avec la personne en face, selon ce qui vous lie — taquine avec qui elle connaît, pas avec une
-    inconnue. Rien de la fiche : juste une manière d'être, dite même quand la fiche est fermée."""
-    ep, aud = frame.episode, frame.audience
+def _tie(frame: Frame) -> str | None:
+    """Ce qu'est la personne en face pour elle, en une phrase (``social.register.levels``) — rien pour qui n'est pas
+    identifiable."""
+    ep = frame.episode
     if ep is None or not ep.target or not is_identifiable(ep.target):
         return None
+    return register(frame.get(c.CLOSENESS(frame.get(identity_c.PERSON(ep.target)))))
+
+
+@SOCIAL.section("register", zone=Zone.VOLATILE, episodes=CONVERSATIONAL,
+                trim_rank=70, title=phrase("social.register.title"), reads=[identity_c.PERSON, c.CLOSENESS])
+def _register(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce qu'est la personne en face pour elle (``social.register.levels``) : le lien, jamais la conduite — ce qu'elle
+    en fait (taquiner, rester réservée), son caractère et la conversation le disent. Rien de la fiche : dit même quand
+    la fiche est fermée."""
+    ep, aud = frame.episode, frame.audience
+    tie = _tie(frame)
+    if ep is None or tie is None:
+        return None
     level = frame.get(c.CLOSENESS(frame.get(identity_c.PERSON(ep.target))))
-    lines = [register(level)]
+    lines = [tie]
     ours = enrich.get("between_us") or ()
     if ours and aud is not None and aud.private_ok and level in (c.FRIEND, c.CLOSE):
         lines += [phrase("social.register.ours"),
@@ -241,4 +241,6 @@ async def social_about(args: NoArgs, ctx: Any) -> str:
     if aud is None or not aud.private_ok:
         return phrase("social.tools.about.closed")
     enrich = {"profile_text": await _profile_text(ctx.state, ctx.frame, ctx.ports) or {}}
-    return readable(_about(ctx.state, ctx.frame, enrich), aud) or phrase("social.tools.about.empty")
+    # où vous en êtes (« CE QUI VOUS LIE »), puis sa fiche
+    parts = (_tie(ctx.frame), readable(_about(ctx.state, ctx.frame, enrich), aud))
+    return "\n".join(x for x in parts if x) or phrase("social.tools.about.empty")

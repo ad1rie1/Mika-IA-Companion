@@ -2,7 +2,7 @@
 
 Un message reçu sur le téléphone de quelqu'un (la forme ``Relayed``, qu'apporte un plugin que la mémoire ne connaît
 pas) attend que sa conversation se pose. Elle la relit alors comme une de ses conversations — la même consigne, le
-même outil, ce que le code en garde jugé pareil (``Consolidate._drafts``) —, sous un en-tête qui dit ce que c'est :
+même outil, ce que le code en garde jugé pareil (``consolidation.kept_from``) —, sous un en-tête qui dit ce que c'est :
 une conversation entre d'autres, lue sur le téléphone de la personne qui l'a reçue, à laquelle elle n'a pas pris
 part. Ce que la conversation de relecture en fait de différent tient à ``Conversation.relayed`` :
 
@@ -17,20 +17,20 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import partial
 from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
-from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory.consolidation import extract_request, kept_from, people_directory, shown_of
 from mika.faculties.memory.faculty import MEMORY, MemoryState, params
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
-from mika.ports.llm import LLMRequest, Message
-from mika.ports.llm_budget import fits_context
+from mika.ports.llm_budget import fit_by_halving
 from mika.ports.preprocess import inert
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import family, phrase
@@ -138,8 +138,8 @@ class Relay:
         lost = tuple(q for q in state.relayed if q not in known_seqs)
         if lost:
             drafts.append(c.RELAYED_READ.draft(seqs=lost, dedupe_key=f"relu-perdu:{lost[0]}:{lost[-1]}"))
-        consolidate = Consolidate()
-        directory = consolidate._directory(frame, store) if groups else {}
+        directory = people_directory(frame, store) if groups else {}
+        system = x.system(her, frame.get(self_c.PORTRAYED("compact"))) if groups else ""
         for n, ((recipient, thread), messages) in enumerate(sorted(groups.items(), key=lambda kv: kv[1][0]["at"])):
             if n >= p.relayed_per_run:
                 break
@@ -149,7 +149,7 @@ class Relay:
             if conv is None:
                 drafts.append(c.RELAYED_READ.draft(seqs=seqs, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
                 continue
-            got = await self._read(ctx, frame, state, store, vectors, consolidate, directory, conv, her, p, n)
+            got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
             if got is None:
                 tries = self.failures.get(seqs[0], 0) + 1
                 self.failures[seqs[0]] = tries
@@ -169,34 +169,15 @@ class Relay:
             await ctx.emit(*drafts)
 
     @staticmethod
-    async def _read(ctx: Any, frame: Frame, state: MemoryState, store: Any, vectors: Any, consolidate: Consolidate,
-                    directory: dict[str, tuple[str, ...]], conv: x.Conversation, her: str, p: Any,
+    async def _read(ctx: Any, frame: Frame, state: MemoryState, store: Any, vectors: Any,
+                    directory: dict[str, tuple[str, ...]], conv: x.Conversation, her: str, system: str, p: Any,
                     n: int) -> tuple[list[Draft[Any]], str, str] | None:
         """Une conversation relue : ce que le code en garde, l'appel, le modèle ; ``None`` si l'appel a échoué."""
         people = x.People.of(conv.speakers, directory, her, scope=conv.key)
-        known = await consolidate._known_beliefs(store, vectors, conv, people, directory)
-        labels = {speaker.person: speaker.label for speaker in conv.speakers}
-        situations = consolidate._situations(frame, store, state, conv, p, labels)
-        moments, upcoming = consolidate._moments(frame, store, state, conv, labels)
-        ended, gone = consolidate._ended_situations(frame, store, state, conv, p, labels)
-        passed, past, foreseen = consolidate._behind(frame, store, state, conv, p, labels)
-
-        def request_for(known: list[Any], situations: list[Any], moments: list[Any], ended: list[Any],
-                        passed: list[Any]) -> LLMRequest:
-            prompt = x.render(conv, now=frame.local(), beliefs=known, promises=[], situations=situations,
-                              moments=moments, ended=ended, passed=passed)
-            return LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
-                              messages=(Message("user", prompt),), tools=(x.tool(her),),
-                              max_tokens=x.MAX_OUTPUT_TOKENS, lane="background", priority=3,
-                              meta={"conversation": conv.key})
-
-        request = request_for(known, situations, moments, ended, passed)
+        shown = await shown_of(frame, store, state, vectors, conv, people, directory, p, promises=False)
         # ce qu'elle sait déjà est facultatif, les messages ne le sont pas
-        while not fits_context(ctx.llm, request) and (known or situations or moments or ended or passed):
-            known, situations, moments = known[:len(known) // 2], situations[:len(situations) // 2], \
-                moments[:len(moments) // 2]
-            ended, passed = ended[:len(ended) // 2], passed[:len(passed) // 2]
-            request = request_for(known, situations, moments, ended, passed)
+        request, times = fit_by_halving(ctx.llm, partial(extract_request, conv, frame, state, shown, system=system,
+                                                         her=her, call_id=f"{ctx.run_id}#{n}", priority=3))
         try:
             response = await ctx.llm.call(request)
         except Exception as exc:  # noqa: BLE001 — une panne : la conversation attend le passage suivant
@@ -206,13 +187,8 @@ class Relay:
         if extraction is None:
             log.warning("relecture d'une conversation reçue ailleurs : réponse illisible")
             return None
-        shown = {i for i, _w, _t in (*moments, *ended, *passed)}
-        designable = {i: ev for i, ev in {**upcoming, **gone, **past}.items() if i in shown}
-        kept = await consolidate._drafts(extraction, frame, state, store, conv, people, known, [], vectors, p,
-                                         request.call_id, moments=designable,
-                                         passed={i: ev for i, ev in past.items() if i in shown},
-                                         foreseen={i: f for i, f in foreseen.items() if i in shown})
-        kept += consolidate._ended(extraction, situations, request.call_id)
+        kept = await kept_from(extraction, frame, state, store, conv, people, shown.shrunk(times), vectors, p,
+                               request.call_id)
         return kept, request.call_id, response.model
 
 

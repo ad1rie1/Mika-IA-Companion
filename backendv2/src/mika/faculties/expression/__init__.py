@@ -39,7 +39,7 @@ from mika.kernel.episode import Prelude
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, LAST, unlabel
+from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, unlabel
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
@@ -194,7 +194,7 @@ def _style(s: ExpressionState, frame: Frame, enrich: Any) -> str:
     return style()
 
 
-@EXPRESSION.section("form", zone=Zone.STABLE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], after=["style"],
+@EXPRESSION.section("form", zone=Zone.STABLE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE],
                     trim_rank=98, title=phrase("expression.form.title"))
 def _form(s: ExpressionState, frame: Frame, enrich: Any) -> str | None:
     """« COMMENT TU ÉCRIS ICI » (ADR 0140) : les codes d'écriture de l'autrice du chat — la longueur, le registre,
@@ -216,8 +216,6 @@ def pro_style() -> str:
 
 #: ses derniers messages relus pour s'entendre se répéter
 HABIT_WINDOW = 6
-#: un message à partir duquel on parle longtemps (en caractères, à peu près quatre phrases)
-LONG_MESSAGE = 320
 _TOKEN = re.compile(r"\w+(?:'\w+)?")
 GREETINGS = frozenset({"salut", "coucou", "hey", "bonjour", "bonsoir", "yo", "hello", "re", "hi", "yoo",
                        "heey", "heyy", "coucouu"})
@@ -292,9 +290,6 @@ def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = (
         out.append(phrase("expression.habits.reunion", opener=raw))
     if asking_in_a_row(said):
         out.append(phrase("expression.habits.questions"))
-    # trois longs messages d'affilée : un monologue, pas une conversation (sonde : quatre à six phrases à chaque fois)
-    if len(msgs) >= 3 and all(len(A.strip_prosody(t)) >= LONG_MESSAGE for t in msgs[-3:]):
-        out.append(phrase("expression.habits.long"))
     return out
 
 
@@ -432,32 +427,6 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
     return q if len(q) <= 90 else "…" + q[-89:]
 
 
-# ── Sa réponse relue ──────────────────────────────────────────────────────
-#
-# Banc de conversation du 2026-10-14 (Sonnet, jugé par Opus) : malgré la consigne de style et « TA RÉPONSE », une
-# réplique sur deux finissait par « ceci, ou cela ? », s'ouvrait par le même « Ah, » que les précédentes, ou redisait
-# une phrase déjà dite. Ces tics se voient sur le brouillon même : relu, il est réécrit une fois (``pipeline``).
-
-#: une question à options (« t'as trouvé quelque chose, ou t'es rentré bredouille ? ») — pas « … ou pas ? »
-_OPTIONS = re.compile(r"\bou\b(?!\s+(?:pas|non|quoi|bien|alors)\b)", re.IGNORECASE)
-#: on la corrige ou on la taquine (« nan celui qui défonce tout », « non c'est ma cousine », « merci maman ») …
-_CORRECTED = re.compile(r"^\s*(?:non|nan|nope|mais non|pas du tout)\b|\bmaman\b|\btu te trompes\b|\bt'as tout faux\b"
-                        r"|\bc'est pas (?:ça|ca)\b", re.IGNORECASE)
-#: … et elle ouvre sur une excuse ou une justification (« ah pardon, j'avais tout faux ») : un réflexe d'assistante.
-#: Banc de recherche du 2026-10-15 : une réponse sur quatre, dans ces cas-là, et aucune consigne ne l'enlève tout à
-#: fait ; relue, elle rebondit (« ah ok, donc la lumière c'est surtout pour le style »). « désolée pour ton
-#: grand-père » n'est pas une excuse : ni « désolée » seul, ni une excuse sans qu'on l'ait corrigée ne sont repris.
-_SORRY = re.compile(r"\b(?:pardon|excuse-moi|je m'excuse|autant pour moi|au temps pour moi|j'(?:ai|avais) tout faux"
-                    r"|je me suis (?:trompée|plantée))\b", re.IGNORECASE)
-#: une excuse se lit dans ses premiers mots
-_SORRY_WITHIN = 80
-#: au moins tant de mots en commun avec l'un de ses derniers messages : une redite ; avec son portrait : une copie
-_AGAIN, _COPIED = 5, 6
-#: à un message de tant de caractères au plus, une réponse de plus de ``_LONG_ANSWER`` (ou en plusieurs paragraphes)
-#: est hors de mesure
-_SHORT_HEARD, _LONG_ANSWER = 60, 280
-
-
 def _plain(text: str) -> str:
     """Sa parole sans balise ni jeton de voix."""
     return " ".join(A.strip_prosody(_BRACKETS.sub(" ", text or "")).split())
@@ -470,70 +439,6 @@ _BUBBLES = re.compile(r"\n\s*\n")
 def _bubbles(text: str) -> str:
     """Sa parole sans balise ni jeton de voix, ses bulles gardées (séparées par une ligne vide)."""
     return "\n\n".join(p for p in (_plain(b) for b in _BUBBLES.split(text or "")) if p)
-
-
-def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "") -> str | None:
-    """Ce qu'elle remarquerait en se relisant, avant d'envoyer : une question à options, plusieurs questions,
-    la même ouverture que deux de ses trois derniers messages, ses premiers mots qui redisent ceux de la personne, une
-    suite de mots déjà dite dans un de ses derniers messages, ou recopiée de son portrait (``portrait`` : sa persona
-    telle que le modèle l'a lue — un exemple de sa voix repris mot pour mot, banc du 2026-10-14). ``None`` : rien à
-    reprendre."""
-    text = _plain(draft)
-    if not text:
-        return None
-    found: list[str] = []
-    questions = [q.strip() for q in _QUESTION.findall(text) if len(q.strip()) > 3]
-    choice = next((q for q in questions if _OPTIONS.search(q)), None)
-    if choice is not None:
-        found.append(phrase("expression.review.choice", question=choice))
-    if len(questions) >= 2:
-        found.append(phrase("expression.review.questions"))
-    before = [_plain(m) for m in mine if _plain(m)][-3:]
-    # la troisième question d'affilée n'est plus un tic repris (ADR 0141) : « ce que tu te répètes » le lui dit en
-    # fait, et c'est son caractère qui tranche (ablation du 2026-10-15 : 88 à 100 % de ses réponses finissaient sur
-    # une question, quoi qu'on retire ou ajoute ; v15 : la règle laissait des culs-de-sac)
-    first = (_words(text)[:1] or [""])[0]
-    if first and first not in GREETINGS and sum((_words(m)[:1] or [""])[0] == first for m in before) >= 2:
-        found.append(phrase("expression.review.opener", word=text.split()[0].rstrip(",;:!?.…")))
-    opening = next(iter(_SENTENCE.findall(text)), "")
-    said = stems(heard)
-    ws = _words(text)
-    # reprendre un mot (« Bleu marine, ça va avec tout ») est naturel ; redire sa phrase (« Un manteau bleu marine un
-    # peu cher, tu l'aimes bien »), ou ses mots tels quels, ne l'est pas
-    hw = _words(heard)
-    echoed = {tuple(hw[i:i + _AGAIN]) for i in range(len(hw) - _AGAIN + 1)} & \
-        {tuple(ws[i:i + _AGAIN]) for i in range(len(ws) - _AGAIN + 1)}
-    if (said and len(stems(opening) & said) >= max(3, (3 * len(stems(opening)) + 4) // 5)) or any(
-            sum(w not in STOPWORDS for w in g) >= 2 for g in echoed):
-        found.append(phrase("expression.review.echo"))
-    # un second bonjour, un second au revoir : son dernier message les a déjà dits
-    last = before[-1] if before else ""
-    if first in GREETINGS and last and (_words(last)[:1] or [""])[0] in GREETINGS:
-        found.append(phrase("expression.review.greeted"))
-    if last and LEAVING.search(fold(text.lower())) and LEAVING.search(fold(last.lower())):
-        found.append(phrase("expression.review.farewell"))
-    pw = _words(portrait)
-    copied = {tuple(pw[i:i + _COPIED]) for i in range(len(pw) - _COPIED + 1)} & \
-        {tuple(ws[i:i + _COPIED]) for i in range(len(ws) - _COPIED + 1)}
-    if any(sum(w not in STOPWORDS for w in g) >= 2 for g in copied):
-        found.append(phrase("expression.review.portrait"))
-    if _CORRECTED.search(heard or "") and _SORRY.search(text[:_SORRY_WITHIN]):
-        found.append(phrase("expression.review.sorry"))
-    heard_plain = " ".join(A.strip_prosody(heard).split())
-    # une ligne vide n'allonge rien : en chat, c'est une autre bulle
-    if heard_plain and len(heard_plain) <= _SHORT_HEARD and len(text) > _LONG_ANSWER:
-        found.append(phrase("expression.review.long"))
-    grams = {tuple(ws[i:i + _AGAIN]) for i in range(len(ws) - _AGAIN + 1)}
-    for m in before:
-        mw = _words(m)
-        again = next((g for i in range(len(mw) - _AGAIN + 1) if (g := tuple(mw[i:i + _AGAIN])) in grams
-                      and sum(w not in STOPWORDS for w in g) >= 2), None)
-        if again is not None:
-            found.append(phrase("expression.review.again", words=" ".join(again)))
-            break
-    if not found:
-        return None
-    return phrase("expression.review.note", draft=text[:600], found=" ; ".join(found))
 
 
 # ── Sa réponse écrite par une autrice (ADR 0114) ──────────────────────────
@@ -615,15 +520,8 @@ def authored(text: str, name: str) -> str:
     return "\n\n".join(out)
 
 
-def _other_titles() -> tuple[str, ...]:
-    """Les sections de son état qui disent qui est l'autre : qui écrit, le ton entre eux, sa fiche."""
-    return phrase("identity.who.title"), phrase("social.register.title"), phrase("social.about.title")
-
-
-def _section(state: str, title: str) -> str:
-    """Le corps d'une section « --- TITRE --- » de son état interne (« » : absente)."""
-    m = re.search(rf"--- {re.escape(title)} ---\n(.*?)(?=\n--- |\Z)", state or "", re.S)
-    return m.group(1).strip() if m else ""
+#: les sections de son état qui disent qui est l'autre (qui écrit, le ton entre eux, sa fiche), que l'autrice lit
+OTHER_SECTIONS = ("who", "register", "about_person")
 
 
 #: « Nom : … » en tête d'une ligne de SMS (un nom court, éventuellement en gras)
@@ -635,13 +533,14 @@ _TIME_MARK = re.compile(r"^\[[^\]\n]*\]\s*")
 _QUOTED = re.compile(r'^(?:«([^«»]*)»|"([^"]*)"|“([^“”]*)”)$')
 
 
-def polish(draft: str, messages: Sequence[Any], heard: str = "",
-           persona: Any = None, author: Any = None) -> tuple[str, str, Callable[[str], str]] | None:
+def polish(draft: str, messages: Sequence[Any], heard: str = "", persona: Any = None, author: Any = None,
+           bodies: Mapping[str, str] | None = None) -> tuple[str, str, Callable[[str], str]] | None:
     """La seconde passe sur sa réponse : (consigne, message, ce qu'on garde de la suite écrite) d'un appel où une
     autrice écrit la suite du fil à partir de son premier jet, ou ``None`` sans premier jet. ``persona`` : sa persona
     rendue pour la conversation (``text``, ``name``, ``reference`` : un fil de référence pour le registre) ;
     ``author`` : l'autrice du chat (``vocab.flows.Author``, ADR 0124) — ses codes s'ajoutent au cadre, son exemple
-    prend la place du fil de référence."""
+    prend la place du fil de référence ; ``bodies`` : le texte de chaque section de son prompt, par clé — l'autrice
+    en lit qui est l'autre (``OTHER_SECTIONS``)."""
     text = _bubbles(draft)
     if not text:
         return None
@@ -661,7 +560,7 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "",
     system = phrase("expression.polish.system", name=name, portrait=(getattr(persona, "text", "") or "").strip())
     # qui est l'autre, d'après ce qu'elle a vécu avec lui (sa fiche, déjà filtrée pour cette audience) : l'autrice
     # écrit aussi ses réponses à venir (banc du 2026-10-16 : avec sa fiche, il plaisante comme lui)
-    other = [body for title in _other_titles() if (body := _section(state, title))]
+    other = [body for key in OTHER_SECTIONS if (body := (bodies or {}).get(key, "").strip())]
     if other:
         system += "\n\n" + phrase("expression.polish.other", name=name, about="\n".join(other))
     codes = (getattr(author, "codes", "") or "").strip()
@@ -696,36 +595,16 @@ def polish_draft(flow: str, draft: str, about: str, author: Any) -> tuple[str, s
     return "\n\n".join(parts), message
 
 
-#: un message de quelques mots : une réponse à la même mesure
-SHORT_MESSAGE = 40
-
-
-#: un merci, un au revoir (mots repliés) : la réponse d'une amie, pas d'un guichet
-THANKS = frozenset({"merci", "mercii", "thanks", "thx"})
-LEAVING = re.compile(r"\b(?:bonne (?:nuit|soiree|journee|aprem)|a (?:plus tard|demain|toute)|bye|ciao|"
-                     r"je (?:file|te laisse|vais y aller)|j'y vais)\b|\ba plus\W*$|\ba\+")
-
-
-@EXPRESSION.section("answer", zone=Zone.VOLATILE, episodes=[Kind.REPLY], tags=[LAST], trim_rank=90,
+@EXPRESSION.section("answer", zone=Zone.VOLATILE, episodes=[Kind.REPLY], tags=[Tag.CHAT], trim_rank=90,
                     title=phrase("expression.answer.title"))
 def _answer(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str:
-    """« TA RÉPONSE » : le dernier mot avant son message — réagir en personne, pas de conseil qu'on ne demande pas,
-    pas sa phrase reformulée, pas de vérité générale ; court à qui écrit court quand aucune autrice ne suit. Banc de
-    conversation du 2026-10-14 (Sonnet, jugé par Opus) : avec ces règles seulement dans la consigne de style, en tête
-    du prompt, les conseils de coach revenaient. Rien sur ses questions ni ses traits (ADR 0141, banc v18) : son
-    caractère écrit les porte, et c'est lui qui tranche."""
-    heard = " ".join(A.strip_prosody(enrich.get("last_heard") or "").split())
-    folded = fold(heard.lower())
-    out = [phrase("expression.answer.react")]
-    out.append(phrase("expression.answer.subject"))
-    # la mesure d'une réponse est de la forme : quand une seconde passe suit, c'est l'autrice qui la prend (ADR 0140)
-    if heard and len(heard) <= SHORT_MESSAGE and not frame.episode.attrs.get("second_pass"):
-        out.append(phrase("expression.answer.short"))
-    if THANKS & set(_words(heard)):
-        out.append(phrase("expression.answer.thanked"))
-    if LEAVING.search(folded):
-        out.append(phrase("expression.answer.leaving"))
-    return " ".join(out)
+    """« TA RÉPONSE » : le dernier mot avant son message — réagir en personne, ni analyse, ni vérité générale, ni
+    conseil qu'on ne demande pas, ni sa phrase reformulée. Banc de conversation du 2026-10-14 (Sonnet, jugé par Opus) :
+    avec cette règle seulement dans la consigne de style, en tête du prompt, les conseils de coach revenaient. La même
+    à chaque réponse (ADR 0154) : rien ne la choisit d'après les mots de la personne ; la mesure et la forme sont à
+    l'autrice (« COMMENT TU ÉCRIS ICI », ADR 0140), ses redites à « CE QUE TU TE RÉPÈTES », ses questions à son
+    caractère (ADR 0141)."""
+    return phrase("expression.answer.react")
 
 
 @EXPRESSION.section("habits", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
@@ -746,14 +625,13 @@ def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str 
         if ep is not None and ep.kind == Kind.REPLY else None
     if not found and not asked:
         return None
-    # une remarque pour elle seule : la sonde finale l'a vue s'en excuser à voix haute (« je vais varier mon
-    # langage, promis ! »)
+    # ce qu'elle remarque de sa propre parole, pour elle seule (la sonde finale l'a vue s'en excuser à voix haute :
+    # « je vais varier mon langage, promis ! ») — des faits, jamais un ordre (ADR 0154)
     out = []
     if found:
         out.append(phrase("expression.habits.reread", found=" ; ".join(found)))
     if asked:
         out.append(phrase("expression.habits.asked", question=asked))
-    out.append(phrase("expression.habits.private"))
     return " ".join(out)
 
 

@@ -113,8 +113,7 @@ class EpisodeMode:
     #: une autre borne pour ce qu'un outil venu d'ailleurs rend (un mode qui lit des fichiers entiers)
     outside_chars: int | None = None
     muted_tags: frozenset[str] = frozenset()
-    #: sa parole relue (``reviewers``) et passée une seconde fois (``polishers``), comme d'ordinaire
-    reviewed: bool = True
+    #: sa parole passée une seconde fois (``polishers``), comme d'ordinaire
     polished: bool = True
     #: ses outils montrés à la personne pendant qu'elle travaille (le port ``activity``)
     live: bool = False

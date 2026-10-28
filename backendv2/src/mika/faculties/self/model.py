@@ -196,6 +196,6 @@ def _self_model(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     lines += [phrase("self.knows.changed", was=ch.was_text, now=ch.text) for ch in changes]
     if not lines:
         return None
-    return SectionBody("\n".join([*lines, phrase("self.knows.advice")]),
+    return SectionBody("\n".join(lines),
                        level=max((ch.sensitivity for ch in changes), default=0),
                        provenance=tuple(f"memory:{ch.item}" for ch in changes))

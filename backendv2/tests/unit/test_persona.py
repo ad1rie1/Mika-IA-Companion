@@ -121,14 +121,14 @@ def test_her_life_is_an_ais_life_and_her_tastes_do_not_move():
     sur ce qu'elle ne peut pas goûter (persona d'avant le 2026-10-07 : un avis sur des ramen « jamais mangés », snob
     d'un café « jamais bu ») ; ailleurs, la nourriture ne se dit que pour dire qu'elle n'en mange pas."""
     for full in (render(DOC, "full"), render(DOC, "full", chat=True)):
-        assert "Ce qui est vrai de toi :" in full and "L'Écume des jours" in full and "ne mange pas" in full
+        assert "Ce qui est vrai de toi :" in full and "L'Écume des jours" in full and "ne manges pas" in full
         assert "d'un jour à l'autre" in full
     assert "L'Écume des jours" not in render(DOC, "compact")  # sa voix intérieure, ses séances : pas besoin
     entries = [DOC.description, DOC.portrait, *DOC.interests, *DOC.facts]
     # des débuts de mots (« tempérament » n'est pas un plat de ramen) ; entre espaces, un mot entier (« bu », pas
     # « bureau »)
     physical = [e for e in entries if any(re.search(rf"(?<!\w){re.escape(w.strip())}{'(?!\\w)' if w != w.strip() else ''}",
-                                                    e.lower()) for w in FOOD) and "ne mange pas" not in e.lower()]
+                                                    e.lower()) for w in FOOD) and "ne manges pas" not in e.lower()]
     assert not physical, f"une vie physique, incompatible avec sa nature : {physical}"
     # une persona sans portrait ni faits garde la règle d'avant
     bare = render(self_c.PersonaDoc(name="Zoé"), "full")
@@ -173,7 +173,8 @@ def test_her_greetings_set_the_tone_of_a_greeting_and_are_never_given_as_lines_t
     replies = [c for c in llm.calls if c.role == "reply"]
     assert greets and replies
     shown = greets[0].messages[-1].content
-    assert "TA FAÇON DE DIRE BONJOUR" in shown and "jamais une formule toute faite" in shown
+    assert "TA FAÇON DE DIRE BONJOUR" in shown and "Tes petits mots pour dire bonjour" in shown
+    assert "formule toute faite" not in shown and "pars de" not in shown  # un fait sur elle, pas une manière de saluer
     # jamais une phrase entière : un modèle la recopiait, même marquée « pour le ton seulement » (sonde finale :
     # « Yooo, te revoilà ! » cinq soirs sur six ; sonde du 2026-10-03 : « Heeey ~ alors, raconte-moi tout. » comme
     # message entier, trois initiatives sur dix) — ses petits mots seulement
@@ -183,10 +184,11 @@ def test_her_greetings_set_the_tone_of_a_greeting_and_are_never_given_as_lines_t
     assert DOC.greetings[0] not in replies[-1].messages[-1].content
 
 
-def test_a_first_greeting_to_someone_she_does_not_know_is_simple_not_a_friends_hello(tmp_path):
-    """Ses bonjours d'amie (« te revoilà », « raconte-moi tout ») supposent qu'on se connaît : à quelqu'un qui arrive
-    pour la première fois, un bonjour simple (sonde réelle du 2026-10-03 : « Heeey ~ alors, raconte-moi tout » à
-    une inconnue). Contre-exemple : une amie a toujours son exemple de ton."""
+def test_a_first_greeting_knows_she_does_not_know_the_person_and_is_never_told_how_to_greet(tmp_path):
+    """Ses bonjours d'amie (« te revoilà », « raconte-moi tout ») supposaient qu'on se connaît (sonde réelle du
+    2026-10-03 : « Heeey ~ alors, raconte-moi tout » à une inconnue). Le code l'informe — elle ne connaît pas encore
+    Inès, dit une fois dans « CE QUI VOUS LIE » — sans lui dicter un bonjour simple ; ses petits mots sont les mêmes
+    pour tous, jamais une phrase entière à recopier."""
     def script(req):
         if req.role in ("extract", "profile", "compact"):
             return LLMResponse("{}")
@@ -207,8 +209,12 @@ def test_a_first_greeting_to_someone_she_does_not_know_is_simple_not_a_friends_h
     run_virtual(clock, main)
     greets = {c.meta.get("target"): c.messages[-1].content for c in llm.calls if c.role == "initiative"}
     assert "user_2" in greets and "user_1" in greets
-    assert "un bonjour simple" in greets["user_2"] and not any(g in greets["user_2"] for g in DOC.greetings)
-    assert "tes petits mots" in greets["user_1"], "contre-exemple : une amie garde son ton"
+    for who in ("user_1", "user_2"):
+        assert "Tes petits mots pour dire bonjour" in greets[who] and not any(g in greets[who] for g in DOC.greetings)
+        assert "bonjour simple" not in greets[who]
+    tie = greets["user_2"].split("--- CE QUI VOUS LIE ---", 1)[1].split("\n--- ", 1)[0]
+    assert "Tu ne connais pas encore cette personne." in tie
+    assert greets["user_2"].count("ne connais pas encore") == 1  # une seule maison
 
 
 # ── Sa nature et son nom viennent de sa persona (ADR 0070) ────────────────

@@ -2,8 +2,10 @@
 (ADR 0064) — sur le modèle des dessins (ADR 0063).
 
 - La section « CE QUE TES SERVICES T'ONT RENDU » (réponse et initiative, pour la personne en face) : ce qui attend
-  encore un accord, et ce qui est revenu — rendu (cité : une donnée), raté, refusé, expiré. Ce que son prompt lui a
-  montré quand elle a parlé est réputé dit (``mcp:<proposition>`` dans sa provenance).
+  encore un accord, et ce qui est revenu — rendu, raté, refusé, expiré. Ce sont ses demandes : la section est à elle ;
+  seul ce que le service a répondu (rendu, ou sa raison d'un échec) est cité, une donnée. Ce que son prompt lui a
+  montré quand elle a parlé est réputé dit (``mcp:<proposition>`` dans sa provenance). Ses phrases servent aussi aux
+  appels de ses apps (``plugins/forge/calls.py``) : une seule maison.
 - L'initiative due (``service_answered``) : ce qui est revenu se dit, vers là où la personne est maintenant — comme
   un rappel, ce n'est pas prendre la parole (``agency.OWED``) ; une garde l'annule si c'est déjà dit.
 """
@@ -46,6 +48,8 @@ from mika.vocab.privacy import Sensitivity
 SHOWN_MAX = 4
 #: ce qu'une réponse montre d'elle dans la section
 SHOWN_CHARS = 2000
+#: ce que la raison d'un échec montre d'elle
+WHY_CHARS = 300
 #: la force de l'initiative due (au-dessus du seuil d'initiative, sous la barre de réveil : comme un dessin prêt)
 EVIDENCE = 12.0
 
@@ -77,24 +81,27 @@ async def _texts(s: McpState, frame: Frame, ports: Mapping[str, Any]) -> dict[st
 
 
 def line(r: Request, texts: Mapping[str, str]) -> str:
+    """Où en est une demande : ses mots à elle ; ce que le service a répondu, cité en dessous — une donnée, jamais une
+    consigne."""
     what = phrase("mcp.section.what", tool=inert(r.remote, 80), server=inert(r.server, 40))
     if r.status == WAITING:
         who = phrase("mcp.section.by_chat") if r.approval == "conversation" else phrase("mcp.section.by_operator")
         return "- " + phrase("mcp.section.waiting", what=what, who=who)
+    said = texts.get(r.text_ref, "")
     if r.status == ANSWERED:
-        said = texts.get(r.text_ref, "")
-        return ("- " + phrase("mcp.section.answered", what=what) + "\n"
-                + (cite(said, SHOWN_CHARS) or phrase("mcp.tools.nothing")) + "\n" + phrase("mcp.section.say_it"))
+        return "- " + phrase("mcp.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
+                                                                          or phrase("mcp.tools.nothing"))
     if r.status == FAILED:
-        said = inert(texts.get(r.text_ref, ""), 300)
-        return "- " + phrase("mcp.section.failed", what=what, why=phrase("mcp.section.why", said=said) if said else "")
+        if not said.strip():
+            return "- " + phrase("mcp.section.failed", what=what)
+        return "- " + phrase("mcp.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
     if r.status == EXPIRED:
         return "- " + phrase("mcp.section.expired", what=what)
     return "- " + phrase("mcp.section.refused", what=what)
 
 
 @MCP.section("services", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
-             title=phrase("mcp.section.title"), untrusted=True, reads=[identity_c.PERSON, identity_c.HANDLES])
+             title=phrase("mcp.section.title"), reads=[identity_c.PERSON, identity_c.HANDLES])
 def _section(s: McpState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     reqs = _relevant(s, frame)
     if not reqs:
