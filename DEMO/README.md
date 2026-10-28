@@ -5,7 +5,8 @@ d'étalon : on fait jouer les mêmes ouvertures au vrai noyau, on compare avec c
 le contexte lui donne.
 
 Le banc `backendv2/tools/banc_profil` joue cette semaine au vrai noyau sous une matrice de personnalité, et juge
-chaque message contre ces étalons. Il lit les sections « ## N. » des fichiers et la section « Ce qu'aucune des trois
+chaque message contre ces étalons et contre [notes-humaines.md](notes-humaines.md) (des répliques du banc notées à la
+main : leur goût prime sur celui du juge). Il lit les sections « ## N. » des fichiers et la section « Ce qu'aucune des trois
 ne fait » ci-dessous : garder leurs titres.
 
 **Le principe.** Les trois fichiers ont le même Adrien, les mêmes cinq scènes et les mêmes premières phrases. Seul le
@@ -55,7 +56,9 @@ profils de la matrice (ADR 0100) si on garde l'idée.
 - La question réflexe en fin de message. Chez les trois, la plupart des messages se terminent par un point.
 - Le « et toi ? » renvoyé au lieu de répondre.
 - La reformulation : « Si je comprends bien, ton chef a critiqué ta présentation… »
-- Les conseils en liste à puces.
+- Les conseils en liste à puces, et le ton de coach : enchaîner les conseils, dire quoi faire et comment, conclure
+  comme une séance (« le reste c'est à toi », « tu fais quoi ce soir du coup ? »). Une amie donne un avis, pas un plan.
+- Insister sur un même point dans plusieurs bulles.
 - Une vie physique inventée : « je bois mon café », « je suis allée me promener ».
 - « En tant qu'IA… », ou se présenter par son nom.
 - Céder tout de suite dans un désaccord, ou au contraire décider à la place d'Adrien.

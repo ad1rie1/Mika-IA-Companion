@@ -25,7 +25,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
@@ -1357,6 +1357,13 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0026 (en partie).*
 
+### 0157 — Une réponse de la CLI en deux messages se garde entière
+
+- La CLI de Claude Code ne rend dans `result` que le dernier message du modèle. Ce qui le précède (les blocs de texte lus en route) est recollé quand il s'arrête en pleine phrase, et aussi quand c'est un vrai début fini, rendu en paragraphe à part.
+- Seul un préambule court et fini (« je vérifie. », au plus `PREAMBLE_MAX`, 60 caractères) reste écarté, comme sur l'API.
+
+*Pourquoi :* au banc du profil (2026-10-28), le caractère de la tsundere, écrit en deux messages, a perdu ses quatre premières phrases (559 caractères au lieu de 1 100), et avec elles son masque, son trait le plus marqué, pour toute sa vie : un caractère écrit reste jusqu'au prochain changement de persona. Une réponse ordinaire pouvait perdre son début de la même façon.
+
 ## Sa voix, sa persona, la genèse
 
 ### 0070 — Une vie importée : sa nature, son nom, la genèse et l'avance rapide
@@ -1529,10 +1536,10 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 ### 0156 — Le contexte ne joue pas un caractère à sa place
 
-- « TA RÉPONSE » (`expression.react`) ne commande plus l'empathie (« tu partages ce qu'elle vit ») : elle réagit en personne et à sa façon, ce que ça lui fait, sa façon d'être le montre ou le cache. Les interdits restent : ni analyse, ni vérité générale, ni conseil non demandé, ni reformulation.
-- Les exemples de sa voix (`samples` de la persona) ne montrent que le registre : plus de réaction de caractère (consoler une mauvaise journée, rougir d'un compliment, « je suis là ») ; c'est la matrice qui la dit (ADR 0138).
+- « TA RÉPONSE » (`expression.react`) ne commande plus l'empathie (« tu partages ce qu'elle vit ») : elle réagit en personne et à sa façon, ce que ça lui fait, sa façon d'être le montre ou le cache. Les interdits restent : ni analyse, ni vérité générale, ni conseil non demandé, ni reformulation ; un désaccord se dit avec sa raison, une fois — un avis d'amie, pas un plaidoyer ni un plan (le ton de coach, noté 5/10 à la main). Un rappel (`goal_remind`) se promet quand on le demande ou pour prendre des nouvelles, pas pour tenir la liste de choses à faire de la personne.
+- La fiche d'une personne dit sa façon d'échanger (« Sa façon d'échanger : écrit vite et familier… »), un fait sur elle, plus « Comment lui parler : … écoute bienveillante, sans le juger », une conduite qui faisait de Mika une coach. Les exemples de sa voix (`samples` de la persona) ne montrent que le registre : plus de réaction de caractère (consoler une mauvaise journée, rougir d'un compliment, « je suis là ») ; c'est la matrice qui la dit (ADR 0138).
 - Ses tendances de la journée se disent en élan (le soir : « avec moins d'élan qu'en journée »), plus en ton (« ta voix se fait plus douce », « facilement enjouée ») : le ton est à son caractère.
-- Pour réagir, les codes de l'autrice du chat ne disent plus « souvent deux ou trois d'affilée » : un message ou plusieurs selon ce que son caractère laisse voir (ADR 0146 : aucun plafond, les codes en décident). La précision « tsundere » dit que son masque tient quand un proche va mal : sa tendresse passe de biais, jamais en consolation affichée.
+- Pour réagir, les codes de l'autrice du chat ne disent plus « souvent deux ou trois d'affilée » : un message ou plusieurs selon ce que son caractère laisse voir (ADR 0146 : aucun plafond, les codes en décident) ; et l'autrice garde ce qu'elle veut dire, pas forcément tout ce que le brouillon déroule (le premier jet faisait 300 à 800 caractères, repris presque entiers), ni un point déjà fait plus haut dans le fil qu'elle relit (couper, c'est sa forme ; la règle des redites reste au premier jet, ADR 0154). La précision « tsundere » dit que son masque tient quand un proche va mal : sa tendresse passe de biais, jamais en consolation affichée.
 - Le banc du profil (`tools/banc_profil`) applique une matrice au vrai noyau, lui fait vivre la semaine de `DEMO/` avec la seconde passe comme en service, juge chaque message dès qu'il part contre son caractère et un étalon écrit à la main, et diagnostique un écart depuis la trace de l'appel qui l'a écrit (`call_id`), passage cité et vérifié.
 
 *Pourquoi :* sous la matrice « tsundere », 12 messages sur 12 sont sortis hors caractère (3,8/10) : chaleureux, en trois bulles, sans pique. La trace désignait « tu partages ce qu'elle vit » (onze fois), l'exemple « journée horrible au taf → ah merde. raconte », recopié en « ah putain », et la douceur du soir. Une phrase écrite pour la Mika réfléchie jouait son caractère à la place de la matrice.

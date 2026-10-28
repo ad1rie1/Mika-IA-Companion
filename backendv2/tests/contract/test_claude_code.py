@@ -677,8 +677,14 @@ async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli
         cut = await said("cut-1#0", before="Oui, je m'en souviens. Je ne la connais ",
                          say="pas, et je ne connais pas ton équipe.")
         preamble = await said("cut-2#0", before="Je regarde.", say="Oui, elle vient d'arriver.")
+        # un vrai début, fini, écrit dans un premier message (banc du profil, 2026-10-28 : un caractère en deux
+        # messages perdait ses quatre premières phrases) : il reste, en paragraphe à part
+        start = ("Un mot suffit à te toucher. Tu montres peu ce que tu ressens. Tu caches ta tendresse derrière "
+                 "des piques.")
+        halves = await said("cut-3#0", before=start, say="Si on te prend en flagrant délit, tu attaques.")
     assert cut == "Oui, je m'en souviens. Je ne la connais pas, et je ne connais pas ton équipe."
     assert preamble == "Oui, elle vient d'arriver."
+    assert halves == start + "\n\nSi on te prend en flagrant délit, tu attaques."
 
 
 async def test_call_folders_live_outside_the_data_and_are_private(tmp_path, cli, monkeypatch):

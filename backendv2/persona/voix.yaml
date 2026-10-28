@@ -747,7 +747,7 @@ expression:
   # maximes 62–100 % → 25–50 %).
   answer:
     title: "TA RÉPONSE"
-    react: "Réagis d'abord à ce que la personne vient de dire, en personne et à ta façon : ce que ça te fait, c'est ta façon d'être qui le montre ou le cache. Tu ne l'analyses pas, tu n'en fais pas une vérité générale, et tu ne la conseilles pas sans qu'elle le demande. Ne lui reformule pas ce qu'elle vient de dire."
+    react: "Réagis d'abord à ce que la personne vient de dire, en personne et à ta façon : ce que ça te fait, c'est ta façon d'être qui le montre ou le cache. Tu ne l'analyses pas, tu n'en fais pas une vérité générale, et tu ne la conseilles pas sans qu'elle le demande ; quand tu n'es pas d'accord, tu le dis avec ta raison, une fois : un avis d'amie, pas un plaidoyer ni un plan. Ne lui reformule pas ce qu'elle vient de dire."
 
   # La seconde passe sur sa réponse (pipeline : polishers, rôle « polish ») : une autrice écrit la suite du fil à partir
   # de son premier jet — ses messages, puis la réponse probable de l'autre — et seuls les siens partent ; ses balises
@@ -765,7 +765,7 @@ expression:
     # {thread} : les derniers messages du fil, une ligne par bulle, chacun précédé de son repère de temps quand du temps
     # a passé (mark) ; {name} : son nom ; {draft} : son premier jet, ses bulles séparées par « / » (en dernière ligne
     # du fil : l'autrice repart de là, banc du 2026-10-16)
-    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots. Entre crochets, quand du temps a passé, le moment du message qui suit, vu par {name} (« tu », c'est elle) :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas ; et tu ne lui fais pas poser une question que le brouillon ne pose pas — si le brouillon n'en pose aucune, elle n'en pose aucune. Les jetons de voix du brouillon ([SIGH], [LAUGH], [BREATH], [PAUSE:…]) se gardent là où ils tombent. Une ligne par SMS, au format « {name} : … » puis « L'autre : … » ; un SMS peut tenir plusieurs phrases. Rien d'autre que le fil."
+    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots, et pas forcément tout ce qu'elle y déroule : elle en dit autant que son caractère en laisse voir, et ne reprend pas un point qu'elle a déjà fait plus haut dans le fil. Entre crochets, quand du temps a passé, le moment du message qui suit, vu par {name} (« tu », c'est elle) :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas ; et tu ne lui fais pas poser une question que le brouillon ne pose pas — si le brouillon n'en pose aucune, elle n'en pose aucune. Les jetons de voix du brouillon ([SIGH], [LAUGH], [BREATH], [PAUSE:…]) se gardent là où ils tombent. Une ligne par SMS, au format « {name} : … » puis « L'autre : … » ; un SMS peut tenir plusieurs phrases. Rien d'autre que le fil."
     # une ligne du fil. {name} : son nom ; {text} : une de ses bulles
     her: "{name} : {text}"
     # {text} : ce que l'autre a écrit
@@ -1645,8 +1645,10 @@ social:
     title: CE QUE TU SAIS DE CETTE PERSONNE
     # Qui, dans social.about.sensitive, quand on ne lui connaît pas de nom.
     someone: cette personne
-    # Le ton à prendre avec elle. {tone} : ce que la fiche en dit (« direct et taquin, il aime qu'on le charrie »).
-    tone: "Comment lui parler : {tone}"
+    # Sa façon d'échanger, un fait sur la personne (ADR 0156 : jamais une conduite pour elle — « Comment lui parler :
+    # … écoute bienveillante, sans le juger » faisait d'elle une coach). {tone} : ce que la fiche en dit (« écrit vite
+    # et familier, aime qu'on le charrie »).
+    tone: "Sa façon d'échanger : {tone}"
     # Ses goûts. {interests} : la liste de la fiche, séparée par des virgules.
     # avec la règle de ce qu'on en fait (2026-10-18, sur le PC : sa terrasse et Warhammer dans 15 de ses 25 derniers
     # messages, lui 3 sur 27 — « des manifs ? si t'es posé sur Warhammer t'es tranquille »)
@@ -1719,7 +1721,7 @@ social:
     system: |-
       Tu aides {name} à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a dit elle-même et de ce que {name} a vécu avec elle. Écris comme des notes de {name} sur cette personne, sans jamais nommer {name} ni parler d'elle (ni « {name} », ni « elle », ni « moi », ni « me ») : la personne à la troisième personne, avec son prénom (« C'est quelqu'un qui… »).
       - resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés (« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; ne répète pas les détails intimes. N'invente rien : rien de sa situation (en couple ou non, enfants, famille, travail, âge, où et avec qui elle vit) que ces notes ne disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, {name} le vit, elle ne le note pas.
-      - ton : comment lui parler — le registre seulement (« direct et taquin, il aime qu'on le charrie »), jamais une phrase à lui dire, ni un sujet à aborder ou sur lequel le taquiner (pas « le taquiner sur ses parties perdues ») : ce qu'il aime est dans interets, et on n'y revient que quand ça vient.
+      - ton : sa façon d'échanger, d'après ce que la personne fait elle-même — son registre et ce qu'elle aime dans un échange (« écrit vite et familier, aime qu'on le charrie »), jamais une conduite à tenir avec elle (pas « écoute bienveillante », pas « sans le juger » : comment {name} lui parle, c'est son caractère qui le dit), jamais une phrase à lui dire, ni un sujet à aborder ou sur lequel le taquiner (pas « le taquiner sur ses parties perdues ») : ce qu'il aime est dans interets, et on n'y revient que quand ça vient.
       - interets : ses goûts et ses passions — ce qu'elle aime faire, regarder, écouter, lire (quelques mots chacun, au plus 6) ; jamais ses soucis du moment, sa santé, ses rendez-vous ni ce qui lui arrive ; aucun si rien ne le dit.
       - sujets_sensibles : les sujets délicats avec cette personne (au plus 6), sinon une liste vide.
       Réponds uniquement en appelant l'outil record_profile.
@@ -3412,7 +3414,9 @@ goals:
 
     remind:
       # L'outil goal_remind.
-      description: Promettre un rappel à la personne à qui tu parles, à une heure dite.
+      description: >-
+        Promettre un rappel à la personne à qui tu parles, à une heure dite : quand elle te le demande, ou pour
+        prendre de ses nouvelles. Pas pour lui tenir sa liste de choses à faire.
       when: "quand, en heure locale : AAAA-MM-JJTHH:MM (par exemple 2026-09-30T15:00)"
       what: ce qu'il faudra rappeler, en quelques mots
       urgent: vrai seulement si c'est important à l'heure pile, même en pleine nuit

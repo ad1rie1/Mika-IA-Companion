@@ -838,20 +838,30 @@ def _tool(t: Any) -> Tool:
 
 #: ce qui clôt une phrase : un texte qui s'arrête là, avant une recherche d'outil, est un préambule fini
 _SENTENCE_END = ".!?…»\")"
+#: un préambule fini qu'on écarte (« je vérifie. », « Je regarde. ») est court ; au-delà, c'est le début de la réponse
+#: (ADR 0157)
+#: (banc du profil, 2026-10-28 : un caractère écrit en deux messages perdait ses quatre premières phrases, et avec elles
+#: le trait le plus marqué de la tsundere — pour toute sa vie)
+PREAMBLE_MAX = 60
 
 
 def answer(texts: Sequence[str], result: str) -> str:
     """La réponse d'un tour. ``result`` ne porte que le dernier message de la CLI : quand le modèle s'est
     interrompu au milieu d'une phrase pour chercher un outil (``ToolSearch``, que la CLI exécute elle-même) et
     l'a reprise dans un second message, le début de la réponse se perdait (sonde réelle du 2026-10-09 :
-    « pas, et je ne connais pas ton équipe… »). Ce qui précède est rendu quand il s'arrête en pleine phrase ; un
-    préambule fini (« je vérifie. ») reste écarté, comme sur l'API."""
+    « pas, et je ne connais pas ton équipe… »). Ce qui précède est rendu quand il s'arrête en pleine phrase, ou
+    quand c'est un vrai début fini (un second message, en paragraphe à part) ; un préambule court et fini
+    (« je vérifie. », ``PREAMBLE_MAX``) reste écarté, comme sur l'API."""
     whole, tail = "".join(texts).rstrip(), result.strip()
     if not tail or not whole.endswith(tail) or len(whole) == len(tail):
         return result
     before = whole[: len(whole) - len(tail)]
-    if not before.strip() or before.rstrip()[-1] in _SENTENCE_END:
+    if not before.strip():
         return result
+    if before.rstrip()[-1] in _SENTENCE_END:
+        if len(before.strip()) <= PREAMBLE_MAX:
+            return result
+        return before.rstrip() + "\n\n" + tail
     glue = "" if before[-1].isspace() else " "
     return before + glue + tail
 

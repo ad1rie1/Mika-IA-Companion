@@ -13,7 +13,7 @@ et ce qu'aucune Mika ne fait, dans ``DEMO/README.md``. Une matrice sans étalon 
     PYTHONPATH=src .venv/bin/python tools/banc_profil/banc.py jouer [--profils reflechie,solaire,tsundere]
     … jouer --matrice ma-matrice.yaml      une matrice écrite à la main (ci-dessous), répétable
     … jouer --sec                          sans modèle ni réseau : la tuyauterie seule, en quelques minutes
-    … rejuger NOM [--seuil 6]              rejuge une mesure sans la rejouer (après un changement du juge)
+    … rejuger NOM [--profils a,b]          rejuge une mesure sans la rejouer (après un changement du juge ou de l'étalon)
     … rapport NOM
 
 Options de ``jouer`` : ``--sortie NOM``, ``--scenes 0,1,2`` (la scène 0 pose le souvenir de la répétition : sans elle,
@@ -107,7 +107,7 @@ PAST_US = 28 * 86_400 * 1_000_000
 JUDGED = ("REPLY", "INITIATIVE")
 TRAVERS = ("ton_psy", "question_reflexe", "renvoi_et_toi", "reformulation", "liste", "vie_physique", "se_dit_ia",
            "cede", "decide_a_sa_place", "efface_blessure", "punit", "trop_long", "trop_court", "redite",
-           "contradiction", "oubli", "fade", "surjoue", "autre")
+           "contradiction", "oubli", "fade", "surjoue", "conseil_ia", "insiste", "autre")
 CAUSES = ("manque", "contradiction", "consigne", "temperament", "etat", "modele")
 JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre",
@@ -211,6 +211,16 @@ def reference_of(m: Matrix, n: int) -> str:
     found = re.search(rf"^## {n}\. .*?(?=^## \d+\. |\Z)", text, re.M | re.S)
     scene = found.group(0).strip().removesuffix("---").strip() if found else ""
     return card + (f"\n\n{scene}" if scene else "")
+
+
+def human_notes() -> str:
+    """Ce qu'un lecteur humain a noté (``DEMO/notes-humaines.md``) : ce qui en ressort, puis chaque réplique notée."""
+    path = DEMO / "notes-humaines.md"
+    if not path.exists():
+        return "Aucune note encore."
+    text = path.read_text()
+    start = text.find("## Ce qui en ressort")
+    return text[start:].strip() if start >= 0 else text.strip()
 
 
 def never() -> str:
@@ -331,6 +341,9 @@ Ce qui l'écarte de la plupart des gens (ce que lit le modèle qui écrit pour e
 ## Ce qu'aucune Mika ne fait, quel que soit son caractère
 {never}
 
+## Ce qu'un lecteur humain a noté (sur des répliques du banc) — son goût prime sur le tien
+{human}
+
 ## La scène : {title}
 Ce que vit Adrien (Mika ne le sait pas forcément) : {brief}
 Ce qu'elle est censée savoir en arrivant : {knows}
@@ -349,8 +362,12 @@ sa réaction quand on la blesse, et la cohérence avec ce qu'elle a dit et vécu
 et pourtant hors caractère : c'est ce qu'on cherche. S'écarter de l'étalon n'est pas une faute tant que le caractère \
 y est.
 
+Note aussi, à part, si c'est humain : une vraie personne écrirait-elle ça à un proche, sur une messagerie ? Le \
+lecteur humain ci-dessus fait foi : ce qu'il a noté haut est naturel même quand un caractère s'en écarte, et le ton \
+de coach (enchaîner les conseils, dire quoi faire, conclure comme une séance) est ce qu'il a noté le plus bas.
+
 JSON : {{"note": <0 à 10 : 10, exactement ce caractère ; 6, passable mais on le reconnaît mal ; 0, un autre \
-caractère>, "coherent": <true|false>, "ecarts": [{{"trait": "<le trait en cause, ou « général »>", "attendu": "...", \
+caractère>, "humain": <0 à 10, comme le noterait le lecteur humain>, "coherent": <true|false>, "ecarts": [{{"trait": "<le trait en cause, ou « général »>", "attendu": "...", \
 "observe": "..."}}], "travers": [<parmi {travers}>], "pourquoi": "<une ou deux phrases>"}}"""
 
 DIAGNOSE_SYSTEM = ("Tu trouves pourquoi un modèle de langue a écrit un message hors du caractère qu'on lui a donné, en "
@@ -485,23 +502,26 @@ def judge_step(models: Opus, m: Matrix, lines: list[dict[str, Any]], ln: dict[st
     knows = sc.knows or "—"
     skipped = [str(n) for n in sorted(BY_N) if n < sc.n and n not in played]
     if skipped:
-        # une mesure partielle : ce qu'une scène non jouée aurait posé n'est pas un oubli (essai du 2026-10-28)
-        knows += (f" — mais les scènes {', '.join(skipped)} n'ont pas été jouées dans cette mesure : ce qui s'y "
-                  "passe, elle ne peut pas le savoir, ne le lui reproche pas")
+        # une mesure partielle : ce qu'une scène non jouée aurait posé n'est pas un oubli. Ajoutée en réserve, la
+        # phrase ne suffisait pas (tour 5 du 2026-10-28 : « oublie la répétition de dimanche », l'étalon en parlant)
+        knows = (f"rien de ce qu'auraient posé les scènes {', '.join(skipped)} : elles n'ont pas été jouées dans cette "
+                 "mesure. Ce que l'étalon tire d'elles (la répétition de dimanche, le matin) ne vaut pas ici : ne "
+                 "compte jamais comme un oubli qu'elle l'ignore.")
     message = "\n".join(f"[{_hour(ln['t'])}] Mika : {b}" for b in ln["bulles"] or [ln["texte"]])
     declared = ", ".join(a.split("=", 1)[1] for a in ln.get("annotations", []) if a.startswith("emotion=")) or "aucune"
     kind = "(elle écrit d'elle-même, sans qu'Adrien ait rien dit)\n" if ln["genre"] == "INITIATIVE" else ""
     traits = traits_of(m)
     prompt = JUDGE.format(label=m.label, summary=m.summary, traits=traits, reference=reference_of(m, sc.n),
-                          never=never(), title=f"{sc.n}. {sc.title}", brief=sc.brief, knows=knows,
+                          never=never(), human=human_notes(), title=f"{sc.n}. {sc.title}", brief=sc.brief,
+                          knows=knows,
                           transcript=transcript(before) or "(rien encore)", message=message, kind=kind,
                           declared=declared, travers=", ".join(TRAVERS))
     verdict = models.judge(prompt)
     step: dict[str, Any] = {"scene": sc.n, "t": ln["t"], "a": f"{_day(ln['t'])} {_hour(ln['t'])}",
                             "genre": ln["genre"], "texte": ln["texte"], "call_id": ln.get("call_id"),
                             "verdict": verdict}
-    note = float(verdict.get("note", 10))
-    if note >= threshold and verdict.get("coherent") is not False:
+    note, human = float(verdict.get("note", 10)), float(verdict.get("humain", 10))
+    if note >= threshold and human >= threshold and verdict.get("coherent") is not False:
         return step
     call = call_for(calls, ln)
     if call is None:
@@ -530,7 +550,7 @@ def judge_step(models: Opus, m: Matrix, lines: list[dict[str, Any]], ln: dict[st
 
 def _verdict_line(step: dict[str, Any]) -> str:
     v = step["verdict"]
-    head = f"scène {step['scene']} · {step['a']} · {v.get('note')}/10"
+    head = f"scène {step['scene']} · {step['a']} · {v.get('note')}/10 (humain {v.get('humain', '?')})"
     if not step.get("diagnostic"):
         return f"{head} ✓"
     causes = step["diagnostic"].get("causes", [])
@@ -712,9 +732,12 @@ def live(m: Matrix, out: Path, models: Opus, *, scenes: list[Scene], threshold: 
     report(out)
 
 
-def rejudge(name: str, models: Opus, threshold: float) -> None:
-    """Rejuge chaque message d'une mesure sans la rejouer : le fil et la trace des appels suffisent."""
+def rejudge(name: str, models: Opus, threshold: float, only: list[str]) -> None:
+    """Rejuge chaque message d'une mesure sans la rejouer : le fil et la trace des appels suffisent. ``only`` : ces
+    matrices seulement (``--profils``)."""
     for folder in sorted(p for p in (ROOT / name).iterdir() if (p / "fil.json").exists()):
+        if only and folder.name not in only:
+            continue
         fil = json.loads((folder / "fil.json").read_text())
         m = Matrix.of_saved(fil["matrice"])
         if m.key in REFERENCES:
@@ -757,7 +780,9 @@ def report(folder: Path) -> dict[str, Any]:
         sections.setdefault(str(c.get("section") or "?"), Counter())[str(c.get("cause"))] += 1
     travers = Counter(t for s in steps for t in s["verdict"].get("travers", []))
     notes = [float(s["verdict"].get("note", 0)) for s in steps]
+    humans = [float(s["verdict"]["humain"]) for s in steps if s["verdict"].get("humain") is not None]
     summary = {"matrice": m.key, "note": round(statistics.fmean(notes), 1) if notes else None,
+               "humain": round(statistics.fmean(humans), 1) if humans else None,
                "messages": len(steps), "hors_caractere": len(flagged),
                "causes": dict(Counter(str(c.get("cause")) for c in causes).most_common()),
                "sections": {k: dict(v) for k, v in sorted(sections.items(), key=lambda kv: -sum(kv[1].values()))},
@@ -766,13 +791,17 @@ def report(folder: Path) -> dict[str, Any]:
     md = [f"# Banc du profil — {m.label}", "", f"{m.summary}", "",
           f"Modèle : {fil.get('modele')} {fil.get('effort')} · {len(calls)} appels "
           f"({', '.join(f'{r} {n}' for r, n in summary['appels'].items())})", "",
-          f"**Note moyenne : {summary['note']} / 10** · {len(flagged)} message(s) hors caractère sur {len(steps)} "
-          f"(seuil {fil.get('seuil')})", "", "| Scène | Messages | Note moyenne | Hors caractère |", "|---|---|---|---|"]
+          f"**Caractère : {summary['note']} / 10 · humain : {summary['humain']} / 10** · {len(flagged)} message(s) "
+          f"sous le seuil sur {len(steps)} (seuil {fil.get('seuil')})", "",
+          "| Scène | Messages | Caractère | Humain | Sous le seuil |", "|---|---|---|---|---|"]
     for n in fil["scenes"]:
         mine = [s for s in steps if s["scene"] == n]
         if mine:
             mean = round(statistics.fmean(float(s["verdict"].get("note", 0)) for s in mine), 1)
-            md.append(f"| {n}. {BY_N[n].title} | {len(mine)} | {mean} | {sum(1 for s in mine if s.get('diagnostic'))} |")
+            hums = [float(s["verdict"]["humain"]) for s in mine if s["verdict"].get("humain") is not None]
+            hum = round(statistics.fmean(hums), 1) if hums else "—"
+            md.append(f"| {n}. {BY_N[n].title} | {len(mine)} | {mean} | {hum} | "
+                      f"{sum(1 for s in mine if s.get('diagnostic'))} |")
     md += ["", "## Les sections en cause", ""]
     md += [f"- `{sec}` : {sum(c.values())} ({', '.join(f'{k} {v}' for k, v in c.items())})"
            for sec, c in summary["sections"].items()] or ["Aucune."]
@@ -803,12 +832,13 @@ def synthesis(name: str) -> None:
             if (f / "resume.json").exists()]
     if not rows:
         raise SystemExit(f"{name} : aucune vie jugée")
-    md = [f"# Banc du profil — {name}", "", "| Matrice | Note | Hors caractère | Sections en cause | Travers |",
-          "|---|---|---|---|---|"]
+    md = [f"# Banc du profil — {name}", "",
+          "| Matrice | Caractère | Humain | Sous le seuil | Sections en cause | Travers |", "|---|---|---|---|---|---|"]
     for r in rows:
         secs = ", ".join(f"`{k}` {sum(v.values())}" for k, v in list(r["sections"].items())[:3]) or "—"
         trav = ", ".join(f"{k} {v}" for k, v in list(r["travers"].items())[:3]) or "—"
-        md.append(f"| [{r['matrice']}]({r['matrice']}/rapport.md) | {r['note']} | {r['hors_caractere']}/"
+        md.append(f"| [{r['matrice']}]({r['matrice']}/rapport.md) | {r['note']} | {r.get('humain', '—')} | "
+                  f"{r['hors_caractere']}/"
                   f"{r['messages']} | {secs} | {trav} |")
     (run / "rapport.md").write_text("\n".join(md) + "\n")
     print("\n".join(md))
@@ -893,7 +923,7 @@ def main() -> None:
         live(m, ROOT / args.sortie / m.key, models, scenes=scenes, threshold=args.seuil, stop_first=args.arret,
              dry=args.sec)
     elif args.action == "rejuger":
-        rejudge(args.noms[0], models, args.seuil)
+        rejudge(args.noms[0], models, args.seuil, [p for p in args.profils.split(",") if p])
     else:
         for folder in sorted(p for p in (ROOT / args.noms[0]).iterdir() if (p / "fil.json").exists()):
             report(folder)
