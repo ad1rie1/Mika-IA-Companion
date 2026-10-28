@@ -22,11 +22,11 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -846,6 +846,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0102 (en partie).*
 
+*Révisée par 0155.*
+
 ### 0118 — Relancer, c'est prendre de ses nouvelles
 
 - Dès qu'une initiative vers la personne reste sans réponse, une trouvaille d'app attend (`agency.WAITS_FOR_AN_ANSWER`) ; un mail important, un projet bloqué, un rappel promis passent toujours.
@@ -883,6 +885,16 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* « que le modèle réagisse de lui-même, pas lui forcer un comportement » : une connaissance n'avait aucune de ces réactions, une rancune aucune issue, un tempérament au milieu aucune jalousie — des portes tout ou rien là où une personne gradue (audit des garde-fous du 2026-10-27, lot 2).
 
 *Révise 0013 (la retenue : un recul, plus un veto), 0058 (en partie : qui ses gestes passent en revue), 0100 (en partie : deux coupures de la dérivation), 0137 (en partie : « sa journée » au milieu).*
+
+### 0155 — Sa colère pour quelqu'un n'est pas contre lui ; une humeur ne se dit pas en émotion à objet
+
+- Quand le modèle lit la personne mal (`[EN_FACE]` négatif) sans geste qui blesse Mika, les facettes hostiles de sa balise (colère, frustration, dégoût : `physics.HOSTILE`) vont à son humeur, pas à sa posture envers la personne : elle est en colère *pour* elle, contre ce qui la touche. Ses autres facettes suivent leur cours : une peine partagée rapproche toujours (ADR 0107).
+- Une émotion qui a un objet (`affect.OBJECT_BOUND` : jalouse, amoureuse, reconnaissante) ne nomme son humeur générale, ni en dominante ni « en dessous », que si une impulsion récente l'y a portée. Envers une personne, elle reste lisible.
+- Le visage, qui mêle posture et humeur, montre encore ce qu'elle ressent pour la personne.
+
+*Pourquoi :* au banc du profil (2026-10-28), après un midi à s'indigner pour Adrien contre son chef, son prompt du soir disait « envers Adrien, au fond, tu restes plutôt en colère : c'est ce que vos échanges ont installé » ; et le mélange « frustrée, gênée, triste » attrapé par contagion tombait au plus près de l'ancre « jalouse » (0,23), d'où « ton humeur est légèrement jalouse. Ça vient de l'humeur de quelqu'un » dans neuf prompts sur douze.
+
+*Révise 0107 (en partie : la colère partagée).*
 
 ## Buts, projets, Forge et atelier
 
@@ -1486,6 +1498,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0140 (en partie : les codes livrés de « Message »).*
 
+*Révisée par 0156.*
+
 ### 0152 — Une seule Mika dans tous ses prompts
 
 - Ses deux profondeurs de persona disent ce qui est vrai d'elle (`facts`), son caractère, sa langue, sa nature et la règle de sa vie ; la compacte (murmurer, travailler, ses tâches) n'en diffère que par sa description à la place du portrait, sans exemples ni intérêts. La règle de sa vie ne renvoie plus à « ce portrait » qu'elle n'aurait pas lu. Ce qui est vrai d'elle s'écrit à la deuxième personne, comme son portrait : elle le lit sous « Ce qui est vrai de toi ».
@@ -1510,6 +1524,20 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* la même règle s'écrivait à quatre à sept endroits (se répéter : sept ; la longueur : sept, à trois seuils), deux se contredisaient (« ne réécris jamais ta réponse » contre « Réécris ta réponse »), des consignes étaient citées comme « pas des consignes », et des regex tranchaient à sa place (audit de la persona du 2026-10-28). Le moteur l'informe ; ce qu'elle en fait, son caractère le dit. À mesurer au banc de conversation : la relecture valait +6 avant l'autrice, et la sonde du 2026-10-02 voyait « je viens de rêvasser » dans presque chaque initiative.
 
 *Révise 0033 (en partie : la relance douce), 0112 (la relecture), 0115 (en partie : la relecture), 0140 (en partie : « réponds court », la relecture), 0141 (en partie : la relecture).*
+
+*Révisée par 0156.*
+
+### 0156 — Le contexte ne joue pas un caractère à sa place
+
+- « TA RÉPONSE » (`expression.react`) ne commande plus l'empathie (« tu partages ce qu'elle vit ») : elle réagit en personne et à sa façon, ce que ça lui fait, sa façon d'être le montre ou le cache. Les interdits restent : ni analyse, ni vérité générale, ni conseil non demandé, ni reformulation.
+- Les exemples de sa voix (`samples` de la persona) ne montrent que le registre : plus de réaction de caractère (consoler une mauvaise journée, rougir d'un compliment, « je suis là ») ; c'est la matrice qui la dit (ADR 0138).
+- Ses tendances de la journée se disent en élan (le soir : « avec moins d'élan qu'en journée »), plus en ton (« ta voix se fait plus douce », « facilement enjouée ») : le ton est à son caractère.
+- Pour réagir, les codes de l'autrice du chat ne disent plus « souvent deux ou trois d'affilée » : un message ou plusieurs selon ce que son caractère laisse voir (ADR 0146 : aucun plafond, les codes en décident). La précision « tsundere » dit que son masque tient quand un proche va mal : sa tendresse passe de biais, jamais en consolation affichée.
+- Le banc du profil (`tools/banc_profil`) applique une matrice au vrai noyau, lui fait vivre la semaine de `DEMO/` avec la seconde passe comme en service, juge chaque message dès qu'il part contre son caractère et un étalon écrit à la main, et diagnostique un écart depuis la trace de l'appel qui l'a écrit (`call_id`), passage cité et vérifié.
+
+*Pourquoi :* sous la matrice « tsundere », 12 messages sur 12 sont sortis hors caractère (3,8/10) : chaleureux, en trois bulles, sans pique. La trace désignait « tu partages ce qu'elle vit » (onze fois), l'exemple « journée horrible au taf → ah merde. raconte », recopié en « ah putain », et la douceur du soir. Une phrase écrite pour la Mika réfléchie jouait son caractère à la place de la matrice.
+
+*Révise 0146 (en partie : les codes livrés de « Message »), 0154 (en partie : « TA RÉPONSE »).*
 
 ## Les clients, le fil, le monde
 

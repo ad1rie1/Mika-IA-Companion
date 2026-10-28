@@ -174,6 +174,11 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
     - un juge Opus qui note le plan (/30), le travail (/50) et le suivi (/20).
     `--sec` fait tout tourner sans modèle ni réseau. Une mesure réelle coûte de 60 à 160 appels Opus par scénario :
     la demander d'abord.
+  - `tools/banc_profil` (ADR 0156) applique une matrice de personnalité (un profil, ou un YAML) au vrai noyau et lui fait vivre
+    la semaine de `DEMO/` (tout en Opus, effort moyen, par la CLI). Chaque message est jugé dès qu'il part contre son
+    caractère et l'étalon écrit à la main ; un écart est diagnostiqué depuis la trace de l'appel qui l'a écrit
+    (`call_id`), passage cité. `--sec` sans modèle ; une vie réelle coûte quelques centaines d'appels : la demander
+    d'abord.
   - pour les lancer : `PYTHONPATH=src .venv/bin/python tools/<banc>/banc.py [modèle] [parallèle] [sortie.json]`.
 - **La sonde** (`sim sonde --semaine 1|2`) fait vivre une semaine au vrai modèle configuré ; elle refuse `claude_code`.
   Après une sonde réelle, on corrige tout ce qu'elle montre, puis on revalide en réel.

@@ -306,6 +306,26 @@ def test_what_lingers_keeps_the_name_of_what_caused_it():
     assert A.felt(A.add(reading.home, reading.fond), reading.home)[0] is not Emotion.ANGRY
 
 
+def test_a_mood_no_jealousy_pushed_is_never_read_jealous():
+    """Frustrée, gênée, triste par contagion : son humeur peut tomber dans le voisinage de « jalouse ». Aucune jalousie
+    ne l'y a poussée : elle ne se lit pas jalouse, ni en dominante ni « en dessous » (banc du profil, 2026-10-28 :
+    « ton humeur est légèrement jalouse. Ça vient de l'humeur de quelqu'un avec qui tu as parlé »). Poussée par une
+    vraie jalousie, si."""
+    cw = ph.Clockwork(PARIS, circadian.DEFAULT)
+    p = DEFAULT
+    t = at_paris(2026, 9, 28, 16, 0)
+    home = ph.common_home(t, p, cw)
+    gap = A.scale(A.sub(A.ANCHORS[Emotion.JEALOUS], home), 0.5)
+    caught = tuple(ph.Mark(t, e, "contagion") for e in ("frustrated", "embarrassed", "sad"))
+    reading = F.mood_reading(F.AffectState(mood=ph.Mood(ph.Osc(home, (0.0, 0.0, 0.0), t), gap=gap, marks=caught)),
+                             t, p, cw)
+    assert A.felt(reading.position, reading.home)[0] is Emotion.JEALOUS  # le voisinage de l'espace
+    assert reading.felt not in (Emotion.JEALOUS, Emotion.NEUTRAL), reading.felt
+    assert "jalous" not in prose.mood(reading, p), prose.mood(reading, p)
+    pushed = ph.Mood(ph.Osc(home, (0.0, 0.0, 0.0), t), gap=gap, marks=(ph.Mark(t, "jealous", "talk", "user_1"),))
+    assert F.mood_reading(F.AffectState(mood=pushed), t, p, cw).felt is Emotion.JEALOUS
+
+
 def test_sleep_freezes_the_fond_and_waking_lightens_it():
     """Pendant qu'elle dort, le fond ne bouge pas ; au réveil il perd sa part
     (60 % par défaut) — il en reste assez pour colorer le matin."""

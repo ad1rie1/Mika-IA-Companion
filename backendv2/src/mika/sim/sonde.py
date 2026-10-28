@@ -77,6 +77,8 @@ class Blocking:
                 error = f"{type(exc).__name__}: {exc}"
         record = {
             "n": self.calls, "a": _local(self.clock.now()), "role": req.role, "voie": req.lane,
+            # celui que porte l'énoncé qu'elle en a tiré (``voice.call_id``) : la trace d'un message se retrouve
+            "call_id": req.call_id,
             "meta": {k: str(v) for k, v in dict(req.meta).items()},
             "systeme": req.system_stable, "volatile": req.system_volatile,
             "messages": [{"role": m.role, "texte": m.content, "outils": [c.name for c in m.tool_calls]}

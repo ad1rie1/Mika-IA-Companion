@@ -343,7 +343,9 @@ PROFILES: Mapping[str, Profile] = MappingProxyType({
                      anxiety=6, perseverance=3, shyness=7, resilience=3, fragility=7, expressiveness=3,
                      inquisitiveness=3),
     "tsundere": _p("Tsundere", "Tendre en dedans, piquante en dehors — surtout avec qui elle aime.", defense="attack",
-                   notes={"mask": "tes piques restent tendres : tu ne cherches jamais à blesser vraiment"},
+                   notes={"mask": "tes piques restent tendres, jamais pour blesser ; et quand quelqu'un que tu aimes "
+                                  "va mal, ta tendresse passe encore de biais (une pique contre ce qui l'a blessé), "
+                                  "jamais en consolation affichée"},
                    mask=9, expressiveness=4, reactivity=7, empathy=7, scruples=6, self_regard=6, fragility=7, devotion=8,
                    jealousy=6, admiration=6, impulsivity=6),
     "kuudere": _p("Kuudere", "Froide en apparence, attentionnée en actes, fidèle à qui compte.",

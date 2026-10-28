@@ -110,6 +110,12 @@ def _declared(s: AffectState, e, cx) -> AffectState:
         if d.kind == Kind.REPLY and d.reply_to is not None else None
     hurt = their is not None and their.gesture in reading.HURTING
     touched = their is not None and their.gesture in (reading.COMPLIMENTED, reading.THANKED)
+    # sa colère pour la personne, pas contre elle (ADR 0155) : quand la personne va mal et ne lui a rien fait (aucun geste qui
+    # blesse), une colère qui épouse la sienne vise ce qui la touche — son chef, sa journée. Elle va à son humeur, pas
+    # à sa posture envers la personne ; une peine partagée, elle, rapproche toujours (ADR 0107). Banc du profil,
+    # 2026-10-28 : après un midi à s'indigner pour Adrien contre son chef, « envers Adrien, au fond, tu restes plutôt
+    # en colère : c'est ce que vos échanges ont installé »
+    on_their_side = their is not None and not hurt and A.facets_valence(their.felt) < 0
     # son tempérament sur ce qu'elle déclare (ADR 0100) : sa jalousie pèse ; blessée, sa réaction aussi
     declared = ph.weighed(declared, {Emotion.JEALOUS: p.jealous_weight})
     if hurt:
@@ -128,6 +134,11 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     s = replace(s, mood=mood)
     if not d.target:
         return s  # un monologue : seule l'humeur générale bouge
+    if on_their_side:
+        kept = Declared.of(tuple(f for f in declared.all if Emotion(f[0]) not in ph.HOSTILE))
+        if kept is None:
+            return s  # rien que de la colère pour elle : seule l'humeur générale bouge
+        declared, weight = kept, p.valence_gain(kept.emotion)
     stance = s.stances.get(key) or ph.new_stance(e.at, p, cw)
     stance = ph.advance_stance(stance, e.at, p, cw)
     stance = ph.push_stance(stance, ph.stance_target_of(stance, declared),
@@ -290,7 +301,14 @@ def _lingering(m: ph.Mood, fond: A.Vec3, now: int, p: AffectParams, cw: ph.Clock
         cos = A.dot(fond, ray) / max(1e-9, A.norm(fond) * A.norm(ray))
         if cos > score:
             best, score = emotion, cos
-    return best if best is not Emotion.NEUTRAL else A.felt(A.add(ref, fond), ref)[0]
+    return best if best is not Emotion.NEUTRAL else A.felt(A.add(ref, fond), ref, skip=A.OBJECT_BOUND)[0]
+
+
+def unpushed(m: ph.Mood, now: int, p: AffectParams) -> frozenset[Emotion]:
+    """Les émotions à objet (``A.OBJECT_BOUND``) qu'aucune impulsion récente de son humeur n'a portées : son humeur
+    générale ne se dit pas en elles (un voisinage de l'espace n'est pas une jalousie)."""
+    pushed = {mark.emotion for mark in m.marks if now - mark.at <= 2 * p.fond_tau_us}
+    return frozenset(e for e in A.OBJECT_BOUND if e.value not in pushed)
 
 
 def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork, needs: Any = None) -> c.MoodReading:
@@ -299,7 +317,7 @@ def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork, ne
     fond = ph.fond_of(m, p)
     moment = A.add(rest, m.gap)
     position = A.add(moment, fond)
-    felt, felt_i = A.felt(position, rest)
+    felt, felt_i = A.felt(position, rest, skip=unpushed(m, now, p))
     label, intensity = A.label(position)
     cause, who, at = _cause(m, A.sub(position, rest), now, p)
     return c.MoodReading(position, rest, felt, felt_i, A.felt(moment, rest)[1], label, intensity, fond, cause, who,

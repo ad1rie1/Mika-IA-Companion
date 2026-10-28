@@ -184,6 +184,30 @@ def test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer(tmp_pa
     assert esteem < untouched == 0.5
 
 
+def test_angry_for_him_is_not_angry_at_him(tmp_path):
+    """En colère *contre* un proche (le modèle lit des mots qui la blessent) ou *pour* lui (le modèle le lit frustré,
+    il ne lui a rien fait : c'est son chef) : la même balise de Mika, deux suites. Contre lui, la relation se tend ;
+    pour lui, sa colère reste dans son humeur et rien d'hostile ne s'installe envers lui (banc du profil,
+    2026-10-28 : « envers Adrien, au fond, tu restes plutôt en colère : c'est ce que vos échanges ont installé »)."""
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", social_c.CLOSE)
+        await connect(kernel, "user_1", "Adrien")
+        await say(kernel, "user_1", "le chef a démonté ma présentation", "slide par slide", "devant toute l'équipe")
+        frame = kernel.mind.frame()
+        return frame.get(affect_c.STANCE("user_1")), frame.get(affect_c.MOOD)
+
+    angry = "[EMOTION: angry 0.6, disgusted 0.3]"
+    at_him, _ = live(tmp_path / "contre", {"présentation": "rien | geste : insultant", "slide": "rien | geste : insultant",
+                                            "équipe": "rien | geste : insultant"}, scenario, mine=angry)
+    for_him, mood = live(tmp_path / "pour", {"présentation": "frustrated 0.7, embarrassed 0.5",
+                                             "slide": "frustrated 0.6", "équipe": "frustrated 0.6, sad 0.4"},
+                         scenario, mine=angry)
+    assert at_him.hostility > 0 or at_him.felt in ph.HOSTILE, at_him
+    assert for_him.hostility == 0 and for_him.felt not in ph.HOSTILE, for_him
+    assert for_him.declared is None or for_him.declared.emotion not in ph.HOSTILE, for_him.declared
+    assert A.valence(mood.felt) < 0, mood  # sa colère n'a pas disparu : elle est dans son humeur
+
+
 def test_a_grave_event_read_by_the_model_worries_her_and_weighs_on_the_days(tmp_path):
     async def scenario(kernel):
         await befriend(kernel, "user_1", social_c.FRIEND)

@@ -153,6 +153,11 @@ def cap_norm(v: Vec3, limit: float) -> Vec3:
 
 
 MAX_ANCHOR_NORM = max(norm(a) for a in ANCHORS.values())
+#: Les émotions qui ont un objet (ADR 0155) : on est jalouse de quelqu'un, amoureuse de quelqu'un, reconnaissante envers
+#: quelqu'un. Déclarées ou ressenties envers une personne, elles disent vrai ; lues dans une humeur générale qu'aucune
+#: n'a poussée, elles ne sont qu'un voisinage de l'espace : « frustrée, gênée et triste » y tombe à 0,23 de
+#: « jalouse » (banc du profil, 2026-10-28 : « ton humeur est légèrement jalouse. Ça vient de l'humeur de quelqu'un »).
+OBJECT_BOUND = frozenset({Emotion.JEALOUS, Emotion.LOVE, Emotion.GRATEFUL})
 #: Plancher des lectures d'intensité : la plus courte des ancres négatives
 #: (``bored``). Sans lui, une humeur ordinaire dans le cône d'une émotion à
 #: ancre courte (``thinking``, ``nostalgic``) lirait 1,0.
@@ -192,13 +197,15 @@ def label(position: Vec3) -> tuple[Emotion, float]:
     return best, min(1.0, mag / MAX_ANCHOR_NORM)
 
 
-def felt(position: Vec3, home: Vec3, *, floor: float | None = None) -> tuple[Emotion, float]:
+def felt(position: Vec3, home: Vec3, *, floor: float | None = None,
+         skip: frozenset[Emotion] = frozenset()) -> tuple[Emotion, float]:
     """Ce que dit l'écart au repos : l'émotion vers laquelle il pointe, et la
     part du chemin parcourue vers elle.
 
     La direction se compare aux **rayons** ``ancre − repos``, pas aux ancres :
     une impulsion déplace la position depuis le repos vers une ancre, donc
-    l'écart est colinéaire à ce rayon. Le neutre n'est jamais candidat.
+    l'écart est colinéaire à ce rayon. Le neutre n'est jamais candidat, ni
+    ce que ``skip`` écarte (``OBJECT_BOUND`` pour une humeur générale).
     """
     gap = sub(position, home)
     mag = norm(gap)
@@ -206,7 +213,7 @@ def felt(position: Vec3, home: Vec3, *, floor: float | None = None) -> tuple[Emo
         return Emotion.NEUTRAL, 0.0
     best, best_score, best_len = Emotion.NEUTRAL, -2.0, 1.0
     for emotion, anchor in ANCHORS.items():
-        if emotion is Emotion.NEUTRAL:
+        if emotion is Emotion.NEUTRAL or emotion in skip:
             continue
         ray = sub(anchor, home)
         length = norm(ray)
@@ -242,6 +249,7 @@ def blend(
     similarity_floor: float = 0.35,
     residual_floor: float = 0.15,
     home: Vec3 | None = None,
+    skip: frozenset[Emotion] = frozenset(),
 ) -> list[tuple[Emotion, float]]:
     """Décomposition d'une position en émotions, par poursuite du résidu.
 
@@ -250,7 +258,8 @@ def blend(
     première, et toute position pure paraîtrait ambivalente. On mesure plutôt
     ce que la dominante **n'explique pas** : le poids d'une seconde entrée est
     nul sur une position pure et ne monte que si la position s'en écarte.
-    Avec ``home``, la décomposition porte sur l'écart au repos.
+    Avec ``home``, la décomposition porte sur l'écart au repos ; ``skip``
+    écarte des émotions candidates (comme ``felt``).
     """
     if top_k <= 0:
         return []
@@ -258,11 +267,11 @@ def blend(
     mag = norm(vec)
     if mag < 1e-6:
         return []
-    intensity = min(1.0, mag / MAX_ANCHOR_NORM) if home is None else felt(position, home)[1]
+    intensity = min(1.0, mag / MAX_ANCHOR_NORM) if home is None else felt(position, home, skip=skip)[1]
 
     candidates: list[tuple[Emotion, Vec3, float, float]] = []
     for emotion, anchor in ANCHORS.items():
-        if emotion is Emotion.NEUTRAL:
+        if emotion is Emotion.NEUTRAL or emotion in skip:
             continue
         direction = sub(anchor, home) if home is not None else anchor
         n = norm(direction)

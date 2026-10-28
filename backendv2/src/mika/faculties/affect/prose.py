@@ -80,7 +80,8 @@ def mood(m: MoodReading, p: AffectParams, current: str = "") -> str:
                       usual=FR[default])
     lingering = A.norm(m.fond) >= 0.6 * gap
     tail = " " + phrase("affect.mood_line.lingering") if lingering else ""
-    under = _under(A.blend(m.position, top_k=2, home=m.home), m.felt, ratio=0.4)
+    # pas de jalousie « en dessous » d'une humeur qu'aucune n'a poussée (``unpushed`` : la dominante l'a déjà dit)
+    under = _under(A.blend(m.position, top_k=2, home=m.home, skip=A.OBJECT_BOUND - {m.felt}), m.felt, ratio=0.4)
     return base + (f" {cause}" if cause else "") + tail + under
 
 
