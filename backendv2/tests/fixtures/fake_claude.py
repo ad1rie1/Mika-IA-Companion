@@ -12,6 +12,8 @@ est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 - ``say`` : le texte final (``{results}`` y reçoit les résultats des outils) ;
 - ``before`` : un texte que le modèle écrit d'abord, avant de chercher un outil (``ToolSearch``, que la CLI
   exécute elle-même) et de reprendre dans un second message — ``result`` ne porte que ce second message ;
+- ``split`` : livrer le texte final en deux blocs de texte, coupé à ce rang, sans appel d'outil entre eux
+  (la vraie CLI le fait parfois, coupé même dans un mot) — ``result`` ne porte que le second ;
 - ``fail`` : terminer par un résultat en erreur portant ce texte ;
 - ``sleep`` : rester bloqué N secondes avant de répondre (annulation) ;
 - ``quota`` : l'utilisation d'abonnement annoncée (``rate_limit_event``) ;
@@ -183,11 +185,14 @@ def main():
     m += 1
     event("message_start", message={"model": "fake-cc", **(
         {"id": f"msg_{m}", "usage": usage(m)} if scenario.get("usage") else {})})
-    out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": text}]}})
+    cut = scenario.get("split") or 0
+    pieces = [text[:cut], text[cut:]] if cut else [text]
+    for piece in pieces:
+        out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": piece}]}})
     event("message_delta", delta={"stop_reason": "end_turn"},
           **({"usage": usage(m, final=True)} if scenario.get("usage") else {}))
     event("message_stop")
-    out({"type": "result", "subtype": "success", "is_error": False, "result": text, "stop_reason": "end_turn",
+    out({"type": "result", "subtype": "success", "is_error": False, "result": pieces[-1], "stop_reason": "end_turn",
          "usage": {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 100,
                    "cache_creation_input_tokens": 20},
          "modelUsage": {"fake-cc": {}}, "total_cost_usd": 0.01})

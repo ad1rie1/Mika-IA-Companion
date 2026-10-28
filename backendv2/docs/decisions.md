@@ -25,7 +25,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
-| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157 |
+| Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
@@ -1363,6 +1363,17 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Seul un préambule court et fini (« je vérifie. », au plus `PREAMBLE_MAX`, 60 caractères) reste écarté, comme sur l'API.
 
 *Pourquoi :* au banc du profil (2026-10-28), le caractère de la tsundere, écrit en deux messages, a perdu ses quatre premières phrases (559 caractères au lieu de 1 100), et avec elles son masque, son trait le plus marqué, pour toute sa vie : un caractère écrit reste jusqu'au prochain changement de persona. Une réponse ordinaire pouvait perdre son début de la même façon.
+
+*Révisée par 0158.*
+
+### 0158 — Une réponse livrée en plusieurs blocs se recolle telle quelle
+
+- La CLI livre parfois un texte d'un seul tenant en plusieurs blocs de texte, coupé n'importe où, même dans un mot, et `result` n'en porte que le dernier. Sans appel d'outil entre eux, les blocs se recollent tels quels (`_add`), sans espace ni paragraphe.
+- La règle de 0157 (une phrase reprise, un début fini, un préambule écarté) ne vaut qu'entre deux passages qu'un appel d'outil sépare, relayé ou exécuté par la CLI (`ToolSearch`).
+
+*Pourquoi :* le caractère tronqué qui a motivé 0157 n'avait aucun outil : ce n'étaient pas deux messages, mais ce découpage. Recollé comme une phrase reprise, un mot prenait une espace (« la ch asse ») : 44 fois sur 1 064 longues réponses de la seconde passe et du caractère, dans les traces des bancs (2026-10-28). Coupé après un point, un début de moins de 60 caractères était jeté, et un début plus long devenait une bulle à part.
+
+*Révise 0157.*
 
 ## Sa voix, sa persona, la genèse
 

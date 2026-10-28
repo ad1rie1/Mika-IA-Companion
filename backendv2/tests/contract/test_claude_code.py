@@ -687,6 +687,27 @@ async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli
     assert halves == start + "\n\nSi on te prend en flagrant délit, tu attaques."
 
 
+async def test_an_answer_handed_in_two_blocks_is_rejoined_as_written(tmp_path, cli):
+    """La CLI livre parfois une réponse d'un seul tenant en deux blocs de texte, coupée n'importe où, et ``result``
+    n'en porte que le second. Recollée comme une phrase reprise après un outil, elle prenait une espace dans un mot
+    (« la ch asse », une longue réponse sur 25 au banc du profil, 2026-10-28), ou perdait un début fini : le
+    caractère de la tsundere, que l'ADR 0157 croyait écrit en deux messages. Sans appel d'outil entre eux, les
+    blocs se recollent tels quels."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+
+        async def said(call_id: str, say: str, cut: str) -> str:
+            req = LLMRequest(role="reply", call_id=call_id, system_stable=scenario(say=say, split=say.index(cut)),
+                             messages=(Message("user", "tu me le relis ?"),))
+            return (await be.complete(req)).text
+
+        word = await said("w-1#0", "demain. je ferai la chasse aux « humiliation »", "asse")
+        start = await said("w-2#0", "demain.\net tu me le montres avant d'envoyer", "\n")
+    assert word == "demain. je ferai la chasse aux « humiliation »"
+    assert start == "demain.\net tu me le montres avant d'envoyer"
+
+
 async def test_call_folders_live_outside_the_data_and_are_private(tmp_path, cli, monkeypatch):
     from mika.adapters.llm.claude_code import purge_stale, runtime_dir
 

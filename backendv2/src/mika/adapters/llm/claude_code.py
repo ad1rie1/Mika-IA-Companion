@@ -264,6 +264,8 @@ class _Run:
     current: str = ""
     #: les messages dont l'usage est déjà rendu
     reported: set[str] = field(default_factory=set)
+    #: un appel d'outil est passé depuis le dernier bloc de texte : le prochain ouvre un nouveau passage (``_add``)
+    resumed: bool = True
 
     def on_call(self, p: Pending) -> None:
         self.events.put_nowait(("call", p))
@@ -522,7 +524,7 @@ class ClaudeCodeBackend:
                 self._schedule_stop(call_id)
                 raise ClaudeCodeError(f"la CLI n'a rien dit en {self.turn_timeout_s:.0f} s") from None
             if kind == "text":
-                texts.append(value)
+                _add(texts, *value)
             elif kind == "wake":
                 continue
             elif kind == "call":
@@ -574,7 +576,7 @@ class ClaudeCodeBackend:
             if kind == "call":
                 batch.append(value)
             elif kind == "text":
-                texts.append(value)
+                _add(texts, *value)
             elif kind != "wake":
                 return kind, value
 
@@ -674,10 +676,13 @@ class ClaudeCodeBackend:
                 if not isinstance(block, Mapping):
                     continue
                 if block.get("type") == "text" and block.get("text"):
-                    run.events.put_nowait(("text", str(block["text"])))
-                elif block.get("type") == "tool_use" and (tool := _relayed(str(block.get("name") or ""))):
-                    run.announced.append((str(block.get("id") or ""), tool, block.get("input")))
-                    run.events.put_nowait(("wake", None))
+                    run.events.put_nowait(("text", (str(block["text"]), run.resumed)))
+                    run.resumed = False
+                elif block.get("type") == "tool_use":
+                    run.resumed = True  # le texte d'après reprend après un outil, relayé ou non : un autre passage
+                    if tool := _relayed(str(block.get("name") or "")):
+                        run.announced.append((str(block.get("id") or ""), tool, block.get("input")))
+                        run.events.put_nowait(("wake", None))
         elif kind == "user":
             # une réponse d'outil écrite par la CLI : pour un appel qu'elle a refusé elle-même, elle arrive sans
             # que le relais ait rien vu — on n'attend plus cet appel
@@ -838,32 +843,41 @@ def _tool(t: Any) -> Tool:
 
 #: ce qui clôt une phrase : un texte qui s'arrête là, avant une recherche d'outil, est un préambule fini
 _SENTENCE_END = ".!?…»\")"
-#: un préambule fini qu'on écarte (« je vérifie. », « Je regarde. ») est court ; au-delà, c'est le début de la réponse
-#: (ADR 0157)
-#: (banc du profil, 2026-10-28 : un caractère écrit en deux messages perdait ses quatre premières phrases, et avec elles
-#: le trait le plus marqué de la tsundere — pour toute sa vie)
+#: un préambule fini qu'on écarte avant un outil (« je vérifie. », « Je regarde. ») est court ; au-delà, c'est le
+#: début de la réponse (ADR 0157)
 PREAMBLE_MAX = 60
 
 
+def _add(texts: list[str], text: str, resumed: bool) -> None:
+    """Un bloc de texte lu en route. La CLI livre parfois un texte d'un seul tenant en plusieurs blocs, coupé
+    n'importe où, même dans un mot : sans appel d'outil depuis le bloc d'avant, il continue le passage tel quel ;
+    après un outil, il en ouvre un nouveau (ADR 0158)."""
+    if resumed or not texts:
+        texts.append(text)
+    else:
+        texts[-1] += text
+
+
 def answer(texts: Sequence[str], result: str) -> str:
-    """La réponse d'un tour. ``result`` ne porte que le dernier message de la CLI : quand le modèle s'est
-    interrompu au milieu d'une phrase pour chercher un outil (``ToolSearch``, que la CLI exécute elle-même) et
-    l'a reprise dans un second message, le début de la réponse se perdait (sonde réelle du 2026-10-09 :
-    « pas, et je ne connais pas ton équipe… »). Ce qui précède est rendu quand il s'arrête en pleine phrase, ou
-    quand c'est un vrai début fini (un second message, en paragraphe à part) ; un préambule court et fini
-    (« je vérifie. », ``PREAMBLE_MAX``) reste écarté, comme sur l'API."""
-    whole, tail = "".join(texts).rstrip(), result.strip()
-    if not tail or not whole.endswith(tail) or len(whole) == len(tail):
+    """La réponse d'un tour, depuis ses passages (``_add``). ``result`` ne porte que le dernier bloc de texte de
+    la CLI : le dernier passage est rendu entier. Quand le modèle s'est interrompu au milieu d'une phrase pour
+    chercher un outil (``ToolSearch``, que la CLI exécute elle-même) et l'a reprise ensuite, le début de la réponse
+    se perdait (sonde réelle du 2026-10-09 : « pas, et je ne connais pas ton équipe… ») : ce qui précède est rendu
+    quand il s'arrête en pleine phrase, ou quand c'est un vrai début fini (en paragraphe à part) ; un préambule
+    court et fini (« je vérifie. », ``PREAMBLE_MAX``) reste écarté, comme sur l'API."""
+    end, last = result.strip(), (texts[-1].strip() if texts else "")
+    if not end or not last.endswith(end):
         return result
-    before = whole[: len(whole) - len(tail)]
+    tail = result if last == end else last
+    before = "".join(texts[:-1])
     if not before.strip():
-        return result
+        return tail
     if before.rstrip()[-1] in _SENTENCE_END:
         if len(before.strip()) <= PREAMBLE_MAX:
-            return result
-        return before.rstrip() + "\n\n" + tail
+            return tail
+        return before.rstrip() + "\n\n" + last
     glue = "" if before[-1].isspace() else " "
-    return before + glue + tail
+    return before + glue + last
 
 
 def _relayed(name: str) -> str:
