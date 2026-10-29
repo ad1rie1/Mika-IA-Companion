@@ -182,7 +182,7 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 - Outils `go_to`, `interact` et `world_look`, en main en conversation. Ce qui l'entoure (« AUTOUR DE TOI ») est ce que lui rend `world_look` quand elle regarde ; ce n'est pas une section du prompt.
 - Le coucher et le bureau sont des réflexes (elle s'installe à son bureau pour travailler, sauf juste après avoir parlé à quelqu'un) ; chaque geste se conclut à son échéance, sans moteur.
 - Une opératrice l'édite (objets, archétypes, position d'un lieu), et elle remarque ce qu'on a changé chez elle, éveillée ou à son réveil.
-- Désœuvrée, elle s'occupe d'elle-même de ce qui nourrit ce qui lui manque, quelques fois par jour (`occupy_per_day`).
+- Désœuvrée, elle peut s'occuper d'elle-même dans sa chambre (`occupy_per_day`), mais par défaut jamais : sa journée, ce sont ses vraies activités (ADR 0160). Les gestes qu'on lui demande restent.
 
 **`place`** (ADR 0049, 0050) : vue de compatibilité — le type `place.moved` d'avant le monde et les faits `place.current`, `place.since` que lisent les écrans.
 
@@ -367,7 +367,7 @@ Les plugins ont la même forme que les facultés et une confiance restreinte : d
 - L'arbitre : `@f.propose(kinds, reasons=…)` pour les preuves, `@f.modulate` pour les modulations et vetos.
 - Les ressentis : `@f.appraisal`, `@f.feels`.
 - Le temps : `@f.process(name, wake_on=…, lane=…, deadline_s=…)`.
-- Les outils : `@f.tool(name, args=…, bundle=…, episodes=…, ends_loop=…, owner_only=…, when=…, fits=…)` (`when(audience)` ; `fits(audience, kind, frame)` quand l'offre dépend aussi du moment et de ce qu'elle vit, des lignes d'accès par exemple), `f.bundle(...)`, `@f.tool_source(famille)` pour des outils dynamiques.
+- Les outils : `@f.tool(name, args=…, bundle=…, episodes=…, ends_loop=…, owner_only=…, when=…, fits=…, needs=…)` (`when(audience)` ; `fits(audience, kind, frame)` quand l'offre dépend aussi du moment et de ce qu'elle vit, des lignes d'accès par exemple ; `needs` : le port sans lequel il ne fait rien, pas offert tant qu'il n'est pas configuré), `f.bundle(...)`, `@f.tool_source(famille)` pour des outils dynamiques.
 - Les droits : `@f.rights(clé, title=…, grants=…)`, un type de règles (ADR 0133) : ses tableaux en mots (`kernel.rights.RuleTable`) et ce qu'ils accordent à qui est en face (`Grant`).
 - Les effets : `@f.capability(name, preview=…)`, `@f.effect(type, lane=…)`, `projector(name, version, tier=…)`.
 - La console : `@f.inspect` (un onglet de fiche qui ne se montre que s'il a quelque chose à dire : `shown=`), `@f.subject`, `@f.search`, `@f.download`, `@f.action`, `@f.vital`, `@f.series`.

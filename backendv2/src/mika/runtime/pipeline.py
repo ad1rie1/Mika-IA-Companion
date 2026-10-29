@@ -773,7 +773,7 @@ class EpisodeRunner:
         """Les outils offerts (``tools.offer``, la seule porte), avec ce que la porte lit du registre (ADR 0134)."""
         if rights is None:
             rights, close = gate_of(self.mind.registry, frame)
-        return offer(self.mind.registry.tools, policy, kind, audience, only, frame, rights, close)
+        return offer(self.mind.registry.tools, policy, kind, audience, only, frame, rights, close, self.ports)
 
     @staticmethod
     async def _extra_pass(ep: _Live, fn: Callable[[], Awaitable[LoopResult]], *, label: str) -> LoopResult | Failed:

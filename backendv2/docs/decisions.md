@@ -22,7 +22,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
@@ -820,6 +820,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* seule, il ne se passait presque rien en elle, et deux minutes d'occupation effaçaient deux heures d'ennui.
 
+*Révisée par 0160.*
+
 ### 0100 — La matrice de personnalité : des curseurs en familles, des profils, des précisions
 
 - Le tempérament est une matrice : 28 curseurs de 0 à 1 en six familles, une humeur de fond, une réaction quand on la blesse (colère, tristesse, peur, repli) et une défense quand on la touche.
@@ -896,6 +898,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0107 (en partie : la colère partagée).*
 
+### 0160 — Sa journée, ce sont ses vraies activités
+
+- Elle ne s'occupe plus d'elle-même dans sa chambre : `occupy_per_day` vaut 0 par défaut. Ce qu'elle a fait de sa journée, ce sont ses vraies activités, celles qui laissent une trace : ce qu'elle a lu, cherché, avancé sur un projet, et ses conversations. Elles comblent ses besoins et tiennent l'ennui à distance (explorer, apprendre, travailler). Les gestes qu'on lui demande dans sa chambre restent, comme le sommeil.
+- Son portrait dit sa journée par ses vraies activités (ses flux, les nouvelles, internet, ses projets) ; plus d'arrosage, de fenêtre ni de ficus, et ses faits ne détaillent plus sa chambre.
+- Elle ne dessine que pour de vrai : l'outil `draw` n'est offert que si un fournisseur d'images est configuré. Un outil déclare le port sans lequel il ne fait rien (`needs`), et la porte d'offre (`runtime.tools.offer`) ne l'offre pas tant que ce port n'est pas prêt — la console, le prêt d'outils et le pipeline jugent pareil.
+
+*Pourquoi :* sur quatre semaines du banc du profil (2026-10-29), elle racontait les trois mêmes occupations, sans contenu (« j'ai beaucoup dessiné », « j'ai parlé à mon ficus », l'inventaire de sa chambre à « tu fais quoi quand je suis pas là »), et son journal disait « j'ai dessiné le matin… puis repris le dessin le soir » sans qu'aucun dessin n'existe. Une réplique notée à la main : « dessiner ? ».
+
+*Révise 0063 (en partie : `draw` toujours offert), 0098 (en partie : s'occuper seule), 0159 (en partie : sa chambre au banc).*
 ## Buts, projets, Forge et atelier
 
 ### 0005 — La Forge hors du processus
@@ -1118,6 +1129,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* le port d'images ne servait à rien, et un fichier qui met des minutes à naître demandait son chemin jusqu'au message qui l'emporte.
 
 *Révise 0062 (en partie).*
+
+*Révisée par 0160.*
 
 ### 0064 — Ses outils, et ceux qui viennent d'ailleurs (MCP)
 
@@ -1570,6 +1583,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* sur la semaine entière du banc du profil (2026-10-29), la Solaire était notée 5,3 et « fade » 30 fois sur 33 : ses brouillons n'avaient pas un point d'exclamation ni un emoji, et 36 diagnostics citaient le portrait, 11 les exemples. Après le portrait et les exemples : Réfléchie 7,0 → 7,2, Tsundere 6,9 → 7,3 en humain ; avec sa précision, la Solaire 5,5 → 6,5 à 6,9 sur deux semaines (4 et 10 messages sur 33 hors caractère au lieu de 18), et la Tsundere écrit 176 caractères par message au lieu de 298, sans perdre de note. Le juge comptait aussi son lit et son ficus pour une vie physique inventée, que sa persona et son monde lui donnent.
 
 *Révise 0138 (en partie : le portrait), 0156 (en partie : les exemples).*
+
+*Révisée par 0160.*
 
 ## Les clients, le fil, le monde
 

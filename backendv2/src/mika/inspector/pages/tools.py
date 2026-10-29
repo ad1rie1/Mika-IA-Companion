@@ -62,6 +62,7 @@ from mika.runtime.tools import (
     defers_tools,
     gate_of,
     offer,
+    ready,
 )
 from mika.vocab.access import NO
 from mika.vocab.episodes import Kind
@@ -141,7 +142,7 @@ def offered_in(ui: Any, s: Situation) -> dict[str, ToolSpec]:
     """Ce que la porte d'offre du pipeline lui donnerait dans cette situation, ses droits compris (ADR 0134)."""
     rights, close = gate_of(ui.kernel.registry, s.frame)
     return offer(ui.kernel.registry.tools, ui.kernel.runner.policies[s.kind], s.kind, s.audience, frame=s.frame,
-                 rights=rights, close=close)
+                 rights=rights, close=close, ports=ui.kernel.runner.ports)
 
 
 def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
@@ -152,13 +153,15 @@ def in_hand(ui: Any, policy: EpisodePolicy) -> frozenset[str] | None:
 
 
 def why_not(spec: ToolSpec, policy: EpisodePolicy, s: Situation, tools: Mapping[str, ToolSpec] | None = None,
-            rights: Any = None, close: Any = None) -> str:
+            rights: Any = None, close: Any = None, ports: Mapping[str, Any] | None = None) -> str:
     """Pourquoi la porte ne l'offre pas ici, en mots (vide : elle l'offre). Un test vérifie que ce récit et la
     porte disent la même chose, situation par situation."""
     if s.kind not in spec.episodes:
         return "pas prévu dans cette situation"
     if not admitted(policy.tool_bundles, spec.bundle):
         return "sa famille n'est pas prévue dans cette situation"
+    if spec.needs and ports is not None and not ready(ports.get(spec.needs)):
+        return f"« {spec.needs} » n'est pas configuré"
     if spec.when is not None or spec.fits is not None:
         try:
             ok = (spec.when is None or spec.when(s.audience) is True) and (
@@ -280,7 +283,7 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
     for s in situations(ui):
         policy = policies[s.kind]
         if spec.name not in offered_in(ui, s):
-            why = why_not(spec, policy, s, registry.tools, *gate_of(registry, s.frame))
+            why = why_not(spec, policy, s, registry.tools, *gate_of(registry, s.frame), ports=ui.kernel.runner.ports)
             where.append({"key": s.key, "label": s.label, "state": "none", "why": why})
             continue
         core = in_hand(ui, policy)

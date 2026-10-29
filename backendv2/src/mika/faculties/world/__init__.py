@@ -92,7 +92,8 @@ class WorldParams(BaseModel):
         label="S'occuper d'elle-même, par jour", group="S'occuper seule", lo=0, hi=8,
         help="Désœuvrée (l'ennui, la solitude que ses besoins lui font sentir), elle s'occupe d'elle-même dans sa "
              "chambre — dessiner, feuilleter un livre, regarder dehors, selon ce qui lui manque. Au plus autant de "
-             "fois par jour (0 : jamais d'elle-même).")] = 3
+             "fois par jour (0 : jamais d'elle-même). Par défaut jamais : ces occupations sans contenu tournaient en "
+             "boucle dans ce qu'elle racontait ; sa journée, ce sont ses vraies activités (ADR 0160).")] = 0
     occupy_spacing_min: Annotated[int, Knob(
         label="Pas plus souvent que toutes les (min)", group="S'occuper seule", lo=15, hi=720, step=5,
         help="Deux occupations qu'elle prend d'elle-même s'espacent d'au moins ce temps.")] = 120

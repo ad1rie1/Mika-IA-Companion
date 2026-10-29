@@ -285,7 +285,7 @@ def allowed(tools: Mapping[str, ToolSpec], spec: ToolSpec, audience: Audience, k
 
 def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audience: Audience,
           only: Any = None, frame: Any = None, rights: Rights | None = None,
-          close: Callable[[str], bool] | None = None) -> dict[str, ToolSpec]:
+          close: Callable[[str], bool] | None = None, ports: Mapping[str, Any] | None = None) -> dict[str, ToolSpec]:
     """Les outils offerts : les lots de la politique — restreints, quand le candidat le dit (``bundles`` :
     « goals,workshop »), à ceux-là seuls. Un lot est offert entier ou pas du tout, moins ce que ses droits ferment
     (ADR 0134) : pour un outil venu d'ailleurs, sa condition (``fits`` : les lignes de son service, de son projet) ;
@@ -293,7 +293,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
 
     La seule porte : le pipeline l'applique à chaque épisode, la console à des audiences de synthèse (« qui reçoit
     quoi ») — jamais une recopie. ``frame`` : ce qu'elle vit, pour une condition qui lit son journal ; ``rights``
-    et ``close`` : ce que ``gate_of`` lit du registre."""
+    et ``close`` : ce que ``gate_of`` lit du registre ; ``ports`` : ceux du noyau, pour un outil qui en attend un
+    configuré (``needs``, ADR 0160) — sans eux, la porte ne le juge pas."""
     bundles = policy.tool_bundles
     if only:
         bundles = frozenset(b for b in (x.strip() for x in str(only).split(",")) if b and admitted(policy.tool_bundles, b))
@@ -301,6 +302,8 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
     out = {}
     for name, spec in tools.items():
         if kind not in spec.episodes or not admitted(bundles, spec.bundle):
+            continue
+        if spec.needs and ports is not None and not ready(ports.get(spec.needs)):
             continue
         if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:
             continue
@@ -313,6 +316,14 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
                 continue
         out[name] = spec
     return out
+
+
+def ready(port: Any) -> bool:
+    """Un port là et configuré (``configured``, propriété ou méthode ; sans lui, sa présence suffit)."""
+    if port is None:
+        return False
+    flag = getattr(port, "configured", True)
+    return bool(flag() if callable(flag) else flag)
 
 
 def admitted(bundles: frozenset[str], bundle: str) -> bool:

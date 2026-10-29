@@ -125,7 +125,8 @@ def test_a_memory_is_felt_and_shared_with_whom_it_concerns_never_a_reason_to_wri
 def cx(*, curiosity=0.2, expression=0.2, asleep=False):
     facts = {"body.sleep": body_c.SleepPhase.DEEP_SLEEP if asleep else body_c.SleepPhase.AWAKE,
              "needs.needs": NS(curiosity=curiosity, expression=expression)}
-    return NS(params=WorldParams(), facts=NS(get=lambda key: facts[key.name]))
+    # s'occuper seule est coupé par défaut (ADR 0160) : ces tests règlent le mécanisme lui-même
+    return NS(params=WorldParams(occupy_per_day=3), facts=NS(get=lambda key: facts[key.name]))
 
 
 def felt(at=NOW, seq=100):

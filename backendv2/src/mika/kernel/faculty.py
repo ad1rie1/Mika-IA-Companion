@@ -218,6 +218,9 @@ class ToolSpec:
     #: il sait attendre un accord (un effet proposé, exécuté une fois accepté) : « ton accord » et « demande à la
     #: personne » se règlent pour lui ; sinon ces cases sont grisées (il agit dans la conversation même)
     deferrable: bool = False
+    #: le port sans lequel il ne fait rien (« imaging ») : pas offert tant que ce port n'est pas configuré — un
+    #: outil qui répondrait « je ne peux pas » ferait croire qu'elle sait le faire (ADR 0160)
+    needs: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -659,13 +662,14 @@ class Faculty(Generic[S, Pm]):
         fits: Callable[[Any, str, Any], bool] | None = None,
         acts: bool = False,
         deferrable: bool = False,
+        needs: str = "",
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits, acts=acts, deferrable=deferrable,
+                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs,
                 )
             )
             return fn

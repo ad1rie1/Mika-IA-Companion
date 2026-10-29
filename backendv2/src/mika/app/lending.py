@@ -113,7 +113,8 @@ class Lending:
         audience = self.audience(handle)
         registry, frame = self.kernel.mind.registry, self.kernel.mind.frame()
         rights, close = gate_of(registry, frame)
-        return lendable(offer(registry.tools, policy, Kind.REPLY, audience, frame=frame, rights=rights, close=close))
+        return lendable(offer(registry.tools, policy, Kind.REPLY, audience, frame=frame, rights=rights, close=close,
+                              ports=runner.ports))
 
     def offered(self, entry: Mapping[str, Any]) -> dict[str, ToolSpec]:
         """Les outils que ce point sert maintenant : ceux qu'il prête, parmi ce qu'il peut prêter."""

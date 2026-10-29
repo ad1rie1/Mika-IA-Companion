@@ -66,6 +66,14 @@ def test_the_grid_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: 
     client, live, _ = world
     kernel = live.kernel
     ui = SimpleNamespace(kernel=kernel)
+    # ses dessins seulement pour de vrai : sans fournisseur d'images configuré, « draw » n'est pas offert, et la
+    # console dit pourquoi (ADR 0160) ; ensuite, un fournisseur est là
+    account = next(s for s in page.situations(ui) if s.key == "compte")
+    rights, close = gate_of(kernel.registry, account.frame)
+    assert "draw" not in page.offered_in(ui, account)
+    assert "configuré" in page.why_not(kernel.registry.tools["draw"], kernel.runner.policies[account.kind], account,
+                                       kernel.registry.tools, rights, close, ports=kernel.runner.ports)
+    kernel.runner.ports["imaging"] = SimpleNamespace(configured=True)
     offers = {}
     for s in page.situations(ui):
         policy = kernel.runner.policies[s.kind]
@@ -74,7 +82,7 @@ def test_the_grid_and_its_reasons_say_what_the_pipeline_offers(world):  # noqa: 
         assert offered == kernel.runner._tools(policy, s.kind, s.audience, frame=s.frame), s.key
         rights, close = gate_of(kernel.registry, s.frame)
         for name, spec in kernel.registry.tools.items():
-            why = page.why_not(spec, policy, s, kernel.registry.tools, rights, close)
+            why = page.why_not(spec, policy, s, kernel.registry.tools, rights, close, ports=kernel.runner.ports)
             assert (why == "") == (name in offered), (s.key, name, why)
         offers[s.key] = offered
     # cibles d'intention : sa boîte, pour sa propriétaire en privé seulement ; ses dessins, pour qui a un compte
