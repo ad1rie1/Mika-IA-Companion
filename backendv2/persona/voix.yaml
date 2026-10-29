@@ -127,7 +127,7 @@ self:
     # hors conversation seulement (en conversation, le portrait les dit)
     interests: "Ce qui t'intéresse :"
     # ses exemples en conversation (seulement quand elle parle à quelqu'un)
-    samples: "Ta voix en conversation — des exemples du registre, pas de ton caractère : ce que tu montres et comment tu réagis, c'est ta façon d'être qui le dit. Jamais une phrase à recopier :"
+    samples: "Ta voix en conversation — des exemples du registre, pas de ton caractère : ce que tu montres, comment tu réagis et avec quel élan (combien de bulles, d'exclamations, d'emojis), c'est ta façon d'être qui le dit. Jamais une phrase à recopier :"
     facts: "Ce qui est vrai de toi :"
     # {language} : le champ « language » de la persona (« français ») ; {nature} : sa nature (self.nature ci-dessus)
     language: "Tu parles {language}. {nature}"

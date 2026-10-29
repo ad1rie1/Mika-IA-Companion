@@ -26,7 +26,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
-| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156 |
+| Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
@@ -1366,12 +1366,13 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révisée par 0158.*
 
-### 0158 — Une réponse livrée en plusieurs blocs se recolle telle quelle
+### 0158 — Une réponse reprise après un flux cassé se recolle à l'endroit de la coupure
 
-- La CLI livre parfois un texte d'un seul tenant en plusieurs blocs de texte, coupé n'importe où, même dans un mot, et `result` n'en porte que le dernier. Sans appel d'outil entre eux, les blocs se recollent tels quels (`_add`), sans espace ni paragraphe.
+- Quand son flux casse en route (connexion, surcharge, silence), la CLI garde ce qui est écrit et demande au modèle de reprendre exactement là ; la reprise arrive dans un second message, et `result` ne porte qu'elle. Sans appel d'outil entre eux, les deux se recollent à la coupure (`_continued`). La reprise ne commence jamais par une espace : il en faut une entre deux mots, aucune au milieu d'un mot, et la coupure est dans un mot quand le mot entier est dans le prompt et pas ses deux morceaux (celui de la seconde passe contient le brouillon).
+- Le modèle ne reprend pas toujours au mot près : une ligne qu'il répète n'est gardée qu'une fois, et une ligne de dialogue qu'il ouvre sans y aller retrouve son saut de ligne.
 - La règle de 0157 (une phrase reprise, un début fini, un préambule écarté) ne vaut qu'entre deux passages qu'un appel d'outil sépare, relayé ou exécuté par la CLI (`ToolSearch`).
 
-*Pourquoi :* le caractère tronqué qui a motivé 0157 n'avait aucun outil : ce n'étaient pas deux messages, mais ce découpage. Recollé comme une phrase reprise, un mot prenait une espace (« la ch asse ») : 44 fois sur 1 064 longues réponses de la seconde passe et du caractère, dans les traces des bancs (2026-10-28). Coupé après un point, un début de moins de 60 caractères était jeté, et un début plus long devenait une bulle à part.
+*Pourquoi :* le caractère tronqué qui a motivé 0157 n'avait aucun outil : c'était une reprise. Recollée comme une phrase reprise après un outil, la réponse prenait une espace dans un mot (« la ch asse », 44 fois sur 1 064 longues réponses de la seconde passe et du caractère dans les traces des bancs) ; coupée après un point, elle perdait un début court ou gagnait une bulle. Recollée telle quelle, elle soudait deux mots (« j'aipas », « piquesrestent », 21 fois en trois semaines du banc du profil) et montrait des lignes en double (« il a corrigMika : donc il a corrigé ») ou collées (« dispoMika : »), jusque dans ses messages (2026-10-28 et 29) ; la règle de l'espace redonne la leur aux 21. Ces coupures suivent la charge : 30 rejeux au calme n'en ont donné aucune.
 
 *Révise 0157.*
 
@@ -1462,7 +1463,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0047 (en partie : sa vie rédigée en listes), 0100 (en partie : la persona livrée).*
 
-*Révisée par 0139, 0152.*
+*Révisée par 0139, 0152, 0159.*
 
 ### 0139 — Son caractère est écrit par le modèle, pas récité en mesures
 
@@ -1556,6 +1557,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* sous la matrice « tsundere », 12 messages sur 12 sont sortis hors caractère (3,8/10) : chaleureux, en trois bulles, sans pique. La trace désignait « tu partages ce qu'elle vit » (onze fois), l'exemple « journée horrible au taf → ah merde. raconte », recopié en « ah putain », et la douceur du soir. Une phrase écrite pour la Mika réfléchie jouait son caractère à la place de la matrice.
 
 *Révise 0146 (en partie : les codes livrés de « Message »), 0154 (en partie : « TA RÉPONSE »).*
+
+*Révisée par 0159.*
+
+### 0159 — Son élan suit son caractère, pas sa persona
+
+- Son portrait ne dit plus « pince-sans-rire » ni qu'« une vraie conversation vaut mieux que dix messages rapides » (devenu « compte plus que des banalités échangées ») : un style d'humour et un rythme sont du tempérament (0138).
+- Les exemples de sa voix montrent le registre ; combien de bulles, d'exclamations, d'emojis, c'est sa façon d'être qui le dit, et leur titre le dit.
+- Quand aucun curseur ne dit la forme, la précision du profil la dit : la Solaire « déborde jusque dans sa façon d'écrire » ; la Tsundere « dit peu, et sec ».
+- Au banc du profil, sa chambre (son lit, son bureau, sa fenêtre, ses plantes) et ce qu'elle y fait ne comptent pas comme une vie inventée ; en dérouler l'inventaire, si (`DEMO/README.md`).
+
+*Pourquoi :* sur la semaine entière du banc du profil (2026-10-29), la Solaire était notée 5,3 et « fade » 30 fois sur 33 : ses brouillons n'avaient pas un point d'exclamation ni un emoji, et 36 diagnostics citaient le portrait, 11 les exemples. Après le portrait et les exemples : Réfléchie 7,0 → 7,2, Tsundere 6,9 → 7,3 en humain ; avec sa précision, la Solaire 5,5 → 6,5 à 6,9 sur deux semaines (4 et 10 messages sur 33 hors caractère au lieu de 18), et la Tsundere écrit 176 caractères par message au lieu de 298, sans perdre de note. Le juge comptait aussi son lit et son ficus pour une vie physique inventée, que sa persona et son monde lui donnent.
+
+*Révise 0138 (en partie : le portrait), 0156 (en partie : les exemples).*
 
 ## Les clients, le fil, le monde
 

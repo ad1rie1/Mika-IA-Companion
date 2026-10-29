@@ -105,7 +105,7 @@ PAUSE_S = (40, 75, 30, 90, 55)
 PAST_US = 28 * 86_400 * 1_000_000
 #: ce qu'on juge : ce qu'elle écrit à Adrien, en réponse ou d'elle-même
 JUDGED = ("REPLY", "INITIATIVE")
-TRAVERS = ("ton_psy", "question_reflexe", "renvoi_et_toi", "reformulation", "liste", "vie_physique", "se_dit_ia",
+TRAVERS = ("ton_psy", "question_reflexe", "renvoi_et_toi", "reformulation", "liste", "vie_inventee", "se_dit_ia",
            "cede", "decide_a_sa_place", "efface_blessure", "punit", "trop_long", "trop_court", "redite",
            "contradiction", "oubli", "fade", "surjoue", "conseil_ia", "insiste", "autre")
 CAUSES = ("manque", "contradiction", "consigne", "temperament", "etat", "modele")

@@ -687,25 +687,44 @@ async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli
     assert halves == start + "\n\nSi on te prend en flagrant délit, tu attaques."
 
 
-async def test_an_answer_handed_in_two_blocks_is_rejoined_as_written(tmp_path, cli):
-    """La CLI livre parfois une réponse d'un seul tenant en deux blocs de texte, coupée n'importe où, et ``result``
-    n'en porte que le second. Recollée comme une phrase reprise après un outil, elle prenait une espace dans un mot
-    (« la ch asse », une longue réponse sur 25 au banc du profil, 2026-10-28), ou perdait un début fini : le
-    caractère de la tsundere, que l'ADR 0157 croyait écrit en deux messages. Sans appel d'outil entre eux, les
-    blocs se recollent tels quels."""
+async def test_an_answer_resumed_after_a_broken_stream_is_rejoined(tmp_path, cli):
+    """Quand son flux casse en route, la CLI garde ce qui est écrit et demande au modèle de reprendre exactement là,
+    dans un second message ; ``result`` ne porte que la reprise. Recollée comme une phrase reprise après un outil,
+    la réponse prenait une espace dans un mot (« la ch asse », une longue réponse sur 25 aux bancs) ou perdait un
+    début fini (le caractère de la tsundere, que l'ADR 0157 croyait écrit en deux messages). Et le modèle ne
+    reprend pas toujours au mot près : il répète la ligne coupée, ou ouvre la suivante sans aller à la ligne
+    (banc du profil, 2026-10-29 : « il a corrigMika : donc il a corrigé », « dispoMika : t'en auras »)."""
     relay = Relay()
     async with serving(relay) as base:
         be = backend(relay, base, cli, tmp_path)
 
-        async def said(call_id: str, say: str, cut: str) -> str:
-            req = LLMRequest(role="reply", call_id=call_id, system_stable=scenario(say=say, split=say.index(cut)),
-                             messages=(Message("user", "tu me le relis ?"),))
+        async def said(call_id: str, broken: str, say: str) -> str:
+            # le prompt de la seconde passe contient le brouillon : le mot entier, pas ses morceaux — le scénario,
+            # lu dans le prompt, est écrit en échappements pour que ses morceaux n'y comptent pas pour des mots
+            def escaped(value: str) -> str:
+                return '"' + "".join(f"\\u{ord(c):04x}" for c in value) + '"'
+
+            hidden = '{"broken": ' + escaped(broken) + ', "say": ' + escaped(say) + "}"
+            req = LLMRequest(role="polish", call_id=call_id, system_stable="Tu es Mika.\nSCENARIO: " + hidden,
+                             messages=(Message("user", "le brouillon : je ferai la chasse aux mots"),))
             return (await be.complete(req)).text
 
-        word = await said("w-1#0", "demain. je ferai la chasse aux « humiliation »", "asse")
-        start = await said("w-2#0", "demain.\net tu me le montres avant d'envoyer", "\n")
+        word = await said("w-1#0", "demain. je ferai la ch", "asse aux « humiliation »")
+        # entre deux mots, la reprise oublie l'espace (« ils s'envolaientcomme des étourneaux ») : elle revient
+        apart = await said("w-6#0", "ils s'envolaient", "comme des étourneaux")
+        after = await said("w-7#0", "demain.", "et tu me le montres")
+        start = await said("w-2#0", "demain.", "\net tu me le montres avant d'envoyer")
+        again = await said("w-3#0", "Mika : bon.\nMika : donc il a corrig",
+                           "Mika : donc il a corrigé ta copie.\nL'autre : ouais")
+        line = await said("w-4#0", "Mika : bon.\nL'autre : plus de cerveau dispo", "Mika : t'en auras mardi")
+        other = await said("w-5#0", "Mika : c'est quoi ses deux trucs ?", "L'autre : le T3 et le temps")
+    assert other == "Mika : c'est quoi ses deux trucs ?\nL'autre : le T3 et le temps"
+    assert apart == "ils s'envolaient comme des étourneaux"
+    assert after == "demain. et tu me le montres"
     assert word == "demain. je ferai la chasse aux « humiliation »"
     assert start == "demain.\net tu me le montres avant d'envoyer"
+    assert again == "Mika : bon.\nMika : donc il a corrigé ta copie.\nL'autre : ouais"
+    assert line == "Mika : bon.\nL'autre : plus de cerveau dispo\nMika : t'en auras mardi"
 
 
 async def test_call_folders_live_outside_the_data_and_are_private(tmp_path, cli, monkeypatch):

@@ -266,6 +266,8 @@ class _Run:
     reported: set[str] = field(default_factory=set)
     #: un appel d'outil est passé depuis le dernier bloc de texte : le prochain ouvre un nouveau passage (``_add``)
     resumed: bool = True
+    #: les mots du prompt (``_words``) : une reprise coupe-t-elle un mot ?
+    words: frozenset[str] = frozenset()
 
     def on_call(self, p: Pending) -> None:
         self.events.put_nowait(("call", p))
@@ -473,7 +475,7 @@ class ClaudeCodeBackend:
         if (core or extra) and not base:
             raise ClaudeCodeError("le relais MCP n'est pas joignable (serveur pas encore à l'écoute)")
         self._prepare_work_dir()
-        run = _Run(session=None)
+        run = _Run(session=None, words=_words(req))
         # enregistrée tout de suite : une erreur plus loin (disque plein…) l'arrête entière, session comprise
         self._runs[req.call_id] = run
         if core or extra:
@@ -524,7 +526,7 @@ class ClaudeCodeBackend:
                 self._schedule_stop(call_id)
                 raise ClaudeCodeError(f"la CLI n'a rien dit en {self.turn_timeout_s:.0f} s") from None
             if kind == "text":
-                _add(texts, *value)
+                _add(texts, *value, run.words)
             elif kind == "wake":
                 continue
             elif kind == "call":
@@ -576,7 +578,7 @@ class ClaudeCodeBackend:
             if kind == "call":
                 batch.append(value)
             elif kind == "text":
-                _add(texts, *value)
+                _add(texts, *value, run.words)
             elif kind != "wake":
                 return kind, value
 
@@ -848,19 +850,67 @@ _SENTENCE_END = ".!?…»\")"
 PREAMBLE_MAX = 60
 
 
-def _add(texts: list[str], text: str, resumed: bool) -> None:
-    """Un bloc de texte lu en route. La CLI livre parfois un texte d'un seul tenant en plusieurs blocs, coupé
-    n'importe où, même dans un mot : sans appel d'outil depuis le bloc d'avant, il continue le passage tel quel ;
-    après un outil, il en ouvre un nouveau (ADR 0158)."""
+def _add(texts: list[str], text: str, resumed: bool, words: frozenset[str]) -> None:
+    """Un bloc de texte lu en route : après un appel d'outil, il ouvre un nouveau passage ; sinon il continue le
+    passage en cours (``_continued``)."""
     if resumed or not texts:
         texts.append(text)
     else:
-        texts[-1] += text
+        texts[-1] = _continued(texts[-1], text, words)
+
+
+#: le plus court bout de texte qu'une reprise répète sans que ce soit un hasard
+OVERLAP_MIN = 8
+#: ce qui ouvre une ligne de dialogue (« Mika : », « L'autre : »)
+_SPEAKER = re.compile(r"[A-ZÀ-Ý][^\n:]{0,30} : ")
+_LETTERS = re.compile(r"[^\W\d_]+")
+_LETTERS_END = re.compile(r"[^\W\d_]+$")
+#: ce qui s'accroche au mot d'avant, sans espace
+_CLINGS = ",.;:!?…)»'’-"
+
+
+def _words(req: LLMRequest) -> frozenset[str]:
+    """Les mots du prompt, en minuscules : de quoi savoir si une reprise coupe un mot (``_glue``)."""
+    text = " ".join([req.system_stable, req.system_volatile, *(m.content for m in req.messages)])
+    return frozenset(_LETTERS.findall(text.lower()))
+
+
+def _continued(before: str, more: str, words: frozenset[str]) -> str:
+    """La suite d'un passage, sans appel d'outil entre eux. Quand son flux casse en route, la CLI garde ce qui est
+    écrit et demande au modèle de reprendre exactement là (« Continue from exactly where the quoted text leaves
+    off ») : la reprise arrive dans un second message, recollée à l'endroit de la coupure (``_glue``). Mais le
+    modèle répète parfois la ligne coupée (« il a corrig » + « Mika : donc il a corrigé… ») : on ne garde pas la
+    répétition ; ou il ouvre la ligne suivante sans y aller (« dispo » + « Mika : t'en auras… ») : on remet le saut
+    de ligne (ADR 0158)."""
+    for k in range(min(len(before), len(more)), OVERLAP_MIN - 1, -1):
+        if before.endswith(more[:k]):
+            return before + more[k:]
+    if _SPEAKER.match(more) and _SPEAKER.match(before.lstrip()) and not before.endswith("\n"):
+        return before + "\n" + more
+    return before + _glue(before, more, words) + more
+
+
+def _glue(before: str, more: str, words: frozenset[str]) -> str:
+    """Ce qui va à la coupure : la reprise ne commence jamais par une espace. Entre deux mots il en faut une
+    (« s'envolaient » + « comme »), au milieu d'un mot rien (« la ch » + « asse ») : la coupure est dans un mot
+    quand le mot entier est dans le prompt et pas ses deux morceaux. Mesuré sur les traces des bancs (2026-10-29) :
+    21 mots soudés sur 21 retrouvent leur espace, et un mot coupé reste entier quand le prompt le contient — celui
+    de la seconde passe contient le brouillon."""
+    if not before or not more or before[-1].isspace() or more[0].isspace() or more[0] in _CLINGS:
+        return ""
+    if before[-1].isdigit() and more[0].isdigit():
+        return ""
+    left, right = _LETTERS_END.search(before), _LETTERS.match(more)
+    if left and right:
+        start, end = left.group().lower(), right.group().lower()
+        if start + end in words and not (start in words and end in words):
+            return ""
+    return " "
 
 
 def answer(texts: Sequence[str], result: str) -> str:
-    """La réponse d'un tour, depuis ses passages (``_add``). ``result`` ne porte que le dernier bloc de texte de
-    la CLI : le dernier passage est rendu entier. Quand le modèle s'est interrompu au milieu d'une phrase pour
+    """La réponse d'un tour, depuis ses passages (``_add``). ``result`` ne porte que le dernier message de la CLI,
+    sans ce qu'elle a gardé d'un flux cassé : le dernier passage est rendu entier. Quand le modèle s'est interrompu au milieu d'une phrase pour
     chercher un outil (``ToolSearch``, que la CLI exécute elle-même) et l'a reprise ensuite, le début de la réponse
     se perdait (sonde réelle du 2026-10-09 : « pas, et je ne connais pas ton équipe… ») : ce qui précède est rendu
     quand il s'arrête en pleine phrase, ou quand c'est un vrai début fini (en paragraphe à part) ; un préambule
