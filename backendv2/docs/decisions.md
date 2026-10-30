@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162 |
@@ -1192,7 +1192,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* rien ne permettait de lui brancher un serveur MCP, ni de voir au même endroit tout ce qu'elle peut faire.
 
-*Révisée par 0066, 0128.*
+*Révisée par 0066, 0128, 0163.*
 
 ### 0066 — Chercher sur le web : un plugin système qui apporte son serveur MCP
 
@@ -1204,7 +1204,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* sans outil pour aller sur le web, elle annonçait regarder les nouvelles puis inventait l'actualité.
 
-*Révise 0064 (en partie). Révisée par 0105, 0131.*
+*Révise 0064 (en partie). Révisée par 0105, 0131, 0163.*
 
 ### 0068 — Les réveils par API
 
@@ -1349,6 +1349,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Sans tri (au-delà des messages triés par passage, quota, panne), le repli estime l'importance et la réponse attendue, jamais une émotion.
 
 *Pourquoi :* le modèle lisait chaque message mais ne pouvait dire que six émotions, toutes tenues sous 0,2 par le code, et le repli du courrier posait « curieuse » sur tout mail ; une insulte ne pouvait pas la fâcher (audit des garde-fous du 2026-10-27).
+
+### 0163 — Ce qu'un service rend, elle le lit entier : seule la borne de l'épisode le coupe
+
+- « Réponse lue », le réglage de chaque serveur MCP (4 000 caractères par défaut, 20 000 au plus) et celui du serveur web (8 000), est retiré. Une configuration gardée qui le porte se lit sans lui (`RETIRED` dans `adapters/mcp/config.py`, `retired_params` du plugin `web`).
+- L'outil d'un service rend la réponse entière, sans ses caractères invisibles (`ports.preprocess.visible`) ; la boucle la cite une seule fois et la borne à ce que l'épisode lit (`EpisodePolicy.outside_chars` : 24 000 caractères en conversation, 120 000 en mode pro et en projet), coupée à une frontière.
+- La trace, et l'écran du mode pro qui la montre, gardent la réponse telle quelle (ni citée ni désamorcée), bornée comme toute trace (4 096 caractères) ; le modèle, lui, la lit jusqu'à la borne de l'épisode, ses tableaux et son JSON lisibles.
+- Une réponse rendue après un accord (une carte, l'opérateur) se montre dans sa section autant qu'on en garde (8 000 caractères, au lieu de 2 000), pour un service comme pour une app de la Forge.
+- Reste le contexte déclaré du fournisseur (« Contexte (jetons) », ADR 0136), qui abrège les résultats d'outils quand la requête entière n'y tient plus.
+
+*Pourquoi :* quatre devis en JSON dépassaient déjà 4 000 caractères, coupés au milieu d'un mot, même en mode pro qui devait en lire 120 000 ; la réponse était aussi citée deux fois, ce qui cassait les tableaux. Claude Code laisse 25 000 jetons à un outil MCP.
+
+*Révise 0064 (en partie), 0066 (en partie).*
 
 ## Les fournisseurs de modèles
 
