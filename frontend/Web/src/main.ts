@@ -339,6 +339,12 @@ async function init() {
   // identity — or a second account on the same browser — kept the previous
   // person's conversation on screen under a new name.
   const chatOverlay = new ChatOverlay(ws, effectivePersonId);
+  // En mode pro, le travail prend tout l'écran et la vie intérieure se replie
+  // (elle revient comme elle était en sortant du mode).
+  chatOverlay.onProModeChange((on) => {
+    document.getElementById("app")?.classList.toggle("pro-mode", on);
+    innerLifePanel.setProMode(on);
+  });
   // Approving a project action needs an operator account (the server answers
   // 403 otherwise). With auth disabled server-side nothing is gated.
   innerLifePanel.setCanApprove(!auth.authenticated || auth.operator === true);

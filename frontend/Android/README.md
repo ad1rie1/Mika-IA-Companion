@@ -21,8 +21,10 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **Le mode pro** (ADR 0116), pour une opératrice : la pastille « Pro » dans le champ (retenue sur le téléphone)
   envoie le message en mode pro (`chat.mode`). Pendant qu'elle travaille, une carte montre ses outils en direct
   (trames `tool` : en cours, ✓ ou ✗, durée ; dépliables en texte brut), jamais gardée en base ; elle se replie au-dessus
-  de la réponse, une seule bulle en Markdown que sa voix ne lit pas. L'historique montre la ligne de ses outils. Une
-  réponse depuis une notification part toujours en message ordinaire.
+  de la réponse, une seule bulle en Markdown (tableaux compris) que sa voix ne lit pas. L'historique montre la ligne
+  de ses outils. Pastille allumée, le travail prend tout l'écran : Mika quitte le fond (sa 3D ne tourne plus, son
+  visage reste dans la barre), le fil n'a plus de bande sous son visage, ses réponses et ses cartes prennent toute la
+  largeur, en texte plus serré. Une réponse depuis une notification part toujours en message ordinaire.
 - **Les cartes d'accord** (ADR 0064) : quand Mika veut appeler un service extérieur et que c'est à toi d'en
   décider, une carte apparaît au-dessus de la barre de saisie — ce qu'elle veut faire, **exactement ce qui partira**
   (en texte brut, à chasse fixe, jamais interprété), le compte à rebours (« expire dans 4 min ») et deux boutons,

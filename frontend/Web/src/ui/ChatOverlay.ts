@@ -285,6 +285,9 @@ export class ChatOverlay {
    */
   private proToggle: HTMLButtonElement | null;
   private proPreferred: boolean;
+  /** Ceux qui suivent le mode pro (l'écran entier), et le dernier état annoncé. */
+  private proModeListeners: Array<(on: boolean) => void> = [];
+  private proModeAnnounced = false;
   private readonly basePlaceholder: string;
   /**
    * Ses cartes de travail en direct (voir toolActivity.ts) — en mémoire
@@ -456,6 +459,12 @@ export class ChatOverlay {
     return this.operator && this.proPreferred;
   }
 
+  /** Suivre le mode pro : tout de suite l'état présent, puis chaque changement. */
+  onProModeChange(cb: (on: boolean) => void): void {
+    this.proModeListeners.push(cb);
+    cb(this.proMode);
+  }
+
   /**
    * L'interrupteur « Pro » (ADR 0116), visible pour une opératrice seulement,
    * et le champ qui le montre clairement quand il est allumé : un autre
@@ -472,6 +481,12 @@ export class ChatOverlay {
     }
     this.inputEl.classList.toggle("pro", on);
     this.inputEl.placeholder = on ? PRO_PLACEHOLDER : this.basePlaceholder;
+    if (on !== this.proModeAnnounced) {
+      this.proModeAnnounced = on;
+      for (const cb of this.proModeListeners) cb(on);
+      // le fil change de hauteur : on garde sous les yeux le dernier message
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
   }
 
   /** Le menu ⚙️ de la saisie : ses liens vers la console pour une opératrice,

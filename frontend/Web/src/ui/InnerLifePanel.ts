@@ -14,7 +14,8 @@
  * Seule exception, l'approbation/refus d'une action en attente, qui est un
  * POST HTTP (via ``postJson``) — le backend répond par un
  * ``inner_state_update`` qui repeint la section. Le panneau peut être replié
- * (clic sur le header) pour libérer l'écran.
+ * (clic sur le header) pour libérer l'écran ; le mode pro le replie tant
+ * qu'il dure (``setProMode``).
  */
 
 import type {
@@ -156,6 +157,11 @@ export class InnerLifePanel {
   private pendingEl: HTMLElement;
   private activitySectionEl: HTMLElement;
   private activityEl: HTMLElement;
+  private headerEl: HTMLElement;
+  private bodyEl: HTMLElement;
+  private toggleEl: HTMLElement;
+  /** Replié ou non avant que le mode pro ne le replie ; `null` hors mode pro. */
+  private foldedBeforePro: boolean | null = null;
 
   /** Son occupation montrée, relue tant qu'elle dure (ACTIVITY_REFRESH_MS). */
   private activity: InnerStateActivity | null = null;
@@ -259,24 +265,37 @@ export class InnerLifePanel {
     this.activityEl = this.root.querySelector(".il-activity-body")!;
 
     // Collapse/expand on header click
-    const header = this.root.querySelector(".il-header") as HTMLElement;
-    const body = this.root.querySelector(".il-body") as HTMLElement;
-    const toggle = this.root.querySelector(".il-toggle") as HTMLElement;
-    header.addEventListener("click", () => {
-      const hidden = body.hasAttribute("hidden");
-      if (hidden) {
-        body.removeAttribute("hidden");
-        header.setAttribute("aria-expanded", "true");
-        toggle.textContent = "▾";
-      } else {
-        body.setAttribute("hidden", "");
-        header.setAttribute("aria-expanded", "false");
-        toggle.textContent = "▸";
-      }
-    });
+    this.headerEl = this.root.querySelector(".il-header")!;
+    this.bodyEl = this.root.querySelector(".il-body")!;
+    this.toggleEl = this.root.querySelector(".il-toggle")!;
+    this.headerEl.addEventListener("click", () => this.setFolded(!this.folded));
   }
 
   // ── Public API ──────────────────────────────────────────────
+
+  /**
+   * Le mode pro prend tout l'écran : le panneau se replie tant qu'il dure (on
+   * peut toujours le rouvrir), puis revient comme on l'avait laissé.
+   */
+  setProMode(on: boolean): void {
+    if (on && this.foldedBeforePro === null) {
+      this.foldedBeforePro = this.folded;
+      this.setFolded(true);
+    } else if (!on && this.foldedBeforePro !== null) {
+      this.setFolded(this.foldedBeforePro);
+      this.foldedBeforePro = null;
+    }
+  }
+
+  private get folded(): boolean {
+    return this.bodyEl.hidden;
+  }
+
+  private setFolded(folded: boolean): void {
+    this.bodyEl.hidden = folded;
+    this.headerEl.setAttribute("aria-expanded", String(!folded));
+    this.toggleEl.textContent = folded ? "▸" : "▾";
+  }
 
   setEmotionBlend(blend: EmotionBlend, intensity: number) {
     if (!blend || blend.length === 0) {

@@ -516,6 +516,27 @@
       .chat-bubble.pro tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
       .chat-bubble.pro .md-center { text-align: center; }
       .chat-bubble.pro .md-right { text-align: right; }
+      /* Le mode pro allumé : le travail prend tout l'écran, sur un fond qui
+         cache la pièce, en une colonne de lecture centrée. La vie intérieure,
+         repliée (main.ts), remonte au-dessus et se rouvre d'un clic. */
+      #app.pro-mode #chat-container {
+        top: 0;
+        max-height: none;
+        z-index: 5;
+        background: rgba(12, 13, 28, 0.95);
+        pointer-events: auto;
+      }
+      #app.pro-mode #chat-container > * {
+        width: 100%;
+        max-width: 1100px;
+        margin-left: auto;
+        margin-right: auto;
+        box-sizing: border-box;
+      }
+      #app.pro-mode #chat-messages { padding-top: 64px; }
+      #app.pro-mode .chat-bubble.vtuber.pro { max-width: min(100%, 960px); }
+      #app.pro-mode #inner-life-panel { top: 12px; z-index: 12; }
+      #app.pro-mode #identity-bar, #app.pro-mode #emotion-display { visibility: hidden; }
       /* Relue après un rechargement (sa carte ne survit pas) : les outils
          dont elle s'est servie, une ligne discrète au-dessus de la réponse. */
       .chat-tools-line {
@@ -1266,6 +1287,8 @@
           font-size: 12px;
         }
         #chat-container { max-height: 50%; }
+        #app.pro-mode #inner-life-panel { top: 40px; }
+        #app.pro-mode #chat-messages { padding-top: 88px; }
         .chat-bubble { max-width: 85%; font-size: 13px; }
         .chat-bubble.vtuber.pro, .work-card, .chat-tools-line { max-width: 100%; width: auto; }
         #chat-input-container { padding: 8px 10px; }

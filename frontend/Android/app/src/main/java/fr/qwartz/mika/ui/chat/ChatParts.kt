@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -277,6 +278,8 @@ internal fun ChatConversation(
     stage: StageLink? = null,
     /** Ce qu'un refus a dit d'un avis sur une de ses réponses, par message (ADR 0113). */
     verdictErrors: Map<Long, String> = emptyMap(),
+    /** Le mode pro (ADR 0116) : un maximum sur l'écran — ses réponses et ses cartes sur toute la largeur, plus serrées. */
+    wide: Boolean = false,
 ) {
     if (items.isEmpty()) {
         // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
@@ -339,7 +342,12 @@ internal fun ChatConversation(
             state = listState,
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = if (stage != null) FADE_HEIGHT else 8.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(
+                start = if (wide) 6.dp else 12.dp,
+                end = if (wide) 6.dp else 12.dp,
+                top = if (stage != null) FADE_HEIGHT else 8.dp,
+                bottom = 8.dp,
+            ),
             // Toute la hauteur : un fil court part du bas, comme dans une messagerie (sinon il se colle en
             // haut — sur son visage quand elle est en fond).
             modifier = Modifier
@@ -361,12 +369,13 @@ internal fun ChatConversation(
                             onSkip = { stage?.track?.skip(item.key) },
                             operator = operator,
                             verdictError = item.message.id?.let { verdictErrors[it] },
+                            wide = wide,
                         )
                         is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
                         is ChatItem.Looked -> LookedChip(item, zone, overPortrait)
                         is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
                         is ChatItem.SystemNote -> Centered(item.text, overPortrait)
-                        is ChatItem.Work -> WorkCardView(item, overPortrait)
+                        is ChatItem.Work -> WorkCardView(item, overPortrait, wide)
                         ChatItem.Typing -> TypingBubble()
                     }
                 }
@@ -577,6 +586,8 @@ private fun Bubble(
     /** Une opératrice : sous ses réponses, son avis (ADR 0113). */
     operator: Boolean = false,
     verdictError: String? = null,
+    /** Le mode pro : une réponse pro sur toute la largeur, en texte plus serré. */
+    wide: Boolean = false,
 ) {
     val turn = utterance?.let { rememberTurn(it) } ?: Turn.SAID
     // comme une messagerie : rien tant qu'elle n'y est pas, puis « écrit… », puis la bulle d'un coup
@@ -609,7 +620,7 @@ private fun Bubble(
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
-            Modifier.fillMaxWidth(if (proReply) 0.96f else 0.85f),
+            Modifier.fillMaxWidth(if (proReply) (if (wide) 1f else 0.96f) else 0.85f),
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
         ) {
             Surface(shape = shape, color = container) {
@@ -641,7 +652,9 @@ private fun Bubble(
                             },
                     ) {
                         if (body.isNotEmpty()) {
-                            if (proReply) {
+                            if (proReply && wide) {
+                                ProvideTextStyle(MaterialTheme.typography.bodyMedium) { ProMarkdownText(body, content) }
+                            } else if (proReply) {
                                 ProMarkdownText(body, content)
                             } else {
                                 InlineMarkupText(body, content)
@@ -779,7 +792,7 @@ private fun ProMark(color: Color) {
  * de sa réponse, elle se résume (« 4 outils · 3,2 s ») et se déplie au toucher. En mémoire seulement.
  */
 @Composable
-private fun WorkCardView(item: ChatItem.Work, overPortrait: Boolean) {
+private fun WorkCardView(item: ChatItem.Work, overPortrait: Boolean, wide: Boolean = false) {
     val card = item.card
     // Repliée quand sa réponse arrive : l'état se refait à ce moment-là.
     var open by rememberSaveable(card.key, item.folded) { mutableStateOf(!item.folded) }
@@ -800,7 +813,7 @@ private fun WorkCardView(item: ChatItem.Work, overPortrait: Boolean) {
             shape = RoundedCornerShape(12.dp),
             color = scheme.surfaceVariant.copy(alpha = if (overPortrait) 0.92f else 1f),
             contentColor = color,
-            modifier = Modifier.fillMaxWidth(0.96f),
+            modifier = Modifier.fillMaxWidth(if (wide) 1f else 0.96f),
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(

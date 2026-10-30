@@ -102,7 +102,9 @@ Unity.
 - `ui/verdicts.ts` : pour une opératrice, 👍/👎 sous ses réponses et ce qu'elle aurait dû dire (ADR 0113).
 - Le mode pro (ADR 0116), pour une opératrice : l'interrupteur « Pro » près du champ (`ChatOverlay`), la carte de
   travail en direct (`ui/toolActivity.ts`, pur : les trames `tool` fusionnées par message), la bulle pro en Markdown
-  (`ui/proMarkdown.ts` : tout le HTML échappé d'abord, liens http(s) seulement), jamais lue à voix haute.
+  (`ui/proMarkdown.ts` : tout le HTML échappé d'abord, liens http(s) seulement, tableaux et citations compris),
+  jamais lue à voix haute. Interrupteur allumé, le chat prend tout l'écran sur un fond qui cache la pièce et la vie
+  intérieure se replie ; elle revient comme elle était en sortant du mode (`main.ts`, `#app.pro-mode`).
 - Les tests vitest sont dans des dossiers `__tests__`.
 
 Les ADR cités sont dans `backendv2/docs/decisions.md`.

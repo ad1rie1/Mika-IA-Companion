@@ -180,15 +180,18 @@ fun ChatScreen(
         )
     }
 
-    val scene = avatar
+    // En mode pro (ADR 0116), le travail prend tout l'écran : Mika quitte le fond (sa 3D ne tourne plus), le fil n'a
+    // plus de bande sous son visage, ses réponses et ses cartes prennent toute la largeur. Son visage reste en haut.
+    val scene = avatar.takeIf { !proMode }
     val state3d by vm.avatar3d.collectAsStateWithLifecycle()
     var keystrokes by remember { mutableIntStateOf(0) }
     LaunchedEffect(vm.input) { if (vm.input.isNotEmpty()) keystrokes++ }
 
-    // Ce que le fil lui dit : sa réponse qui arrive, elle la dit ; un message qui part, elle le lit.
+    // Ce que le fil lui dit : sa réponse qui arrive, elle la dit ; un message qui part, elle le lit. Pas en mode
+    // pro, où elle n'est pas là pour le jouer.
     val talk = rememberConversationStage(
         items,
-        watching = lifecycle.isAtLeast(Lifecycle.State.RESUMED),
+        watching = lifecycle.isAtLeast(Lifecycle.State.RESUMED) && !proMode,
         speaks = vm.has3d,
         key = owner,
     )
@@ -228,7 +231,7 @@ fun ChatScreen(
                     status,
                     onOpenMind,
                     onOpenSettings,
-                    face = portrait.takeIf { scene != null },
+                    face = portrait.takeIf { avatar != null },
                     faceTint = faceTint ?: MaterialTheme.colorScheme.primaryContainer,
                     transparent = scene != null,
                 )
@@ -274,6 +277,7 @@ fun ChatScreen(
                         overPortrait = scene != null,
                         stage = stage,
                         verdictErrors = verdictErrors,
+                        wide = proMode,
                         modifier = Modifier.weight(1f),
                     )
                     ApprovalTray(approvals, onDecide = vm::decide, modifier = Modifier.heightIn(max = trayMax))
