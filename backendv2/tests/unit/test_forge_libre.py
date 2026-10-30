@@ -278,7 +278,8 @@ def test_her_apps_reach_the_whole_internet_with_any_method_and_the_whole_answer(
     method, url, headers, body = sent[0]
     assert method == "POST" and body == '{"q": "café"}'.encode()
     assert headers == {"Authorization": "Bearer k", "Accept-Language": "fr", "Content-Type": "application/json"}
-    assert value["img"] == "8950" and value["big"] is True and value["panne"].endswith("HTTP 500")
+    assert value["img"] == "8950" and value["big"] is True
+    assert value["panne"].endswith("HTTP 500 sur https://api.exemple.fr/panne")  # avec son adresse (ADR 0161)
     assert value["page"] == '{"ok": "oui"}'  # n'importe quel domaine, sans rien déclarer
     assert any("réponse coupée" in line and "gros.exemple.fr" in line for line in logs)
     assert loop.ok and loop.value[0] == 200 and "trop de requêtes" in loop.value[1]  # une boucle qui martèle s'arrête

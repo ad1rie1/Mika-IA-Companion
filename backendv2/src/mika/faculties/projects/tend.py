@@ -48,6 +48,7 @@ from mika.faculties.projects.faculty import (
     busy,
     living,
     params,
+    stuck_asking,
 )
 from mika.faculties.projects.tools import closing, written
 from mika.kernel.clock import MINUTE
@@ -79,27 +80,42 @@ def closures(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective, s
     return out
 
 
-def finished_at(p: Project, pm: Any) -> int | None:
-    """Quand elle clôt un projet à elle qui n'a plus rien d'ouvert (``None`` : il n'en est pas là)."""
-    if p.authority != c.SELF or p.status != c.ACTIVE or not p.objectives:
+def finished_at(p: Project, pm: Any, apps: frozenset[int] = frozenset()) -> int | None:
+    """Quand elle clôt un projet à elle qui n'a plus rien d'ouvert (``None`` : il n'en est pas là). Une app qui vit
+    dans le projet le garde ouvert : c'est son livrable, et seul un projet actif la répare (ADR 0161)."""
+    if p.authority != c.SELF or p.status != c.ACTIVE or not p.objectives or p.id in apps:
         return None
     if any(o.status == c.OPEN for o in p.objectives):
         return None
     return max(o.closed_at for o in p.objectives) + pm.self_done_after_us
 
 
+def homes(frame: Frame) -> frozenset[int]:
+    """Les projets où vit une app qui tourne (ni arrêtée, ni retenue par un opérateur)."""
+    return frozenset(a.project for a in frame.get(forge_c.APPS) or () if a.project and a.enabled and not a.held)
+
+
 def finished(s: ProjectsState, frame: Frame) -> list[Project]:
     """Ses projets à elle, finis depuis assez longtemps pour qu'elle les close."""
     pm = params(frame.env.params_of("projects", frame.root))
+    apps = homes(frame)
     return [p for p in sorted(s.projects.values(), key=lambda p: p.id)
-            if not busy(s, p.id) and (at := finished_at(p, pm)) is not None and at <= frame.now]
+            if not busy(s, p.id) and (at := finished_at(p, pm, apps)) is not None and at <= frame.now]
 
 
 def broken(s: ProjectsState, frame: Frame) -> list[Project]:
-    """Les projets actifs dont le modèle a échoué trop de fois d'affilée."""
+    """Les projets actifs dont le modèle a échoué trop de fois d'affilée — ou dont les séances de cadrage n'ont pas
+    écrit de plan autant de fois que l'objectif qui n'a rien conclu (ADR 0161)."""
     pm = params(frame.env.params_of("projects", frame.root))
     return [p for p in sorted(s.projects.values(), key=lambda p: p.id)
-            if p.status == c.ACTIVE and not busy(s, p.id) and p.failures >= pm.failures_before_pause]
+            if p.status == c.ACTIVE and not busy(s, p.id)
+            and (p.failures >= pm.failures_before_pause or unframed(p, pm))]
+
+
+def unframed(p: Project, pm: Any) -> bool:
+    """Ses séances de cadrage n'aboutissent pas : à cadrer, et autant d'affilée sans plan qu'il en faut à un
+    objectif pour bloquer."""
+    return p.plan_state == c.TO_FRAME and p.frame_silent >= pm.silent_before_blocked
 
 
 def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
@@ -111,7 +127,9 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
         if p.status != c.ACTIVE or busy(s, p.id):
             continue
         for o in p.objectives:
-            if o.status != c.OPEN or not o.asked or not o.asked_to or not o.need_ref or o.answered_at >= o.asked_at:
+            # un besoin dit sur un objectif ouvert ; ou un blocage dit, que sa réponse rouvre (ADR 0161)
+            waits = o.status == c.OPEN and bool(o.need_ref) or stuck_asking(o)
+            if not waits or not o.asked or not o.asked_to or o.answered_at >= o.asked_at:
                 continue
             handles = frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,)
             if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > o.asked_at:
@@ -119,9 +137,12 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
     return out
 
 
-def pause_reason(p: Project) -> str:
+def pause_reason(p: Project, pm: Any) -> str:
     """Pourquoi un projet en panne se met en pause : combien d'échecs, et la cause du dernier telle qu'elle a été
-    (un prompt trop long n'est ni un modèle muet ni un délai passé : ADR 0142)."""
+    (un prompt trop long n'est ni un modèle muet ni un délai passé : ADR 0142) — ou ses séances de cadrage sans
+    plan (ADR 0161)."""
+    if unframed(p, pm) and p.failures < pm.failures_before_pause:
+        return f"cadrage sans plan : {p.frame_silent} séances de suite n'ont pas écrit de plan"
     cause = describe_error(p.last_failure)
     return f"en panne : {p.failures} exécutions de suite ont échoué (la dernière : {cause})"
 
@@ -133,7 +154,8 @@ class Tend:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
         if not (closures(s, frame) or broken(s, frame) or finished(s, frame) or replied(s, frame)):
             pm = params(frame.env.params_of("projects", frame.root))
-            later = [at for p in s.projects.values() if (at := finished_at(p, pm)) is not None]
+            apps = homes(frame)
+            later = [at for p in s.projects.values() if (at := finished_at(p, pm, apps)) is not None]
             return min(later) if later else None
         # par prudence : une passe qui vient d'avoir lieu sans rien changer (écriture dédoublonnée, garde) ne
         # repart pas aussitôt — au pire une minute de retard, jamais une boucle
@@ -160,8 +182,9 @@ class Tend:
                 drafts.append(OBJECTIVE_CHANGED.draft(
                     project=p.id, objective=o.id, status=c.BLOCKED, note=Content.of(why, level=p.sensitivity),
                     owner=p.owner, about=p.about, dedupe_key=key))
+        pm = params(frame.env.params_of("projects", frame.root))
         for p in broken(s, frame):
-            drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p), broke=True, owner=p.owner,
+            drafts.append(PAUSED.draft(project=p.id, reason=pause_reason(p, pm), broke=True, owner=p.owner,
                                        about=p.about, dedupe_key=f"panne:{p.id}:{p.tried_at}"))
         done_now = finished(s, frame)
         for p in done_now:  # elle le clôt elle-même : il a fait son temps (ou elle y renonce, rien n'a abouti)

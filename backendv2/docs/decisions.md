@@ -23,7 +23,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
@@ -976,7 +976,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un but est une envie qui s'use ; un projet est un espace de travail durable qu'on pilote.
 
-*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039.*
+*Révise 0020 (en partie), 0030 (en partie). Révisée par 0039, 0161.*
 
 ### 0039 — Agir dans le monde : un bac à sable qui tient, un accord qui porte sur ce qui part, une preuve qui veut dire quelque chose
 
@@ -1002,7 +1002,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* chaque étape de son travail existait, mais aucune ne passait le relais : elle ne se fabriquait jamais rien.
 
-*Révisée par 0105, 0133.*
+*Révisée par 0105, 0133, 0161.*
 
 ### 0105 — Une Forge libre et outillée : le web au travail, des outils déclarés, un réseau libre, une confiance par app
 
@@ -1027,6 +1027,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Un projet qu'on lui a confié ne le demande pas : seuls ses projets à elle le font.
 
 *Pourquoi :* le 2026-10-27, son projet de trading s'est arrêté après trois pannes, et elle n'en a rien dit : une pause pour pannes ne lui parvenait pas, et sa liste de projets disait seulement « en pause ». Il serait resté arrêté jusqu'à ce que quelqu'un ouvre la console.
+
+*Révisée par 0161.*
 
 ### 0144 — Ce que son labo de trading a montré : un constant à son rythme, une source ouverte, des parts en %
 
@@ -1062,7 +1064,47 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* l'audit du 2026-10-27 (`docs/audit-2026-10-27-projets.md`) est parti du projet n° 257. Ce jour-là, le cadre du projet s'était écrit dans sa réponse, au milieu d'une conversation, sous la consigne « ouvre le projet maintenant ». La demande d'Adrien (« du trading par IA ») s'était perdue dans une paraphrase. La première exécution était partie dans la minute, sur un objectif constant. Et aucune exécution ne pouvait revoir un cadre fait à la hâte. Adrien voulait « une réflexion pour définir ses objectifs correctement, un plan, quitte à demander l'avis de l'utilisateur ».
 
-*Révise 0031 (en partie), 0104 (en partie).*
+*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161.*
+
+### 0161 — De la demande au livrable : les jointures du cadrage
+
+- **La demande, comme elle s'est dite.** Un projet ouvert en conversation garde la conversation qui y a mené : les messages de la personne et les siens, chacun avec qui l'a dit, tant qu'ils se suivent (une pause de plus de deux heures ouvre une autre conversation), 3 000 caractères au plus (`exchange`). Le dernier message seul n'en gardait qu'un bout.
+- **Une promesse ouvre un projet à cadrer.** Une exploration née d'une promesse de travail qui ouvre un projet (`start_project`) l'ouvre demandé par qui a reçu la promesse : à cadrer, avec la conversation où elle l'a faite (`GoalView.origin`, `origin_at`). Sa consigne lui dit d'ouvrir le projet plutôt que de bâtir pendant l'exploration.
+- **Ce qu'on lui demande n'est pas une envie à elle.** Son plafond de projets à elle (`live_self_max`) ne compte ni ne refuse un projet qu'on lui a demandé (`asked_by`). `create_project` prend ses outils avec qui le confie (`tools` : la Forge pour une app).
+- **Une séance de cadrage se conclut par son plan.**
+  - Son brief le dit (`projects.frame.brief`) : il disait « conclus par report_run », que la séance refuse.
+  - Le plan arrête la boucle : un outil peut conclure par son résultat (`ToolResult.ends`), pas seulement par sa déclaration (`ends_loop`).
+  - Une séance qui n'a pas écrit de plan est comptée (`frame_silent`). Autant d'affilée qu'il en faut à un objectif pour bloquer mettent le projet en pause (« cadrage sans plan »), et qui l'a demandé l'apprend par ses demandes d'aide (`stalled:<id>`), même pour un projet confié. Repris, il se recadre.
+- **Ses questions restent avec leur réponse.** Validé, le plan garde ses questions, ce qu'elle recommandait et la réponse telle quelle (`plan_answer_ref`) sous les yeux de chaque exécution ; validé sans un mot, ce qu'elle recommandait vaut. La réponse ne devient plus une consigne nue. Revu en cours de route sans question neuve, il garde celles qui l'ont fondé.
+- **La conversation montre d'abord ce qui attend la personne.** « TES PROJETS » prend d'abord les projets dont le plan, un besoin ou un blocage attend la personne qui parle, puis les plus récents (il montrait les plus anciens des huit derniers).
+- **Une étape bloquée se rouvre.** Un ponctuel bloqué dont elle a dit le blocage se rouvre quand la personne lui répond, ou quand une consigne arrive, sa réponse sous les yeux : sinon ce qui en dépendait dans son plan attendait pour toujours.
+- **L'ordre du plan.** Les étapes du plan passent à leur rang, une idée de départ gardée comprise ; ce qu'on ajoute hors du plan passe avant ; ce qu'elle ajoute d'elle-même, après. Le premier passage d'un constant vient une cadence après qu'il a pu commencer (l'étape dont il dépend faite, sinon sa naissance), plus tout de suite.
+- **Une exécution se conclut.**
+  - `report_run` arrête la boucle.
+  - Une boucle qui se conclut par un outil voit ses trois derniers tours comptés dans ses résultats d'outils (`TURNS_WARNED`). Au plafond, le dernier tour n'a plus d'outil, et une exécution sans verdict n'a rien conclu.
+  - Ce compte remplace le rappel compté en appels (`wrap_up_after`, retiré), qui ne venait que des outils du projet et de l'atelier.
+- **Le passage d'un constant se raconte quand il a regardé du réel.** Un bilan qui lit la base d'une app et se résume dans son compte rendu ne produit rien : il se prouve par ce qu'il a consulté (une base, une app, un fichier, le web — pas son carnet ni un guide). Sinon il ne se raconte pas, et elle le sait. Un ponctuel garde sa règle : ce qui a été produit, dans cette exécution ou une d'avant.
+- **La Forge.**
+  - **La preuve par version.** Un essai réussi prouve une app écrite ou relancée après une panne dans l'épisode, ou, pendant une exécution de son projet, une version qu'aucun essai n'a encore prouvée (`App.proven`, événement `forge.proved`) — une fois. Ni sa ligne de contexte ni un événement inventé ne prouvent, ni un appel dont aucune requête n'a abouti.
+  - **Ce qu'un essai montre.** Une erreur dit sa ligne de `main.py` et son code ; une erreur HTTP de `http_get` dit son adresse. Un appel compte ses requêtes qui ont échoué (`CallResult.failed`), que l'essai montre et que le journal garde. Un essai d'outil ou d'action dit que ce qu'il a rangé reste dans la base. Les données d'une action sont vérifiées comme la console les vérifie.
+  - **Ce qu'elle relit.** `forge_read` dit les réglages en vigueur : la valeur donnée dans la console l'emporte sur le défaut du manifeste, un secret se dit défini ou non, jamais sa valeur.
+  - **Ce qui se refuse et se garde.** Un manifeste qui a un rythme sans fonction `tick` est refusé. Une vue qui se rend invalide dans la console le note dans le journal de l'app. Une app retouchée depuis un autre projet reste dans le sien.
+  - **Un projet ne laisse pas tomber son app.** Un projet à elle où vit une app ne se clôt pas seul.
+  - **Ce que la personne voit.** Le récit renvoie aux vues des apps qui en ont et qui marchent : avec leur lien dans la console pour qui s'occupe d'elle, sans lien pour une autre, à qui la console n'est pas ouverte.
+- **La dernière étape vérifie le tout.** La consigne du cadrage demande une dernière étape qui vérifie le tout comme la personne le verra, au regard de sa demande.
+
+*Pourquoi :* la relecture du 2026-10-30, de la demande au livrable, a trouvé les jointures de l'ADR 0145 trouées.
+- Une promesse ouvrait un projet sans cadrage.
+- Une séance de cadrage, briefée pour un outil qu'elle refuse, pouvait recommencer vingt-quatre fois par jour sans rien dire.
+- Les réponses aux questions du plan perdaient leurs questions.
+- Une étape bloquée gelait tout ce qui en dépendait.
+- Une exécution qui atteignait son plafond de tours finissait sans verdict.
+- Un bilan de la semaine qui ne faisait que lire n'arrivait jamais à la personne.
+- Une app écrite par une exécution en panne ne se prouvait plus qu'en la réécrivant.
+- Les erreurs des apps ne disaient pas leur ligne.
+- Une app survivait, sans réparation, au projet clos autour d'elle.
+
+*Révise 0031 (en partie), 0104 (en partie), 0143 (en partie), 0145 (en partie).*
 
 ## Les sens et les plugins
 

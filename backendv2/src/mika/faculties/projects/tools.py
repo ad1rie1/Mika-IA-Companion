@@ -147,6 +147,56 @@ def their_words(ctx: Any) -> str:
     return "\n".join(reversed(said))[-REQUEST_CHARS:]
 
 
+#: ce qu'un projet garde de la conversation où il a été demandé (ADR 0161) : ses derniers messages, tant qu'ils se
+#: suivent (une pause plus longue ouvre une autre conversation), et au plus tant de caractères
+EXCHANGE_LINES, EXCHANGE_GAP, EXCHANGE_CHARS = 16, 2 * HOUR, 3000
+
+
+def exchange(ctx: Any, person: str | None, handles: list[str], *, upto: int | None = None,
+             upto_at: int | None = None) -> str:
+    """La conversation en privé qui a mené à une demande, telle qu'elle s'est dite : les messages de la personne et
+    les siens, du plus ancien au plus récent, jusqu'au message ``upto`` (ou à l'instant ``upto_at``) — une demande se
+    précise souvent en plusieurs échanges, et son dernier message seul n'en garde qu'un bout (ADR 0161)."""
+    store = ctx.ports.get("store")
+    if store is None or not handles:
+        return ""
+    t = transcript_c.thread_table()
+    query = select(t.c.role, t.c.text, t.c.at).where(t.c.person.in_(handles), t.c.room.is_(None))
+    if upto is not None:
+        query = query.where(t.c.id <= upto)
+    if upto_at is not None:
+        query = query.where(t.c.at <= upto_at)
+    name = (ctx.frame.get(identity_c.IDENTITY(person)).name if person else "") or phrase("projects.request.them")
+    said: list[str] = []
+    size, after = 0, None
+    for role, text, at in store.query_mind(query.order_by(t.c.id.desc()).limit(EXCHANGE_LINES)):
+        if after is not None and after - at > EXCHANGE_GAP:
+            break
+        after = at
+        text = str(text or "").strip()
+        if not text:
+            continue
+        who = name if role == "user" else phrase("projects.request.you")
+        line = phrase("projects.request.line", who=who, text=text)
+        if said and size + len(line) > EXCHANGE_CHARS:
+            break
+        said.append(line)
+        size += len(line) + 1
+    return "\n".join(reversed(said))[-EXCHANGE_CHARS:]
+
+
+def their_request(ctx: Any) -> str:
+    """Ce qu'un projet ouvert en réponse garde de sa demande : la conversation qui y a mené, jusqu'au message
+    auquel elle répond (``exchange``) — rien hors d'une réponse, ni dans un salon."""
+    ep = ctx.frame.episode
+    if ep is None or ep.kind != Kind.REPLY or not ep.target or ep.attrs.get("room"):
+        return ""
+    person = ctx.frame.get(identity_c.PERSON(ep.target))
+    handles = list(ctx.frame.get(identity_c.HANDLES(person)) or ()) if person else []
+    upto = ep.attrs.get("reply_to")
+    return exchange(ctx, person, handles or [ep.target], upto=upto if isinstance(upto, int) else None)
+
+
 def framing_run(ctx: Any, p: Project) -> bool:
     """Cette exécution est-elle la séance de cadrage de ``p`` (ADR 0145) ?"""
     ep = ctx.frame.episode
@@ -168,19 +218,6 @@ def caretaker(frame: Frame) -> str:
 def gone() -> str:
     """La réponse de chaque outil d'exécution quand le projet n'est plus actif."""
     return phrase("projects.tools.gone")
-
-
-def wrap_up(ctx: Any, out: Any) -> Any:
-    """Au-delà de quelques appels, chaque résultat lui rappelle de conclure : une exécution qui s'arrête sans
-    verdict ne compte pas comme du travail (et le délai d'une exécution est court)."""
-    pm = params(ctx.frame.env.params_of("projects", ctx.frame.root))
-    done = any(name == REPORT and ok for name, ok in ctx.calls)
-    if done or len(ctx.calls) + 1 < pm.wrap_up_after:
-        return out
-    note = phrase("projects.tools.wrap_up")
-    if isinstance(out, ToolResult):
-        return ToolResult(ok=out.ok, content=out.content + note)
-    return f"{out}{note}"
 
 
 def still_open(project: int, objective: int) -> Guard:
@@ -209,6 +246,17 @@ def _proof(ctx: Any, sha: str, o: Objective | None = None) -> str:
     return "commit" if sha else tool
 
 
+#: ce qui ne regarde rien de réel : tenir le projet, lister, lire un guide — un passage qui n'a fait que ça n'a rien
+#: vu (ADR 0161)
+BOOKKEEPING = frozenset({REPORT, NOTE, DECIDE, OBJECTIVE_ADD, EQUIP, "project_plan", "forge_help", "forge_list",
+                         "ws_list"})
+
+
+def consulted(ctx: Any) -> bool:
+    """Le passage a-t-il regardé quelque chose de réel (une base, une app, un fichier, le web) ?"""
+    return any(ok and name not in BOOKKEEPING for name, ok in ctx.calls)
+
+
 def _mode(ctx: Any) -> str:
     """Le mode de cette exécution : celui de son épisode — un réveil impersonnel sur un projet à elle n'est pas son
     travail à elle (ADR 0068)."""
@@ -223,7 +271,7 @@ def commit_message(p: Project, o: Objective | None) -> str:
         phrase("projects.commit.run", run=p.runs)
 
 
-@PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3)
+@PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3, ends_loop=True)
 async def report_run(args: ReportArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -247,7 +295,11 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
         sha = await port.commit(p.id, commit_message(p, o))  # un commit par exécution qui a changé quelque chose
     proof = _proof(ctx, sha, o)
     closed = o is not None and o.status != c.OPEN  # retiré ou clos pendant qu'elle y travaillait
-    proven = args.verdict == c.DONE and o is not None and not closed and (bool(proof) or o.evidence > 0)
+    # un ponctuel se prouve par ce qu'il a produit, dans cette exécution ou une d'avant ; le passage d'un constant
+    # (un bilan, une veille) par ce qu'il a regardé de réel dans celle-ci — son compte rendu est ce qu'il rend (ADR
+    # 0161)
+    earned = (o.evidence > 0 if o.kind == c.ONCE else consulted(ctx)) if o is not None else False
+    proven = args.verdict == c.DONE and o is not None and not closed and (bool(proof) or earned)
     if args.verdict == c.DONE and o is not None and not closed and o.kind == c.ONCE and not proven:
         # pas un verdict : rien ne s'écrit, elle peut encore conclure honnêtement
         return ToolResult(ok=False, content=phrase("projects.tools.report.not_yet"))
@@ -284,7 +336,9 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
         if args.verdict in (c.DONE, c.BLOCKED):
             pm = params(ctx.frame.env.params_of("projects", ctx.frame.root))
             hours = max(1, round(cadence(o, pm) / HOUR))
-            return phrase("projects.tools.report.constant", hours=hours, kept=kept, pushed=pushed, asked=asked)
+            unseen = phrase("projects.tools.report.unseen") if args.verdict == c.DONE and not proven else ""
+            return phrase("projects.tools.report.constant", hours=hours, kept=kept, pushed=pushed,
+                          asked=asked) + unseen
         return phrase("projects.tools.report.constant_continue", kept=kept, pushed=pushed, asked=asked)
     if proven:
         return phrase("projects.tools.report.done", id=o.id, kept=kept, pushed=pushed)
@@ -348,7 +402,7 @@ async def project_note(args: NoteArgs, ctx: Any) -> Any:
     p, _ = got
     await ctx.emit(NOTED.draft(project=p.id, text=Content.of(args.text.strip(), level=written(p)), owner=p.owner,
                                about=p.about))
-    return wrap_up(ctx, phrase("projects.tools.note.done"))
+    return phrase("projects.tools.note.done")
 
 
 class DecideArgs(BaseModel):
@@ -384,8 +438,8 @@ async def project_decide(args: DecideArgs, ctx: Any) -> Any:
         reason=opt(args.reason), replaces=args.replaces, objective=o.id if o is not None else 0, author="self",
         owner=p.owner, about=p.about))
     more = phrase("projects.tools.decide.replaced", id=args.replaces) if args.replaces else ""
-    return wrap_up(ctx, phrase("projects.tools.decide.done",
-                               id=_attributed(ctx, p.id, commit, "title", "decisions", number), more=more))
+    return phrase("projects.tools.decide.done",
+                               id=_attributed(ctx, p.id, commit, "title", "decisions", number), more=more)
 
 
 class ObjectiveArgs(BaseModel):
@@ -411,7 +465,7 @@ async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     number = _attributed(ctx, p.id, commit, "text", "objectives", number)
     kind = phrase("projects.tools.objective_add.constant") if args.kind == c.CONSTANT else \
         phrase("projects.tools.objective_add.once")
-    return wrap_up(ctx, phrase("projects.tools.objective_add.done", id=number, kind=kind))
+    return phrase("projects.tools.objective_add.done", id=number, kind=kind)
 
 
 PLAN_TOOL = "project_plan"
@@ -533,10 +587,11 @@ async def project_plan(args: PlanArgs, ctx: Any) -> Any:
                                       approved=approved, tell=tell, **who))
     await ctx.emit(*drafts)
     if not framing_now:
-        return wrap_up(ctx, phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped)))
+        return phrase("projects.tools.plan.revised", steps=len(args.steps), dropped=len(dropped))
+    # le plan conclut sa séance de cadrage : la boucle s'arrête là (ADR 0161)
     if not approved:
-        return phrase("projects.tools.plan.waits", steps=len(args.steps))
-    return phrase("projects.tools.plan.starts", steps=len(args.steps))
+        return ToolResult(content=phrase("projects.tools.plan.waits", steps=len(args.steps)), ends=True)
+    return ToolResult(content=phrase("projects.tools.plan.starts", steps=len(args.steps)), ends=True)
 
 
 class EquipArgs(BaseModel):
@@ -563,7 +618,7 @@ async def project_equip(args: EquipArgs, ctx: Any) -> Any:
     await ctx.emit(REFRAMED.draft(project=p.id, bundles=(*p.bundles, args.tool), owner=p.owner, about=p.about),
                    NOTED.draft(project=p.id, owner=p.owner, about=p.about, text=Content.of(
                        phrase("projects.tools.equip.note", what=words, why=args.why.strip()), level=level)))
-    return wrap_up(ctx, phrase("projects.tools.equip.done", what=words))
+    return phrase("projects.tools.equip.done", what=words)
 
 
 def _attributed(ctx: Any, project: int, commit: Any, field: str, kind: str, asked: int) -> int:
@@ -626,6 +681,10 @@ def objectives_of(project: int, lines: list[str], constants: list[str | Constant
     return out
 
 
+#: un lot qu'elle peut se donner (``SELF_BUNDLES``, dans le même ordre : un test les garde égaux)
+SelfBundle = Literal["memory", "rss", "forge", "forge_apps"]
+
+
 class CreateArgs(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000,
@@ -636,6 +695,8 @@ class CreateArgs(BaseModel):
                                                description=phrase("projects.tools.create.constants"))
     mode: Literal["persona", "plain"] = Field(default="persona", description=phrase("projects.tools.create.mode"))
     schedule: str = Field(default="asap", description=phrase("projects.tools.create.schedule"))
+    #: ce qu'il aura en main, choisi avec qui le confie — la Forge pour une app (ADR 0161)
+    tools: list[SelfBundle] = Field(default_factory=list, max_length=4, description=phrase("projects.tools.create.tools"))
 
 
 @PROJECTS.tool("create_project", acts=True, description=phrase("projects.tools.create.description"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
@@ -651,8 +712,8 @@ async def create_project(args: CreateArgs, ctx: Any) -> Any:
     level = int(Sensitivity.PERSONAL)
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.USER, mode=args.mode, owner=person,
-        address=handle, about=(person,), level=level, source="tool", schedule_rule=rule, request=their_words(ctx),
-        asked_by=person, framing=True))
+        address=handle, about=(person,), level=level, source="tool", schedule_rule=rule, request=their_request(ctx),
+        asked_by=person, framing=True, bundles=own_bundles(args.tools)))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
         return ToolResult(ok=False, content=phrase("projects.tools.create.failed"))
@@ -660,10 +721,6 @@ async def create_project(args: CreateArgs, ctx: Any) -> Any:
     await ctx.emit(*objectives_of(pid, goals, args.constants, author="owner", owner=person, about=(person,),
                                   level=level))
     return phrase("projects.tools.create.done", id=pid)
-
-
-#: un lot qu'elle peut se donner (``SELF_BUNDLES``, dans le même ordre : un test les garde égaux)
-SelfBundle = Literal["memory", "rss", "forge", "forge_apps"]
 
 
 class StartArgs(BaseModel):
@@ -685,8 +742,9 @@ def own_bundles(*sources: tuple[str, ...] | list[str]) -> tuple[str, ...]:
 
 def _own_live(s: ProjectsState) -> int:
     """Ses projets à elle qui l'occupent encore : vivants **et** avec un objectif ouvert (un projet dont tout est
-    fait ne l'empêche pas d'en ouvrir un autre)."""
-    return sum(1 for p in s.projects.values() if live(p) and p.authority == c.SELF
+    fait ne l'empêche pas d'en ouvrir un autre). Un projet qu'on lui a demandé n'en est pas un : ce plafond garde ses
+    heures creuses de ses propres envies, jamais d'une demande de qui s'occupe d'elle (ADR 0161)."""
+    return sum(1 for p in s.projects.values() if live(p) and p.authority == c.SELF and not p.asked_by
                and any(o.status == c.OPEN for o in p.objectives))
 
 
@@ -718,9 +776,7 @@ async def start_project(args: StartArgs, ctx: Any) -> Any:
     # heures creuses
     if not _talking_to_owner(frame):
         return ToolResult(ok=False, content=phrase("projects.tools.start.stranger"))
-    if _own_live(s) >= pm.live_self_max:
-        return ToolResult(ok=False, content=phrase("projects.tools.start.too_many", count=_own_live(s),
-                                                   max=pm.live_self_max))
+    asking = ep is not None and ep.kind == Kind.REPLY  # en réponse : qui lui parle le lui demande
     gid = goal_of(ep.target) if ep is not None else None
     source = f"goal:{gid}" if gid is not None else "conversation"
     twin = next((p for p in s.projects.values() if live(p) and gid is not None and p.source == source), None)
@@ -729,6 +785,8 @@ async def start_project(args: StartArgs, ctx: Any) -> Any:
     about: tuple[str, ...] = (who[1],) if who is not None else ()
     level = int(Sensitivity.PERSONAL) if about else int(Sensitivity.NONE)
     inherited: tuple[str, ...] = ()
+    # en conversation, il naît à cadrer, avec la conversation qui l'a demandé (ADR 0145, 0161)
+    request, asked_by = (their_request(ctx), who[1] if who is not None else None) if asking else ("", None)
     if gid is not None:
         goal = next((g for g in frame.get(goals_c.LIVE) if g.id == gid), None)
         about = goal.about if goal is not None else ()
@@ -736,22 +794,28 @@ async def start_project(args: StartArgs, ctx: Any) -> Any:
         level = max(goal.sensitivity if goal is not None else 0, int(Sensitivity.PERSONAL) if about else 0)
         # l'exploration devenue projet garde ses mains (la Forge d'une app à réparer, ses flux…)
         inherited = goal.bundles if goal is not None else ()
-    # en conversation, il naît à cadrer, avec les mots de qui le demande ; né d'une exploration, elle y a déjà
-    # réfléchi (ADR 0145)
-    talking = ep is not None and ep.kind == Kind.REPLY
+        if goal is not None and goal.origin == goals_c.FROM_PROMISE and goal.owner:
+            # une promesse de travail faite à quelqu'un : il l'a demandé — à cadrer, avec la conversation qui y a
+            # mené, comme en réponse (ADR 0161) ; une exploration à elle a déjà réfléchi
+            handles = list(frame.get(identity_c.HANDLES(goal.owner)) or (goal.owner,))
+            request = exchange(ctx, goal.owner, handles, upto_at=goal.origin_at or None)
+            asked_by = goal.owner
+    if asked_by is None and _own_live(s) >= pm.live_self_max:
+        return ToolResult(ok=False, content=phrase("projects.tools.start.too_many", count=_own_live(s),
+                                                   max=pm.live_self_max))
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.SELF, mode=c.PERSONA, owner=None, address=None,
-        about=about, level=level, source=source, bundles=own_bundles(args.tools, inherited),
-        request=their_words(ctx) if talking else "", asked_by=who[1] if talking and who is not None else None,
-        framing=talking))
+        about=about, level=level, source=source, bundles=own_bundles(args.tools, inherited), request=request,
+        asked_by=asked_by, framing=asking or asked_by is not None))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
         return ToolResult(ok=False, content=phrase("projects.tools.start.failed"))
     goals = args.objectives or ([] if args.constants else [args.title])
     await ctx.emit(*objectives_of(pid, goals, args.constants, author="self", owner=None, about=about, level=level))
-    if gid is not None:
+    if gid is not None and asked_by is None:
         return phrase("projects.tools.start.done", id=pid, more=phrase("projects.tools.start.from_goal"))
-    return phrase("projects.tools.start.framing", id=pid)
+    more = phrase("projects.tools.start.from_goal") if gid is not None else ""
+    return phrase("projects.tools.start.framing", id=pid) + more
 
 
 class CloseArgs(BaseModel):

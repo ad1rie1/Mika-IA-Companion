@@ -83,6 +83,8 @@ def frame_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
     if p.status != c.ACTIVE or p.plan_state != c.TO_FRAME or busy(s, p.id) or outgoing(p, frame.now):
         return None
     pm = params(frame.env.params_of("projects", frame.root))
+    if p.frame_silent >= pm.silent_before_blocked:  # ses séances n'aboutissent pas : « tenir » l'arrête (ADR 0161)
+        return None
     at = max(frame.now, p.tried_at + pm.run_spacing_us if p.tried_at else p.created_at)
     if runs_today(p, frame.now) >= daily_cap(p, pm):
         at = max(at, min(t for t in p.runs_at if frame.now - t < DAY) + DAY)
@@ -268,8 +270,8 @@ def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: An
 
 def _reader(p: Project, frame: Frame) -> tuple[str, str] | None:
     """À qui rendre compte d'un projet impersonnel, ou dire qu'on a besoin d'aide : qui l'a confié (s'il s'occupe
-    d'elle), sinon quelqu'un qui s'occupe d'elle — jamais une amie : c'est un travail."""
-    candidates = [p.owner] if p.owner else []
+    d'elle), ou qui le lui a demandé, sinon quelqu'un qui s'occupe d'elle — jamais une amie : c'est un travail."""
+    candidates = [x for x in dict.fromkeys((p.owner, p.asked_by)) if x]
     candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
         if frame.get(identity_c.IS_OWNER(person)) or (person == p.owner and p.authority == c.USER):
@@ -392,9 +394,15 @@ def _needy(o: Objective, now: int, pm: Any) -> bool:
 
 
 def _stalled(p: Project, now: int, pm: Any) -> bool:
-    """Un projet à elle mis en pause par des pannes depuis peu, qu'elle n'a pas encore dit (ADR 0143)."""
-    return p.status == c.PAUSED and p.authority == c.SELF and bool(p.stalled_at) and not p.stall_asked \
-        and p.stall_attempts < pm.share_attempts and now - p.stalled_at <= pm.share_within_us
+    """Un projet à elle mis en pause par des pannes depuis peu, qu'elle n'a pas encore dit (ADR 0143) — ou un projet
+    qu'on lui a demandé et dont le cadrage n'aboutit pas : qui l'a demandé attend son plan (ADR 0161)."""
+    return p.status == c.PAUSED and (p.authority == c.SELF or unplanned_stall(p)) and bool(p.stalled_at) \
+        and not p.stall_asked and p.stall_attempts < pm.share_attempts and now - p.stalled_at <= pm.share_within_us
+
+
+def unplanned_stall(p: Project) -> bool:
+    """Arrêté pendant son cadrage, faute de plan (pas d'une panne de la machine)."""
+    return p.plan_state == c.TO_FRAME and p.frame_silent > 0 and bool(p.stalled_at)
 
 
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.NEED: (0.0, 10.0)},
@@ -419,6 +427,8 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         who = _who_words(frame, person, address)
         if o is not None:
             subject, brief = subject_of(p.id, o.id), phrase("projects.brief.need", who=who)
+        elif unplanned_stall(p):
+            subject, brief = stall_subject(p.id), phrase("projects.brief.unframed", who=who)
         else:
             subject, brief = stall_subject(p.id), phrase("projects.brief.stalled", who=who)
         if address in seen:

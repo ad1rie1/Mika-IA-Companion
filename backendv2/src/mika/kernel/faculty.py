@@ -69,6 +69,9 @@ class ToolResult(BaseModel):
     #: cette sensibilité (``vocab.privacy.Sensitivity``) ; ``unkept`` : rien ne s'en garde, ni en mémoire ni en trace
     floor: int = 0
     unkept: bool = False
+    #: cet appel conclut la boucle, comme un outil ``ends_loop`` — pour un outil qui ne conclut que parfois (le plan
+    #: qui clôt une séance de cadrage, ADR 0161)
+    ends: bool = False
 
 
 def proving_tools(calls: Sequence[tuple[str, bool]], proofs: Sequence[bool | None],

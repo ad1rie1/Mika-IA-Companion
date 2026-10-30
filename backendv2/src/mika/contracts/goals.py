@@ -224,6 +224,10 @@ class GoalView:
     musing: bool = False
     #: les lots d'outils de ses séances : un projet qui en naît les garde (ADR 0104)
     bundles: tuple[str, ...] = ()
+    #: une exploration : ce qui l'a fait naître (``FROM_PROMISE`` : une promesse de travail) et quand — un projet qui
+    #: naît d'une promesse est demandé par qui l'a reçue (ADR 0161)
+    origin: str = ""
+    origin_at: int = 0
 
 
 #: Les buts vivants (actifs ou en attente), du plus ancien au plus récent.

@@ -144,8 +144,9 @@ class _Call:
     deadline: float = 0.0
     #: l'app lit-elle ses réglages secrets (une app qu'un opérateur a validée)
     secrets: bool = True
-    #: ses requêtes sur le réseau pendant cet appel (``HTTP_PER_CALL`` au plus)
+    #: ses requêtes sur le réseau pendant cet appel (``HTTP_PER_CALL`` au plus), et celles qui ont échoué
     requests: int = 0
+    failed: list[str] = field(default_factory=list)
 
 
 #: le préfixe NAT64 bien connu : l'adresse IPv4 qu'il porte compte, pas lui
@@ -707,6 +708,9 @@ class ForgeHost:
             for key in [k for k in self._cache if k[0] == app]:
                 del self._cache[key]
 
+    def note(self, app: str, line: str) -> None:
+        self._log(app, line[:500])
+
     def logs(self, app: str, n: int = 20) -> list[str]:
         try:
             return self.bases.logs(app, n)
@@ -841,7 +845,8 @@ class ForgeHost:
 
         def done(ok: bool, value: Any = None, error: str = "", killed: bool = False, busy: bool = False) -> CallResult:
             return CallResult(ok, value, error[:1000], killed, int((time.monotonic() - started) * 1000),
-                              tuple(call.logs[-50:]), tuple(call.signals), tuple(call.emits), busy=busy)
+                              tuple(call.logs[-50:]), tuple(call.signals), tuple(call.emits), busy=busy,
+                              requests=call.requests, failed=tuple(call.failed[-20:]))
 
         if not self.bwrap:
             return done(False, error="bubblewrap est absent : aucune app ne tourne sans isolation")
@@ -929,6 +934,12 @@ class ForgeHost:
             return done(True, value)
 
     # ── les services de l'hôte ──
+    def _failed(self, app: str, call: _Call, line: str) -> None:
+        """Une requête de l'app qui a échoué : comptée pour l'appel (l'essai la montre) et dans son journal — une app
+        qui rattrape tout ne se met jamais en panne, mais ce qui n'a pas répondu se voit (ADR 0161)."""
+        call.failed.append(line)
+        self._log(app, line)
+
     def _log(self, app: str, line: str) -> None:
         try:  # un journal qui ne s'écrit pas ne fait jamais échouer un appel
             self.bases.log(app, line, MAX_LOGS)
@@ -986,9 +997,10 @@ class ForgeHost:
                                  str(p.get("emotion") or "")[:20]))
             return True
         if name == "http_get":  # la forme simple : le texte, une erreur HTTP lève une exception
-            got = self._http(app, "GET", str(p.get("url") or ""), call, headers=p.get("headers"))
-            if got["status"] >= 400:
-                raise RuntimeError(f"HTTP {got['status']}")
+            url = str(p.get("url") or "")
+            got = self._http(app, "GET", url, call, headers=p.get("headers"))
+            if got["status"] >= 400:  # l'adresse avec le statut : « HTTP 429 » seul ne dit pas laquelle
+                raise RuntimeError(f"HTTP {got['status']} sur {url[:200]}")
             return got["text"]
         if name == "http":  # la forme entière : toute méthode, un corps, la réponse avec son statut et ses en-têtes
             data, kind = body_of(p.get("json"), p.get("form"), p.get("body"))
@@ -1013,17 +1025,25 @@ class ForgeHost:
         call.requests += 1
         if call.requests > HTTP_PER_CALL:
             raise RuntimeError(f"trop de requêtes pour un appel ({HTTP_PER_CALL}) : continue au prochain")
-        if self._net is not None:  # un faux réseau entier (les essais)
-            got = dict(self._net(method.upper(), url, sent, body))
-        elif self._http_get is not None:  # un faux réseau qui ne sait que lire
-            if not (self._public or _is_public)(host):
-                raise ValueError(f"« {host} » est une adresse privée : refusée")
-            got = {"status": 200, "url": url, "headers": {}, "body": self._http_get(url).encode(), "truncated": False}
-        else:  # le vrai : une seule résolution par saut, vérifiée, et la durée qui reste à l'appel
-            got = real_http(method, url, headers=sent, body=body, deadline=call.deadline or None, timeout_s=timeout_s)
+        try:
+            if self._net is not None:  # un faux réseau entier (les essais)
+                got = dict(self._net(method.upper(), url, sent, body))
+            elif self._http_get is not None:  # un faux réseau qui ne sait que lire
+                if not (self._public or _is_public)(host):
+                    raise ValueError(f"« {host} » est une adresse privée : refusée")
+                got = {"status": 200, "url": url, "headers": {}, "body": self._http_get(url).encode(),
+                       "truncated": False}
+            else:  # le vrai : une seule résolution par saut, vérifiée, et la durée qui reste à l'appel
+                got = real_http(method, url, headers=sent, body=body, deadline=call.deadline or None,
+                                timeout_s=timeout_s)
+        except Exception as exc:  # noqa: BLE001 — comptée, puis rendue à l'app telle quelle
+            self._failed(app, call, f"{method.upper()} {url[:160]} → {type(exc).__name__}: {str(exc)[:120]}")
+            raise
         raw = got.get("body", b"")
         raw = raw.encode() if isinstance(raw, str) else bytes(raw)
         status, shown = int(got.get("status", 200)), dict(got.get("headers") or {})
+        if status >= 400:
+            self._failed(app, call, f"{method.upper()} {url[:160]} → {status}")
         if got.get("truncated"):
             line = f"{method.upper()} {url[:200]} : réponse coupée à {HTTP_MAX // 1_000_000} Mo"
             call.logs.append(line)

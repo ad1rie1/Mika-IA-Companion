@@ -111,6 +111,23 @@ class Printer:
         pass
 
 
+#: le code de l'app, ligne par ligne : ce qu'une erreur montre de l'endroit où elle est née
+SOURCE: list[str] = []
+
+
+def where(exc):
+    """L'endroit de main.py où l'erreur est née (le plus profond), sa ligne et son code : sans lui, « KeyError:
+    'rates' » ne dit pas quoi corriger (ADR 0161)."""
+    if isinstance(exc, SyntaxError) and exc.filename == "main.py" and exc.lineno:
+        return f" (main.py, ligne {exc.lineno} : {(exc.text or '').strip()[:160]})"
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "main.py"]
+    if not frames:
+        return ""
+    n = frames[-1].lineno or 0
+    line = SOURCE[n - 1].strip() if 0 < n <= len(SOURCE) else ""
+    return f" (main.py, ligne {n}{' : ' + line[:160] if line else ''})"
+
+
 def main():
     api = Api()
     sys.stdout = Printer(api)
@@ -119,9 +136,10 @@ def main():
     try:
         with open("/app/main.py", encoding="utf-8") as f:
             code = f.read()
+        SOURCE[:] = code.splitlines()
         exec(compile(code, "main.py", "exec"), module.__dict__)  # noqa: S102 — c'est le bac à sable
     except BaseException as exc:  # noqa: BLE001 — l'erreur de chargement est rendue à l'hôte
-        send({"loaded": False, "error": f"{type(exc).__name__}: {exc}"[:2000]})
+        send({"loaded": False, "error": f"{type(exc).__name__}: {str(exc)[:1600]}{where(exc)}"[:2000]})
         return
     send({"loaded": True})
     for line in IN:
@@ -144,7 +162,8 @@ def main():
                 value = fn(api)
             send({"result": value})
         except BaseException as exc:  # noqa: BLE001 — y compris MemoryError : l'hôte décide
-            send({"error": f"{type(exc).__name__}: {exc}"[:1000], "trace": traceback.format_exc()[-2000:]})
+            send({"error": f"{type(exc).__name__}: {str(exc)[:700]}{where(exc)}"[:1000],
+                  "trace": traceback.format_exc()[-2000:]})
 
 
 if __name__ == "__main__":

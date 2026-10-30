@@ -746,3 +746,79 @@ def test_an_apps_pages_are_its_tabs_and_its_settings_sit_behind_the_gear(world):
     settings = html.unescape(client.get("/inspecteur/fiche/app/deux?onglet=reglages").text)
     assert 'class="gear-menu on"' in settings and 'class="tab on"' not in settings and "Ville" in settings
     ConsoleHTML(client.get("/inspecteur/fiche/app/deux").text).check()
+
+
+# ── Une preuve par version (ADR 0161) ─────────────────────────────────────
+
+
+@needs_bwrap
+def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp_path):
+    """Une app écrite par une exécution qui n'a pas abouti ne se prouvait plus : seul un essai dans l'épisode qui
+    l'avait écrite comptait. Une version de son projet qu'aucun essai n'a prouvée se prouve à l'essai suivant — une
+    fois ; et une app relancée après une panne se prouve dans l'épisode qui l'a relancée."""
+    from mika.plugins.forge import CommandArgs, forge_command, forge_test
+
+    kernel, clock, forge = _project_kernel(tmp_path)
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            reply = _context(kernel, "start_project", Kind.REPLY, "user_1", Audience(owner=True))
+            await start_project(StartArgs(title="Suivre l'euro", objectives=["Une app"], tools=["forge"]), reply)
+            pid = events(kernel, c.PROJECT_CREATED)[-1].seq
+
+            def run(name):
+                return _context(kernel, name, Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
+
+            await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST, code=VEILLE_CODE), run("forge_write"))
+            out = {"suivante": await forge_test(ForgeTestArgs(app="cours", method="tick"), run("forge_test")),
+                   "encore": await forge_test(ForgeTestArgs(app="cours", method="tick"), run("forge_test")),
+                   "contexte": await forge_test(ForgeTestArgs(app="cours", method="context"), run("forge_test"))}
+            await kernel.mind.append([SWITCHED.draft(app="cours", state="broken", reason="HTTP 503")],
+                                     emitter="forge", correlation="genese", origin=Origin.GENESIS)
+            revive = run("forge_command")
+            out["relancée"] = await forge_command(CommandArgs(app="cours", command="enable"), revive)
+            mind = kernel.mind
+            same = Frame(mind.frame().root, mind.clock.now(), mind.registry, Audience(owner=True),
+                         revive.frame.episode)
+            spec = mind.registry.tools["forge_test"]
+            out["réparée"] = await forge_test(ForgeTestArgs(app="cours", method="tick"), ToolContext(
+                mind, spec, "appel-réparée", revive.episode_id, same, ports=kernel.ports))
+            out["prouvée"] = mind.frame().state("forge").apps["cours"].proven
+            return out
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    out = run_virtual(clock, main)
+    assert out["suivante"].ok and out["suivante"].proof is True  # jamais prouvée : l'essai la prouve
+    assert out["encore"].ok and out["encore"].proof is False  # déjà prouvée : un essai de plus ne prouve rien
+    assert out["contexte"].proof is False  # sa ligne de contexte ne montre pas qu'elle travaille
+    assert out["relancée"].proof is False and out["réparée"].proof is True  # relancée puis essayée ici : réparée
+    assert out["prouvée"] == 1
+
+
+def test_a_paced_app_without_tick_is_refused_at_writing():
+    """Un rythme appelle tick : une app qui n'avait que des services échouait à chaque passage, jusqu'au
+    disjoncteur."""
+    assert any("sans fonction tick" in p for p in coherence({"schedule": "interval:1h"}, {}))
+    assert not any("tick" in p for p in coherence({"schedule": "manual"}, {}))
+    assert not coherence({"schedule": "cron:0 8 * * *"}, {"tick": 1})
+
+
+def test_an_error_says_the_line_of_main_py_where_it_was_born():
+    """« KeyError: 'rates' » ne disait pas quoi corriger : l'erreur dit sa ligne de main.py et son code."""
+    from mika.adapters.forge import worker
+
+    worker.SOURCE[:] = ["def tick(api):", "    rates = {}", "    return rates['eur']"]
+    space: dict = {}
+    exec(compile("\n".join(worker.SOURCE), "main.py", "exec"), space)  # noqa: S102 — le code d'une app d'essai
+    try:
+        space["tick"](None)
+    except KeyError as exc:
+        assert worker.where(exc) == " (main.py, ligne 3 : return rates['eur'])"
+    try:
+        compile("def tick(api)\n    pass", "main.py", "exec")
+    except SyntaxError as exc:
+        assert worker.where(exc).startswith(" (main.py, ligne 1")

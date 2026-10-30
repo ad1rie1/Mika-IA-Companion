@@ -75,8 +75,8 @@ def test_a_project_asked_in_conversation_keeps_their_words_and_is_framed_before_
             frame.get(identity_c.PERSON("user_1"))
 
     created, p, candidates, adrien = live(tmp_path, scenario)
-    # ses mots, tels quels, dans l'ordre — pas la paraphrase qu'elle en fait
-    assert created.data.request.text == "\n".join(ASKED) and created.data.asked_by == adrien
+    # ses mots, tels quels, dans l'ordre, avec qui les a dits — pas la paraphrase qu'elle en fait
+    assert created.data.request.text == "\n".join(f"Adrien : {x}" for x in ASKED) and created.data.asked_by == adrien
     assert created.data.framing and p.plan_state == c.TO_FRAME and p.status == c.ACTIVE
     assert pick(p, p.created_at, projects_params(None)) is None  # aucune exécution ne vise encore un objectif
     assert [cand.args["subject"] for cand in candidates] == [frame_subject(p.id)]  # sa séance de cadrage d'abord
@@ -134,7 +134,8 @@ def test_a_plan_with_questions_waits_for_their_answer_then_follows_its_order(tmp
 
     pid, out = live(tmp_path, scenario)
     waiting, after = out["waiting"], out["after"]
-    assert "attend la réponse" in out["plan"] and waiting.plan_state == c.PROPOSED
+    # le plan conclut sa séance : la boucle s'arrête là (ADR 0161)
+    assert "attend la réponse" in out["plan"].content and out["plan"].ends and waiting.plan_state == c.PROPOSED
     assert pick(waiting, waiting.plan_at, projects_params(None)) is None  # rien ne part avant sa réponse
     assert [x.args["subject"] for x in out["telling"]] == [plan_subject(pid)]  # elle le lui dit
     assert [x.reason for x in out["telling"]] == [c.PLAN]

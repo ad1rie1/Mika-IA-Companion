@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import quote
 
 from sqlalchemy import select
 
@@ -54,7 +55,7 @@ from mika.faculties.projects.faculty import (
     stall_of,
 )
 from mika.faculties.projects.tools import RUNS, steerable, written
-from mika.faculties.projects.work import FULL, MENTION, untold
+from mika.faculties.projects.work import FULL, MENTION, unplanned_stall, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
@@ -102,7 +103,7 @@ def _refs(p: Project) -> list[str]:
     reports = [ref for *_, ref in p.reports]
     said = [words for _, words in p.said]
     return [r for r in (p.title_ref, p.description_ref, p.summary_ref, p.request_ref, p.plan_ref, p.questions_ref,
-                        *p.notes, *p.instructions, *said, *objectives, *decisions, *deposits, *refusals, *reports)
+                        p.plan_answer_ref, *p.notes, *p.instructions, *said, *objectives, *decisions, *deposits, *refusals, *reports)
             if r]
 
 
@@ -115,7 +116,7 @@ def _talk_refs(p: Project) -> list[str]:
                         *(o.need_ref for o in opened)) if r]
 
 
-@PROJECTS.enricher("projects", episodes=[*RUNS, *CONVERSATIONAL], deadline_ms=1500)
+@PROJECTS.enricher("projects", episodes=[*RUNS, *CONVERSATIONAL], deadline_ms=1500, reads=[identity_c.PERSON])
 async def _texts(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
     store = ports.get("store")
     if store is None:
@@ -126,7 +127,8 @@ async def _texts(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
     if got is not None:
         chosen.append(got[0])
     if ep is not None and ep.kind in CONVERSATIONAL:
-        chosen += [p for p in _recent(s)[-SHOWN * 2:] if p not in chosen]
+        person = frame.get(identity_c.PERSON(ep.target)) if ep.target else None
+        chosen += [p for p in _talked(s, person) if p not in chosen]
     refs = [r for p in chosen for r in (_refs(p) if got is not None and p is got[0] else _talk_refs(p))]
     return {"texts": store.content(refs) if refs else {}}
 
@@ -180,6 +182,25 @@ def _clip(text: str, n: int) -> str:
 
 def _recent(s: ProjectsState) -> list[Project]:
     return sorted((p for p in s.projects.values() if live(p)), key=lambda p: p.id)
+
+
+def _awaits(p: Project, person: str | None) -> bool:
+    """Ce projet attend-il cette personne : son plan, qu'elle a demandé ; un besoin ou un blocage qu'elle lui a dit ?"""
+    if not person:
+        return False
+    if p.plan_state == c.PROPOSED and person in (p.asked_by, p.plan_asked_to):
+        return True
+    return any(o.asked_to == person and (o.status == c.BLOCKED or (o.status == c.OPEN and o.need_ref))
+               for o in p.objectives)
+
+
+def _talked(s: ProjectsState, person: str | None) -> list[Project]:
+    """Les projets dont une conversation peut parler (au plus ``SHOWN * 2``) : ceux qui attendent la personne
+    d'abord, puis les plus récents — le projet dont elle attend la réponse n'est jamais celui qui manque (ADR
+    0161)."""
+    lives = _recent(s)
+    first = [p for p in lives if _awaits(p, person)]
+    return [*first, *(p for p in reversed(lives) if p.id not in {x.id for x in first})][:SHOWN * 2]
 
 
 def _who(frame: Frame, key: str | None) -> str:
@@ -303,6 +324,7 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
                            provenance=(f"project:{p.id}",))
     if p.plan_ref and texts.get(p.plan_ref):
         lines.append(phrase("projects.run.plan", plan=texts[p.plan_ref]))
+        lines += _answer_lines(p, texts, frame)
     if target is not None:
         lines.append(phrase("projects.run.target") + "\n" + _objective_line(target, texts, pm, frame.now))
         if target.done_when_ref and texts.get(target.done_when_ref):
@@ -369,6 +391,20 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
 REPORT_CLIP = 500
 
 
+def _answer_lines(p: Project, texts: Mapping[str, str], frame: Frame) -> list[str]:
+    """Les questions de son plan, avec ce qu'elle recommandait et la réponse qu'elles ont eue — ensemble : « oui pour
+    la 1 » ne veut rien dire sans la 1 (ADR 0161). Validé sans un mot, ses recommandations valent."""
+    questions = texts.get(p.questions_ref, "") if p.questions_ref else ""
+    if not questions or p.plan_state not in (c.PLANNED, c.TO_FRAME):
+        return []
+    answer = texts.get(p.plan_answer_ref, "") if p.plan_answer_ref else ""
+    if answer:
+        said = [phrase("projects.run.plan_answer", who=_who(frame, p.asked_by), words=answer)]
+    else:  # à reprendre, la réponse est la demande de révision (ses consignes) ; validé sans un mot, elles valent
+        said = [] if p.plan_state == c.TO_FRAME else [phrase("projects.run.plan_silent")]
+    return [phrase("projects.run.plan_questions", questions=questions), *said]
+
+
 def _instruction_lines(p: Project, texts: Mapping[str, str]) -> list[str]:
     """Ses dernières consignes, chacune avec les mots de la personne quand elle les a dits de vive voix (ADR 0145)."""
     said = dict(p.said)
@@ -398,6 +434,7 @@ def _frame_lines(p: Project, texts: Mapping[str, str], frame: Frame, pm: Any) ->
         lines.append(phrase("projects.run.instructions") + "\n" + "\n".join(instructions))
     if p.plan_ref and texts.get(p.plan_ref):  # à reprendre : la personne a demandé une révision
         lines.append(phrase("projects.frame.previous", plan=texts[p.plan_ref]))
+        lines += _answer_lines(p, texts, frame)
     if apps := app_lines(p, frame):
         lines.append("\n".join(apps))
     if missing := missing_tools(p):
@@ -524,9 +561,22 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
 
 
 def _apps_where(p: Project, frame: Frame) -> str:
-    """Où voir ce que ses apps montrent : leur fiche dans la console, où sont leurs vues (ADR 0145)."""
-    titles = [a.title for a in frame.get(forge_c.APPS) or () if a.project == p.id and a.title]
-    return phrase("projects.share.apps", apps=", ".join(f"« {x} »" for x in titles)) if titles else ""
+    """Où voir ce que ses apps montrent (ADR 0145) : seulement celles qui ont des vues et qui marchent ; à qui
+    s'occupe d'elle, le lien de leurs vues dans la console ; à une autre, la console ne lui est pas ouverte (ADR
+    0161)."""
+    shown = [a for a in frame.get(forge_c.APPS) or () if a.project == p.id and a.title and a.views
+             and not forge_c.failure(a)]
+    if not shown:
+        return ""
+    aud = frame.audience
+    if aud is not None and aud.owner:
+        return phrase("projects.share.apps", apps=", ".join(
+            f"« {a.title} » ({APP_VIEWS.format(app=quote(a.name, safe=''))})" for a in shown))
+    return phrase("projects.share.apps_closed", apps=", ".join(f"« {a.title} »" for a in shown))
+
+
+#: les vues d'une app dans la console
+APP_VIEWS = "/inspecteur/fiche/app/{app}?onglet=vues"
 
 
 def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody:
@@ -538,6 +588,10 @@ def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
     if aud is None or not title or not hearable(p.about, written(p), person, aud.level, aud.witness_level,
                                                 aud.private_ok):
         return SectionBody(phrase("projects.share.something"), level=0)
+    if unplanned_stall(p):  # son cadrage n'a pas abouti : ce n'est pas la machine (ADR 0161)
+        return SectionBody(phrase("projects.share.unframed", title=title, n=p.frame_silent),
+                           level=written(p) if any(a != person for a in p.about) else 0,
+                           title=phrase("projects.share.stalled_title"), provenance=(f"project:{p.id}",))
     body = phrase("projects.share.stalled", title=title, n=p.failures)
     if p.last_failure:
         body += "\n" + phrase("projects.share.stalled_cause", cause=describe_error(p.last_failure))
@@ -611,7 +665,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     owner = bool(person) and aud.owner  # l'adresse qui parle, là où elle parle (jamais un groupe public)
     lines, level, witness, steering, answering = [], 0, False, False, False
     kind = ep.kind if ep is not None else ""
-    for p in _recent(s)[-SHOWN * 2:]:
+    for p in _talked(s, person):
         title = texts.get(p.title_ref)
         # ses lignes d'accès disent à qui elle en parle (ADR 0133) ; sa confidentialité, ce qu'elle en dit
         if not title or not sees(p, aud, kind, frame) or \
@@ -672,9 +726,15 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     return SectionBody("\n".join(lines), level=level, witness=witness)
 
 
+def _framing(frame: Frame) -> bool:
+    """Cette exécution est-elle une séance de cadrage (ADR 0145) ? Elle se conclut par son plan, pas par un verdict."""
+    ep = frame.episode
+    return ep is not None and frame_of(ep.attrs.get("subject")) is not None
+
+
 def work_brief(frame: Frame, req: Any) -> str:
-    return phrase("projects.run.brief")
+    return phrase("projects.frame.brief") if _framing(frame) else phrase("projects.run.brief")
 
 
 def job_brief(frame: Frame, req: Any) -> str:
-    return phrase("projects.run.job_brief")
+    return phrase("projects.frame.job_brief") if _framing(frame) else phrase("projects.run.job_brief")

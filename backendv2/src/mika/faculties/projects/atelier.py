@@ -39,7 +39,6 @@ from mika.faculties.projects.tools import (
     pinned,
     propose_push,
     push_summary,
-    wrap_up,
 )
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
@@ -120,7 +119,7 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
         files = await port.tree(p.id, args.path or ".")
     except OutsideWorkshop as exc:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
-    return wrap_up(ctx, "\n".join(files) if files else phrase("projects.workshop.empty"))
+    return "\n".join(files) if files else phrase("projects.workshop.empty")
 
 
 @PROJECTS.tool("ws_read", description=phrase("projects.workshop.read"), args=ReadArgs, bundle=BUNDLE, episodes=RUNS)
@@ -130,7 +129,7 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
         return got
     p, port = got
     try:
-        return wrap_up(ctx, await port.read(p.id, args.path))
+        return await port.read(p.id, args.path)
     except (OutsideWorkshop, FileNotFoundError) as exc:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
 
@@ -146,7 +145,7 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
         rel = await port.write(p.id, args.path, args.content)
     except (OutsideWorkshop, WorkshopFull) as exc:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
-    return wrap_up(ctx, phrase("projects.workshop.written", path=rel, size=len(args.content)))
+    return phrase("projects.workshop.written", path=rel, size=len(args.content))
 
 
 @PROJECTS.tool("ws_edit", acts=True, description=phrase("projects.workshop.edit"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
@@ -159,7 +158,7 @@ async def ws_edit(args: EditArgs, ctx: Any) -> Any:
         rel = await port.edit(p.id, args.path, args.old, args.new)
     except (OutsideWorkshop, FileNotFoundError, ValueError) as exc:  # WorkshopFull est une ValueError
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
-    return wrap_up(ctx, phrase("projects.workshop.edited", path=rel))
+    return phrase("projects.workshop.edited", path=rel)
 
 
 def program_time_left(ctx: Any) -> float:
@@ -184,7 +183,7 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.workshop.no_time"))
     result = await port.run(p.id, args.argv, timeout_s=min(float(args.timeout_s), left))
     # une commande refusée ou en échec n'est pas du travail fait (elle reste une information)
-    return wrap_up(ctx, ToolResult(ok=result.ok, content=describe(result)))
+    return ToolResult(ok=result.ok, content=describe(result))
 
 
 @PROJECTS.tool("ws_diff", description=phrase("projects.workshop.diff"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
@@ -195,8 +194,8 @@ async def ws_diff(args: ListArgs, ctx: Any) -> Any:
     p, port = got
     diff = await port.diff(p.id)
     history = await port.log(p.id, 8)
-    return wrap_up(ctx, (diff or phrase("projects.workshop.unchanged"))
-                   + ("\n\n" + phrase("projects.workshop.history") + "\n" + history if history else ""))
+    return (diff or phrase("projects.workshop.unchanged")) \
+        + ("\n\n" + phrase("projects.workshop.history") + "\n" + history if history else "")
 
 
 def network_summary(p: Project, argv: list[str] | tuple[str, ...], why: str) -> str:
@@ -233,17 +232,17 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     p, _ = got
     about = tuple(x for x in (p.owner, *p.about) if x)
     if _already(ctx.frame, p, args.argv):  # la même commande ne s'empile pas : elle attend déjà
-        return wrap_up(ctx, ToolResult(ok=False, content=phrase("projects.workshop.already")))
+        return ToolResult(ok=False, content=phrase("projects.workshop.already"))
     if not p.approval:  # sans accord : elle partira quand cette exécution aura fini (l'atelier est à elle d'ici là)
         await ctx.emit(NETWORK_QUEUED.draft(project=p.id, argv=tuple(args.argv),
                                             why=Content.of(args.why.strip(), level=p.sensitivity),
                                             owner=p.owner, about=p.about))
-        return wrap_up(ctx, phrase("projects.workshop.queued"))
+        return phrase("projects.workshop.queued")
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED, owner=PROJECTS.name, args_json=json.dumps({"project": p.id, "argv": args.argv}),
         summary=Content.of(network_summary(p, args.argv, args.why), level=p.sensitivity), approval=True,
         context=project_target(p.id), about=about))
-    return wrap_up(ctx, phrase("projects.workshop.proposed"))
+    return phrase("projects.workshop.proposed")
 
 
 @PROJECTS.tool("project_push", acts=True, description=phrase("projects.workshop.push"), args=PushArgs, bundle=BUNDLE,

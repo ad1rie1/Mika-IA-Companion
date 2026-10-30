@@ -417,6 +417,15 @@ def unquoted(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:
 
 #: la boucle s'est arrêtée sur un outil qui conclut (``ToolSpec.ends_loop``)
 ENDED_BY_TOOL = "tool_end"
+#: une boucle qui se conclut par un outil voit ses derniers tours comptés, à partir de celui-ci : au plafond, le
+#: dernier tour n'a plus d'outil, et une séance qui ne s'est pas conclue n'a rien conclu (ADR 0161)
+TURNS_WARNED = 3
+
+
+def turns_left(outputs: list[Message], left: int) -> list[Message]:
+    """Les résultats d'un tour, le dernier suivi de ce qu'il lui reste de tours avec ses outils."""
+    note = phrase("runtime.tools.last_turn") if left == 1 else phrase("runtime.tools.turns_left", n=left)
+    return [*outputs[:-1], replace(outputs[-1], content=f"{outputs[-1].content}\n{note}")]
 
 
 def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str],
@@ -533,6 +542,8 @@ async def _loop(
     counts: dict[str, int] = {}
     same: dict[str, int] = {}
     replayed = False
+    # une boucle qui se conclut par un outil (un pas, une exécution) : ses derniers tours se comptent
+    concluding = any(s.ends_loop for s in tools.values())
     for _turn in range(max_turns):
         resp = await gateway.call(req)
         result.responses += 1
@@ -608,13 +619,16 @@ async def _loop(
                                              cut=spec.outside and content.endswith(TRIM_MARK)))
             outputs.append(Message("tool", content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
             await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
-            ended = ended or (spec.ends_loop and tr.ok)
+            ended = ended or ((spec.ends_loop or tr.ends) and tr.ok)
         if ended:
             # l'outil qui conclut a réussi : rien à écrire de plus (le rappeler coûtait un appel sur trois des
             # séances de sa vie intérieure, pour une conclusion que personne ne lisait — sonde du 2026-10-03)
             result.text = resp.text
             result.stop = ENDED_BY_TOOL
             return result
+        left = max_turns - _turn - 1
+        if outputs and concluding and 0 < left <= TURNS_WARNED:
+            outputs = turns_left(outputs, left)
         req = req.extend(Message("assistant", resp.text, tool_calls=resp.tool_calls), *outputs)
     return await _close(gateway, req, result, "max_turns")
 

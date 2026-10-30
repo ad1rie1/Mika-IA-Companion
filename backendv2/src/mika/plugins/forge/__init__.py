@@ -78,7 +78,7 @@ from mika.plugins.forge.views import (
     summary,
     view_params,
 )
-from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args
+from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args, ui_load
 from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, ToolRule
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
@@ -157,6 +157,11 @@ class App:
     #: l'épisode qui a écrit la version en vigueur : un essai réussi dans ce même épisode prouve qu'elle a produit
     #: une app qui marche (ADR 0104)
     written_in: str = ""
+    #: la dernière version qu'un essai a prouvée, et l'épisode qui l'a relancée après une panne : un essai réussi
+    #: prouve une version jamais prouvée de son projet, ou une app relancée dans l'épisode — pas une app qui marchait
+    #: déjà (ADR 0161)
+    proven: int = 0
+    revived_in: str = ""
     #: le projet où elle vit (0 : aucun) — écrite pendant une de ses exécutions, ou désignée ; il porte sa
     #: réparation, ses trouvailles et ses demandes (ADR 0104)
     project: int = 0
@@ -327,6 +332,13 @@ class Emitted(Payload):
     data: str
 
 
+class Proved(Payload):
+    """Un essai réussi a prouvé cette version (ADR 0161) : un autre essai d'elle ne prouvera plus rien."""
+
+    app: str
+    version: int
+
+
 class AppAccessSet(Payload):
     """Les lignes d'accès d'une app sans projet, réglées d'un coup par un opérateur (ADR 0134) : tout le tableau,
     dans son ordre, et la ligne par défaut."""
@@ -341,7 +353,8 @@ class AppAccessSet(Payload):
 #: v6 : une trouvaille sait si elle est urgente (``News.urgent``).
 #: v7 : les appels d'outils d'app qui attendent un accord (``calls``, ADR 0133).
 #: v8 : les lignes d'accès d'une app sans projet (``App.access``, ADR 0134).
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=8,
+#: v9 : la version prouvée et l'épisode qui l'a relancée (``App.proven``, ``App.revived_in`` : ADR 0161).
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=9,
                retired_params=("signal_spacing_us",))
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
@@ -349,6 +362,7 @@ WRITTEN = FORGE.event("written", Written)
 SWITCHED = FORGE.event("switched", Switched)
 TICKED = FORGE.event("ticked", Ticked)
 EMITTED = FORGE.event("emitted", Emitted)
+PROVED = FORGE.event("proved", Proved)
 HANDLED = FORGE.event("handled", Handled)
 ACCESS_SET = FORGE.event("access_set", AppAccessSet, subjects=("by",))
 INBOX_MAX = 16
@@ -392,8 +406,9 @@ def _written(s: ForgeState, e, cx) -> ForgeState:
               # sa file traverse les versions : ce qu'elle lui a signalé reste à lire
               queue=old.queue if old else (), dropped=old.dropped if old else 0,
               calls_at=old.calls_at if old else (), rules=tuple(d.signals), instructions=d.instructions,
-              # ses lignes d'accès suivent l'app, pas sa version (ADR 0134)
-              access=old.access if old else None, default_access=old.default_access if old else CLOSED_TOOLS)
+              # ses lignes d'accès suivent l'app, pas sa version (ADR 0134) ; ce qui a été prouvé aussi (ADR 0161)
+              access=old.access if old else None, default_access=old.default_access if old else CLOSED_TOOLS,
+              proven=old.proven if old else 0)
     return replace(s, apps=s.apps.set(d.app, app))
 
 
@@ -418,8 +433,10 @@ def _switched(s: ForgeState, e, cx) -> ForgeState:
     if d.state == "broken" and d.service:  # un seul service s'arrête : les autres continuent
         return replace(s, apps=s.apps.set(d.app, replace(
             app, broken_services=app.broken_services.set(d.service, d.reason[:300]))))
+    # relancée après une panne : un essai réussi dans cet épisode prouve sa réparation (ADR 0161)
+    revived = e.correlation if app.broken or app.broken_services else app.revived_in
     change = {"enabled": {"enabled": True, "broken": "", "failures": 0, "held": False,
-                          "broken_services": FrozenDict(), "svc_failures": FrozenDict()},
+                          "broken_services": FrozenDict(), "svc_failures": FrozenDict(), "revived_in": revived},
               "disabled": {"enabled": False, "held": app.held or operator},
               "broken": {"enabled": False, "broken": d.reason[:300]}, "promoted": {"promoted": True},
               "demoted": {"promoted": False},
@@ -439,6 +456,14 @@ def trusted(app: App | None) -> bool:
     """Ses secrets se lisent-ils ? Quand un opérateur a validé l'app une fois (ses versions suivantes comprises,
     ADR 0105), et ne lui a pas retiré sa confiance."""
     return app is not None and bool(app.trusted)
+
+
+@FORGE.reducer(PROVED)
+def _proved(s: ForgeState, e, cx) -> ForgeState:
+    app = s.apps.get(e.data.app)
+    if app is None:
+        return s
+    return replace(s, apps=s.apps.set(e.data.app, replace(app, proven=max(app.proven, e.data.version))))
 
 
 @FORGE.reducer(TICKED)
@@ -740,7 +765,8 @@ def _apps(s: ForgeState, cx) -> tuple[c.AppView, ...]:
     return tuple(c.AppView(k, a.title, a.version, a.enabled, a.broken, a.failures, a.promoted, a.context, a.schedule,
                            project=a.project, held=a.held, pending=k in pending, refused=a.install_refused,
                            ticked_at=a.ticked_at, services=tuple(n for n, _ in a.services),
-                           broken_services=tuple(sorted(a.broken_services.items())))
+                           broken_services=tuple(sorted(a.broken_services.items())),
+                           views=tuple(v.label for v in ui_load(a.ui).views))
                  for k, a in sorted(s.apps.items()))
 
 
@@ -1189,8 +1215,9 @@ class WriteArgs(BaseModel):
 
 
 #: ce qu'elle peut essayer elle-même : un battement, sa ligne de contexte, un événement d'exemple, une vue, un de ses
-#: outils, une action — tout ce qu'elle écrit (ADR 0104). Un essai n'est ni journalisé ni compté contre l'app : ce
-#: qu'il émet ou signale est montré, jamais envoyé.
+#: outils, une action — tout ce qu'elle écrit (ADR 0104). Un essai est un vrai passage (ADR 0105) : ce qu'il range
+#: reste dans sa base, ce qu'il signale part dans sa file ; seul un événement d'exemple est inventé. Jamais compté
+#: contre l'app.
 TESTABLE = r"^(tick|context|on_event|view|view_[a-z0-9_]+|tool_[a-z0-9_]+|action_[a-z0-9_]+|service_[a-z0-9_]+)$"
 
 
@@ -1347,9 +1374,35 @@ async def forge_read(args: ReadArgs, ctx: Any) -> Any:
                       total=total)
         return _nothing(head + "\n" + (body or phrase("forge.tools.read.empty")))
     logs = "\n".join(port.logs(args.app, 15))
+    settings = settings_lines(ctx, args.app, port.info(args.app))
     return _nothing("\n".join((phrase("forge.tools.read.manifest"), numbered(texts["manifest"])[0],
-                                phrase("forge.tools.read.code"), numbered(texts["code"])[0],
+                                *settings, phrase("forge.tools.read.code"), numbered(texts["code"])[0],
                                 phrase("forge.tools.read.logs"), logs or phrase("forge.tools.read.empty"))))
+
+
+def settings_lines(ctx: Any, name: str, info: AppInfo | None) -> list[str]:
+    """Ses réglages en vigueur : la valeur qu'un opérateur a donnée l'emporte sur le défaut du manifeste — changer un
+    défaut ne change alors rien, et elle doit le savoir ; un secret se dit défini ou non, jamais sa valeur ; une app
+    à secrets que personne n'a validée les lit vides (ADR 0161)."""
+    fields = info.config_fields if info is not None else ()
+    if not fields:
+        return []
+    store = ctx.ports.get("forge_settings")
+    current = dict(store.values(name)) if store is not None else {}
+    app = ctx.frame.state("forge").apps.get(name)
+    out = [phrase("forge.tools.read.settings")]
+    for f in fields:
+        given = current.get(f.path)
+        if f.secret:
+            state = phrase("forge.tools.read.secret_set") if given else phrase("forge.tools.read.secret_unset")
+            if given and not trusted(app):
+                state += phrase("forge.tools.read.untrusted")
+        elif given not in (None, ""):
+            state = phrase("forge.tools.read.overridden", value=str(given)[:80])
+        else:
+            state = phrase("forge.tools.read.default", value=str(f.default)[:80])
+        out.append(f"- {f.path} : {state}")
+    return out
 
 
 def _nothing(text: str) -> ToolResult:
@@ -1363,17 +1416,20 @@ def _written_of(info: AppInfo | None, app: str, version: int, project: int = 0) 
         WRITTEN.draft(app=app, version=version, title=app, project=project)
 
 
-def home_of(ctx: Any, asked: int) -> tuple[int, str]:
-    """Le projet où vivra l'app qu'elle écrit (ADR 0104) : celui de l'exécution en cours, sinon celui qu'elle désigne
-    parmi ses projets vivants — (0, « pourquoi pas ») pour un numéro inconnu ; (0, "") : aucun (celui d'avant reste)."""
+def home_of(ctx: Any, asked: int, current: int = 0) -> tuple[int, str]:
+    """Le projet où vivra l'app qu'elle écrit (ADR 0104) : celui qu'elle désigne parmi ses projets vivants — (0,
+    « pourquoi pas ») pour un numéro inconnu —, sinon celui où elle vit déjà s'il vit encore (retouchée depuis un
+    autre projet, elle ne déménage pas avec sa réparation et ses trouvailles : ADR 0161), sinon celui de l'exécution
+    en cours ; (0, "") : aucun (celui d'avant reste)."""
+    alive = {p.id for p in ctx.frame.get(projects_c.LIVE)}
+    if asked:
+        return (asked, "") if asked in alive else (0, phrase("forge.tools.write.no_project", id=asked))
+    if current and current in alive:
+        return current, ""
     ep = ctx.frame.episode
     if ep is not None and ep.kind in PROJECT_KINDS and (pid := project_of(ep.target)):
         return pid, ""
-    if not asked:
-        return 0, ""
-    if asked not in {p.id for p in ctx.frame.get(projects_c.LIVE)}:
-        return 0, phrase("forge.tools.write.no_project", id=asked)
-    return asked, ""
+    return 0, ""
 
 
 def keeper_handle(frame: Frame) -> str:
@@ -1390,7 +1446,7 @@ async def _save(ctx: Any, port: Any, name: str, manifest: str, code: str, asked_
     """Installer une version (relue ; une version refusée ne change rien) — ou la mettre de côté quand elle attend
     la première validation d'un opérateur. Le chemin commun de ``forge_write`` et ``forge_edit``."""
     app = ctx.frame.state("forge").apps.get(name)
-    project, wrong = home_of(ctx, asked_project)
+    project, wrong = home_of(ctx, asked_project, app.project if app is not None else 0)
     if wrong:
         return ToolResult(ok=False, content=wrong)
     why = guarded(app, ctx.ports, port.info(name)) if app is not None else ""
@@ -1605,21 +1661,54 @@ def signal_fate(app: App | None, signals: Sequence[tuple[str, float, str]], fram
     return note
 
 
-def _tested(r: Any, verdict: str = "", *, invalid: bool = False, fate: str = "", made: bool = False) -> ToolResult:
+def _tested(r: Any, verdict: str = "", *, invalid: bool = False, fate: str = "", made: bool = False,
+            stored: bool = False) -> ToolResult:
     """Ce qu'a donné un essai ; ``invalid`` : une vue rendue mais invalide (l'essai n'est pas réussi) ; ``fate`` : ce
-    que deviendraient ses signaux ; ``made`` : l'app a été écrite dans cet épisode — alors un essai réussi prouve
-    qu'elle a produit une app qui marche, et un essai seul ne prouve rien (ADR 0104)."""
+    que deviendraient ses signaux ; ``made`` : un essai réussi prouverait un travail (``proves``) — sauf si rien de ce
+    que l'app a demandé au réseau n'a répondu : « réussi » ne veut alors dire que « rien n'a levé » (ADR 0161) ;
+    ``stored`` : un outil ou une action, dont ce qu'il range reste dans sa base."""
     logs = "\n".join(r.logs[-10:])
     head = phrase("forge.tools.test.outcome",
                   state=phrase("forge.tools.test.ok") if r.ok else phrase("forge.tools.test.failed"),
                   ms=r.duration_ms, killed=phrase("forge.tools.test.killed") if r.killed else "")
     body = json.dumps(r.value, ensure_ascii=False, default=str)[:3000] if r.ok else r.error
+    failed = tuple(getattr(r, "failed", ()) or ())
+    requests = int(getattr(r, "requests", 0) or 0)
     extra = ("\n" + phrase("forge.tools.test.signals", signals=list(r.signals)) if r.signals else "") + \
         (f"\n{fate}" if fate else "") + \
+        ("\n" + phrase("forge.tools.test.http_failed", count=len(failed), total=max(requests, len(failed)),
+                       lines="\n".join(failed[:5])) if failed else "") + \
+        ("\n" + phrase("forge.tools.test.stored") if stored and r.ok else "") + \
         ("\n" + phrase("forge.tools.test.logs") + f"\n{logs}" if logs else "")
     ok = r.ok and not invalid
+    unanswered = bool(failed) and len(failed) >= requests
     return ToolResult(ok=ok, content=phrase("forge.tools.test.result", head=head) + f"\n{body}{extra}"
-                                     + (f"\n{verdict}" if verdict else ""), proof=ok and made)
+                                     + (f"\n{verdict}" if verdict else ""), proof=ok and made and not unanswered)
+
+
+#: ce qui prouve, à l'essai : ce que l'app fait pour de vrai — un battement, un service, un outil, une vue, une
+#: action ; ni sa ligne de contexte ni un événement inventé (ADR 0161)
+PROVING = ("tick", "service_", "tool_", "view", "action_")
+
+
+def proves(app: App | None, ctx: Any, method: str) -> bool:
+    """Un essai réussi de cette app prouverait-il un travail ? Écrite ou relancée après une panne dans cet épisode
+    (ADR 0104) ; ou, pendant une exécution de son projet, une version qu'aucun essai n'a encore prouvée — écrite par
+    une exécution qui n'a pas abouti, elle se prouve à la suivante sans être réécrite (ADR 0161)."""
+    if app is None or not method.startswith(PROVING):
+        return False
+    if ctx.episode_id in (app.written_in, app.revived_in):
+        return True
+    ep = ctx.frame.episode
+    here = project_of(ep.target) if ep is not None and ep.kind in PROJECT_KINDS else None
+    return bool(here) and app.project == here and app.version > app.proven
+
+
+async def _settled(ctx: Any, name: str, app: App | None, out: ToolResult) -> ToolResult:
+    """Un essai qui prouve marque sa version prouvée : l'essayer de nouveau ne prouvera plus rien (ADR 0161)."""
+    if out.proof and app is not None and app.version > app.proven:
+        await ctx.emit(PROVED.draft(app=name, version=app.version))
+    return out
 
 
 def stopped(app: App | None) -> str:
@@ -1636,7 +1725,7 @@ def stopped(app: App | None) -> str:
 
 
 @FORGE.tool("forge_test", acts=True, description=phrase("forge.tools.test.description"), args=TestArgs, bundle=BUNDLE,
-            episodes=BUILD, max_calls_per_episode=8, owner_only=True)
+            episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -1644,9 +1733,10 @@ async def forge_test(args: TestArgs, ctx: Any) -> Any:
     app = ctx.frame.state("forge").apps.get(args.app)
     if why := stopped(app):
         return ToolResult(ok=False, content=phrase("forge.tools.test.stopped", why=why))
-    made = app is not None and bool(app.written_in) and app.written_in == ctx.episode_id
+    made = proves(app, ctx, args.method)
     if args.method.startswith("view"):
-        return await _test_view(port, args.app, args.method, args.args, trusted(app), made=made)
+        return await _settled(ctx, args.app, app, await _test_view(port, args.app, args.method, args.args,
+                                                                   trusted(app), made=made))
     frame: Frame = ctx.frame
     info = port.info(args.app)
     verdict, payload = "", {}
@@ -1658,10 +1748,15 @@ async def forge_test(args: TestArgs, ctx: Any) -> Any:
         if errors:
             return ToolResult(ok=False, content=bad_args(tool, errors))
     elif args.method.startswith("action_"):
-        declared = {a.function for v in (info.views if info is not None else ()) for a in v.actions}
-        if args.method not in declared:
+        action = next((a for v in (info.views if info is not None else ()) for a in v.actions
+                       if a.function == args.method), None)
+        if action is None:
             return ToolResult(ok=False, content=phrase("forge.tools.test.no_action", action=args.method))
-        payload = dict(args.args)  # tels qu'un opérateur les remplirait : la console, elle, les vérifie d'abord
+        # vérifiées comme la console les vérifie : chaque champ déclaré présent et typé (ADR 0161)
+        payload, errors = check_args(action.specs, dict(args.args), defaults=False, strict=False)
+        if errors:
+            return ToolResult(ok=False, content=phrase("forge.tools.test.bad_data", errors="; ".join(
+                f"{k} : {v}" for k, v in errors.items())))
     elif args.method == "on_event":
         payload = {"type": "rss.noticed", "at": frame.now // 1_000_000, "source": "rss", "kind": "", "summary": "",
                    **args.args}
@@ -1678,8 +1773,10 @@ async def forge_test(args: TestArgs, ctx: Any) -> Any:
             await ctx.emit(*drafts)
     if r.ok and args.method.startswith("action_"):
         verdict = action_verdict(r.value)
-    return _tested(r, verdict, invalid=verdict == phrase("forge.tools.action.invalid"),
-                   fate=signal_fate(app, r.signals, frame, p, invented=invented), made=made)
+    return await _settled(ctx, args.app, app, _tested(
+        r, verdict, invalid=verdict == phrase("forge.tools.action.invalid"),
+        fate=signal_fate(app, r.signals, frame, p, invented=invented), made=made,
+        stored=args.method.startswith(("tool_", "action_"))))
 
 
 def action_verdict(value: Any) -> str:

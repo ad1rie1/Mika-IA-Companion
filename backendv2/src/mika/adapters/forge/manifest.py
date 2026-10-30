@@ -640,6 +640,13 @@ def coherence(manifest: Mapping[str, Any], functions: Mapping[str, int]) -> list
             need(a["function"], "api, data", f"l'action « {a['key']} » de la vue « {v['key']} » est déclarée")
     if manifest.get("context") and "context" not in functions:
         problems.append("« context: true » sans fonction context(api)")
+    try:
+        paced = schedule.parse(str(manifest.get("schedule") or "manual").strip()).kind != "manual"
+    except ValueError:
+        paced = False  # la règle elle-même est refusée ailleurs
+    if paced and "tick" not in functions:  # un rythme appelle tick : sans elle, chaque passage échoue (ADR 0161)
+        problems.append("« schedule » sans fonction tick(api) : un rythme appelle tick ; sans rythme, "
+                        "« schedule: manual » (ses services ont le leur)")
     if manifest.get("events") and "on_event" not in functions:
         problems.append("« events » sans fonction on_event(api, événement)")
     return problems

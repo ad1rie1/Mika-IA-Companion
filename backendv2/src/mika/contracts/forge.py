@@ -105,6 +105,8 @@ class AppView:
     #: ses services, et ceux que le disjoncteur a arrêtés : (nom, pourquoi) — l'app tourne encore (ADR 0104)
     services: tuple[str, ...] = ()
     broken_services: tuple[tuple[str, str], ...] = ()
+    #: ses vues déclarées, par leur titre : ce qu'une personne en voit dans la console (ADR 0161)
+    views: tuple[str, ...] = ()
 
 
 def failure(app: AppView) -> str:

@@ -224,6 +224,10 @@ class CallResult:
     emits: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     #: pas appelée : un autre appel tenait l'app — ce n'est pas un échec de l'app, il se refait
     busy: bool = False
+    #: ses requêtes sur le réseau pendant l'appel, et celles qui ont échoué (« GET adresse → 429 ») : un appel qui
+    #: rattrape tout « réussit » même quand rien n'a répondu (ADR 0161)
+    requests: int = 0
+    failed: tuple[str, ...] = ()
 
 
 class ForgePort(Protocol):
@@ -305,6 +309,10 @@ class ForgePort(Protocol):
         ...
 
     def logs(self, app: str, n: int = 20) -> list[str]: ...
+
+    def note(self, app: str, line: str) -> None:
+        """Écrire une ligne dans son journal (une vue qui ne se rend pas dans la console : ADR 0161)."""
+        ...
 
 
 class ForgeSettings(Protocol):

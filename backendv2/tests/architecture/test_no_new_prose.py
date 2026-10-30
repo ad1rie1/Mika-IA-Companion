@@ -40,7 +40,7 @@ CEILING = {
     "faculties/identity/detection.py": 2,  # listes de mots (détecteur)
     "faculties/presence/__init__.py": 2,  # panneau de console
     "faculties/projects/atelier.py": 13,  # résumés d'effets que l'opératrice approuve
-    "faculties/projects/tend.py": 2,  # raison de pause, gardée au journal
+    "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
     # raisons de clôture, gardées au journal ; règle de project_steer (console) ; +1 le 2026-10-25 : la description
     # de la capacité projects.steer, piloter sur ton accord (console, ADR 0133)
     "faculties/projects/tools.py": 4,

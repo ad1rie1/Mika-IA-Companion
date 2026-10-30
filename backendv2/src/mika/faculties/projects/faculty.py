@@ -172,11 +172,6 @@ class ProjectsParams(BaseModel):
         help="Les programmes qu'elle lance pendant une exécution (ws_run) ont au plus ce temps à eux tous. À garder "
              "en deçà du délai d'une exécution (15 min) : un programme lent finit en « délai dépassé » qu'elle lit, "
              "jamais en exécution coupée qu'on prendrait pour une panne du modèle.")] = 7 * MINUTE
-    wrap_up_after: Annotated[int, Knob(
-        label="Rappel de conclure après", group="Les exécutions", lo=2, hi=40,
-        help="Après autant d'appels d'outils dans une exécution, chaque résultat lui rappelle de conclure par "
-             "report_run (une exécution qui s'arrête sans verdict ne compte pas comme du travail). Une exécution a "
-             "24 tours, chacun pouvant porter plusieurs appels.")] = 18
     need_evidence: Annotated[float, Knob(
         label="Envie de demander de l'aide", group="Raconter", lo=0.0, hi=10.0, step=0.5,
         help="La preuve (log-odds) de l'initiative de dire à qui lui a confié le projet qu'un objectif bloque ou "
@@ -352,6 +347,10 @@ class Project:
     plan_asked_to: str = ""
     plan_attempts: int = 0
     plan_reminded: bool = False
+    #: la réponse à ses questions (une référence : ses mots tels quels, vide s'il l'a validé sans rien dire — ses
+    #: recommandations valent) ; ses séances de cadrage d'affilée qui n'ont pas écrit de plan (ADR 0161)
+    plan_answer_ref: str = ""
+    frame_silent: int = 0
     #: ses derniers comptes rendus, du plus ancien au plus récent : (instant, objectif, verdict, réf. du texte) — la
     #: mémoire de travail d'une exécution (ADR 0145)
     reports: tuple[tuple[int, int, str, str], ...] = ()
@@ -425,8 +424,10 @@ STEERS_KEPT = 50
 #:     dit à qui s'occupe d'elle (``stalled_at``, ``stall_asked``, ``stall_attempts`` : ADR 0143).
 #: v10 : le cadrage (ADR 0145) — la demande, son plan et son état, les critères et l'ordre des objectifs, ses
 #:     derniers comptes rendus, les passages des constants qu'elle raconte.
+#: v11 : la réponse à ses questions gardée avec elles, ses séances de cadrage sans plan, un objectif bloqué que sa
+#:     réponse rouvre, le premier passage d'un constant à sa cadence (ADR 0161).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=10)
+                   state_version=11, retired_params=("wrap_up_after",))
 PROJECTS.declare(*c.ALL)
 
 
@@ -777,11 +778,17 @@ def workable(o: Objective, now: int) -> bool:
     return o.status == c.OPEN and o.waiting_until <= now
 
 
-def due_at(o: Objective, pm: ProjectsParams) -> int:
-    """Quand un objectif peut être repris : un constant après sa cadence, un ponctuel tout de suite."""
-    if o.kind == c.CONSTANT and o.passed_at:
+def due_at(p: Project, o: Objective, pm: ProjectsParams) -> int:
+    """Quand un objectif peut être repris : un ponctuel tout de suite ; un constant une cadence après son dernier
+    passage — et son premier, une cadence après qu'il a pu commencer (l'étape dont il dépend faite, sinon sa
+    naissance) : un bilan de la semaine ne tombe pas le jour où l'app vient d'être écrite (ADR 0161)."""
+    if o.kind != c.CONSTANT:
+        return o.waiting_until
+    if o.passed_at:
         return max(o.passed_at + cadence(o, pm), o.waiting_until)
-    return o.waiting_until
+    dep = objective_at(p, o.after) if o.after else None
+    began = max(o.at, dep.closed_at if dep is not None else 0)
+    return max(began + cadence(o, pm), o.waiting_until)
 
 
 def framing(p: Project) -> bool:
@@ -799,10 +806,19 @@ def ready(p: Project, o: Objective) -> bool:
 _UNRANKED = 10_000
 
 
+def _order(o: Objective) -> tuple[int, int, int]:
+    """L'ordre des ponctuels : ce qu'on a ajouté hors de son plan d'abord (l'opérateur, la personne), puis les
+    étapes de son plan à leur rang — une idée de départ qu'il garde a le sien (ADR 0161) —, puis ce qu'elle a ajouté
+    d'elle-même."""
+    if o.rank:
+        return 1, o.rank, o.id
+    return (2 if o.author == "self" else 0), _UNRANKED, o.id
+
+
 def pick(p: Project, now: int, pm: ProjectsParams) -> Objective | None:
     """L'objectif de la prochaine exécution : celui qu'on a demandé, sinon le constant le plus en retard,
-    sinon le premier ponctuel ouvert (ceux de l'opérateur d'abord, puis les siens dans l'ordre de son plan). Un
-    objectif attend celui dont il dépend ; sans plan qui vaille, aucun (ADR 0145). Rien de dû : rien."""
+    sinon le premier ponctuel ouvert (``_order``). Un objectif attend celui dont il dépend ; sans plan qui vaille,
+    aucun (ADR 0145). Rien de dû : rien."""
     if framing(p):
         return None
     if nudged(p) and p.nudged_objective:
@@ -810,12 +826,13 @@ def pick(p: Project, now: int, pm: ProjectsParams) -> Objective | None:
         if wanted is not None and wanted.status == c.OPEN:
             return wanted
     opened = [o for o in p.objectives if o.status == c.OPEN and ready(p, o)]
-    constants = sorted((due_at(o, pm), o.id, o) for o in opened if o.kind == c.CONSTANT and o.waiting_until <= now)
+    constants = sorted((due_at(p, o, pm), o.id, o) for o in opened
+                       if o.kind == c.CONSTANT and o.waiting_until <= now)
     due = [o for at, _, o in constants if at <= now]
     if due:
         return due[0]
     once = [o for o in opened if o.kind == c.ONCE and o.waiting_until <= now]
-    once.sort(key=lambda o: (o.author == "self", o.rank or _UNRANKED, o.id))
+    once.sort(key=_order)
     if once:
         return once[0]
     # « lancer maintenant » sans rien de dû : le constant le plus proche de sa cadence, en avance
@@ -827,7 +844,7 @@ def next_due(p: Project, pm: ProjectsParams) -> int | None:
     pas de plan qui vaille."""
     if framing(p):
         return None
-    times = [due_at(o, pm) for o in p.objectives if o.status == c.OPEN and ready(p, o)]
+    times = [due_at(p, o, pm) for o in p.objectives if o.status == c.OPEN and ready(p, o)]
     return min(times) if times else None
 
 
@@ -1065,7 +1082,8 @@ def _resumed(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.PAUSED:
         return s
-    return _set(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0, stalled_at=0))
+    return _set(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0, stalled_at=0,
+                           frame_silent=0))
 
 
 @PROJECTS.reducer(ARCHIVED)
@@ -1144,9 +1162,23 @@ def _amended(s: ProjectsState, e, cx) -> ProjectsState:
         kept = set(p.instructions)
         p = replace(p, said=tuple(x for x in (*p.said, (e.data.instruction.ref, e.data.words.ref)) if x[0] in kept))
     p = replace(p, objectives=tuple(
-        replace(o, steered_at=e.at, asked=True, waiting_until=0) if o.status == c.OPEN and o.need_ref else o
+        replace(o, steered_at=e.at, asked=True, waiting_until=0) if o.status == c.OPEN and o.need_ref
+        else reopened(o, e.at, steered=True) if stuck_asking(o) else o
         for o in p.objectives))
     return _set(s, p)
+
+
+def stuck_asking(o: Objective) -> bool:
+    """Un ponctuel bloqué dont elle a dit le blocage à quelqu'un : sa réponse, ou une consigne, le rouvre (ADR 0161)
+    — sinon ce qui en dépend dans son plan attendrait pour toujours."""
+    return o.kind == c.ONCE and o.status == c.BLOCKED and o.asked
+
+
+def reopened(o: Objective, at: int, *, steered: bool = False) -> Objective:
+    """Rouvert par la réponse à son blocage : il repart (ses exécutions, son silence, sa clôture remis à zéro), le
+    besoin et la réponse sous les yeux de l'exécution qui vient."""
+    return replace(o, status=c.OPEN, closed_at=0, runs=0, silent=0, waiting_until=0, result_ref="", notable=0.0,
+                   steered_at=at if steered else o.steered_at, answered_at=o.answered_at if steered else at)
 
 
 #: la réponse à un plan (ADR 0145)
@@ -1165,26 +1197,30 @@ def _plan_proposed(s: ProjectsState, e, cx) -> ProjectsState:
     if run is not None and run.project == p.id and run.purpose == "frame":
         s = replace(s, running=s.running.set(e.correlation, replace(run, reported=True)))
     state = c.PLANNED if d.approved else c.PROPOSED
-    return _set(s, replace(p, plan_ref=d.plan.ref, questions_ref=d.questions.ref or "" if d.questions is not None
-                           else "", plan_at=e.at, plan_version=p.plan_version + 1, plan_state=state, plan_tell=d.tell,
-                           plan_asked=False, plan_asked_at=0, plan_asked_to="", plan_attempts=0, plan_reminded=False))
+    asked = d.questions.ref or "" if d.questions is not None else ""
+    # revu en cours de route sans question neuve, il garde celles qui l'ont fondé et leur réponse (ADR 0161)
+    kept = not asked and p.plan_state == c.PLANNED
+    return _set(s, replace(p, plan_ref=d.plan.ref, questions_ref=p.questions_ref if kept else asked,
+                           plan_answer_ref=p.plan_answer_ref if kept else "", plan_at=e.at,
+                           plan_version=p.plan_version + 1, plan_state=state, plan_tell=d.tell, plan_asked=False,
+                           plan_asked_at=0, plan_asked_to="", plan_attempts=0, plan_reminded=False, frame_silent=0))
 
 
 @PROJECTS.reducer(PLAN_ANSWERED)
 def _plan_answered(s: ProjectsState, e, cx) -> ProjectsState:
-    """Sa réponse : validé, le projet suit son plan ; à revoir, une séance de cadrage le reprend, ses mots (une
-    consigne) sous les yeux."""
+    """Sa réponse : validé, le projet suit son plan, ses mots gardés avec ses questions — la réponse à ce qu'elle
+    demandait (ADR 0161) ; à revoir, une séance de cadrage le reprend, ses mots (une consigne) sous les yeux."""
     d = e.data
     p = s.projects.get(d.project)
     if p is None or p.status == c.ARCHIVED or (p.plan_state == c.UNPLANNED and d.verdict != REVISE):
         return s  # un projet d'avant n'a pas de plan à valider ; le revoir lui en donne un
     words = d.words.ref if d.words is not None and d.words.ref else ""
+    if d.verdict == APPROVE and p.plan_state == c.PROPOSED:
+        return _set(s, replace(p, plan_state=c.PLANNED, plan_tell=False, plan_answer_ref=words))
     if words:
         p = replace(p, instructions=(*p.instructions, words)[-INSTRUCTIONS_KEPT:])
-    if d.verdict == APPROVE and p.plan_state == c.PROPOSED:
-        return _set(s, replace(p, plan_state=c.PLANNED, plan_tell=False))
     if d.verdict == REVISE:
-        return _set(s, replace(p, plan_state=c.TO_FRAME, revise_at=e.at, plan_tell=False))
+        return _set(s, replace(p, plan_state=c.TO_FRAME, revise_at=e.at, plan_tell=False, frame_silent=0))
     return _set(s, p)
 
 
@@ -1366,7 +1402,11 @@ def _answered(s: ProjectsState, e, cx) -> ProjectsState:
     d = e.data
     p = s.projects.get(d.project)
     o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None or o.status != c.OPEN:
+    if p is None or o is None:
+        return s
+    if stuck_asking(o):  # la réponse à son blocage le rouvre (ADR 0161)
+        return _set(s, _objective(p, reopened(o, e.at)))
+    if o.status != c.OPEN:
         return s
     # sa réponse est là : l'objectif n'attend plus (l'exécution suivante part dans l'espacement normal)
     return _set(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
@@ -1435,6 +1475,10 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
         return _set(s, p)
     if run.reported:
         return s
+    if run.purpose == "frame" and e.data.outcome not in REFUND:
+        # une séance de cadrage qui n'a pas écrit de plan : comptée — d'affilée, elles arrêtent le projet, qui ne
+        # recommence pas en boucle sans rien dire (ADR 0161)
+        return _set(s, replace(p, failures=0, frame_silent=p.frame_silent + 1))
     if e.data.outcome in REFUND:
         # elle n'a pas eu lieu : ni l'agenda, ni « lancer maintenant », ni le plafond du jour ne la comptent ;
         # l'espacement, si (il court depuis la tentative : pas de relance en boucle)

@@ -177,8 +177,13 @@ async def render(port: Any, app: str, info: AppInfo, spec: AppViewSpec, values: 
     r: CallResult = await port.call(app, spec.function, args, timeout_s=VIEW_TIMEOUT_S, max_result=VIEW_MAX_BYTES,
                                     cache_s=cache_s, secrets=secrets)
     if not r.ok:
-        return [failure_note(spec.label, r)]
-    return decode_view(r.value, app, info, spec)
+        return [failure_note(spec.label, r)]  # l'hôte l'a déjà mise dans son journal
+    blocks = decode_view(r.value, app, info, spec)
+    if is_invalid(blocks):  # rendue mais invalide : son journal le garde, elle le relira (ADR 0161)
+        note = getattr(port, "note", None)
+        if callable(note):
+            note(app, f"{spec.function} : enveloppe invalide dans la console — {getattr(blocks[0], 'text', '')[:300]}")
+    return blocks
 
 
 def without_forms(blocks: Sequence[Any]) -> list[Any]:

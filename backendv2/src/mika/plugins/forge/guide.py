@@ -21,7 +21,7 @@ quoi en faire — à qui le dire, un par un ou regroupés (forge_help veille : t
 Le manifeste (YAML) :
 - title (requis), description ;
 - schedule : manual (défaut), interval:30m, cron:0 8 * * *… — le rythme de tick(api) ; timeout : le temps qu'ont
-  tick et on_event, en secondes (1 à 120 ; sans : 5 s) ;
+  tick et on_event, en secondes (1 à 120 ; sans : le délai par défaut de la Forge, 5 s sauf réglage) ;
 - services : d'autres tâches planifiées, chacune son rythme — [{name, schedule, description, timeout}] →
   service_<name>(api) ; chacune est suivie à part (son dernier passage, ses échecs : une qui casse n'arrête pas
   les autres) et a son délai (1 à 120 s) ;
@@ -54,8 +54,8 @@ Le code (main.py, bibliothèque standard seulement ; le réseau passe par api) :
 
 Seules les fonctions déclarées sont appelées. Une écriture refusée ne change rien et dit pourquoi, champ par
 champ (views[0].actions[1].fields[2] (« ville ») : …). Essaie chaque fonction avec forge_test : c'est un vrai
-passage — ce qu'il range dans ta base y reste, ce qu'il signale part dans sa file (seul on_event reçoit un
-événement inventé, dont les signaux ne partent pas).
+passage — ce qu'il range dans ta base y reste (retire ce que tu as inventé pour essayer : forge_db_execute), ce
+qu'il signale part dans sa file (seul on_event reçoit un événement inventé, dont les signaux ne partent pas).
 
 Pour changer une app : forge_read (ses lignes numérotées), forge_search (un texte dans tes apps), puis forge_edit
 (remplacer des fragments exacts) — forge_write réécrit tout, c'est pour créer.
@@ -85,7 +85,7 @@ Le code : def view_releves(api, params): … return {"version": 2, "blocks": [..
   (recherche, liste, nombre, oui/non), au-dessus de la vue. Leur soumission remet les tables à la première page.
 - La vue rend une enveloppe JSON (voir forge_help blocs). Une enveloppe invalide est remplacée par une note qui
   nomme le chemin fautif ; une vue de plus de 3 s ou de plus de 256 Ko n'est pas montrée. Rien de tout ça
-  n'est compté contre ton app (le disjoncteur ne regarde que tick et on_event).
+  n'est compté contre ton app (le disjoncteur ne regarde que tick, on_event et les services).
 - Un lien vers une autre de tes vues : {"kind": "link", "text": "Lyon", "view": "releves",
   "params": {"ville": "Lyon"}} (seuls les paramètres déclarés de cette vue passent, ainsi que « page » et « page_<nom> »).
 - Un formulaire d'action en place : {"type": "form", "action": "ajouter", "initial": {"ville": "Lyon"}}.
@@ -119,7 +119,8 @@ Le code : def action_<vue>_<action>(api, data): … return {"ok": True, "message
   l'opérateur. Ce que l'action émet ou signale est journalisé comme venant de l'opérateur ; un échec n'est
   pas compté contre ton app.
 Dans ta vue : {"type": "form", "action": "ajouter", "initial": {"ville": "Paris"}}.
-forge_test action_releves_ajouter {"ville": "Paris", "temperature": 12} vérifie qu'elle rend {ok, message}.
+forge_test action_releves_ajouter {"ville": "Paris", "temperature": 12} vérifie ses données comme la console et
+qu'elle rend {ok, message} — le relevé reste dans ta base : retire-le ensuite s'il était inventé.
 """
 
 REGLAGES = """\

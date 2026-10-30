@@ -3170,17 +3170,18 @@ goals:
     # réparer une de ses apps tombée en panne (ADR 0104). {app} : son nom (celui que demandent les outils)
     repair: >-
       Ton app « {app} » ne marche plus : cinq battements ratés de suite l'ont arrêtée (la panne est citée plus
-      bas). Répare-la : relis-la (forge_read, forge_logs), corrige-la (forge_write : une nouvelle version la
-      relance), puis essaie-la (forge_test tick) — elle n'est réparée que quand l'essai passe. Si ça demande quelqu'un
-      (une clé, un accès), dis-le en concluant.
+      bas). Répare-la : relis-la (forge_read, forge_logs), corrige-la (forge_edit pour une retouche, forge_write
+      pour la réécrire : une nouvelle version la relance ; si la panne venait d'ailleurs — une source tombée —,
+      forge_command enable suffit), puis essaie-la (forge_test tick) — elle n'est réparée que quand l'essai passe.
+      Si ça demande quelqu'un (une clé, un accès), dis-le en concluant.
     # une promesse de travail qu'elle a faite à qui s'occupe d'elle et que rien n'avait mise en route (ADR 0104).
     # {who} : « Adrien » (entre guillemets) ou someone ; {when}, {quoted} : comme talk_musing
     promised: >-
-      Tu as promis à {who}{when} de faire quelque chose{quoted}, et rien ne l'a encore mis en route : fais-le
-      maintenant, avec tes outils. Si c'est un outil à te fabriquer (relever, suivre, surveiller quelque chose sur un
-      site), écris une app (forge_help veille te montre comment), puis essaie-la (forge_test) ; si c'est plus gros
-      qu'une séance, ouvre un projet (start_project, avec « forge » dans ses outils). Tu lui diras où tu en es la
-      prochaine fois que vous vous parlerez.
+      Tu as promis à {who}{when} de faire quelque chose{quoted}, et rien ne l'a encore mis en route. Si c'est vite
+      fait, fais-le maintenant, avec tes outils. Si c'est un outil à te fabriquer (relever, suivre, surveiller quelque
+      chose sur un site) ou un vrai travail, ouvre un projet (start_project, avec « forge » dans ses outils s'il faut
+      une app) : il naîtra à cadrer, avec la conversation où tu l'as promis, et tu reviendras vers {who} avec ton
+      plan — ne le bâtis pas ici. Tu lui diras où tu en es la prochaine fois que vous vous parlerez.
     # l'exploration d'un de ses centres d'intérêt, avec ses flux
     interest: >-
       Un de tes centres d'intérêt : va voir s'il y a du neuf (tes flux), lis ce qui t'accroche, et garde ce que tu
@@ -3497,6 +3498,12 @@ projects:
   # de l'app ; {app} : son nom ; {error} : la panne
   repair:
     objective: "Réparer mon app « {title} » ({app}) : elle ne marche plus ({error})"
+  # La conversation qui a mené à un projet, telle qu'il la garde (projects/tools.py, exchange — ADR 0161) : une ligne
+  # par message. {who} : son prénom (them sans prénom), ou you pour elle ; {text} : le message tel quel
+  request:
+    line: "{who} : {text}"
+    you: Toi
+    them: La personne
   # Les lots d'outils d'un projet, en mots (projects/prompt.py, missing_tools ; projects/tools.py, project_equip) — le
   # nom de chaque clé est le code du lot : NE PAS RENOMMER
   bundle_words:
@@ -3537,8 +3544,9 @@ projects:
     target: "L'objectif de cette exécution :"
     # quand l'objectif visé est constant
     constant: >-
-      C'est un objectif constant : il ne finit jamais. Fais un passage utile (une amélioration concrète, vérifiée),
-      puis conclus ce passage par « done ».
+      C'est un objectif constant : il revient, il ne finit jamais. Fais ce qu'il demande à chaque fois (un bilan, une
+      veille, une mise à jour, une vérification), avec tes outils, sur ce qui existe vraiment ; puis conclus ce
+      passage par « done » — ton compte rendu dit ce que tu as trouvé ou fait : c'est lui qui se racontera.
     # {note} : où elle en était sur cet objectif
     note: "Où tu en étais sur cet objectif : {note}"
     # ce qu'elle attendait de qui lui a confié le projet. {need} : ce qu'elle attendait ; {reply} : reply, ou rien
@@ -3629,9 +3637,19 @@ projects:
     job_brief: >-
       Exécution de travail impersonnelle sur ce projet : personne ne lit ce texte. Avance sur l'objectif indiqué en
       appelant les outils, puis conclus en appelant report_run.
-    # Le cadrage (ADR 0145) : la demande, telle quelle ; {who} : « Adrien », ou expression.person.someone
-    request: "Ce que {who} t'a demandé, ses mots tels quels (c'est ce que tu vises) :\n{text}"
+    # Le cadrage (ADR 0145) : la demande, telle quelle — la conversation qui y a mené, ses messages et les siens
+    # (ADR 0161, projects.request) ; {who} : « Adrien », ou expression.person.someone
+    request: >-
+      Ce que {who} t'a demandé, tel que vous en avez parlé (ses mots et les tiens, tels quels — c'est ce que tu
+      vises) :\n{text}
     plan: "Ton plan (c'est lui que tu suis ; s'il ne tient plus, revois-le avec project_plan) :\n{plan}"
+    # les questions de son plan, gardées avec leur réponse (ADR 0161). {questions} : ses questions et ce qu'elle
+    # recommandait, une par ligne (projects.plan.question)
+    plan_questions: "Les questions que tu as posées avec ton plan :\n{questions}"
+    # {who} : « Adrien », ou expression.person.someone ; {words} : sa réponse, telle quelle
+    plan_answer: "Ce que {who} t'a répondu en le validant : « {words} »"
+    # validé sans un mot (« vas-y », ou dans la console)
+    plan_silent: "Il a été validé sans autre réponse : ce que tu recommandais vaut."
     done_when: >-
       Il est fait quand : {criterion} — tu ne le déclares fait (report_run « done ») qu'en disant comment c'est
       rempli (how_met).
@@ -3655,6 +3673,15 @@ projects:
   # Une exécution sans objectif, avant toute autre : elle relit la demande et écrit son plan (projects/prompt.py,
   # _frame_lines).
   frame:
+    # Le dernier tour d'une séance de cadrage (projects/prompt.py, work_brief et job_brief) : personne ne lui parle,
+    # et elle se conclut par son plan (report_run n'y est pas un verdict)
+    brief: >-
+      (Personne ne te parle : c'est un moment de réflexion sur ton projet, pour toi seule — personne ne lit ce que tu
+      écris ici ; ni didascalies, ni adresse à quelqu'un.) Réfléchis à comment t'y prendre en appelant tes outils,
+      puis conclus en écrivant ton plan avec project_plan.
+    job_brief: >-
+      Séance de cadrage impersonnelle sur ce projet : personne ne lit ce texte. Prépare le plan en appelant les
+      outils, puis conclus en l'écrivant avec project_plan.
     ideas: "Tes idées de départ (notées en ouvrant le projet : à garder, réécrire ou retirer) :"
     done: "Déjà fait dans ce projet :"
     previous: "Ton plan d'avant, à reprendre d'après ce qu'on t'a dit (consignes ci-dessus) :\n{plan}"
@@ -3672,7 +3699,8 @@ projects:
       préparer. Puis écris ton plan avec project_plan, qui conclut la séance : le but en une phrase, ce que la
       personne verra, ton approche, ce qui est hors sujet, et les étapes dans l'ordre — chaque ponctuel avec son
       critère de fait, chaque étape avec celle dont elle dépend, chaque constant avec sa cadence et l'étape après
-      laquelle il commence. Ne bâtis rien pendant cette séance. {asked}
+      laquelle il commence. Ta dernière étape vérifie le tout comme la personne le verra, au regard de sa demande.
+      Ne bâtis rien pendant cette séance. {asked}
 
   # ── Son plan (ADR 0145) ─────────────────────────────────────────────────────────────────────────────────────
   # Le texte de son plan, tel qu'il se relit (exécutions, récit, console) : projects/tools.py, plan_text.
@@ -3796,13 +3824,21 @@ projects:
     stalled_title: TON PROJET S'EST ARRÊTÉ
     stalled: "Ton projet « {title} » s'est arrêté : ses exécutions ont échoué {n} fois de suite, et il est en pause jusqu'à ce qu'on le relance. Ce n'est pas toi : c'est la machine qui a lâché."
     stalled_cause: "Ce que la machine en dit : {cause}"
+    # un projet arrêté pendant son cadrage : ses séances n'ont pas écrit de plan (ADR 0161). {title} : son titre ;
+    # {n} : combien de séances
+    unframed: >-
+      Le projet « {title} » est en pause : tes {n} dernières séances de cadrage n'ont pas abouti à un plan. Il
+      attend qu'on le relance — et ce qui t'a arrêtée, la personne peut t'aider à le démêler.
     # son plan, à dire à qui a demandé le projet (ADR 0145)
     plan_title: TON PLAN
     plan_head: "Ton plan pour le projet « {title} » :"
     plan_steps: "Tes étapes :"
     plan_questions: "Tes questions, avec ce que tu recommandes :"
-    # où voir ce que ses apps montrent : leur fiche dans la console ; {apps} : leurs titres, entre guillemets
-    apps: "Ce qu'en montrent tes apps se voit dans la console, sur leur fiche : {apps}."
+    # où voir ce que ses apps montrent (ADR 0145, 0161) : seulement celles qui ont des vues et qui marchent. {apps} :
+    # leurs titres entre guillemets — à qui s'occupe d'elle, chacun suivi du lien de ses vues dans la console
+    apps: "Ce qu'en montrent tes apps se voit dans leurs vues, dans la console : {apps}."
+    # à une personne qui n'a pas la console
+    apps_closed: "Tes apps en montrent des vues ({apps}), dans une console qui n'est pas ouverte à cette personne."
 
   # ── « TES PROJETS » ─────────────────────────────────────────────────────────────────────────────────────────
   # En conversation (réponse et initiative) : ses projets — « tu travailles sur quoi ? » est une question sur sa vie
@@ -3875,6 +3911,8 @@ projects:
     # un projet à elle arrêté par des pannes (ADR 0143) : que ce soit la machine, pas elle, la section du sujet le
     # dit (projects.share.stalled)
     stalled: "Un de tes projets s'est arrêté tout seul, et il attend que {who} le relance."
+    # un projet arrêté faute de plan (ADR 0161) : {who} attend ce plan
+    unframed: "Tu n'arrives pas à écrire le plan du projet que {who} t'a demandé, et il s'est mis en pause."
 
   # Un objectif qui n'en finit pas : ce qui reste de lui quand le code le bloque (projects/tend.py). Le modèle le relit
   # sous « CE QUI TE BLOQUE » (Ce qu'il te faudrait : …). {n} : le nombre d'exécutions
@@ -3895,8 +3933,6 @@ projects:
   tools:
     # la réponse de chaque outil d'exécution quand le projet n'est plus actif
     gone: "Ce projet n'est plus actif (en pause ou archivé) : arrête-toi là."
-    # ajouté à la réponse d'un outil passé quelques appels (avec son retour à la ligne de tête)
-    wrap_up: "\n(Ton exécution touche à sa fin : conclus maintenant par report_run — « continue » si ce n'est pas fini.)"
 
     report:
       # L'outil report_run : le verdict, qui clôt l'exécution.
@@ -3942,6 +3978,8 @@ projects:
       noted: "C'est noté.{kept}{pushed}{asked}"
       # {hours} : dans combien d'heures il reviendra
       constant: "Passage noté : cet objectif constant reviendra dans {hours} h environ.{kept}{pushed}{asked}"
+      # ajouté quand ce passage n'a rien regardé de réel (ni base, ni app, ni fichier, ni web : ADR 0161)
+      unseen: " Ce passage n'a rien regardé de réel : il ne se racontera pas."
       constant_continue: "C'est noté : tu reprendras cet objectif à une prochaine exécution.{kept}{pushed}{asked}"
       # {id} : le numéro de l'objectif
       done: "C'est noté : l'objectif n° {id} est atteint.{kept}{pushed}"
@@ -4059,6 +4097,10 @@ projects:
         les objectifs constants, à entretenir (« améliorer la sécurité ») : un texte revient à la cadence par défaut ;
         ce qui revient à un autre rythme se donne avec sa cadence en heures (168 : un point chaque semaine)
       mode: "persona : tu y travailles toi-même, avec ton humeur et tes avis ; plain : un travail impersonnel"
+      # ce qu'il aura en main, choisi avec qui le confie (ADR 0161 ; les noms sont lus par le code)
+      tools: >-
+        ce qu'il aura en main en plus de son atelier, de ta mémoire et du web : forge (écrire et tester une app),
+        forge_apps (te servir de tes apps), rss (tes flux d'actualité)
       schedule: "asap : dès que possible ; demand : seulement quand on le lance ; interval:2h ; cron:0 9 * * MON-FRI"
       # quelqu'un d'autre. {who} : « Adrien », ou projects.caretaker
       not_owner: "Seul(e) {who} peut te confier un projet. Si l'idée te plaît, tu peux en ouvrir un à toi (start_project)."
@@ -5604,7 +5646,9 @@ forge:
     stopped:
       held: un opérateur l'a arrêtée
       # {error} : pourquoi elle est hors service
-      broken: "elle est hors service ({error}) : répare-la (forge_write)"
+      broken: >-
+        elle est hors service ({error}) : répare-la (forge_edit ; si la panne venait d'ailleurs, forge_command
+        enable)
       disabled: elle est arrêtée (forge_command enable)
 
     list:
@@ -5637,6 +5681,16 @@ forge:
       logs: "Journal (données) :"
       # un journal vide, un morceau vide
       empty: (vide)
+      # ses réglages en vigueur (ADR 0161), une ligne chacun : « - ville : Lyon (réglé par qui s'occupe de toi) »
+      settings: "Ses réglages en vigueur (la valeur donnée dans la console l'emporte sur le défaut du manifeste) :"
+      # {value} : la valeur, coupée
+      overridden: "{value} (réglé dans la console : changer le défaut du manifeste n'y change rien)"
+      default: "{value} (le défaut du manifeste)"
+      secret_set: secret défini
+      secret_unset: >-
+        secret non défini : l'app le lit vide — s'il lui faut, demande-le à qui s'occupe de toi (needs_you)
+      # ajouté à secret_set quand l'app n'a pas encore la confiance d'un opérateur
+      untrusted: " — mais l'app n'est pas encore validée par un opérateur : elle le lit vide jusque-là"
     # L'outil forge_edit (ADR 0105) : retoucher une app sans la réécrire, comme l'outil Edit de Claude Code.
     edit:
       description: >-
@@ -5749,6 +5803,17 @@ forge:
       logs: "Journal :"
       # une vue rendue mais invalide. {why} : ce qui ne va pas
       invalid: "Invalide : {why}"
+      # ses requêtes sur le réseau qui ont échoué pendant l'essai (ADR 0161). {count} : combien ; {total} : sur
+      # combien ; {lines} : les premières (« GET adresse → 429 »)
+      http_failed: >-
+        {count} requête(s) sur {total} n'ont pas abouti — « ok » veut seulement dire que rien n'a levé d'erreur :
+        {lines}
+      # après l'essai d'un outil ou d'une action : ce qu'il a rangé est resté (ADR 0161)
+      stored: >-
+        Ce que cet essai a rangé est resté dans sa base, comme un vrai passage : si ses données étaient inventées,
+        retire-les (forge_db_execute), sinon elles se verront dans ses vues.
+      # les données d'une action refusées comme la console les refuserait. {errors} : champ : problème, séparés
+      bad_data: "Données refusées, comme la console les refuserait : {errors}"
     # ce qu'une action doit rendre (vérifié pour qui l'écrit)
     action:
       valid: Réponse d'action valide.
@@ -6411,6 +6476,13 @@ runtime:
     closing: >-
       (Tu as fait le tour de ce que tu pouvais faire avec tes outils. Réponds maintenant, avec ce que tu sais déjà,
       sans appeler d'outil.)
+    # Les derniers tours d'une séance qui se conclut par un outil (un pas, une exécution, une séance de cadrage) :
+    # ajoutés au dernier résultat d'outil (runtime/tools.py, turns_left — ADR 0161). Au-delà, plus aucun outil : ce
+    # qui n'est pas conclu ne l'est pas. {n} : les tours qui restent (2 ou 3)
+    turns_left: "(Il te reste {n} tours avec tes outils : garde le dernier pour conclure ta séance.)"
+    last_turn: >-
+      (Ton prochain tour est le dernier avec tes outils : conclus ta séance maintenant, par l'outil qui la conclut —
+      après, tu n'en auras plus.)
     # Les réponses de la boucle d'outils quand un appel ne part pas (le modèle les lit comme le résultat de l'appel)
     refused:
       # {name} : le nom de l'outil

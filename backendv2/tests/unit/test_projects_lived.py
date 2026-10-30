@@ -185,11 +185,12 @@ def test_an_archived_project_pushes_nothing_even_asked_after_and_restoring_sends
 # ── Ses projets à elle ────────────────────────────────────────────────────
 
 
-def _start(kernel, title: str):
-    """Elle ouvre un projet à elle en répondant à Adrien (start_project)."""
+def _start(kernel, title: str, kind: str = Kind.REPLY):
+    """Elle ouvre un projet en répondant à Adrien (start_project) — il le lui demande — ou d'elle-même, pendant une
+    de ses séances (``Kind.STEP``)."""
     mind = kernel.mind
     spec = mind.registry.tools["start_project"]
-    episode = EpisodeRef(f"ep-{title}", Kind.REPLY, target="user_1")
+    episode = EpisodeRef(f"ep-{title}-{kind}", kind, target="user_1")
     frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, Audience(owner=True), episode)
     return spec.handler(spec.args(title=title), ToolContext(mind, spec, f"appel-{title}", episode.id, frame,
                                                             ports=kernel.ports))
@@ -206,16 +207,19 @@ def _close(kernel, project: int, ending: str):
 
 def test_she_closes_her_own_projects_and_one_all_done_does_not_hold_her_back(tmp_path):
     async def scenario(kernel, llm):
-        out = {"un": await _start(kernel, "Un herbier"), "deux": await _start(kernel, "Un carnet de chansons")}
-        out["trois"] = await _start(kernel, "Un troisième")  # au plus deux à elle en cours
+        step = Kind.STEP
+        out = {"un": await _start(kernel, "Un herbier", step), "deux": await _start(kernel, "Un carnet", step)}
+        out["trois"] = await _start(kernel, "Un troisième", step)  # au plus deux à elle en cours
+        # …mais ce qu'Adrien lui demande n'est pas une envie à elle : son plafond ne le refuse pas (ADR 0161)
+        out["demandé"] = await _start(kernel, "Ce qu'Adrien demande")
         mine = sorted(p.id for p in kernel.mind.frame().get(c.LIVE))
         out["clos"] = await _close(kernel, mine[0], "done")
-        out["après"] = await _start(kernel, "Un troisième")
+        out["après"] = await _start(kernel, "Un troisième", step)
         # un projet à elle dont tout est fait ne l'occupe plus : elle peut en ouvrir un autre sans le clore
         third = max(p.id for p in kernel.mind.frame().get(c.LIVE))
         await perform(kernel, "projects.objectif_statut", row_form({"objective": "1", "status": "done"}),
                       by="user_1", subject=str(third), nonce="fait")
-        out["tout fait"] = await _start(kernel, "Un quatrième")
+        out["tout fait"] = await _start(kernel, "Un quatrième", step)
         confided = await create(kernel, "p9", title="Confié", objectives="Une page")
         out["confié"] = await _close(kernel, confided, "dropped")
         out["archivés"] = [e.data.ending for e in events(kernel, ARCHIVED)]
@@ -224,6 +228,7 @@ def test_she_closes_her_own_projects_and_one_all_done_does_not_hold_her_back(tmp
     out = live(tmp_path, scenario)
     assert "Projet ouvert" in out["un"] and "Projet ouvert" in out["deux"]
     assert not out["trois"].ok and "project_close" in out["trois"].content
+    assert "Projet ouvert" in out["demandé"]
     assert "clos" in out["clos"]
     assert "Projet ouvert" in out["après"]  # clos, il ne la retient plus
     assert "Projet ouvert" in out["tout fait"]

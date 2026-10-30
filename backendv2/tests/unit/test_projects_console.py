@@ -415,7 +415,7 @@ def test_a_deposited_file_lands_in_the_workshop_and_the_next_run_knows(tmp_path)
                                 by="user_1", subject=pid, nonce="d3"),
         }
         await perform(kernel, "projects.reprendre", form(), by="user_1", subject=pid, nonce="r")
-        await wait(15)
+        await wait(65)  # son premier passage vient une cadence après sa naissance (ADR 0161)
         await kernel.lanes.join()
         out["prompt"] = prompt(llm)
         out["events"] = events(kernel, DEPOSITED)

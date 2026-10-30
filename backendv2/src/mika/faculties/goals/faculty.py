@@ -1026,6 +1026,7 @@ def view(g: Goal, now: int) -> c.GoalView:
         last_summary_ref=g.summary_ref, schedule=g.schedule, priority=g.priority, tasks_total=len(g.tasks),
         tasks_done=sum(1 for t in g.tasks if t.status == c.TASK_DONE),
         tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED), musing=musing(g), bundles=g.bundles,
+        origin=g.origin, origin_at=g.origin_at,
     )
 
 
