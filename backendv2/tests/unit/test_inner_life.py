@@ -3,7 +3,7 @@
 - elle dort la nuit (vers 23 h – 7 h), plus tard après une longue soirée ; le
   message d'une amie la réveille, et elle se rendort ensuite ; jamais
   d'initiative en dormant ;
-- ses besoins montent et retombent ; deux heures sans rien, elle s'ennuie ;
+- ses besoins montent et retombent ; quatre heures sans rien, elle s'ennuie ;
 - ce que les événements font ressentir est déclaré par leur propriétaire et
   reçu par l'affect — et le rejeu retombe exactement sur le même état ;
 - une pensée née d'un échange s'allège quand elle en parle et ne se montre
@@ -164,11 +164,11 @@ def test_needs_rise_with_time_and_fall_when_met(tmp_path):
     assert met.social < later.social / 2
 
 
-def test_two_empty_hours_feel_like_boredom(tmp_path):
+def test_four_empty_hours_feel_like_boredom(tmp_path):
     async def scenario(kernel, script, out):
         p = await kernel.perceive(said("user_1", "bon, à plus"))
         await p.reply
-        await asyncio.sleep(3 * HOUR / US)
+        await asyncio.sleep(5 * HOUR / US)
         return events(kernel, needs_c.FELT.name)
 
     felt = run(tmp_path, scenario)
@@ -180,7 +180,7 @@ def test_what_events_make_her_feel_replays_to_the_same_state(tmp_path):
     async def scenario(kernel, script, out):
         p = await kernel.perceive(said("user_1", "bon, à plus"))
         await p.reply
-        await asyncio.sleep(4 * HOUR / US)
+        await asyncio.sleep(5 * HOUR / US)
         live = digest(kernel.mind.root.slices["affect"])
         moved = kernel.mind.root.slices["affect"].mood is not None
         await kernel.mind.rebuild(["affect"])

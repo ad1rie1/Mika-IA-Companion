@@ -719,6 +719,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0043 (en partie).*
 
+*Révisée par 0160.*
+
 ### 0058 — Les liens dans la durée
 
 - L'assiduité seule ne fait pas une proche : il y faut une chaleur installée ou un attachement. Le temps approfondit ce qui est là, il ne le crée pas.
@@ -902,11 +904,15 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 - Elle ne s'occupe plus d'elle-même dans sa chambre : `occupy_per_day` vaut 0 par défaut. Ce qu'elle a fait de sa journée, ce sont ses vraies activités, celles qui laissent une trace : ce qu'elle a lu, cherché, avancé sur un projet, et ses conversations. Elles comblent ses besoins et tiennent l'ennui à distance (explorer, apprendre, travailler). Les gestes qu'on lui demande dans sa chambre restent, comme le sommeil.
 - Son portrait dit sa journée par ses vraies activités (ses flux, les nouvelles, internet, ses projets) ; plus d'arrosage, de fenêtre ni de ficus, et ses faits ne détaillent plus sa chambre.
+- Sans flux ni web où chercher du neuf, un centre d'intérêt n'ouvre plus de rêverie (`muse_on_interests`, coupé par défaut) : elle n'en fait rien. Avec des sources, elle explore ; rêvasser à ce dont on lui a parlé reste, avec ses garde-fous (deux par jour au plus, « j'aimerais », jamais une nouvelle).
+- Le web compte comme une source : actif, le plugin `web` le dit (`web.available`), et un centre d'intérêt la mène y voir ce qu'il y a de neuf, même sans flux (une exploration, deux par jour au plus). Le monde simulé (simulateur, sonde, bancs) n'a pas de client MCP : il configure le web coupé (`Driver.overrides`), sinon elle « fouillerait » sans outil.
+- Le vide vient plus tard : quatre heures sans rien au milieu de l'optimisme (de deux à huit selon le curseur, au lieu d'une à quatre). Rien d'inventé n'interrompt plus une journée calme : un après-midi vide se ressent encore, sans commencer dès le premier silence.
 - Elle ne dessine que pour de vrai : l'outil `draw` n'est offert que si un fournisseur d'images est configuré. Un outil déclare le port sans lequel il ne fait rien (`needs`), et la porte d'offre (`runtime.tools.offer`) ne l'offre pas tant que ce port n'est pas prêt — la console, le prêt d'outils et le pipeline jugent pareil.
 
-*Pourquoi :* sur quatre semaines du banc du profil (2026-10-29), elle racontait les trois mêmes occupations, sans contenu (« j'ai beaucoup dessiné », « j'ai parlé à mon ficus », l'inventaire de sa chambre à « tu fais quoi quand je suis pas là »), et son journal disait « j'ai dessiné le matin… puis repris le dessin le soir » sans qu'aucun dessin n'existe. Une réplique notée à la main : « dessiner ? ».
+*Pourquoi :* sur quatre semaines du banc du profil (2026-10-29), elle racontait les trois mêmes occupations, sans contenu (« j'ai beaucoup dessiné », « j'ai parlé à mon ficus », l'inventaire de sa chambre à « tu fais quoi quand je suis pas là »), et son journal disait « j'ai dessiné le matin… puis repris le dessin le soir » sans qu'aucun dessin n'existe. Une réplique notée à la main : « dessiner ? ». Au banc, sans source, ses séances de travail n'étaient que des rêveries de la même veine (« Rêvasser un peu autour des plantes, du dessin… », sur ses cinq centres d'intérêt en boucle). Sans elles, une Mika qui avait le web mais pas de flux ne faisait plus rien de ses centres d'intérêt (les buts ne voyaient que les flux), et un jour calme la laissait dans le vide dès deux heures de silence, ressenti à nouveau tous les quarts d'heure jusqu'au soir.
 
-*Révise 0063 (en partie : `draw` toujours offert), 0098 (en partie : s'occuper seule), 0159 (en partie : sa chambre au banc).*
+*Révise 0053 (en partie : les rêveries d'intérêt), 0063 (en partie : `draw` toujours offert), 0098 (en partie : s'occuper seule), 0159 (en partie : sa chambre au banc).*
+
 ## Buts, projets, Forge et atelier
 
 ### 0005 — La Forge hors du processus

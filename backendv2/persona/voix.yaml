@@ -3085,9 +3085,9 @@ goals:
     # le titre rendu d'une ancienne exploration « Y voir plus clair — … » (goals/tools.py, titled)
     legacy_thought: Y voir plus clair sur ce qui me trotte dans la tête
     # un de ses centres d'intérêt. {subject} : le centre d'intérêt précédé de « de » à la française (« du gaming »,
-    # « des jeux rétro », « de la cuisine », « d'Outer Wilds ») — avec ses flux, elle va y fouiller…
+    # « des jeux rétro », « de la cuisine », « d'Outer Wilds ») — avec ses flux ou le web, elle va y fouiller…
     interest_search: Fouiller un peu du côté {subject}
-    # … sans flux, elle rêvasse
+    # … sans flux ni web, elle rêvasse (seulement si ``muse_on_interests`` le permet, ADR 0160)
     interest_muse: Rêvasser un peu autour {subject}
     # ce dont on lui a parlé et qui lui a plu. {name} : la personne
     talk: Rêvasser à ce dont « {name} » m'a parlé

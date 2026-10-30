@@ -13,9 +13,9 @@ après-midi à se faire chahuter par un inconnu ne remplace pas une amie.
 
 Ils poussent à prendre la parole (preuves vers quiconque est là), se disent
 dans le prompt (« tu as envie de parler à quelqu'un »), et quand plus rien ne
-se passe depuis deux heures, elle ressent un vide — de l'ennui, ou de la
+se passe depuis quatre heures, elle ressent un vide — de l'ennui, ou de la
 solitude quand c'est de compagnie qu'elle manque ; un vide qui se creuse
-avec la durée (ADR 0033). Le temps où son serveur était arrêté ne compte
+avec la durée (ADR 0033, 0160). Le temps où son serveur était arrêté ne compte
 pas : au retour, ses besoins reprennent où elle les avait laissés.
 
 **Travailler l'occupe** : pendant une séance sur un but ou une exécution de
@@ -204,7 +204,8 @@ class NeedsParams(BaseModel):
     idle_before_empty_us: Annotated[int, Knob(
         label="Inactivité avant le vide", group="Le vide", lo=15 * MINUTE, hi=DAY,
         help="Éveillée, sans message reçu, ni parole dite, ni travail depuis cette durée, elle ressent un vide : "
-             "de l'ennui, ou de la solitude.")] = 2 * HOUR
+             "de l'ennui, ou de la solitude. Dérivée de l'optimisme : quatre heures au milieu (ADR 0160 : rien "
+             "d'inventé n'interrompt plus une journée calme).")] = 4 * HOUR
     empty_every_us: Annotated[int, Knob(
         label="Le vide se ressent toutes les", group="Le vide", lo=MINUTE, hi=6 * HOUR,
         help="Tant que le vide dure, il se ressent à nouveau à cet intervalle : un état tenu, pas une dent de "
@@ -249,10 +250,10 @@ class NeedsParams(BaseModel):
 def derive(t: Temperament, overrides: Any = None) -> NeedsParams:
     """La sociabilité raccourcit l'horizon du besoin de compagnie ; la
     curiosité, celui d'apprendre ; l'optimisme repousse le vide et l'adoucit
-    (au milieu : deux heures, 0,15 au début) ; la timidité (ADR 0100) fait qu'une inconnue, une connaissance la
+    (au milieu : quatre heures, 0,15 au début) ; la timidité (ADR 0100) fait qu'une inconnue, une connaissance la
     comblent moins (au milieu : 0,3 et 0,6, les valeurs d'avant)."""
     values = {"tau_social_h": 4.0 * (1.5 - t.sociability), "tau_curiosity_h": 8.0 * (1.5 - t.curiosity),
-              "idle_before_empty_us": round(geometric(1.0, 4.0, t.optimism) * HOUR),
+              "idle_before_empty_us": round(geometric(2.0, 8.0, t.optimism) * HOUR),
               "empty_intensity": round(lerp(0.2, 0.1, t.optimism), 3),
               "stranger_company": around(t.shyness, 0.3, 0.5),
               "acquaintance_company": around(t.shyness, 0.6, 1 / 1.4)}
@@ -908,7 +909,7 @@ def emptiness(s: NeedsState, now: int, p: NeedsParams, lonely: bool = False) -> 
                                        c.FELT, *body_c.ALL, w.INTENDED, w.ENDED, w.CHANGED],
                lane="background", catch_up=CatchUp.SKIP, max_quantum_s=3600)
 class Empty:
-    """Deux heures sans rien : un vide ressenti toutes les vingt minutes tant
+    """Quatre heures sans rien : un vide ressenti à intervalles tant
     qu'il dure (un état tenu, pas une dent de scie), qui se creuse avec la
     durée. Travailler l'occupe : pas de vide pendant une séance ; ce qu'elle
     fait de ses mains tient l'ennui à distance jusqu'à ce qu'elle s'arrête —

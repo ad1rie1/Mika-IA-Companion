@@ -195,6 +195,11 @@ class GoalsParams(BaseModel):
              "fouiller ses flux — ne dépasse pas ce nombre, étalé sur sa journée (deux : une le matin, une "
              "l'après-midi) : une personne ne rêvasse pas toutes les deux heures (sonde réelle du 2026-10-03 : "
              "quatre à cinq rêveries par jour). 0 : jamais.")] = 2
+    muse_on_interests: Annotated[bool, Knob(
+        label="Rêvasser sur ses centres d'intérêt sans source", group="Entreprendre d'elle-même",
+        help="Sans flux ni web où chercher du neuf, un centre d'intérêt la fait rêvasser autour de son sujet. Décoché "
+             "(par défaut) : elle n'en fait rien — ces rêveries sans contenu tournaient en boucle sur ses centres "
+             "d'intérêt (ADR 0160). Rêvasser à ce dont on lui a parlé reste, et avec des sources elle explore.")] = False
     talk_lookback_us: Annotated[int, Knob(
         label="Un sujet de conversation reste une graine pendant", group="Entreprendre d'elle-même", lo=HOUR,
         hi=14 * DAY,

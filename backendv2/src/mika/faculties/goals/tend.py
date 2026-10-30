@@ -61,6 +61,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.contracts import web as web_c
 from mika.faculties.goals.faculty import (
     AWAITED,
     CHECK_SOURCE,
@@ -137,8 +138,6 @@ READ_ONLY_SOURCES = frozenset({"rss", "camera", "forge"})
 #: que c'est toujours elle qui écrit) non plus : rien à lire ailleurs — et l'exploration citait ses propres mots
 #: comme venus d'ailleurs (audit des garde-fous, 2026-10-28)
 UNEXPLORED_SOURCES = frozenset({"world", "forge"})
-#: où elle peut aller chercher du neuf sur un de ses centres d'intérêt
-INTEREST_SOURCES = ("rss",)
 #: tenir une promesse de travail : de quoi se fabriquer un outil (la Forge) ou en faire un projet, et ses lectures
 #: (ADR 0104)
 PROMISE_BUNDLES = ("forge", *EXPLORE_BUNDLES)
@@ -202,12 +201,17 @@ def _day_opens(frame: Frame, p: Any) -> int | None:
 
 
 def _sources(frame: Frame) -> tuple[str, ...]:
-    """Où elle peut aller chercher du neuf maintenant : ses flux, s'ils ont quelque chose."""
+    """Où elle peut aller chercher du neuf maintenant : ses flux, s'ils ont quelque chose, et le web, s'il est
+    actif (ADR 0160)."""
     try:
         headlines = frame.get(rss_c.HEADLINES)
     except KeyError:  # une composition sans flux
         headlines = ()
-    return INTEREST_SOURCES if headlines else ()
+    try:
+        web = frame.get(web_c.AVAILABLE)
+    except KeyError:  # une composition sans le web
+        web = False
+    return (*(("rss",) if headlines else ()), *((mcp_c.WEB_BUNDLE,) if web else ()))
 
 
 def _name(frame: Frame, person: str | None) -> str:
@@ -418,6 +422,12 @@ class Seed:
         if talk is not None:
             await ctx.emit(_talk_musing(frame, talk, p))
             return
+        sources = _sources(frame)
+        if not sources and not p.muse_on_interests:
+            # sans flux ni web, un centre d'intérêt n'a nulle part où chercher du neuf : elle n'en fait rien plutôt
+            # que de rêvasser autour (ADR 0160)
+            self.idle_until = frame.now + HOUR
+            return
         view = self._interest(s, frame, p)
         texts = store.content([r for r in (view.label_ref, view.detail_ref) if r]) \
             if view is not None and view.origin == LIVED and store is not None else {}
@@ -428,9 +438,8 @@ class Seed:
             return
         source = f"interest:{view.key}"
         day = frame.local().date().isoformat()
-        sources = _sources(frame)
-        # avec ses flux, elle va voir ce qu'il y a de neuf ; sans, elle rêvasse (et rien ne se raconte comme une
-        # nouvelle : il n'y a rien de nouveau)
+        # avec ses flux ou le web, elle va voir ce qu'il y a de neuf ; sans, elle rêvasse (et rien ne se raconte comme
+        # une nouvelle : il n'y a rien de nouveau)
         subject = of_words(lowered(subject_of(interest)))
         title = phrase("goals.title.interest_search", subject=subject) if sources else \
             phrase("goals.title.interest_muse", subject=subject)

@@ -1,7 +1,7 @@
 """Une rêverie n'est ni une nouvelle ni un exploit (ADR 0047, HUM-3 / HUM-19), par ses intentions.
 
-Sans flux où chercher du neuf, sa curiosité la fait rêvasser autour d'un de ses centres d'intérêt : elle l'écrit,
-et c'est tout. Rien n'est arrivé :
+Sans flux ni web où chercher du neuf, et si on le lui permet (``muse_on_interests``, ADR 0160), sa curiosité la fait
+rêvasser autour d'un de ses centres d'intérêt : elle l'écrit, et c'est tout. Rien n'est arrivé :
 
 - ce n'est pas une matière d'initiative (« Ce que tu as fini, cet après-midi : Rêvasser… ») ;
 - ce n'est pas « mené à bout » dans ce qu'elle a en train, ni dans son journal (qui la dit une fois, comme une
@@ -19,6 +19,7 @@ from collections import Counter
 import pytest
 
 from mika.contracts import goals as goals_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
@@ -26,6 +27,7 @@ from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.goals.tend import lowered, of_words
 from mika.kernel.clock import DAY, HOUR, US, local
 from mika.kernel.events import Content, Origin
+from mika.plugins.web import WebParams
 from mika.sim.llm.persona import _section
 from mika.vocab.interests import subject_of
 from tests.fixtures.mika import DOC, PARIS, at_paris, befriend, connect, said
@@ -38,10 +40,16 @@ def _musings(r):
     return [e for e in r.of(goals_c.GOAL_CLOSED) if e.data.reason == goals_c.MUSED]
 
 
+async def _muses(kernel, **goals):
+    """Ni flux ni web, et la rêverie sur ses centres d'intérêt permise : elle rêvasse."""
+    await kernel.set_params("web", WebParams(enabled=False))
+    await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0, muse_on_interests=True, **goals))
+
+
 @pytest.mark.slow
 def test_a_week_of_daydreams_is_neither_news_nor_pride(tmp_path):
     async def scenario(kernel, llm):
-        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await _muses(kernel)
         await asyncio.sleep(7 * DAY / US)
         frame = kernel.mind.frame()
         return frame.get(self_c.ESTEEM), kernel.mind.root.slices["self"].deeds
@@ -61,9 +69,35 @@ def test_a_week_of_daydreams_is_neither_news_nor_pride(tmp_path):
     assert any("esprit vagabonder" in n for n in journals)
 
 
-def test_an_evening_greeting_after_a_day_of_daydreams_has_nothing_finished_to_tell(tmp_path):
+def test_without_sources_her_interests_open_no_daydream(tmp_path):
+    """Par défaut, sans flux ni web où chercher du neuf, un centre d'intérêt ne la fait plus rêvasser : ces rêveries
+    sans contenu tournaient en boucle sur ses centres d'intérêt (ADR 0160). Une journée entière de curiosité
+    n'ouvre rien ; ce dont on lui a parlé, si (``test_what_a_friend_made_her_discover…``)."""
+    async def scenario(kernel, llm):
+        await kernel.set_params("web", WebParams(enabled=False))
+        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await asyncio.sleep(DAY / US)
+
+    r = run(tmp_path, scenario, start=MONDAY_8H)
+    assert not [o for o in r.of(goals_c.GOAL_OPENED) if o.data.origin == goals_c.FROM_INTEREST]
+
+
+def test_with_the_web_her_interests_lead_her_to_search_not_to_daydream(tmp_path):
+    """Le web actif, sans aucun flux : un centre d'intérêt la mène y voir ce qu'il y a de neuf — une exploration
+    avec ses outils du web, pas une rêverie (ADR 0160)."""
     async def scenario(kernel, llm):
         await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await asyncio.sleep(DAY / US)
+
+    opened = [o.data for o in run(tmp_path, scenario, start=MONDAY_8H).of(goals_c.GOAL_OPENED)
+              if o.data.origin == goals_c.FROM_INTEREST]
+    assert opened and not any(o.musing for o in opened)
+    assert all(mcp_c.WEB_BUNDLE in o.bundles and o.max_steps == GoalsParams().exploration_steps for o in opened)
+
+
+def test_an_evening_greeting_after_a_day_of_daydreams_has_nothing_finished_to_tell(tmp_path):
+    async def scenario(kernel, llm):
+        await _muses(kernel)
         await asyncio.sleep(11 * HOUR / US)  # 8 h → 19 h : elle rêvasse
         await befriend(kernel, "user_1", social_c.FRIEND)
         matter = kernel.mind.frame().get(needs_c.MATTER("user_1"))
@@ -117,7 +151,7 @@ def test_she_daydreams_a_few_times_a_day_not_every_two_hours(tmp_path, cap, most
     sur sa journée, pas deux d'affilée le matin puis plus rien. Contre-exemple : réglé plus haut, la même curiosité
     en ouvre davantage."""
     async def scenario(kernel, llm):
-        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0, musings_per_day=cap))
+        await _muses(kernel, musings_per_day=cap)
         await asyncio.sleep(3 * DAY / US)
 
     opened = _musings(run(tmp_path, scenario, start=MONDAY_8H))

@@ -32,6 +32,7 @@ from mika.kernel.clock import HOUR, MINUTE, US, instant
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.inspect import Fields, Table, Timeline, walk_blocks
 from mika.kernel.prompt import CONTEXT_FOOTER, UNTRUSTED_NOTE
+from mika.plugins.web import WebParams
 from mika.ports.llm import LLMResponse
 from mika.runtime.inspection import find, run_view
 from mika.sim.clock import run_virtual
@@ -294,7 +295,7 @@ def test_she_does_not_reread_in_a_reply_what_she_already_has_before_her_eyes(tmp
 def test_working_keeps_the_void_away(tmp_path):
     """PSY-18 : un après-midi de séances sur un but (une toutes les demi-heures),
     elle est occupée — pas de vide ; ce qu'elle y fait comble un peu l'envie de
-    s'exprimer. Après, le vide finit par venir."""
+    s'exprimer. Après, le vide finit par venir (ni flux ni web : rien d'autre ne l'occupe, ADR 0160)."""
     async def step(kernel, n):
         mind, eid = kernel.mind, f"pas{n}"
         await mind.append([rt.EPISODE_STARTED.draft(kind="STEP", target="goal:1")], emitter="runtime",
@@ -314,6 +315,7 @@ def test_working_keeps_the_void_away(tmp_path):
         return [e for e in kernel.mind.store.read() if e.type == needs_c.FELT.name]
 
     async def scenario(kernel, script, llm):
+        await kernel.set_params("web", WebParams(enabled=False))
         p = await kernel.perceive(said("user_1", "bon, à plus"))
         await p.reply
         await asyncio.sleep(90 * MINUTE / US)
@@ -322,7 +324,7 @@ def test_working_keeps_the_void_away(tmp_path):
             relieved.append(await step(kernel, n))
             await asyncio.sleep(25 * MINUTE / US)
         during = felt(kernel)
-        await asyncio.sleep(3 * HOUR / US)
+        await asyncio.sleep(5 * HOUR / US)
         return during, felt(kernel), relieved
 
     during, later, relieved = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))

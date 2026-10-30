@@ -6,6 +6,7 @@ le réseau local) — dont les outils sont **approuvés d'office** : ``mcp_web_s
 (une page, par morceaux) et, quand il peut en charger plusieurs à la fois, ``mcp_web_read_pages``. Ils passent par
 les mêmes gardes que tout outil venu d'ailleurs (porte d'offre, plafonds, réponse désamorcée et citée, la règle de
 ses mains qui dit que ses arguments partent de la machine). Désactivé, le serveur n'est plus ni joint ni offert.
+Actif, il le dit (``web.available``) : ses centres d'intérêt la mènent au web (ADR 0160).
 
 Ce module ne parle à aucun serveur : il dit ce que ses paramètres veulent (``system_server``), et la composition
 le donne au client MCP. Les outils annoncés et ceux que le serveur liste viennent d'une seule définition
@@ -20,6 +21,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import web as c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
@@ -93,6 +95,12 @@ WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams
 
 def params(p: WebParams | None) -> WebParams:
     return p if isinstance(p, WebParams) else WebParams()
+
+
+@WEB.fact(c.AVAILABLE)
+def _available(s: WebState, cx) -> bool:
+    """Actif, il lui ouvre le web : ses centres d'intérêt l'y mènent plutôt que de rester sans suite (ADR 0160)."""
+    return params(cx.params).enabled
 
 
 def settings_of(p: WebParams) -> server.Settings:

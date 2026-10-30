@@ -283,7 +283,8 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
     assert len(follow_ups) == 1 and follow_ups[0].at - first >= 1.8 * DAY, [e.at - first for e in sent]
     # la relance prend de ses nouvelles, seule : ce qui la poussait (le manque, une pensée…) se tait
     checking = [b for b in briefs if "c'est de ses nouvelles que tu as envie" in b]
-    assert checking and all(b.count("\n- ") == 1 for b in checking), checking
+    # (ses raisons, après l'état interne : ce qu'elle a en train y est une ligne à part)
+    assert checking and all(b.split("--- FIN ETAT INTERNE ---")[-1].count("\n- ") == 1 for b in checking), checking
     assert after_two == agency_c.UNANSWERED  # après deux sans réponse : plus rien
     assert birthday is None  # … sauf lui souhaiter son anniversaire le jour même : un vœu n'est pas une relance
     assert answered.initiatives == 0 and answered.ignored == 0  # elle a écrit : tout repart de zéro

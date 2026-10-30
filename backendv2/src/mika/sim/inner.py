@@ -1,9 +1,9 @@
 """Les scénarios de M4 : sa vie intérieure.
 
 - **S06** la journée vide : quelqu'un est là, connecté, mais ne dit rien de
-  la journée. Elle prend la parole d'elle-même, une fois ou deux, puis
-  n'insiste pas ; jamais la nuit ; elle s'ennuie ou se sent seule une partie
-  de l'après-midi, sans jamais sombrer ; elle dort.
+  la journée, et elle n'a ni flux ni web. Elle prend la parole d'elle-même,
+  une fois ou deux, puis n'insiste pas ; jamais la nuit ; elle s'ennuie ou se
+  sent seule une partie de l'après-midi, sans jamais sombrer ; elle dort.
 - **S07** une semaine type : trois personnes à leurs rythmes. Elle dort
   chaque nuit, ne parle jamais en dormant, ne dépasse jamais son budget
   d'initiatives, ne relance qu'une fois (doucement, un jour plus tard au
@@ -20,6 +20,7 @@ from typing import Any
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
+from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.sim import expect
@@ -80,6 +81,8 @@ def _distressed(m: affect_c.MoodReading) -> bool:
 
 
 async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
+    # ni flux ni web (le monde simulé n'en a pas, ``Driver.overrides``) : rien de vrai à faire de ses centres
+    # d'intérêt — avec le web, elle irait y voir (ADR 0160)
     await until(driver, at_paris(2026, 9, 28, 8, 0))
     await driver.connect("user_2", "Alice")  # là toute la journée, sans un mot
     end = at_paris(2026, 9, 29, 8, 0)
@@ -96,9 +99,10 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
     night = [t for t in times if _local(t).hour < 7 or _asleep_at(spans, t)]
     explored = [e for e in events if e.type.name == "goals.opened" and e.data.authority == "self"
                 and 8 <= _local(e.at).hour < 22]
-    # désœuvrée, elle s'occupe d'elle-même dans sa chambre (ADR 0098) : une intention née du vide ressenti (son
-    # réducteur la pose, la fin de l'action l'écrit)
+    # désœuvrée, elle s'occupait d'elle-même dans sa chambre (ADR 0098) : une intention née du vide ressenti (son
+    # réducteur la pose, la fin de l'action l'écrit) — plus par défaut, ni une rêverie d'intérêt sans source (ADR 0160)
     occupied = [e for e in events if e.type.name == "world.ended" and str(e.data.intent).startswith("occupation:")]
+    mused = [e for e in explored if e.data.origin == goals_c.FROM_INTEREST and e.data.musing]
     res.metrics.update({"initiatives": len(said), "gaps_min": [round(g) for g in gaps],
                         "sleep": [(_local(a).strftime("%H:%M"), _local(b).strftime("%H:%M")) for a, b in spans],
                         "empty_afternoon": round(len(empty) / max(1, len(afternoon)), 2),
@@ -122,14 +126,10 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
                                                                                      strict=False)),
                          "elle n'entreprend pas deux choses dans la même heure",
                          f"{[_local(e.at).strftime('%H:%M') for e in explored]}"),
-        expect.control("elle s'occupe d'elle-même", bool(occupied),
-                       "désœuvrée, elle prend un livre, dessine, regarde dehors — d'elle-même (ADR 0098)",
-                       f"{res.metrics['occupée']}"),
-        expect.invariant("pas sans cesse", len(occupied) <= 2 * 3,
-                         "quelques fois par jour, pas à chaque ennui", f"{len(occupied)}"),
-        expect.control("une activité pour elle-même", bool(explored),
-                       "une journée vide, elle finit par s'occuper de ce qui l'intéresse",
-                       f"{[e.data.title.text for e in explored]}"),
+        expect.invariant("rien d'inventé pour remplir la journée", not occupied and not mused,
+                         "sans flux ni web, ni occupation de sa chambre ni rêverie autour d'un centre d'intérêt : "
+                         "la journée vide se ressent, elle ne se remplit pas de rien (ADR 0160)",
+                         f"occupée {res.metrics['occupée']}, rêveries {[e.data.title.text for e in mused]}"),
     ]
 
 

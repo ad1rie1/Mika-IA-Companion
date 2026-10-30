@@ -26,7 +26,7 @@ from tests.fixtures.mika import AFTERNOON, DOC, boot, build, said
 
 
 def _alone(tmp_path, optimism: float) -> tuple[list[tuple[int, float]], float]:
-    """Un dernier mot, puis six heures seule et éveillée : quand le vide vient, et la valence de son humeur."""
+    """Un dernier mot, puis neuf heures seule et éveillée : quand le vide vient, et la valence de son humeur."""
     doc = DOC.model_copy(update={"temperament": DOC.temperament.model_copy(update={"optimism": optimism})})
     kernel, clock, _llm, _out = build(tmp_path, lambda req: LLMResponse("[SILENCE]"), start=AFTERNOON)
 
@@ -36,7 +36,7 @@ def _alone(tmp_path, optimism: float) -> tuple[list[tuple[int, float]], float]:
             start = kernel.mind.clock.now()
             got = await kernel.perceive(said("user_1", "à plus tard !"))  # un dernier mot, puis personne
             await got.reply
-            await asyncio.sleep(6 * HOUR / US)
+            await asyncio.sleep(9 * HOUR / US)
             felt = [(e.at - start, e.data.intensity) for e in
                     (kernel.mind.decode(s) for s in kernel.mind.store.read(types={needs_c.FELT.name}))]
             mood = kernel.mind.frame().get(affect_c.MOOD)
@@ -50,7 +50,7 @@ def _alone(tmp_path, optimism: float) -> tuple[list[tuple[int, float]], float]:
 def test_the_middle_changes_nothing():
     t = Temperament()
     assert affect_derive(t).rest_valence == 0.0 == AffectParams().rest_valence
-    assert needs_derive(t).idle_before_empty_us == NeedsParams().idle_before_empty_us == 2 * HOUR
+    assert needs_derive(t).idle_before_empty_us == NeedsParams().idle_before_empty_us == 4 * HOUR
     assert needs_derive(t).empty_intensity == NeedsParams().empty_intensity
     assert social_derive(t) == SocialParams()
 

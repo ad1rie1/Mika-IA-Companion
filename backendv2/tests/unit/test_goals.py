@@ -37,6 +37,7 @@ from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin
+from mika.plugins.web import WebParams
 from mika.ports.llm import LLMResponse
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock, run_virtual
@@ -640,11 +641,13 @@ def test_a_session_that_concludes_does_not_call_the_model_again(tmp_path):
 
 @pytest.mark.slow
 def test_her_daydreams_follow_no_fixed_rotation_and_last_one_session(tmp_path):
-    """Sans flux où chercher du neuf, sa curiosité la fait rêvasser : chaque rêverie se vit d'un trait (une
-    séance), et ses sujets ne défilent pas dans l'ordre de sa persona, un par jour comme un métronome (sonde réelle
-    du 2026-10-02 : Gaming, Bidouille, Séries, Cuisine, Café, puis on recommence) — mais aucun n'est oublié."""
+    """Sans flux ni web où chercher du neuf (et la rêverie permise, ADR 0160), sa curiosité la fait rêvasser : chaque
+    rêverie se vit d'un trait (une séance), et ses sujets ne défilent pas dans l'ordre de sa persona, un par jour comme
+    un métronome (sonde réelle du 2026-10-02 : Gaming, Bidouille, Séries, Cuisine, Café, puis on recommence) — mais
+    aucun n'est oublié."""
     async def scenario(kernel, llm):
-        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await kernel.set_params("web", WebParams(enabled=False))
+        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0, muse_on_interests=True))
         await asyncio.sleep(12 * DAY / US)
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 8, 0))

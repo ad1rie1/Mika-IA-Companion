@@ -50,7 +50,8 @@ class Composition:
     """Ce que la racine de composition fournit au simulateur."""
 
     deps: Callable[..., KernelDeps]
-    configure: Callable[[Kernel, Any], Awaitable[Any]]
+    #: ``configure(kernel, persona, surcharges)``
+    configure: Callable[..., Awaitable[Any]]
     persona: Any
     voice_roles: frozenset[str]
 
@@ -138,6 +139,9 @@ class Driver:
     embedder: Any = None
     #: des rôles servis en plus des rôles de sa voix (la seconde passe, ``polish``, au banc de conversation)
     routed: tuple[str, ...] = ()
+    #: ce que ce monde règle autrement que le serveur : il n'a pas de client MCP, donc pas de web pour elle — actif, le
+    #: plugin ``web`` dirait à ses buts qu'elle peut y chercher (ADR 0160), et elle « fouillerait » sans outil
+    overrides: dict[str, dict[str, Any]] = field(default_factory=lambda: {"web": {"enabled": False}})
 
     def __post_init__(self) -> None:
         # une messagerie (un compte extérieur) reçoit même hors ligne : on y écrit à quelqu'un d'absent
@@ -160,7 +164,8 @@ class Driver:
         self.kernel = Kernel(deps)
         ports["forge"].on_change(self.kernel.refresh_tools)  # comme le serveur : une app écrite, ses outils aussi
         self.boots += 1
-        await self.kernel.start(configure=lambda k: self.composition.configure(k, self.composition.persona))
+        await self.kernel.start(configure=lambda k: self.composition.configure(k, self.composition.persona,
+                                                                               self.overrides))
         # les clients encore là se reconnectent (la présence est volatile)
         for handle in sorted(self.online):
             await self._announce(handle)

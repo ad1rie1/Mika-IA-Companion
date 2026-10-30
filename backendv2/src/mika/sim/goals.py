@@ -137,7 +137,8 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.connect("user_2", "Bea")  # elle revient, toujours inquiète
     await driver.say("user_2", "j'angoisse toujours pour mon chat, l'opération c'est demain matin")
     await driver.disconnect("user_2")
-    await until(driver, day0 + DAY + 16 * HOUR)
+    end = day0 + DAY + 16 * HOUR
+    await until(driver, end)
     events = driver.read_events()
     reports = _of(events, goals_c.STEP_REPORTED.name)
     closed = _of(events, goals_c.GOAL_CLOSED.name)
@@ -149,7 +150,8 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
     first_block = next((c.at for c in closed if c.data.status == goals_c.STUCK), None)
     next_start = next((o.at for o in opened if first_block and o.at > first_block and o.data.authority == "self"),
                       None)
-    pause_h = (next_start - first_block) / HOUR if first_block and next_start else None
+    # rien entrepris d'elle-même jusqu'à la fin (sans source, plus de rêverie d'intérêt, ADR 0160) : au moins tout ça
+    pause_h = ((next_start or end) - first_block) / HOUR if first_block else None
     restated = [e for e in _of(events, "attention.thought_born") if "toujours" in (e.data.text.text or "")]
     res.metrics.update({"verdicts": [(r.data.verdict, r.data.proven) for r in reports],
                         "clos": [(c.data.status, c.data.reason) for c in closed],
