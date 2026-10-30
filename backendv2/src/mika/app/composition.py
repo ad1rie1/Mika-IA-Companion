@@ -238,12 +238,14 @@ def modes() -> dict[str, EpisodeMode]:
     demande dans le chat, comme dans Claude Code — son rôle de modèle à lui (``pro``, qui retombe sur la réponse), une
     persona sans voix de chat ni tempérament, ses sections affectives et intérieures coupées avec sa consigne de
     style et « TA RÉPONSE », ni seconde passe ; la place de travailler (24 tours d'outils, 15 min) et
-    d'écrire long, en Markdown ; ses outils montrés en direct."""
+    d'écrire long, en Markdown ; ses outils montrés en direct. Chaque outil d'un service branché s'y appelle autant
+    de fois qu'elle a de tours (ADR 0162)."""
     return {
         # un service branché (un dépôt, des fichiers) rend des fichiers entiers qu'elle récrit ensuite : la borne
-        # ordinaire (24 000 caractères) en cacherait la fin
+        # ordinaire (24 000 caractères) en cacherait la fin ; éprouver une API, c'est appeler le même outil avec
+        # chaque filtre : le plafond de son service (3 par défaut) l'arrêtait au quatrième
         PRO: EpisodeMode(kinds=frozenset({Kind.REPLY}), role=Role.PRO, persona_depth=PRO, max_tool_turns=24,
-                         max_tokens=8192, deadline_s=900.0, outside_chars=120_000,
+                         max_tokens=8192, deadline_s=900.0, outside_chars=120_000, outside_calls=24,
                          muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, Tag.CHAT}),
                          polished=False, live=True, markdown=True, instruction=pro_style),
     }

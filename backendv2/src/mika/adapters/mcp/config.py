@@ -126,6 +126,7 @@ class McpServer(BaseModel):
     timeout_s: Annotated[float, Knob(label="Délai d'un appel", group="Bornes", lo=1, hi=300, unit="s",
                                      order=40)] = 30.0
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
+                                   help="Le mode pro le relève : autant d'appels que de tours d'outils.",
                                    order=41)] = 3
     max_result_chars: Annotated[int, Knob(label="Réponse lue (caractères)", group="Bornes", lo=200, hi=20_000,
                                           order=42)] = 4000

@@ -518,7 +518,7 @@ class EpisodeRunner:
                 loop = await acall(
                     lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns,
                                           clock=mind.clock.now, result=ep.loop, watch=watch,
-                                          outside_max=policy.outside_chars),
+                                          outside_max=policy.outside_chars, outside_calls=policy.outside_calls),
                     label=f"appel du modèle ({policy.role})",
                 )
                 ep.preemptible = False

@@ -11,15 +11,20 @@ from __future__ import annotations
 
 import asyncio
 
+from pydantic import BaseModel
+
+from mika.app.composition import modes, policies
 from mika.contracts import runtime as rt
 from mika.faculties import transcript
 from mika.faculties.expression import parse
 from mika.faculties.self.persona import render
 from mika.kernel.clock import HOUR
+from mika.kernel.faculty import ToolSpec
 from mika.ports.delivery import DONE, NOTE, TOOL_END, TOOL_START
 from mika.ports.llm import DEADLINE_AT, LLMRequest, LLMResponse, ToolCall
-from mika.runtime.tools import LoopEvent, run_tool_loop
+from mika.runtime.tools import LoopEvent, ToolResult, run_tool_loop
 from mika.sim.clock import run_virtual
+from mika.vocab.episodes import PRO, Kind
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import SHIPPED, at_paris, boot, build, connect, said
 
@@ -179,3 +184,42 @@ def test_a_watch_that_fails_changes_nothing_to_the_loop():
                                     lambda spec, cid: None, max_turns=3, watch=watch))
     assert got.text == "fini" and got.stop == "end"
     assert [(e.phase, e.name, e.record.ok) for e in seen] == [(TOOL_END, "nulle_part", False)]
+
+
+class _Query(BaseModel):
+    status: str = ""
+
+
+def _tool(name: str, cap: int, *, outside: bool) -> ToolSpec:
+    async def answer(args: _Query, ctx) -> ToolResult:
+        return ToolResult(content=f"{name} {args.status}")
+
+    return ToolSpec(owner="x", name=name, description="Liste.", args=_Query, handler=answer, bundle="x",
+                    episodes=frozenset({Kind.REPLY}), max_calls_per_episode=cap, outside=outside)
+
+
+def _ran(outside_calls: int | None) -> list[tuple[str, bool]]:
+    """Cinq appels à un outil de service (plafonné à 3 par son serveur), deux à l'un de ses outils (plafonné à 1)."""
+    tools = {"devis_list": _tool("devis_list", 3, outside=True), "create_project": _tool("create_project", 1,
+                                                                                         outside=False)}
+    calls = (*(ToolCall(f"d{i}", "devis_list", {"status": s})
+               for i, s in enumerate(("", "brouillon", "signé", "refusé", "envoyé"))),
+             ToolCall("p1", "create_project", {}), ToolCall("p2", "create_project", {}))
+    gateway = _Stub(LLMResponse("", tool_calls=calls), LLMResponse("fini"))
+    got = asyncio.run(run_tool_loop(gateway, LLMRequest(role="pro", call_id="e#0", system_stable=""), tools,
+                                    lambda spec, cid: None, max_turns=3, outside_calls=outside_calls))
+    return [(r.name, r.ok) for r in got.records]
+
+
+def test_in_pro_mode_a_service_is_tried_with_every_filter_its_own_tools_keep_their_cap():
+    """Éprouver une API, c'est appeler le même outil avec chaque filtre : au quatrième appel de ``devis_list``, le
+    plafond de son serveur (3 par défaut) l'arrêtait à mi-chemin. Le mode pro le relève à ses 24 tours (ADR 0162) ;
+    ses propres outils gardent le leur, et l'ordinaire celui du serveur."""
+    assert _ran(24) == [*[("devis_list", True)] * 5, ("create_project", True), ("create_project", False)]
+    assert _ran(None) == [*[("devis_list", True)] * 3, *[("devis_list", False)] * 2,
+                          ("create_project", True), ("create_project", False)]
+    assert _ran(2)[:4] == [*[("devis_list", True)] * 3, ("devis_list", False)]  # relevé, jamais abaissé
+    reply = policies()[Kind.REPLY]
+    pro = modes()[PRO]
+    assert reply.outside_calls is None and pro.applied(reply).outside_calls == pro.max_tool_turns == 24
+    assert policies()[Kind.WORK].outside_calls is None

@@ -27,7 +27,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
@@ -1785,6 +1785,19 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 - Le fil garde le mode ; une réponse pro ne se dit pas à voix haute et forme une seule bulle.
 
 *Pourquoi :* un travail demandé n'a que faire de sa voix de chat, de son caractère ni de son humeur.
+
+*Révisée par 0162.*
+
+### 0162 — En mode pro, un service s'éprouve sans buter sur son plafond
+
+- Chaque outil d'un service MCP a un plafond d'appels par épisode, réglé par serveur (« Appels par épisode (par outil) », 3 par défaut, 20 au plus) ; au-delà, la boucle refuse l'appel sans joindre le serveur.
+- Le mode pro le relève à 24, autant que ses tours d'outils (`EpisodeMode.outside_calls`, appliqué par `run_tool_loop` aux seuls outils venus d'ailleurs) ; un plafond de serveur plus haut reste le sien.
+- Ses propres outils gardent le leur, qui dit ce qu'ils sont (un projet créé une fois, un compte rendu qui clôt), et la conversation ordinaire garde celui du serveur.
+- Les exécutions de projet (`WORK`, `JOB`) n'en héritent pas : personne ne les regarde travailler.
+
+*Pourquoi :* éprouver une API, c'est appeler le même outil avec chaque filtre, une pagination, une borne ; au quatrième appel de `devis_list`, elle s'arrêtait à mi-chemin. Les 24 tours, les 15 minutes, le disjoncteur et l'opératrice qui regarde la boucle en direct suffisent à la borner.
+
+*Révise 0116.*
 
 ## La console et l'exploitation
 

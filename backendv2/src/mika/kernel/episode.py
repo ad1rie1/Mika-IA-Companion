@@ -86,6 +86,9 @@ class EpisodePolicy:
     max_paragraphs: int = 0
     #: au-delà, ce qu'un outil venu d'ailleurs rend est coupé dans le fil (``OUTSIDE_CHARS``)
     outside_chars: int = OUTSIDE_CHARS
+    #: chaque outil venu d'ailleurs peut être appelé jusqu'à tant de fois dans l'épisode quand son service en permet
+    #: moins (ADR 0162) ; ``None`` : le plafond de son service
+    outside_calls: int | None = None
     tool_bundles: frozenset[str] = frozenset()
     #: les lots « en main » ; les autres lots offerts sont à la demande (le modèle
     #: les cherche quand il en a besoin). None : tout est en main.
@@ -112,6 +115,8 @@ class EpisodeMode:
     deadline_s: float | None = None
     #: une autre borne pour ce qu'un outil venu d'ailleurs rend (un mode qui lit des fichiers entiers)
     outside_chars: int | None = None
+    #: un plafond d'appels relevé pour chaque outil venu d'ailleurs (un mode où l'on éprouve un service)
+    outside_calls: int | None = None
     muted_tags: frozenset[str] = frozenset()
     #: sa parole passée une seconde fois (``polishers``), comme d'ordinaire
     polished: bool = True
@@ -133,5 +138,6 @@ class EpisodeMode:
             max_tokens=self.max_tokens if self.max_tokens is not None else policy.max_tokens,
             deadline_s=self.deadline_s if self.deadline_s is not None else policy.deadline_s,
             outside_chars=self.outside_chars if self.outside_chars is not None else policy.outside_chars,
+            outside_calls=self.outside_calls if self.outside_calls is not None else policy.outside_calls,
             muted_tags=policy.muted_tags | self.muted_tags,
         )

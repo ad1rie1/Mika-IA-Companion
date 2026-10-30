@@ -456,18 +456,20 @@ async def run_tool_loop(
     result: LoopResult | None = None,
     watch: Watch | None = None,
     outside_max: int = OUTSIDE_RESULT_MAX,
+    outside_calls: int | None = None,
 ) -> LoopResult:
     """``clock`` date les appels d'outils (sans horloge : durées nulles) ;
     ``result``, s'il est donné, est rempli au fil de l'eau — ce qui a été fait
     reste lisible quand l'épisode est coupé en route (délai, supplantation) ;
     ``watch``, s'il est donné, en voit chaque moment au fil de l'eau ;
-    ``outside_max`` borne ce qu'un outil venu d'ailleurs rend au fil (caractères).
+    ``outside_max`` borne ce qu'un outil venu d'ailleurs rend au fil (caractères) ;
+    ``outside_calls`` relève le plafond d'appels de chacun (ADR 0162), jamais celui de ses propres outils.
     La boucle finie, de quelque façon que ce soit (réponse, plafond, coupure,
     annulation), la passerelle la relâche (``release(call_id)``) : un
     fournisseur à session n'attend pas son délai d'inactivité."""
     try:
         return await _loop(gateway, request, tools, make_context, max_turns=max_turns, clock=clock, result=result,
-                           watch=watch, outside_max=outside_max)
+                           watch=watch, outside_max=outside_max, outside_calls=outside_calls)
     finally:
         release(gateway, request.call_id)
 
@@ -534,6 +536,7 @@ async def _loop(
     result: LoopResult | None,
     watch: Watch | None = None,
     outside_max: int = OUTSIDE_RESULT_MAX,
+    outside_calls: int | None = None,
 ) -> LoopResult:
     result = result if result is not None else LoopResult(text="")
     result.stop = "running"  # chaque sortie le fixe ; resté tel quel, la boucle a été coupée en route
@@ -570,6 +573,8 @@ async def _loop(
                 outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.unknown", name=call.name), result))
                 continue
             limit = spec.max_calls_per_episode
+            if spec.outside and limit is not None and outside_calls is not None:
+                limit = max(limit, outside_calls)  # un mode qui éprouve un service le relève, jamais ne l'abaisse
             if limit is not None and counts.get(call.name, 0) >= limit:
                 outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.capped", name=call.name), result))
                 continue
