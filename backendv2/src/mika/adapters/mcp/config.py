@@ -35,6 +35,9 @@ LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".locald
 MAX_DESCRIPTION = 1024
 #: un schéma d'arguments au-delà : l'outil est refusé (le budget du prompt le paierait à chaque épisode)
 MAX_SCHEMA = 16_384
+#: des réglages d'un serveur qui ne sont plus : une configuration gardée qui les porte se lit sans eux — ce qu'elle
+#: lit d'une réponse est borné par l'épisode, pas par le serveur (ADR 0163)
+RETIRED = frozenset({"max_result_chars"})
 
 TRANSPORTS = (("distant", "à une adresse (HTTP)"), ("local", "sur cette machine (une commande)"))
 AUTHS = (("aucune", "aucune"), ("bearer", "jeton (Authorization: Bearer …)"), ("entete", "un en-tête nommé"))
@@ -128,10 +131,14 @@ class McpServer(BaseModel):
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
                                    help="Le mode pro le relève : autant d'appels que de tours d'outils.",
                                    order=41)] = 3
-    max_result_chars: Annotated[int, Knob(label="Réponse lue (caractères)", group="Bornes", lo=200, hi=20_000,
-                                          order=42)] = 4000
     breaker: Annotated[int, Knob(label="Pannes d'affilée avant de le couper", group="Bornes", lo=1, hi=20,
                                  order=43)] = 3
+
+    @model_validator(mode="before")
+    @classmethod
+    def _without_retired(cls, data: Any) -> Any:
+        """Un réglage retiré, encore dans une configuration gardée, ne la rend pas illisible."""
+        return {k: v for k, v in data.items() if k not in RETIRED} if isinstance(data, dict) else data
 
     @property
     def local(self) -> bool:

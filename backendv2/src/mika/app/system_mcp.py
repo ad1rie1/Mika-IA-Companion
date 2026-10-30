@@ -41,4 +41,4 @@ def spec(s: web.SystemServer) -> McpServer:
     rows = WEB_ACCESS
     return McpServer(purpose=s.purpose, when_to_use=s.when_to_use, enabled=True, transport="local", command=s.command,
                      args=s.args, env=s.env, network="isole", shared=s.shared, access=tuple(rows), in_hand=False,
-                     timeout_s=s.timeout_s, max_calls=s.max_calls, max_result_chars=s.max_result_chars)
+                     timeout_s=s.timeout_s, max_calls=s.max_calls)

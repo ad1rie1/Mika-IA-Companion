@@ -80,9 +80,6 @@ class WebParams(BaseModel):
         label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
         help="Dans une même réponse ou une même séance de travail, au plus autant de recherches, et autant de "
              "lectures : de quoi chercher, lire, préciser, sans tourner en rond.")] = 4
-    max_result_chars: Annotated[int, Knob(
-        label="Réponse lue (caractères)", group="Bornes", lo=1000, hi=20_000,
-        help="Ce qu'elle lit d'une réponse au plus ; une page plus longue se lit par morceaux.")] = 8000
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +87,9 @@ class WebState:
     pass
 
 
-WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams)
+#: ce qu'elle lit d'une réponse est borné par l'épisode, pas par le serveur (ADR 0163)
+WEB = Faculty("web", state=WebState, init=lambda p: WebState(), params=WebParams,
+              retired_params=("max_result_chars",))
 
 
 def params(p: WebParams | None) -> WebParams:
@@ -125,7 +124,6 @@ class SystemServer:
     shared: tuple[str, ...]
     timeout_s: float
     max_calls: int
-    max_result_chars: int
     tools: tuple[dict[str, Any], ...]
 
 
@@ -145,5 +143,4 @@ def system_server(p: WebParams | None) -> SystemServer | None:
         name=SERVER, purpose=phrase("web.purpose"), when_to_use=phrase("web.when_to_use"), command="python3",
         args=("-I", str(path)),
         env=tuple(f"{k}={v}" for k, v in sorted(st.env().items())), shared=(str(path.parent),),
-        timeout_s=p.call_timeout_us / US, max_calls=p.max_calls,
-        max_result_chars=p.max_result_chars, tools=tuple(server.tools(st)))
+        timeout_s=p.call_timeout_us / US, max_calls=p.max_calls, tools=tuple(server.tools(st)))

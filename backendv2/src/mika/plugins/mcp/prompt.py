@@ -25,6 +25,7 @@ from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.plugins.mcp import (
+    ANSWER_KEPT,
     ANSWERED,
     EXPIRED,
     FAILED,
@@ -46,8 +47,8 @@ from mika.vocab.privacy import Sensitivity
 
 #: au plus tant de demandes dans la section
 SHOWN_MAX = 4
-#: ce qu'une réponse montre d'elle dans la section
-SHOWN_CHARS = 2000
+#: ce qu'une réponse montre d'elle dans la section : tout ce qu'on en garde (ADR 0163)
+SHOWN_CHARS = ANSWER_KEPT
 #: ce que la raison d'un échec montre d'elle
 WHY_CHARS = 300
 #: la force de l'initiative due (au-dessus du seuil d'initiative, sous la barre de réveil : comme un dessin prêt)

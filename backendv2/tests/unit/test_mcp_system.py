@@ -13,6 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
+from pydantic import ValidationError
 
 from mika.adapters.mcp.client import live_tool
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
@@ -20,6 +24,7 @@ from mika.adapters.mcp.system import BY, Provided, SystemServers
 from mika.app import composition, system_mcp
 from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
 from mika.kernel.clock import MINUTE, US
+from mika.kernel.registry import _decode_params
 from mika.plugins import web
 from mika.plugins.web import serveur
 from mika.ports.mcp import CLOSE, OWNER
@@ -71,13 +76,13 @@ def test_disabled_it_is_gone():
 
 def test_its_settings_reach_the_server_through_its_environment():
     p = web.WebParams(spacing_us=7 * US, searches_per_minute=5, parallel_pages=2, pause_us=30 * MINUTE,
-                      cache_us=0, region="be-fr", safesearch="strict", call_timeout_us=60 * US, max_result_chars=5000)
+                      cache_us=0, region="be-fr", safesearch="strict", call_timeout_us=60 * US)
     srv = _system(p).config(McpConfig()).servers["web"]
     env = dict(line.split("=", 1) for line in srv.env)
     assert serveur.Settings.from_env(env) == serveur.Settings(spacing_s=7, searches_per_minute=5, parallel_pages=2,
                                                               pause_s=1800, cache_s=0, region="be-fr",
                                                               safesearch="strict")
-    assert srv.timeout_s == 60 and srv.max_result_chars == 5000
+    assert srv.timeout_s == 60
 
 
 def test_its_tools_are_approved_on_what_the_server_will_say():
@@ -129,3 +134,16 @@ def test_the_plugin_is_part_of_her_and_its_settings_have_a_page():
     assert web.WEB.params is web.WebParams and "web" in system_mcp.OWNERS
     assert FACULTY_LABELS["web"] == "Recherche web" and any("web" in names for _f, names in PARAM_FAMILIES)
     assert web.WebParams().enabled  # actif d'office : c'est un outil système
+
+
+def test_the_retired_reading_bound_leaves_a_kept_configuration_readable():
+    """« Réponse lue » n'est plus un réglage de serveur (ADR 0163) : ce qu'elle lit d'une réponse est borné par
+    l'épisode. Une configuration gardée qui le porte se lit sans lui — sinon le serveur serait écarté comme
+    illisible —, et une clé inconnue reste une erreur."""
+    kept = McpServer.model_validate({"purpose": "les devis de l'atelier", "max_result_chars": 4000})
+    assert kept.purpose == "les devis de l'atelier" and "max_result_chars" not in McpServer.model_fields
+    with pytest.raises(ValidationError):
+        McpServer.model_validate({"purpose": "les devis de l'atelier", "max_result_char": 4000})
+    old = json.dumps({"enabled": True, "max_result_chars": 8000})
+    assert _decode_params(web.WebParams, old, web.WEB.retired_params).enabled is True
+    assert "max_result_chars" not in web.WebParams.model_fields

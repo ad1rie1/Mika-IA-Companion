@@ -134,7 +134,6 @@ class OfferedTool:
     episodes: frozenset[str]
     in_hand: bool
     max_calls: int
-    max_result_chars: int
     #: à quoi sert son serveur, pour elle (la ligne de son catalogue) et quand s'en servir
     purpose: str
     when_to_use: str

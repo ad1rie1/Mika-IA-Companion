@@ -72,7 +72,7 @@ CACHE_SIZE = 64
 
 MAX_RESULTS = 10
 SNIPPET_CHARS = 300
-READ_DEFAULT_CHARS = 3500  # sous le plafond de réponse par défaut d'un outil (4 000), la suite comprise
+READ_DEFAULT_CHARS = 3500  # un morceau par défaut ; elle en demande plus (max_chars) quand il lui faut
 READ_MAX_CHARS = 20_000
 #: ce qu'on lit de chaque page dans ``read_pages`` (par défaut, et au plus)
 PAGES_DEFAULT_CHARS = 1500

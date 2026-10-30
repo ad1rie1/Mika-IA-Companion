@@ -119,11 +119,21 @@ def _undash(text: str) -> str:
     return "".join(out)
 
 
+#: les caractères qu'on ne voit pas : de contrôle, de format (sans largeur, bidirectionnels, étiquettes), privés
+_INVISIBLE = frozenset({"Cc", "Cf", "Co", "Cs"})
+
+
 def defang(line: str) -> str:
     """Une ligne venue d'ailleurs qui ne peut plus imiter un titre de section
     (``--- … ---``) ni l'en-tête ou la fin de l'état interne."""
-    kept = "".join(ch for ch in line if unicodedata.category(ch) not in ("Cc", "Cf", "Co", "Cs") or ch == "\t")
+    kept = "".join(ch for ch in line if unicodedata.category(ch) not in _INVISIBLE or ch == "\t")
     return _INNER.sub("état-interne", _undash(kept))
+
+
+def visible(text: str) -> str:
+    """Un texte venu d'ailleurs sans ce que le modèle lirait sans qu'on le voie (``_INVISIBLE``) ; ses lignes, ses
+    tabulations et tout le reste tels quels : la boucle d'outils le cite (``kernel.prompt.cited``)."""
+    return "".join(ch for ch in text if ch in "\n\t" or unicodedata.category(ch) not in _INVISIBLE)
 
 
 def inert(text: str, limit: int = 400) -> str:

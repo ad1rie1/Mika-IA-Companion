@@ -146,7 +146,7 @@ class McpHub:
                     description=rv.description or rv.server_description or tool.description,
                     schema=rv.schema_ or tool.schema, nature=rv.nature,
                     episodes=granted(own, default, rv.nature), in_hand=spec.in_hand, max_calls=spec.max_calls,
-                    max_result_chars=spec.max_result_chars, purpose=inert(spec.purpose, 400),
+                    purpose=inert(spec.purpose, 400),
                     when_to_use=inert(spec.when_to_use, 400), local=spec.local, fingerprint=rv.fingerprint,
                     access=own, default=default))
         return out

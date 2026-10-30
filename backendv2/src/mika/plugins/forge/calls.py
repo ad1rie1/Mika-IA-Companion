@@ -57,7 +57,9 @@ FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
 #: une carte dans la conversation vaut tant ; un accord de l'opérateur, tant ; passé ce délai, l'issue ne se dit plus
 CARD_TTL, OPERATOR_TTL, TOO_LATE = 10 * MINUTE, DAY, 6 * HOUR
 #: ce qu'on garde des demandes, d'une réponse (le contenu journalisé), ce que la section en montre
-CALLS_KEPT, ANSWER_KEPT, SHOWN_CHARS, SHOWN_MAX = 100, 8000, 2000, 4
+CALLS_KEPT, ANSWER_KEPT, SHOWN_MAX = 100, 8000, 4
+#: ce qu'une réponse montre d'elle dans la section : tout ce qu'on en garde (ADR 0163)
+SHOWN_CHARS = ANSWER_KEPT
 #: ce que la raison d'un échec montre d'elle
 WHY_CHARS = 300
 #: qui signe un refus faute d'accord à temps

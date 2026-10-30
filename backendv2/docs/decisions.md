@@ -1064,7 +1064,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* l'audit du 2026-10-27 (`docs/audit-2026-10-27-projets.md`) est parti du projet n° 257. Ce jour-là, le cadre du projet s'était écrit dans sa réponse, au milieu d'une conversation, sous la consigne « ouvre le projet maintenant ». La demande d'Adrien (« du trading par IA ») s'était perdue dans une paraphrase. La première exécution était partie dans la minute, sur un objectif constant. Et aucune exécution ne pouvait revoir un cadre fait à la hâte. Adrien voulait « une réflexion pour définir ses objectifs correctement, un plan, quitte à demander l'avis de l'utilisateur ».
 
-*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161.*
+*Révise 0031 (en partie), 0104 (en partie). Révisée par 0161, 0162.*
 
 ### 0161 — De la demande au livrable : les jointures du cadrage
 
@@ -1788,16 +1788,16 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révisée par 0162.*
 
-### 0162 — En mode pro, un service s'éprouve sans buter sur son plafond
+### 0162 — En mode pro et en projet, un service s'éprouve sans buter sur son plafond
 
 - Chaque outil d'un service MCP a un plafond d'appels par épisode, réglé par serveur (« Appels par épisode (par outil) », 3 par défaut, 20 au plus) ; au-delà, la boucle refuse l'appel sans joindre le serveur.
 - Le mode pro le relève à 24, autant que ses tours d'outils (`EpisodeMode.outside_calls`, appliqué par `run_tool_loop` aux seuls outils venus d'ailleurs) ; un plafond de serveur plus haut reste le sien.
 - Ses propres outils gardent le leur, qui dit ce qu'ils sont (un projet créé une fois, un compte rendu qui clôt), et la conversation ordinaire garde celui du serveur.
-- Les exécutions de projet (`WORK`, `JOB`) n'en héritent pas : personne ne les regarde travailler.
+- Les exécutions de projet (`WORK`, `JOB`) ont le même relèvement (`EpisodePolicy.outside_calls`), avec le reste du budget du mode pro (ADR 0145) : elles aussi appellent un service à répétition.
 
-*Pourquoi :* éprouver une API, c'est appeler le même outil avec chaque filtre, une pagination, une borne ; au quatrième appel de `devis_list`, elle s'arrêtait à mi-chemin. Les 24 tours, les 15 minutes, le disjoncteur et l'opératrice qui regarde la boucle en direct suffisent à la borner.
+*Pourquoi :* éprouver une API, c'est appeler le même outil avec chaque filtre, une pagination, une borne ; au quatrième appel de `devis_list`, elle s'arrêtait à mi-chemin. Les 24 tours, les 15 minutes et le disjoncteur du serveur suffisent à la borner.
 
-*Révise 0116.*
+*Révise 0116 (en partie), 0145 (en partie).*
 
 ## La console et l'exploitation
 

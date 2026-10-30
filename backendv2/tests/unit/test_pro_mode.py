@@ -213,8 +213,8 @@ def _ran(outside_calls: int | None) -> list[tuple[str, bool]]:
 
 def test_in_pro_mode_a_service_is_tried_with_every_filter_its_own_tools_keep_their_cap():
     """Éprouver une API, c'est appeler le même outil avec chaque filtre : au quatrième appel de ``devis_list``, le
-    plafond de son serveur (3 par défaut) l'arrêtait à mi-chemin. Le mode pro le relève à ses 24 tours (ADR 0162) ;
-    ses propres outils gardent le leur, et l'ordinaire celui du serveur."""
+    plafond de son serveur (3 par défaut) l'arrêtait à mi-chemin. Le mode pro et ses exécutions de projet le
+    relèvent à leurs 24 tours (ADR 0162) ; ses propres outils gardent le leur, et l'ordinaire celui du serveur."""
     assert _ran(24) == [*[("devis_list", True)] * 5, ("create_project", True), ("create_project", False)]
     assert _ran(None) == [*[("devis_list", True)] * 3, *[("devis_list", False)] * 2,
                           ("create_project", True), ("create_project", False)]
@@ -222,4 +222,5 @@ def test_in_pro_mode_a_service_is_tried_with_every_filter_its_own_tools_keep_the
     reply = policies()[Kind.REPLY]
     pro = modes()[PRO]
     assert reply.outside_calls is None and pro.applied(reply).outside_calls == pro.max_tool_turns == 24
-    assert policies()[Kind.WORK].outside_calls is None
+    # une exécution de projet a le budget du mode pro, ce relèvement compris
+    assert policies()[Kind.WORK].outside_calls == policies()[Kind.JOB].outside_calls == 24

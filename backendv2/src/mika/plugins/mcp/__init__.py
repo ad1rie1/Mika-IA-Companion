@@ -43,7 +43,7 @@ from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.rights import Rights
 from mika.kernel.state import FrozenDict
-from mika.ports.preprocess import cite, inert
+from mika.ports.preprocess import inert, visible
 from mika.vocab.access import KINDS_OF, can_approve
 
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
@@ -303,9 +303,10 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
             asked_by=asked_by[:200]))
     # comment raconter ce qu'elle a lu a une seule maison, ses outils dans son prompt (runtime.tools.acting) : la
     # réponse de l'outil n'y ajoute pas de consigne (ADR 0154 ; la sonde du 2026-10-14 l'entendait commenter la
-    # page, « je n'ai lu que le début » — à surveiller au banc)
+    # page, « je n'ai lu que le début » — à surveiller au banc). Elle part entière, sans ses caractères invisibles :
+    # la boucle la cite et la borne à ce que lit l'épisode, coupée à une frontière (ADR 0163)
     return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
-                              + (cite(result.text, t.max_result_chars) or phrase("mcp.tools.nothing")),
+                              + (visible(result.text).strip() or phrase("mcp.tools.nothing")),
                       floor=FLOORS.get(keep, 0), unkept=keep == "rien")
 
 

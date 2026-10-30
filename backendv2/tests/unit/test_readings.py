@@ -247,7 +247,7 @@ class Port:
 
 def _search() -> NS:
     """L'outil « search » d'un serveur : il lit."""
-    return NS(server="web", remote="search", max_result_chars=4000, nature="lecture")
+    return NS(server="web", remote="search", nature="lecture")
 
 
 async def _consult(kind: str, reads_world: bool = True, target: str | None = None) -> list:
