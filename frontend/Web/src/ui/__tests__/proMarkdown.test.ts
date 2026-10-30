@@ -6,7 +6,10 @@ const LINK = (url: string, label = url) =>
 
 /** Les seules balises que la sortie peut porter, attributs compris. */
 const ALLOWED_TAGS = [
-  /^<\/?(p|br|strong|em|code|pre|ul|ol|li|hr)>$/,
+  /^<\/?(p|br|strong|em|code|pre|ul|ol|li|hr|blockquote|table|thead|tbody|tr|th|td)>$/,
+  /^<div class="md-table">$/,
+  /^<\/div>$/,
+  /^<t[hd] class="md-(center|right)">$/,
   /^<p class="md-title">$/,
   /^<pre class="md-code">$/,
   /^<ol start="\d+">$/,
@@ -63,6 +66,7 @@ describe("renderProMarkdown — sûreté", () => {
       "<script>", "</p>", "<img src=x onerror=alert(1)>", '"', "'", "&", "**", "*", "_", "__",
       "`", "```", "~~~", "[x](", "](", ")", "https://a.fr/", "http://b.fr/?q=1&r=2",
       "javascript:", "onerror=", "\n", "\n\n", "- ", "1. ", "# ", "  ", "mot", "é", "\t", "---",
+      "|", "\\|", "|---|", ":--:|", "> ", "<br>", "<br/>",
     ];
     let seed = 42;
     const next = () => {
@@ -168,6 +172,46 @@ describe("renderProMarkdown — mise en forme", () => {
   it("le libellé d'un lien garde sa mise en forme", () => {
     expect(md("[`code` **lien**](https://a.fr)")).toBe(
       `<p>${LINK("https://a.fr", "<code>code</code> <strong>lien</strong>")}</p>`
+    );
+  });
+
+  it("un tableau : en-tête, corps, cellules mises en forme", () => {
+    expect(md("Les devis\n| N° | Total |\n|---|---|\n| **DEV-1** | 15 400 € |\n| `DEV-2` | 6 660 € |\n\nfin")).toBe(
+      "<p>Les devis</p>" +
+        '<div class="md-table"><table>' +
+        "<thead><tr><th>N°</th><th>Total</th></tr></thead>" +
+        "<tbody><tr><td><strong>DEV-1</strong></td><td>15 400 €</td></tr>" +
+        "<tr><td><code>DEV-2</code></td><td>6 660 €</td></tr></tbody>" +
+        "</table></div><p>fin</p>"
+    );
+  });
+
+  it("un tableau : alignements, barres du bord facultatives, rangs à la largeur de l'en-tête", () => {
+    expect(md("a | b | c\n:--- | :-: | --:\n1 | 2\n1 | 2 | 3 | 4")).toBe(
+      '<div class="md-table"><table>' +
+        '<thead><tr><th>a</th><th class="md-center">b</th><th class="md-right">c</th></tr></thead>' +
+        '<tbody><tr><td>1</td><td class="md-center">2</td><td class="md-right"></td></tr>' +
+        '<tr><td>1</td><td class="md-center">2</td><td class="md-right">3</td></tr></tbody>' +
+        "</table></div>"
+    );
+  });
+
+  it("une cellule garde une barre échappée et va à la ligne sur un <br>", () => {
+    expect(md("| x |\n|---|\n| a \\| b<br>c |")).toBe(
+      '<div class="md-table"><table><thead><tr><th>x</th></tr></thead>' +
+        "<tbody><tr><td>a | b<br>c</td></tr></tbody></table></div>"
+    );
+  });
+
+  it("sans ligne de séparation, ou avec un autre nombre de colonnes, ce n'est pas un tableau", () => {
+    expect(md("| a | b |\n| 1 | 2 |")).toBe("<p>| a | b |<br>| 1 | 2 |</p>");
+    expect(md("| a | b |\n|---|\n| 1 | 2 |")).toBe("<p>| a | b |<br>|---|<br>| 1 | 2 |</p>");
+    expect(md("a | b\n---")).toBe("<p>a | b</p><hr>");
+  });
+
+  it("une citation, sur plusieurs lignes", () => {
+    expect(md("> **dit** une fois\n> deux\nensuite")).toBe(
+      "<blockquote><strong>dit</strong> une fois<br>deux</blockquote><p>ensuite</p>"
     );
   });
 

@@ -1,5 +1,6 @@
 package fr.qwartz.mika.ui.components
 
+import fr.qwartz.mika.ui.components.ProMarkdown.Align
 import fr.qwartz.mika.ui.components.ProMarkdown.Block
 import fr.qwartz.mika.ui.components.ProMarkdown.Span
 import org.junit.Assert.assertEquals
@@ -100,8 +101,47 @@ class ProMarkdownTest {
         )
         assertEquals(listOf(Block.Code("a\nb", "")), ProMarkdown.parse("```\na\nb"))
         assertEquals(listOf(Block.Code("ls -la", "")), ProMarkdown.parse("```ls -la```"))
-        // un tableau se montre tel quel, en chasse fixe
-        assertEquals(listOf(Block.Code("| a | b |\n|---|---|\n| 1 | 2 |", "")), ProMarkdown.parse("| a | b |\n|---|---|\n| 1 | 2 |"))
+        // des lignes à barres sans séparation d'en-tête se montrent telles quelles, en chasse fixe
+        assertEquals(listOf(Block.Code("| a | b |\n| 1 | 2 |", "")), ProMarkdown.parse("| a | b |\n| 1 | 2 |"))
+    }
+
+    @Test fun `un tableau, son en-tête, son corps, ses cellules mises en forme`() {
+        assertEquals(
+            listOf(
+                Block.Paragraph(listOf(Span("Les devis"))),
+                Block.Table(
+                    header = listOf(listOf(Span("N°")), listOf(Span("Total"))),
+                    align = listOf(Align.START, Align.START),
+                    rows = listOf(
+                        listOf(listOf(Span("DEV-1", bold = true)), listOf(Span("15 400 €"))),
+                        listOf(listOf(Span("DEV-2", code = true)), listOf(Span("6 660 €"))),
+                    ),
+                ),
+                Block.Paragraph(listOf(Span("fin"))),
+            ),
+            ProMarkdown.parse("Les devis\n| N° | Total |\n|---|---|\n| **DEV-1** | 15 400 € |\n| `DEV-2` | 6 660 € |\n\nfin"),
+        )
+    }
+
+    @Test fun `un tableau, ses alignements, ses barres du bord facultatives, ses rangs à la largeur de l'en-tête`() {
+        val cell = { t: String -> if (t.isEmpty()) emptyList() else listOf(Span(t)) }
+        assertEquals(
+            listOf(
+                Block.Table(
+                    header = listOf(cell("a"), cell("b"), cell("c")),
+                    align = listOf(Align.START, Align.CENTER, Align.END),
+                    rows = listOf(listOf(cell("1"), cell("2"), cell("")), listOf(cell("1"), cell("2"), cell("3"))),
+                ),
+            ),
+            ProMarkdown.parse("a | b | c\n:--- | :-: | --:\n1 | 2\n1 | 2 | 3 | 4"),
+        )
+        // une barre échappée reste dans sa cellule, un <br> y va à la ligne
+        assertEquals(
+            listOf(Block.Table(listOf(cell("x")), listOf(Align.START), listOf(listOf(cell("a | b\nc"))))),
+            ProMarkdown.parse("| x |\n|---|\n| a \\| b<br>c |"),
+        )
+        // une séparation d'un autre nombre de colonnes : pas un tableau
+        assertTrue(ProMarkdown.parse("| a | b |\n|---|\n| 1 | 2 |").none { it is Block.Table })
     }
 
     @Test fun `du HTML reste du texte`() {
@@ -116,5 +156,7 @@ class ProMarkdownTest {
             "Titre\nun mot important\n• a\n  ◦ b\n1. c\nprint(1)",
             ProMarkdown.plain("# Titre\n\nun mot **important**\n\n- a\n  - b\n1. c\n\n---\n\n```py\nprint(1)\n```"),
         )
+        // un tableau : un rang par ligne, une tabulation entre les cellules (ce qui se colle dans un tableur)
+        assertEquals("N°\tTotal\nDEV-1\t15 400 €", ProMarkdown.plain("| N° | Total |\n|---|---|\n| **DEV-1** | 15 400 € |"))
     }
 }

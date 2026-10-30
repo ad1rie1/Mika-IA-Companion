@@ -224,7 +224,34 @@ def test_a_blocked_step_reopens_when_she_gets_the_answer():
     again = s.projects[1].objectives[0]
     assert again.status == c.OPEN and again.runs == 0 and again.answered_at == 2 * HOUR and again.need_ref == "n"
     assert pick(s.projects[1], 2 * HOUR, PM).id == 1
+    # un vieux blocage (dit il y a plus d'une semaine) ne se rouvre pas d'un coup quand la personne parle
+    old = ProjectsState(projects=FrozenDict({1: p}))
+    late = _answered(old, _ev(9 * DAY, ANSWERED.payload(project=1, objective=1, person="adrien")), _cx())
+    assert late.projects[1].objectives[0].status == c.BLOCKED
 
+
+def test_a_run_that_reaches_its_turn_limit_without_a_verdict_is_silent_not_broken(tmp_path):
+    """Au plafond de tours, la CLI garde ses outils au tour de clôture : un appel y rendait un texte vide, et
+    l'exécution comptait comme une panne — trois, et le projet se mettait en pause « en panne ». Elle n'a rien
+    conclu : muette, l'objectif bloque après trois, le projet reste actif."""
+    from itertools import count
+
+    from tests.unit.test_projects import create, wait
+
+    n = count()
+
+    async def scenario(kernel, llm):
+        pid = await create(kernel, "p1", title="Le module", mode="plain", objectives="Écrire le module")
+        original = llm._work
+        llm._work = lambda req: LLMResponse("", (ToolCall(f"t{next(n)}", "ws_list", {}),), stop="tool_use")
+        await wait(3 * 60)
+        await kernel.lanes.join()
+        llm._work = original
+        return kernel.mind.frame().state("projects").projects[pid]
+
+    project = live(tmp_path, scenario)
+    assert project.status == c.ACTIVE and project.failures == 0
+    assert project.objectives[0].status == c.BLOCKED
 
 def test_a_constant_first_pass_waits_its_cadence_after_it_can_start():
     """Un bilan de la semaine qui dépend de l'app tombait le jour même où l'app était écrite, avant les étapes qui
@@ -280,11 +307,22 @@ def test_a_constant_pass_that_looked_at_something_real_is_told(tmp_path):
 
 def test_a_project_where_an_app_lives_is_not_closed_on_its_own():
     """Un projet à elle sans constant se close trois jours après sa dernière étape : son app tournait encore, sans
-    plus personne pour la réparer. Une app qui vit dans le projet le garde ouvert."""
+    plus personne pour la réparer. Une app qui vit dans le projet le garde ouvert — en panne aussi, puisque c'est à
+    son projet de la réparer ; pas une app qu'elle a arrêtée."""
+    from mika.contracts import forge as forge_c
+    from mika.faculties.projects.tend import homes
+
     done = Objective(id=1, text_ref="app", status=c.DONE, closed_at=DAY)
     p = Project(id=4, title_ref="t", authority=c.SELF, created_at=0, objectives=(done,))
     assert finished_at(p, PM) == DAY + PM.self_done_after_us
     assert finished_at(p, PM, frozenset({4})) is None
+
+    def app(name, project, enabled=True, broken="", held=False):
+        return forge_c.AppView(name, name, 1, enabled, broken, 0, False, False, "manual", project=project, held=held)
+
+    apps = (app("tourne", 4), app("cassee", 5, enabled=False, broken="HTTP 503"), app("arretee", 6, enabled=False),
+            app("retenue", 7, held=True))
+    assert homes(SimpleNamespace(get=lambda key: apps)) == frozenset({4, 5})
 
 
 # ── La boucle d'outils ─────────────────────────────────────────────────────

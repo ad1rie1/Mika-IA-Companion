@@ -2,7 +2,7 @@ package fr.qwartz.mika.ui.components
 
 /**
  * Le Markdown d'une réponse pro (ADR 0116) : blocs de code (```), code en ligne, gras, italique, listes (`-`, `*`,
- * `1.`), titres (`#`), citations, filets, tableaux (montrés tels quels, en chasse fixe) et liens — cliquables
+ * `1.`), titres (`#`), citations, filets, tableaux (en-tête, corps, alignement des colonnes) et liens — cliquables
  * seulement en http(s). Un petit analyseur, pas une implémentation de CommonMark : ce que les modèles écrivent
  * d'ordinaire, et rien qui ne puisse mal tourner. Rien n'est jamais interprété comme du HTML : une bulle ne montre
  * que du texte. Pur, sans Android ni Compose : le rendu (`AnnotatedString`) est dans `ProMarkdownText`.
@@ -17,6 +17,9 @@ object ProMarkdown {
         val url: String? = null,
     )
 
+    /** L'alignement d'une colonne, lu sur la ligne de séparation (`:---`, `:-:`, `--:`). */
+    enum class Align { START, CENTER, END }
+
     sealed interface Block {
         data class Paragraph(val spans: List<Span>) : Block
         data class Heading(val level: Int, val spans: List<Span>) : Block
@@ -25,7 +28,13 @@ object ProMarkdown {
         data class Item(val marker: String, val depth: Int, val spans: List<Span>) : Block
         data class Quote(val spans: List<Span>) : Block
 
-        /** Un bloc de code (ou un tableau) : montré tel quel, en chasse fixe. */
+        /**
+         * Un tableau : son en-tête, l'alignement de chaque colonne et ses rangs, tous à la largeur de l'en-tête (une
+         * cellule manquante est vide, une cellule de trop tombe).
+         */
+        data class Table(val header: List<List<Span>>, val align: List<Align>, val rows: List<List<List<Span>>>) : Block
+
+        /** Un bloc de code (ou des lignes à barres sans séparation d'en-tête) : montré tel quel, en chasse fixe. */
         data class Code(val text: String, val lang: String) : Block
         data object Rule : Block
     }
@@ -37,6 +46,8 @@ object ProMarkdown {
     private val QUOTE = Regex("""^ {0,3}>[ \t]?(.*)$""")
     private val RULE = Regex("""^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$""")
     private val TABLE = Regex("""^[ \t]*\|.*\|[ \t]*$""")
+    private val TABLE_DELIMITER = Regex("""^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$""")
+    private val CELL_BREAK = Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE)
     private val SAFE_URL = Regex("""^https?://[^\s<>"'`]+$""", RegexOption.IGNORE_CASE)
     private const val ESCAPABLE = "\\`*_{}[]()#+-.!|>~"
     private val BULLETS = listOf("•", "◦", "▪")
@@ -97,6 +108,17 @@ object ProMarkdown {
                 i++
                 continue
             }
+            val align = tableAt(lines, i)
+            if (align != null) {
+                flush()
+                val header = cells(line, align.size)
+                val rows = mutableListOf<List<List<Span>>>()
+                i += 2
+                // le corps : les lignes à barres qui suivent, jusqu'à une ligne vide
+                while (i < lines.size && lines[i].isNotBlank() && '|' in lines[i]) rows += cells(lines[i++], align.size)
+                out += Block.Table(header, align, rows)
+                continue
+            }
             if (TABLE.matches(line)) {
                 flush()
                 val rows = mutableListOf<String>()
@@ -143,6 +165,52 @@ object ProMarkdown {
         }
         flush()
         return out
+    }
+
+    /**
+     * Un tableau commence en [i] : une ligne à barres, suivie de sa ligne de séparation, avec autant de colonnes. Ses
+     * alignements, ou `null`.
+     */
+    private fun tableAt(lines: List<String>, i: Int): List<Align>? {
+        val delimiter = lines.getOrNull(i + 1) ?: return null
+        if ('|' !in lines[i] || '|' !in delimiter || !TABLE_DELIMITER.matches(delimiter)) return null
+        val align = split(delimiter).map {
+            when {
+                it.endsWith(':') && it.startsWith(':') -> Align.CENTER
+                it.endsWith(':') -> Align.END
+                else -> Align.START
+            }
+        }
+        return align.takeIf { split(lines[i]).size == it.size }
+    }
+
+    /**
+     * Les cellules d'une ligne de tableau sans les barres du bord ; `\|` est une barre dans la cellule (l'échappement
+     * reste, [scan] le lit).
+     */
+    private fun split(line: String): List<String> {
+        var row = line.trim()
+        if (row.startsWith('|')) row = row.substring(1)
+        if (row.endsWith('|') && !row.endsWith("\\|")) row = row.dropLast(1)
+        val out = mutableListOf<String>()
+        val cell = StringBuilder()
+        var k = 0
+        while (k < row.length) {
+            when {
+                row[k] == '\\' && k + 1 < row.length && row[k + 1] == '|' -> cell.append(row, k, k + 2).also { k++ }
+                row[k] == '|' -> out += cell.toString().trim().also { cell.setLength(0) }
+                else -> cell.append(row[k])
+            }
+            k++
+        }
+        out += cell.toString().trim()
+        return out
+    }
+
+    /** Un rang de [columns] cellules mises en forme ; un `<br>` écrit dans une cellule y est un saut de ligne. */
+    private fun cells(line: String, columns: Int): List<List<Span>> {
+        val cells = split(line)
+        return List(columns) { c -> inline(cells.getOrElse(c) { "" }.replace(CELL_BREAK, "\n")) }
     }
 
     private class PendingItem(val marker: String, val depth: Int, val text: StringBuilder)
@@ -370,6 +438,10 @@ object ProMarkdown {
             is Block.Heading -> join(block.spans)
             is Block.Item -> "  ".repeat(block.depth) + block.marker + " " + join(block.spans)
             is Block.Quote -> join(block.spans)
+            // une ligne par rang, les cellules séparées d'une tabulation : ce qui se colle dans un tableur
+            is Block.Table -> (listOf(block.header) + block.rows).joinToString("\n") { row ->
+                row.joinToString("\t") { join(it).replace('\n', ' ') }
+            }
             is Block.Code -> block.text
             Block.Rule -> null
         }
@@ -382,6 +454,7 @@ object ProMarkdown {
             is Block.Heading -> block.spans
             is Block.Item -> block.spans
             is Block.Quote -> block.spans
+            is Block.Table -> (block.header + block.rows.flatten()).flatten()
             is Block.Code, Block.Rule -> emptyList()
         }
     }.mapNotNull { s -> s.url?.let { s.text to it } }.distinctBy { it.second }

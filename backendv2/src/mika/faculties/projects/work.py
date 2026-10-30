@@ -396,13 +396,15 @@ def _needy(o: Objective, now: int, pm: Any) -> bool:
 def _stalled(p: Project, now: int, pm: Any) -> bool:
     """Un projet à elle mis en pause par des pannes depuis peu, qu'elle n'a pas encore dit (ADR 0143) — ou un projet
     qu'on lui a demandé et dont le cadrage n'aboutit pas : qui l'a demandé attend son plan (ADR 0161)."""
-    return p.status == c.PAUSED and (p.authority == c.SELF or unplanned_stall(p)) and bool(p.stalled_at) \
+    return p.status == c.PAUSED and (p.authority == c.SELF or unplanned_stall(p, pm)) and bool(p.stalled_at) \
         and not p.stall_asked and p.stall_attempts < pm.share_attempts and now - p.stalled_at <= pm.share_within_us
 
 
-def unplanned_stall(p: Project) -> bool:
-    """Arrêté pendant son cadrage, faute de plan (pas d'une panne de la machine)."""
-    return p.plan_state == c.TO_FRAME and p.frame_silent > 0 and bool(p.stalled_at)
+def unplanned_stall(p: Project, pm: Any) -> bool:
+    """Arrêté pendant son cadrage faute de plan, pas par une panne de la machine — le même partage que la raison de
+    sa pause (``tend.pause_reason``)."""
+    return p.plan_state == c.TO_FRAME and bool(p.stalled_at) and p.frame_silent >= pm.silent_before_blocked \
+        and p.failures < pm.failures_before_pause
 
 
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.NEED: (0.0, 10.0)},
@@ -427,7 +429,7 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         who = _who_words(frame, person, address)
         if o is not None:
             subject, brief = subject_of(p.id, o.id), phrase("projects.brief.need", who=who)
-        elif unplanned_stall(p):
+        elif unplanned_stall(p, pm):
             subject, brief = stall_subject(p.id), phrase("projects.brief.unframed", who=who)
         else:
             subject, brief = stall_subject(p.id), phrase("projects.brief.stalled", who=who)

@@ -540,7 +540,12 @@ class EpisodeRunner:
                 if policy.max_paragraphs:
                     text = first_paragraphs(text, policy.max_paragraphs)
                 if not text.strip() or is_silence(text):
-                    if loop.stop in _UNFINISHED and not loop.text.strip():
+                    if loop.stop == "max_turns" and not policy.delivered and any(x.ends_loop for x in tools.values()):
+                        # une séance qui se conclut par un outil (une exécution, un pas) et ne l'a pas fait : au
+                        # plafond, elle n'a rien conclu — muette, pas en panne (ADR 0161 ; la CLI garde ses outils au
+                        # tour de clôture, et un appel y rend un texte vide)
+                        await self._settle(ep, Outcome.DONE)
+                    elif loop.stop in _UNFINISHED and not loop.text.strip():
                         # elle n'a pas pu finir (trop d'appels d'outils) : ce n'est pas un silence choisi
                         await self._settle(ep, Outcome.FAILED, detail=f"pas de réponse au bout des outils "
                                                                       f"({loop.stop})")

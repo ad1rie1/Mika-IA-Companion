@@ -159,9 +159,13 @@ class App:
     written_in: str = ""
     #: la dernière version qu'un essai a prouvée, et l'épisode qui l'a relancée après une panne : un essai réussi
     #: prouve une version jamais prouvée de son projet, ou une app relancée dans l'épisode — pas une app qui marchait
-    #: déjà (ADR 0161)
+    #: déjà (ADR 0161). Un essai qui prouve ne compte qu'une fois crédité par le compte rendu de son exécution : en
+    #: attendant, l'épisode et la version (``trial_in``, ``trial_version``) ; une exécution qui n'aboutit pas ne
+    #: consomme rien
     proven: int = 0
     revived_in: str = ""
+    trial_in: str = ""
+    trial_version: int = 0
     #: le projet où elle vit (0 : aucun) — écrite pendant une de ses exécutions, ou désignée ; il porte sa
     #: réparation, ses trouvailles et ses demandes (ADR 0104)
     project: int = 0
@@ -333,7 +337,8 @@ class Emitted(Payload):
 
 
 class Proved(Payload):
-    """Un essai réussi a prouvé cette version (ADR 0161) : un autre essai d'elle ne prouvera plus rien."""
+    """Un essai réussi prouve cette version (ADR 0161) : une fois le compte rendu de son exécution crédité de la
+    preuve, un autre essai d'elle ne prouvera plus rien."""
 
     app: str
     version: int
@@ -460,10 +465,26 @@ def trusted(app: App | None) -> bool:
 
 @FORGE.reducer(PROVED)
 def _proved(s: ForgeState, e, cx) -> ForgeState:
+    """L'essai qui prouve : en attente du compte rendu de son exécution (ADR 0161)."""
     app = s.apps.get(e.data.app)
     if app is None:
         return s
-    return replace(s, apps=s.apps.set(e.data.app, replace(app, proven=max(app.proven, e.data.version))))
+    return replace(s, apps=s.apps.set(e.data.app, replace(app, trial_in=e.correlation,
+                                                          trial_version=e.data.version)))
+
+
+@FORGE.reducer(projects_c.RUN_REPORTED)
+def _credited(s: ForgeState, e, cx) -> ForgeState:
+    """Le compte rendu d'une exécution crédité d'une preuve : les versions qu'elle a prouvées à l'essai le sont pour
+    de bon (ADR 0161)."""
+    if not e.data.proof:
+        return s
+    apps = s.apps
+    for name, app in s.apps.items():
+        if app.trial_in and app.trial_in == e.correlation:
+            apps = apps.set(name, replace(app, proven=max(app.proven, app.trial_version), trial_in="",
+                                          trial_version=0))
+    return replace(s, apps=apps) if apps is not s.apps else s
 
 
 @FORGE.reducer(TICKED)
@@ -598,6 +619,10 @@ def _ended(s: ForgeState, e, cx) -> ForgeState:
     file — une file ne se relit pas sans fin aux frais du quota ; devancée ou interrompue, il y reste. Une initiative
     pour dire une trouvaille finie sans rien dire : un essai (``agency.tried``)."""
     renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+    # un essai qui prouvait, dans une exécution finie sans le créditer : rien n'est consommé (ADR 0161)
+    for name, app in s.apps.items():
+        if app.trial_in and app.trial_in == e.correlation:
+            s = replace(s, apps=s.apps.set(name, replace(app, trial_in="", trial_version=0)))
     sift = s.sifting.get(e.correlation)
     if sift is not None:
         s = replace(s, sifting=s.sifting.delete(e.correlation))
@@ -1664,9 +1689,10 @@ def signal_fate(app: App | None, signals: Sequence[tuple[str, float, str]], fram
 def _tested(r: Any, verdict: str = "", *, invalid: bool = False, fate: str = "", made: bool = False,
             stored: bool = False) -> ToolResult:
     """Ce qu'a donné un essai ; ``invalid`` : une vue rendue mais invalide (l'essai n'est pas réussi) ; ``fate`` : ce
-    que deviendraient ses signaux ; ``made`` : un essai réussi prouverait un travail (``proves``) — sauf si rien de ce
-    que l'app a demandé au réseau n'a répondu : « réussi » ne veut alors dire que « rien n'a levé » (ADR 0161) ;
-    ``stored`` : un outil ou une action, dont ce qu'il range reste dans sa base."""
+    que deviendraient ses signaux ; ``made`` : un essai réussi prouverait un travail (``proves``) ; ``stored`` : un
+    outil ou une action, dont ce qu'il range reste dans sa base. Ce qui n'a pas répondu au réseau se montre (ADR
+    0161) : « réussi » ne veut dire que « rien n'a levé », et c'est à elle d'en juger — une app réparée qui tient
+    pendant que son site est tombé a réussi, sans qu'aucune requête ait abouti."""
     logs = "\n".join(r.logs[-10:])
     head = phrase("forge.tools.test.outcome",
                   state=phrase("forge.tools.test.ok") if r.ok else phrase("forge.tools.test.failed"),
@@ -1681,9 +1707,8 @@ def _tested(r: Any, verdict: str = "", *, invalid: bool = False, fate: str = "",
         ("\n" + phrase("forge.tools.test.stored") if stored and r.ok else "") + \
         ("\n" + phrase("forge.tools.test.logs") + f"\n{logs}" if logs else "")
     ok = r.ok and not invalid
-    unanswered = bool(failed) and len(failed) >= requests
     return ToolResult(ok=ok, content=phrase("forge.tools.test.result", head=head) + f"\n{body}{extra}"
-                                     + (f"\n{verdict}" if verdict else ""), proof=ok and made and not unanswered)
+                                     + (f"\n{verdict}" if verdict else ""), proof=ok and made)
 
 
 #: ce qui prouve, à l'essai : ce que l'app fait pour de vrai — un battement, un service, un outil, une vue, une
@@ -1705,7 +1730,8 @@ def proves(app: App | None, ctx: Any, method: str) -> bool:
 
 
 async def _settled(ctx: Any, name: str, app: App | None, out: ToolResult) -> ToolResult:
-    """Un essai qui prouve marque sa version prouvée : l'essayer de nouveau ne prouvera plus rien (ADR 0161)."""
+    """Un essai qui prouve le note : crédité par le compte rendu de son exécution, sa version est prouvée, et
+    l'essayer de nouveau ne prouvera plus rien (ADR 0161)."""
     if out.proof and app is not None and app.version > app.proven:
         await ctx.emit(PROVED.draft(app=name, version=app.version))
     return out

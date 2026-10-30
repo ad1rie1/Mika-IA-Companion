@@ -154,6 +154,20 @@ async def _tree(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     return out
 
 
+@PROJECTS.enricher("projects_apps", episodes=RUNS, deadline_ms=1500, reads=[forge_c.APPS])
+async def _app_problems(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Ce qui n'a pas marché pour ses apps hors de leurs appels — une vue invalide dans la console (ADR 0161) : la
+    Forge le garde jusqu'à leur version suivante."""
+    got = _project(s, frame)
+    forge = ports.get("forge")
+    problems = getattr(forge, "problems", None)
+    if got is None or not callable(problems):
+        return None
+    mine = [a.name for a in frame.get(forge_c.APPS) or () if a.project == got[0].id]
+    found = {name: list(seen) for name in mine if (seen := problems(name))}
+    return {"problems": found} if found else None
+
+
 #: ce qu'on cite de sa réponse : ses premiers messages privés depuis la demande, chacun coupé
 ANSWER_LINES, ANSWER_CLIP = 10, 400
 
@@ -261,9 +275,10 @@ def missing_tools(p: Project) -> str:
     return phrase("projects.run.missing_confided", tools=listed)
 
 
-def app_lines(p: Project, frame: Frame) -> list[str]:
+def app_lines(p: Project, frame: Frame, problems: Mapping[str, list[str]] | None = None) -> list[str]:
     """Ses apps qui vivent dans ce projet (ADR 0104) : leur état, et ce qui attend quelqu'un — une exécution voit ce
-    qu'elle a fabriqué, au lieu de le redécouvrir par forge_list."""
+    qu'elle a fabriqué, au lieu de le redécouvrir par forge_list ; ``problems`` : ce qui n'a pas marché hors de leurs
+    appels (une vue invalide dans la console, ADR 0161)."""
     mine = [a for a in frame.get(forge_c.APPS) or () if a.project == p.id]
     if not mine:
         return []
@@ -288,6 +303,8 @@ def app_lines(p: Project, frame: Frame) -> list[str]:
         line = phrase("projects.run.app.line", title=a.title, app=a.name, version=a.version, state=state)
         if a.services:
             line += phrase("projects.run.app.services", services=", ".join(a.services))
+        if seen := (problems or {}).get(a.name):
+            line += phrase("projects.run.app.problems", problems=" ; ".join(x[:200] for x in seen[-2:]))
         out.append("- " + line)
     return [*out, phrase("projects.run.apps_tell"),
             phrase("projects.run.apps_clock", zone=str(frame.env.tz_of(frame.root)))]
@@ -378,7 +395,7 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
                      phrase("projects.run.remote_manual", remote=p.remote, branch=p.branch))
     if "workshop" in p.bundles:
         lines += _atelier_lines(enrich.get("projects_tree") or {})
-    if apps := app_lines(p, frame):
+    if apps := app_lines(p, frame, (enrich.get("projects_apps") or {}).get("problems")):
         lines.append("\n".join(apps))
     if missing := missing_tools(p):
         lines.append(missing)
@@ -588,7 +605,7 @@ def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
     if aud is None or not title or not hearable(p.about, written(p), person, aud.level, aud.witness_level,
                                                 aud.private_ok):
         return SectionBody(phrase("projects.share.something"), level=0)
-    if unplanned_stall(p):  # son cadrage n'a pas abouti : ce n'est pas la machine (ADR 0161)
+    if unplanned_stall(p, params(frame.env.params_of("projects", frame.root))):  # pas la machine : son cadrage
         return SectionBody(phrase("projects.share.unframed", title=title, n=p.frame_silent),
                            level=written(p) if any(a != person for a in p.about) else 0,
                            title=phrase("projects.share.stalled_title"), provenance=(f"project:{p.id}",))

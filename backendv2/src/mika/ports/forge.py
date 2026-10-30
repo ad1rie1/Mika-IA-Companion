@@ -311,7 +311,13 @@ class ForgePort(Protocol):
     def logs(self, app: str, n: int = 20) -> list[str]: ...
 
     def note(self, app: str, line: str) -> None:
-        """Écrire une ligne dans son journal (une vue qui ne se rend pas dans la console : ADR 0161)."""
+        """Une vue qui ne s'est pas rendue dans la console (ADR 0161) : une ligne de son journal, gardée aussi dans
+        ses problèmes récents (``problems``) jusqu'à sa prochaine version."""
+        ...
+
+    def problems(self, app: str) -> list[str]:
+        """Ses problèmes récents vus hors de ses appels (une vue invalide dans la console), du plus ancien au plus
+        récent : ce qu'une exécution de son projet doit savoir sans relire son journal."""
         ...
 
 

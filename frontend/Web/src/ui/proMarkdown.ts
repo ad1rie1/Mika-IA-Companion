@@ -2,15 +2,17 @@
  * Le Markdown d'une réponse pro (ADR 0116), rendu sans risque.
  *
  * Une réponse de travail est longue et structurée : blocs de code, code en
- * ligne, gras, italique, listes, titres, liens. `inlineMarkup.ts` (les
- * réponses ordinaires) n'en sait que trois ; ici, le rendu complet de ce que
- * le modèle écrit d'ordinaire, et rien de plus (ni tableau, ni image, ni HTML).
+ * ligne, gras, italique, listes, titres, citations, tableaux, liens.
+ * `inlineMarkup.ts` (les réponses ordinaires) n'en sait que trois ; ici, le
+ * rendu complet de ce que le modèle écrit d'ordinaire, et rien de plus (ni
+ * image, ni HTML).
  *
  * La règle de sûreté tient en une ligne : **tout le HTML est échappé d'abord**,
  * avant qu'aucune balise ne soit posée. Le texte ne peut donc plus rien
  * contenir qu'un navigateur lirait comme une balise ou un attribut ; les seules
  * balises de la sortie sont celles que ce module écrit (`p`, `br`, `strong`,
- * `em`, `code`, `pre`, `ul`, `ol`, `li`, `hr`, `a`), sans autre attribut qu'une
+ * `em`, `code`, `pre`, `ul`, `ol`, `li`, `hr`, `blockquote`, `div`, `table`,
+ * `thead`, `tbody`, `tr`, `th`, `td`, `a`), sans autre attribut qu'une
  * classe fixe, un `start` numérique, et le `href` d'un lien — seulement
  * `http(s)://`, déjà échappé (un `"` y est `&quot;` : il ne peut pas fermer
  * l'attribut). C'est ce qui permet à la bulle de poser la sortie en
@@ -38,6 +40,10 @@ const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const BULLET = /^(\s*)[-*+]\s+(.*)$/;
 const NUMBERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
+/** Une citation, sur le texte échappé : `>` y est `&gt;`. */
+const QUOTE = /^\s{0,3}&gt;\s?(.*)$/;
+/** La ligne qui sépare l'en-tête d'un tableau de son corps : `|---|:---:|---:|`. */
+const TABLE_DELIMITER = /^\s{0,3}\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
 
 /** Une adresse cliquable : `http://` ou `https://`, rien d'autre. */
 const URL_HEAD = /^https?:\/\/[^\s/]/i;
@@ -88,6 +94,31 @@ export function renderProMarkdown(source: string): string {
       continue;
     }
 
+    const aligns = tableAt(lines, i);
+    if (aligns) {
+      flush();
+      const head = tableRow(lines[i], aligns, "th");
+      const body: string[] = [];
+      // le corps : les lignes à barres qui suivent, jusqu'à une ligne vide
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes("|"); i++) {
+        body.push(tableRow(lines[i], aligns, "td"));
+      }
+      i -= 1;
+      const tbody = body.length ? `<tbody>${body.join("")}</tbody>` : "";
+      out.push(`<div class="md-table"><table><thead>${head}</thead>${tbody}</table></div>`);
+      continue;
+    }
+
+    const quote = QUOTE.exec(line);
+    if (quote) {
+      flush();
+      const quoted: string[] = [];
+      for (let q: RegExpExecArray | null = quote; q; q =QUOTE.exec(lines[++i] ?? "")) quoted.push(inline(q[1].trim()));
+      i -= 1;
+      out.push(`<blockquote>${quoted.join("<br>")}</blockquote>`);
+      continue;
+    }
+
     const heading = HEADING.exec(line);
     if (heading) {
       flush();
@@ -132,6 +163,46 @@ function dedent(line: string, n: number): string {
   let i = 0;
   while (i < n && i < line.length && line[i] === " ") i++;
   return line.slice(i);
+}
+
+type Align = "" | "center" | "right";
+
+/**
+ * Un tableau commence en `i` : une ligne à barres, suivie de sa ligne de
+ * séparation, avec autant de colonnes. Ses alignements, ou `null`.
+ */
+function tableAt(lines: string[], i: number): Align[] | null {
+  const head = lines[i];
+  const delimiter = lines[i + 1];
+  if (delimiter === undefined || !head.includes("|") || !delimiter.includes("|")) return null;
+  if (!TABLE_DELIMITER.test(delimiter)) return null;
+  const aligns = tableCells(delimiter).map((cell): Align => {
+    if (cell.endsWith(":")) return cell.startsWith(":") ? "center" : "right";
+    return "";
+  });
+  return tableCells(head).length === aligns.length ? aligns : null;
+}
+
+/** Les cellules d'une ligne de tableau, sans les barres du bord ; `\|` est une barre dans la cellule. */
+function tableCells(line: string): string[] {
+  let row = line.trim();
+  if (row.startsWith("|")) row = row.slice(1);
+  if (row.endsWith("|") && !row.endsWith("\\|")) row = row.slice(0, -1);
+  return row.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
+/**
+ * Un rang du tableau, à la largeur de l'en-tête (une cellule manquante est
+ * vide, une cellule de trop tombe). Un `<br>` écrit dans une cellule — la
+ * seule façon d'y aller à la ligne — en est un.
+ */
+function tableRow(line: string, aligns: Align[], tag: "th" | "td"): string {
+  const cells = tableCells(line);
+  const html = aligns.map((align, c) => {
+    const body = (cells[c] ?? "").split(/&lt;br\s*\/?&gt;/i).map(inline).join("<br>");
+    return `<${tag}${align ? ` class="md-${align}"` : ""}>${body}</${tag}>`;
+  });
+  return `<tr>${html.join("")}</tr>`;
 }
 
 interface ListItem {

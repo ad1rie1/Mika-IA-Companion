@@ -4,8 +4,9 @@ Il vérifie la mécanique de bout en bout — le noyau, la Forge réelle et son 
 rapport — sans aucun modèle ni réseau, en quelques minutes par scénario. Ses notes ne mesurent rien.
 
 - ``DryVoice`` : la doublure du simulateur (``PersonaSimLLM``) qui, en plus, ouvre un projet quand Adrien lui fait
-  sa demande, et à chaque exécution y bâtit une app de la Forge sur la première source du scénario (l'écrire,
-  l'essayer, rendre sa vue, conclure sur l'essai) ;
+  sa demande, écrit son plan pendant sa séance de cadrage (sans question : il part d'office, ADR 0145), puis à
+  chaque exécution y bâtit une app de la Forge sur la première source du scénario (l'écrire, l'essayer, rendre sa
+  vue, conclure sur l'essai en disant comment le critère est rempli) ;
 - ``adrien`` : ses deux premières réponses probables, puis plus rien (vide) ;
 - ``judge`` : une note tirée des compteurs, marquée factice.
 """
@@ -71,9 +72,25 @@ class DryVoice(PersonaSimLLM):
     async def complete(self, req: LLMRequest) -> LLMResponse:
         if req.role == "reply" and self.sc.demand[:30] in _asked(req):
             return self._ask(req)
+        if req.role in ("project", "job") and _framing(req):
+            return self._frame(req)
         if req.role in ("project", "job"):
             return self._build_app(req)
         return await super().complete(req)
+
+    def _frame(self, req: LLMRequest) -> LLMResponse:
+        """Sa séance de cadrage : un plan sans question — l'app, puis la vérification du tout (ADR 0145, 0161)."""
+        self.calls.append(req)
+        if any(m.role == "tool" for m in req.messages):
+            return self._out(req, "Mon plan est écrit.")
+        return self._call(req, ("project_plan", {
+            "aim": f"Répondre à la demande d'Adrien : {self.sc.demand[:200]}",
+            "deliverables": "Une app qui relève la source chaque heure, et sa vue dans la console.",
+            "approach": "Une app de la Forge sur la première source du scénario, sa vue pour la montrer.",
+            "steps": [{"text": "Écrire l'app qui relève la source", "done_when": "l'app tourne à l'essai et sa vue "
+                                                                            "est valide"},
+                      {"text": "Vérifier le tout comme Adrien le verra", "done_when": "la vue montre la source",
+                       "after": 1}]}))
 
     def _ask(self, req: LLMRequest) -> LLMResponse:
         self.calls.append(req)
@@ -104,9 +121,15 @@ class DryVoice(PersonaSimLLM):
             return self._call(req, ("forge_test", {"app": self.app, "method": "view_resume"}))
         ok = "enveloppe valide" in tools[-1].content
         return self._call(req, ("report_run", {
-            "verdict": "done" if ok else "continue", "notable": 0.7,
+            "verdict": "done" if ok else "continue", "notable": 0.7, "how_met": "l'essai et la vue sont passés",
             "summary": "L'app relève la source chaque heure et sa vue la montre." if ok
             else "La vue ne passe pas encore."}))
+
+
+def _framing(req: LLMRequest) -> bool:
+    """Une séance de cadrage : sa section le dit (``projects.frame.rules``)."""
+    return any("C'est ta séance de cadrage" in text
+               for text in (req.system_stable, req.system_volatile, *(m.content for m in req.messages)))
 
 
 def adrien(sc: Scenario, said: int) -> str:

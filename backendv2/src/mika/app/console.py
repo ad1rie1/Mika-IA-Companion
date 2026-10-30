@@ -307,6 +307,7 @@ EVENT_LABELS: dict[str, str] = {
     "forge.access_set": "Les accès d'une app sans projet réglés",
     "projects.steer_asked": "Une demande de pilotage d'un projet, sur ton accord",
     "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
+    "forge.proved": "Une version d'app prouvée à l'essai",
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
     "forge.queued": "Un signal d'app mis en file", "forge.judged": "Une file d'app lue",
     "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",

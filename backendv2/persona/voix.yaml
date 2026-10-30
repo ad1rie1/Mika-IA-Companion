@@ -3606,6 +3606,8 @@ projects:
       service_broken: "elle tourne, mais un service est en panne ({error}) : à réparer"
       # après la ligne, ses services. {services} : leurs noms
       services: " ; ses services : {services}"
+      # ce qui n'a pas marché hors de ses appels (ADR 0161). {problems} : les derniers, séparés
+      problems: " — vu dans la console depuis sa dernière version : {problems} (essaie la vue avec forge_test)"
       held: "arrêtée par un opérateur : c'est à lui de la relancer (demande-le dans « needs_you »)"
       pending: "une nouvelle version attend l'accord de qui s'occupe de toi"
       refused: "ta dernière version a été refusée par qui s'occupe de toi : celle d'avant tourne toujours"
@@ -3647,7 +3649,9 @@ projects:
     # recommandait, une par ligne (projects.plan.question)
     plan_questions: "Les questions que tu as posées avec ton plan :\n{questions}"
     # {who} : « Adrien », ou expression.person.someone ; {words} : sa réponse, telle quelle
-    plan_answer: "Ce que {who} t'a répondu en le validant : « {words} »"
+    plan_answer: >-
+      Ce que {who} t'a répondu en le validant : « {words} » — ce que sa réponse ne tranche pas, ce que tu
+      recommandais vaut.
     # validé sans un mot (« vas-y », ou dans la console)
     plan_silent: "Il a été validé sans autre réponse : ce que tu recommandais vaut."
     done_when: >-
@@ -5743,7 +5747,8 @@ forge:
         app ne dit rien d'elle-même : si quelqu'un doit apprendre ce qu'elle trouve (une température, des articles,
         une alerte), elle le signale (api.signal) et son manifeste dit quoi en faire (signals : à qui, par lots) —
         sinon ça reste dans sa base. Une app qui a reçu des secrets attend la première validation d'un opérateur ;
-        ensuite ses versions s'installent directement.
+        ensuite ses versions s'installent directement. Une app neuve qu'on te demande en conversation naît dans un
+        projet (start_project, avec « forge ») : il se cadre d'abord (ADR 0161).
       # {error} : pourquoi le manifeste ou le code sont refusés (technique)
       refused: "Refusé (rien n'a changé) : {error}"
       same: "C'est déjà la version en place : rien à changer."

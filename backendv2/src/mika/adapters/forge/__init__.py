@@ -151,6 +151,16 @@ class _Call:
 
 #: le préfixe NAT64 bien connu : l'adresse IPv4 qu'il porte compte, pas lui
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+#: les problèmes d'une app vus hors de ses appels qu'on garde, au plus (ADR 0161)
+PROBLEMS_KEPT = 5
+
+
+def shown_url(url: str) -> str:
+    """Une adresse telle qu'une erreur ou le journal la montrent : schéma, hôte et chemin — sans sa requête ni son
+    fragment, où une app met souvent sa clé (``?apikey=…``) : un secret n'en sort jamais (ADR 0161)."""
+    parts = urlsplit(url)
+    bare = f"{parts.scheme}://{parts.netloc.rsplit('@', 1)[-1]}{parts.path}" if parts.netloc else url.split("?", 1)[0]
+    return (bare + ("?…" if parts.query or parts.fragment else ""))[:200]
 #: une requête de l'app dure au plus ça quand elle ne dit rien (``timeout``), jamais plus que ce qui reste à son appel
 HTTP_TIMEOUT_S = 15.0
 #: …ni plus que ça, même si elle le demande
@@ -439,6 +449,8 @@ class ForgeHost:
         #: les vues rendues : clé → (instant, résultat)
         self._cache: dict[tuple[Any, ...], tuple[float, CallResult]] = {}
         self._cachelock = threading.Lock()
+        #: ses problèmes vus hors de ses appels (une vue invalide dans la console), jusqu'à sa version suivante
+        self._problems: dict[str, list[str]] = {}
         #: qui veut savoir que l'offre a changé (une app écrite ou effacée : ses outils aussi, ADR 0104)
         self._listeners: list[Callable[[], Any]] = []
         #: son fuseau (« Europe/Paris »), relu au lancement de chaque processus d'app : l'horloge d'une app est la
@@ -623,6 +635,7 @@ class ForgeHost:
         (d / "version.json").write_text(json.dumps({"version": version}))
         self._stop(app)  # la version suivante repart d'un processus neuf
         self._forget(app)
+        self._problems.pop(app, None)  # ce qui n'allait pas venait de la version d'avant
         # une borne dans son journal : ce qui précède vient d'une version d'avant (sonde du 2026-10-13 — une erreur
         # d'une ancienne version, relue dans le journal, passait pour une erreur de l'actuelle)
         self._log(app, f"── version {version} ──")
@@ -709,7 +722,14 @@ class ForgeHost:
                 del self._cache[key]
 
     def note(self, app: str, line: str) -> None:
-        self._log(app, line[:500])
+        kept = self._problems.setdefault(app, [])
+        if line[:300] not in kept:  # une vue qui casse à chaque rendu ne s'écrit qu'une fois par version
+            self._log(app, line[:500])
+            kept.append(line[:300])
+            del kept[:-PROBLEMS_KEPT]
+
+    def problems(self, app: str) -> list[str]:
+        return list(self._problems.get(app, ()))
 
     def logs(self, app: str, n: int = 20) -> list[str]:
         try:
@@ -844,6 +864,9 @@ class ForgeHost:
         call = _Call(secrets=secrets)
 
         def done(ok: bool, value: Any = None, error: str = "", killed: bool = False, busy: bool = False) -> CallResult:
+            if call.failed:  # une ligne par appel, pas une par requête : le journal ne se noie pas (ADR 0161)
+                self._log(app, f"{method} : {len(call.failed)} requête(s) sur {call.requests} sans réponse — "
+                               f"{call.failed[-1]}")
             return CallResult(ok, value, error[:1000], killed, int((time.monotonic() - started) * 1000),
                               tuple(call.logs[-50:]), tuple(call.signals), tuple(call.emits), busy=busy,
                               requests=call.requests, failed=tuple(call.failed[-20:]))
@@ -935,10 +958,10 @@ class ForgeHost:
 
     # ── les services de l'hôte ──
     def _failed(self, app: str, call: _Call, line: str) -> None:
-        """Une requête de l'app qui a échoué : comptée pour l'appel (l'essai la montre) et dans son journal — une app
-        qui rattrape tout ne se met jamais en panne, mais ce qui n'a pas répondu se voit (ADR 0161)."""
+        """Une requête de l'app qui a échoué : comptée pour l'appel — l'essai la montre, et son journal en garde une
+        ligne à la fin de l'appel : une app qui rattrape tout ne se met jamais en panne, mais ce qui n'a pas répondu
+        se voit (ADR 0161)."""
         call.failed.append(line)
-        self._log(app, line)
 
     def _log(self, app: str, line: str) -> None:
         try:  # un journal qui ne s'écrit pas ne fait jamais échouer un appel
@@ -1000,7 +1023,7 @@ class ForgeHost:
             url = str(p.get("url") or "")
             got = self._http(app, "GET", url, call, headers=p.get("headers"))
             if got["status"] >= 400:  # l'adresse avec le statut : « HTTP 429 » seul ne dit pas laquelle
-                raise RuntimeError(f"HTTP {got['status']} sur {url[:200]}")
+                raise RuntimeError(f"HTTP {got['status']} sur {shown_url(url)}")
             return got["text"]
         if name == "http":  # la forme entière : toute méthode, un corps, la réponse avec son statut et ses en-têtes
             data, kind = body_of(p.get("json"), p.get("form"), p.get("body"))
@@ -1037,15 +1060,15 @@ class ForgeHost:
                 got = real_http(method, url, headers=sent, body=body, deadline=call.deadline or None,
                                 timeout_s=timeout_s)
         except Exception as exc:  # noqa: BLE001 — comptée, puis rendue à l'app telle quelle
-            self._failed(app, call, f"{method.upper()} {url[:160]} → {type(exc).__name__}: {str(exc)[:120]}")
+            self._failed(app, call, f"{method.upper()} {shown_url(url)} → {type(exc).__name__}: {str(exc)[:120]}")
             raise
         raw = got.get("body", b"")
         raw = raw.encode() if isinstance(raw, str) else bytes(raw)
         status, shown = int(got.get("status", 200)), dict(got.get("headers") or {})
         if status >= 400:
-            self._failed(app, call, f"{method.upper()} {url[:160]} → {status}")
+            self._failed(app, call, f"{method.upper()} {shown_url(url)} → {status}")
         if got.get("truncated"):
-            line = f"{method.upper()} {url[:200]} : réponse coupée à {HTTP_MAX // 1_000_000} Mo"
+            line = f"{method.upper()} {shown_url(url)} : réponse coupée à {HTTP_MAX // 1_000_000} Mo"
             call.logs.append(line)
             self._log(app, line)
         out: dict[str, Any] = {"status": status, "ok": 200 <= status < 300, "url": str(got.get("url") or url),

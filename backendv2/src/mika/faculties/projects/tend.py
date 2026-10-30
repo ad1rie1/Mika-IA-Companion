@@ -91,8 +91,10 @@ def finished_at(p: Project, pm: Any, apps: frozenset[int] = frozenset()) -> int 
 
 
 def homes(frame: Frame) -> frozenset[int]:
-    """Les projets où vit une app qui tourne (ni arrêtée, ni retenue par un opérateur)."""
-    return frozenset(a.project for a in frame.get(forge_c.APPS) or () if a.project and a.enabled and not a.held)
+    """Les projets où vit une app qui tourne, ou qui est en panne — c'est à son projet de la réparer — ; pas une app
+    qu'elle a arrêtée, ni une qu'un opérateur retient."""
+    return frozenset(a.project for a in frame.get(forge_c.APPS) or ()
+                     if a.project and not a.held and (a.enabled or forge_c.failure(a)))
 
 
 def finished(s: ProjectsState, frame: Frame) -> list[Project]:
@@ -128,7 +130,7 @@ def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
             continue
         for o in p.objectives:
             # un besoin dit sur un objectif ouvert ; ou un blocage dit, que sa réponse rouvre (ADR 0161)
-            waits = o.status == c.OPEN and bool(o.need_ref) or stuck_asking(o)
+            waits = o.status == c.OPEN and bool(o.need_ref) or stuck_asking(o, frame.now)
             if not waits or not o.asked or not o.asked_to or o.answered_at >= o.asked_at:
                 continue
             handles = frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,)

@@ -755,7 +755,8 @@ def test_an_apps_pages_are_its_tabs_and_its_settings_sit_behind_the_gear(world):
 def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp_path):
     """Une app écrite par une exécution qui n'a pas abouti ne se prouvait plus : seul un essai dans l'épisode qui
     l'avait écrite comptait. Une version de son projet qu'aucun essai n'a prouvée se prouve à l'essai suivant — une
-    fois ; et une app relancée après une panne se prouve dans l'épisode qui l'a relancée."""
+    fois crédité par le compte rendu de son exécution ; une exécution qui n'aboutit pas ne consomme rien. Une app
+    relancée après une panne se prouve dans l'épisode qui l'a relancée."""
     from mika.plugins.forge import CommandArgs, forge_command, forge_test
 
     kernel, clock, forge = _project_kernel(tmp_path)
@@ -771,10 +772,25 @@ def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp
             def run(name):
                 return _context(kernel, name, Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
 
+            async def ended(ctx, reported: bool) -> None:  # la fin de son exécution, créditée ou non
+                if reported:
+                    await kernel.mind.append([c.RUN_REPORTED.draft(
+                        project=pid, objective=1, verdict="done", proof="outil", proven=True,
+                        summary=Content.of("Fait.", level=1))], emitter="projects", correlation=ctx.episode_id,
+                        origin=Origin.KERNEL)
+                await kernel.mind.append([rt.EPISODE_ENDED.draft(kind=Kind.WORK, outcome="done" if reported
+                                                                 else "timeout", target=project_target(pid))],
+                                         emitter="runtime", correlation=ctx.episode_id, origin=Origin.KERNEL)
+
             await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST, code=VEILLE_CODE), run("forge_write"))
-            out = {"suivante": await forge_test(ForgeTestArgs(app="cours", method="tick"), run("forge_test")),
-                   "encore": await forge_test(ForgeTestArgs(app="cours", method="tick"), run("forge_test")),
-                   "contexte": await forge_test(ForgeTestArgs(app="cours", method="context"), run("forge_test"))}
+            failed = run("forge_test")
+            out = {"panne": await forge_test(ForgeTestArgs(app="cours", method="tick"), failed)}
+            await ended(failed, reported=False)  # son délai passe : rien n'est consommé
+            credited = run("forge_test")
+            out["suivante"] = await forge_test(ForgeTestArgs(app="cours", method="tick"), credited)
+            await ended(credited, reported=True)
+            out["encore"] = await forge_test(ForgeTestArgs(app="cours", method="tick"), run("forge_test"))
+            out["contexte"] = await forge_test(ForgeTestArgs(app="cours", method="context"), run("forge_test"))
             await kernel.mind.append([SWITCHED.draft(app="cours", state="broken", reason="HTTP 503")],
                                      emitter="forge", correlation="genese", origin=Origin.GENESIS)
             revive = run("forge_command")
@@ -792,7 +808,8 @@ def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp
             await kernel.stop()
 
     out = run_virtual(clock, main)
-    assert out["suivante"].ok and out["suivante"].proof is True  # jamais prouvée : l'essai la prouve
+    assert out["panne"].proof is True  # il prouvait, mais son exécution n'a rien crédité…
+    assert out["suivante"].ok and out["suivante"].proof is True  # …la suivante la prouve encore
     assert out["encore"].ok and out["encore"].proof is False  # déjà prouvée : un essai de plus ne prouve rien
     assert out["contexte"].proof is False  # sa ligne de contexte ne montre pas qu'elle travaille
     assert out["relancée"].proof is False and out["réparée"].proof is True  # relancée puis essayée ici : réparée
@@ -822,3 +839,40 @@ def test_an_error_says_the_line_of_main_py_where_it_was_born():
         compile("def tick(api)\n    pass", "main.py", "exec")
     except SyntaxError as exc:
         assert worker.where(exc).startswith(" (main.py, ligne 1")
+
+
+def test_a_view_that_breaks_in_the_console_reaches_the_run_of_its_project(tmp_path):
+    """Une vue rendue invalide dans la console se notait dans le journal de l'app, que personne ne relisait :
+    l'exécution suivante de son projet le voit, jusqu'à la version suivante de l'app."""
+    host = ForgeHost(tmp_path / "forge")
+
+    async def main():
+        await host.write("cours", VEILLE_MANIFEST, VEILLE_CODE)
+        host.note("cours", "view_releves : enveloppe invalide dans la console — blocks[0].rows : une liste")
+        host.note("cours", "view_releves : enveloppe invalide dans la console — blocks[0].rows : une liste")
+        seen = host.problems("cours")
+        await host.write("cours", VEILLE_MANIFEST, VEILLE_CODE + "\n")
+        return seen, host.problems("cours")
+
+    try:
+        seen, after = asyncio.run(main())
+    finally:
+        host.shutdown()
+    assert seen == ["view_releves : enveloppe invalide dans la console — blocks[0].rows : une liste"]  # une fois
+    assert after == []  # la version suivante repart de zéro
+    p = SimpleNamespace(id=7)
+    frame = SimpleNamespace(get=lambda key: (forge_c.AppView("cours", "Cours", 2, True, "", 0, False, False, "manual",
+                                                             project=7, ticked_at=0),) if key == forge_c.APPS else (),
+                            now=0, env=SimpleNamespace(tz_of=lambda root: "Europe/Paris"), root=None)
+    lines = "\n".join(app_lines(p, frame, {"cours": seen}))
+    assert "vu dans la console depuis sa dernière version" in lines and "blocks[0].rows" in lines
+
+
+def test_an_address_shown_in_an_error_or_the_journal_never_carries_its_query():
+    """Une app validée met souvent sa clé dans l'adresse (``?apikey=…``) : une erreur ou son journal l'auraient
+    gardée pour toujours. Ils montrent le schéma, l'hôte et le chemin."""
+    from mika.adapters.forge import shown_url
+
+    assert shown_url("https://api.exemple.fr/v1/cours?apikey=SECRET&d=EUR") == "https://api.exemple.fr/v1/cours?…"
+    assert shown_url("https://moi:motdepasse@exemple.fr/flux#x") == "https://exemple.fr/flux?…"
+    assert shown_url("https://exemple.fr/flux") == "https://exemple.fr/flux"

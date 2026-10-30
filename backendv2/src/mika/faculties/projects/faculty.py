@@ -1163,15 +1163,20 @@ def _amended(s: ProjectsState, e, cx) -> ProjectsState:
         p = replace(p, said=tuple(x for x in (*p.said, (e.data.instruction.ref, e.data.words.ref)) if x[0] in kept))
     p = replace(p, objectives=tuple(
         replace(o, steered_at=e.at, asked=True, waiting_until=0) if o.status == c.OPEN and o.need_ref
-        else reopened(o, e.at, steered=True) if stuck_asking(o) else o
+        else reopened(o, e.at, steered=True) if stuck_asking(o, e.at) else o
         for o in p.objectives))
     return _set(s, p)
 
 
-def stuck_asking(o: Objective) -> bool:
-    """Un ponctuel bloqué dont elle a dit le blocage à quelqu'un : sa réponse, ou une consigne, le rouvre (ADR 0161)
-    — sinon ce qui en dépend dans son plan attendrait pour toujours."""
-    return o.kind == c.ONCE and o.status == c.BLOCKED and o.asked
+#: une réponse rouvre un blocage qu'elle a dit dans ce délai : au-delà, la personne a parlé d'autre chose depuis
+#: longtemps — un vieux blocage ne se rouvre pas d'un coup (ADR 0161)
+ANSWER_REOPENS_WITHIN = 7 * DAY
+
+
+def stuck_asking(o: Objective, at: int) -> bool:
+    """Un ponctuel bloqué dont elle a dit le blocage à quelqu'un, il y a moins d'une semaine à ``at`` : sa réponse,
+    ou une consigne, le rouvre (ADR 0161) — sinon ce qui en dépend dans son plan attendrait pour toujours."""
+    return o.kind == c.ONCE and o.status == c.BLOCKED and o.asked and 0 <= at - o.asked_at <= ANSWER_REOPENS_WITHIN
 
 
 def reopened(o: Objective, at: int, *, steered: bool = False) -> Objective:
@@ -1404,7 +1409,7 @@ def _answered(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None:
         return s
-    if stuck_asking(o):  # la réponse à son blocage le rouvre (ADR 0161)
+    if stuck_asking(o, e.at):  # la réponse à son blocage le rouvre (ADR 0161)
         return _set(s, _objective(p, reopened(o, e.at)))
     if o.status != c.OPEN:
         return s
