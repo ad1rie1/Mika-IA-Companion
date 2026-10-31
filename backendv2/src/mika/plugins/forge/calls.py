@@ -11,6 +11,8 @@ expire — comme l'appel d'un service extérieur (``plugins/mcp/calls.py``).
   émis ; la section et l'initiative due le disent à qui l'avait demandé. La section est à elle (ses demandes) : seul ce
   que l'app a répondu est cité, une donnée — avec les phrases des services (``mcp.section``), une seule maison.
 - *L'expiration* : sans accord à temps (10 min dans le chat, un jour pour l'opérateur), refusée au nom du délai.
+- *En mode pro*, une carte dans la conversation s'attend dans la boucle (ADR 0165), comme celle d'un service : l'outil
+  rend la décision et ce que l'app a rendu, dit avec sa réponse.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult, Zone
@@ -48,7 +50,7 @@ from mika.plugins.forge import (
 )
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import CARD, can_approve
-from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
+from mika.vocab.episodes import CONVERSATIONAL, PRO, Kind, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
@@ -56,6 +58,9 @@ WAITING, APPROVED, REFUSED, EXPIRED, ANSWERED, FAILED = "attend", "acceptée", "
 FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
 #: une carte dans la conversation vaut tant ; un accord de l'opérateur, tant ; passé ce délai, l'issue ne se dit plus
 CARD_TTL, OPERATOR_TTL, TOO_LATE = 10 * MINUTE, DAY, 6 * HOUR
+#: en mode pro, l'attente d'une carte dans la boucle (ADR 0165) dure son délai, plus de quoi laisser passer le refus au
+#: nom du délai
+EXPIRY_GRACE_S = 60.0
 #: ce qu'on garde des demandes, d'une réponse (le contenu journalisé), ce que la section en montre
 CALLS_KEPT, ANSWER_KEPT, SHOWN_MAX = 100, 8000, 4
 #: ce qu'une réponse montre d'elle dans la section : tout ce qu'on en garde (ADR 0163)
@@ -92,13 +97,34 @@ async def ask(ctx: Any, app: App, name: str, tool: str, function: str, values: M
         payload[rt.DECIDER] = target
     payload["_apercu"] = call_digest(payload)
     shown = inert(json.dumps(values, ensure_ascii=False, sort_keys=True), 300)
-    await ctx.propose(rt.EFFECT_PROPOSED.draft(
+    commit = await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.CALL, owner=FORGE.name, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         summary=Content.of(phrase("forge.calls.summary", tool=inert(tool, 80), app=inert(app.title, 60),
                                   args=shown)[:400], level=int(Sensitivity.PERSONAL)),
         approval=True, context=f"forge:{name}", about=(target,) if target else ()))
+    # en mode pro, la personne regarde son travail : elle attend sa décision avant de continuer (ADR 0165)
+    if in_chat and ep is not None and ep.attrs.get("mode") == PRO:
+        proposal = commit.seqs[-1]
+        decided = await ctx.until(lambda frame: _settled(frame, proposal),
+                                  (payload[rt.EXPIRES] - ctx.frame.now) / US + EXPIRY_GRACE_S)
+        if decided is not None:
+            return _decided(decided.state(FORGE.name).calls[proposal], ctx)
     who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
     return ToolResult(content=phrase("mcp.tools.asked", who=who))
+
+
+def _settled(frame: Frame, proposal: int) -> bool:
+    r = frame.state(FORGE.name).calls.get(proposal)
+    return r is not None and r.status in FINAL
+
+
+def _decided(r: AppCall, ctx: Any) -> ToolResult:
+    """Ce qu'est devenue une demande attendue dans la boucle (ADR 0165), avec les mots de la section (``line``) : ce
+    que l'app a rendu, ou pourquoi rien n'est parti. Son message suivant l'emporte comme dit."""
+    store = ctx.ports.get("store")
+    texts = store.content([r.text_ref]) if store is not None and r.text_ref else {}
+    return ToolResult(ok=r.status == ANSWERED, content=line(r, texts).removeprefix("- "),
+                      provenance=(f"{PROVENANCE}{r.proposal}",))
 
 
 def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:

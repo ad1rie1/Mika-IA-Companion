@@ -188,6 +188,22 @@ describe("withAnswer", () => {
     const cards = play(frame("start"));
     expect(withAnswer(cards, 5, 6)).toBe(cards);
   });
+
+  it("sa réponse clôt le travail : un done perdu (onglet en arrière-plan) ne laisse pas tourner la carte", () => {
+    // un outil parti, jamais fini, et pas de done : l'écran n'était plus regardé
+    const cards = play(frame("start", { at: 1_000 }), frame("note", { at: 4_000 }));
+    expect(isRunning(cards[0])).toBe(true);
+    const [card] = withAnswer(cards, 811, 812);
+    expect(isRunning(card)).toBe(false);
+    expect(toolSteps(card).map((s) => s.status)).toEqual(["stopped"]);
+    expect(card.endedAt).toBe(4_000);
+    expect(isRunning(cards[0])).toBe(true); // jamais muté
+    // le contre-exemple : un done reçu garde son issue et son instant
+    const [done] = withAnswer(play(frame("start"), frame("end"), frame("done", { at: 9_000, outcome: "timeout" })),
+                              811, 812);
+    expect(done.episodes[EP]).toBe("timeout");
+    expect(done.endedAt).toBe(9_000);
+  });
 });
 
 describe("libellés", () => {

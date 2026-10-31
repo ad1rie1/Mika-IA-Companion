@@ -148,6 +148,11 @@ class Mind:
     def subscribe(self, fn: Callable[[Sequence[Event[Any]], Root], None]) -> None:
         self._listeners.append(fn)
 
+    def unsubscribe(self, fn: Callable[[Sequence[Event[Any]], Root], None]) -> None:
+        """Ne plus être prévenu des écritures (un écouteur inconnu : rien)."""
+        if fn in self._listeners:
+            self._listeners.remove(fn)
+
     def trace(self, kind: str, **detail: Any) -> None:
         self.traces.append(Trace(self.clock.now(), kind, detail))
         if len(self.traces) > self._trace_size:

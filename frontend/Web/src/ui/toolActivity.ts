@@ -291,6 +291,12 @@ function applyFrame(card: WorkCard, frame: ToolFrame): void {
  * au-dessus de la bulle (`messageId`). Sans `user_message_id`, c'est la
  * dernière carte sans `reply_to` encore sans réponse. Rien à replier : les
  * mêmes cartes.
+ *
+ * Sa réponse dit aussi que le travail est fini. Les trames `tool` ne partent
+ * qu'aux écrans regardés : un onglet passé en arrière-plan pendant qu'elle
+ * travaillait n'a jamais reçu le `done`, et sa carte tournait encore sous la
+ * réponse. Un épisode resté ouvert se clôt donc ici, et un outil dont la fin
+ * n'est jamais venue passe « sans fin connue ».
  */
 export function withAnswer(
   cards: readonly WorkCard[],
@@ -309,8 +315,21 @@ export function withAnswer(
     }
   }
   if (index < 0) return cards;
+  const card = cards[index];
+  const episodes: Record<string, string | null> = {};
+  for (const [episode, outcome] of Object.entries(card.episodes)) episodes[episode] = outcome ?? "done";
+  const steps = card.steps.map((s): WorkStep =>
+    s.kind === "tool" && s.status === "running" ? { ...s, status: "stopped" } : s
+  );
   const next = [...cards];
-  next[index] = { ...cards[index], answered: true, answerId: messageId };
+  next[index] = {
+    ...card,
+    episodes,
+    steps,
+    endedAt: card.endedAt ?? card.lastAt,
+    answered: true,
+    answerId: messageId,
+  };
   return next;
 }
 

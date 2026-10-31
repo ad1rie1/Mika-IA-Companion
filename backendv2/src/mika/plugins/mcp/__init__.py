@@ -14,7 +14,10 @@ l'appel :
   personne pour accepter, de l'opérateur) : l'outil **propose** l'appel (``mcp.call``, un effet) et rend la main —
   rien ne sort tant qu'on n'a pas accepté ce qui est montré. Exécuté, ce que le service a rendu revient comme un
   contenu (``mcp.answered``) qu'elle dit à la personne : dans sa réponse suivante si la personne a écrit, sinon par
-  une initiative due (``calls``, ``prompt``). Refusé ou expiré, elle le sait aussi.
+  une initiative due (``calls``, ``prompt``). Refusé ou expiré, elle le sait aussi. En mode pro, la personne regarde
+  son travail : une carte dans la conversation s'attend dans la boucle (ADR 0165) — l'outil rend la décision et ce
+  que le service a rendu, et elle continue avec ; passé le délai de la carte, ou trop près de la fin de l'épisode,
+  elle reprend comme ailleurs.
 
 Ce qu'elle garde de ce qu'un service rend (``keep``) suit tout ce qui en sort : la réponse porte son plancher
 (``ToolResult.floor``, ``unkept``), et la mémoire le respecte.
@@ -36,20 +39,20 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import mcp as c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.rights import Rights
 from mika.kernel.state import FrozenDict
-from mika.ports.preprocess import inert, visible
+from mika.ports.preprocess import cite, inert, visible
 from mika.vocab.access import KINDS_OF, can_approve
 
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
 from mika.vocab.access import moment as moment
 from mika.vocab.access import situation as situation
-from mika.vocab.episodes import CONVERSATIONAL, WORKING, is_work_target
+from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.rights import grants_of, rights_of, tool_allowance
@@ -75,6 +78,11 @@ NO, ALONE, CARD, OWNER_OK = "non", "seule", "carte", "toi"
 #: une carte d'accord dans la conversation vaut tant ; un accord de l'opérateur, tant
 CARD_TTL = 10 * MINUTE
 OPERATOR_TTL = DAY
+#: en mode pro, l'attente d'une carte dans la boucle (ADR 0165) dure son délai, plus de quoi laisser passer le
+#: refus au nom du délai (``mcp.expire``)
+EXPIRY_GRACE_S = 60.0
+#: ce que la raison d'un échec montre d'elle, dans la boucle
+WHY_CHARS = 300
 #: ce qu'un service a rendu n'est plus annoncé passé ce délai (il reste dans la console)
 TOO_LATE = 6 * HOUR
 #: ce qu'on garde des demandes (les plus anciennes s'effacent)
@@ -329,13 +337,45 @@ async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> T
         payload[rt.DECIDER] = target
     payload["_apercu"] = call_digest(payload)
     shown = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 300)
-    await ctx.propose(rt.EFFECT_PROPOSED.draft(
+    commit = await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.CALL, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         summary=Content.of(f"Appeler « {inert(t.remote, 80)} » ({inert(t.server, 40)}) : {shown}"[:400],
                            level=int(Sensitivity.PERSONAL)),
         approval=True, context=f"mcp:{t.server}", about=(target,) if target else ()))
+    # en mode pro, la personne regarde son travail : elle attend sa décision avant de continuer (ADR 0165)
+    if in_chat and ep is not None and ep.attrs.get("mode") == PRO:
+        proposal = commit.seqs[-1]
+        decided = await ctx.until(lambda frame: _settled(frame, proposal),
+                                  (payload[rt.EXPIRES] - ctx.frame.now) / US + EXPIRY_GRACE_S)
+        if decided is not None:
+            return _decided(decided.state(MCP.name).requests[proposal], ctx)
     who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
     return ToolResult(content=phrase("mcp.tools.asked", who=who))
+
+
+def _settled(frame: Frame, proposal: int) -> bool:
+    req = frame.state(MCP.name).requests.get(proposal)
+    return req is not None and req.status in FINAL
+
+
+def _decided(req: Request, ctx: Any) -> ToolResult:
+    """Ce qu'est devenue une demande attendue dans la boucle (ADR 0165) : ce que le service a rendu, ou pourquoi rien
+    n'est parti. Son message suivant l'emporte comme dit (``mcp:<proposition>``) : l'initiative due ne le redit pas."""
+    told = (f"{PROVENANCE}{req.proposal}",)
+    store = ctx.ports.get("store")
+    text = (store.content([req.text_ref]).get(req.text_ref) or "") if store is not None and req.text_ref else ""
+    what = phrase("mcp.section.what", tool=inert(req.remote, 80), server=inert(req.server, 40))
+    if req.status == ANSWERED:
+        return ToolResult(content=phrase("mcp.tools.answered", server=label(req.server)) + "\n"
+                          + (visible(text).strip() or phrase("mcp.tools.nothing")),
+                          floor=FLOORS.get(req.keep, 0), unkept=req.keep == "rien", provenance=told)
+    if req.status == FAILED:
+        why = (phrase("mcp.section.failed_said", what=what) + "\n" + cite(text, WHY_CHARS) if text.strip()
+               else phrase("mcp.section.failed", what=what))
+        return ToolResult(ok=False, content=why, provenance=told)
+    if req.status == EXPIRED:
+        return ToolResult(ok=False, content=phrase("mcp.section.expired", what=what), provenance=told)
+    return ToolResult(ok=False, content=phrase("mcp.section.refused", what=what), provenance=told)
 
 
 def _handler(t: Any) -> Any:

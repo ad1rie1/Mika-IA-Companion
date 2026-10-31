@@ -72,6 +72,9 @@ class ToolResult(BaseModel):
     #: cet appel conclut la boucle, comme un outil ``ends_loop`` — pour un outil qui ne conclut que parfois (le plan
     #: qui clôt une séance de cadrage, ADR 0161)
     ends: bool = False
+    #: ce que l'appel lui a montré et que son message suivant emporte comme dit (``Utterance.provenance``) : la
+    #: réponse d'un service attendue dans la boucle (``mcp:<proposition>``, ADR 0165) ne se redit pas ensuite
+    provenance: tuple[str, ...] = ()
 
 
 def proving_tools(calls: Sequence[tuple[str, bool]], proofs: Sequence[bool | None],

@@ -249,7 +249,7 @@ class Ctx:
 
     def __init__(self, audience, target, kind=Kind.REPLY, port=None):
         self.ports = {"mcp": port if port is not None else FakePort()}
-        self.frame = NS(audience=audience, episode=NS(kind=kind, target=target), now=1_000, env=None,
+        self.frame = NS(audience=audience, episode=NS(kind=kind, target=target, attrs={}), now=1_000, env=None,
                         get=lambda key, default=None: default)
         self.episode_id, self.call_key, self.call_id = "ep1", "k1", "c1"
         self.emitted: list = []

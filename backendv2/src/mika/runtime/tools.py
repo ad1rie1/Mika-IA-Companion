@@ -40,6 +40,7 @@ rien à la boucle.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -87,6 +88,9 @@ RECORD_TRUNCATED = "…[coupé]"
 #: au-delà, le résultat d'un outil venu d'ailleurs est coupé dans le fil (cité, à une frontière), quand la politique
 #: de l'épisode ne dit pas sa propre borne (``EpisodePolicy.outside_chars`` : le mode pro la relève)
 OUTSIDE_RESULT_MAX = OUTSIDE_CHARS
+#: ce qu'une attente dans la boucle (``ToolContext.until``) laisse devant l'échéance de l'épisode : de quoi écrire
+#: la suite une fois la décision venue
+UNTIL_MARGIN_S = 90.0
 
 
 @dataclass(slots=True)
@@ -112,6 +116,8 @@ class ToolContext:
     #: l'autrice de ses brouillons (ADR 0124, posée par le pipeline) : ``fn(flux, texte, à propos) -> texte`` ;
     #: absente, un brouillon part tel que le modèle l'a écrit
     authoring: Callable[[str, str, str], Awaitable[str]] | None = None
+    #: l'échéance de l'épisode, en temps de la boucle d'événements (``asyncio.Timeout.when``) ; ``None`` : aucune
+    deadline_at: float | None = None
     _emitted: int = 0
 
     @property
@@ -126,6 +132,37 @@ class ToolContext:
             return text
         got = await acall(self.authoring, flow, text, about, label="autrice d'un brouillon")
         return got if isinstance(got, str) and got.strip() else text
+
+    async def until(self, holds: Callable[[Frame], bool], timeout_s: float) -> Frame | None:
+        """Attendre que ``holds`` soit vrai de sa vie, relu après chaque écriture, au plus ``timeout_s`` secondes et
+        jamais au-delà de ``UNTIL_MARGIN_S`` avant l'échéance de l'épisode : le cadre où il l'est, ou ``None`` passé ce
+        délai. Pour un outil qui attend une décision venue d'ailleurs (un accord demandé, ADR 0165) ; l'épisode qui
+        attend reste annulable (un message qui le supplante, une préemption)."""
+        frame = self.mind.frame()
+        if holds(frame):
+            return frame
+        if self.deadline_at is not None:
+            timeout_s = min(timeout_s, self.deadline_at - asyncio.get_running_loop().time() - UNTIL_MARGIN_S)
+        if timeout_s <= 0:
+            return None
+        written = asyncio.Event()
+
+        def wake(_events: Sequence[Any], _root: Any) -> None:
+            written.set()
+
+        self.mind.subscribe(wake)
+        try:
+            async with asyncio.timeout(timeout_s):
+                while True:
+                    await written.wait()
+                    written.clear()
+                    frame = self.mind.frame()
+                    if holds(frame):
+                        return frame
+        except TimeoutError:
+            return None
+        finally:
+            self.mind.unsubscribe(wake)
 
     async def emit(self, *drafts: Draft[Any], guard: Guard | None = None) -> Commit:
         """Écrire au nom de la faculté de l'outil. ``guard`` s'ajoute à la garde de l'épisode : ce que
@@ -232,6 +269,8 @@ class LoopResult:
     #: ce que valent ses réponses réussies (``ToolResult.floor``, ``unkept``) : ce que l'énoncé emporte (ADR 0128)
     floor: int = 0
     unkept: bool = False
+    #: ce que ses outils lui ont montré et que l'énoncé emporte comme dit (``ToolResult.provenance``), sans doublon
+    provenance: list[str] = field(default_factory=list)
 
     @property
     def call_ids(self) -> list[str]:
@@ -611,6 +650,9 @@ async def _loop(
             for ref in tr.attach if tr.ok else ():
                 if ref and ref not in result.attachments:
                     result.attachments.append(ref)
+            for ref in tr.provenance:
+                if ref and ref not in result.provenance:
+                    result.provenance.append(ref)
             if tr.ok:
                 result.floor = max(result.floor, tr.floor)
                 result.unkept = result.unkept or tr.unkept

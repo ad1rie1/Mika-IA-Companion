@@ -27,7 +27,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
@@ -1192,7 +1192,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* rien ne permettait de lui brancher un serveur MCP, ni de voir au même endroit tout ce qu'elle peut faire.
 
-*Révisée par 0066, 0128, 0163.*
+*Révisée par 0066, 0128, 0163, 0165.*
 
 ### 0066 — Chercher sur le web : un plugin système qui apporte son serveur MCP
 
@@ -1798,7 +1798,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un travail demandé n'a que faire de sa voix de chat, de son caractère ni de son humeur.
 
-*Révisée par 0162, 0164.*
+*Révisée par 0162, 0164, 0165.*
 
 ### 0162 — En mode pro et en projet, un service s'éprouve sans buter sur son plafond
 
@@ -1822,6 +1822,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* un seul fil mêlait le travail et la conversation — le modèle relisait « bonne nuit » en préparant des devis, le fil avec elle se remplissait de tableaux, et chaque demande payait un historique qui ne la concernait pas.
 
 *Révise 0116 (en partie).*
+
+### 0165 — En mode pro, un accord demandé s'attend dans la boucle
+
+- En mode pro, quand un outil d'un service demande l'accord de la personne en face par une carte, la boucle d'outils attend sa décision avant de continuer (`ToolContext.until`, relu à chaque écriture de sa vie).
+- Accepté, l'appel part et l'outil rend ce que le service a rendu ; refusé, expiré ou raté, il le dit. Elle continue le même travail avec.
+- Ce qu'elle a lu ainsi est dit avec sa réponse (`ToolResult.provenance`, `mcp:<proposition>`) : l'initiative due ne le redit pas.
+- L'attente dure le délai de la carte et s'arrête assez tôt avant la fin de l'épisode pour écrire la suite ; au-delà, elle reprend comme ailleurs. Un accord de l'opérateur ne s'attend jamais.
+- Ailleurs (la conversation ordinaire, le travail en fond), l'outil rend la main tout de suite ; le résultat revient ensuite.
+
+*Pourquoi :* l'outil rendait la main aussitôt la carte posée : sa réponse partait avant la décision de la personne, sans savoir si l'appel allait partir ni ce qu'il rendrait.
+
+*Révise 0064 (en partie), 0116 (en partie).*
 
 ## La console et l'exploitation
 

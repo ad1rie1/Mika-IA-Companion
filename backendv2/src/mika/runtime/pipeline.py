@@ -519,7 +519,8 @@ class EpisodeRunner:
                 def make_ctx(spec: Any, call_id: str) -> ToolContext:
                     return ToolContext(mind, spec, call_id, eid, Frame(mind.root, mind.clock.now(),
                                        mind.registry, audience, episode), guard=None, ports=self.ports,
-                                       dedupe_scope=scope, authoring=author_draft)
+                                       dedupe_scope=scope, authoring=author_draft,
+                                       deadline_at=ep.deadline.when() if ep.deadline is not None else None)
 
                 assert self.gateway is not None, "pas de passerelle LLM"
                 gateway = self.gateway
@@ -607,7 +608,8 @@ class EpisodeRunner:
                         reply_to=req.reply_to, visible=policy.visible,
                         annotations=tuple(sorted(annotations.items())),
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
-                        sections=trace.included, provenance=trace.provenance, answers=answers,
+                        sections=trace.included,
+                        provenance=tuple(dict.fromkeys((*trace.provenance, *loop.provenance))), answers=answers,
                         attachments=tuple(loop.attachments), about=req.about,
                         mode=req.mode if ep.mode is not None else "", strand=req.strand,
                         floor=max(loop.floor, trace.floor), unkept=loop.unkept or trace.unkept,
