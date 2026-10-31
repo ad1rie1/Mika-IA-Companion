@@ -1,7 +1,9 @@
 """Ses comptes : l'état de chaque boîte, ses dossiers, et **comment elle y écrit**
 (le texte exact qu'elle lit avant d'écrire). Les réglages eux-mêmes (serveurs,
 mot de passe, voix) se modifient dans Réglages › Plugins › Boîtes aux lettres : un lien y
-mène, et l'enregistrement ramène ici."""
+mène, et l'enregistrement ramène ici. Une boîte Microsoft (Hotmail, Outlook.com) se
+connecte depuis sa fiche : « Se connecter à Microsoft » donne un code à entrer chez
+Microsoft (ADR 0166)."""
 
 from __future__ import annotations
 
@@ -39,13 +41,28 @@ from mika.plugins.email.console.common import (
     fold,
 )
 from mika.plugins.email.voice import voice_text
-from mika.ports.mail import AccountInfo
+from mika.ports.mail import SIGNED_IN, SIGNIN_PENDING, AccountInfo, SignIn
 from mika.vocab.canals import mail_rule
 
 #: où se règle le tableau d'une boîte (ADR 0134)
 CANALS_PAGE = "/inspecteur/reglages/canaux"
 
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
+
+
+def signin_note(signin: SignIn | None, until: str) -> tuple[str, str] | None:
+    """Ce que la fiche dit de la connexion Microsoft d'une boîte (le ton, le texte) ; rien quand elle est faite, ou
+    quand la boîte entre par mot de passe. ``until`` : l'heure où le code en attente expire, déjà mise en mots."""
+    if signin is None or signin.state == SIGNED_IN:
+        return None
+    if signin.state == SIGNIN_PENDING:
+        return "warn", (f"Pour connecter cette boîte : ouvre {signin.url} et entre le code {signin.code} (valable "
+                        f"jusqu'à {until}). Elle se connecte dès que c'est fait.")
+    if signin.error:
+        return "warn", (f"Cette boîte entre par un compte Microsoft et n'est pas connectée : {signin.error}. « Se "
+                        f"connecter à Microsoft », en haut de la fiche.")
+    return "warn", ("Cette boîte entre par un compte Microsoft et n'est pas encore connectée : « Se connecter à "
+                    "Microsoft », en haut de la fiche.")
 
 def _state(info: AccountInfo, error: str) -> Badge:
     if not info.enabled:
@@ -140,6 +157,10 @@ def _tab_state(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not info.ready:
         blocks.append(Note("Il manque de quoi relever (serveur IMAP, utilisateur) ou le compte est inactif.",
                            tone="warn"))
+    signin = port.signin(info.key)
+    said = signin_note(signin, ctx.when(signin.until) if signin is not None and signin.until else "")
+    if said is not None:
+        blocks.append(Note(said[1], tone=said[0]))
     blocks.append(Fields(info.details or (("réglages", "—"),), title="Réglages (sans secret)", columns=2))
     rows = tuple(Row((Text(f.label), Text(f.name, "mono"), Badge("relevé", "info") if f.polled else "",
                       Text(str(f.unseen), "num"), Text(str(f.total), "num"),
@@ -201,6 +222,27 @@ async def _test(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Don
     if not ok and port.status(ctx.subject).error:
         said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger")
+
+
+def _microsoft(s: EmailState, frame: Frame, key: str, ports: Any = None) -> bool:
+    port = ports.get("mail") if ports is not None else None
+    return port is not None and port.signin(key) is not None
+
+
+@EMAIL.action("microsoft", title="Se connecter à Microsoft", args=AccountArgs, emits=[], subject="compte", order=15,
+              available=_microsoft,
+              description="Donne un code à entrer sur une page de Microsoft, où tu te connectes à ton compte : la boîte "
+                          "est connectée dès que c'est fait (ton mot de passe reste chez Microsoft).")
+async def _sign_in(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Done:
+    port = ctx.ports.get("mail")
+    if port is None or port.signin(ctx.subject) is None:
+        raise Refused("Cette boîte n'entre pas par un compte Microsoft.")
+    try:
+        got = await port.start_signin(ctx.subject)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise Refused(f"La connexion n'a pas pu commencer : {exc}"[:300]) from None
+    return Done(message=f"Ouvre {got.url} et entre le code {got.code} : la boîte se connecte dès que c'est fait "
+                        f"(le code vaut un quart d'heure ; sa fiche dit où elle en est).", tone="info")
 
 
 @EMAIL.action("dossiers", title="Actualiser les dossiers", args=AccountArgs, emits=[], subject="compte", order=20)

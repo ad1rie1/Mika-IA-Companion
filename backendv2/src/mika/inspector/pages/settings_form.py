@@ -143,7 +143,15 @@ def _with_kept(fields: Sequence[forms.FormField], lists: Mapping[str, list[str]]
 
 def _view(f: forms.FormField, value: Any, error: str, prefix: str,
           loaded: Sequence[tuple[str, str]] | None = None) -> dict[str, Any] | None:
-    if f.loader and not f.choices:
+    if f.loader and not f.choices and f.kind == "lines":
+        # des lignes à choisir (les dossiers d'une boîte) : des cases une fois la liste chargée, la zone de texte
+        # avant ; ce qui est choisi et que la liste n'a plus reste là, coché
+        if loaded:
+            current = [str(x) for x in value or ()] if not isinstance(value, str) else value.splitlines()
+            listed = {v for v, _ in loaded}
+            f = dataclasses.replace(f, choices=(*((x, f"{x} (actuel)") for x in current if x not in listed),
+                                                *loaded))
+    elif f.loader and not f.choices:
         if loaded:
             choices = tuple(loaded)
             if value and str(value) not in {v for v, _ in choices}:
@@ -485,8 +493,9 @@ class SettingsForms:
         loader = s.loaders.get(spec.loader) if spec is not None else None
         if loader is None or entry is None:
             return "Rien à charger ici."
+        named = {RECORD_KEY: key} if spec is not None and spec.loader in s.named_loaders else {}
         try:
-            return list(await loader(forms.flatten(entry)))[:LOADED_MAX]
+            return list(await loader({**forms.flatten(entry), **named}))[:LOADED_MAX]
         except ValueError as exc:
             return f"Liste indisponible : {exc} — le champ reste modifiable à la main."[:300]
 
@@ -671,8 +680,9 @@ class SettingsForms:
         if loader is None:
             state.messages = [("warn", "Rien à charger ici.")]
             return None, {s.key: state}, 200
+        named = {RECORD_KEY: old} if spec is not None and spec.loader in s.named_loaders else {}
         try:
-            got = list(await loader({**flat, **values, wanted: values.get(wanted) or ""}))[:LOADED_MAX]
+            got = list(await loader({**flat, **values, wanted: values.get(wanted) or "", **named}))[:LOADED_MAX]
         except ValueError as exc:
             state.messages = [("warn", f"Liste indisponible : {exc} — le champ reste modifiable à la main.")]
             return None, {s.key: state}, 200

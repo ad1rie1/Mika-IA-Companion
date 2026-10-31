@@ -205,7 +205,9 @@ reste dans sa vie : elle s'en souvient comme du reste.
 L'identité vient toujours de la session ou du jeton : il n'y a pas de trame pour se présenter.
 
 `approval` (ADR 0064) : `digest` est **celui de la carte affichée** — le serveur refuse un accord sur autre chose que
-ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte.
+ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte. Un client peut accepter de lui-même pour une
+opératrice qui l'a choisi (« Tout accepter » du client web, ADR 0170) : la même trame, avec l'empreinte de la carte
+reçue, une décision à la fois — au-delà du débit, une trame est jetée sans réponse.
 
 `strand` (ADR 0164) : le réglage entier d'un de ses fils de travail — `title` (120 caractères au plus) et
 `description` (2 000 au plus ; ce que Mika relit en tête de ce fil, à chaque message), vides permis, et `archived`

@@ -6,7 +6,8 @@ onglet, chaque réglage et quelques fiches sont exportés en HTML statique, en
 clair et en sombre, avec la feuille de style — de quoi relire la console
 dans un navigateur, ou en faire des captures (``google-chrome --headless``).
 Le script de la console est retiré des copies : le thème exporté est celui
-qu'on a choisi.
+qu'on a choisi. Le cadre d'un mail HTML (ADR 0169) s'exporte à part, sous
+``cadres/``, et sa page y renvoie.
 """
 
 from __future__ import annotations
@@ -56,6 +57,8 @@ ORIGIN = "http://localhost:3000"
 HOST = "http://localhost:8001"
 PASSWORD = "une-phrase-de-passe-longue"
 STATIC = Path(__file__).resolve().parent.parent / "inspector" / "static"
+#: le cadre d'un document HTML natif dans une page (ADR 0169)
+FRAME = re.compile(r'src="/inspecteur/document/([0-9a-f]{40})"')
 REPLIES = itertools.cycle([
     ("Oh, ça me fait plaisir de te lire ! Raconte-moi tout.", "happy", 0.6),
     ("Hmm, attends… c'est une vraie question, ça.", "thinking", 0.5),
@@ -114,6 +117,7 @@ class _Model(PersonaSimLLM):
 def _page(text: str, theme: str, depth: int) -> str:
     prefix = "../" * depth
     text = text.replace("/inspecteur/static/", f"{prefix}static/")
+    text = FRAME.sub(lambda m: f'src="{prefix}cadres/{m.group(1)}.html"', text)
     text = re.sub(r"<script[^>]*(?:console|live)\.js[^>]*></script>", "", text)  # une copie ne relit rien
     return text.replace('<html lang="fr">', f'<html lang="fr" data-theme="{theme}">', 1)
 
@@ -279,6 +283,10 @@ def export(out: Path) -> list[str]:
                     failed.append(f"{url} ({r.status_code})")
                     continue
                 name = _name(url)
+                for digest in dict.fromkeys(FRAME.findall(r.text)):  # le cadre, tant que la page le garde
+                    framed = client.get(f"/inspecteur/document/{digest}")
+                    (out / "cadres").mkdir(parents=True, exist_ok=True)
+                    (out / "cadres" / f"{digest}.html").write_text(framed.text, encoding="utf-8")
                 for theme in ("clair", "sombre"):
                     target = out / theme / name
                     target.parent.mkdir(parents=True, exist_ok=True)

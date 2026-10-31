@@ -699,6 +699,8 @@ def _read(f: FormField, form: Mapping[str, Any], cleared: set[str], load: Callab
             return ""
         raw = _last(form, f.path)
         return _KEEP if not raw.strip() else raw
+    if f.kind == "lines":  # une zone de texte, ou des cases cochées parmi une liste chargée : chacune une valeur
+        return _read_text(f, "\n".join(_values(form, f.path)), load)
     return _read_text(f, _last(form, f.path), load)
 
 

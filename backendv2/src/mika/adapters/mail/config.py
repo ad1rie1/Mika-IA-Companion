@@ -6,10 +6,17 @@ Elle vit dans les réglages (le mot de passe scellé), jamais dans le journal ;
 l'adaptateur la relit à chaque appel (changer un compte ne demande pas de
 redémarrer). Une ancienne configuration à un seul compte devient le compte
 « principal ».
+
+Une boîte entre par mot de passe, ou par un compte Microsoft (Hotmail,
+Outlook.com, Live ; Microsoft 365 si son administrateur le permet), où le mot
+de passe est refusé : OAuth2 (``oauth``, ADR 0166). Le jeton de cette connexion
+n'est pas ici : il est gardé à part, scellé, et ce formulaire ne le touche
+jamais.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
@@ -21,6 +28,16 @@ from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
 #: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
 LEGACY_ACCOUNT = "principal"
 ACCOUNT_KEY_RULE = "des minuscules, chiffres, - ou _ (40 au plus), en commençant par une lettre ou un chiffre"
+#: comment une boîte entre : par mot de passe, ou par un compte Microsoft (OAuth2, ADR 0166)
+PASSWORD, MICROSOFT = "password", "microsoft"
+AUTHS: tuple[tuple[str, str], ...] = ((PASSWORD, "par mot de passe"),
+                                      (MICROSOFT, "par un compte Microsoft (Hotmail, Outlook.com, Live)"))
+#: l'annuaire Microsoft des comptes personnels (Hotmail, Outlook.com, Live)
+CONSUMERS = "consumers"
+#: l'identifiant d'une application Microsoft (un GUID) ; un annuaire (``consumers``, ``organizations``, un domaine ou
+#: un GUID) : il entre dans l'adresse de Microsoft, rien d'autre n'y passe
+_CLIENT_ID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
 
 
 class MailAccount(BaseModel):
@@ -32,8 +49,15 @@ class MailAccount(BaseModel):
                                  group="La boîte", advanced=False, order=10)] = ""
     enabled: Annotated[bool, Knob(label="Actif", help="Décoché : ni relevé ni envoi, les réglages restent.",
                                   group="La boîte", advanced=False, order=12)] = True
+    auth: Annotated[Literal["password", "microsoft"], Knob(
+        label="Connexion", group="Lire", choices=AUTHS, advanced=False, order=19,
+        help="Par mot de passe, ou par ton compte Microsoft : Hotmail, Outlook.com et Live refusent les mots de passe "
+             "(serveur IMAP outlook.office365.com, SMTP smtp-mail.outlook.com en STARTTLS sur 587). Avec Microsoft, "
+             "il faut une application Microsoft (plus bas), puis « Se connecter à Microsoft » sur la fiche de la "
+             "boîte.")] = PASSWORD
     imap_host: Annotated[str, Knob(label="Serveur IMAP", help="Donné par ton fournisseur de mail "
-                                                              "(imap.gmail.com, imap.fastmail.com…).",
+                                                              "(imap.gmail.com, imap.fastmail.com, "
+                                                              "outlook.office365.com…).",
                                    group="Lire", advanced=False, order=20)] = ""
     imap_port: Annotated[int, Knob(label="Port IMAP", help="993 presque toujours (IMAP chiffré).", group="Lire",
                                    lo=1, hi=65_535, order=21)] = 993
@@ -42,14 +66,29 @@ class MailAccount(BaseModel):
     user: Annotated[str, Knob(label="Utilisateur", help="Souvent l'adresse elle-même.", group="Lire",
                               advanced=False, order=23)] = ""
     password: Annotated[str, Knob(label="Mot de passe", help="Un mot de passe d'application de préférence. "
-                                                             "Chiffré, jamais réaffiché ; vide : inchangé.",
+                                                             "Chiffré, jamais réaffiché ; vide : inchangé. Sans "
+                                                             "objet avec un compte Microsoft.",
                                   group="Lire", secret=True, advanced=False, order=24)] = ""
     folders: Annotated[tuple[str, ...], Knob(
-        label="Dossiers relevés", group="Lire", order=25,
-        help="Un par ligne : ceux où elle remarque ce qui arrive. Les autres se consultent dans la console.")] = \
-        ("INBOX",)
+        label="Dossiers relevés", group="Lire", advanced=False, order=25, loader="folders",
+        help="Ceux où elle remarque ce qui arrive. « Charger la liste » lit les dossiers sur le serveur de la boîte "
+             "enregistrée, à cocher ; sinon, un nom par ligne.")] = ("INBOX",)
+    sync_all: Annotated[bool, Knob(
+        label="Synchroniser tous les dossiers", group="Lire", advanced=False, order=26,
+        help="À chaque relève, tous les dossiers du serveur sont tenus à jour dans la console. Elle ne remarque "
+             "toujours que les dossiers relevés.")] = False
     since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=26,
                                     help="Au premier relevé d'un dossier, on ne remonte pas plus loin.")] = 2
+    oauth_client_id: Annotated[str, Knob(
+        label="Application Microsoft (client ID)", group="Lire", order=27,
+        help="Avec un compte Microsoft seulement : l'identifiant de l'application inscrite dans Microsoft Entra "
+             "(portail Azure › Inscriptions d'applications) — comptes Microsoft personnels acceptés, « Autoriser les "
+             "flux de clients publics » activé. Changer d'application demande de se reconnecter.")] = ""
+    oauth_tenant: Annotated[str, Knob(
+        label="Annuaire Microsoft", group="Lire", order=28,
+        help="« consumers » pour un compte personnel (Hotmail, Outlook.com, Live) ; pour un compte Microsoft 365, "
+             "« organizations » ou l'identifiant de l'annuaire. Changer d'annuaire demande de se reconnecter.")] = \
+        CONSUMERS
     smtp_host: Annotated[str, Knob(label="Serveur SMTP", help="Pour envoyer (smtp.gmail.com…). Vide : cette boîte "
                                                               "ne fait que lire.", group="Envoyer", advanced=False,
                                    order=30)] = ""
@@ -92,6 +131,23 @@ class MailAccount(BaseModel):
         kept = tuple(dict.fromkeys(f.strip() for f in folders if f.strip()))
         return kept or ("INBOX",)
 
+    @field_validator("oauth_client_id")
+    @classmethod
+    def _client_id(cls, client_id: str) -> str:
+        client_id = client_id.strip()
+        if client_id and not _CLIENT_ID.match(client_id):
+            raise ValueError("l'application Microsoft se donne par son identifiant (client ID), de la forme "
+                             "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+        return client_id.lower()
+
+    @field_validator("oauth_tenant")
+    @classmethod
+    def _tenant(cls, tenant: str) -> str:
+        tenant = tenant.strip() or CONSUMERS
+        if not _TENANT.match(tenant):
+            raise ValueError("l'annuaire Microsoft est « consumers », « organizations », un domaine ou un identifiant")
+        return tenant
+
     @property
     def ready(self) -> bool:
         return bool(self.enabled and self.imap_host and self.user)
@@ -104,6 +160,11 @@ class MailAccount(BaseModel):
     def from_address(self) -> str:
         return self.address or self.user
 
+    @property
+    def microsoft(self) -> bool:
+        """Elle entre par un compte Microsoft (OAuth2), pas par mot de passe."""
+        return self.auth == MICROSOFT
+
     def info(self, key: str) -> AccountInfo:
         return AccountInfo(
             key=key, label=self.label, address=self.from_address.lower(), display_name=self.display_name,
@@ -115,9 +176,13 @@ class MailAccount(BaseModel):
         """Ses réglages, sans aucun secret (le mot de passe : « défini » ou non)."""
         read = f"{self.imap_host}:{self.imap_port}{' (SSL)' if self.imap_ssl else ''}" if self.imap_host else "—"
         send = f"{self.smtp_host}:{self.smtp_port} ({self.smtp_security})" if self.smtp_host else "—"
-        return (("lire", read), ("utilisateur", self.user or "—"),
-                ("mot de passe", "défini" if self.password else "aucun"),
-                ("dossiers relevés", ", ".join(self.folders)), ("fenêtre du premier relevé", f"{self.since_days} j"),
+        secret = (("connexion", f"compte Microsoft (application {self.oauth_client_id or 'non déclarée'}, annuaire "
+                                f"{self.oauth_tenant})"),) if self.microsoft else \
+            (("mot de passe", "défini" if self.password else "aucun"),)
+        return (("lire", read), ("utilisateur", self.user or "—"), *secret,
+                ("dossiers relevés", ", ".join(self.folders)),
+                ("autres dossiers", "synchronisés à chaque relève" if self.sync_all else "relus à la demande"),
+                ("fenêtre du premier relevé", f"{self.since_days} j"),
                 ("envoyer", send), ("utilisateur d'envoi", self.smtp_user or "le même"),
                 ("copie dans « Envoyés »", "oui" if self.save_sent else "non"))
 

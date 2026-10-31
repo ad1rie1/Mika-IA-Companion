@@ -57,6 +57,10 @@ from mika.vocab.rights import here_allowed
 
 KEEP = 100
 BUNDLE = "email"
+#: à partir de là, son tri juge un mail important (sa section, ses listes)
+IMPORTANT = 0.8
+#: comment un mail quitte ses non-lus quand un brouillon d'elle y a répondu (``Seen.how``)
+REPLIED = "répondu"
 #: un mail écrit par un opérateur reste sous ses yeux (« TES MAILS ») pendant deux jours
 SENT_SHOWN_FOR = 2 * DAY
 #: ce qu'elle garde des mails écrits par un opérateur
@@ -418,7 +422,7 @@ def _executed(s: EmailState, e, cx) -> EmailState:
     s = replace(s, drafts=s.drafts.set(d.proposal, done))
     m = s.mails.get(found.mail) if found.mail else None
     if d.ok and m is not None and not m.read:  # elle y a répondu : il quitte ses non-lus
-        s = replace(s, mails=s.mails.set(found.mail, replace(m, read=True, how="répondu")))
+        s = replace(s, mails=s.mails.set(found.mail, replace(m, read=True, how=REPLIED)))
     return s
 
 

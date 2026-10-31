@@ -40,6 +40,7 @@ from mika.contracts import wakeup as wakeup_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.inspector.pages.reglages import effect
+from mika.inspector.pages.settings_form import RECORD_KEY
 from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
@@ -524,6 +525,20 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             log.warning("courrier enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
         return []
 
+    async def mail_folders(values: Any) -> list[tuple[str, str]]:
+        """Les dossiers d'une boîte enregistrée, lus sur son serveur avec sa connexion, à cocher (la liste
+        gardée pour la console se relit du même coup)."""
+        port = live.kernel.ports.get("mail") if live.kernel is not None else None
+        key = str(values.get(RECORD_KEY) or "")
+        if port is None or not key or port.account(key) is None:
+            raise ValueError("enregistre d'abord la boîte : ses dossiers se lisent sur son serveur, avec ce qui est "
+                             "enregistré")
+        try:
+            found = await port.refresh_folders(key)
+        except (OSError, RuntimeError, EOFError) as exc:
+            raise ValueError(str(exc)[:200] or type(exc).__name__) from None
+        return [(f.name, f.name if f.label == f.name else f"{f.label} ({f.name})") for f in found]
+
     def mail_facts() -> list[tuple[str, str]]:
         accounts = settings.email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
@@ -813,6 +828,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
                         facts=mail_facts, fixed_names=("accounts",),
+                        loaders={"folders": mail_folders}, named_loaders=("folders",),
                         pages=(SettingsPage("boites", "Boîtes aux lettres", ("accounts",), description=(
                             "Chaque boîte a sa page : lire (IMAP), envoyer (SMTP), sa voix dans cette boîte et ce "
                             "qu'elle y prépare d'elle-même. Ce qui s'y passe se lit dans Courrier.")),)),

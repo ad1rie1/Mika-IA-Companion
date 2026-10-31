@@ -659,8 +659,10 @@ async def world_command(data: Path, args: argparse.Namespace) -> dict[str, objec
                     imap_ssl=None if args.imap_ssl is None else args.imap_ssl == "oui", user=args.user,
                     password=args.password, smtp_host=args.smtp_host, smtp_port=args.smtp_port,
                     smtp_security=args.smtp_security, since_days=args.since_days,
-                    folders=tuple(args.dossiers) if args.dossiers else None, voice=args.voix,
-                    display_name=args.nom)
+                    folders=tuple(args.dossiers) if args.dossiers else None,
+                    sync_all=None if args.tous_les_dossiers is None else args.tous_les_dossiers == "oui",
+                    voice=args.voix,
+                    display_name=args.nom, auth=args.auth, oauth_client_id=args.client_id, oauth_tenant=args.tenant)
             elif args.mail_cmd == "remove":
                 cfg = settings.email()
                 if args.compte not in cfg.accounts:
@@ -848,6 +850,11 @@ def _run(argv: list[str] | None) -> int:
     ms.add_argument("--imap-host")
     ms.add_argument("--imap-port", type=int)
     ms.add_argument("--imap-ssl", choices=["oui", "non"])
+    ms.add_argument("--auth", choices=["password", "microsoft"],
+                    help="microsoft : Hotmail, Outlook.com (OAuth2, ADR 0166) ; on se connecte ensuite depuis la "
+                         "fiche de la boîte, dans la console")
+    ms.add_argument("--client-id", help="l'application Microsoft (client ID), avec --auth microsoft")
+    ms.add_argument("--tenant", help="l'annuaire Microsoft (défaut : consumers, les comptes personnels)")
     ms.add_argument("--user")
     ms.add_argument("--password")
     ms.add_argument("--smtp-host")
@@ -855,6 +862,8 @@ def _run(argv: list[str] | None) -> int:
     ms.add_argument("--smtp-security", choices=["ssl", "starttls", "none"])
     ms.add_argument("--since-days", type=int)
     ms.add_argument("--dossiers", nargs="+", help="les dossiers relevés (défaut : INBOX)")
+    ms.add_argument("--tous-les-dossiers", choices=["oui", "non"],
+                    help="tenir aussi les autres dossiers à jour à chaque relève (elle ne remarque que les relevés)")
     ms.add_argument("--voix", choices=["elle", "assistante", "proprietaire"])
     ms.add_argument("--nom", help="ton nom (pour écrire en assistante ou à ta place)")
     mr = msub.add_parser("remove", help="retire un compte")

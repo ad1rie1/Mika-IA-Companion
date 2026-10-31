@@ -44,6 +44,7 @@ from mika.plugins.email import (
     EMAIL,
     FAILED,
     GONE,
+    IMPORTANT,
     MENTION_FLOOR,
     MENTION_PROVENANCE,
     MENTION_TITLE,
@@ -246,7 +247,7 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     for m in _shown_unread(frame):
         text = texts.get(m.summary_ref)
         if text:
-            flag = phrase("email.unread.important") if m.importance >= 0.8 else ""
+            flag = phrase("email.unread.important") if m.importance >= IMPORTANT else ""
             flag += phrase("email.unread.needs_reply") if m.needs_reply else ""
             box = f" [{inert(accounts[m.account].name, 60)}]" if several and m.account in accounts else ""
             lines.append(f"[{m.mail}]{box}{flag} {inert(text)}")

@@ -195,6 +195,9 @@ class Mail:
     key: str = ""
     #: un autre mail de ce compte porte le même Message-ID avec un autre contenu : méfiance
     twin: bool = False
+    #: ses pièces (jointes, images intégrées) sont gardées avec lui ; faux pour un mail gardé avant qu'elles le soient
+    #: (ADR 0172) : ``reread`` le relit sur le serveur, et les garde
+    parts_kept: bool = True
 
     @property
     def ref(self) -> str:
@@ -359,6 +362,25 @@ class AccountStatus:
     error_at: int = 0
 
 
+#: les états d'une connexion Microsoft : faite, un code qui attend d'être entré chez Microsoft, à faire (jamais faite,
+#: ou qui ne vaut plus)
+SIGNED_IN, SIGNIN_PENDING, SIGNIN_NEEDED = "connectee", "en_attente", "a_faire"
+
+
+@dataclass(frozen=True, slots=True)
+class SignIn:
+    """Où en est la connexion d'une boîte qui entre par un compte Microsoft (OAuth2, ADR 0166)."""
+
+    #: ``SIGNED_IN``, ``SIGNIN_PENDING`` ou ``SIGNIN_NEEDED``
+    state: str
+    #: en attente : le code à entrer, la page de Microsoft où l'entrer, jusqu'à quand (µs)
+    code: str = ""
+    url: str = ""
+    until: int = 0
+    #: pourquoi elle n'est pas (ou plus) connectée, en français (vide : rien à dire)
+    error: str = ""
+
+
 class MailPort(Protocol):
     def find_ref(self, key: str) -> str | None: ...
 
@@ -381,6 +403,15 @@ class MailPort(Protocol):
     async def document(self, ref: str) -> Mail | None: ...
 
     async def file(self, ref: str, part: str) -> File: ...
+
+    async def reread(self, ref: str) -> Mail | None:
+        """Relit un mail reçu sur le serveur et le garde entier, pièces comprises (ADR 0172)."""
+        ...
+
+    def inline_images(self, ref: str) -> tuple[tuple[str, str, bytes], ...]:
+        """Les images intégrées gardées d'un mail, que son HTML désigne par ``cid:`` : (Content-ID, type, octets),
+        bornées (ADR 0172). Lecture seule : l'inspecteur."""
+        ...
 
     async def forward(self, ref: str, to: str, subject: str, body: str, *, cc: str = "", by: str = "",
                       attachments: bool = True) -> str: ...
@@ -497,6 +528,15 @@ class MailPort(Protocol):
         ...
 
     def status(self, account: str) -> AccountStatus: ...
+
+    def signin(self, account: str) -> SignIn | None:
+        """Où en est la connexion Microsoft de cette boîte ; ``None`` : elle entre par mot de passe."""
+        ...
+
+    async def start_signin(self, account: str) -> SignIn:
+        """Commence la connexion Microsoft : un code à entrer sur une page de Microsoft ; elle se termine d'elle-même
+        quand la personne l'a fait. Refusée (``RuntimeError``, dite en français) sans application déclarée."""
+        ...
 
     async def forget(self, subject: str) -> int:
         """Oublie un correspondant (``mail:<adresse>``, ``contracts.email.address_handle``) : ses mails, ce

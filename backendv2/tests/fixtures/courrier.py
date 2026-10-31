@@ -1,11 +1,23 @@
 """Courrier de démonstration : deux comptes, des dossiers, HTML et textes longs."""
 
+import re
+
+from mika.inspector.framed import FRAME_CSP
 from mika.ports.mail import AccountInfo, Attachment, Mail, Sent
 from mika.sim.outside import FakeMail
 
 PERSO = AccountInfo("perso", "Personnel", "adrien@example.test", ready=True, can_send=True)
 PRO = AccountInfo("pro", "Atelier", "atelier@example.test", ready=True, can_send=True)
 NOW = 1_790_790_000_000_000
+
+
+def framed(client, page):
+    """Le mail HTML d'une page, lu dans son cadre isolé (ADR 0169) : la page n'en porte que l'adresse."""
+    src, sandbox = re.search(r'<iframe class="document-frame" src="([^"]+)" sandbox="([^"]+)"', page).groups()
+    assert "allow-scripts" not in sandbox and "allow-forms" not in sandbox
+    response = client.get(src)
+    assert response.status_code == 200 and response.headers["content-security-policy"] == FRAME_CSP
+    return response.text
 
 
 def mailbox(count=32):

@@ -4,7 +4,9 @@ import {
   approvalCard,
   approvalCards,
   approvalFrame,
+  approvalKey,
   approvalResult,
+  autoAcceptFrame,
   canAccept,
   cardControls,
   decisionFrame,
@@ -253,5 +255,48 @@ describe("cartes d'accord — l'état de la bande", () => {
     // une carte qui n'est plus dans la liste, une connexion fermée
     expect(decisionFrame(s, 999, "refuse", NOW)).toBeNull();
     expect(decisionFrame(withConnection(s, "disconnected"), 905, "refuse", NOW)).toBeNull();
+  });
+});
+
+describe("cartes d'accord — « Tout accepter » (ADR 0170)", () => {
+  const open = (): ApprovalsState => withConnection(EMPTY_APPROVALS, "connected");
+  const none = new Set<string>();
+
+  it("accepte la première carte acceptable, avec l'empreinte de la carte reçue", () => {
+    const s = withApprovals(open(), [{ ...RAW, id: 904, blocked: "plus servi" }, RAW, { ...RAW, id: 906 }]);
+    expect(autoAcceptFrame(s, NOW, none)).toEqual({
+      type: "approval", id: 905, decision: "accept", digest: DIGEST,
+    });
+  });
+
+  it("une à la fois : rien ne part tant qu'une décision attend sa réponse", () => {
+    let s = withApprovals(open(), [RAW, { ...RAW, id: 906 }]);
+    s = withDecisionSent(s, 905);
+    expect(autoAcceptFrame(s, NOW, none)).toBeNull();
+    // la liste qui suit la réponse relance la suivante
+    s = withApprovals(withResult(s, 905), [{ ...RAW, id: 906 }]);
+    expect(autoAcceptFrame(s, NOW, none)?.id).toBe(906);
+  });
+
+  it("jamais deux fois la même carte ; une carte changée est une autre carte", () => {
+    const s = withApprovals(open(), [RAW]);
+    const done = new Set([approvalKey(RAW)]);
+    expect(autoAcceptFrame(s, NOW, done)).toBeNull();
+    const changed = withApprovals(open(), [{ ...RAW, digest: "ab12" }]);
+    expect(autoAcceptFrame(changed, NOW, done)?.digest).toBe("ab12");
+    expect(approvalKey(approvalFrame(card(), "accept"))).toBe(approvalKey(card()));
+  });
+
+  it("laisse à la personne ce que le bouton « Accepter » ne permet pas", () => {
+    const blocked = withApprovals(open(), [
+      { ...RAW, blocked: "plus servi" },
+      { ...RAW, id: 906, digest: "" },
+      { ...RAW, id: 907, text: "" },
+    ]);
+    expect(autoAcceptFrame(blocked, NOW, none)).toBeNull();
+    // expirée, hors ligne, liste vide
+    expect(autoAcceptFrame(withApprovals(open(), [RAW]), RAW.expires_at, none)).toBeNull();
+    expect(autoAcceptFrame(withConnection(withApprovals(open(), [RAW]), "disconnected"), NOW, none)).toBeNull();
+    expect(autoAcceptFrame(open(), NOW, none)).toBeNull();
   });
 });

@@ -1,8 +1,11 @@
 """Lecture d'un document HTML natif : typographie et liens, sans contenu actif.
 
 On reconstruit des balises connues, sans reprendre aucun attribut source sauf
-une URL http(s) vérifiée. Ni CSS, ni image distante, ni formulaire, ni script.
-Les tableaux de mise en page des mails deviennent des lignes de document.
+une URL http(s) ou mailto vérifiée et la fusion de colonnes d'une cellule (un
+``colspan``, devenu une classe). Ni CSS, ni image distante, ni formulaire, ni script.
+Les tableaux des mails deviennent des grilles de ``<div>`` dont chaque colonne
+prend la largeur de son contenu, comme dans une messagerie : la coche d'une
+liste reste étroite, le texte à côté prend la place.
 Les apps Forge n'ont pas accès à ce format : elles composent des blocs typés.
 
 **Le contenu ne sort jamais de son cadre.** Ce qu'on émet est bien imbriqué,
@@ -20,6 +23,7 @@ lien dans un lien.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from html import escape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -36,6 +40,8 @@ URL = re.compile(r"https?://[^\s<>]+")
 BLOCKS = frozenset(("p", "div", "ul", "ol", "li", "blockquote", "pre", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
                     "table", "tr", "td", "th"))
 HEADINGS = frozenset(("h1", "h2", "h3", "h4", "h5", "h6"))
+#: au-delà, un tableau n'est plus une grille : ses cellules passent à la ligne (leurs classes : console.css)
+COLUMNS = 12
 
 
 def link_url(value: str) -> str:
@@ -43,11 +49,29 @@ def link_url(value: str) -> str:
         return ""
     try:
         parts = urlsplit(value)
-        if parts.scheme.lower() in ("http", "https") and parts.hostname and not parts.username and not parts.password:
+        scheme = parts.scheme.lower()
+        if scheme in ("http", "https") and parts.hostname and not parts.username and not parts.password:
+            return value
+        if scheme == "mailto" and parts.path:
             return value
     except ValueError:
         pass
     return ""
+
+
+def _span(value: str | None) -> int:
+    try:
+        return max(1, min(COLUMNS, int(value or 1)))
+    except ValueError:
+        return 1
+
+
+@dataclass
+class _Grid:
+    """Un tableau ouvert : sa balise dans la sortie (sa classe se pose à sa fermeture), sa ligne la plus large."""
+    at: int
+    columns: int = 0
+    row: int = 0
 
 
 class _Document(HTMLParser):
@@ -56,6 +80,7 @@ class _Document(HTMLParser):
         self.out: list[str] = []
         self.stack: list[tuple[str, str]] = []
         self.hidden: list[str] = []
+        self.grids: list[_Grid] = []  # un par tableau rendu en <div> encore ouvert, dans l'ordre de la pile
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in HIDDEN:
@@ -70,21 +95,62 @@ class _Document(HTMLParser):
             return
         if tag not in LAYOUT and tag not in ALLOWED:
             return
+        if tag in ("tr", "td", "th"):
+            self._implied(tag)
         rendered = self._rendered(tag)
         if tag in LAYOUT and rendered == "div":
-            self.out.append(f'<div class="{LAYOUT[tag]}">')
+            self.out.append(f'<div class="{self._layout(tag, attrs)}">')
             self.stack.append((tag, "div"))
             return
         extra = ""
         if tag == "a" and rendered == "a":
             href = link_url(dict(attrs).get("href") or "")
             if href:
-                extra = f' href="{escape(href, quote=True)}" target="_blank" rel="noopener noreferrer nofollow"'
+                web = not href.lower().startswith("mailto:")  # un mailto ouvre la messagerie, pas un onglet vide
+                extra = (f' href="{escape(href, quote=True)}"' + (' target="_blank"' if web else "") +
+                         ' rel="noopener noreferrer nofollow"')
             else:
                 rendered = "span"
         self.out.append(f"<{rendered}{extra}>")
         if rendered not in VOID:
             self.stack.append((tag, rendered))
+
+    def _implied(self, tag: str) -> None:
+        """``</td>`` et ``</tr>`` sont facultatifs : une cellule ferme la cellule ouverte de sa ligne, une ligne
+        la ligne ouverte de son tableau, avec ce qui y reste ouvert (sinon la suivante s'imbriquerait dedans)."""
+        table = next((i for i in range(len(self.stack) - 1, -1, -1) if self.stack[i][0] == "table"), None)
+        if table is None or self.stack[table][1] != "div":
+            return
+        keep = table + 1
+        if tag != "tr" and self.stack[keep:keep + 1] == [("tr", "div")]:
+            keep += 1
+        if len(self.stack) > keep and self.stack[keep] in (("tr", "div"), ("td", "div"), ("th", "div")):
+            while len(self.stack) > keep:
+                self._close(*self.stack.pop())
+
+    def _layout(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        """La classe d'une balise de tableau. Ses colonnes se comptent sur les lignes et cellules posées
+        directement dans le tableau : celles que la grille place (``.document-grid > .document-row > …``)."""
+        if tag == "table":
+            self.grids.append(_Grid(len(self.out)))
+            return LAYOUT[tag]
+        if tag == "tr":
+            if self.stack[-1:] == [("table", "div")]:
+                self.grids[-1].row = 0
+            return LAYOUT[tag]
+        span = _span(dict(attrs).get("colspan"))
+        if self.stack[-2:] == [("table", "div"), ("tr", "div")]:
+            grid = self.grids[-1]
+            grid.row += span
+            grid.columns = max(grid.columns, grid.row)
+        return LAYOUT[tag] + (" document-head" if tag == "th" else "") + (f" document-span-{span}" if span > 1 else "")
+
+    def _close(self, original: str, rendered: str) -> None:
+        self.out.append(f"</{rendered}>")
+        if (original, rendered) == ("table", "div"):
+            grid = self.grids.pop()
+            if 2 <= grid.columns <= COLUMNS:
+                self.out[grid.at] = f'<div class="document-table document-grid document-cols-{grid.columns}">'
 
     def _rendered(self, tag: str) -> str:
         """La balise émise pour ``tag`` à cet endroit : une que le navigateur relira sans rien fermer
@@ -110,7 +176,7 @@ class _Document(HTMLParser):
         if any(original == tag for original, _ in self.stack):
             while self.stack:
                 original, rendered = self.stack.pop()
-                self.out.append(f"</{rendered}>")
+                self._close(original, rendered)
                 if original == tag:
                     break
 
@@ -119,7 +185,8 @@ class _Document(HTMLParser):
             self.out.append(escape(data))
 
     def finish(self) -> Markup:
-        self.out.extend(f"</{tag}>" for _, tag in reversed(self.stack))
+        for original, rendered in reversed(self.stack):
+            self._close(original, rendered)
         return Markup("".join(self.out))  # only the reconstructed allowlist above
 
 

@@ -44,6 +44,7 @@ from mika.adapters.llm.config import BackendSpec, LiveGateway, ModelLimits, buil
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.mail.oauth import MicrosoftSignIn
 from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
@@ -383,7 +384,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her),
+    # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages (ADR 0166)
+    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings)),
              "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}

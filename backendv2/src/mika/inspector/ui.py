@@ -35,6 +35,7 @@ from mika.inspector.catalog import (
     SettingsTab,
     builtin_keys,
 )
+from mika.inspector.framed import Documents
 from mika.inspector.names import Names
 from mika.kernel import forms
 from mika.kernel.clock import US
@@ -60,7 +61,8 @@ LOGIN_WINDOW_S = 60.0
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
-                               "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+                               "connect-src 'self'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; "
+                               "base-uri 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
     "Cache-Control": "no-store",
@@ -216,6 +218,8 @@ class UI:
         self.settings_forms: Any = None
         sampler = deps.sampler or getattr(getattr(deps.kernel, "series", None), "read", None)
         self.inspection = Inspection(deps.kernel, sampler=sampler)
+        #: les documents HTML natifs des pages rendues, que leur cadre vient chercher (ADR 0169)
+        self.documents = Documents()
         self.sampler = sampler
         labels = deps.labels or Labels()
         if not labels.faculties and deps.faculty_labels:
@@ -297,7 +301,11 @@ class UI:
         return datetime.fromtimestamp(t / US, self.tz).strftime(fmt)
 
     def env(self) -> render.Env:
-        return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp)
+        return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp, frame=self.frame)
+
+    def frame(self, html: str) -> str:
+        """L'adresse du cadre où se lit ce document HTML natif, tel qu'il a été écrit (ADR 0169)."""
+        return f"{PREFIX}/document/{self.documents.keep(html)}"
 
     # ── navigation ──
     def attention_items(self) -> list[dict[str, Any]]:

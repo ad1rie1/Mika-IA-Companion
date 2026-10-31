@@ -36,7 +36,9 @@ import { messageNotes, noteLine } from "./messageNotes";
 import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "./verdicts";
 import {
   acceptRefusal,
+  approvalKey,
   approvalResult,
+  autoAcceptFrame,
   cardControls,
   decisionFrame,
   EMPTY_APPROVALS,
@@ -53,6 +55,7 @@ import {
   withResult,
 } from "./approvals";
 import type { ApprovalsState } from "./approvals";
+import { EmojiPicker } from "./EmojiPicker";
 import {
   applyAck,
   ASLEEP_NOTE,
@@ -152,6 +155,13 @@ const OFFLINE_NOT_SENT =
 /** La préférence de l'appareil pour le mode pro (ADR 0116) : `"1"` activé. */
 const PRO_PREF_KEY = "vtuber_chat_pro";
 const PRO_PLACEHOLDER = "Mode pro : demande-lui un travail… (/aide pour les commandes)";
+/**
+ * « Tout accepter » (ADR 0170) : `"1"` activé. Retenu par l'onglet seulement
+ * (`sessionStorage`) : il survit à un rechargement, jamais à un onglet neuf
+ * ni au navigateur fermé — on ne retrouve pas ses accords donnés d'avance
+ * sans l'avoir rallumé.
+ */
+const AUTO_ACCEPT_KEY = "vtuber_chat_auto_accept";
 /** Le fil de travail montré en mode pro (ADR 0164), retenu par l'appareil pour ce compte. */
 const STRAND_PREF_PREFIX = "vtuber_chat_strand";
 /** Ce qu'une note sous l'en-tête d'un fil reste lisible. */
@@ -197,6 +207,22 @@ function writeStrandPreference(key: string, id: string): void {
     localStorage.setItem(key, id);
   } catch {
     // stockage fermé : le choix vaut pour cet onglet seulement
+  }
+}
+
+function readAutoAcceptPreference(): boolean {
+  try {
+    return sessionStorage.getItem(AUTO_ACCEPT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoAcceptPreference(on: boolean): void {
+  try {
+    sessionStorage.setItem(AUTO_ACCEPT_KEY, on ? "1" : "0");
+  } catch {
+    // stockage fermé : le choix vaut jusqu'au rechargement
   }
 }
 
@@ -323,6 +349,15 @@ export class ChatOverlay {
   private approvalTimer: number | null = null;
   private approvalNoteTimer: number | null = null;
   /**
+   * « Tout accepter » (ADR 0170) : l'interrupteur près de « Pro », visible
+   * pour une opératrice seulement ; allumé, chaque carte acceptable part
+   * acceptée, une à une. Les cartes déjà acceptées ainsi sur cette connexion
+   * ne repartent pas (voir approvals.autoAcceptFrame).
+   */
+  private autoToggle: HTMLButtonElement | null;
+  private autoPreferred: boolean;
+  private readonly autoAccepted = new Set<string>();
+  /**
    * Le mode pro (ADR 0116) : l'interrupteur près du champ, visible pour une
    * opératrice seulement, et le choix retenu par l'appareil. Un message part
    * pro quand les deux y sont (`proMode`).
@@ -386,6 +421,10 @@ export class ChatOverlay {
     this.proToggle = document.getElementById("chat-pro") as HTMLButtonElement | null;
     this.basePlaceholder = this.inputEl.placeholder;
     this.proPreferred = readProPreference();
+    this.autoToggle = document.getElementById("chat-auto") as HTMLButtonElement | null;
+    this.autoPreferred = readAutoAcceptPreference();
+    const emojiRoot = document.getElementById("chat-emoji");
+    if (emojiRoot) new EmojiPicker(emojiRoot, this.inputEl);
     this.strandPrefKey = personId ? `${STRAND_PREF_PREFIX}:${personId}` : STRAND_PREF_PREFIX;
     this.activeStrand = readStrandPreference(this.strandPrefKey);
     this.buildStrandsUi();
@@ -423,6 +462,7 @@ export class ChatOverlay {
     this.restoreHistory();
     this.setupEvents();
     this.paintProToggle();
+    this.paintAutoToggle();
   }
 
   /** Repaint messages persisted from the previous session (no animation).
@@ -523,6 +563,8 @@ export class ChatOverlay {
     this.operator = operator;
     this.paintOperatorMenu();
     this.paintProToggle();
+    this.paintAutoToggle();
+    this.autoAcceptPending();
     this.repaint({ animate: false });
   }
 
@@ -563,6 +605,50 @@ export class ChatOverlay {
       this.repaintStrandHead();
       this.repaint({ animate: false });
     }
+  }
+
+  /** Les cartes partent-elles acceptées d'elles-mêmes ? Seulement pour une opératrice qui l'a choisi. */
+  private get autoAccept(): boolean {
+    return this.operator && this.autoPreferred;
+  }
+
+  /**
+   * L'interrupteur « Tout accepter » (ADR 0170), visible pour une opératrice
+   * seulement. Allumé, il le dit sans ambiguïté — rouge, et en toutes lettres
+   * dans la bande des cartes.
+   */
+  private paintAutoToggle() {
+    const on = this.autoAccept;
+    if (this.autoToggle) {
+      this.autoToggle.hidden = !this.operator;
+      this.autoToggle.setAttribute("aria-pressed", String(on));
+      // le libellé se replie sur un téléphone ; l'icône et la couleur restent
+      const label = document.createElement("span");
+      label.className = "chat-auto-label";
+      label.textContent = " Tout accepter";
+      this.autoToggle.replaceChildren(on ? "⚡" : "🛡️", ...(on ? [label] : []));
+      this.autoToggle.title = on
+        ? "Tout accepter : chaque appel à un service qui demande ton accord part sans attendre ton clic. Cliquer pour revenir à « demander »."
+        : "Accords : Mika te demande avant chaque appel à un service. Cliquer pour tout accepter sans demander (cet onglet seulement).";
+    }
+    this.approvalsHeadEl.textContent = on
+      ? "Mika attend ton accord — « Tout accepter » est allumé"
+      : "Mika attend ton accord";
+  }
+
+  /**
+   * « Tout accepter » (ADR 0170) : la première carte acceptable part
+   * acceptée, avec l'empreinte de la carte reçue, comme un clic sur
+   * « Accepter » ; la suivante partira à la liste qui suit sa réponse. Une
+   * carte bloquée ou expirée reste à la personne ; rien ne part hors ligne.
+   */
+  private autoAcceptPending() {
+    if (!this.autoAccept) return;
+    const frame = autoAcceptFrame(this.approvals, Date.now(), this.autoAccepted);
+    if (!frame || !this.ws.sendApproval(frame)) return;
+    this.autoAccepted.add(approvalKey(frame));
+    this.approvals = withDecisionSent(this.approvals, frame.id);
+    this.refreshApprovals();
   }
 
   /** Le menu ⚙️ de la saisie : ses liens vers la console pour une opératrice,
@@ -612,6 +698,13 @@ export class ChatOverlay {
       writeProPreference(this.proPreferred);
       this.paintProToggle();
       this.inputEl.focus();
+    });
+
+    this.autoToggle?.addEventListener("click", () => {
+      this.autoPreferred = !this.autoPreferred;
+      writeAutoAcceptPreference(this.autoPreferred);
+      this.paintAutoToggle();
+      this.autoAcceptPending();
     });
 
     this.inputEl.addEventListener("keydown", (e) => {
@@ -772,6 +865,9 @@ export class ChatOverlay {
       // ne renvoie la liste que si elle n'est pas vide) ; coupée, les
       // boutons s'éteignent.
       this.approvals = withConnection(this.approvals, data.status);
+      // une connexion neuve repart d'une liste vide : ce qui avait été accepté
+      // sans réponse avant la coupure peut repartir s'il est relisté
+      if (data.status === "connected") this.autoAccepted.clear();
       this.renderApprovals();
       if (data.status !== "unauthorized") return;
       this.failPending("session expirée — reconnecte-toi");
@@ -903,6 +999,7 @@ export class ChatOverlay {
   setApprovals(items: unknown) {
     this.approvals = withApprovals(this.approvals, items);
     this.renderApprovals();
+    this.autoAcceptPending();
   }
 
   /** Le sort d'une décision (`approval_result`), dit brièvement ; la liste à jour suit. */

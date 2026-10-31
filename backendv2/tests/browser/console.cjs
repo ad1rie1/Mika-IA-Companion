@@ -28,6 +28,7 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
     if (url.pathname.endsWith('/console.css')) return route.fulfill({ path: path.join(assets, 'console.css'), contentType: 'text/css' });
     if (url.pathname.endsWith('/console.js')) return route.fulfill({ path: path.join(assets, 'console.js'), contentType: 'application/javascript' });
     if (url.pathname.endsWith('/_vitals')) return route.fulfill({ status: vitalsStatus, body: '<span>État actualisé</span>', contentType: 'text/html' });
+    if (url.pathname.startsWith('/cadres/')) return route.fulfill({ path: path.join(preview, 'cadres', path.basename(url.pathname)), contentType: 'text/html' });
     const appPath = url.pathname.startsWith('/inspecteur/');
     if (!url.pathname.startsWith('/preview/') && !appPath) return route.fulfill({ status: 404, body: 'Route hors aperçu' });
     let filename = appPath ? (url.pathname.slice('/inspecteur/'.length) || 'accueil').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) + '.html' : path.basename(url.pathname);
@@ -332,9 +333,15 @@ test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et l
   await page.keyboard.press('Enter');  // toujours sur le résumé : Entrée replie la liste
   assert.equal(await navigation.evaluate(el => el.open), false);
   await page.locator('.collection-open').first().click();
-  assert.equal(await page.locator('.document-html').isVisible(), true);
+  const frame = page.locator('iframe.document-frame');
+  assert.equal(await frame.isVisible(), true);
   assert.match(await page.locator('h1').textContent(), /Maquettes du projet/);
-  assert.equal(await page.locator('.document-html strong').textContent(), 'Ton retour jeudi');
+  // le mail tel qu'il a été écrit, dans son cadre isolé (ADR 0169), à la hauteur de son contenu
+  assert.equal(await page.frameLocator('iframe.document-frame').locator('strong').first().textContent(), 'Ton retour jeudi');
+  await page.waitForFunction(() => {
+    const f = document.querySelector('iframe.document-frame');
+    return f.contentDocument && f.style.height === f.contentDocument.documentElement.scrollHeight + 'px';
+  });
   assert.equal(await page.getByRole('link', { name: 'maquettes.pdf', exact: true }).isVisible(), true);
   assert.equal(await page.locator('[data-nav-group="Relations & échanges"]').evaluate(el => el.open), true);
 });

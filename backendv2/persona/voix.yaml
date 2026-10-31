@@ -4940,6 +4940,8 @@ email:
     subject: "Objet : {subject}"
     # {files} : les noms des pièces jointes, séparés par des virgules
     attachments: "Pièces jointes : {files}"
+    # {when} : email.tools.when
+    date: "Date : {when}"
 
   # ── Le tri de ce qui arrive ─────────────────────────────────────────────────────────────────────────────────
   # Chaque mail qui arrive est trié par un appel au modèle (rôle « triage », plugins/email/poll.py) : la consigne et
@@ -5110,6 +5112,42 @@ email:
     twin: " (méfiance : un autre mail porte le même identifiant)"
     not_found: Je ne trouve pas ce mail.
 
+    # Quand un mail est arrivé (ses listes, l'en-tête d'un mail ouvert), daté pour en juger l'âge. {hour}, {minute}
+    # (sur deux chiffres), {day}, {month} (sur deux chiffres), {year}
+    when:
+      today: "aujourd'hui {hour} h {minute}"
+      yesterday: "hier {hour} h {minute}"
+      date: "le {day}/{month} {hour} h {minute}"
+      # une autre année : le jour suffit
+      year: "le {day}/{month}/{year}"
+      unknown: date inconnue
+
+    # Derrière un mail d'une liste, chacun avec son espace de tête (son tri dit aussi email.unread.important et
+    # email.unread.needs_reply)
+    marks:
+      answered: " (répondu)"
+      flagged: " (suivi)"
+      # {count} : combien
+      attachments: " ({count} pièce(s) jointe(s))"
+
+    # Une liste se lit page par page
+    page:
+      arg: "la page (1 : les plus récents)"
+      # {number} : cette page ; {pages} : combien ; {total} : combien de mails ; {next} : la suivante
+      more: "(page {number} sur {pages}, {total} mails ; la suite : page={next})"
+      last: "(page {number} sur {pages}, {total} mails : la dernière)"
+      past: Il n'y a pas de page aussi loin.
+
+    # Jusqu'où remonte ce qu'elle a relevé : au-delà, elle ne trouve rien, et ce n'est pas que rien n'existe.
+    # {since} : email.tools.when, ou box pour chaque boîte quand elle en a plusieurs, séparés par des virgules ;
+    # {who} : qui peut charger l'historique (son prénom)
+    covered:
+      line: >-
+        (ce que tu as relevé commence {since} ; plus ancien, tu ne le vois pas : {who} peut le charger dans la console,
+        « Charger des messages plus anciens »)
+      # {when} : email.tools.when ; {account} : la boîte
+      box: "{when} ({account})"
+
     accounts:
       # L'outil email_accounts.
       description: "Tes boîtes aux lettres : leurs dossiers, ce qui n'est pas lu, comment tu y écris."
@@ -5124,28 +5162,50 @@ email:
 
     list:
       # L'outil email_list.
-      description: Lister les derniers mails d'une boîte ou d'un dossier.
+      description: >-
+        Lister les mails d'une boîte ou d'un dossier, du plus récent au plus ancien, page par page : leur date, ce que
+        ton tri en a jugé (important, attend une réponse), répondu ou non, leurs pièces jointes. Seulement ce que tu as
+        relevé.
       account: "une boîte (vide : toutes)"
       folder: "un dossier (vide : tous)"
       unread_only: seulement ce qui n'est pas lu
       nothing_here: Rien ici.
       empty: Ta boîte est vide.
-      # un mail. {ref} : sa référence ; {unread} : email.tools.unread, ou rien ; {box} : box, ou rien ; {sender} :
-      # l'expéditeur ; {subject} : l'objet ; {twin} : email.tools.twin, ou rien
-      line: "[{ref}] {unread}{box}de {sender} : « {subject} »{twin}"
+      # un mail. {ref} : sa référence ; {when} : email.tools.when ; {unread} : email.tools.unread, ou rien ; {box} :
+      # box, ou rien ; {sender} : l'expéditeur ; {subject} : l'objet ; {marks} : email.tools.marks (et
+      # email.unread.important, email.unread.needs_reply), ou rien ; {twin} : email.tools.twin, ou rien
+      line: "[{ref}] {when} · {unread}{box}de {sender} : « {subject} »{marks}{twin}"
       # quand elle a plusieurs boîtes (avec son espace de fin). {account} : la boîte ; {folder} : le dossier
       box: "({account}/{folder}) "
       sent_header: "Partis récemment de ta boîte :"
-      # un mail parti. {id} : son identifiant ; {to} : le destinataire ; {subject} : l'objet ; {by} : by_you ou by
-      sent: "[{id}] à {to} : « {subject} »{by}"
+      # un mail parti. {id} : son identifiant ; {when} : email.tools.when ; {to} : le destinataire ; {subject} :
+      # l'objet ; {by} : by_you ou by
+      sent: "[{id}] {when} · à {to} : « {subject} »{by}"
       by: " (écrit par {who})"
       by_you: " (écrit par toi)"
 
     search:
       # L'outil email_search.
-      description: Chercher dans tes mails (objet, expéditeur, texte).
-      query: des mots de l'objet, de l'expéditeur ou du texte
+      description: >-
+        Chercher dans tes mails : des mots (tous présents, dans n'importe quel ordre) dans l'objet, l'expéditeur ou le
+        texte, un expéditeur, ou les deux. Seulement ce que tu as relevé : la réponse dit jusqu'où ça remonte.
+      query: "des mots de l'objet, de l'expéditeur ou du texte (tous doivent y être)"
+      sender: "le nom ou l'adresse de l'expéditeur"
+      # ni mots ni expéditeur
+      what: Dis des mots à chercher, ou un expéditeur.
       nothing: Rien ne correspond.
+
+    contacts:
+      # L'outil email_contacts.
+      description: >-
+        Retrouver quelqu'un dans ton courrier (qui t'a écrit, à qui tu as écrit) : son adresse, combien de mails
+        échangés, le dernier. Pour écrire à la bonne adresse.
+      query: "un nom ou une adresse (vide : les plus récents)"
+      nothing: Personne ne correspond dans ce que tu as relevé.
+      # quelqu'un. {name} : son nom, ou no_name ; {address} : son adresse ; {received} : reçus de lui ; {sent} :
+      # envoyés à lui ; {when} : le dernier échange (email.tools.when)
+      line: "- {name} <{address}> : {received} reçu(s), {sent} envoyé(s) ; dernier échange : {when}"
+      no_name: (sans nom)
 
     read:
       # L'outil email_read.

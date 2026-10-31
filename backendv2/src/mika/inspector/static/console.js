@@ -358,6 +358,28 @@
       r.addEventListener("input", function () { if (out) out.textContent = String(r.value).replace(".", ","); });
     });
 
+    // Un mail dans son cadre (ADR 0169) : le cadre prend la hauteur de son contenu. Sans script, il garde sa
+    // hauteur fixe et défile.
+    var frames = document.querySelectorAll("iframe.document-frame");
+    var fit = function (frame) {
+      var doc;
+      try { doc = frame.contentDocument; } catch (e) { return; }
+      if (!doc || !doc.documentElement) return;
+      frame.style.height = "0px";
+      frame.style.height = Math.max(doc.documentElement.scrollHeight, 80) + "px";
+    };
+    frames.forEach(function (frame) {
+      frame.addEventListener("load", function () { fit(frame); });
+      if (frame.contentDocument && frame.contentDocument.readyState === "complete") fit(frame);
+    });
+    if (frames.length) {
+      var resized = 0;
+      window.addEventListener("resize", function () {
+        clearTimeout(resized);
+        resized = setTimeout(function () { frames.forEach(fit); }, 150);
+      });
+    }
+
     // Vitaux : rafraîchis toutes les 10 s, en pause quand l'onglet est caché.
     var bar = document.querySelector("[data-vitals]");
     if (bar && window.fetch) {

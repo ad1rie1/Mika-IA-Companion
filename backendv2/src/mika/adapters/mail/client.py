@@ -10,11 +10,18 @@ standard, dans un fil), un cache à part pour ce qui est arrivé (sa base, ADR 0
   dossier, on ne remonte que quelques jours.
 - **Un client complet** : lu/non lu, suivi, déplacer, archiver, corbeille —
   sur le serveur, et le cache suit.
+- **Ses pièces sont gardées avec lui** (ADR 0172) : le relevé lit chaque mail
+  entier ; ses pièces jointes et ses images intégrées vont au cache. Télécharger
+  ou transférer une pièce gardée ne demande pas le serveur ; un mail gardé avant
+  se relit (``reread``) pour garder les siennes.
 - **Ce qui part** est mis en forme par ``compose`` (l'expéditeur selon la voix
   du compte, sa signature, la citation) ; un brouillon ne part que tel qu'il
   a été lu (le condensé de l'aperçu).
 - La configuration est relue à chaque appel (changer de compte ne demande pas
   de redémarrer).
+- **Une boîte Microsoft** (Hotmail, Outlook.com) entre par XOAUTH2 : avant
+  chaque session, le jeton d'accès de sa connexion (``oauth``, ADR 0166) ; une
+  boîte pas (ou plus) connectée échoue comme un serveur qui refuse, en le disant.
 """
 
 from __future__ import annotations
@@ -40,7 +47,8 @@ from mika.adapters.mail import compose
 from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
-from mika.adapters.mail.parse import attachment_files, parse
+from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, answer
+from mika.adapters.mail.parse import Part, attachment_files, parse, read
 from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
     AccountInfo,
@@ -52,6 +60,7 @@ from mika.ports.mail import (
     Mail,
     Preview,
     Sent,
+    SignIn,
     forwarded_text,
     split_ref,
 )
@@ -60,6 +69,8 @@ log = logging.getLogger("mika.mail")
 
 #: les derniers mails d'un dossier relevé dont on relit les drapeaux (lus ailleurs ?)
 FLAGS_WINDOW = 200
+#: « tous les dossiers » : ce qu'un dossier seulement synchronisé (pas relevé) range au plus à chaque relève
+SYNC_ALL_BATCH = 50
 
 
 def _local_tz() -> tzinfo:
@@ -69,7 +80,8 @@ def _local_tz() -> tzinfo:
 class ImapSmtpMail:
     def __init__(self, config: Callable[[], MailConfig], cache: Path | Target, *,
                  now: Callable[[], datetime] = lambda: datetime.now(UTC), tz: tzinfo | None = None,
-                 timeout: float = 30.0, her: Callable[[], str] | None = None) -> None:
+                 timeout: float = 30.0, her: Callable[[], str] | None = None,
+                 microsoft: MicrosoftSignIn | None = None) -> None:
         self._config = config
         #: son nom d'expéditrice quand un compte n'en dit pas : celui de sa persona, que l'application fournit
         self._her = her or (lambda: compose.DEFAULT_NAME)
@@ -79,6 +91,10 @@ class ImapSmtpMail:
         self._cache = MailCache(cache)
         self._locks: dict[str, asyncio.Lock] = {}
         self._seen_elsewhere: list[str] = []
+        #: les connexions Microsoft (sans endroit où garder leur jeton, aucune boîte Microsoft n'entre)
+        self._microsoft = microsoft or MicrosoftSignIn()
+        #: par compte, le jeton d'accès de la session qui va s'ouvrir (posé sous le verrou du compte)
+        self._bearers: dict[str, str] = {}
 
     # ── comptes ──
     def _accounts(self) -> dict[str, MailAccount]:
@@ -108,11 +124,17 @@ class ImapSmtpMail:
 
     async def _in_thread(self, key: str, fn: Callable[..., Any], *args: Any) -> Any:
         async with self._lock(key):
+            found = self._accounts().get(key)
+            self._bearers[key] = await self._bearer(key, found) if found is not None else ""
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, fn, *args)
 
-    def _session(self, account: MailAccount) -> Session:
-        return Session(account, timeout=self._timeout)
+    async def _bearer(self, key: str, account: MailAccount) -> str:
+        """Le jeton d'accès d'une boîte Microsoft (``OAuthError`` si elle n'est pas connectée) ; rien pour les autres."""
+        return await self._microsoft.token(key, account) if account.microsoft else ""
+
+    def _session(self, key: str, account: MailAccount) -> Session:
+        return Session(account, timeout=self._timeout, token=self._bearers.get(key, ""))
 
     # ── relever ──
     async def fetch_new(self, limit: int) -> list[Mail]:
@@ -124,7 +146,7 @@ class ImapSmtpMail:
                 break
             try:
                 await self._in_thread(key, self._poll_sync, key, account, share)
-            except (OSError, ImapError, ValueError, EOFError) as exc:
+            except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
                 self._cache.note(key, at=self._at(), error=_why(exc), polled=True)
                 log.warning("courrier : relevé de %s impossible (%s)", key, type(exc).__name__)
             # ce qui attend son accusé : ce relevé-ci (même si un dossier suivant a échoué), ou un passage
@@ -141,13 +163,24 @@ class ImapSmtpMail:
 
     def _poll_sync(self, key: str, account: MailAccount, limit: int) -> list[Mail]:
         out: list[Mail] = []
-        with self._session(account) as s:
-            if not self._cache.folders(key):
-                self._list_sync(s, key)
+        with self._session(key, account) as s:
+            # la liste se relit à chaque relève : un dossier créé ailleurs paraît, un dossier disparu s'en va (lue
+            # une seule fois, elle restait figée dès qu'un dossier était connu — souvent la seule réception)
+            self._list_sync(s, key)
             for folder in account.folders:
                 if len(out) >= limit:
                     break
                 out += self._sync_sync(s, key, account, folder, limit - len(out), hand=True)
+            if account.sync_all:
+                # les autres dossiers sont tenus à jour pour la console, sans rien lui rendre : elle ne remarque que
+                # ceux qu'elle relève
+                for f in self._cache.folders(key):
+                    if f.name in account.folders:
+                        continue
+                    try:
+                        self._sync_sync(s, key, account, f.name, SYNC_ALL_BATCH, hand=False)
+                    except ImapError as exc:  # un dossier que le serveur refuse n'arrête pas les suivants
+                        log.warning("courrier : dossier %s/%s non synchronisé (%s)", key, f.name, type(exc).__name__)
         self._cache.note(key, at=self._at(), polled=True)
         return out
 
@@ -157,16 +190,20 @@ class ImapSmtpMail:
             self._cache.save_folder(key, name, role=role_of(name, flags))
         self._cache.keep_folders(key, [n for n, _ in found])
 
-    def _read(self, raw: bytes, uid: int, key: str, folder: str, flags: frozenset[str]) -> Mail:
-        """Un mail brut lu ; un mail que la lecture ne comprend pas devient une ligne qui le dit
-        (on ne le relira pas à chaque relevé : il est rangé, et le curseur passe)."""
+    def _read(self, raw: bytes, uid: int, key: str, folder: str,
+              flags: frozenset[str]) -> tuple[Mail, tuple[Part, ...]]:
+        """Un mail brut lu, et ses pièces (que le cache garde avec lui, ADR 0172) ; un mail que la lecture ne
+        comprend pas devient une ligne qui le dit (on ne le relira pas à chaque relevé : il est rangé, et le curseur
+        passe)."""
         try:
-            mail = parse(raw, str(uid), account=key, folder=folder, complete=True)
+            mail, parts = read(raw, str(uid), account=key, folder=folder, complete=True)
         except Exception as exc:  # un mail hostile ou cassé n'arrête jamais un relevé
             log.warning("courrier : un mail illisible dans %s/%s (%s)", key, folder, type(exc).__name__)
-            mail = Mail(f"<illisible-{hashlib.sha256(raw).hexdigest()[:20]}@mika>", "(expéditeur illisible)", "",
-                        "(un mail illisible)", 0, "Ce mail n'a pas pu être lu.", account=key, folder=folder)
-        return replace(mail, seen="\\seen" in flags, flagged="\\flagged" in flags, answered="\\answered" in flags)
+            mail, parts = Mail(f"<illisible-{hashlib.sha256(raw).hexdigest()[:20]}@mika>", "(expéditeur illisible)",
+                               "", "(un mail illisible)", 0, "Ce mail n'a pas pu être lu.", account=key,
+                               folder=folder), ()
+        return replace(mail, seen="\\seen" in flags, flagged="\\flagged" in flags,
+                       answered="\\answered" in flags), parts
 
     def _sync_sync(self, s: Session, key: str, account: MailAccount, folder: str, limit: int, *,
                    hand: bool) -> list[Mail]:
@@ -191,7 +228,8 @@ class ImapSmtpMail:
         taken = uids[:max(0, limit)]
         out: list[Mail] = []
         for uid, flags, raw in sorted(s.fetch(taken)):
-            stored = self._cache.store(self._read(raw, uid, key, folder, flags), uid)
+            mail, parts = self._read(raw, uid, key, folder, flags)
+            stored = self._cache.store(mail, uid, parts)
             local = split_ref(stored.ref)[1]
             if hand and not self._cache.handed(key, local):
                 self._cache.offer(key, stored.ref)  # rendu pour de bon à l'accusé (``ack``), pas avant
@@ -200,7 +238,8 @@ class ImapSmtpMail:
                 self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=uid + 1)
         if not hand:
             for uid, flags, raw in s.fetch(self._cache.missing_html(key, folder, limit)):
-                self._cache.store(self._read(raw, uid, key, folder, flags), uid)
+                mail, parts = self._read(raw, uid, key, folder, flags)
+                self._cache.store(mail, uid, parts)
         nxt = (max(taken) + 1) if len(taken) < len(uids) else max(uidnext, (max(taken) + 1) if taken else start)
         self._refresh_flags(s, key, folder, hand=hand)
         if owns_cursor:
@@ -280,7 +319,7 @@ class ImapSmtpMail:
             return msg.as_bytes()
         key, acc, mail, uid = self._where(ref)
         def read():
-            with self._session(acc) as session:
+            with self._session(key, acc) as session:
                 _, validity, _ = session.select(mail.folder)
                 previous, _ = self._cache.cursor(key, mail.folder) or (0, 0)
                 if validity and previous and validity != previous:
@@ -290,11 +329,11 @@ class ImapSmtpMail:
                 if not rows:
                     raise FileNotFoundError("Ce message n'est plus disponible sur le serveur.")
                 number, flags, raw = rows[0]
-                full = parse(raw, str(number), account=key, folder=mail.folder, complete=True)
+                full, parts = read(raw, str(number), account=key, folder=mail.folder, complete=True)
                 if full.message_id != mail.message_id:
                     raise ValueError("Ce message a changé sur le serveur. Actualise le dossier.")
                 self._cache.store(replace(full, seen="\\seen" in flags, flagged="\\flagged" in flags,
-                                           answered="\\answered" in flags), number)
+                                           answered="\\answered" in flags), number, parts)
                 return raw
         return await self._in_thread(key, read)
 
@@ -314,6 +353,10 @@ class ImapSmtpMail:
             if full is None:
                 raise FileNotFoundError("Ce message n'est plus disponible.")
             return File("message.txt", "text/plain", full.body.encode())
+        if part.isdecimal() and len(part) <= 5:
+            kept = self._cache.part(ref, int(part))  # gardée à son arrivée (ADR 0172) : le serveur n'est pas requis
+            if kept is not None:
+                return kept
         raw = await self._source(ref)
         if part == "source":
             return File("message.eml", "message/rfc822", raw)
@@ -324,11 +367,24 @@ class ImapSmtpMail:
             raise FileNotFoundError("Cette pièce jointe n'est plus disponible.")
         return files[int(part)]
 
+    async def reread(self, ref: str) -> Mail | None:
+        """Relit un mail reçu sur le serveur et le garde entier, pièces comprises (un mail gardé avant qu'elles le
+        soient, ADR 0172) ; un envoi se relit comme ``document``."""
+        if self._cache.one(ref) is None:
+            return await self.document(ref)
+        await self._source(ref)
+        return self._cache.one(ref)
+
+    def inline_images(self, ref: str) -> tuple[tuple[str, str, bytes], ...]:
+        return self._cache.inline(ref)
+
     async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True):
         original = await self.document(ref)
         if original is None:
             raise ValueError("Ce message n'est plus disponible.")
-        files = attachment_files(await self._source(ref)) if attachments and original.attachments else ()
+        files = self._cache.files(ref, len(original.attachments)) if attachments and original.attachments else ()
+        if files is None:  # une pièce n'est pas gardée ici : le message se relit sur le serveur
+            files = attachment_files(await self._source(ref))
         key = self._sender_key(original.account, "")
         draft = Draft("", key, to, subject, forwarded_text(original, body), cc=cc, author=by)
         shown, _ = self._preview(draft)
@@ -348,7 +404,7 @@ class ImapSmtpMail:
         acc = self._account(account)
 
         def run() -> None:
-            with self._session(acc) as s:
+            with self._session(account, acc) as s:
                 self._list_sync(s, account)
 
         await self._in_thread(account, run)
@@ -359,7 +415,7 @@ class ImapSmtpMail:
 
         def run() -> int:
             before = self._cache.folder_count(account, folder)
-            with self._session(acc) as s:
+            with self._session(account, acc) as s:
                 self._sync_sync(s, account, acc, folder, limit, hand=False)
             return max(0, self._cache.folder_count(account, folder) - before)
 
@@ -368,7 +424,7 @@ class ImapSmtpMail:
     async def older(self, account: str, folder: str, limit: int = 50) -> int:
         acc = self._account(account)
         def run():
-            with self._session(acc) as session:
+            with self._session(account, acc) as session:
                 _, validity, _ = session.select(folder)
                 previous, _ = self._cache.cursor(account, folder) or (0, 0)
                 if previous and validity and previous != validity:
@@ -379,7 +435,8 @@ class ImapSmtpMail:
                 uids = sorted(u for u in session.search(f"UID 1:{first - 1}" if first else "ALL") if not first or u < first)
                 rows = session.fetch(uids[-max(1, min(100, limit)):])
                 for uid, flags, raw in rows:
-                    stored = self._cache.store(self._read(raw, uid, account, folder, flags), uid)
+                    mail, parts = self._read(raw, uid, account, folder, flags)
+                    stored = self._cache.store(mail, uid, parts)
                     self._cache.hand(account, split_ref(stored.ref)[1])
                 self._cache.save_folder(account, folder, uidvalidity=validity or None)
                 self._cache.recount(account, folder)
@@ -410,7 +467,7 @@ class ImapSmtpMail:
         key, acc, mail, uid = self._where(ref)
 
         def run() -> None:
-            with self._session(acc) as s:
+            with self._session(key, acc) as s:
                 s.select(mail.folder, write=True)
                 real = self._uid_sync(s, mail, uid)
                 if seen is not None:
@@ -440,7 +497,7 @@ class ImapSmtpMail:
 
             def run(acc: MailAccount = acc, key: str = key, folders: dict = folders) -> int:
                 missed = 0
-                with self._session(acc) as s:
+                with self._session(key, acc) as s:
                     for folder, items in folders.items():
                         s.select(folder, write=True)
                         real = []
@@ -459,7 +516,7 @@ class ImapSmtpMail:
 
             try:
                 failed += int(await self._in_thread(key, run))
-            except (OSError, ImapError, ValueError, EOFError) as exc:
+            except (OSError, ImapError, OAuthError, ValueError, EOFError) as exc:
                 failed += sum(len(v) for v in folders.values())
                 self._cache.note(key, at=self._at(), error=_why(exc))
         return failed
@@ -470,7 +527,7 @@ class ImapSmtpMail:
             return folder
 
         def run() -> str:
-            with self._session(acc) as s:
+            with self._session(key, acc) as s:
                 known = {f.name for f in self._cache.folders(key)}
                 if folder not in known:
                     self._list_sync(s, key)
@@ -510,7 +567,7 @@ class ImapSmtpMail:
             raise ValueError("on ne supprime définitivement que depuis la corbeille")
 
         def run() -> None:
-            with self._session(acc) as s:
+            with self._session(key, acc) as s:
                 s.select(mail.folder, write=True)
                 real = self._uid_sync(s, mail, uid)
                 s.store(real, "\\Deleted", True)
@@ -586,8 +643,9 @@ class ImapSmtpMail:
                 continue
             maintype, _, subtype = file.mime.partition('/')
             msg.add_attachment(file.data, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=file.name)
+        token = await self._bearer(key, acc)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._smtp_sync, acc, msg)
+        await loop.run_in_executor(None, self._smtp_sync, acc, msg, token)
         # le mail est parti : plus rien ne doit le dire échoué (on le renverrait, et il arriverait deux fois)
         try:
             self._cache.remember_sent(Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(),
@@ -606,7 +664,7 @@ class ImapSmtpMail:
     def _after_send_sync(self, key: str, acc: MailAccount, msg: EmailMessage, parent: Mail | None) -> None:
         if not acc.ready or not (acc.save_sent or parent is not None):
             return
-        with self._session(acc) as s:
+        with self._session(key, acc) as s:
             if acc.save_sent:
                 if self._cache.role_folder(key, "sent") is None:
                     self._list_sync(s, key)
@@ -621,7 +679,7 @@ class ImapSmtpMail:
                     self._cache.set_flags(key, parent.folder, located[1], answered=True)
 
     @staticmethod
-    def _smtp_sync(acc: MailAccount, msg: EmailMessage) -> None:
+    def _smtp_sync(acc: MailAccount, msg: EmailMessage, token: str = "") -> None:
         if not acc.smtp_host:
             raise RuntimeError("aucun serveur d'envoi configuré")
         if acc.smtp_security == "ssl":
@@ -632,10 +690,7 @@ class ImapSmtpMail:
         try:
             if acc.smtp_security == "starttls":
                 server.starttls(context=ssl.create_default_context())
-            user = acc.smtp_user or acc.user
-            password = acc.smtp_password or acc.password
-            if user and password:
-                server.login(user, password)
+            _smtp_login(server, acc, token)
             server.send_message(msg)
         finally:
             try:
@@ -680,12 +735,19 @@ class ImapSmtpMail:
     # ── état ──
     async def test(self, account: str) -> tuple[bool, str]:
         acc = self._account(account)
+        if acc.microsoft:  # sans jeton, ni la lecture ni l'envoi ne peuvent s'essayer : on le dit d'abord
+            try:
+                await self._bearer(account, acc)
+            except OAuthError as exc:
+                said = f"connexion Microsoft : {_why(exc)}"
+                self._cache.note(account, at=self._at(), error=said)
+                return False, said[:1].upper() + said[1:] + "."
 
         def run() -> tuple[bool, str]:
             parts, ok = [], True
             if acc.imap_host and acc.user:
                 try:
-                    with self._session(acc) as s:
+                    with self._session(account, acc) as s:
                         found = s.folders()
                         for name, flags in found:
                             self._cache.save_folder(account, name, role=role_of(name, flags))
@@ -699,7 +761,7 @@ class ImapSmtpMail:
                 parts.append("lecture : serveur IMAP ou utilisateur manquant")
             if acc.smtp_host:
                 try:
-                    self._smtp_check(acc)
+                    self._smtp_check(acc, self._bearers.get(account, ""))
                     parts.append("envoi : ok")
                 except (OSError, smtplib.SMTPException) as exc:
                     ok = False
@@ -713,7 +775,7 @@ class ImapSmtpMail:
         return result
 
     @staticmethod
-    def _smtp_check(acc: MailAccount) -> None:
+    def _smtp_check(acc: MailAccount, token: str = "") -> None:
         if acc.smtp_security == "ssl":
             server: smtplib.SMTP = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=15,
                                                     context=ssl.create_default_context())
@@ -722,10 +784,7 @@ class ImapSmtpMail:
         try:
             if acc.smtp_security == "starttls":
                 server.starttls(context=ssl.create_default_context())
-            user = acc.smtp_user or acc.user
-            password = acc.smtp_password or acc.password
-            if user and password:
-                server.login(user, password)
+            _smtp_login(server, acc, token)
         finally:
             try:
                 server.quit()
@@ -735,8 +794,37 @@ class ImapSmtpMail:
     def status(self, account: str) -> AccountStatus:
         return self._cache.status(account)
 
+    # ── la connexion Microsoft (ADR 0166) ──
+    def signin(self, account: str) -> SignIn | None:
+        found = self._accounts().get(account)
+        if found is None or not found.microsoft:
+            return None
+        return self._microsoft.state(account, found)
+
+    async def start_signin(self, account: str) -> SignIn:
+        acc = self._account(account)
+        if not acc.microsoft:
+            raise ValueError("cette boîte entre par mot de passe, pas par un compte Microsoft")
+        return await self._microsoft.start(account, acc)
+
     def close(self) -> None:
+        self._microsoft.close()
         self._cache.close()
+
+
+def _smtp_login(server: smtplib.SMTP, acc: MailAccount, token: str) -> None:
+    """S'identifier auprès du serveur d'envoi : ``XOAUTH2`` pour une boîte Microsoft, sinon le mot de passe (s'il y en
+    a un)."""
+    user = acc.smtp_user or acc.user
+    if acc.microsoft:
+        if not token:
+            raise smtplib.SMTPAuthenticationError(530, "pas de jeton Microsoft pour cette boîte")
+        server.ehlo_or_helo_if_needed()
+        server.auth("XOAUTH2", answer(user, token))
+        return
+    password = acc.smtp_password or acc.password
+    if user and password:
+        server.login(user, password)
 
 
 def _why(exc: BaseException) -> str:

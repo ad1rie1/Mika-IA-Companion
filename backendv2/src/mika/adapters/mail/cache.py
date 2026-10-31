@@ -19,12 +19,21 @@ Oublier un correspondant (``forget``) efface ses mails, ce qui lui a été écri
 et ce qui lui répondait ; ses mails restent sur le serveur, leur empreinte est
 retenue (``forgotten``) pour qu'une relecture ne les ramène pas.
 
+**Les pièces d'un mail sont gardées avec lui** (ADR 0172) : ses pièces jointes et
+ses images intégrées (``parts``), leurs octets à part, une fois par contenu
+(``blobs``). Elles partent avec leur mail, quelle qu'en soit la raison (oubli,
+élagage, mail rangé ailleurs) ; des octets qu'aucune pièce ne désigne plus
+s'effacent avec elle. Une pièce de plus de ``PART_MAX`` reste sur le serveur ;
+au-delà de ``KEPT_MAX`` en tout, les pièces des mails les plus anciens cèdent
+leurs octets : elles se relisent sur le serveur, à la demande.
+
 Les accès passent sous un verrou, par une seule connexion : une écriture est une transaction (validée à la sortie),
 une lecture faite pendant une écriture la voit.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Iterable, Iterator
@@ -41,6 +50,7 @@ from mika.adapters.mail.browse import Browse
 from mika.adapters.mail.models import (
     ACCOUNT,
     ADDRESS,
+    CHUNK,
     DRAFT,
     DRAFTED,
     FOLDER,
@@ -52,12 +62,14 @@ from mika.adapters.mail.models import (
     SENT,
     TO,
     WORD,
+    BlobRow,
     DraftRow,
     FolderRow,
     ForgottenRow,
     HandedRow,
     MessageRow,
     OfferedRow,
+    PartRow,
     RecipientRow,
     SentRow,
     StatusRow,
@@ -70,10 +82,12 @@ from mika.adapters.mail.models import (
     sent_name,
     sent_values,
 )
+from mika.adapters.mail.parse import Part
 from mika.ports.mail import (
     AccountStatus,
     Attachment,
     Draft,
+    File,
     Folder,
     Mail,
     Sent,
@@ -81,18 +95,27 @@ from mika.ports.mail import (
     mail_ref,
     split_ref,
 )
-from mika.ports.paging import fold_text
+from mika.ports.paging import words_of
 from mika.ports.sql import MAIL, insert_ignore
 
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
+#: au plus, une pièce gardée ; au-delà, elle reste sur le serveur (relue à la demande)
+PART_MAX = 25 * 1024 * 1024
+#: au plus, les octets de toutes les pièces gardées ; au-delà, les mails les plus anciens cèdent les leurs (jusqu'aux
+#: neuf dixièmes, pour ne pas recommencer au mail suivant)
+KEPT_MAX = 4 * 1024 ** 3
+#: au plus, les images intégrées d'un mail rendues à sa lecture ; au-delà, leur texte de remplacement
+INLINE_MAX = 8 * 1024 * 1024
+#: les images intégrées qu'un cadre montre (ce qu'un navigateur lit sans risque dans un ``<img>``)
+INLINE_TYPES = frozenset(("image/png", "image/gif", "image/jpeg", "image/jpg", "image/webp", "image/bmp"))
 
-M, F, S, D, R = MessageRow, FolderRow, SentRow, DraftRow, RecipientRow
+M, F, S, D, R, P, B = MessageRow, FolderRow, SentRow, DraftRow, RecipientRow, PartRow, BlobRow
 _MESSAGES = MessageRow.__table__
 #: ce qu'on lit d'un mail (``_mail``)
 _MAIL = (M.account, M.folder, M.uid, M.message_id, M.sender, M.address, M.reply_to, M.dest, M.cc, M.subject, M.date,
          M.body, M.has_html, M.attachments, M.in_reply_to, M.refs, M.bulk, M.seen, M.flagged, M.answered, M.html,
-         M.complete, M.ref, M.twin)
+         M.complete, M.ref, M.twin, M.parts_kept)
 _SENT = (S.message_id, S.dest, S.subject, S.body, S.date, S.in_reply_to, S.author, S.account, S.draft, S.cc,
          S.attachments)
 _DRAFT = (D.draft_id, D.account, D.dest, D.cc, D.subject, D.body, D.reply_to, D.quote, D.author, D.created, D.updated,
@@ -154,11 +177,12 @@ class MailCache:
 
     @staticmethod
     def _drop_messages(s: Session, *where: Any) -> int:
-        """Efface les mails qui répondent à ``where``, et les personnes qu'ils nommaient."""
+        """Efface les mails qui répondent à ``where``, les personnes qu'ils nommaient et leurs pièces."""
         ids = list(s.scalars(select(M.id).where(*where)))
         if not ids:
             return 0
         s.execute(delete(R).where(R.kind == MESSAGE, R.owner.in_(ids)))
+        _collect(s, _drop_parts(s, ids))
         return int(s.execute(delete(M).where(M.id.in_(ids))).rowcount or 0)
 
     @staticmethod
@@ -211,13 +235,14 @@ class MailCache:
                     folder=r.folder, cc=r.cc or "", reply_to=r.reply_to or "", references=r.refs or "",
                     seen=bool(r.seen), flagged=bool(r.flagged), answered=bool(r.answered),
                     attachments=_files(r.attachments), has_html=bool(r.has_html), html=r.html or "",
-                    complete=bool(r.complete), key=r.ref or "", twin=bool(r.twin))
+                    complete=bool(r.complete), key=r.ref or "", twin=bool(r.twin), parts_kept=bool(r.parts_kept))
 
-    def store(self, m: Mail, uid: int) -> Mail:
+    def store(self, m: Mail, uid: int, parts: Iterable[Part] | None = None) -> Mail:
         """Garde un mail à sa place (compte, dossier, UID) et rend ce qui est gardé, avec sa référence :
         celle qu'il avait déjà à cette place (ou à sa place provisoire, s'il vient d'être déplacé),
         sinon celle que lui attribue ``_assign``. Un mail oublié (``forget``) n'est pas gardé de nouveau :
-        il est rendu tel quel."""
+        il est rendu tel quel. ``parts`` : ses pièces, lues de son message entier (``parse.read``), qui
+        remplacent celles qu'il avait ; sans elles, il garde les siennes."""
         fingerprint = self._print(m.address, m.subject, m.date, m.body)
         account, folder, mid = fit(m.account, ACCOUNT), fit(m.folder, FOLDER), fit(m.message_id, MID)
         with self._use(write=True) as s:
@@ -243,6 +268,8 @@ class MailCache:
                 self._drop_messages(s, M.id.in_(gone))
             # la ligne passe en paramètres d'une requête sur la table (``values(**…)`` coûte autant que l'écriture)
             values = message_values(m, uid, ref, twin)
+            if parts is not None:
+                values["parts_kept"] = True
             if place is None:
                 row_id = int(s.execute(insert(_MESSAGES), values).inserted_primary_key[0])
             else:
@@ -252,7 +279,13 @@ class MailCache:
             linked = people(MESSAGE, row_id, to=m.to, cc=m.cc, sender=m.sender, address=m.address)
             if linked:
                 s.execute(insert(R), linked)
-        return replace(m, key=ref, twin=twin)
+            if parts is not None:
+                before = _drop_parts(s, [row_id])
+                fresh = _keep_parts(s, row_id, parts)
+                _collect(s, before)  # après : relu à l'identique, il garde ses octets sans les réécrire
+                if fresh:
+                    _bound(s)
+        return replace(m, key=ref, twin=twin, parts_kept=values["parts_kept"])
 
     @staticmethod
     def _where_ref(ref: str) -> Any:
@@ -291,6 +324,53 @@ class MailCache:
         with self._use(write=False):
             return getattr(Browse(self), method)(*args)
 
+    # ── ses pièces ──
+    def _owners(self, s: Session, ref: str) -> list[int]:
+        """Les lignes de ce mail (ses copies comprises), la meilleure d'abord (comme ``_best``)."""
+        return [int(i) for i in s.scalars(
+            select(M.id).where(self._where_ref(ref))
+            .order_by(case((M.ref == fit(ref, REF), 1), else_=0).desc(), case((M.folder == "INBOX", 1), else_=0).desc(),
+                      M.date.desc(), M.id))]
+
+    def part(self, ref: str, position: int) -> File | None:
+        """Une pièce jointe gardée, à son rang ; ``None`` : ses octets ne sont pas ici (le serveur les a)."""
+        with self._use(write=False) as s:
+            for owner in self._owners(s, ref):
+                row = s.execute(select(P.name, P.mime, P.size, P.digest)
+                                .where(P.owner == owner, P.position == position, P.digest != "")).first()
+                data = _blob(s, row.digest, row.size) if row is not None else None
+                if data is not None:
+                    return File(row.name, row.mime, data)
+        return None
+
+    def files(self, ref: str, count: int) -> tuple[File, ...] | None:
+        """Ses ``count`` pièces jointes, toutes gardées, dans leur ordre ; ``None`` s'il en manque une."""
+        out = []
+        for position in range(count):
+            found = self.part(ref, position)
+            if found is None:
+                return None
+            out.append(found)
+        return tuple(out)
+
+    def inline(self, ref: str, limit: int = INLINE_MAX) -> tuple[tuple[str, str, bytes], ...]:
+        """Ses images intégrées gardées, (Content-ID, type, octets), jusqu'à ``limit`` octets en tout."""
+        out: dict[str, tuple[str, str, bytes]] = {}
+        left = limit
+        with self._use(write=False) as s:
+            for owner in self._owners(s, ref):
+                rows = s.execute(select(P.content_id, P.mime, P.size, P.digest)
+                                 .where(P.owner == owner, P.content_id != "", P.digest != "")
+                                 .order_by(P.id)).all()
+                for row in rows:
+                    if row.content_id in out or row.mime.lower() not in INLINE_TYPES or row.size > left:
+                        continue
+                    data = _blob(s, row.digest, row.size)
+                    if data is not None:
+                        out[row.content_id] = (row.content_id, row.mime.lower(), data)
+                        left -= len(data)
+        return tuple(out.values())
+
     def located(self, ref: str) -> tuple[Mail, int] | None:
         """Le mail et son UID dans son dossier."""
         with self._use(write=False) as s:
@@ -321,9 +401,11 @@ class MailCache:
         return [self._mail(r) for r in rows]
 
     def search(self, text: str, limit: int, *, account: str = "") -> list[Mail]:
-        """Les mails dont l'objet, l'expéditeur ou le corps contient ``text`` (sans casse ni accents)."""
-        needle = fold_text(text.strip())
-        where = [or_(*(func.instr(col, needle) > 0 for col in (M.fold_subject, M.fold_sender, M.fold_body)))]
+        """Les mails dont l'objet, l'expéditeur ou le corps contiennent chaque mot de ``text`` (sans casse ni
+        accents, dans n'importe quel ordre)."""
+        words = words_of(text) or [""]
+        found = M.fold_subject + " " + M.fold_sender + " " + M.fold_body
+        where = [and_(*(func.instr(found, w) > 0 for w in words))]
         if account:
             where.append(M.account == fit(account, ACCOUNT))
         with self._use(write=False) as s:
@@ -669,3 +751,70 @@ class MailCache:
 
 def ref_of(m: Mail) -> str:
     return m.ref
+
+
+# ── les pièces et leurs octets ──
+def _keep_parts(s: Session, owner: int, parts: Iterable[Part]) -> bool:
+    """Les pièces d'un mail, et leurs octets s'ils sont lisibles et pas trop gros ; rend s'il en a écrit de nouveaux."""
+    rows, fresh = [], False
+    for part in parts:
+        digest = ""
+        if part.data is not None and len(part.data) <= PART_MAX:
+            digest = hashlib.sha256(part.data).hexdigest()
+            if s.scalar(select(B.chunk).where(B.digest == digest).limit(1)) is None:
+                data = part.data
+                s.execute(insert(B), [{"digest": digest, "chunk": n, "data": data[at:at + CHUNK]}
+                                      for n, at in enumerate(range(0, max(1, len(data)), CHUNK))])
+                fresh = True
+        rows.append({"owner": owner, "position": part.position, "content_id": part.content_id[:1000],
+                     "name": part.name[:1000], "mime": part.mime[:200],
+                     "size": len(part.data) if part.data is not None else 0, "digest": digest})
+    if rows:
+        s.execute(insert(P), rows)
+    return fresh
+
+
+def _drop_parts(s: Session, owners: list[int]) -> list[str]:
+    """Efface les pièces de ces mails ; rend les empreintes qu'elles désignaient (``_collect`` les ramasse)."""
+    digests = sorted(set(s.scalars(select(P.digest).where(P.owner.in_(owners), P.digest != ""))))
+    s.execute(delete(P).where(P.owner.in_(owners)))
+    return digests
+
+
+def _collect(s: Session, digests: list[str]) -> None:
+    """Efface les octets de ces empreintes qu'aucune pièce ne désigne plus."""
+    if not digests:
+        return
+    used = set(s.scalars(select(P.digest).where(P.digest.in_(digests))))
+    gone = [d for d in digests if d not in used]
+    if gone:
+        s.execute(delete(B).where(B.digest.in_(gone)))
+
+
+def _blob(s: Session, digest: str, size: int) -> bytes | None:
+    """Les octets d'une empreinte, recollés ; ``None`` s'ils manquent ou ne font pas la taille attendue."""
+    data = b"".join(s.scalars(select(B.data).where(B.digest == digest).order_by(B.chunk)))
+    return data if len(data) == size else None
+
+
+def _bound(s: Session) -> None:
+    """Au-delà de ``KEPT_MAX``, les pièces dont le dernier mail est le plus ancien cèdent leurs octets (jusqu'aux
+    neuf dixièmes) : leurs lignes restent, sans empreinte, et se relisent sur le serveur."""
+    kept = select(P.digest, func.max(P.size).label("size")).where(P.digest != "").group_by(P.digest).subquery()
+    total = int(s.scalar(select(func.coalesce(func.sum(kept.c.size), 0))) or 0)
+    if total <= KEPT_MAX:
+        return
+    last = func.max(M.date)
+    rows = s.execute(select(P.digest, func.max(P.size).label("size"), last.label("last"))
+                     .join(M, M.id == P.owner).where(P.digest != "").group_by(P.digest)
+                     .order_by(last, P.digest)).all()
+    gone = []
+    for row in rows:
+        if total <= KEPT_MAX * 9 // 10:
+            break
+        gone.append(row.digest)
+        total -= int(row.size or 0)
+    for at in range(0, len(gone), 500):
+        batch = gone[at:at + 500]
+        s.execute(update(P).where(P.digest.in_(batch)).values(digest=""))
+        s.execute(delete(B).where(B.digest.in_(batch)))

@@ -45,6 +45,11 @@
   {% if not f.nochamp %}<input type="hidden" name="_champs" value="{{ f.path }}">{% endif %}
   {% if f.kind == "bool" %}
     <label class="check"><input type="checkbox" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }}{{ ' checked' if f.value }}{{ ' disabled' if f.readonly }}> {{ f.label }}</label>
+  {% elif f.kind == "lines" and f.choices %}
+    <span class="label" id="{{ f.id }}-label">{{ f.label }}</span>
+    <div class="check-list" role="group" aria-labelledby="{{ f.id }}-label"{{ described(f) }}>
+      {% for v, l in f.choices %}<label class="check"><input type="checkbox" name="{{ f.path }}" value="{{ v }}"{{ ' checked' if v in f.selected }}{{ ' disabled' if f.readonly }}> {{ l }}</label>{% endfor %}
+    </div>
   {% else %}
     <label for="{{ f.id }}">{{ f.label }}{% if f.unit %} <span class="muted">({{ f.unit }})</span>{% endif %}</label>
     {% if f.kind == "select" %}

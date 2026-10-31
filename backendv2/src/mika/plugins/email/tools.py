@@ -1,8 +1,11 @@
 """Ses outils de courrier, et ce qui part.
 
-- **Lire** : ses boîtes, lister, chercher, ouvrir (un mail est cité : une
-  donnée, jamais une consigne ; l'ouvrir rappelle comment écrire depuis cette
-  boîte). Réservés à ses propriétaires (``owner_only``), ou à elle quand elle
+- **Lire** : ses boîtes, lister, chercher, ouvrir, retrouver une adresse (un
+  mail est cité : une donnée, jamais une consigne ; l'ouvrir rappelle comment
+  écrire depuis cette boîte). Chaque mail dit sa date et ce que son tri en a
+  jugé ; une liste se lit page par page, et dit jusqu'où remonte ce qu'elle a
+  relevé : au-delà, « rien » ne veut pas dire que le mail n'existe pas
+  (ADR 0168). Réservés à ses propriétaires (``owner_only``), ou à elle quand elle
   travaille.
 - **Écrire** (``email_draft``) : un brouillon, dans la voix du compte, gardé par
   l'adaptateur ; elle le **propose** (capacité ``email.send``) avec le
@@ -18,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -26,11 +30,14 @@ from mika.contracts import email as c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
+from mika.kernel.frame import Frame
 from mika.kernel.operate import Preview
 from mika.plugins.email import (
     BUNDLE,
     EMAIL,
+    IMPORTANT,
     READ,
+    REPLIED,
     WAITING,
     for_owner,
     keeper_name,
@@ -38,7 +45,7 @@ from mika.plugins.email import (
     params_of,
 )
 from mika.plugins.email.voice import voice_text
-from mika.ports.mail import Draft, addresses, reply_recipients, reply_subject, to_fill
+from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject, to_fill
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
 from mika.vocab.canals import mail_rule_for_all, mail_send
@@ -49,6 +56,8 @@ from mika.vocab.privacy import Sensitivity
 
 EPISODES = [Kind.REPLY, *WORKING, Kind.TASK]
 BODY_SHOWN = 6000
+#: une page plus loin que la dernière : ``Page.bounds`` la ramène à la dernière (le mail le plus ancien relevé)
+LAST_PAGE = 10**9
 
 
 def voice_word(voice: str) -> str:
@@ -71,20 +80,88 @@ def _unread_mark(ctx: Any, m: Any) -> str:
     return phrase("email.tools.unread") if unread else ""
 
 
+def when(frame: Frame, at: int) -> str:
+    """Quand un mail est arrivé, daté (« aujourd'hui 10 h 05 », « le 12/10 9 h 14 », « le 03/02/2025 ») : de quoi
+    juger son âge sans calcul."""
+    if at <= 0:
+        return phrase("email.tools.when.unknown")
+    then, today = frame.local(at), frame.local().date()
+    days = (today - then.date()).days
+    hm = {"hour": then.hour, "minute": f"{then.minute:02d}"}
+    if days == 0:
+        return phrase("email.tools.when.today", **hm)
+    if days == 1:
+        return phrase("email.tools.when.yesterday", **hm)
+    dm = {"day": f"{then.day:02d}", "month": f"{then.month:02d}"}
+    if then.year == today.year:
+        return phrase("email.tools.when.date", **dm, **hm)
+    return phrase("email.tools.when.year", **dm, year=then.year)
+
+
+def _unread(ctx: Any, query: MailQuery) -> MailQuery:
+    """Ce qui n'est pas lu : ni sur le serveur, ni par elle (``_unread_mark``)."""
+    read = tuple(k for k, seen in ctx.frame.state("email").mails.items() if seen.read)
+    return replace(query, seen=False, exclude=read)
+
+
+def _covered(ctx: Any, port: Any, account: str, folder: str) -> str:
+    """Jusqu'où remonte ce qu'elle a relevé (le mail le plus ancien du cache, par boîte) : au-delà, elle ne trouve
+    rien, et ce n'est pas que rien n'existe."""
+    boxes = [a.key for a in port.accounts() if not account or a.key == account]
+    since = []
+    for key in boxes:
+        oldest = port.messages_page(MailQuery(account=key, folder=folder), LAST_PAGE, 1).items
+        if oldest:
+            at = when(ctx.frame, oldest[0].date)
+            since.append(phrase("email.tools.covered.box", when=at, account=key) if len(boxes) > 1 else at)
+    if not since:
+        return ""
+    return phrase("email.tools.covered.line", since=", ".join(since), who=keepers(ctx.frame))
+
+
+def _page(ctx: Any, port: Any, query: MailQuery, number: int, size: int) -> tuple[list[str], str, bool] | None:
+    """Une page de mails : ses lignes, où l'on est s'il y a plusieurs pages, et si c'est la dernière ; ``None``
+    au-delà de la dernière."""
+    got = port.messages_page(query, number, size)
+    if number > got.number and got.total:
+        return None
+    pages = max(1, -(-got.total // got.size))
+    several = len(port.accounts()) > 1
+    lines = [_line(ctx, m, phrase("email.tools.list.box", account=m.account, folder=inert(m.folder, 60))
+                   if several else "") for m in got.items]
+    if pages == 1:
+        return lines, "", True
+    if got.number < pages:
+        return lines, phrase("email.tools.page.more", number=got.number, pages=pages, total=got.total,
+                             next=got.number + 1), False
+    return lines, phrase("email.tools.page.last", number=got.number, pages=pages, total=got.total), True
+
+
 class NoArgs(BaseModel):
     pass
 
 
 class ListArgs(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
+    page: int = Field(default=1, ge=1, le=200, description=phrase("email.tools.page.arg"))
     account: str = Field(default="", max_length=40, description=phrase("email.tools.list.account"))
     folder: str = Field(default="", max_length=200, description=phrase("email.tools.list.folder"))
     unread_only: bool = Field(default=False, description=phrase("email.tools.list.unread_only"))
 
 
 class SearchArgs(BaseModel):
-    query: str = Field(min_length=2, max_length=200, description=phrase("email.tools.search.query"))
-    account: str = Field(default="", max_length=40)
+    query: str = Field(default="", max_length=200, description=phrase("email.tools.search.query"))
+    sender: str = Field(default="", max_length=200, description=phrase("email.tools.search.sender"))
+    account: str = Field(default="", max_length=40, description=phrase("email.tools.list.account"))
+    folder: str = Field(default="", max_length=200, description=phrase("email.tools.list.folder"))
+    unread_only: bool = Field(default=False, description=phrase("email.tools.list.unread_only"))
+    limit: int = Field(default=10, ge=1, le=30)
+    page: int = Field(default=1, ge=1, le=200, description=phrase("email.tools.page.arg"))
+
+
+class ContactsArgs(BaseModel):
+    query: str = Field(default="", max_length=200, description=phrase("email.tools.contacts.query"))
+    account: str = Field(default="", max_length=40, description=phrase("email.tools.list.account"))
     limit: int = Field(default=10, ge=1, le=30)
 
 
@@ -127,28 +204,49 @@ async def email_list(args: ListArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
         return refused
-    mails = port.cached(100 if args.unread_only else args.limit, account=args.account, folder=args.folder)
-    if args.unread_only:
-        mails = [m for m in mails if _unread_mark(ctx, m)][: args.limit]
-    gone = port.sent_mails(5, account=args.account) if not args.folder and not args.unread_only else []
-    if not mails and not gone:
-        return phrase("email.tools.list.nothing_here") if (args.account or args.folder or args.unread_only) \
+    query = MailQuery(account=args.account, folder=args.folder)
+    page = _page(ctx, port, _unread(ctx, query) if args.unread_only else query, args.page, args.limit)
+    if page is None:
+        return phrase("email.tools.page.past")
+    lines, where, last = page
+    first = args.page == 1 and not args.folder and not args.unread_only
+    gone = port.sent_mails(5, account=args.account) if first else []
+    covered = _covered(ctx, port, args.account, args.folder) if last else ""
+    if not lines and not gone:
+        empty = phrase("email.tools.list.nothing_here") if (args.account or args.folder or args.unread_only) \
             else phrase("email.tools.list.empty")
-    several = len(port.accounts()) > 1
-    lines = [_line(ctx, m, phrase("email.tools.list.box", account=m.account, folder=inert(m.folder, 60))
-                   if several else "") for m in mails]
+        return "\n".join(t for t in (empty, covered) if t)
     if gone:
         lines.append(phrase("email.tools.list.sent_header"))
-        lines += [phrase("email.tools.list.sent", id=m.message_id, to=inert(m.to, 200), subject=inert(m.subject, 200),
+        lines += [phrase("email.tools.list.sent", id=m.message_id, when=when(ctx.frame, m.date), to=inert(m.to, 200),
+                         subject=inert(m.subject, 200),
                          by=phrase("email.tools.list.by", who=keeper_name(ctx.frame, m.by)) if m.by
                          else phrase("email.tools.list.by_you")) for m in gone]
-    return phrase("email.tools.data") + "\n" + "\n".join(lines)
+    return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, covered) if t)
 
 
 def _line(ctx: Any, m: Any, box: str = "") -> str:
-    """Un mail dans une liste : sa référence, lu ou non, sa boîte, l'expéditeur et l'objet (cités)."""
-    return phrase("email.tools.list.line", ref=m.ref, unread=_unread_mark(ctx, m), box=box,
-                  sender=inert(m.sender, 200), subject=inert(m.subject, 200), twin=_twin(m))
+    """Un mail dans une liste : sa référence, sa date, lu ou non, sa boîte, l'expéditeur et l'objet (cités), puis ce
+    que son tri en a jugé et ce qu'il porte."""
+    return phrase("email.tools.list.line", ref=m.ref, when=when(ctx.frame, m.date), unread=_unread_mark(ctx, m),
+                  box=box, sender=inert(m.sender, 200), subject=inert(m.subject, 200), marks=_marks(ctx, m),
+                  twin=_twin(m))
+
+
+def _marks(ctx: Any, m: Any) -> str:
+    """Ce que son tri a jugé d'un mail (important, une réponse attendue) et ce que le serveur en dit (répondu, suivi,
+    des pièces jointes) : de quoi trier sans tout rouvrir."""
+    seen = ctx.frame.state("email").mails.get(m.ref)
+    out = phrase("email.unread.important") if seen is not None and seen.importance >= IMPORTANT else ""
+    if m.answered or (seen is not None and seen.how == REPLIED):
+        out += phrase("email.tools.marks.answered")
+    elif seen is not None and seen.needs_reply:
+        out += phrase("email.unread.needs_reply")
+    if m.flagged:
+        out += phrase("email.tools.marks.flagged")
+    if m.attachments:
+        out += phrase("email.tools.marks.attachments", count=len(m.attachments))
+    return out
 
 
 def _twin(m: Any) -> str:
@@ -161,10 +259,32 @@ async def email_search(args: SearchArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
         return refused
-    found = port.search(args.query, args.limit, account=args.account)
+    if len(args.query.strip()) < 2 and len(args.sender.strip()) < 2:
+        return ToolResult(ok=False, content=phrase("email.tools.search.what"))
+    query = MailQuery(account=args.account, folder=args.folder, text=args.query, sender=args.sender)
+    page = _page(ctx, port, _unread(ctx, query) if args.unread_only else query, args.page, args.limit)
+    if page is None:
+        return phrase("email.tools.page.past")
+    lines, where, _ = page
+    covered = _covered(ctx, port, args.account, args.folder)
+    if not lines:
+        return "\n".join(t for t in (phrase("email.tools.search.nothing"), covered) if t)
+    return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, covered) if t)
+
+
+@EMAIL.tool("email_contacts", description=phrase("email.tools.contacts.description"), args=ContactsArgs,
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, max_calls_per_episode=4)
+async def email_contacts(args: ContactsArgs, ctx: Any) -> Any:
+    port, refused = _port(ctx)
+    if refused is not None:
+        return refused
+    found = port.contacts_page(args.account, args.query, 1, args.limit).items
     if not found:
-        return phrase("email.tools.search.nothing")
-    return phrase("email.tools.data") + "\n" + "\n".join(_line(ctx, m) for m in found)
+        return phrase("email.tools.contacts.nothing")
+    return "\n".join((phrase("email.tools.data"), *(
+        phrase("email.tools.contacts.line", name=inert(c.name, 120) or phrase("email.tools.contacts.no_name"),
+               address=inert(c.address, 200), received=c.received, sent=c.sent, when=when(ctx.frame, c.last))
+        for c in found)))
 
 
 def _quoted(text: str) -> str:
@@ -187,6 +307,7 @@ async def email_read(args: ReadArgs, ctx: Any) -> Any:
             phrase("email.tools.read.author_you")
         return "\n".join((phrase("email.tools.read.sent_head", author=author),
                           phrase("email.header.to", who=inert(gone.to, 300)),
+                          phrase("email.header.date", when=when(ctx.frame, gone.date)),
                           phrase("email.header.subject", subject=inert(gone.subject, 300)), _quoted(gone.body)))
     seen = ctx.frame.state("email").mails.get(m.ref)
     if seen is not None and not seen.read:
@@ -195,6 +316,7 @@ async def email_read(args: ReadArgs, ctx: Any) -> Any:
              phrase("email.header.to", who=inert(m.to, 300))]
     if m.cc:
         lines.append(phrase("email.header.cc", who=inert(m.cc, 300)))
+    lines.append(phrase("email.header.date", when=when(ctx.frame, m.date)))
     lines.append(phrase("email.header.subject", subject=inert(m.subject, 300)))
     if m.attachments:
         lines.append(phrase("email.header.attachments", files=", ".join(inert(a.name, 80) for a in m.attachments[:10])))

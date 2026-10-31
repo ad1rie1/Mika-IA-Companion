@@ -6,8 +6,9 @@ protocole.
   un mail lu ailleurs est su ; un UIDVALIDITY qui change fait tout relire sans
   rien rendre deux fois ;
 - ranger : les dossiers et leurs rôles (special-use, noms en UTF-7 modifié),
-  lu/non lu et suivi sur le serveur, archiver, corbeille, supprimer depuis la
-  corbeille, déplacer sans MOVE (COPY + EXPUNGE) ;
+  leur liste relue à chaque relève, « tous les dossiers » tenus à jour sans
+  rien lui rendre, lu/non lu et suivi sur le serveur, archiver, corbeille,
+  supprimer depuis la corbeille, déplacer sans MOVE (COPY + EXPUNGE) ;
 - envoyer : l'expéditeur suit la voix du compte, la signature et la citation
   sont ajoutées, le fil est chaîné, une copie est rangée dans « Envoyés » et le
   mail d'origine est marqué répondu ; un brouillon ne part que tel qu'il a été
@@ -29,7 +30,7 @@ import pytest
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig, compose, from_stored, utf7
 from mika.adapters.mail.parse import attachment_files, parse
 from mika.ports.mail import AccountInfo, Draft, Mail, reply_recipients, split_ref
-from tests.fixtures.mail_servers import Imap, Smtp, raw_mail, serve
+from tests.fixtures.mail_servers import Box, Imap, Smtp, raw_mail, serve
 
 NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -331,3 +332,43 @@ def test_missing_attachment_refuses_forward_before_smtp_and_changed_uids_are_rej
         go(box.file(m.ref, '0'))
     assert not Smtp.received
     box._cache.close()
+
+
+# ── la liste des dossiers, et « tous les dossiers » (ADR 0171) ──────────
+
+
+def test_the_folder_list_is_reread_at_each_poll_even_when_the_inbox_was_known_first(tmp_path, servers):
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    go(box.sync_folder("perso", "INBOX", 10))  # « Actualiser le dossier » avant toute relève : la réception seule
+    assert [f.name for f in box.folders("perso")] == ["INBOX"]
+    box.ack([m.ref for m in go(box.fetch_new(10))])
+    assert {f.name for f in box.folders("perso")} == {"INBOX", "Envoyés", "Archives", "Corbeille", "Indésirables"}
+    Imap.boxes["Projets"] = Box()  # créé dans un autre client
+    del Imap.boxes["Indésirables"]  # supprimé ailleurs
+    assert go(box.fetch_new(10)) == []
+    assert {f.name for f in box.folders("perso")} == {"INBOX", "Envoyés", "Archives", "Corbeille", "Projets"}
+
+
+def test_all_folders_are_kept_up_to_date_for_the_console_but_she_only_notices_the_polled_ones(tmp_path, servers):
+    Imap.boxes["Archives"].add(raw_mail(4, "Facture", "Votre facture d'octobre"))
+    Imap.boxes["Indésirables"].add(raw_mail(5, "Gagnez", "un lot"))
+    box = box_for(tmp_path, ("perso", account(*servers, sync_all=True)))
+    first = go(box.fetch_new(10))
+    assert [m.folder for m in first] == ["INBOX", "INBOX"]  # rien des autres dossiers ne lui est rendu
+    box.ack([m.ref for m in first])
+    assert [m.subject for m in box.cached(10, folder="Archives")] == ["Facture"]
+    assert [m.subject for m in box.cached(10, folder="Indésirables")] == ["Gagnez"]
+    folders = {f.name: f for f in box.folders("perso")}
+    assert folders["Archives"].last_sync and folders["Archives"].total == 1 and not folders["Archives"].polled
+    Imap.boxes["Archives"].add(raw_mail(6, "Relance", "Votre facture attend"))
+    assert go(box.fetch_new(10)) == []  # suivi pour la console, jamais remarqué
+    assert {m.subject for m in box.cached(10, folder="Archives")} == {"Facture", "Relance"}
+    assert all(not flags for b in Imap.boxes.values() for flags, _ in b.mails.values())  # rien n'est marqué lu
+
+
+def test_without_all_folders_the_others_wait_for_the_console(tmp_path, servers):
+    Imap.boxes["Archives"].add(raw_mail(4, "Facture", "Votre facture d'octobre"))
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    box.ack([m.ref for m in go(box.fetch_new(10))])
+    assert box.cached(10, folder="Archives") == []
+    assert go(box.sync_folder("perso", "Archives", 10)) == 1

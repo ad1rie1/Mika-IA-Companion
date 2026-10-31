@@ -11,6 +11,8 @@
   ``IMAP4.error``, une connexion coupée en cours de commande ``IMAP4.abort`` —
   ni l'une ni l'autre n'est une ``OSError``. Hors de cette session, une panne IMAP
   est toujours une ``OSError`` ou une ``ImapError``.
+- Une boîte Microsoft entre par ``AUTHENTICATE XOAUTH2`` avec le jeton d'accès
+  qu'on lui donne (``oauth``, ADR 0166), les autres par ``LOGIN``.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, TypeVar
 
-from mika.adapters.mail import utf7
+from mika.adapters.mail import oauth, utf7
 from mika.adapters.mail.config import MailAccount
 
 TIMEOUT = 30.0
@@ -98,7 +100,9 @@ def quoted(name: str) -> str:
 
 
 class Session:
-    def __init__(self, account: MailAccount, *, timeout: float = TIMEOUT) -> None:
+    def __init__(self, account: MailAccount, *, timeout: float = TIMEOUT, token: str = "") -> None:
+        if account.microsoft and not token:
+            raise ImapError(oauth.NOT_SIGNED_IN)
         try:  # un accueil refusé ou coupé lève une erreur d'imaplib, pas une OSError
             if account.imap_ssl:
                 self.box: imaplib.IMAP4 = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
@@ -116,7 +120,10 @@ class Session:
                     self.close()
                     raise ImapError(f"le chiffrement (STARTTLS) a échoué : {exc}") from None
         try:
-            self._ok(self.box.login(account.user, account.password), "connexion refusée")
+            if account.microsoft:
+                self._ok(self.box.authenticate("XOAUTH2", oauth.answer(account.user, token)), "connexion refusée")
+            else:
+                self._ok(self.box.login(account.user, account.password), "connexion refusée")
         except imaplib.IMAP4.error as exc:
             self.close()
             raise ImapError(f"connexion refusée : {exc}") from None
@@ -160,7 +167,10 @@ class Session:
             flags = frozenset(f.lower() for f in found.group("flags").decode("ascii", "replace").split())
             if "\\noselect" in flags or "\\nonexistent" in flags:
                 continue
-            out.append((utf7.decode(_unquote(found.group("name"))), flags))
+            name = utf7.decode(_unquote(found.group("name")))
+            # la réception s'écrit sans casse (RFC 3501) : « Inbox » chez Outlook est l'« INBOX » des réglages, et
+            # son curseur ne se perd pas quand la liste se relit
+            out.append(("INBOX" if name.upper() == "INBOX" else name, flags))
         return out
 
     @_translated

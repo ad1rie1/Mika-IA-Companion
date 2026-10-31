@@ -25,12 +25,13 @@ from mika.ports.mail import (
     MailQuery,
     Preview,
     Sent,
+    SignIn,
     addresses,
     forwarded_text,
     reference_key,
     split_ref,
 )
-from mika.ports.paging import Page, fold_text
+from mika.ports.paging import Page, fold_text, has_words
 
 #: la boîte simulée par défaut : un compte sans clé (les références restent les Message-ID)
 DEFAULT_ACCOUNT = AccountInfo(key="", label="Sa boîte", address="mika@exemple.fr", ready=True, can_send=True)
@@ -61,6 +62,8 @@ class FakeMail:
     actions: list[tuple[str, ...]] = field(default_factory=list)
     files: dict[tuple[str, str], File] = field(default_factory=dict)
     outgoing_files: dict[str, tuple[File, ...]] = field(default_factory=dict)
+    #: les images intégrées d'un mail, par sa référence : (Content-ID, type, octets)
+    inline: dict[str, tuple[tuple[str, str, bytes], ...]] = field(default_factory=dict)
 
     # ── comptes ──
     def configured(self) -> bool:
@@ -126,9 +129,8 @@ class FakeMail:
         return sorted(kept, key=lambda m: -m.date)[:limit]
 
     def search(self, text: str, limit: int, *, account: str = "") -> list[Mail]:
-        low = text.lower().strip()
         return [m for m in self.cached(10_000, account=account)
-                if low and low in f"{m.subject} {m.sender} {m.body}".lower()][:limit]
+                if text.strip() and has_words(f"{m.subject} {m.sender} {m.body}", text)][:limit]
 
     def messages_page(self, query: MailQuery, page=1, size=25):
         kept = [m for m in self.inbox if (not query.account or m.account == query.account)
@@ -136,8 +138,8 @@ class FakeMail:
                 and (query.seen is None or m.seen == query.seen)
                 and (query.flagged is None or m.flagged == query.flagged)
                 and (query.refs is None or m.ref in query.refs) and m.ref not in query.exclude
-                and fold_text(query.text) in fold_text(f"{m.subject} {m.sender} {m.body}")
-                and fold_text(query.sender) in fold_text(f"{m.sender} {m.address}")]
+                and has_words(f"{m.subject} {m.sender} {m.body}", query.text)
+                and has_words(f"{m.sender} {m.address}", query.sender)]
         return Page.of(sorted(kept, key=lambda m: (-m.date, m.ref)), page, size)
 
     def find_ref(self, key):
@@ -157,7 +159,7 @@ class FakeMail:
     def outgoing_page(self, query: MailQuery, page=1, size=25):
         rows = [(m, local) for m, local, sent in self._letters().values() if sent
                 and (not query.account or m.account == query.account)
-                and fold_text(query.text) in fold_text(f"{m.subject} {m.to} {m.body}")]
+                and has_words(f"{m.subject} {m.to} {m.body}", query.text)]
         return Page.of(sorted(rows, key=lambda item: (-item[0].date, item[0].ref)), page, size)
 
     @staticmethod
@@ -167,11 +169,11 @@ class FakeMail:
 
     def search_page(self, text, limit=25, offset=0):
         rows = [self._hit(m, sent) for m, _, sent in self._letters().values()
-                if fold_text(text) in fold_text(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}")]
+                if has_words(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}", text)]
         return sorted(rows, key=lambda m: (-m.date, m.ref))[offset:offset + limit]
 
     def search_count(self, text):
-        return sum(fold_text(text) in fold_text(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}")
+        return sum(has_words(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}", text)
                    for m, _, _ in self._letters().values())
 
     def thread_page(self, ref, page=1, size=25):
@@ -202,15 +204,23 @@ class FakeMail:
                 old = book.get(address, Contact(address, name, 0, 0, 0))
                 book[address] = Contact(address, old.name or name, old.received + int(not sent),
                                         old.sent + int(sent), max(old.last, m.date))
-        rows = [c for c in book.values() if fold_text(text) in fold_text(c.name + ' ' + c.address)]
+        rows = [c for c in book.values() if has_words(c.name + ' ' + c.address, text)]
         return Page.of(sorted(rows, key=lambda c: (-c.last, c.address)), page, size)
 
     def drafts_page(self, text="", page=1, size=25):
-        rows = [d for d in self.kept_drafts.values() if fold_text(text) in fold_text(d.subject + ' ' + d.to)]
+        rows = [d for d in self.kept_drafts.values() if has_words(d.subject + ' ' + d.to, text)]
         return Page.of(sorted(rows, key=lambda d: (-d.updated, d.id)), page, size)
 
     async def document(self, ref):
         return self.cached_one(ref) or self.sent_mail(ref)
+
+    async def reread(self, ref):
+        self.actions.append(("reread", ref))
+        i = self._find(ref)
+        return self._update(ref, parts_kept=True) if i is not None else self.sent_mail(ref)
+
+    def inline_images(self, ref):
+        return self.inline.get(ref, ())
 
     async def file(self, ref, part):
         found = self.files.get((ref, part))
@@ -385,6 +395,12 @@ class FakeMail:
 
     def status(self, account: str) -> AccountStatus:
         return AccountStatus(account, last_poll=self.now() if self.polls else 0)
+
+    def signin(self, account: str) -> SignIn | None:
+        return None  # ses boîtes entrent par mot de passe
+
+    async def start_signin(self, account: str) -> SignIn:
+        raise ValueError("cette boîte entre par mot de passe, pas par un compte Microsoft")
 
 
 @dataclass(slots=True)

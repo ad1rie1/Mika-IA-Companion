@@ -6,7 +6,8 @@
 - une connexion qui ne se laisse pas deviner, une touche Entrée qui ne décide
   jamais d'un bouton secondaire ;
 - des réglages qui refusent ce qui mettrait tout en panne (un fuseau inventé),
-  qui renomment sans rien perdre, qui ne joignent un fournisseur que sur demande ;
+  qui renomment sans rien perdre, qui ne joignent un fournisseur (ou le serveur
+  d'une boîte, pour ses dossiers à cocher) que sur demande ;
 - des listes qui ne perdent rien entre deux pages, ne mentent pas sur leur total,
   et des badges qu'on peut éteindre.
 """
@@ -21,6 +22,7 @@ from mika.contracts import runtime as rt
 from mika.inspector.ui import env as templates
 from mika.kernel.builtin import KernelParams
 from mika.kernel.registry import _zone
+from mika.ports.mail import Folder
 from mika.runtime import health, operations
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
@@ -255,6 +257,45 @@ def test_a_mailbox_keeps_its_name(world):  # noqa: F811
     moved = post(client, url, {**account, "_ancienne": "perso", "_cle": "pro"})
     assert moved.status_code == 400 and "ne change pas" in html_of(moved)
     assert set(client.portal.call(live.settings.email).accounts) == {"perso"}
+
+
+def test_a_mailbox_loads_its_folders_to_tick_and_keeps_the_ticked_ones(world):  # noqa: F811
+    """ADR 0171 : « Charger la liste » lit les dossiers de la boîte enregistrée, en cases à cocher ; ceux qu'on coche
+    sont relevés, et « Synchroniser tous les dossiers » se coche à côté."""
+    client, live, _ = world
+    bootstrap(client)
+    url = f"{BASE}/reglages/boites"
+    client.get(url)
+    account = {"_section": "courrier", "_enregistrement": "accounts", "_ancienne": "", "_cle": "perso",
+               "_champs": ["imap_host", "user", "address", "folders", "sync_all"], "imap_host": "imap.exemple.org",
+               "user": "moi", "address": "moi@exemple.org", "folders": "INBOX"}
+    early = post(client, url, {**account, "_charger": "folders"})  # pas encore enregistrée : rien à lire
+    assert early.status_code == 200 and "enregistre d'abord la boîte" in html_of(early)
+    assert post(client, url, account).status_code == 200
+    asked: list[str] = []
+
+    class Port:  # le serveur de la boîte, sans réseau
+        def account(self, key):
+            return object() if key == "perso" else None
+
+        async def refresh_folders(self, key):
+            asked.append(key)
+            return [Folder("perso", "INBOX", "inbox", True), Folder("perso", "Archives", "archive"),
+                    Folder("perso", "Projets")]
+
+    live.kernel.ports["mail"] = Port()
+    page = html_of(client.get(f"{url}?enregistrement=accounts&cle=perso"))
+    assert re.search(r'<button[^>]*name="_charger" value="folders"', page) and asked == []  # sur demande seulement
+    loaded = html_of(post(client, url, {**account, "_ancienne": "perso", "_charger": "folders"}))
+    assert asked == ["perso"] and "Rien n'est encore enregistré" in loaded
+    ticks = re.findall(r'<label class="check"><input type="checkbox" name="folders" value="([^"]+)"( checked)?[^>]*> '
+                       r'([^<]+)</label>', loaded)
+    assert ticks == [("INBOX", " checked", "Réception (INBOX)"), ("Archives", "", "Archives"),
+                     ("Projets", "", "Projets")]
+    saved = post(client, url, {**account, "_ancienne": "perso", "folders": ["INBOX", "Projets"], "sync_all": "on"})
+    assert saved.status_code == 200
+    got = client.portal.call(live.settings.email).accounts["perso"]
+    assert got.folders == ("INBOX", "Projets") and got.sync_all
 
 
 def test_settings_refuse_what_cannot_work(world):  # noqa: F811

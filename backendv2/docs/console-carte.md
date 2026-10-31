@@ -108,8 +108,10 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - **Courrier** : Réception et Envoyés en boîte aux lettres (une ligne par message, douze par page, le message
   ouvert dans une liseuse sous la liste, `?lire=`), Brouillons, Contacts. Le compte, le dossier et les filtres se
   gardent dans la pagination et au retour d'un message ; consulter n'envoie rien et ne marque rien comme lu. Un
-  mail HTML est reconstruit avec une liste de balises autorisées, sans scripts, styles ni images distantes ; sa
-  version texte reste accessible ; un message long se lit en parties de 50 000 caractères au plus. Les brouillons
+  mail HTML se lit tel qu'il a été écrit, avec ses styles, dans un cadre isolé (ADR 0169) : ni script, ni
+  formulaire, ni image distante (son texte de remplacement à sa place) ; ses liens web et `mailto:` s'ouvrent dans
+  un nouvel onglet ; sa version texte reste accessible ; un message long se lit en parties de 50 000 caractères au
+  plus. Les brouillons
   qu'elle propose sont distingués de ceux du serveur. Les boîtes se règlent dans Réglages › Plugins › Boîtes aux
   lettres.
 - **Teams** (ADR 0069) : Conversations, Réponses (ses réponses rédigées à la place de la personne et leur sort),
@@ -419,7 +421,8 @@ MIKA_CONSOLE_PREVIEW=/tmp/mika-console-apercu node --test tests/browser/console.
 ```
 
 `mika console apercu` exporte chaque page, en clair et en sombre, d'une Mika neuve sur des données fictives
-(modèle factice, port de courrier simulé, rien ne sort de la machine, POST refusés).
+(modèle factice, port de courrier simulé, rien ne sort de la machine, POST refusés) ; le cadre d'un mail HTML
+(ADR 0169) s'exporte à part, sous `cadres/`.
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` permet de préciser un autre exécutable Chromium. Le navigateur emploie un profil
 temporaire ; les pages et ressources sont servies par interception depuis l'export et les fichiers source, et les
 requêtes vers un autre hôte sont bloquées. Aucun compte de l'installation n'est utilisé.

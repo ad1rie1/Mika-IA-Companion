@@ -27,6 +27,7 @@ class Tags(HTMLParser):
     '<a href="java&#x09;script:alert(1)" style="color:red" id="q-global">Bonjour</a>',
     '<math><mtext><table><mglyph><style><!--</style><img title="--><img src=x onerror=run()>"></math>Bonjour',
     '<a href="https://user:pass@example.test">Bonjour</a><a href="//example.test">x</a>',
+    '<table><tr><td colspan="2&quot; onclick=&quot;run()">Bonjour</td><td colspan="2" onclick="run()">x</td></tr></table>',
 ])
 def test_html_cannot_load_content_execute_code_or_inject_ui(source):
     result = str(readable_html(source))
@@ -56,6 +57,8 @@ def test_html_preserves_links_lists_quotes_and_never_produces_a_second_h1():
     "<a href='https://a.example'><a href='https://b.example'>x</a></a></div>Faux",  # un lien en referme un autre
     "<table><tr><td><li>x</td></tr></table></div>Faux",
     "<ul><b><li>x</li></b></ul>",
+    "<table><tr><td><p>x<td>y<tr><td>z</table></div>Faux",  # cellules et lignes jamais fermées
+    "<table><tr><td><p><table><tr><td>x<td>y</table></p></td></tr></table></div>Faux",
 ])
 def test_a_mail_cannot_step_out_of_its_frame_in_the_console(source):
     """Relu par un vrai parseur HTML5 (celui d'un navigateur), le mail reste dans son cadre : rien de ce qu'il
@@ -96,3 +99,34 @@ def test_mail_cache_keeps_html_and_knows_which_mails_lack_it(tmp_path):
     cache.store(rich, 3)
     assert cache.one(original.ref) == replace(rich, key=original.ref) and cache.missing_html("pro", "INBOX", 25) == []
     cache.close()
+
+
+def test_mail_table_columns_take_the_width_of_their_content():
+    """Comme dans une messagerie : la coche d'une liste reste étroite à côté de son texte, une cellule fusionnée
+    couvre ses colonnes, un tableau d'une colonne reste une suite de lignes."""
+    result = str(readable_html(
+        '<table width="100%"><tr><th colspan="2">Titre</th></tr>'
+        '<tr><td width="18">✓</td><td><table><tr><td>Seule</td></tr></table></td></tr></table>'))
+    assert result == (
+        '<div class="document-table document-grid document-cols-2"><div class="document-row">'
+        '<div class="document-cell document-head document-span-2">Titre</div></div>'
+        '<div class="document-row"><div class="document-cell">✓</div><div class="document-cell">'
+        '<div class="document-table"><div class="document-row"><div class="document-cell">Seule</div></div></div>'
+        '</div></div></div>')
+    too_wide = str(readable_html("<table><tr>" + "<td>x</td>" * 13 + "</tr></table>"))
+    assert too_wide.startswith('<div class="document-table"><div class="document-row">')  # ses cellules passent à la ligne
+
+
+def test_unclosed_cells_and_rows_close_themselves_like_in_a_browser():
+    result = str(readable_html("<table><tr><td>a<td><p>b<tr><td>c</table>"))
+    assert result == (
+        '<div class="document-table document-grid document-cols-2">'
+        '<div class="document-row"><div class="document-cell">a</div><div class="document-cell"><p>b</p></div></div>'
+        '<div class="document-row"><div class="document-cell">c</div></div></div>')
+
+
+def test_mailto_links_stay_clickable_and_open_the_mail_client():
+    result = str(readable_html('<a href="mailto:contact@example.test?subject=D%C3%A9mo">Demander une présentation</a>'
+                               '<a href="mailto:">Vide</a>'))
+    assert result == ('<a href="mailto:contact@example.test?subject=D%C3%A9mo" rel="noopener noreferrer nofollow">'
+                      'Demander une présentation</a><span>Vide</span>')

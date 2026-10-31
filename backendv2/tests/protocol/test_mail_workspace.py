@@ -7,9 +7,10 @@ import re
 from dataclasses import replace
 from urllib.parse import quote
 
+from mika.inspector.framed import FRAME_CSP
 from mika.ports.mail import Attachment, File
 from tests.fixtures.console_html import ConsoleHTML
-from tests.fixtures.courrier import mailbox
+from tests.fixtures.courrier import framed, mailbox
 from tests.protocol.test_console_workflows import page as export_page
 from tests.protocol.test_web import bootstrap, world  # noqa: F401
 
@@ -55,10 +56,14 @@ def test_reader_displays_html_safely_and_replies_from_the_original_account(world
     client, box = setup(world)
     key = quote("pro:<projet@example.test>", safe="")
     page = get(client, f"/inspecteur/fiche/mail/{key}")
-    assert "<strong>Ton retour jeudi</strong>" in page
-    assert "FIN DU MESSAGE LONG" in page
-    assert '<a href="https://example.test/projet"' in page
-    assert 'src="https://tracker.example.test' not in page and "window.mailExecuted" not in page
+    mail = framed(client, page)  # le mail tel qu'il a été écrit, dans son cadre (ADR 0169)
+    assert "<strong>Ton retour jeudi</strong>" in mail and "<h1>Les maquettes sont prêtes</h1>" in mail
+    assert "FIN DU MESSAGE LONG" in page  # sa version texte, dans la page
+    assert '<a href="https://example.test/projet" target="_blank"' in mail
+    assert "Logo Atelier" in mail  # l'image distante : son texte de remplacement
+    for text in (page, mail):
+        assert "tracker.example.test" not in text and "window.mailExecuted" not in text
+    assert "frame-src 'self'" in client.get(f"/inspecteur/fiche/mail/{key}").headers["content-security-policy"]
     assert 'class="hm-reading' in page  # un document à lire (ADR 0121)
     assert "maquettes.pdf" in page and "150 Ko" in page
     assert "/inspecteur/courrier/reception?compte=pro&dossier=INBOX" in page
@@ -74,6 +79,17 @@ def test_reader_displays_html_safely_and_replies_from_the_original_account(world
     assert sent.account == "pro" and sent.in_reply_to == "pro:<projet@example.test>"
     sent_page = get(client, "/inspecteur/courrier/envoyes?compte=pro")
     assert "Envoyé depuis Personnel" not in sent_page and "Re: Maquettes" in sent_page
+
+
+def test_a_mail_frame_needs_the_console_session_and_says_when_it_is_gone(world):  # noqa: F811
+    client, _ = setup(world)
+    page = get(client, "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe=""))
+    src = re.search(r'<iframe class="document-frame" src="([^"]+)"', page).group(1)
+    gone = client.get("/inspecteur/document/" + "0" * 40)  # oublié (un redémarrage) : la page rechargée le redonne
+    assert gone.status_code == 404 and "recharge la page" in gone.text
+    assert gone.headers["content-security-policy"] == FRAME_CSP
+    client.cookies.clear()
+    assert client.get(src, follow_redirects=False).status_code == 303  # vers la connexion
 
 
 def test_folders_unread_and_unknown_accounts_do_not_mix_mail(world):  # noqa: F811
@@ -201,7 +217,7 @@ def test_a_line_opens_the_message_under_the_list_with_its_actions(world):  # noq
     page = get(client, f"/inspecteur/courrier/reception?compte=pro&lire={key}")
     assert '<li class="unread on">' in page  # la ligne du message ouvert
     reader = page.split('class="now-card mail-reader"')[1]
-    assert "Maquettes du projet" in reader and "<strong>Ton retour jeudi</strong>" in reader
+    assert "Maquettes du projet" in reader and "<strong>Ton retour jeudi</strong>" in framed(client, reader)
     assert "maquettes.pdf" in reader and f'href="/inspecteur/fiche/mail/{key}"' in reader
     form = re.search(r'<form[^>]+action="/inspecteur/action/email.repondre".*?</form>', reader, re.S).group()
     assert 'name="csrf"' in form  # le retour ramène au message ouvert

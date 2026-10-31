@@ -313,3 +313,39 @@ export function decisionFrame(
   const allowed = decision === "accept" ? controls.accept : controls.refuse;
   return allowed ? approvalFrame(card, decision) : null;
 }
+
+// ── L'accord automatique (ADR 0170) ─────────────────────────────────
+
+/**
+ * Une carte telle qu'elle a été reçue — ou la trame qui l'a acceptée : son
+ * identifiant et son empreinte. Une carte dont ce qui partirait a changé est
+ * une autre carte.
+ */
+export function approvalKey(card: { readonly id: number; readonly digest: string }): string {
+  return `${card.id}:${card.digest}`;
+}
+
+/**
+ * Ce que « Tout accepter » envoie maintenant — ou `null` : l'accord de la
+ * première carte que le bouton « Accepter » permettrait (connexion ouverte,
+ * ni bloquée, ni vide, ni expirée).
+ *
+ * - Une à la fois : rien ne part tant qu'une décision attend sa réponse (la
+ *   liste qui la suit). Le serveur jette sans rien dire ce qui dépasse son
+ *   débit (12 décisions par 10 s) ; une rafale y laisserait des cartes.
+ * - Jamais deux fois la même (`done`, par `approvalKey`) sur une connexion :
+ *   une carte que le serveur relisterait telle quelle ne repart pas en boucle.
+ * - Une carte bloquée reste là : seul son refus est possible, et il revient
+ *   à la personne.
+ */
+export function autoAcceptFrame(
+  state: ApprovalsState,
+  nowMs: number,
+  done: ReadonlySet<string>,
+): ApprovalFrame | null {
+  if (state.sent.length) return null;
+  const card = state.cards.find(
+    (c) => !done.has(approvalKey(c)) && cardControls(state, c, nowMs).accept,
+  );
+  return card ? approvalFrame(card, "accept") : null;
+}

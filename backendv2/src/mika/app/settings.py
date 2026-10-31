@@ -12,6 +12,7 @@ l'est, et c'est l'empreinte du jeton présenté qu'on lui compare.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
+from mika.adapters.mail.oauth import Grant
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
@@ -51,6 +53,9 @@ LLM_KEY = "llm"
 #: les fournisseurs d'images et leurs rôles (clés scellées)
 IMAGING_KEY = "imaging"
 EMAIL_KEY = "email"
+#: les connexions Microsoft des boîtes aux lettres (ADR 0166) : par boîte, le jeton de renouvellement scellé, et
+#: l'application et l'annuaire qui l'ont délivré — à part des comptes, que le formulaire de la console réécrit
+MAIL_GRANTS_KEY = "mail_oauth"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 #: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
@@ -184,6 +189,8 @@ class Settings:
         self._authors: authors_m.Authors | None = None
         #: le fil de référence de sa persona (posé par le serveur) : l'exemple de « Message » quand le sien est vide
         self.reference_thread: Callable[[], str] = lambda: ""
+        #: les connexions Microsoft des boîtes se relisent puis se réécrivent ensemble : une à la fois
+        self._grants_lock = asyncio.Lock()
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -303,7 +310,30 @@ class Settings:
                 spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
             accounts[name] = spec
         await self._put(EMAIL_KEY, {"accounts": accounts})
+        async with self._grants_lock:  # la connexion d'une boîte retirée, ou qui reprend un mot de passe, ne reste pas
+            grants = dict(self._get(MAIL_GRANTS_KEY) or {})
+            kept = {k: v for k, v in grants.items() if k in cfg.accounts and cfg.accounts[k].microsoft}
+            if kept != grants:
+                await self._put(MAIL_GRANTS_KEY, kept)
         return cfg
+
+    def mail_grant(self, account: str) -> Grant | None:
+        """La connexion Microsoft d'une boîte (son jeton de renouvellement déchiffré) ; aucune : ``None``."""
+        spec = dict(self._get(MAIL_GRANTS_KEY) or {}).get(account)
+        if not isinstance(spec, dict):
+            return None
+        refresh = self.box.open(str(spec.get("refresh_sealed") or ""))
+        if not refresh:  # un scellé qui ne s'ouvre plus (``secret.key`` changée) : il faut se reconnecter
+            return None
+        return Grant(refresh, str(spec.get("client_id") or ""), str(spec.get("tenant") or ""))
+
+    async def save_mail_grant(self, account: str, grant: Grant) -> None:
+        """Garde la connexion Microsoft d'une boîte, son jeton de renouvellement scellé."""
+        async with self._grants_lock:
+            grants = dict(self._get(MAIL_GRANTS_KEY) or {})
+            grants[account] = {"refresh_sealed": self.box.seal(grant.refresh), "client_id": grant.client_id,
+                               "tenant": grant.tenant}
+            await self._put(MAIL_GRANTS_KEY, grants)
 
     async def save_mail_account(self, name: str, **fields: Any) -> MailConfig:
         """Crée ou modifie un compte (la ligne de commande) : les champs ``None`` ne changent pas."""

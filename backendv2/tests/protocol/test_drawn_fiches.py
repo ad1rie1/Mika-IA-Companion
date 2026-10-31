@@ -18,10 +18,12 @@ from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
 from mika.kernel.events import Content, Origin
+from mika.ports.mail import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.mail import Draft as MailDraft
+from mika.sim.outside import FakeMail
 from mika.ports.teams import Draft as TeamsDraft
 from tests.fixtures.console_html import ConsoleHTML
-from tests.fixtures.courrier import mailbox
+from tests.fixtures.courrier import framed, mailbox
 from tests.protocol.test_teams_web import DM, batch, headers, new_key
 from tests.protocol.test_wakeup_web import configure, key_for, send
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -219,11 +221,26 @@ def test_a_mailbox_shows_its_state_folders_and_how_she_writes_there(world):  # n
     assert 'class="now-page person-tab"' in voice and "Ce qu'elle lit avant d'écrire" in voice
 
 
+def test_a_microsoft_mailbox_says_how_to_connect_it(world, monkeypatch):  # noqa: F811
+    client, _, box = with_mail(world)
+    assert "/inspecteur/action/email.microsoft" not in drawn(client, "/inspecteur/fiche/compte/pro")  # un mot de passe
+    monkeypatch.setattr(FakeMail, "signin", lambda self, key: SignIn(
+        SIGNIN_PENDING, code="ABCD-EFGH", url="https://microsoft.com/devicelogin", until=1_793_000_000_000_000))
+    page = drawn(client, "/inspecteur/fiche/compte/pro")
+    assert "/inspecteur/action/email.microsoft" in page and "Se connecter à Microsoft" in page
+    assert "https://microsoft.com/devicelogin" in page and "ABCD-EFGH" in page  # le code à entrer, sur la fiche
+    monkeypatch.setattr(FakeMail, "signin", lambda self, key: SignIn(SIGNIN_NEEDED, error="Microsoft ne renouvelle "
+                                                                                         "plus sa connexion"))
+    assert "n'est pas connectée : Microsoft ne renouvelle plus sa connexion" in drawn(
+        client, "/inspecteur/fiche/compte/pro")
+
+
 def test_a_mail_reads_with_what_she_knows_beside_it(world):  # noqa: F811
     client, _, box = with_mail(world)
     page = drawn(client, "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe=""))
     assert 'class="now-page mailf"' in page and "Mail reçu" in page
-    assert "Maquettes du projet" in page and "<strong>Ton retour jeudi</strong>" in page and "maquettes.pdf" in page
+    assert "Maquettes du projet" in page and "maquettes.pdf" in page
+    assert "<strong>Ton retour jeudi</strong>" in framed(client, page)  # dans son cadre (ADR 0169)
     assert "/inspecteur/action/email.repondre" in page  # ses actions, celles de la console
     assert "Elle ne l'a pas (ou plus) remarqué" in page  # ce qu'elle en sait : rien de plus que la boîte
     assert not box.actions and not box.sent  # consulter ne range rien

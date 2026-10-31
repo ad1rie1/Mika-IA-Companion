@@ -38,6 +38,7 @@ from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.plugins.email import WAITING
+from mika.plugins.email.console.accounts import signin_note
 from mika.plugins.email.console.common import VOICE_LABEL, box_link, clip, mail_key, resolve
 
 ACCOUNT, MAIL, DRAFT = "compte", "mail", "brouillon"
@@ -106,6 +107,10 @@ class AccountFiche(Overview):
         if not info.ready:
             alerts.append({"tone": "warn", "text": "Il manque de quoi relever (serveur IMAP, utilisateur), ou la boîte "
                                                    "est inactive : rien n'arrive d'ici."})
+        signin = port.signin(key)  # une boîte Microsoft : sa connexion (ADR 0166)
+        said = signin_note(signin, look.hm(signin.until) if signin is not None and signin.until else "")
+        if said is not None:
+            alerts.append({"tone": said[0], "text": said[1]})
         polled = sum(1 for f in folders if f.polled)
         state = _account_state(info, status.error)
         items = rendered(ui, blocks, query)

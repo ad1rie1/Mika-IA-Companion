@@ -143,6 +143,9 @@ class SettingsSection:
     order: int = 100
     loaders: Mapping[str, Callable[[Mapping[str, Any]], Awaitable[list[tuple[str, str]]]]] = \
         field(default_factory=dict)
+    #: les chargeurs qui reçoivent aussi le nom de l'entrée (sous ``_cle`` ; vide pour une entrée neuve) : ce qu'ils
+    #: lisent dépend de l'entrée enregistrée (les dossiers d'une boîte, sur son serveur, avec sa connexion)
+    named_loaders: tuple[str, ...] = ()
     commands: tuple[Command, ...] = ()
     facts: Callable[[], Sequence[tuple[str, str]]] | None = None
     blocks: Callable[[], Sequence[Any]] | None = None

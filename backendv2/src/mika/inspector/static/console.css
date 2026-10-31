@@ -490,8 +490,10 @@ details.advanced > summary .muted { font-weight: 400; font-size: 12.5px; }
 .settings .group { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px;
   align-items: start; }
 .settings .group > legend { grid-column: 1 / -1; }
-.settings .group .field:has(textarea), .settings .group .field.mapping, .settings .group .field:has(.slider) {
-  grid-column: 1 / -1; }
+.settings .group .field:has(textarea), .settings .group .field.mapping, .settings .group .field:has(.slider),
+.settings .group .field:has(.check-list) { grid-column: 1 / -1; }
+/* des lignes choisies dans une liste chargée (les dossiers d'une boîte) : une case par choix */
+.check-list { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 /* un champ seul dans son groupe prend toute la largeur ; son aide garde une longueur de ligne lisible */
 .settings .group:not(:has(.field ~ .field)) > .field { grid-column: 1 / -1; }
 .settings .group:not(:has(.field ~ .field)) > .field select { max-width: 520px; }
@@ -645,10 +647,40 @@ form.inline { display: inline; }
 .document-html blockquote { border-left: 3px solid var(--border-strong); margin: 16px 0;
   padding: 0 16px; color: var(--text-2); }
 .document-mode { font-size: 12px; color: var(--muted); margin: 0 0 20px; }
+/* un mail tel qu'il a été écrit, dans son cadre isolé (ADR 0169) : sa page blanche, à sa hauteur (console.js) */
+.document-frame { display: block; width: 100%; height: 70vh; border: 0; border-radius: var(--radius-sm);
+  background: #fff; color-scheme: light; }
 .document-image { display: inline-block; padding: 4px 8px; color: var(--muted); background: var(--surface-2); }
 .document-table { max-width: 100%; }
 .document-row { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .document-cell { min-width: 0; flex: 1 1 180px; }
+/* un tableau de plusieurs colonnes : chacune à la largeur de son contenu, comme dans une messagerie (document.py) */
+.document-grid { display: grid; gap: 6px 16px; justify-content: start; align-items: start; }
+.document-grid > .document-row { display: contents; }
+.document-grid > .document-row > .document-cell:first-child { grid-column-start: 1; }
+.document-head { font-weight: 600; }
+.document-cols-2 { grid-template-columns: repeat(2, auto); }
+.document-cols-3 { grid-template-columns: repeat(3, auto); }
+.document-cols-4 { grid-template-columns: repeat(4, auto); }
+.document-cols-5 { grid-template-columns: repeat(5, auto); }
+.document-cols-6 { grid-template-columns: repeat(6, auto); }
+.document-cols-7 { grid-template-columns: repeat(7, auto); }
+.document-cols-8 { grid-template-columns: repeat(8, auto); }
+.document-cols-9 { grid-template-columns: repeat(9, auto); }
+.document-cols-10 { grid-template-columns: repeat(10, auto); }
+.document-cols-11 { grid-template-columns: repeat(11, auto); }
+.document-cols-12 { grid-template-columns: repeat(12, auto); }
+.document-span-2 { grid-column-end: span 2; }
+.document-span-3 { grid-column-end: span 3; }
+.document-span-4 { grid-column-end: span 4; }
+.document-span-5 { grid-column-end: span 5; }
+.document-span-6 { grid-column-end: span 6; }
+.document-span-7 { grid-column-end: span 7; }
+.document-span-8 { grid-column-end: span 8; }
+.document-span-9 { grid-column-end: span 9; }
+.document-span-10 { grid-column-end: span 10; }
+.document-span-11 { grid-column-end: span 11; }
+.document-span-12 { grid-column-end: span 12; }
 .document-alternative { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); }
 .document-alternative summary { cursor: pointer; }
 .document-alternative .prose { margin-top: 12px; color: var(--text-2); }

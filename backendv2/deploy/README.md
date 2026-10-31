@@ -307,10 +307,21 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 4. Ses boîtes aux lettres : **Réglages › Plugins › Boîtes aux lettres** (`/inspecteur/reglages/boites`) — un
    enregistrement par boîte : serveurs IMAP/SMTP, dossiers relevés, et sa voix (en son nom, en assistante, ou à ta
    place ; ton, consignes, signature ; préparer des réponses d'elle-même). « Tester la connexion » sur la fiche de
-   la boîte. En ligne de commande, serveur arrêté : `mika mail set --compte perso --address … --imap-host …
+   la boîte. Une fois la boîte enregistrée, « Charger la liste », sous « Dossiers relevés », lit ses dossiers sur
+   le serveur : coche ceux où elle remarque ce qui arrive. « Synchroniser tous les dossiers » tient les autres à
+   jour dans la console à chaque relève, sans qu'elle les remarque (ADR 0171). En ligne de commande, serveur arrêté : `mika mail set --compte perso --address … --imap-host …
    --user … --password … --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
    `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Brouillons
    de courrier).
+   Une boîte **Hotmail ou Outlook.com** refuse les mots de passe : elle entre par ton compte Microsoft (ADR 0166).
+   Inscris d'abord une application dans Microsoft Entra (portail Azure › Inscriptions d'applications : comptes
+   Microsoft personnels acceptés, « Autoriser les flux de clients publics » activé) et note son identifiant (client
+   ID). Puis, dans les réglages de la boîte : Connexion « par un compte Microsoft », serveur IMAP
+   `outlook.office365.com` (993, SSL), SMTP `smtp-mail.outlook.com` (587, STARTTLS), utilisateur = l'adresse,
+   l'identifiant de l'application. Enfin, sur la fiche de la boîte, « Se connecter à Microsoft » : un code à
+   entrer sur la page de Microsoft qu'elle indique. En ligne de commande : `mika mail set --compte hotmail --auth
+   microsoft --client-id … --imap-host outlook.office365.com --smtp-host smtp-mail.outlook.com …`, puis la
+   connexion depuis la console.
 
 Les pièces jointes qu'on lui envoie prennent au plus 2 Gio par personne par défaut (Réglages › Paramètres avancés,
 page des pièces reçues, « Place par personne »).
@@ -398,7 +409,7 @@ archivés.
 
 **Hors de la machine, et chiffrées.** Un disque qui meurt emporte Mika et ses
 quatorze archives ; une archive qui fuit contient `secret.key` à côté des secrets
-qu'elle déchiffre (clés d'API, mot de passe IMAP, jeton git). Donc :
+qu'elle déchiffre (clés d'API, mot de passe IMAP, connexion Microsoft d'une boîte, jeton git). Donc :
 
 - copier chaque archive ailleurs (un second disque, un stockage distant) en la
   chiffrant — par exemple `restic` (chiffre, déduplique, vérifie) ou `age` :

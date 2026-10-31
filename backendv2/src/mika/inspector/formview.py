@@ -38,6 +38,8 @@ def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str =
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
         "only": only_attr(f),
         "rows": _rows(text, kind), "group": f.group,
+        # des lignes à choisir parmi une liste (les dossiers d'une boîte) : une case par choix, cochée si elle y est
+        "selected": text.split("\n") if kind == "lines" and f.choices and text else [],
     }
 
 

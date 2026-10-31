@@ -7,11 +7,15 @@ SELECT/EXAMINE, UID SEARCH (SINCE, UID n:*, HEADER Message-ID), UID FETCH
 (BODY.PEEK[] et FLAGS), UID STORE, UID MOVE (si annoncé), UID COPY,
 EXPUNGE / UID EXPUNGE et APPEND. Un SELECT en lecture seule qui tenterait
 d'écrire est refusé : on sait ainsi qu'un relevé ne touche à rien.
+
+Les deux acceptent aussi ``XOAUTH2`` (une boîte Microsoft, ADR 0166) : le jeton
+« refuse » est refusé comme Microsoft le fait (un défi JSON, puis un refus).
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import re
 import socketserver
 import threading
@@ -64,6 +68,8 @@ class Imap(socketserver.StreamRequestHandler):
     #: nom décodé → dossier ; ``mailbox`` : raccourci vers INBOX (les anciens tests)
     boxes: dict[str, Box] = {}
     logins: list[tuple[str, str]] = []
+    #: les entrées par XOAUTH2 : (utilisateur, jeton)
+    bearers: list[tuple[str, str]] = []
     caps = "IMAP4rev1 MOVE UIDPLUS"
     #: ce que le serveur a reçu (pour vérifier qu'un relevé n'écrit rien)
     commands: list[str] = []
@@ -74,7 +80,7 @@ class Imap(socketserver.StreamRequestHandler):
                      "Corbeille": Box("\\Trash"), "Indésirables": Box("\\Junk")}
         for uid, raw in (inbox or {}).items():
             cls.boxes["INBOX"].add(raw, uid=uid)
-        cls.logins, cls.commands, cls.caps = [], [], caps
+        cls.logins, cls.bearers, cls.commands, cls.caps = [], [], [], caps
 
     @classmethod
     def set_mailbox(cls, mailbox: dict[int, bytes]) -> None:
@@ -138,6 +144,15 @@ class Imap(socketserver.StreamRequestHandler):
         elif cmd.startswith("LOGIN"):
             _, user, password = rest.split(" ", 2)
             cls.logins.append((user.strip('"'), password.strip('"')))
+        elif cmd.startswith("AUTHENTICATE XOAUTH2"):
+            self.say("+ ")
+            user, token = bearer(self.rfile.readline())
+            if token == "refuse":
+                self.say("+ " + refusal())
+                self.rfile.readline()  # la réponse vide qui clôt l'échange
+                self.say(f"{tag} NO AUTHENTICATE failed.")
+                return True
+            cls.bearers.append((user, token))
         elif cmd.startswith("LIST"):
             for name, b in cls.boxes.items():
                 attrs = f"\\HasNoChildren {b.attrs}".strip()
@@ -235,8 +250,17 @@ class Smtp(socketserver.StreamRequestHandler):
                 return
             up = line.upper()
             if up.startswith(("EHLO", "HELO")):
-                self.wfile.write(b"250-faux\r\n250 AUTH PLAIN\r\n")
+                self.wfile.write(b"250-faux\r\n250 AUTH PLAIN XOAUTH2\r\n")
             elif up.startswith("AUTH PLAIN"):
+                auth = base64.b64decode(line.split()[-1]).decode()
+                self.say("235 ok")
+            elif up.startswith("AUTH XOAUTH2"):
+                _user, token = bearer(line.split()[-1].encode())
+                if token == "refuse":
+                    self.say("334 " + refusal())
+                    self.rfile.readline()
+                    self.say("535 5.7.3 Authentication unsuccessful")
+                    continue
                 auth = base64.b64decode(line.split()[-1]).decode()
                 self.say("235 ok")
             elif up.startswith("MAIL FROM"):
@@ -257,6 +281,18 @@ class Smtp(socketserver.StreamRequestHandler):
                 return
             else:
                 self.say("250 ok")
+
+
+def bearer(line: bytes) -> tuple[str, str]:
+    """L'utilisateur et le jeton d'une réponse ``XOAUTH2`` (en base64)."""
+    said = base64.b64decode(line.strip()).decode()
+    fields = dict(part.split("=", 1) for part in said.split("\x01") if "=" in part)
+    return fields.get("user", ""), fields.get("auth", "").removeprefix("Bearer ")
+
+
+def refusal() -> str:
+    """Le défi par lequel Microsoft dit qu'un jeton ne passe pas."""
+    return base64.b64encode(json.dumps({"status": "401", "schemes": "bearer"}).encode()).decode()
 
 
 def serve(handler) -> socketserver.ThreadingTCPServer:

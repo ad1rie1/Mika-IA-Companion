@@ -404,6 +404,15 @@ def test_lines_are_split_stripped_and_blank_dropped():
     assert values == {"notes": ("un", "deux")}
 
 
+def test_lines_ticked_in_a_loaded_list_are_all_kept():
+    """Des cases cochées (les dossiers d'une boîte, ADR 0171) postent une valeur chacune : toutes sont gardées ;
+    aucune cochée, la liste est vide."""
+    values, _ = parse(FIELDS, form("notes", notes=["INBOX", "R&D / Été"]), current=CURRENT)
+    assert values == {"notes": ("INBOX", "R&D / Été")}
+    values, _ = parse(FIELDS, form("notes"), current=CURRENT)
+    assert values == {"notes": ()}
+
+
 def test_select_must_be_a_choice():
     values, errors = parse(FIELDS, form("mode", "color", mode="b", color="green"), current=CURRENT)
     assert values == {"mode": "b"}

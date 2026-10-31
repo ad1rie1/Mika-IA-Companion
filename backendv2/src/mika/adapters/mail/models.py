@@ -1,6 +1,7 @@
 """Les tables du cache du courrier (ADR 0101), déclarées sur ``MailBase`` : les mails à leur place, les dossiers, ce
 qui a été rendu (et ce qui l'a été sans être encore accusé), les brouillons, ce qui est parti, l'état de chaque compte,
-l'empreinte de ce qui a été oublié, et les personnes que chaque ligne nomme.
+l'empreinte de ce qui a été oublié, les personnes que chaque ligne nomme, et les pièces de chaque mail avec leurs
+octets (ADR 0172).
 
 **Une ligne se désigne par son ``id``** (l'ordre d'arrivée, là où il sert : les rendus pas encore accusés, les
 pages) ; la clé naturelle (compte, dossier, UID ; Message-ID d'un envoi ; identifiant d'un brouillon) est une
@@ -26,7 +27,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mika.ports.mail import Draft, Mail, Sent, addresses, assigned_ref, mail_ref, reference_key, split_ref
@@ -54,6 +55,9 @@ DRAFT = 64
 WORD = 16
 #: une empreinte (sha256, en hexadécimal)
 PRINT = 64
+#: un morceau des octets d'une pièce : une ligne tient toujours dans un paquet de MariaDB et dans une copie de
+#: sauvegarde (``mariadb-dump --hex-blob`` double sa taille)
+CHUNK = 1024 * 1024
 
 # ── les personnes nommées ──
 #: à quoi appartient une ligne de ``recipients`` (un entier : ``Browse`` le joint à une colonne calculée)
@@ -138,6 +142,38 @@ class MessageRow(MailBase):
     fold_body: Mapped[str] = mapped_column(LongText)
     #: ``fold_text(expéditeur + " " + adresse)``
     fold_who: Mapped[str] = mapped_column(LongText)
+    #: ses pièces sont gardées (``parts``) ; faux pour un mail gardé avant qu'elles le soient (ADR 0172)
+    parts_kept: Mapped[bool] = mapped_column(default=False, server_default=false())
+
+
+class PartRow(MailBase):
+    """Une pièce d'un mail gardé (``owner`` : l'``id`` de sa ligne) : une pièce jointe (``position`` : son rang parmi
+    elles, celui du lien de téléchargement) ou une image intégrée (``position`` -1), que son HTML désigne par son
+    Content-ID (``content_id``, nu, en minuscules). ``digest`` : l'empreinte de ses octets (``blobs``) ; vide quand
+    ils ne sont pas gardés ici (illisibles, trop gros, ou cédés aux plus récents) : on les relit sur le serveur."""
+
+    __tablename__ = "parts"
+    __table_args__ = table_args(Index("ix_parts_owner", "owner"), Index("ix_parts_digest", "digest"))
+
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    owner: Mapped[int]
+    position: Mapped[int]
+    content_id: Mapped[str] = mapped_column(LongText)
+    name: Mapped[str] = mapped_column(LongText)
+    mime: Mapped[str] = mapped_column(LongText)
+    size: Mapped[int]
+    digest: Mapped[str] = mapped_column(Key(PRINT))
+
+
+class BlobRow(MailBase):
+    """Les octets d'une pièce, par l'empreinte (sha256) de leur tout, en morceaux d'au plus ``CHUNK`` (``chunk`` : leur
+    rang) : la même pièce, reçue dans dix mails ou deux dossiers, n'est gardée qu'une fois."""
+
+    __tablename__ = "blobs"
+
+    digest: Mapped[str] = mapped_column(Key(PRINT), primary_key=True)
+    chunk: Mapped[int] = mapped_column(primary_key=True)
+    data: Mapped[bytes] = mapped_column(LongBlob)
 
 
 class FolderRow(MailBase):
@@ -293,7 +329,7 @@ def message_values(m: Mail, uid: int, ref: str, twin: bool) -> dict[str, Any]:
         flagged=m.flagged, answered=m.answered, fingerprint=content_print(m.address, m.subject, m.date, m.body),
         sent_name=sent_name(m.folder), fold_subject=fold_text(m.subject or ""), fold_sender=fold_text(m.sender or ""),
         fold_dest=fold_text(m.to or ""), fold_body=fold_text(m.body or ""),
-        fold_who=fold_text(f"{m.sender or ''} {m.address or ''}"))
+        fold_who=fold_text(f"{m.sender or ''} {m.address or ''}"), parts_kept=m.parts_kept)
 
 
 def first_ref(account: str, message_id: str) -> str:
@@ -342,9 +378,9 @@ def people(kind: int, owner: int, *, to: str, cc: str, sender: str = "", address
 
 
 __all__ = [
-    "ACCOUNT", "ADDRESS", "DRAFT", "DRAFTED", "FOLDER", "FROM", "LOCAL", "MESSAGE", "MID", "PRINT", "REF", "REF_KEY",
-    "SENT", "SENT_NAMES", "TO", "WORD",
-    "DraftRow", "FolderRow", "ForgottenRow", "HandedRow", "MessageRow", "OfferedRow", "RecipientRow", "SentRow",
-    "StatusRow", "attachments_text", "content_print", "draft_values", "first_ref", "fit", "message_values", "people",
+    "ACCOUNT", "ADDRESS", "CHUNK", "DRAFT", "DRAFTED", "FOLDER", "FROM", "LOCAL", "MESSAGE", "MID", "PRINT", "REF",
+    "REF_KEY", "SENT", "SENT_NAMES", "TO", "WORD",
+    "BlobRow", "DraftRow", "FolderRow", "ForgottenRow", "HandedRow", "MessageRow", "OfferedRow", "PartRow",
+    "RecipientRow", "SentRow", "StatusRow", "attachments_text", "content_print", "draft_values", "first_ref", "fit", "message_values", "people",
     "sent_name", "sent_values",
 ]

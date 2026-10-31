@@ -24,11 +24,11 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1130,7 +1130,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un mail proposé s'approuvait sans aperçu, et son corps dormait en clair au journal, hors de portée de l'oubli.
 
-*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132.*
+*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132, 0166, 0171.*
 
 ### 0037 — Ce qui vient d'ailleurs : borné, cité, désigné par nous, montré en privé, en arrière-plan
 
@@ -1192,7 +1192,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* rien ne permettait de lui brancher un serveur MCP, ni de voir au même endroit tout ce qu'elle peut faire.
 
-*Révisée par 0066, 0128, 0163, 0165.*
+*Révisée par 0066, 0128, 0163, 0165, 0170.*
 
 ### 0066 — Chercher sur le web : un plugin système qui apporte son serveur MCP
 
@@ -1361,6 +1361,41 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* quatre devis en JSON dépassaient déjà 4 000 caractères, coupés au milieu d'un mot, même en mode pro qui devait en lire 120 000 ; la réponse était aussi citée deux fois, ce qui cassait les tableaux. Claude Code laisse 25 000 jetons à un outil MCP.
 
 *Révise 0064 (en partie), 0066 (en partie).*
+
+### 0166 — Une boîte Microsoft entre par OAuth2, sans mot de passe
+
+- Hotmail, Outlook.com et Live refusent le mot de passe en IMAP et en SMTP. Une boîte peut donc entrer par un compte Microsoft (`auth: microsoft`) : un jeton d'accès, présenté par `XOAUTH2`, à la lecture comme à l'envoi. Microsoft 365 aussi, si son administrateur le permet (`oauth_tenant`).
+- On se connecte par le flux « code d'appareil » : « Se connecter à Microsoft », sur la fiche de la boîte, donne un code à entrer sur une page de Microsoft. Le mot de passe et la double authentification restent chez Microsoft. Le serveur attend le feu vert en tâche de fond, au rythme que Microsoft fixe, un quart d'heure au plus ; un redémarrage oublie un code en attente. Le flux par redirection est écarté : la console tourne sur une adresse locale en http, que Microsoft refuse comme retour.
+- L'application est celle de la personne : son identifiant (`oauth_client_id`), qu'elle inscrit elle-même dans Microsoft Entra, en client public. Mika ne livre l'identifiant d'aucune autre application.
+- Le jeton de renouvellement est scellé dans les réglages, à part des comptes (`mail_oauth`), avec l'application et l'annuaire qui l'ont délivré. Le formulaire de la console ne le réécrit jamais ; changer d'application ou d'annuaire demande de se reconnecter ; il part avec sa boîte, ou quand elle reprend un mot de passe. Quand Microsoft le remplace, le nouveau est gardé. Le jeton d'accès vit en mémoire, renouvelé cinq minutes avant sa fin.
+- Une connexion que Microsoft ne renouvelle plus (`invalid_grant`) ne lui est plus présentée : la boîte échoue comme un serveur qui refuse, et sa fiche dit de se reconnecter. Aucun jeton n'entre dans un journal ni dans un message.
+- La règle de l'ADR 0038 sur les jetons OAuth vaut pour le login de Claude Code, pas pour le courrier.
+
+*Pourquoi :* Microsoft a coupé l'authentification par mot de passe de ses comptes personnels en IMAP et en SMTP en 2024 : une boîte Hotmail ne pouvait plus être relevée.
+
+*Révise 0027 (en partie).*
+
+### 0168 — Ses outils de courrier datent chaque mail, disent son tri et jusqu'où remonte ce qu'elle a relevé
+
+- Dans ses listes, chaque mail dit sa date (« aujourd'hui 9 h 05 », « le 12/10 9 h 14 », le jour seul pour une autre année) et ce que son tri en a jugé (important, attend une réponse). Il dit aussi ce qu'en sait le serveur : répondu, suivi, ses pièces jointes. Un mail ouvert dit sa date.
+- `email_list` et `email_search` se lisent page par page (`page`, sur `messages_page`). « Non lu » veut dire : ni lu sur le serveur, ni lu par elle. `email_search` cherche des mots, un expéditeur (`sender`), ou les deux, dans un dossier ou parmi les non-lus.
+- Une recherche, et la dernière page d'une liste, disent où commence ce qu'elle a relevé et qui peut charger plus ancien. Au-delà, « rien » ne veut pas dire que le mail n'existe pas. Elle ne charge pas l'historique elle-même.
+- `email_contacts` retrouve une adresse dans ce qu'elle a relevé : combien de mails reçus et envoyés, le dernier échange.
+- Partout dans le courrier, console comprise, chercher veut dire trouver chaque mot, dans n'importe quel ordre, sans casse, sans accents, sans les guillemets qui l'entourent (`ports.paging.words_of`).
+
+*Pourquoi :* ses listes ne disaient ni la date ni son propre tri : pour trier, elle rouvrait chaque mail, cinq au plus par épisode. « facture EDF » ne trouvait pas « Facture de votre contrat EDF ». Une recherche au-delà des deux jours relevés répondait « Rien ne correspond », et elle concluait que le mail n'existait pas.
+
+### 0171 — Les dossiers d'une boîte : cochés dans la liste du serveur, tous synchronisés si on le veut
+
+- Synchroniser et relever sont deux choses. Un dossier **relevé**, elle le remarque : chaque mail qui y arrive est trié, puis devient une pensée. Un dossier seulement **synchronisé** est tenu à jour pour la console, sans rien lui rendre.
+- Dans la configuration d'une boîte enregistrée, « Charger la liste » lit ses dossiers sur le serveur, avec sa connexion (Microsoft comprise). On y coche ceux qu'elle relève. Le serveur n'est interrogé que sur ce bouton. Une boîte pas encore enregistrée n'a rien à lire.
+- « Synchroniser tous les dossiers » (`sync_all`, non coché par défaut) : à chaque relève, les autres dossiers, Envoyés, Corbeille et Indésirables compris, sont relus, au plus 50 mails par dossier et par relève. Un dossier que le serveur refuse n'arrête pas les suivants.
+- La liste des dossiers se relit à chaque relève : un dossier créé ailleurs paraît, un dossier supprimé s'en va. La réception s'écrit `INBOX` quelle que soit sa casse sur le serveur (« Inbox » chez Outlook).
+- Dans un formulaire de réglages, une liste de lignes dont les choix se chargent devient des cases à cocher. Un chargeur qui dépend de l'entrée enregistrée en reçoit le nom (`named_loaders`).
+
+*Pourquoi :* seule la réception se synchronisait. La liste des dossiers n'était lue qu'au premier relevé, et seulement si aucun dossier n'était encore connu : un « Actualiser le dossier » fait avant ce premier relevé la figeait sur la réception. Les dossiers relevés se tapaient à la main, un nom IMAP par ligne. Relever tous les dossiers lui aurait fait remarquer les spams et chacun de tes envois.
+
+*Révise 0027 (en partie).*
 
 ## Les fournisseurs de modèles
 
@@ -1835,6 +1870,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Révise 0064 (en partie), 0116 (en partie).*
 
+### 0170 — Une opératrice peut tout accepter d'avance, depuis son écran
+
+- Dans le client web, une opératrice allume « Tout accepter » près de « Pro » : chaque carte que le bouton « Accepter » permettrait part acceptée d'elle-même, avec l'empreinte de la carte reçue. La trame est la même qu'un clic ; le serveur garde toutes ses gardes (empreinte, échéance, blocage).
+- Une carte bloquée, vide ou expirée reste à la personne : seul son refus est possible. Rien ne part hors ligne.
+- Une à la fois : chaque accord attend sa réponse (la liste qui suit) avant le suivant, car le serveur jette sans répondre ce qui dépasse son débit. Une même carte n'est acceptée ainsi qu'une fois par connexion.
+- Le choix vaut pour l'onglet (`sessionStorage`) : il survit à un rechargement, jamais à un onglet neuf. Allumé, il se voit : une pastille rouge, et la bande des cartes le dit.
+- Un compte ordinaire ne l'a pas, et un « oui » tapé ne compte toujours pas.
+
+*Pourquoi :* valider chaque appel un par un interrompait un travail que l'opératrice avait déjà décidé de lui confier — en mode pro, la boucle attend chaque accord (ADR 0165).
+
+*Révise 0064 (en partie).*
+
 ## La console et l'exploitation
 
 ### 0024 — L'exploitation : voir, sonder, sauvegarder, oublier pour de bon
@@ -1861,7 +1908,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* retrouver l'extensibilité des vues déclarées de la v1 sans que la console connaisse une seule faculté.
 
-*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121.*
+*Révise 0024 (en partie). Révisée par 0027, 0029, 0042, 0121, 0169.*
 
 ### 0029 — La console refondue : des menus qui répondent à des questions, des pages qui ne montrent qu'un sujet
 
@@ -1982,6 +2029,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* Mika vit sur un portable, et son opératrice lit sa console depuis une autre machine. Sans ouverture, il fallait un tunnel SSH, à rouvrir après chaque redémarrage.
 
 *Révise 0122 (en partie).*
+
+### 0169 — Un mail HTML se lit tel qu'il a été écrit, dans un cadre isolé
+
+- Un document HTML natif (un mail reçu) s'affiche avec ses styles et sa mise en page, dans un `<iframe sandbox>` vers `/inspecteur/document/<empreinte>`. La page de la console n'en reçoit que l'adresse ; sa politique n'admet de cadre que du même serveur (`frame-src 'self'`).
+- Le cadre a sa propre politique : styles en ligne, images `data:`, rien d'autre. Bac à sable sans `allow-scripts` ni `allow-forms` : rien ne s'y exécute, rien ne s'y envoie, rien ne remplace la console. `allow-same-origin` sert seulement à mesurer sa hauteur.
+- La source est purgée en plus de la politique : scripts, cadres, objets, `<meta>`, `<base>`, gestionnaires `on…`, toute adresse autre qu'un lien web ou `mailto:` vérifié. Les liens s'ouvrent dans un nouvel onglet, sans référent.
+- Les images distantes restent masquées : une image bloquée laisse son texte de remplacement, à sa taille. Les images `data:` s'affichent.
+- La page garde le document en mémoire, par empreinte, le temps que le cadre le charge (64 au plus) ; après un redémarrage, recharger la page le redonne. La version simplifiée (`readable_html`) reste le repli sans cadre et la version texte reste dépliable.
+
+*Pourquoi :* reconstruit sans CSS, un mail mis en page (colonnes, encadrés, boutons) devenait illisible. Le bac à sable garde la console aussi sûre qu'avant, sans priver le mail de sa forme.
+
+*Révise 0025 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

@@ -36,7 +36,7 @@ from mika.adapters.mail.models import (
     fit,
 )
 from mika.ports.mail import Contact, MailHit, MailQuery, mail_ref, split_ref
-from mika.ports.paging import Page, fold_text
+from mika.ports.paging import Page, words_of
 
 M, S, F, R, D = MessageRow, SentRow, FolderRow, RecipientRow, DraftRow
 
@@ -64,7 +64,9 @@ def index() -> Any:
 
 
 def _contains(text: Any, value: str) -> Any:
-    return func.instr(text, fold_text(value)) > 0
+    """Chaque mot de ``value`` dans ``text`` (replié à l'écriture), dans n'importe quel ordre (``words_of``)."""
+    words = words_of(value)
+    return and_(*(func.instr(text, w) > 0 for w in words)) if words else true()
 
 
 def _text_of(letters: Any, message: Callable[[], Any], sent: Callable[[], Any]) -> Any:

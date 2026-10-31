@@ -111,6 +111,13 @@ Unity.
   `/nouveau`) ouvre un fil neuf sans rien effacer, `/renommer`, `/description`, `/archiver`, `/desarchiver`, `/aide` ;
   `//` en tête échappe. Le cache garde les 50 derniers messages de chaque fil (`chatSync.trimThreads`) ; un fil qu'on
   ouvre sans ses messages se relit au serveur (`strand_history`).
+- Les cartes d'accord (ADR 0064, `ui/approvals.ts`, pur) : épinglées au-dessus du champ, seuls les boutons décident.
+  Pour une opératrice, l'interrupteur 🛡️ près de « Pro » devient « ⚡ Tout accepter » (ADR 0170) : chaque carte
+  acceptable part acceptée d'elle-même, une à la fois (`approvals.autoAcceptFrame`) ; une carte bloquée ou expirée
+  reste à décider. Le choix vaut pour l'onglet (`sessionStorage`).
+- Le sélecteur d'emojis, à droite du champ (`ui/EmojiPicker.ts` ; familles, insertion au curseur et récents dans
+  `ui/emojis.ts`, pur) : le panneau reste ouvert pour en poser plusieurs, les récents sont retenus par l'appareil ;
+  caché sur un écran tactile, qui a les siens au clavier.
 - Les tests vitest sont dans des dossiers `__tests__`.
 
 Les ADR cités sont dans `backendv2/docs/decisions.md`.

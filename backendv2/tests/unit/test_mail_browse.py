@@ -8,6 +8,7 @@ from mika.adapters.feeds import HttpFeeds
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig
 from mika.adapters.mail.parse import parse
 from mika.ports.mail import Draft, Mail, MailQuery, Sent, reference_key
+from mika.ports.paging import words_of
 from tests.fixtures.mail_servers import raw_mail
 
 
@@ -79,6 +80,30 @@ def test_search_is_unbounded_deduplicated_and_accent_insensitive(archive):
     assert archive.search_count("%") == 0  # caractères littéraux, pas de joker SQL
     assert archive.search_count("FIN-0") == 1
     assert archive.sent_mail("perso:<s0@example.test>") is None
+
+
+def test_a_search_finds_every_word_in_any_order(tmp_path):
+    """« facture edf » trouve « Facture de votre contrat EDF » : chaque mot, dans n'importe quel ordre, sans les
+    guillemets qui l'entourent."""
+    assert words_of("« Facture » EDF, \"été\"") == ["facture", "edf", "ete"]
+    box = ImapSmtpMail(lambda: MailConfig(accounts={"pro": MailAccount(address="me@example.test")}), tmp_path / "mail.db")
+    cache = box._cache
+    for i, (subject, sender) in enumerate((("Facture de votre contrat EDF", "EDF <factures@edf.fr>"),
+                                           ("Votre facture de gaz", "Engie <gaz@engie.fr>"))):
+        cache.store(Mail(f"<f{i}@example.test>", sender, sender.split("<")[1][:-1], subject, i, "Bonjour.",
+                         account="pro", folder="INBOX"), i + 1)
+    try:
+        def found(**query):
+            return [m.subject for m in box.messages_page(MailQuery(**query)).items]
+
+        assert found(text="edf facture") == ["Facture de votre contrat EDF"]
+        assert found(text="« facture »") == ["Votre facture de gaz", "Facture de votre contrat EDF"]
+        assert found(text="facture électricité") == []
+        assert found(sender="engie gaz") == ["Votre facture de gaz"]
+        assert [m.subject for m in box.search("contrat facture", 10)] == ["Facture de votre contrat EDF"]
+        assert [c.address for c in box.contacts_page(text="factures edf").items] == ["factures@edf.fr"]
+    finally:
+        cache.close()
 
 
 def test_long_message_ids_resolve_without_loading_the_archive(archive, monkeypatch):

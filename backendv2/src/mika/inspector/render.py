@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 from mika.inspector.document import readable_html, readable_text
+from mika.inspector.framed import SANDBOX
 from mika.inspector.svg import chart_svg
 from mika.kernel.clock import US
 from mika.kernel.inspect import (
@@ -152,6 +153,8 @@ class Env:
     now: int
     #: une graduation courte : ``stamp(instant, étendue)``
     stamp: Callable[[int, int], str] | None = None
+    #: l'adresse du cadre isolé d'un document HTML natif (ADR 0169) ; sans elle, sa version simplifiée
+    frame: Callable[[str], str] | None = None
 
 
 def cell(value: Any, env: Env) -> dict[str, Any]:
@@ -336,10 +339,11 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         return {"t": "note", "text": b.text, "tone": tone(b.tone) or "info", "title": b.title}
     if isinstance(b, Prose):
         text = b.text[:TEXT_MAX]
+        frame = env.frame(b.html) if b.html and env.frame is not None else ""
         return {"t": "prose", "text": text, "title": b.title,
                 "clamp": bool(b.clamp) and len(text) > b.clamp, "short": text[:b.clamp] if b.clamp else "",
-                "reading": b.reading, "html": readable_html(b.html) if b.html else readable_text(text) if b.reading else "",
-                "rich": bool(b.html)}
+                "reading": b.reading, "rich": bool(b.html), "frame": frame, "sandbox": SANDBOX,
+                "html": "" if frame else readable_html(b.html) if b.html else readable_text(text) if b.reading else ""}
     if isinstance(b, Code):
         text = b.text[:TEXT_MAX]
         split = text.split("\n") if b.lang == "diff" else []

@@ -13,6 +13,22 @@ def fold_text(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", str(text).casefold()) if not unicodedata.combining(c))
 
 
+#: ce qui entoure un mot cherché sans en faire partie (des guillemets, une ponctuation collée)
+_EDGES = "\"'«»“”‘’()[]{},;:.!?"
+
+
+def words_of(text: str) -> list[str]:
+    """Les mots d'une recherche, repliés, sans la ponctuation qui les entoure."""
+    return [w for w in (part.strip(_EDGES) for part in fold_text(text).split()) if w]
+
+
+def has_words(haystack: str, needle: str) -> bool:
+    """Chaque mot de ``needle`` est dans ``haystack``, dans n'importe quel ordre : « facture edf » trouve « Facture
+    de votre contrat EDF ». Sans mot, tout correspond."""
+    folded = fold_text(haystack)
+    return all(w in folded for w in words_of(needle))
+
+
 @dataclass(frozen=True, slots=True)
 class Page(Generic[T]):
     items: tuple[T, ...]

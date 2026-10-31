@@ -10,7 +10,8 @@
 - « Tout marquer comme lu » : par lot, une session et pas une par mail ;
 - « Répondre » à « "Dupré, Élodie" <…> » écrit à une seule personne ;
 - un « [À COMPLÉTER » ne part sous aucune graphie ;
-- IMAP sans SSL tente STARTTLS avant d'envoyer le mot de passe.
+- IMAP sans SSL tente STARTTLS avant d'envoyer le mot de passe ;
+- la réception d'Outlook (« Inbox ») est l'« INBOX » des réglages.
 """
 
 from __future__ import annotations
@@ -249,3 +250,29 @@ def test_imap_without_ssl_upgrades_with_starttls_before_sending_the_password(mon
     with imap_mod.Session(MailAccount(imap_host="h", imap_ssl=False, user="u", password="p")):
         pass
     assert calls == ["starttls", "login"]
+
+
+def test_outlooks_inbox_is_the_inbox_of_the_settings(monkeypatch):
+    """Outlook liste sa réception « Inbox » : c'est l'« INBOX » des réglages, et la liste relue à chaque relève
+    n'efface pas son curseur."""
+    from mika.adapters.mail import imap as imap_mod
+
+    class Fake:
+        capabilities = ("IMAP4REV1",)
+
+        def __init__(self, host, port, timeout=None):
+            pass
+
+        def login(self, user, password):
+            return "OK", [b"ok"]
+
+        def list(self):
+            return "OK", [b'(\\Marked \\HasNoChildren) "/" Inbox', b'(\\HasNoChildren \\Sent) "/" "Sent"']
+
+        def logout(self):
+            return "BYE", []
+
+    monkeypatch.setattr(imap_mod.imaplib, "IMAP4", Fake)
+    with imap_mod.Session(MailAccount(imap_host="h", imap_ssl=False, user="u", password="p")) as s:
+        assert s.folders() == [("INBOX", frozenset({"\\marked", "\\hasnochildren"})),
+                               ("Sent", frozenset({"\\hasnochildren", "\\sent"}))]

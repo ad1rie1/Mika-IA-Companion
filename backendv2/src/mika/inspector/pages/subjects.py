@@ -10,11 +10,12 @@ from unicodedata import combining, normalize
 from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel
+from mika.inspector.framed import FRAME_CSP, framed_html
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
@@ -326,9 +327,17 @@ class Subjects:
             "Content-Disposition": "attachment; filename*=UTF-8''" + quote(name, safe=""),
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}))
 
+    async def document(self, request: Request) -> Response:
+        """Le cadre d'un document HTML natif (ADR 0169) : sa propre politique, sans script ni rien du dehors."""
+        kept = self.ui.documents.get(request.path_params["digest"])
+        source = kept if kept is not None else "<p>Ce message n'est plus prêt : recharge la page pour le relire.</p>"
+        return secure(HTMLResponse(framed_html(source), status_code=200 if kept is not None else 404, headers={
+            "Content-Security-Policy": FRAME_CSP, "Referrer-Policy": "no-referrer"}))
+
     def routes(self) -> list[Any]:
         g = self.ui.guarded
         return [Route(PREFIX + "/fiche/{kind:str}/{key:str}", g(self.fiche)),
                 Route(PREFIX + "/telecharger/{kind:str}/{key:str}", g(self.download)),
+                Route(PREFIX + "/document/{digest:str}", g(self.document)),
                 Route(PREFIX + "/recherche", g(self.search)),
                 Route(PREFIX + "/oublier/{kind:str}/{key:str}", g(self.forget), methods=["POST"])]
