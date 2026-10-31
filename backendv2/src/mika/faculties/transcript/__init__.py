@@ -20,6 +20,12 @@ resté sans réponse le dit dans son repère, en mots et sans détail technique
 (« [mardi 14h13 — tu n'as pas pu lui répondre : une panne] », « [tu avais
 choisi de ne rien répondre] ») : comme la personne, elle sait qu'elle n'a pas
 répondu.
+
+En mode pro, son opératrice ouvre des fils de travail (ADR 0164) : chaque
+message en porte l'identifiant (``strand``), choisi par le client. Le fil privé
+ne les relit pas ; un fil de travail ne relit que ses messages, sous son titre
+et sa petite description (``transcript.strand_set``, le dernier réglage vaut).
+Tout reste au journal : sa mémoire les consolide comme le reste de sa vie.
 """
 
 from __future__ import annotations
@@ -151,7 +157,7 @@ class TranscriptState:
 #: refaire (ADR 0082)
 TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams,
                      state_version=2)
-TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED)
+TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED, c.STRAND_SET)
 
 
 def _params(p: TranscriptParams | None) -> TranscriptParams:
@@ -228,9 +234,10 @@ def _head(s: TranscriptState, cx) -> int:
 #: ``unanswered`` : pourquoi un message reçu est resté sans réponse pour de bon (``c.UNANSWERED_*``), posé par la
 #: fin d'épisode qui l'a réglé ; nul sinon (version 3). ``tools`` : les outils dont elle s'est servie pour écrire un
 #: de ses messages (version 6, ADR 0108). ``mode`` : le mode dans lequel le message a été écrit (version 8, ADR 0116)
+#: ; ``strand`` : son fil de travail (version 9, ADR 0164)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
             "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools", "verdict",
-            "verdict_note", "mode")
+            "verdict_note", "mode", "strand")
 
 
 class Thread:
@@ -270,6 +277,7 @@ def _stored(row: tuple[Any, ...]) -> dict[str, Any]:
     out = dict(zip(_COLUMNS, row, strict=True))
     out["person"] = fit(out["person"], HANDLE_MAX)
     out["room"] = fit(out["room"], HANDLE_MAX) if out["room"] is not None else None
+    out["strand"] = fit(out["strand"], c.STRAND_MAX) if out["strand"] is not None else None
     out["folded"] = fold_text(out["text"])
     return out
 
@@ -290,7 +298,8 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         text = d.text.text or ""
         typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
         return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
-                d.client_msg_id, None, None, None, attachments, typed, None, None, None, None, d.mode or None)
+                d.client_msg_id, None, None, None, attachments, typed, None, None, None, None, d.mode or None,
+                d.strand)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
@@ -299,7 +308,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
                 declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None,
-                None, _tools_of(d), None, None, d.mode or None)
+                None, _tools_of(d), None, None, d.mode or None, d.strand)
     return None
 
 
@@ -345,6 +354,7 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
+#: version 9 : le fil de travail d'un message (``strand``, ADR 0164) ;
 #: version 8 : le mode dans lequel un message a été écrit (``mode``, ADR 0116) ;
 #: version 7 : l'avis de son opératrice sur ses réponses (``verdict``, ``verdict_note``, ADR 0113), d'où
 #: ``transcript.judged`` ; version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
@@ -352,8 +362,40 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
 #: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=8, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=9, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED, c.JUDGED])(Thread)
+
+
+class Strands:
+    """T0 : le dernier réglage de chaque fil de travail (``contracts.transcript.strands_table``, ADR 0164). Un
+    titre ou une description oubliés ne reviennent pas à la reconstruction."""
+
+    def create(self, sql: Sql, sfx: str) -> None:
+        sql.create(c.strands_table(sfx))
+
+    def drop(self, sql: Sql, sfx: str) -> None:
+        sql.drop(c.strands_table(sfx))
+
+    def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        t = c.strands_table(sfx)
+        rows = [{"person": fit(e.data.person, HANDLE_MAX), "strand": fit(e.data.strand, c.STRAND_MAX), "at": e.at,
+                 "title": _kept(e.data.title), "description": _kept(e.data.description),
+                 "archived": bool(e.data.archived)}
+                for e in events if e.type.name == c.STRAND_SET.name]
+        if rows:
+            upsert(sql, t, rows, keys=["person", "strand"])
+
+    def forget(self, sql: Sql, subject: str, sfx: str) -> None:
+        t = c.strands_table(sfx)
+        sql.execute(delete(t).where(t.c.person == fit(subject, HANDLE_MAX)))
+
+
+def _kept(text: Any) -> str | None:
+    """Un texte réglé tel que la projection le garde : vide ou oublié, rien."""
+    return None if text is None or _forgotten(text) else (text.text or None)
+
+
+TRANSCRIPT.projector(c.STRANDS_TABLE, version=1, tier=Tier.T0, types=[c.STRAND_SET])(Strands)
 
 
 def _columns() -> list[Any]:
@@ -397,10 +439,10 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
 def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[str, Any]]:
     """Les ``limit`` plus anciens messages du fil privé d'une adresse après
     ``after``, dans l'ordre : ce qu'un résumé replie en premier (il n'est relu
-    qu'en privé, un salon n'a rien à y faire)."""
+    qu'en privé, un salon n'a rien à y faire ; un fil de travail non plus)."""
     t = c.thread_table()
-    rows = _messages_of(store, t.c.person == person, t.c.room.is_(None), t.c.id > after, newest_first=False,
-                        limit=limit)
+    rows = _messages_of(store, t.c.person == person, t.c.room.is_(None), t.c.strand.is_(None), t.c.id > after,
+                        newest_first=False, limit=limit)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
 
 
@@ -412,7 +454,7 @@ def _count(store: Any, *where: Any) -> int:
 
 def count_after(store: Any, person: str, after: int) -> int:
     t = c.thread_table()
-    return _count(store, t.c.person == person, t.c.room.is_(None), t.c.id > after)
+    return _count(store, t.c.person == person, t.c.room.is_(None), t.c.strand.is_(None), t.c.id > after)
 
 
 def window_start(total: int, window: int, step: int) -> int:
@@ -437,11 +479,64 @@ def _window(store: Any, where: Sequence[Any], window: int, step: int) -> list[di
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
                    after: int = 0, step: int = 1) -> list[dict[str, Any]]:
     """Le fil privé avec une personne, toutes ses adresses confondues (ce
-    qu'elle a dit dans un salon n'y est pas : hors de son contexte)."""
+    qu'elle a dit dans un salon n'y est pas : hors de son contexte ; ses fils
+    de travail non plus, ADR 0164)."""
     bound = before if before is not None else 2**62
     t = c.thread_table()
-    return _window(store, (t.c.person.in_(list(handles)), t.c.room.is_(None), t.c.id < bound, t.c.id > after),
-                   limit, step)
+    return _window(store, (t.c.person.in_(list(handles)), t.c.room.is_(None), t.c.strand.is_(None), t.c.id < bound,
+                           t.c.id > after), limit, step)
+
+
+def strand_thread(store: Any, handle: str, strand: str, limit: int, before: int | None = None,
+                  step: int = 1) -> list[dict[str, Any]]:
+    """Un fil de travail (ADR 0164) : ses seuls messages, rien d'autre de leur fil."""
+    bound = before if before is not None else 2**62
+    t = c.thread_table()
+    return _window(store, (t.c.person == handle, t.c.strand == strand, t.c.id < bound), limit, step)
+
+
+def strand_history(store: Any, handle: str, strand: str, before: int | None, limit: int) -> tuple[list[dict[str, Any]],
+                                                                                                   bool]:
+    """Les messages d'un fil de travail tels qu'un écran les relit : les ``limit`` derniers avant ``before`` (tous
+    s'il est nul), du plus ancien au plus récent, et s'il en reste de plus anciens."""
+    bound = before if before is not None else 2**62
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.person == handle, t.c.strand == strand, t.c.id < bound, limit=limit + 1)
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows[:limit])], len(rows) > limit
+
+
+def strand_setting(store: Any, handle: str, strand: str) -> dict[str, Any] | None:
+    """Le dernier réglage d'un fil de travail (titre, description, archivé) ; ``None`` : jamais réglé."""
+    t = c.strands_table()
+    rows = store.query_mind(select(t.c.title, t.c.description, t.c.archived, t.c.at)
+                            .where(t.c.person == handle, t.c.strand == strand))
+    if not rows:
+        return None
+    title, description, archived, at = rows[0]
+    return {"title": title or "", "description": description or "", "archived": bool(archived), "at": int(at)}
+
+
+def strands_of(store: Any, handle: str) -> list[dict[str, Any]]:
+    """Les fils de travail d'une adresse, du plus récemment actif au plus ancien : ceux qui ont des messages et ceux
+    qu'on a seulement réglés. Pour chacun : son identifiant, son titre, sa description, archivé ou non, combien de
+    messages, le premier et le dernier instant, et le début de son premier message (de quoi le nommer sans titre)."""
+    t, st = c.thread_table(), c.strands_table()
+    stats = store.query_mind(select(t.c.strand, func.count(), func.min(t.c.id), func.min(t.c.at), func.max(t.c.at))
+                             .where(t.c.person == handle, t.c.strand.is_not(None)).group_by(t.c.strand))
+    firsts = {int(first) for _s, _n, first, _a, _b in stats}
+    openers = {int(i): str(text or "") for i, text in
+               store.query_mind(select(t.c.id, t.c.text).where(t.c.id.in_(sorted(firsts))))} if firsts else {}
+    out: dict[str, dict[str, Any]] = {}
+    for strand, count, first, first_at, last_at in stats:
+        out[str(strand)] = {"id": str(strand), "title": "", "description": "", "archived": False,
+                            "count": int(count), "first_at": int(first_at), "last_at": int(last_at),
+                            "opener": openers.get(int(first), "")}
+    for strand, title, description, archived, at in store.query_mind(
+            select(st.c.strand, st.c.title, st.c.description, st.c.archived, st.c.at).where(st.c.person == handle)):
+        item = out.setdefault(str(strand), {"id": str(strand), "count": 0, "first_at": int(at), "last_at": int(at),
+                                            "opener": ""})
+        item.update(title=title or "", description=description or "", archived=bool(archived))
+    return sorted(out.values(), key=lambda x: (-x["last_at"], x["id"]))
 
 
 def room_thread(store: Any, room: str, limit: int, before: int | None = None, step: int = 1,
@@ -711,7 +806,9 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     partagé verbatim ferait lire à Bob ce qu'Alice a écrit en privé). Dans un
     salon, le fil du salon — tout le monde l'a lu —, chacun sous son nom. En
     privé, ses adresses reliées s'ajoutent seulement si sa fiche est ouverte,
-    et le résumé du début du fil est prioritaire dans le budget."""
+    et le résumé du début du fil est prioritaire dans le budget. Dans un fil de
+    travail (ADR 0164), ses seuls messages, sous ce qui dit de quoi il parle :
+    le reste de leur vie passe par sa mémoire."""
     store = ports.get("store")
     ep = frame.episode
     if store is None or ep is None or not ep.target:
@@ -720,6 +817,7 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     tz = frame.env.tz_of(frame.root)
     before = ep.attrs.get("reply_to")
     room = ep.attrs.get("room")
+    strand = ep.attrs.get("strand")
     asked = _message(store, before) if before is not None else None
     names: dict[str, str] = {}
     pinned: list[ChatTurn] = []
@@ -745,6 +843,13 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         names = speakers(frame, [str(r["person"]) for r in rows if r["role"] != "assistant"] +
                          ([str(asked["person"])] if asked else []))
         key = f"room:{room}"
+    elif strand:
+        # un fil de travail : ses messages seulement, ni résumé ni autres adresses ; ce qui dit de quoi il parle
+        # en tête, jamais coupé
+        key = f"strand:{ep.target}:{strand}"
+        pinned.append(ChatTurn("user", strand_about(strand_setting(store, ep.target, strand)), pinned=True))
+        rows = strand_thread(store, ep.target, strand, limit, before=before, step=p.window_step)
+        gap = bool(rows) and _any(store, t.c.person == ep.target, t.c.strand == strand, t.c.id < rows[0]["id"])
     else:
         aud = frame.audience
         handles: tuple[str, ...] = (ep.target,)
@@ -760,8 +865,8 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         for handle in handles:
             since = summary_for(handle)
             part = private_thread(store, (handle,), limit, before=before, after=since, step=p.window_step)
-            gap |= bool(part) and _any(store, t.c.person == handle, t.c.room.is_(None), t.c.id > since,
-                                       t.c.id < part[0]["id"])
+            gap |= bool(part) and _any(store, t.c.person == handle, t.c.room.is_(None), t.c.strand.is_(None),
+                                       t.c.id > since, t.c.id < part[0]["id"])
             rows += part
         rows.sort(key=lambda r: r["id"])
     if gap:
@@ -775,6 +880,20 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         mark = f"{mark} — {late}" if mark else late
     who = names.get(str(asked["person"]), "") if (room and asked) else ""
     return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
+
+
+def strand_about(setting: Mapping[str, Any] | None) -> str:
+    """Ce qu'elle relit en tête d'un fil de travail (ADR 0164) : son titre et sa description tels que son
+    opératrice les a écrits, et que ce qui s'est dit ailleurs n'y est pas."""
+    title = str((setting or {}).get("title") or "").strip()
+    description = str((setting or {}).get("description") or "").strip()
+    if title and description:
+        return phrase("transcript.strand.about.both", title=title, description=description)
+    if title:
+        return phrase("transcript.strand.about.title", title=title)
+    if description:
+        return phrase("transcript.strand.about.description", description=description)
+    return phrase("transcript.strand.about.none")
 
 
 def compact_system(name: str, persona: str) -> str:

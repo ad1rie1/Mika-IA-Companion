@@ -61,6 +61,8 @@ class Pending:
     attempts: int = 0
     #: le salon du message (``None`` en privé) : avec l'adresse, il dit à quel tour il appartient
     room: str | None = None
+    #: son fil de travail (ADR 0164, ``None`` hors du mode pro) : un tour à lui
+    strand: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,18 +101,19 @@ class RuntimeParams(BaseModel):
              "dépendent pas : quelqu'un les attend.")] = 0.0
 
 
-# version 2 : une question en attente sait son salon (le tour de conversation)
+# version 2 : une question en attente sait son salon (le tour de conversation) ; version 3 : son fil de travail
 RUNTIME = Faculty("runtime", state=RuntimeState, init=lambda p: RuntimeState(), params=RuntimeParams,
-                  namespaces=rt.NAMESPACES, state_version=2)
+                  namespaces=rt.NAMESPACES, state_version=3)
 RUNTIME.declare(*rt.ALL)
 
 
 # ── Le tour de conversation (fonctions pures de la tranche) ───────────────
 
 
-def turn_of(s: RuntimeState, handle: str, room: str | None) -> tuple[int, ...]:
-    """Les messages sans réponse de ``handle`` en ``room``, du plus ancien au plus récent."""
-    return tuple(seq for seq, p in s.pending.items() if p.handle == handle and p.room == room)
+def turn_of(s: RuntimeState, handle: str, room: str | None, strand: str | None = None) -> tuple[int, ...]:
+    """Les messages sans réponse de ``handle`` en ``room`` et dans le fil de travail ``strand``, du plus ancien au
+    plus récent."""
+    return tuple(seq for seq, p in s.pending.items() if p.handle == handle and p.room == room and p.strand == strand)
 
 
 def turn_upto(s: RuntimeState, reply_to: int) -> tuple[int, ...]:
@@ -118,7 +121,7 @@ def turn_upto(s: RuntimeState, reply_to: int) -> tuple[int, ...]:
     p = s.pending.get(reply_to)
     if p is None:
         return ()
-    return tuple(seq for seq in turn_of(s, p.handle, p.room) if seq <= reply_to)
+    return tuple(seq for seq in turn_of(s, p.handle, p.room, p.strand) if seq <= reply_to)
 
 
 def unanswered_at_end(s: RuntimeState, reply_to: int | None, outcome: str) -> tuple[int, ...]:
@@ -133,7 +136,7 @@ def unanswered_at_end(s: RuntimeState, reply_to: int | None, outcome: str) -> tu
         return ()
     if outcome in UNSETTLED:
         p = s.pending[reply_to]
-        if p.attempts < MAX_REPLY_ATTEMPTS or turn_of(s, p.handle, p.room)[-1] != reply_to:
+        if p.attempts < MAX_REPLY_ATTEMPTS or turn_of(s, p.handle, p.room, p.strand)[-1] != reply_to:
             return ()
     return turn_upto(s, reply_to)
 
@@ -145,7 +148,8 @@ def unanswered_at_end(s: RuntimeState, reply_to: int | None, outcome: str) -> tu
 def _perceived(s: RuntimeState, e, cx) -> RuntimeState:
     if not e.data.addressed:
         return s  # entendu, pas adressé : personne n'attend de réponse
-    return replace(s, pending=s.pending.set(e.seq, Pending(e.data.handle, e.at, room=e.data.room)))
+    return replace(s, pending=s.pending.set(e.seq, Pending(e.data.handle, e.at, room=e.data.room,
+                                                          strand=e.data.strand)))
 
 
 @RUNTIME.reducer(rt.EPISODE_STARTED)
@@ -206,9 +210,9 @@ def _awaiting(s: RuntimeState, cx) -> tuple[int, ...]:
 
 
 @RUNTIME.fact(rt.TURN)
-def _turn(s: RuntimeState, cx, key: tuple[str, str | None]) -> tuple[int, ...]:
-    handle, room = key
-    return turn_of(s, handle, room)
+def _turn(s: RuntimeState, cx, key: tuple[str, str | None, str | None]) -> tuple[int, ...]:
+    handle, room, strand = key
+    return turn_of(s, handle, room, strand)
 
 
 @RUNTIME.fact(rt.PENDING_EFFECTS)
@@ -309,14 +313,14 @@ async def _no_reply(ev: Any, ports: Mapping[str, Any]) -> None:
     port, store = ports.get("delivery"), ports.get("store")
     if not d.unanswered or port is None or store is None:
         return
-    last: dict[tuple[str, str | None], tuple[int, rt.PerceptionReceived]] = {}
-    turns: dict[tuple[str, str | None], list[int]] = {}
+    last: dict[tuple[str, str | None, str | None], tuple[int, rt.PerceptionReceived]] = {}
+    turns: dict[tuple[str, str | None, str | None], list[int]] = {}
     for stored in store.get_events(sorted(d.unanswered)):
         if stored.type != rt.PERCEPTION_RECEIVED.name:
             continue
         p = rt.PerceptionReceived.model_validate_json(stored.data)
-        last[(p.handle, p.room)] = (stored.seq, p)
-        turns.setdefault((p.handle, p.room), []).append(stored.seq)
+        last[(p.handle, p.room, p.strand)] = (stored.seq, p)
+        turns.setdefault((p.handle, p.room, p.strand), []).append(stored.seq)
     abstained = d.outcome == "abstained"
     for seq, p in sorted(last.values(), key=lambda x: x[0]):
         await port.deliver(Delivery(
@@ -324,4 +328,4 @@ async def _no_reply(ev: Any, ports: Mapping[str, Any]) -> None:
             text="" if abstained else (d.detail or d.outcome), persona=voice.SPEAKING,
             emotion=EmotionView("neutral", 0.0), message_id=0, reply_to=seq, client_msg_id=p.client_msg_id,
             source=d.outcome, kind=REPLY_ABSTAINED if abstained else REPLY_FAILED,
-            answers=tuple(turns[(p.handle, p.room)])))
+            answers=tuple(turns[(p.handle, p.room, p.strand)]), strand=p.strand))

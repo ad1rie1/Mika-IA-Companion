@@ -110,6 +110,7 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             mode = ChatSync.modeOf(mode),
             tools = tools?.let { decodeTools(it) },
             notes = notes?.let { decodeNotes(it) },
+            strand = strand,
         )
 
         fun StoredMessage.toEntity() = MessageEntity(
@@ -141,6 +142,7 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             mode = ChatSync.modeOf(mode),
             tools = tools?.let { MikaJson.encodeToString(TOOLS, it) },
             notes = notes?.takeIf { it.isNotEmpty() }?.let { MikaJson.encodeToString(NOTES, it) },
+            strand = strand,
         )
 
         /** Les outils d'une réponse pro (ADR 0116) ; illisibles, rien — le prochain historique les redit. */

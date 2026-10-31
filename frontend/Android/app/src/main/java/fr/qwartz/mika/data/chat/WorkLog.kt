@@ -49,6 +49,8 @@ data class WorkCard(
     val answerId: Long? = null,
     /** Les étapes écartées au-delà de [MikaProtocol.MAX_WORK_STEPS]. */
     val dropped: Int = 0,
+    /** Le fil de travail où elle répond (ADR 0164) ; `null` : le fil avec elle. La carte ne se montre que là. */
+    val strand: String? = null,
 ) {
     val key: String get() = "w$episode"
     val done: Boolean get() = outcome != null
@@ -145,7 +147,7 @@ data class WorkLog(
                 next.removeAll(replaced)
                 gone += replaced.map { it.episode }
             }
-            next += WorkCard(f.episode, replyTo)
+            next += WorkCard(f.episode, replyTo, strand = f.strand)
             i = next.lastIndex
         }
         next[i] = next[i].step(f)

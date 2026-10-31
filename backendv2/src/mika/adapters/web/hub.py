@@ -213,6 +213,15 @@ class Hub:
     async def send_to(self, handle: str, frame: dict[str, Any]) -> int:
         return await self._send(self.of(handle), frame)
 
+    async def push_strands(self, handle: str) -> int:
+        """La liste des fils de travail de la personne (ADR 0164), à ses écrans d'opératrice authentifiée : les
+        seuls qui en ouvrent."""
+        conns = [c for c in self.of(handle) if c.operator and c.authenticated]
+        listed = getattr(self.port, "strands", None)
+        if not conns or listed is None:
+            return 0
+        return await self._send(conns, protocol.strands(listed(handle)))
+
     async def activity(self, a: Activity) -> None:
         """Un moment de son travail en mode pro (le port ``activity``, ADR 0116) : aux écrans regardés de la personne,
         s'ils sont d'une opératrice authentifiée — le seul qui a pu le demander. Ni gardé ni rattrapé."""

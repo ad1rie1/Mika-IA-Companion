@@ -90,6 +90,11 @@ data class StoredMessage(
     var tools: List<ToolUse>? = null,
     /** Une réponse d'elle : ses petites bulles (ADR 0119 : elle a regardé où tu es), montrées avant elle ; `null` : rien. */
     var notes: List<MessageNote>? = null,
+    /**
+     * Son fil de travail du mode pro (ADR 0164) : gardé à l'envoi pour ses messages, dit par le serveur pour les siens ;
+     * `null` : le fil avec elle.
+     */
+    var strand: String? = null,
 ) {
     val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
 }
@@ -243,7 +248,8 @@ object ChatSync {
     /** Une page de la console, et rien d'autre : un lien sous une bulle ne mène jamais ailleurs. */
     fun consoleHref(href: String?): String? = href?.takeIf { CONSOLE_HREF.matches(it) }
 
-    data class AckResult(val changed: Boolean, val failed: Boolean, val settled: Boolean)
+    /** [strand] : le fil de travail du message accusé (ADR 0164) — celui où « Mika écrit… » se montre. */
+    data class AckResult(val changed: Boolean, val failed: Boolean, val settled: Boolean, val strand: String? = null)
 
     /**
      * Ce que le serveur dit d'un message envoyé. `failed` : refusé, il ne l'a jamais reçue.
@@ -265,13 +271,13 @@ object ChatSync {
             msg.waiting = null
             msg.replyNote = noReplyNote(if (status == "too_late") "too_late" else reason, detail)
             msg.replyHref = consoleHref(href)
-            return AckResult(changed = true, failed = false, settled = true)
+            return AckResult(changed = true, failed = false, settled = true, strand = msg.strand)
         }
         val failed = status != MikaProtocol.ACK_ACCEPTED
         msg.status = if (failed) MessageStatus.FAILED else MessageStatus.SENT
         msg.reason = if (failed) ackReason(status) else null
         msg.note = if (!rejected.isNullOrEmpty()) rejectedNote(rejected) else null
-        return AckResult(changed = true, failed = failed, settled = failed)
+        return AckResult(changed = true, failed = failed, settled = failed, strand = msg.strand)
     }
 
     const val ASLEEP = "asleep"
@@ -445,7 +451,10 @@ object ChatSync {
             val ts = entry.ts?.let { Timestamps.normalize(it, nowMs) }
 
             // Une bulle en échec n'est adoptée qu'en dernier recours : « coucou » retapé est le nouvel envoi, pas l'ancien.
-            val unbound = history.filter { it.id == null && it.sender == sender && matches(it, text, typed) }
+            // Jamais une bulle d'un autre fil (ADR 0164) : « ok » tapé dans deux fils n'est pas le même message.
+            val unbound = history.filter {
+                it.id == null && it.sender == sender && it.strand == entry.strand && matches(it, text, typed)
+            }
             val mine = unbound.firstOrNull { it.status != MessageStatus.FAILED } ?: unbound.firstOrNull()
             if (mine != null) {
                 mine.id = id
@@ -473,6 +482,7 @@ object ChatSync {
                         mode = modeOf(entry.mode),
                         tools = toolsOf(entry, sender),
                         notes = notesOf(entry, sender),
+                        strand = entry.strand,
                     ),
                 )
                 added += 1
@@ -498,20 +508,21 @@ object ChatSync {
         entry.notes?.takeIf { sender == Sender.MIKA && it.isNotEmpty() }
 
     /**
-     * Le mode, les outils et les petites bulles d'une ligne déjà montrée, tels que le serveur les dit (il est la
-     * référence : un message qu'il n'a pas reçu en mode pro ne l'est pas ; le lieu d'une position oubliée s'efface).
-     * Des outils ou des bulles absents de la ligne ne retirent pas ceux qu'on connaît déjà. `true` si quelque chose
-     * a changé.
+     * Le mode, les outils, les petites bulles et le fil de travail d'une ligne déjà montrée, tels que le serveur les
+     * dit (il est la référence : un message qu'il n'a pas reçu en mode pro ne l'est pas, ni dans un fil qu'il a
+     * ignoré ; le lieu d'une position oubliée s'efface). Des outils ou des bulles absents de la ligne ne retirent pas
+     * ceux qu'on connaît déjà. `true` si quelque chose a changé.
      */
     private fun rework(shown: StoredMessage?, entry: HistoryEntry): Boolean {
         if (shown == null) return false
         val mode = modeOf(entry.mode)
         val tools = toolsOf(entry, shown.sender) ?: shown.tools.takeIf { mode != null }
         val notes = notesOf(entry, shown.sender) ?: shown.notes
-        if (shown.mode == mode && shown.tools == tools && shown.notes == notes) return false
+        if (shown.mode == mode && shown.tools == tools && shown.notes == notes && shown.strand == entry.strand) return false
         shown.mode = mode
         shown.tools = tools
         shown.notes = notes
+        shown.strand = entry.strand
         return true
     }
 

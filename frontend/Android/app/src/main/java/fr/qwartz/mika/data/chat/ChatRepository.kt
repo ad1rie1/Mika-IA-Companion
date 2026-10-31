@@ -46,16 +46,23 @@ class ChatRepository(
     /**
      * Envoyer ce qui a été tapé, avec des fichiers déjà préparés (copiés dans l'espace de l'app). [mode] : `pro`
      * pour un message de travail (ADR 0116), gardé avec la bulle et sa ligne de file d'envoi — un renvoi le garde.
+     * [strand] : son fil de travail (ADR 0164), seulement avec le mode pro ; un renvoi le garde aussi.
      */
-    suspend fun send(text: String, staged: List<StagedFile> = emptyList(), mode: String? = null): SendResult {
+    suspend fun send(
+        text: String,
+        staged: List<StagedFile> = emptyList(),
+        mode: String? = null,
+        strand: String? = null,
+    ): SendResult {
         val message = text.trim()
         AttachmentPolicy.checkSend(message, staged)?.let { return SendResult.Rejected(it) }
         val chatMode = ChatSync.modeOf(mode)
+        val work = strand?.takeIf { chatMode != null && Strands.isValidId(it) }
         val cid = ChatSync.nextClientMsgId(clock.wallMs())
         // Nommés comme le serveur les nommera : la trame, la bulle et la ligne relue disent le même nom.
         val named = staged.map { it.copy(name = ChatSync.fileName(it.name)) }
         val outboxFiles = withContext(io) { files.adopt(cid, named) }
-        val frameBytes = ChatFrameWriter.frameBytes(message, cid, outgoing(cid, outboxFiles), chatMode)
+        val frameBytes = ChatFrameWriter.frameBytes(message, cid, outgoing(cid, outboxFiles), chatMode, work)
         // La même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle.
         val display = ChatSync.withAttachments(message, outboxFiles.map { it.name })
         store.mutate {
@@ -71,6 +78,7 @@ class ChatRepository(
                         MessageAttachment(it.name, AttachmentPolicy.kindOf(it.mime), it.mime, it.size, local = it.file)
                     },
                     mode = chatMode,
+                    strand = work,
                 ),
             )
             outboxPut(
@@ -81,10 +89,11 @@ class ChatRepository(
                     frameBytes = frameBytes,
                     createdAt = clock.wallMs(),
                     mode = chatMode,
+                    strand = work,
                 ),
             )
         }
-        withContext(engineContext) { socket().offer(outbound(cid, message, outboxFiles, frameBytes, chatMode)) }
+        withContext(engineContext) { socket().offer(outbound(cid, message, outboxFiles, frameBytes, chatMode, work)) }
         return SendResult.Queued(cid)
     }
 
@@ -108,7 +117,7 @@ class ChatRepository(
             if (cid != null) outboxDelete(cid)
         }
         if (cid != null) withContext(io) { files.forget(cid) }
-        return send(again.typed, again.staged, failed.mode)
+        return send(again.typed, again.staged, failed.mode, failed.strand)
     }
 
     /**
@@ -124,7 +133,7 @@ class ChatRepository(
         }
         val again = prepareAgain(original)
         again.refusal?.let { return SendResult.Rejected(it) }
-        return send(again.typed, again.staged, original.mode)
+        return send(again.typed, again.staged, original.mode, original.strand)
     }
 
     /**
@@ -179,7 +188,7 @@ class ChatRepository(
         }
         val offers = rows.filter { it.clientMsgId in known }.map { row ->
             val outboxFiles = decodeFiles(row.attachments)
-            outbound(row.clientMsgId, row.message, outboxFiles, row.frameBytes, ChatSync.modeOf(row.mode))
+            outbound(row.clientMsgId, row.message, outboxFiles, row.frameBytes, ChatSync.modeOf(row.mode), row.strand)
         }
         if (offers.isNotEmpty()) withContext(engineContext) { offers.forEach { socket().offer(it) } }
     }
@@ -199,8 +208,16 @@ class ChatRepository(
         withContext(io) { files.wipe(keepStaging) }
     }
 
-    private fun outbound(cid: String, message: String, outboxFiles: List<OutboxFile>, frameBytes: Long, mode: String?) =
-        MikaSocket.OutboundChat(cid, frameBytes) { ChatFrameWriter.render(message, cid, outgoing(cid, outboxFiles), mode) }
+    private fun outbound(
+        cid: String,
+        message: String,
+        outboxFiles: List<OutboxFile>,
+        frameBytes: Long,
+        mode: String?,
+        strand: String?,
+    ) = MikaSocket.OutboundChat(cid, frameBytes) {
+        ChatFrameWriter.render(message, cid, outgoing(cid, outboxFiles), mode, strand)
+    }
 
     private fun outgoing(cid: String, outboxFiles: List<OutboxFile>): List<OutgoingFile> =
         outboxFiles.map { f -> OutgoingFile(f.name, f.mime, f.size) { files.open(cid, f.file) } }

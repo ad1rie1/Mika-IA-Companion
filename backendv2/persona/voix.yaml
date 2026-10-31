@@ -2830,6 +2830,19 @@ transcript:
       # Une question qu'elle a lue trop tard pour y répondre.
       late: tu ne l'as pas lu à temps
 
+  # Un fil de travail du mode pro (ADR 0164), épinglé en tête de son historique : elle n'y relit que ses messages,
+  # sous ce que son opératrice en a écrit. Ce qui s'est dit ailleurs, elle le retrouve par sa mémoire.
+  strand:
+    about:
+      # {title} : son titre ; {description} : sa petite description.
+      both: "(Ce fil de travail : « {title} » — {description}. Ce qui s'est dit ailleurs n'y est pas : ta mémoire le garde.)"
+      # Un titre seul. {title} : son titre.
+      title: "(Ce fil de travail : « {title} ». Ce qui s'est dit ailleurs n'y est pas : ta mémoire le garde.)"
+      # Une description seule. {description} : sa petite description.
+      description: "(Ce fil de travail : {description}. Ce qui s'est dit ailleurs n'y est pas : ta mémoire le garde.)"
+      # Ni titre ni description.
+      none: "(Un fil de travail à part : ce qui s'est dit ailleurs n'y est pas ; ta mémoire le garde.)"
+
   # Replier le début d'un fil trop long (transcript/__init__.py, processus ``transcript.compact``) : un appel au
   # modèle (rôle « compact »), en fond, seulement sur ce que la mémoire a déjà relu. Le résumé devient
   # transcript.thread.summary. Sa persona compacte suit la consigne (self.portrayed, ADR 0153) : le résumé est écrit

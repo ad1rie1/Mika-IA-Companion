@@ -37,6 +37,10 @@ persona, ses étiquettes coupées, ses limites), peut taire la seconde passe,
 ajoute sa consigne ; ``live`` : chaque moment de sa boucle
 d'outils est montré en direct à la personne (le port ``activity``), puis la
 fin de l'épisode. Rien de ce qui se montre n'est gardé.
+
+**Un fil de travail** (``EpisodeRequest.strand``, ADR 0164) est un tour à
+lui : sa garde, sa file et la portée de ses écritures ne se mêlent pas à
+celles du fil avec la personne, ni à celles d'un autre fil.
 """
 
 from __future__ import annotations
@@ -222,6 +226,9 @@ class EpisodeRequest:
     about: tuple[str, ...] = ()
     #: la façon de répondre que la personne a demandée (``EpisodeRunner.modes``) ; ``""`` : l'ordinaire
     mode: str = ""
+    #: le fil de travail où elle répond (``PerceptionReceived.strand``, ADR 0164) : un tour à lui, son historique à
+    #: lui ; ``None`` : le fil avec la personne
+    strand: str | None = None
 
 
 @dataclass(slots=True)
@@ -417,6 +424,8 @@ class EpisodeRunner:
                     attrs["args"] = req.selected.args
                 if ep.mode is not None:
                     attrs["mode"] = req.mode
+                if req.strand is not None:
+                    attrs["strand"] = req.strand
                 if req.kind in CONVERSATIONAL:
                     # la forme n'a qu'une maison, l'autrice du chat (ADR 0140) : ses codes passent en seconde passe,
                     # ou, quand aucune ne suivra, dans le premier jet (« COMMENT TU ÉCRIS ICI »)
@@ -479,6 +488,8 @@ class EpisodeRunner:
                                at=mind.clock.now())
                 if ep.mode is not None:
                     ep.seen["mode"] = req.mode
+                if req.strand is not None:
+                    ep.seen["strand"] = req.strand
                 if policy.role is None:
                     await self._settle(ep, Outcome.DONE)
                     return
@@ -598,7 +609,7 @@ class EpisodeRunner:
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
                         sections=trace.included, provenance=trace.provenance, answers=answers,
                         attachments=tuple(loop.attachments), about=req.about,
-                        mode=req.mode if ep.mode is not None else "",
+                        mode=req.mode if ep.mode is not None else "", strand=req.strand,
                         floor=max(loop.floor, trace.floor), unkept=loop.unkept or trace.unkept,
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
@@ -937,13 +948,15 @@ class EpisodeRunner:
             if event.phase == NOTE:
                 text = self._parse(event.text, speaker, markdown=ep.mode is not None and ep.mode.markdown)[0].strip()
                 if text:
-                    await port.activity(Activity(target, ep.id, NOTE, now, ep.req.reply_to, text=text))
+                    await port.activity(Activity(target, ep.id, NOTE, now, ep.req.reply_to, text=text,
+                                                 strand=ep.req.strand))
                 return
             rec = event.record
             await port.activity(Activity(
                 target, ep.id, event.phase, now, ep.req.reply_to, call_id=event.call_id, name=event.name,
                 args=rec.args_json if rec is not None else event.args, ok=rec.ok if rec is not None else None,
                 result=rec.result if rec is not None else "", duration_us=rec.duration_us if rec is not None else 0,
+                strand=ep.req.strand,
             ))
 
         return watch
@@ -954,7 +967,8 @@ class EpisodeRunner:
         if ep.mode is None or not ep.mode.live or port is None or not ep.req.target:
             return
         await acall(port.activity, Activity(ep.req.target, ep.id, DONE, self.mind.clock.now(), ep.req.reply_to,
-                                            outcome=outcome.value), label="fin de l'activité en direct")
+                                            outcome=outcome.value, strand=ep.req.strand),
+                    label="fin de l'activité en direct")
 
     def _parse(self, text: str, speaker: str = "", *, markdown: bool = False) -> tuple[str, dict[str, str]]:
         """Le texte livrable et ce que les analyseurs en tirent. ``markdown`` : ses blocs de code, son code en ligne
@@ -1029,7 +1043,7 @@ def _turn_guard(req: EpisodeRequest) -> Guard | None:
     question déjà réglée ou abandonnée ne reçoit pas de réponse."""
     if req.reply_to is None or not req.target:
         return None
-    key, reply_to = (req.target, req.room), req.reply_to
+    key, reply_to = (req.target, req.room, req.strand), req.reply_to
 
     def latest(view: FactView) -> bool:
         turn = view.get(rt.TURN(key))
@@ -1065,7 +1079,7 @@ def _scope(root: Any, req: EpisodeRequest, eid: str) -> str:
         return eid
     turn = turn_upto(root.slices[RUNTIME.name], req.reply_to)
     first = turn[0] if turn else req.reply_to
-    return f"tour:{req.target}:{req.room or ''}:{first}"
+    return f"tour:{req.target}:{req.room or ''}:{req.strand or ''}:{first}"
 
 
 def _defers(gateway: LLMGateway | None, role: str) -> bool:

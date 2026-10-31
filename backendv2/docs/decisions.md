@@ -27,7 +27,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
@@ -1798,7 +1798,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un travail demandé n'a que faire de sa voix de chat, de son caractère ni de son humeur.
 
-*Révisée par 0162.*
+*Révisée par 0162, 0164.*
 
 ### 0162 — En mode pro et en projet, un service s'éprouve sans buter sur son plafond
 
@@ -1810,6 +1810,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* éprouver une API, c'est appeler le même outil avec chaque filtre, une pagination, une borne ; au quatrième appel de `devis_list`, elle s'arrêtait à mi-chemin. Les 24 tours, les 15 minutes et le disjoncteur du serveur suffisent à la borner.
 
 *Révise 0116 (en partie), 0145 (en partie).*
+
+### 0164 — En mode pro, des fils de travail, chacun son contexte
+
+- En mode pro, un message porte un fil de travail (`strand`) : un identifiant opaque choisi par le client, propre à l'adresse. Le transport ne le prend qu'avec le mode pro ; le fil avec elle n'en a pas.
+- Un fil de travail est un tour à lui : le tour devient (adresse, salon, fil). Un message d'un autre fil ne supplante pas la réponse en cours, et chaque fil a sa réponse.
+- Elle n'y relit que ses messages, sous ce que son opératrice en a écrit — un titre, une petite description, rien d'autre (`transcript.strand_set`, le dernier réglage vaut) ; le fil privé ne relit plus les fils de travail. Ni résumé : la fenêtre du fil suffit.
+- Tout reste au journal : sa mémoire consolide les fils de travail comme le reste de sa vie, et elle peut en reparler dans le fil ordinaire.
+- Rien ne s'efface : ouvrir un fil neuf (`/clear` dans le chat) laisse l'ancien dans la liste ; l'archiver le range.
+
+*Pourquoi :* un seul fil mêlait le travail et la conversation — le modèle relisait « bonne nuit » en préparant des devis, le fil avec elle se remplissait de tableaux, et chaque demande payait un historique qui ne la concernait pas.
+
+*Révise 0116 (en partie).*
 
 ## La console et l'exploitation
 

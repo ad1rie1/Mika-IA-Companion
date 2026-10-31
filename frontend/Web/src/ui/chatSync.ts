@@ -26,6 +26,7 @@ import type {
   Verdict,
 } from "../types";
 import { messageNotes, sameNotes } from "./messageNotes";
+import { strandOf } from "./strands";
 import { sameToolUses, toolUses } from "./toolActivity";
 
 /**
@@ -133,7 +134,55 @@ export interface StoredMessage {
    * Depuis la `speech` ou l'historique, validées par `messageNotes`.
    */
   notes?: MessageNote[];
+  /**
+   * Le fil de travail du message (ADR 0164) : en mode pro, l'écran ne montre
+   * qu'un fil à la fois ; absent, c'est le fil avec elle. Posé à l'envoi,
+   * depuis la `speech`, ou depuis l'historique.
+   */
+  strand?: string;
 }
+
+/** Le fil d'un message pour l'écran : son fil de travail, ou `""` pour le fil avec elle. */
+export function threadOf(msg: Pick<StoredMessage, "strand">): string {
+  return msg.strand ?? "";
+}
+
+/**
+ * Ce que le cache garde : les `perThread` derniers messages de chaque fil (le
+ * fil avec elle et chacun de ses fils de travail), et seulement les
+ * `maxStrands` fils de travail les plus récemment actifs — un fil plus ancien
+ * se relit au serveur quand on l'ouvre (`strand_history`). L'ordre est gardé.
+ */
+export function trimThreads(
+  history: StoredMessage[],
+  perThread: number,
+  maxStrands: number
+): StoredMessage[] {
+  const lastSeen = new Map<string, number>();
+  history.forEach((m, i) => lastSeen.set(threadOf(m), i));
+  const kept = new Set(
+    [...lastSeen.entries()]
+      .filter(([thread]) => thread !== "")
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxStrands)
+      .map(([thread]) => thread)
+  );
+  kept.add("");
+  const counts = new Map<string, number>();
+  const out: StoredMessage[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const thread = threadOf(history[i]);
+    if (!kept.has(thread)) continue;
+    const n = counts.get(thread) ?? 0;
+    if (n >= perThread) continue;
+    counts.set(thread, n + 1);
+    out.push(history[i]);
+  }
+  return out.reverse();
+}
+
+/** Les fils de travail gardés dans le cache du navigateur, au plus (les plus récemment actifs). */
+export const MAX_STRANDS_CACHED = 12;
 
 /** `"pro"` pour une trame ou une ligne en mode pro ; toute autre valeur vaut « ordinaire ». */
 export function proMode(raw: unknown): "pro" | undefined {
@@ -553,7 +602,8 @@ function matches(msg: StoredMessage, display: string, typed: string): boolean {
 export function mergeHistory(
   history: StoredMessage[],
   entries: HistoryEntry[],
-  maxMessages: number
+  maxMessages: number,
+  maxStrands: number = MAX_STRANDS_CACHED
 ): {
   history: StoredMessage[];
   added: number;
@@ -581,6 +631,7 @@ export function mergeHistory(
   for (const entry of entries ?? []) {
     if (typeof entry?.id !== "number") continue;
     const mode = proMode(entry.mode);
+    const strand = strandOf(entry.strand);
     if (known.has(entry.id)) {
       // une ligne déjà là ne change pas — sauf l'avis de l'opératrice, qui peut venir d'un autre appareil
       const shown = history.find((m) => m.id === entry.id);
@@ -609,8 +660,10 @@ export function mergeHistory(
 
     if (sender === "vtuber") sawReply = true;
 
+    // une bulle d'un autre fil n'est jamais la sienne, même au même texte (« ok »)
     const mine = history.find(
-      (m) => m.id === undefined && m.sender === sender && matches(m, text, typed)
+      (m) =>
+        m.id === undefined && m.sender === sender && m.strand === strand && matches(m, text, typed)
     );
     const files = sender === "vtuber" ? sentFiles(entry.attachments) : [];
     if (mine) {
@@ -639,6 +692,7 @@ export function mergeHistory(
         ...(mode ? { mode } : {}),
         ...(tools.length ? { tools } : {}),
         ...(notes.length ? { notes } : {}),
+        ...(strand ? { strand } : {}),
       });
       added += 1;
     }
@@ -646,9 +700,7 @@ export function mergeHistory(
   }
 
   sortMessages(history);
-  if (history.length > maxMessages) {
-    history = history.slice(-maxMessages);
-  }
+  history = trimThreads(history, maxMessages, maxStrands);
   return { history, added, adopted, sawReply, judged, enriched };
 }
 

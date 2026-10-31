@@ -29,7 +29,8 @@ from mika.contracts import place as place_c
 from mika.contracts import presence as presence_c
 from mika.contracts import self_ as self_c
 from mika.contracts import world as world_c
-from mika.contracts.entry import HistoryRow, MessageNote, SharedMeta
+from mika.contracts.entry import HistoryRow, MessageNote, SharedMeta, StrandItem
+from mika.contracts.transcript import STRAND_MAX
 from mika.kernel.clock import HOUR, US
 from mika.kernel.frame import Frame
 from mika.ports.delivery import DONE, NOTE, TOO_LATE, Activity, Delivery
@@ -281,6 +282,8 @@ def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None
         item["mode"] = row.mode
         if row.role == "assistant":
             item["tools"] = tools_item(row.tools)
+    if row.strand:
+        item["strand"] = row.strand  # son fil de travail (ADR 0164)
     return item
 
 
@@ -362,6 +365,7 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
         "client_msg_id": None if inner else d.client_msg_id,
         "attachments": [] if inner else [shared_item(m) for m in attachments],
         "mode": d.mode if pro else "",
+        **({"strand": d.strand} if d.strand and not inner else {}),
     }
     if notes and not inner:
         frame["notes"] = [note_item(n) for n in notes]
@@ -371,6 +375,26 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
 def chat_mode(raw: Any) -> str:
     """Le mode qu'un ``chat`` demande (ADR 0116) : un des ``MODES``, sinon ``""`` (la conversation ordinaire)."""
     return raw if isinstance(raw, str) and raw in MODES else ""
+
+
+#: un identifiant de fil de travail (ADR 0164) : choisi par le client, lettres, chiffres, ``_`` et ``-``
+_STRAND_ID = re.compile(rf"[A-Za-z0-9_-]{{1,{STRAND_MAX}}}")
+#: le début du premier message d'un fil sans titre, tel que la liste le montre
+STRAND_OPENER_MAX = 120
+
+
+def strand_id(raw: Any) -> str | None:
+    """Le fil de travail qu'une trame désigne (ADR 0164) : un identifiant valide, sinon ``None``."""
+    return raw if isinstance(raw, str) and _STRAND_ID.fullmatch(raw) else None
+
+
+def strands(items: Sequence[StrandItem]) -> dict[str, Any]:
+    """La liste des fils de travail de la personne (ADR 0164), du plus récemment actif au plus ancien."""
+    return {"type": "strands", "items": [
+        {"id": i.id, "title": i.title, "description": i.description, "archived": i.archived, "count": i.count,
+         "first_at": i.first_at // 1000, "last_at": i.last_at // 1000,
+         "opener": i.opener if len(i.opener) <= STRAND_OPENER_MAX else i.opener[:STRAND_OPENER_MAX - 1] + "…"}
+        for i in items]}
 
 
 def _cut(text: str, limit: int = TOOL_TEXT_MAX) -> str:
@@ -383,6 +407,8 @@ def tool_activity(a: Activity) -> dict[str, Any]:
     l'épisode (``done``). Arguments et résultat bornés, en texte brut."""
     frame: dict[str, Any] = {"type": "tool", "episode": a.episode, "reply_to": a.reply_to, "phase": a.phase,
                              "at": a.at // 1000}
+    if a.strand:
+        frame["strand"] = a.strand
     if a.phase == NOTE:
         frame["text"] = _cut(a.text)
     elif a.phase == DONE:

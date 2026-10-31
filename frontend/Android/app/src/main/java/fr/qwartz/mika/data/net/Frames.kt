@@ -35,12 +35,17 @@ sealed interface ServerFrame {
          * rien. Lues à part par `FrameCodec` : une liste cassée n'emporte pas la parole.
          */
         val notes: List<MessageNote>? = null,
+        /** Le fil de travail où elle répond (ADR 0164) ; `null` : le fil avec elle. Validé par `FrameCodec`. */
+        val strand: String? = null,
     ) : ServerFrame {
         val isInner: Boolean get() = voicePersona == MikaProtocol.PERSONA_INNER
         val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
     }
 
-    /** Un morceau du fil : `initial` à la connexion, `catchup` en réponse à un `sync`. */
+    /**
+     * Un morceau du fil : `initial` à la connexion, `catchup` en réponse à un `sync` ; `strand` en réponse à un
+     * `strand_history` (ADR 0164), avec [strand] et [more] (il en reste de plus anciens).
+     */
     data class History(
         val mode: String = MikaProtocol.MODE_CATCHUP,
         /** `null` quand la trame n'en portait pas : une trame malformée ne fait pas tomber le fil. */
@@ -51,8 +56,11 @@ sealed interface ServerFrame {
         val life: String? = null,
         /** Le curseur dépassait la tête du fil : ce fil remplace ce que l'écran montre. */
         val reset: Boolean = false,
+        val strand: String? = null,
+        val more: Boolean = false,
     ) : ServerFrame {
         val isInitial: Boolean get() = mode == MikaProtocol.MODE_INITIAL
+        val isStrand: Boolean get() = mode == MikaProtocol.MODE_STRAND
     }
 
     @Serializable
@@ -121,7 +129,18 @@ sealed interface ServerFrame {
         val outcome: String = "",
         /** Millisecondes Unix ; `null` si la trame n'en portait pas de lisible. */
         val at: Long? = null,
+        /** Le fil de travail où elle répond (ADR 0164) ; `null` : le fil avec elle. */
+        val strand: String? = null,
     ) : ServerFrame
+
+    /**
+     * Ses fils de travail (ADR 0164) : la liste entière, du plus récemment actif au plus ancien, archivés compris —
+     * elle remplace la précédente. Une entrée sans identifiant valide est écartée seule.
+     */
+    data class Strands(val items: List<StrandInfo>) : ServerFrame
+
+    /** Le sort d'un réglage de fil : `ok`, `invalid`, `forbidden`, `failed` ; une liste `strands` suit s'il a pris. */
+    data class StrandResult(val id: String, val status: String) : ServerFrame
 
     /** Un type que cette version ne connaît pas, ou une trame illisible : ignorée, jamais fatale. */
     data class Unknown(val type: String) : ServerFrame
@@ -129,6 +148,22 @@ sealed interface ServerFrame {
 
 @Serializable
 data class BlendPart(val emotion: String = "", val weight: Double = 0.0)
+
+/**
+ * Un fil de travail du mode pro (ADR 0164), tel que la trame `strands` le liste : son identifiant, ce que son
+ * opératrice en a écrit, archivé ou non, combien de messages (0 : seulement réglé, ou ouvert ici sans encore rien
+ * dedans), le premier et le dernier instant (ms) et le début de son premier message — de quoi le nommer sans titre.
+ */
+data class StrandInfo(
+    val id: String,
+    val title: String = "",
+    val description: String = "",
+    val archived: Boolean = false,
+    val count: Int = 0,
+    val firstAt: Long = 0,
+    val lastAt: Long = 0,
+    val opener: String = "",
+)
 
 /**
  * Une pièce jointe. Côté personne (`history` `user`) : un nom et une sorte. Côté Mika (`speech`,
@@ -203,6 +238,8 @@ data class HistoryEntry(
     val tools: List<ToolUse>? = null,
     /** Une ligne d'elle : ses petites bulles (ADR 0119), lues à part comme ses outils ; `null` : rien à montrer. */
     val notes: List<MessageNote>? = null,
+    /** Le fil de travail de la ligne (ADR 0164) ; `null` : le fil avec elle. Validé par `FrameCodec`. */
+    val strand: String? = null,
 )
 
 /** Un outil dont elle s'est servie pour une réponse pro (ADR 0116) : son nom, et s'il a réussi. */

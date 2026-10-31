@@ -526,17 +526,140 @@
         background: rgba(12, 13, 28, 0.95);
         pointer-events: auto;
       }
-      #app.pro-mode #chat-container > * {
+      #app.pro-mode #chat-container > *:not(#chat-strands) {
         width: 100%;
         max-width: 1100px;
         margin-left: auto;
         margin-right: auto;
         box-sizing: border-box;
       }
-      #app.pro-mode #chat-messages { padding-top: 64px; }
+      #app.pro-mode #chat-messages { padding-top: 8px; }
       #app.pro-mode .chat-bubble.vtuber.pro { max-width: min(100%, 960px); }
       #app.pro-mode #inner-life-panel { top: 12px; z-index: 12; }
       #app.pro-mode #identity-bar, #app.pro-mode #emotion-display { visibility: hidden; }
+
+      /* Ses fils de travail (ADR 0164, ui/strands.ts) : la liste à gauche,
+         l'en-tête du fil montré au-dessus du fil, les commandes au-dessus du
+         champ. Hors du mode pro, rien de tout cela. */
+      #chat-strands, #chat-strand-head { display: none; }
+      #chat-commands[hidden] { display: none; }
+      #app.pro-mode #chat-container { padding-left: 260px; }
+      #app.pro-mode #chat-strands {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 260px;
+        box-sizing: border-box;
+        padding: 52px 10px 12px;
+        overflow-y: auto;
+        background: rgba(255, 255, 255, 0.04);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        color: white;
+        font-size: 13px;
+      }
+      .strands-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-weight: 600;
+        opacity: 0.9;
+      }
+      .strands-new, .strands-archived, .strand-edit, .strands-toggle, .strands-close, .strand-editor button {
+        border: none;
+        border-radius: 8px;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+      }
+      .strands-new { padding: 4px 10px; background: rgba(251, 191, 36, 0.25); color: #fde68a; }
+      .strands-new:hover { background: rgba(251, 191, 36, 0.4); }
+      .strands-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+      .strand-item {
+        width: 100%;
+        padding: 7px 10px;
+        border: none;
+        border-radius: 8px;
+        background: none;
+        color: rgba(255, 255, 255, 0.85);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .strand-item:hover { background: rgba(255, 255, 255, 0.08); }
+      .strand-item.active { background: rgba(99, 102, 241, 0.35); color: white; }
+      .strand-item.unread::after { content: " ●"; color: #fbbf24; }
+      .strands-archived { margin-top: 10px; padding: 4px 6px; background: none; opacity: 0.7; text-align: left; }
+      .strands-list.archived .strand-item { opacity: 0.7; }
+      #app.pro-mode #chat-strand-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-top: 56px;
+        padding: 6px 16px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: white;
+        pointer-events: auto;
+      }
+      .strand-head-text { flex: 1; min-width: 0; }
+      .strand-head-text strong { font-size: 15px; }
+      .strand-badge {
+        margin-left: 8px;
+        padding: 0 6px;
+        border-radius: 6px;
+        font-size: 11px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .strand-description { margin-top: 2px; font-size: 12px; color: rgba(255, 255, 255, 0.7); white-space: pre-wrap; }
+      .strand-description.empty { font-style: italic; opacity: 0.6; }
+      .strand-note { margin-top: 4px; font-size: 12px; color: #fde68a; }
+      .strand-edit, .strands-toggle { padding: 4px 9px; background: rgba(255, 255, 255, 0.1); }
+      .strand-edit:hover, .strands-toggle:hover { background: rgba(255, 255, 255, 0.2); }
+      .strands-toggle, .strands-close { display: none; }
+      .strands-close { padding: 4px 9px; background: rgba(255, 255, 255, 0.1); }
+      .strand-editor { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+      .strand-editor input, .strand-editor textarea {
+        padding: 6px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: white;
+        font: inherit;
+        resize: vertical;
+      }
+      .strand-editor-buttons { display: flex; gap: 6px; }
+      .strand-editor button { padding: 5px 12px; background: rgba(255, 255, 255, 0.12); }
+      .strand-editor button[type="submit"] { background: rgba(99, 102, 241, 0.7); }
+      #chat-commands {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 0 16px;
+        pointer-events: auto;
+      }
+      .chat-command {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 5px 10px;
+        border: none;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.85);
+        font: inherit;
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .chat-command:hover { background: rgba(255, 255, 255, 0.16); }
+      .chat-command code { color: #fde68a; }
       /* Relue après un rechargement (sa carte ne survit pas) : les outils
          dont elle s'est servie, une ligne discrète au-dessus de la réponse. */
       .chat-tools-line {
@@ -1288,7 +1411,20 @@
         }
         #chat-container { max-height: 50%; }
         #app.pro-mode #inner-life-panel { top: 40px; }
-        #app.pro-mode #chat-messages { padding-top: 88px; }
+        #app.pro-mode #chat-messages { padding-top: 8px; }
+        /* sur un téléphone, la liste des fils est un tiroir que ☰ ouvre */
+        #app.pro-mode #chat-container { padding-left: 0; }
+        #app.pro-mode #chat-strands { display: none; }
+        #app.pro-mode #chat-container.strands-open #chat-strands {
+          display: flex;
+          right: 0;
+          width: auto;
+          z-index: 8;
+          padding-top: 88px;
+          background: rgb(18, 19, 38);
+        }
+        #app.pro-mode #chat-strand-head { margin-top: 84px; padding: 6px 10px 8px; }
+        .strands-toggle, .strands-close { display: inline-block; }
         .chat-bubble { max-width: 85%; font-size: 13px; }
         .chat-bubble.vtuber.pro, .work-card, .chat-tools-line { max-width: 100%; width: auto; }
         #chat-input-container { padding: 8px 10px; }

@@ -25,6 +25,15 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   de ses outils. Pastille allumée, le travail prend tout l'écran : Mika quitte le fond (sa 3D ne tourne plus, son
   visage reste dans la barre), le fil n'a plus de bande sous son visage, ses réponses et ses cartes prennent toute la
   largeur, en texte plus serré. Une réponse depuis une notification part toujours en message ordinaire.
+- **Les fils de travail** (ADR 0164) : pastille allumée, la conversation devient un client à plusieurs fils, chacun son
+  contexte — Mika n'y relit que les messages du fil, sous son titre et sa petite description. Le fil avec elle est
+  caché ; pastille éteinte, il revient seul (aucun message d'un fil de travail). Une barre au-dessus du fil dit le fil
+  ouvert (toucher son nom le règle : titre, description, archivé) ; « Fils » ouvre la liste (titre, sinon le début du
+  premier message ; archivés repliés à part), « Nouveau » un fil neuf. Le fil ouvert est retenu sur le téléphone. Dans
+  le champ : `/clear` (ou `/nouveau`) ouvre un fil neuf sans rien effacer, `/renommer <titre>`, `/description <texte>`,
+  `/archiver`, `/desarchiver`, `/aide` ; `//` en tête envoie le message avec un seul `/`. Chaque message garde son fil
+  (`chat.strand`, base version 5) ; un fil ouvert ici dont le serveur a plus de messages les demande
+  (`strand_history`). Code : `data/chat/Strands.kt` (pur), `ui/chat/StrandParts.kt`.
 - **Les cartes d'accord** (ADR 0064) : quand Mika veut appeler un service extérieur et que c'est à toi d'en
   décider, une carte apparaît au-dessus de la barre de saisie — ce qu'elle veut faire, **exactement ce qui partira**
   (en texte brut, à chasse fixe, jamais interprété), le compte à rebours (« expire dans 4 min ») et deux boutons,

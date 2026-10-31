@@ -280,15 +280,17 @@ internal fun ChatConversation(
     verdictErrors: Map<Long, String> = emptyMap(),
     /** Le mode pro (ADR 0116) : un maximum sur l'écran — ses réponses et ses cartes sur toute la largeur, plus serrées. */
     wide: Boolean = false,
+    /** Ce que dit un fil vide ; `null` : l'invitation du fil avec elle. Un fil de travail neuf (ADR 0164) dit le sien. */
+    emptyText: String? = null,
 ) {
     if (items.isEmpty()) {
         // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
         Box(
-            modifier.fillMaxWidth().padding(bottom = if (overPortrait) 24.dp else 0.dp),
+            modifier.fillMaxWidth().padding(bottom = if (overPortrait) 24.dp else 0.dp, start = 24.dp, end = 24.dp),
             contentAlignment = if (overPortrait) Alignment.BottomCenter else Alignment.Center,
         ) {
             Backed(overPortrait) {
-                Text(stringResource(R.string.chat_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(emptyText ?: stringResource(R.string.chat_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         return

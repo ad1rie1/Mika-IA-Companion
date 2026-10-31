@@ -46,6 +46,8 @@ object FrameCodec {
                 MikaProtocol.TYPE_APPROVAL_RESULT -> decodeApprovalResult(obj)
                 MikaProtocol.TYPE_VERDICT_RESULT -> decodeVerdictResult(obj)
                 MikaProtocol.TYPE_TOOL -> decodeTool(obj)
+                MikaProtocol.TYPE_STRANDS -> decodeStrands(obj)
+                MikaProtocol.TYPE_STRAND_RESULT -> decodeStrandResult(obj)
                 else -> ServerFrame.Unknown(type)
             }
         } catch (_: IllegalArgumentException) {
@@ -60,36 +62,93 @@ object FrameCodec {
         val truncated: Boolean = false,
         val life: String? = null,
         val reset: Boolean = false,
+        val more: Boolean = false,
     )
 
-    /** Une parole. Ses petites bulles (ADR 0119) se lisent à part : une liste cassée n'emporte pas ce qu'elle dit. */
+    /**
+     * Une parole. Ses petites bulles (ADR 0119) se lisent à part : une liste cassée n'emporte pas ce qu'elle dit ; son
+     * fil de travail (ADR 0164) aussi, et un identifiant invalide vaut « le fil avec elle ».
+     */
     private fun decodeSpeech(obj: JsonObject): ServerFrame.Speech {
-        val speech = json.decodeFromJsonElement(ServerFrame.Speech.serializer(), JsonObject(obj - K_NOTES))
-        return if (K_NOTES in obj) speech.copy(notes = messageNotes(obj[K_NOTES])) else speech
+        val speech = json.decodeFromJsonElement(ServerFrame.Speech.serializer(), JsonObject(obj - K_NOTES - K_STRAND))
+        val notes = if (K_NOTES in obj) messageNotes(obj[K_NOTES]) else speech.notes
+        return speech.copy(notes = notes, strand = strandId(obj[K_STRAND]))
     }
 
+    /** Un identifiant de fil de travail valide (ADR 0164), ou `null` : absent, pas une chaîne, mal formé. */
+    fun strandId(element: JsonElement?): String? =
+        (element as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { MikaProtocol.STRAND_ID.matches(it) }
+
     private fun decodeHistory(obj: JsonObject): ServerFrame.History {
-        val head = json.decodeFromJsonElement(HistoryHead.serializer(), JsonObject(obj - "messages"))
+        val head = json.decodeFromJsonElement(HistoryHead.serializer(), JsonObject(obj - "messages" - K_STRAND))
         val raw = obj["messages"] as? JsonArray
         val entries = raw?.mapNotNull { item ->
             try {
                 // Ses outils (ADR 0116) et ses petites bulles (ADR 0119) se lisent à part : une liste cassée
                 // n'emporte pas le message.
                 val line = item as? JsonObject
-                val entry = json.decodeFromJsonElement(HistoryEntry.serializer(), line?.let { JsonObject(it - K_TOOLS - K_NOTES) } ?: item)
+                val entry = json.decodeFromJsonElement(
+                    HistoryEntry.serializer(),
+                    line?.let { JsonObject(it - K_TOOLS - K_NOTES - K_STRAND) } ?: item,
+                )
                 if (line == null) {
                     entry
                 } else {
                     entry.copy(
                         tools = if (K_TOOLS in line) toolUses(line[K_TOOLS]) else entry.tools,
                         notes = if (K_NOTES in line) messageNotes(line[K_NOTES]) else entry.notes,
+                        // son fil de travail (ADR 0164) : un identifiant invalide vaut « le fil avec elle »
+                        strand = strandId(line[K_STRAND]),
                     )
                 }
             } catch (_: IllegalArgumentException) {
                 null
             }
         }
-        return ServerFrame.History(head.mode, entries, head.lastId, head.truncated, head.life, head.reset)
+        return ServerFrame.History(
+            head.mode, entries, head.lastId, head.truncated, head.life, head.reset,
+            strand = strandId(obj[K_STRAND]), more = head.more,
+        )
+    }
+
+    /**
+     * La liste de ses fils de travail (ADR 0164). Sans `items` lisible, la trame est inconnue (la liste affichée ne
+     * se vide pas sur une trame cassée) ; une entrée sans identifiant valide est écartée seule, un identifiant répété
+     * ne compte qu'une fois ; les textes sont bornés, les nombres illisibles valent 0.
+     */
+    private fun decodeStrands(obj: JsonObject): ServerFrame {
+        val items = obj["items"] as? JsonArray ?: return ServerFrame.Unknown(MikaProtocol.TYPE_STRANDS)
+        val seen = HashSet<String>()
+        val out = ArrayList<StrandInfo>()
+        for (item in items) {
+            if (out.size >= MikaProtocol.MAX_STRANDS) break
+            val o = item as? JsonObject ?: continue
+            val id = strandId(o["id"]) ?: continue
+            if (!seen.add(id)) continue
+            fun text(key: String, max: Int) =
+                (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { clip(it, max) }.orEmpty()
+            fun number(key: String): Long = (o[key] as? JsonPrimitive)?.takeIf { !it.isString }
+                ?.let { it.longOrNull ?: it.doubleOrNull?.takeIf { d -> d.isFinite() }?.toLong() }
+                ?.takeIf { it >= 0 } ?: 0L
+            out += StrandInfo(
+                id = id,
+                title = text("title", MikaProtocol.MAX_STRAND_TITLE_CHARS),
+                description = text("description", MikaProtocol.MAX_STRAND_DESCRIPTION_CHARS),
+                archived = (o["archived"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == true,
+                count = number("count").coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                firstAt = number("first_at"),
+                lastAt = number("last_at"),
+                opener = text("opener", MikaProtocol.MAX_STRAND_OPENER_CHARS),
+            )
+        }
+        return ServerFrame.Strands(out)
+    }
+
+    private fun decodeStrandResult(obj: JsonObject): ServerFrame {
+        val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_STRAND_RESULT)
+        val id = strandId(obj["id"]) ?: return unknown
+        val status = (obj["status"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return unknown
+        return ServerFrame.StrandResult(id, status.take(MAX_STATUS_CHARS))
     }
 
     /**
@@ -158,6 +217,7 @@ object FrameCodec {
             text = text("text"),
             outcome = text("outcome", MAX_STATUS_CHARS),
             at = obj["at"]?.let { timestampMs(it) },
+            strand = strandId(obj[K_STRAND]),
         )
     }
 
@@ -351,8 +411,28 @@ object FrameCodec {
         put("comment", if (verdict.isEmpty()) "" else comment.trim().take(MAX_COMMENT_CHARS))
     }.toString()
 
+    /**
+     * Le réglage entier d'un de ses fils de travail (ADR 0164) : titre et description bornés comme le serveur les
+     * borne (au-delà, il refuserait tout le réglage), archivé ou non.
+     */
+    fun strand(id: String, title: String, description: String, archived: Boolean): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_STRAND)
+        put("id", id)
+        put("title", title.trim().take(MikaProtocol.MAX_STRAND_TITLE_CHARS))
+        put("description", description.trim().take(MikaProtocol.MAX_STRAND_DESCRIPTION_CHARS))
+        put("archived", archived)
+    }.toString()
+
+    /** Les messages d'un fil de travail (ADR 0164) : les plus récents avant [before] (absent : les derniers). */
+    fun strandHistory(id: String, before: Long? = null): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_STRAND_HISTORY)
+        put("id", id)
+        if (before != null) put("before", before)
+    }.toString()
+
     private const val MAX_STATUS_CHARS = 64
     private const val K_TOOLS = "tools"
+    private const val K_STRAND = "strand"
     private const val K_NOTES = "notes"
     const val MAX_COMMENT_CHARS = 2000
 

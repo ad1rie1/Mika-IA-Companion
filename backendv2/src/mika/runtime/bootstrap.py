@@ -194,7 +194,7 @@ class Kernel:
         #: les messages dont la réponse attend (``reply_wait``), dans l'ordre d'arrivée
         self._held: dict[int, None] = {}
         #: reprises d'affilée par tour (adresse, salon) : le recul entre deux reprises
-        self._retry_counts: dict[tuple[str, str | None], int] = {}
+        self._retry_counts: dict[tuple[str, str | None, str | None], int] = {}
         #: les mesures des courbes de la console (``@f.series``), dans ``views.db``
         self.series = SeriesStore(deps.store)
         self.sampler = Sampler(self.series, list(registry.series.values()))
@@ -376,7 +376,7 @@ class Kernel:
         await self.interpret(seq, correlation)
         if not data.addressed or self.deps.reply_kind not in self.runner.policies:
             return Perceived(commit, None)
-        self._retry_counts.pop((data.handle, data.room), None)  # la personne parle : un tour neuf
+        self._retry_counts.pop((data.handle, data.room, data.strand), None)  # la personne parle : un tour neuf
         if self._wait_of(seq, self.mind.root) == 0:
             self._held[seq] = None  # elle dort : la réponse attend son réveil (``_release_held``)
             return Perceived(commit, None, held=True)
@@ -391,7 +391,7 @@ class Kernel:
         return EpisodeRequest(
             kind=self.deps.reply_kind, target=data.handle, trigger=trigger, reply_to=seq,
             message=data.text.text or "", typed_chars=data.typed_chars, priority=0, channel=data.channel,
-            room=data.room, mode=data.mode,
+            room=data.room, mode=data.mode, strand=data.strand,
         )
 
     async def interpret(self, seq: int, correlation: str) -> None:
@@ -460,9 +460,10 @@ class Kernel:
             interrupted += 1
         rs = self.mind.root.slices[RUNTIME.name]
         counts = {"resumed": 0, "abandoned": 0, "held": 0}
-        turns = sorted({(p.handle, p.room) for p in rs.pending.values()}, key=lambda k: (k[0], k[1] or ""))
-        for handle, room in turns:
-            seqs = turn_of(self.mind.root.slices[RUNTIME.name], handle, room)
+        turns = sorted({(p.handle, p.room, p.strand) for p in rs.pending.values()},
+                       key=lambda k: (k[0], k[1] or "", k[2] or ""))
+        for handle, room, strand in turns:
+            seqs = turn_of(self.mind.root.slices[RUNTIME.name], handle, room, strand)
             if not seqs:
                 continue
             for seq in seqs:
@@ -519,9 +520,9 @@ class Kernel:
             elif self._wait_of(seq, root) != 0:
                 self._held.pop(seq, None)
                 released.add(seq)
-        turns = {(rs.pending[s].handle, rs.pending[s].room) for s in released}
-        for handle, room in sorted(turns, key=lambda k: (k[0], k[1] or "")):
-            latest = turn_of(rs, handle, room)[-1]
+        turns = {(rs.pending[s].handle, rs.pending[s].room, rs.pending[s].strand) for s in released}
+        for handle, room, strand in sorted(turns, key=lambda k: (k[0], k[1] or "", k[2] or "")):
+            latest = turn_of(rs, handle, room, strand)[-1]
             if latest not in released:
                 continue  # son dernier message attend encore, ou a déjà sa réponse en route : elle les lira
             task = asyncio.ensure_future(self._resume_turn(latest))
@@ -548,7 +549,7 @@ class Kernel:
                                  reply_to=latest, detail=detail, unanswered=turn_upto(rs, latest))],
             emitter="runtime", correlation=f"abandon:{latest}", origin=Origin.KERNEL,
         ), label="abandon d'une question")
-        self._retry_counts.pop((pending.handle, pending.room), None)
+        self._retry_counts.pop((pending.handle, pending.room, pending.strand), None)
         return True
 
     async def _saturated(self, latest: int) -> bool:
@@ -563,7 +564,7 @@ class Kernel:
                                  reply_to=latest, detail=SATURATED, unanswered=turn_upto(rs, latest))],
             emitter="runtime", correlation=f"saturée:{latest}", origin=Origin.KERNEL,
         ), label="tour sans place dans la file")
-        self._retry_counts.pop((pending.handle, pending.room), None)
+        self._retry_counts.pop((pending.handle, pending.room, pending.strand), None)
         return not isinstance(got, Failed)
 
     def _submit_reply(self, seq: int, trigger: str) -> bool:
@@ -590,7 +591,7 @@ class Kernel:
             if self.deps.reply_kind not in self.runner.policies or not self.started:
                 continue
             p = rs.pending[e.data.reply_to]
-            key = (p.handle, p.room)
+            key = (p.handle, p.room, p.strand)
             n = self._retry_counts.get(key, 0)
             self._retry_counts[key] = n + 1
             delay = 0.0 if n == 0 else min(RETRY_MAX_S, RETRY_BASE_S * 2 ** min(n - 1, 10))
@@ -605,7 +606,7 @@ class Kernel:
         p = rs.pending.get(seq)
         if p is None or not self.started:
             return  # réglée entre-temps (une réponse au tour, un abandon)
-        await self._resume_turn(turn_of(rs, p.handle, p.room)[-1])
+        await self._resume_turn(turn_of(rs, p.handle, p.room, p.strand)[-1])
 
     async def _resume_turn(self, latest: int) -> None:
         if latest not in self.mind.root.slices[RUNTIME.name].pending or not self.started:

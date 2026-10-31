@@ -25,7 +25,7 @@ from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
-from mika.contracts.entry import Admission, HistoryRow, MessageNote, SharedDownload, SharedMeta
+from mika.contracts.entry import Admission, HistoryRow, MessageNote, SharedDownload, SharedMeta, StrandItem
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import attachments, shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
@@ -80,6 +80,7 @@ def _row(r: dict) -> HistoryRow:
         emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=attachments,
         verdict=r.get("verdict") or "", verdict_note=r.get("verdict_note") or "",
         mode=r.get("mode") or "", tools=(r.get("tools") or "") if r.get("mode") else "",
+        strand=r.get("strand") or "",
     )
 
 
@@ -234,6 +235,27 @@ class KernelPort:
     def after(self, handle: str, after_id: int, limit: int) -> tuple[list[HistoryRow], bool]:
         rows, truncated = transcript.after(self._store, handle, after_id, limit)
         return [_row(r) for r in rows], truncated
+
+    def strands(self, handle: str) -> list[StrandItem]:
+        return [StrandItem(**item) for item in transcript.strands_of(self._store, handle)]
+
+    def strand_history(self, handle: str, strand: str, before: int | None, limit: int) -> tuple[list[HistoryRow],
+                                                                                                 bool]:
+        rows, more = transcript.strand_history(self._store, handle, strand, before, limit)
+        return [_row(r) for r in rows], more
+
+    async def set_strand(self, handle: str, strand: str, *, title: str, description: str, archived: bool) -> str:
+        """Un fil de travail réglé depuis le chat (ADR 0164) : le chemin des actions de la console
+        (``transcript.regler_fil``, validé et audité), au nom de celle à qui il est. ``ok``, ``invalid`` ou
+        ``failed``."""
+        form = {"strand": [strand], operations.FIXED_FIELD: ["strand"],
+                forms.RENDERED: ["title", "description", "archived"], "title": [title], "description": [description]}
+        if archived:
+            form["archived"] = ["1"]
+        outcome = await operations.perform(self.kernel, "transcript.regler_fil", form, by=handle)
+        if outcome.ok:
+            return "ok"
+        return "failed" if outcome.retry else "invalid"
 
     def ready(self) -> bool:
         return self.kernel.started

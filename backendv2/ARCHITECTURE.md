@@ -117,6 +117,7 @@ Dix-neuf facultés, composées dans cet ordre (`app/composition.py::faculties()`
 - Le fil (l'id d'un message est son `seq`) et les résumés des fils longs, écrits à sa place par un modèle qui lit sa persona (ADR 0153).
 - Un message resté sans réponse le dit dans son repère, en mots (une panne, lu trop tard, un silence choisi), jamais par la cause technique.
 - L'avis de son opératrice sur ses réponses (ADR 0113, `transcript.judged`, action `transcript.juger`) : 👍/👎 et ce qu'elle aurait dû dire, donnés depuis le chat. Ce n'est pas quelque chose qu'elle vit : l'événement n'est pas public.
+- Les fils de travail du mode pro (ADR 0164) : chaque message pro porte son fil (`strand`, colonne du fil), un tour à lui dans le runtime ; elle n'y relit que ses messages, sous son titre et sa petite description (`transcript.strand_set`, action `transcript.regler_fil`, table `strands`), et le fil privé ne les relit plus. Sa mémoire les consolide comme le reste.
 
 ### Sa mémoire : `memory`
 

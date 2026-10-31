@@ -397,7 +397,8 @@ def test_the_murmur_reaches_only_the_screens_of_the_person_she_is_about_to_write
         assert thought["voice_persona"] == "inner" and thought["message_id"] is None  # ChatOverlay : localOnly
         assert thought["user_message_id"] is None and thought["client_msg_id"] is None
         adrien.send_json({"type": "ping", "t": 3})
-        assert [f["type"] for f in until(adrien, "pong")] == ["pong"]  # l'opératrice n'entend pas ce murmure-là
+        # l'opératrice n'entend pas ce murmure-là (sa liste de fils de travail suit son ouverture, ADR 0164)
+        assert [f["type"] for f in until(adrien, "pong") if f["type"] != "strands"] == ["pong"]
 
 
 @pytest.mark.slow

@@ -163,6 +163,21 @@ class ConnectionManager(
         sent
     }
 
+    /**
+     * Régler un fil de travail (ADR 0164) : le réglage entier, maintenant ou pas du tout. `false` : rien n'est parti
+     * (l'écran le dit).
+     */
+    suspend fun setStrand(id: String, title: String, description: String, archived: Boolean): Boolean =
+        withContext(engineContext) {
+            val sent = socket.sendStrand(id, title, description, archived)
+            if (!sent) chat.onStrandNotSent()
+            sent
+        }
+
+    /** Demander les messages d'un fil de travail qu'on n'a pas ici (ADR 0164) ; hors ligne, rien. */
+    suspend fun requestStrandHistory(id: String): Boolean =
+        withContext(engineContext) { socket.requestStrandHistory(id) }
+
     /** Fin de session : plus rien ne part ni n'arrive, et une trame en cours de traitement finit d'abord. */
     suspend fun shutdown() = withContext(engineContext) {
         epoch++
@@ -280,6 +295,8 @@ class ConnectionManager(
                 is ServerFrame.ApprovalResult -> approvals.onResult(frame)
                 is ServerFrame.VerdictResult -> chat.onVerdictResult(frame)
                 is ServerFrame.Tool -> chat.onTool(frame)
+                is ServerFrame.Strands -> chat.onStrands(frame)
+                is ServerFrame.StrandResult -> chat.onStrandResult(frame)
                 is ServerFrame.Pong, is ServerFrame.Unknown -> Unit
             }
         } catch (e: CancellationException) {

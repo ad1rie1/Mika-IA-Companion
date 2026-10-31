@@ -8,6 +8,7 @@ import fr.qwartz.mika.data.db.ThreadStore
 import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.net.MikaProtocol
 import fr.qwartz.mika.data.net.ServerFrame
+import fr.qwartz.mika.data.net.StrandInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -66,6 +67,21 @@ class ChatEngine(
     private val _typing = MutableStateFlow(false)
     val typing: StateFlow<Boolean> = _typing.asStateFlow()
     private var typingTimer: Job? = null
+
+    /**
+     * Le fil de travail du message dont elle écrit la réponse (ADR 0164) ; `null` : le fil avec elle. « Mika écrit… »
+     * ne se montre que là.
+     */
+    private val _typingIn = MutableStateFlow<String?>(null)
+    val typingIn: StateFlow<String?> = _typingIn.asStateFlow()
+
+    /** Ses fils de travail, tels que le serveur les a listés la dernière fois (trame `strands`, ADR 0164). */
+    private val _strands = MutableStateFlow<List<StrandInfo>>(emptyList())
+    val strands: StateFlow<List<StrandInfo>> = _strands.asStateFlow()
+
+    /** Un réglage de fil refusé, à dire une fois (le texte de la note). */
+    private val _strandNotices = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val strandNotices: SharedFlow<String> = _strandNotices.asSharedFlow()
 
     /**
      * Ses pensées à voix haute et les notes de la machine : jamais en base, montrées seulement au
@@ -141,6 +157,7 @@ class ChatEngine(
                 emotionIntensity = f.emotionIntensity,
                 mode = ChatSync.modeOf(f.mode),
                 notes = f.notes?.takeIf { it.isNotEmpty() },
+                strand = f.strand,
             )
             thread.add(row)
             trim(this)
@@ -163,6 +180,21 @@ class ChatEngine(
     /** Un de ses outils en direct (ADR 0116) : sa carte de travail, en mémoire seulement. */
     fun onTool(f: ServerFrame.Tool) {
         _work.update { it.apply(f) }
+    }
+
+    /** La liste de ses fils de travail (ADR 0164) : elle remplace la précédente. */
+    fun onStrands(f: ServerFrame.Strands) {
+        _strands.value = f.items
+    }
+
+    /** Le sort d'un réglage de fil : un refus se dit ; un succès, la liste `strands` qui suit le montre. */
+    fun onStrandResult(f: ServerFrame.StrandResult) {
+        if (f.status != MikaProtocol.STRAND_STATUS_OK) _strandNotices.tryEmit(Strands.resultNotice(f.status))
+    }
+
+    /** Un réglage qui n'a pas pu partir (la socket fermée) : rien n'a changé, l'écran le dit. */
+    fun onStrandNotSent() {
+        _strandNotices.tryEmit(Strands.NOT_SENT)
     }
 
     /** Un avis parti (ADR 0113) : il s'affiche aussitôt ; l'avis d'avant attend la réponse du serveur. */
@@ -212,10 +244,32 @@ class ChatEngine(
         // Un nouveau message part : les cartes de travail finies sans réponse ne sont plus d'actualité.
         if (f.status == MikaProtocol.ACK_ACCEPTED) _work.update { it.prune() }
         // Un message refusé, ou dont la réponse ne viendra pas, n'est pas en train d'être répondu.
-        if (result.settled) setTyping(false) else if (f.status == MikaProtocol.ACK_ACCEPTED) setTyping(true)
+        if (result.settled) {
+            setTyping(false)
+        } else if (f.status == MikaProtocol.ACK_ACCEPTED) {
+            _typingIn.value = result.strand
+            setTyping(true)
+        }
+    }
+
+    /**
+     * Les messages d'un fil de travail demandés à l'ouverture du fil (`history` de mode `strand`, ADR 0164) : fondus
+     * comme le reste, mais sans rien toucher d'autre — ni la vie, ni la troncature, ni le curseur, ni les
+     * notifications (ce sont de vieux messages). Seuls ceux que le curseur couvre déjà entrent : un plus récent
+     * avancerait le curseur par-dessus des messages du fil avec elle encore à rattraper ; le `sync` les apportera.
+     */
+    private suspend fun onStrandHistory(f: ServerFrame.History) {
+        val covered = cursor
+        val entries = f.messages.orEmpty().filter { e -> e.id != null && e.id <= covered && e.strand == f.strand }
+        if (entries.isEmpty()) return
+        store.mutate {
+            thread = ChatSync.mergeHistory(thread, entries, MikaProtocol.MAX_LOCAL_MESSAGES, clock.wallMs()).history
+        }
+        refreshCursor()
     }
 
     suspend fun onHistory(f: ServerFrame.History) {
+        if (f.isStrand) return onStrandHistory(f)
         val cursorBefore = cursor
         var anotherLife = false
         val result = store.mutate {
@@ -292,6 +346,7 @@ class ChatEngine(
         _ephemeral.value = emptyList()
         _truncated.value = false
         _work.value = WorkLog()
+        _strands.value = emptyList()
         cursor = 0
     }
 

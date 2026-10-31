@@ -48,6 +48,10 @@ class PerceptionReceived(Payload):
     #: la façon de répondre qu'elle demande (``vocab.episodes.MODES`` : ``pro``, ADR 0116) ; ``""`` : la conversation
     #: ordinaire — et dans un journal plus ancien. Le transport ne la pose que pour une opératrice.
     mode: str = ""
+    #: le fil de travail où le message est écrit (ADR 0164) : un identifiant opaque choisi par le client, propre à
+    #: l'adresse ; ``None`` : son fil avec elle. Un fil de travail est un tour à lui (``TURN``) et a son historique.
+    #: Le transport ne le pose qu'avec le mode pro.
+    strand: str | None = None
 
 
 class EpisodeStarted(Payload):
@@ -96,6 +100,8 @@ class Utterance(Payload):
     about: tuple[str, ...] = ()
     #: le mode dans lequel elle a répondu (``pro``, ADR 0116) ; ``""`` : la conversation ordinaire
     mode: str = ""
+    #: le fil de travail où elle répond (``PerceptionReceived.strand``, ADR 0164) ; ``None`` : son fil avec la personne
+    strand: str | None = None
     #: ce que vaut ce qu'elle a lu pour l'écrire (ADR 0128), le plus haut de ses outils et de son prompt : ce qu'on
     #: en tire ne se dit jamais en dessous de ``floor`` ; ``unkept`` : rien ne s'en garde (ni l'échange, ni ce qu'on
     #: en tirerait). Zéro et faux dans un journal plus ancien.
@@ -224,11 +230,13 @@ ALL = (
 
 #: Les messages (``seq``) qui attendent encore leur réponse.
 AWAITING = FactKey("runtime.awaiting", type=tuple, doc="perceptions sans réponse encore réglée")
-#: Le tour en cours d'une adresse en un lieu, ``TURN((adresse, salon))`` (salon ``None`` en privé) : ses
-#: messages encore sans réponse, du plus ancien au plus récent. Une réponse règle le tour entier ; un nouveau
-#: message du même tour supplante la réponse en train de s'écrire (elle sera recomposée en le lisant).
+#: Le tour en cours d'une adresse en un lieu, ``TURN((adresse, salon, fil))`` (salon ``None`` en privé ; fil de
+#: travail ``None`` hors du mode pro, ADR 0164) : ses messages encore sans réponse, du plus ancien au plus récent.
+#: Une réponse règle le tour entier ; un nouveau message du même tour supplante la réponse en train de s'écrire
+#: (elle sera recomposée en le lisant) — un message d'un autre fil de travail, non.
 TURN = FactFamily("runtime.turn", arg=tuple, type=tuple,
-                  doc="les messages sans réponse d'un moyen de communication en un lieu (moyen de communication, salon)")
+                  doc="les messages sans réponse d'un moyen de communication en un lieu (moyen de communication, "
+                      "salon, fil de travail)")
 
 
 

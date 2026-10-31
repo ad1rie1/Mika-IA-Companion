@@ -255,6 +255,8 @@ export interface SpeechMessage {
   attachments?: SentFile[];
   /** Ce qu'elle a fait en écrivant ce message (ADR 0119) ; absent s'il n'y en a pas. */
   notes?: MessageNote[];
+  /** Le fil de travail où elle répond (ADR 0164) ; absent : le fil avec elle. */
+  strand?: string;
 }
 
 /**
@@ -336,6 +338,8 @@ export interface HistoryEntry {
   tools?: ToolUse[];
   /** Sur un message d'elle : ce qu'elle a fait en l'écrivant, comme la `speech` (ADR 0119). */
   notes?: MessageNote[];
+  /** Le fil de travail du message (ADR 0164) ; absent : le fil avec elle. */
+  strand?: string;
 }
 
 /** Un outil dont elle s'est servie pour une réponse pro, tel que l'historique le garde. */
@@ -380,6 +384,8 @@ export interface ToolMessage {
   outcome?: string;
   /** Millisecondes Unix. */
   at: number;
+  /** Le fil de travail où elle répond (ADR 0164) ; absent : le fil avec elle. */
+  strand?: string;
 }
 
 /**
@@ -394,7 +400,8 @@ export interface ToolMessage {
  */
 export interface HistoryMessage {
   type: "history";
-  mode: "initial" | "catchup";
+  /** `strand` : la réponse à `strand_history` (ADR 0164) — un fil de travail, pas un curseur. */
+  mode: "initial" | "catchup" | "strand";
   messages: HistoryEntry[];
   last_id: number;
   truncated: boolean;
@@ -411,6 +418,51 @@ export interface HistoryMessage {
    * l'écran montre.
    */
   reset?: boolean;
+  /** Mode `strand` : le fil de travail relu, et s'il en reste de plus anciens. */
+  strand?: string;
+  more?: boolean;
+}
+
+/**
+ * Ses fils de travail (ADR 0164), aux connexions d'opératrice : la liste
+ * entière, du plus récemment actif au plus ancien. Validée par
+ * `ui/strands.ts::parseStrands`.
+ */
+export interface StrandsMessage {
+  type: "strands";
+  items: Array<{
+    id: string;
+    title: string;
+    description: string;
+    archived: boolean;
+    count: number;
+    first_at: number;
+    last_at: number;
+    opener: string;
+  }>;
+}
+
+/** Le sort d'un réglage de fil (ADR 0164). */
+export interface StrandResultMessage {
+  type: "strand_result";
+  id: string;
+  status: "ok" | "invalid" | "forbidden" | "failed";
+}
+
+/** Client → serveur : le réglage entier d'un fil de travail (ADR 0164). */
+export interface StrandFrame {
+  type: "strand";
+  id: string;
+  title: string;
+  description: string;
+  archived: boolean;
+}
+
+/** Client → serveur : les messages d'un fil de travail, les plus récents avant `before`. */
+export interface StrandHistoryFrame {
+  type: "strand_history";
+  id: string;
+  before?: number;
 }
 
 /**
@@ -607,6 +659,8 @@ export interface ChatFrame {
   client_msg_id?: string;
   attachments?: Array<{ name: string; type: string; data: string }>;
   mode?: "pro";
+  /** Le fil de travail du message (ADR 0164) ; seulement avec `mode: "pro"`. */
+  strand?: string;
 }
 
 /** Client → serveur : une carte décidée, telle qu'elle était affichée. */
@@ -661,5 +715,7 @@ export interface ServerMessageMap {
   approval_result: ApprovalResultMessage;
   verdict_result: VerdictResultMessage;
   tool: ToolMessage;
+  strands: StrandsMessage;
+  strand_result: StrandResultMessage;
   connection: ConnectionEvent;
 }

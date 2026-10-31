@@ -47,6 +47,8 @@ data class MessageEntity(
     val tools: String? = null,
     /** Une réponse d'elle : ses petites bulles (`List<MessageNote>` en JSON, ADR 0119, base version 4). */
     val notes: String? = null,
+    /** Son fil de travail (ADR 0164, base version 5) ; `null` : le fil avec elle. */
+    val strand: String? = null,
 )
 
 /**
@@ -66,6 +68,8 @@ data class OutboxEntity(
     @ColumnInfo(name = "in_flight") val inFlight: Boolean = false,
     /** `pro` : envoyé en mode pro (ADR 0116, base version 3) ; un renvoi le garde. */
     val mode: String? = null,
+    /** Son fil de travail (ADR 0164, base version 5) ; un renvoi le garde. */
+    val strand: String? = null,
 )
 
 /** De petites valeurs : la vie du fil, son propriétaire, la troncature, le lu, l'état mental… */

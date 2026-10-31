@@ -16,6 +16,7 @@
  */
 
 import type { ToolMessage, ToolUse } from "../types";
+import { strandOf } from "./strands";
 
 /** Au-delà, la plus ancienne carte est oubliée : ce ne sont que des traces du moment. */
 export const MAX_CARDS = 20;
@@ -48,6 +49,8 @@ export type ToolFrame =
 interface ToolFrameBase {
   episode: string;
   replyTo: number | null;
+  /** Le fil de travail où elle répond (ADR 0164) ; absent : le fil avec elle. */
+  strand?: string;
   /** Millisecondes Unix ; `null` si la trame ne la portait pas. */
   at: number | null;
 }
@@ -87,6 +90,8 @@ export interface WorkCard {
   /** `r:<reply_to>`, ou `e:<episode>` quand la trame ne dit pas à quoi elle répond. */
   key: string;
   replyTo: number | null;
+  /** Le fil de travail où elle répond (ADR 0164) : la carte ne se montre que dans ce fil. */
+  strand?: string;
   steps: WorkStep[];
   /** Les épisodes vus, et leur issue (`null` : en cours). Copié à chaque trame, jamais muté. */
   episodes: Record<string, string | null>;
@@ -124,7 +129,8 @@ export function toolFrame(raw: unknown): ToolFrame | null {
     replyTo = r.reply_to;
   }
   const at = typeof r.at === "number" && Number.isFinite(r.at) && r.at > 0 ? r.at : null;
-  const base = { episode, replyTo, at };
+  const strand = strandOf(r.strand);
+  const base = { episode, replyTo, at, ...(strand ? { strand } : {}) };
   switch (r.phase) {
     case "start":
     case "end": {
@@ -185,6 +191,7 @@ export function withToolFrame(cards: readonly WorkCard[], frame: ToolFrame): Wor
       : {
           key,
           replyTo: frame.replyTo,
+          ...(frame.strand ? { strand: frame.strand } : {}),
           steps: [],
           episodes: {},
           startedAt: frame.at,

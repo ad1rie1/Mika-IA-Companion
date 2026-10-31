@@ -128,6 +128,8 @@ object MikaProtocol {
 
     const val MODE_INITIAL = "initial"
     const val MODE_CATCHUP = "catchup"
+    /** La réponse à `strand_history` (ADR 0164) : les messages d'un fil de travail ; son `last_id` n'est pas un curseur. */
+    const val MODE_STRAND = "strand"
 
     // ── Le mode pro (ADR 0116) : un message de travail, pour une opératrice seulement ──
     /** Le `mode` d'un `chat`, d'une `speech` ou d'une ligne d'`history` ; toute autre valeur vaut « ordinaire ». */
@@ -151,6 +153,25 @@ object MikaProtocol {
     /** Les cartes de travail gardées en mémoire, et les étapes d'une carte, au plus. */
     const val MAX_WORK_CARDS = 20
     const val MAX_WORK_STEPS = 200
+
+    // ── Les fils de travail du mode pro (ADR 0164 ; adapters/web/protocol.py `strand_id`, transcript/actions.py) ──
+    /** Ses fils de travail, la liste entière (opératrice seulement). */
+    const val TYPE_STRANDS = "strands"
+    /** Le sort d'un réglage de fil : `ok`, `invalid`, `forbidden`, `failed`. */
+    const val TYPE_STRAND_RESULT = "strand_result"
+    /** Client → serveur : le réglage entier d'un fil (titre, description, archivé). */
+    const val TYPE_STRAND = "strand"
+    /** Client → serveur : les messages d'un fil (les 200 derniers avant `before`). */
+    const val TYPE_STRAND_HISTORY = "strand_history"
+    const val STRAND_STATUS_OK = "ok"
+    /** Un identifiant de fil : choisi par le client, 1 à 40 lettres, chiffres, `_` ou `-`. */
+    val STRAND_ID = Regex("[A-Za-z0-9_-]{1,40}")
+    const val MAX_STRAND_TITLE_CHARS = 120
+    const val MAX_STRAND_DESCRIPTION_CHARS = 2000
+    /** Le début du premier message d'un fil, tel que le serveur le donne (120) ; borne de lecture au-dessus. */
+    const val MAX_STRAND_OPENER_CHARS = 200
+    /** Les fils lus d'une trame `strands`, au plus. */
+    const val MAX_STRANDS = 500
 
     // ── Statuts d'accusé (protocol.py ; les trois derniers sont émis par le client lui-même) ──
     const val ACK_ACCEPTED = "accepted"

@@ -76,6 +76,30 @@
     <string name="work_outcome_superseded">Remplacé par une nouvelle réponse.</string>
     <string name="work_outcome_interrupted">Interrompu.</string>
     <string name="work_outcome_other">Fini (%1$s).</string>
+    <!-- Les fils de travail du mode pro (ADR 0164) -->
+    <string name="strand_new">Nouveau fil</string>
+    <string name="strand_new_short">Nouveau</string>
+    <string name="strand_list">Fils</string>
+    <string name="strand_list_desc">Tes fils de travail</string>
+    <string name="strand_edit">Modifier</string>
+    <string name="strand_edit_desc">Le titre et la description de ce fil</string>
+    <string name="strand_new_desc">Ouvrir un fil neuf ; celui-ci reste dans la liste</string>
+    <string name="strand_archived">archivé</string>
+    <string name="strand_list_title">Fils de travail</string>
+    <string name="strand_archived_section">Archivés (%1$d)</string>
+    <string name="strand_current">ouvert</string>
+    <string name="strand_edit_title">Régler ce fil</string>
+    <string name="strand_title_label">Titre</string>
+    <string name="strand_description_label">De quoi parle ce fil</string>
+    <string name="strand_description_help">Ce que Mika relit en tête de ce fil, à chaque message.</string>
+    <string name="strand_archive_label">Archivé</string>
+    <string name="strand_save">Enregistrer</string>
+    <string name="strand_empty">Un fil à part : Mika n\'y relit que ce qui s\'y dit. Demande-lui un travail ; /aide pour les commandes.</string>
+    <plurals name="strand_messages">
+        <item quantity="one">%d message</item>
+        <item quantity="many">%d messages</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
     <string name="chat_more">Plus d\'options</string>
     <string name="chat_empty">Dis bonjour à Mika.</string>
     <string name="chat_typing">Mika écrit…</string>

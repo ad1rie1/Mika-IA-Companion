@@ -286,6 +286,17 @@ class MikaSocket(
         sendNow(FrameCodec.verdict(messageId, verdict, comment))
 
     /**
+     * Le réglage entier d'un fil de travail (ADR 0164) : maintenant ou pas du tout — rejoué plus tard, il effacerait
+     * un réglage fait entre-temps d'un autre appareil.
+     */
+    fun sendStrand(id: String, title: String, description: String, archived: Boolean): Boolean =
+        sendNow(FrameCodec.strand(id, title, description, archived))
+
+    /** Demander les messages d'un fil de travail (ADR 0164) : une question du moment, jamais en file. */
+    fun requestStrandHistory(id: String, before: Long? = null): Boolean =
+        sendNow(FrameCodec.strandHistory(id, before))
+
+    /**
      * Envoyer un message. `true` : la socket est ouverte, il part maintenant (ou dès qu'un accusé
      * libère une place parmi les envois en vol) ; `false` : il attend une connexion, ou il est
      * refusé (un accusé synthétique le dit).
@@ -581,7 +592,8 @@ class MikaSocket(
 
     /**
      * Envoyer si la socket est ouverte, sinon rien — jamais en file. Pour les trames de contrôle
-     * (`sync`, `ping`, `presence`, `composing`, `read`, `where`, `approval`) dont toute la valeur est d'être actuelles.
+     * (`sync`, `ping`, `presence`, `composing`, `read`, `where`, `approval`, `strand`…) dont toute la valeur est d'être
+     * actuelles.
      */
     private fun sendNow(text: String): Boolean {
         val s = socket ?: return false

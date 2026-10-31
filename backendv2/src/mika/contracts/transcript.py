@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from functools import cache
 
-from sqlalchemy import BigInteger, Column, Double, Index, Table
+from sqlalchemy import BigInteger, Boolean, Column, Double, Index, Table
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -25,6 +25,11 @@ LAST_TO = FactFamily("transcript.last_to", arg=str, type=int)
 HEAD = FactKey("transcript.head", type=int)
 
 THREAD_TABLE = "thread"
+STRANDS_TABLE = "strands"
+
+#: un identifiant de fil de travail, au plus : choisi par le client (lettres, chiffres, ``_`` et ``-``), propre à
+#: l'adresse qui l'a ouvert (ADR 0164)
+STRAND_MAX = 40
 
 
 @cache
@@ -41,7 +46,8 @@ def thread_table(sfx: str = "") -> Table:
     JSON : ``[[nom, réussi], …]``, leurs noms seulement) ; nul pour un message reçu (ADR 0108). ``verdict`` et
     ``verdict_note`` : pour un de ses messages, l'avis de son opératrice (``VERDICT_*``) et ce qu'elle a écrit avec
     — ce qu'elle aurait dû dire, ou pourquoi (ADR 0113) ; nuls sinon. ``mode`` : le mode dans lequel le message a
-    été écrit (``pro``, ADR 0116) ; nul pour la conversation ordinaire."""
+    été écrit (``pro``, ADR 0116) ; nul pour la conversation ordinaire. ``strand`` : le fil de travail du message
+    (ADR 0164) ; nul pour le fil avec elle — le seul que relit le fil privé."""
     name = f"{THREAD_TABLE}{sfx}"
     return projection_table(
         name,
@@ -66,8 +72,27 @@ def thread_table(sfx: str = "") -> Table:
         Column("verdict", LongText),
         Column("verdict_note", LongText),
         Column("mode", LongText),
+        Column("strand", Key(STRAND_MAX)),
         Index(f"{name}_person", "person", "id"),
         Index(f"{name}_room", "room", "id"),
+        Index(f"{name}_strand", "person", "strand", "id"),
+    )
+
+
+@cache
+def strands_table(sfx: str = "") -> Table:
+    """``strands`` (suffixée de sa version) : les fils de travail que leur opératrice a réglés (ADR 0164) — leur
+    titre, leur description, archivé ou non ; le dernier réglage vaut. Un fil existe par ses messages : sans
+    réglage, il n'est pas ici. ``at`` : l'instant du dernier réglage."""
+    name = f"{STRANDS_TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("person", Key(HANDLE_MAX), primary_key=True),
+        Column("strand", Key(STRAND_MAX), primary_key=True),
+        Column("at", BigInteger, nullable=False),
+        Column("title", LongText),
+        Column("description", LongText),
+        Column("archived", Boolean, nullable=False),
     )
 
 
@@ -126,7 +151,22 @@ class Judged(Payload):
     person: str = ""
 
 
+class StrandSet(Payload):
+    """Un fil de travail réglé par son opératrice (ADR 0164) : son titre et sa petite description — ce qu'elle relit
+    en tête de ce fil à chaque message —, archivé ou non. Le réglage entier à chaque fois : le dernier vaut. Les
+    messages du fil n'en dépendent pas : un fil existe par eux."""
+
+    #: l'adresse à qui est le fil (celle qui l'a ouvert, et qui le règle)
+    person: str
+    strand: str
+    title: Content
+    description: Content
+    archived: bool = False
+
+
 COMPACTED = event_type("transcript.compacted", OWNER, Compacted, public=True, content=("summary",),
                        subjects=("person", "speakers"))
 SUMMARY_RESET = event_type("transcript.summary_reset", OWNER, SummaryReset, public=True)
 JUDGED = event_type("transcript.judged", OWNER, Judged, content=("comment",), subjects=("person", "by"))
+STRAND_SET = event_type("transcript.strand_set", OWNER, StrandSet, content=("title", "description"),
+                        subjects=("person",))

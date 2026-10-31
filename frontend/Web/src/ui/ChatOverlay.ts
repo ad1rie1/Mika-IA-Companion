@@ -12,6 +12,7 @@ import type {
   MessageNote,
   RejectedAttachment,
   SentFile,
+  StrandResultMessage,
   Verdict,
   VerdictResultMessage,
 } from "../types";
@@ -75,8 +76,26 @@ import {
   withAttachments,
   writeCache,
   sentFiles,
+  threadOf,
+  trimThreads,
+  MAX_STRANDS_CACHED,
 } from "./chatSync";
 import type { MessageStatus, StoredMessage, TimeMarker } from "./chatSync";
+import {
+  COMMANDS,
+  localStrand,
+  newStrandId,
+  parseCommand,
+  parseStrands,
+  STRAND_DESCRIPTION_MAX,
+  STRAND_TITLE_MAX,
+  strandLabel,
+  strandOf,
+  suggestCommands,
+  unescapeSlash,
+  withLocal,
+} from "./strands";
+import type { StrandCommand, StrandInfo } from "./strands";
 
 // Re-exported: it was defined here before the synchronisation rules were
 // pulled out, and callers should not have to know which file they moved to.
@@ -132,7 +151,16 @@ const OFFLINE_NOT_SENT =
   "Hors ligne : ta décision n'est pas partie. Réessaie à la reconnexion.";
 /** La préférence de l'appareil pour le mode pro (ADR 0116) : `"1"` activé. */
 const PRO_PREF_KEY = "vtuber_chat_pro";
-const PRO_PLACEHOLDER = "Mode pro : demande-lui un travail…";
+const PRO_PLACEHOLDER = "Mode pro : demande-lui un travail… (/aide pour les commandes)";
+/** Le fil de travail montré en mode pro (ADR 0164), retenu par l'appareil pour ce compte. */
+const STRAND_PREF_PREFIX = "vtuber_chat_strand";
+/** Ce qu'une note sous l'en-tête d'un fil reste lisible. */
+const STRAND_NOTE_MS = 6000;
+const STRAND_RESULT_NOTES: Record<string, string> = {
+  invalid: "Réglage refusé : un champ est trop long.",
+  forbidden: "Réglage refusé : réservé à une opératrice.",
+  failed: "Le réglage n'a pas abouti — réessaie.",
+};
 /** Ce que dit l'icône d'un outil de la carte, pour un lecteur d'écran. */
 const STATUS_LABELS: Record<ToolStatus, string> = {
   running: "en cours",
@@ -153,6 +181,22 @@ function readProPreference(): boolean {
     return localStorage.getItem(PRO_PREF_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function readStrandPreference(key: string): string {
+  try {
+    return strandOf(localStorage.getItem(key)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStrandPreference(key: string, id: string): void {
+  try {
+    localStorage.setItem(key, id);
+  } catch {
+    // stockage fermé : le choix vaut pour cet onglet seulement
   }
 }
 
@@ -298,6 +342,28 @@ export class ChatOverlay {
   private work: readonly WorkCard[] = [];
   private readonly openWork = new Set<string>();
   private readonly workEls = new Map<string, HTMLElement>();
+  /**
+   * Ses fils de travail (ADR 0164) : la liste du serveur (trame `strands`),
+   * ceux que cet onglet a ouverts sans encore y écrire, et le fil montré en
+   * mode pro. Hors du mode pro, l'écran montre le fil avec elle.
+   */
+  private strands: StrandInfo[] = [];
+  private localStrands: StrandInfo[] = [];
+  private activeStrand: string;
+  private readonly strandPrefKey: string;
+  private strandsEl!: HTMLElement;
+  private strandHeadEl!: HTMLElement;
+  private commandsEl!: HTMLElement;
+  private showArchived = false;
+  private strandEditing = false;
+  private strandNote = "";
+  private strandNoteTimer: number | null = null;
+  /** Les fils où une réponse est arrivée pendant qu'on regardait ailleurs. */
+  private readonly unreadStrands = new Set<string>();
+  /** Les fils dont on a déjà demandé les messages au serveur, cette session. */
+  private readonly strandsAsked = new Set<string>();
+  /** Le fil où « Mika écrit… » attend sa réponse (`""` : le fil avec elle). */
+  private typingThread = "";
 
   constructor(ws: WebSocketClient, personId: string = "") {
     this.ws = ws;
@@ -320,6 +386,9 @@ export class ChatOverlay {
     this.proToggle = document.getElementById("chat-pro") as HTMLButtonElement | null;
     this.basePlaceholder = this.inputEl.placeholder;
     this.proPreferred = readProPreference();
+    this.strandPrefKey = personId ? `${STRAND_PREF_PREFIX}:${personId}` : STRAND_PREF_PREFIX;
+    this.activeStrand = readStrandPreference(this.strandPrefKey);
+    this.buildStrandsUi();
 
     this.approvalsEl = document.createElement("section");
     this.approvalsEl.className = "chat-approvals";
@@ -415,9 +484,12 @@ export class ChatOverlay {
           // ses petites bulles aussi (ADR 0119)
           const notes = m.sender === "vtuber" ? messageNotes(m.notes) : [];
           restored.notes = notes.length ? notes : undefined;
+          // son fil de travail (ADR 0164)
+          restored.strand = strandOf(m.strand);
+          if (!restored.strand) delete restored.strand;
           return restored;
-        })
-        .slice(-MAX_MESSAGES);
+        });
+      this.history = trimThreads(this.history, MAX_MESSAGES, MAX_STRANDS_CACHED);
       this.repaint({ animate: false });
     } catch {
       this.history = [];
@@ -484,8 +556,12 @@ export class ChatOverlay {
     if (on !== this.proModeAnnounced) {
       this.proModeAnnounced = on;
       for (const cb of this.proModeListeners) cb(on);
-      // le fil change de hauteur : on garde sous les yeux le dernier message
-      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      // l'écran passe d'un fil à l'autre : le fil avec elle, ou le fil de travail actif (ADR 0164)
+      this.ensureStrand();
+      this.renderCommandHints([]);
+      this.repaintStrands();
+      this.repaintStrandHead();
+      this.repaint({ animate: false });
     }
   }
 
@@ -542,6 +618,15 @@ export class ChatOverlay {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.sendMessage();
+        return;
+      }
+      // en mode pro, Tab complète la commande commencée (« /ren » → « /renommer »)
+      if (e.key === "Tab" && this.proMode) {
+        const [first] = suggestCommands(this.inputEl.value);
+        if (first) {
+          e.preventDefault();
+          this.completeCommand(first);
+        }
       }
     });
 
@@ -549,6 +634,7 @@ export class ChatOverlay {
     this.inputEl.addEventListener("input", () => {
       this.autoResizeInput();
       this.updateCounter();
+      this.renderCommandHints(this.proMode ? suggestCommands(this.inputEl.value) : []);
     });
 
     this.attachBtn.addEventListener("click", () => this.fileInput.click());
@@ -615,7 +701,9 @@ export class ChatOverlay {
     this.ws.on("speech", (data) => {
       // une réponse qui s'écrivait encore se montre en entier : la suivante arrive
       this.reveal.finish();
-      this.hideTyping();
+      // son fil (ADR 0164) : « Mika écrit… » ne s'éteint que dans le fil qui l'attendait
+      const strand = strandOf(data.strand);
+      if ((strand ?? "") === this.typingThread) this.hideTyping();
       // Bind the reply's own row, and the user message it answers, to the
       // bubbles already on screen. Doing it here — rather than waiting for
       // the next history frame — is what keeps the cursor moving during a
@@ -652,8 +740,14 @@ export class ChatOverlay {
           reveal: !inner && !pro,
           mode: pro,
           notes: messageNotes(data.notes),
+          strand,
         });
-        if (this.reveal.writing) this.showTyping();
+        if (this.reveal.writing) this.showTyping("");
+        // une réponse dans un fil qu'on ne regarde pas : un point dans la liste
+        if (strand && strand !== this.viewThread) {
+          this.unreadStrands.add(strand);
+          this.repaintStrands();
+        }
       }
     });
 
@@ -665,6 +759,10 @@ export class ChatOverlay {
     this.ws.on("history", (data) => this.receiveHistory(data));
 
     this.ws.on("verdict_result", (data) => this.verdictResult(data));
+
+    // Ses fils de travail (ADR 0164) : la liste, et le sort d'un réglage.
+    this.ws.on("strands", (data) => this.receiveStrands(data));
+    this.ws.on("strand_result", (data) => this.strandResult(data));
 
     // A terminal refusal (4401) means nothing queued will ever be sent.
     // Leaving those bubbles "en attente d'envoi" reads as "still on its
@@ -721,6 +819,11 @@ export class ChatOverlay {
    * récente que celle restaurée) cachait celui-ci.
    */
   private receiveHistory(data: HistoryMessage) {
+    if (data.mode === "strand") {
+      // un fil de travail relu (ADR 0164) : des lignes à fusionner, jamais un curseur ni une autre vie
+      this.mergeHistory(data.messages ?? [], false, "catchup");
+      return;
+    }
     let wiped = false;
     if (fromAnotherLife(this.life, data)) {
       this.history = keepAcrossLives(this.history);
@@ -938,9 +1041,7 @@ export class ChatOverlay {
   }
 
   private trimHistory() {
-    if (this.history.length > MAX_MESSAGES) {
-      this.history = this.history.slice(-MAX_MESSAGES);
-    }
+    this.history = trimThreads(this.history, MAX_MESSAGES, MAX_STRANDS_CACHED);
   }
 
 
@@ -961,9 +1062,14 @@ export class ChatOverlay {
       (n >= MAX_MESSAGE_CHARS ? " — c'est la limite" : "");
   }
 
-  /** Animated "Mika écrit…" bubble shown between send and reply. */
-  private showTyping() {
+  /**
+   * Animated "Mika écrit…" bubble shown between send and reply — dans le fil
+   * qui attend (ADR 0164) : ailleurs, elle reste cachée.
+   */
+  private showTyping(thread: string = this.viewThread) {
+    this.typingThread = thread;
     if (this.typingEl) {
+      this.typingEl.hidden = thread !== this.viewThread;
       this.resetTypingTimer();
       return;
     }
@@ -975,6 +1081,7 @@ export class ChatOverlay {
       dot.className = "typing-dot";
       bubble.appendChild(dot);
     }
+    bubble.hidden = thread !== this.viewThread;
     this.messagesEl.appendChild(bubble);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     this.typingEl = bubble;
@@ -1083,15 +1190,27 @@ export class ChatOverlay {
   }
 
   private sendMessage() {
-    const text = this.inputEl.value.trim();
-    if (!text && this.pendingAttachments.length === 0) return;
+    const typed = this.inputEl.value.trim();
+    if (!typed && this.pendingAttachments.length === 0) return;
+    // en mode pro, une commande (`/clear`…) agit sur les fils et ne part pas (ADR 0164)
+    const command = this.proMode ? parseCommand(typed) : null;
+    if (command) {
+      this.inputEl.value = "";
+      this.autoResizeInput();
+      this.updateCounter();
+      this.renderCommandHints([]);
+      this.runCommand(command);
+      return;
+    }
+    const text = this.proMode ? unescapeSlash(typed) : typed;
 
     const cid = nextClientMsgId();
     let sent: boolean;
     // Le mode est pris à l'envoi et voyage avec la trame : un message en file
-    // le garde même si l'interrupteur change avant son départ.
+    // le garde même si l'interrupteur change avant son départ — son fil aussi.
     const mode: ChatMode = this.proMode ? "pro" : "";
     const pro = proMode(mode);
+    const strand = pro ? this.activeStrand : undefined;
 
     if (this.pendingAttachments.length > 0) {
       // La même composition que le fil relu (chatSync.withAttachments) : la
@@ -1106,16 +1225,17 @@ export class ChatOverlay {
         status: "pending",
         matchText: text,
         mode: pro,
+        strand,
       });
       sent = this.ws.sendChatWithAttachments(
-        text, this.pendingAttachments, cid, mode,
+        text, this.pendingAttachments, cid, mode, strand,
       );
       this.pendingAttachments = [];
       this.attachmentNotices = [];
       this.renderPreviews();
     } else {
-      this.addMessage(text, "user", { cid, status: "pending", mode: pro });
-      sent = this.ws.sendChat(text, cid, mode);
+      this.addMessage(text, "user", { cid, status: "pending", mode: pro, strand });
+      sent = this.ws.sendChat(text, cid, mode, strand);
       // Le message parti, la note a fait son office : la laisser en ferait un
       // reproche accroché au tour suivant, qui n'a rien écarté.
       if (this.attachmentNotices.length) {
@@ -1127,6 +1247,8 @@ export class ChatOverlay {
     this.inputEl.value = "";
     this.autoResizeInput();
     this.updateCounter();
+    this.renderCommandHints([]);
+    if (strand) this.noteOpener(strand, text);
     // A message that never left the browser is not being answered, so no
     // typing indicator: the pending mark on the bubble is the truthful
     // signal, and it clears itself when the ack arrives after a reconnect.
@@ -1153,6 +1275,8 @@ export class ChatOverlay {
       mode?: "pro";
       /** Ce qu'elle a fait en l'écrivant — voir StoredMessage.notes. */
       notes?: MessageNote[];
+      /** Son fil de travail — voir StoredMessage.strand. */
+      strand?: string;
     } = {}
   ) {
     const display = sender === "vtuber" ? replyText(text, opts.mode) : text;
@@ -1180,6 +1304,7 @@ export class ChatOverlay {
       ...(opts.files?.length ? { files: opts.files } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
       ...(opts.notes?.length ? { notes: opts.notes } : {}),
+      ...(opts.strand ? { strand: opts.strand } : {}),
     };
     this.history.push(stored);
     if (opts.reveal && sender === "vtuber") this.reveal.start(stored, display);
@@ -1201,8 +1326,12 @@ export class ChatOverlay {
     for (const child of Array.from(this.messagesEl.children)) {
       if (child !== this.typingEl) child.remove();
     }
+    // le fil à l'écran (ADR 0164) : en mode pro, le fil de travail actif ; sinon le fil avec elle
+    const thread = this.viewThread;
+    const shown = this.history.filter((m) => threadOf(m) === thread);
+    if (this.typingEl) this.typingEl.hidden = this.typingThread !== thread;
 
-    if (this.truncated) {
+    if (this.truncated && thread === "") {
       const note = document.createElement("div");
       note.className = "chat-note";
       note.textContent =
@@ -1216,8 +1345,9 @@ export class ChatOverlay {
     const after = new Map<number, HTMLElement[]>();
     const end: HTMLElement[] = [];
     this.workEls.clear();
-    const cards = new Map(this.work.map((card) => [card.key, card]));
-    for (const place of placeCards(this.history, this.work)) {
+    const work = this.work.filter((card) => (card.strand ?? "") === thread);
+    const cards = new Map(work.map((card) => [card.key, card]));
+    for (const place of placeCards(shown, work)) {
       const card = cards.get(place.key);
       if (!card) continue;
       const el = this.buildWorkCard(card, place.collapsed);
@@ -1232,8 +1362,8 @@ export class ChatOverlay {
 
     // Le jour qui commence, l'heure d'une reprise : recalculés à chaque rendu
     // (« Aujourd'hui » devient « Hier » après minuit), jamais stockés.
-    const markers = timeMarkers(this.history, Date.now());
-    this.history.forEach((msg, index) => {
+    const markers = timeMarkers(shown, Date.now());
+    shown.forEach((msg, index) => {
       const marker = markers[index];
       if (marker) this.insertBeforeTyping(this.buildMarker(marker));
       for (const card of before.get(index) ?? []) this.insertBeforeTyping(card);
@@ -1248,13 +1378,373 @@ export class ChatOverlay {
       // bien reçu) — pour une opératrice, avec où réparer.
       if (msg.replyNote) {
         this.insertBeforeTyping(this.buildNote(msg.replyNote, msg.replyHref));
-      } else if (asleepNoteShown(this.history, index)) {
+      } else if (asleepNoteShown(shown, index)) {
         this.insertBeforeTyping(this.buildNote(ASLEEP_NOTE));
       }
       for (const card of after.get(index) ?? []) this.insertBeforeTyping(card);
     });
     for (const card of end) this.insertBeforeTyping(card);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  // ── Ses fils de travail (ADR 0164) ────────────────────────────────
+
+  /** Le fil que l'écran montre : en mode pro, le fil de travail actif ; sinon le fil avec elle (`""`). */
+  private get viewThread(): string {
+    return this.proMode ? this.activeStrand : "";
+  }
+
+  /**
+   * Tous ses fils de travail : ceux que cet onglet a ouverts sans que le
+   * serveur les connaisse encore en tête, puis la liste du serveur — et le fil
+   * actif, s'il n'est nulle part (choisi sur cet appareil, jamais écrit).
+   */
+  private get allStrands(): StrandInfo[] {
+    const all = withLocal(this.strands, this.localStrands);
+    if (this.activeStrand && !all.some((s) => s.id === this.activeStrand)) {
+      return [localStrand(this.activeStrand), ...all];
+    }
+    return all;
+  }
+
+  private strandInfo(id: string): StrandInfo {
+    return this.allStrands.find((s) => s.id === id) ?? localStrand(id);
+  }
+
+  /** La liste, l'en-tête du fil montré et les suggestions de commandes : cachés hors du mode pro (index.html). */
+  private buildStrandsUi() {
+    const container = document.getElementById("chat-container");
+    this.strandsEl = document.createElement("aside");
+    this.strandsEl.id = "chat-strands";
+    this.strandsEl.setAttribute("aria-label", "Fils de travail");
+    container?.prepend(this.strandsEl);
+    this.strandHeadEl = document.createElement("div");
+    this.strandHeadEl.id = "chat-strand-head";
+    this.messagesEl.before(this.strandHeadEl);
+    this.commandsEl = document.createElement("div");
+    this.commandsEl.id = "chat-commands";
+    this.commandsEl.hidden = true;
+    document.getElementById("chat-input-container")?.before(this.commandsEl);
+  }
+
+  /** En mode pro, un fil est toujours montré : le dernier choisi, sinon le plus récent, sinon un neuf. */
+  private ensureStrand() {
+    if (!this.proMode || this.activeStrand) return;
+    const recent = this.allStrands.find((s) => !s.archived);
+    this.activeStrand = recent?.id ?? newStrandId();
+    writeStrandPreference(this.strandPrefKey, this.activeStrand);
+  }
+
+  /** La liste du serveur (trame `strands`) ; les fils de cet onglet qu'il connaît désormais y prennent leur ligne. */
+  private receiveStrands(raw: unknown) {
+    this.strands = parseStrands(raw);
+    const known = new Set(this.strands.map((s) => s.id));
+    // un fil ouvert ici et resté vide s'en va, sauf celui qu'on regarde
+    this.localStrands = this.localStrands.filter(
+      (s) => !known.has(s.id) && (s.id === this.activeStrand || this.history.some((m) => m.strand === s.id)),
+    );
+    this.ensureStrand();
+    if (this.proMode) this.askStrandHistory(this.activeStrand);
+    this.repaintStrands();
+    this.repaintStrandHead();
+  }
+
+  private strandResult(data: StrandResultMessage) {
+    const note = STRAND_RESULT_NOTES[data.status];
+    if (note) this.noteStrand(note);
+  }
+
+  /** Montrer un fil : ses messages, son en-tête ; ceux qu'on n'a pas encore se demandent au serveur. */
+  private selectStrand(id: string) {
+    this.activeStrand = id;
+    writeStrandPreference(this.strandPrefKey, id);
+    this.unreadStrands.delete(id);
+    this.strandEditing = false;
+    document.getElementById("chat-container")?.classList.remove("strands-open");
+    this.askStrandHistory(id);
+    this.repaintStrands();
+    this.repaintStrandHead();
+    this.repaint({ animate: false });
+    this.inputEl.focus();
+  }
+
+  /** Un fil que le serveur connaît mieux que cet onglet (un autre appareil) : ses messages, une fois par session. */
+  private askStrandHistory(id: string) {
+    const info = this.strands.find((s) => s.id === id);
+    if (!info || this.strandsAsked.has(id)) return;
+    const here = this.history.filter((m) => m.strand === id && m.id !== undefined).length;
+    if (info.count <= here) return;
+    if (this.ws.requestStrandHistory({ type: "strand_history", id })) this.strandsAsked.add(id);
+  }
+
+  /** `/clear` : un fil neuf, vide ; l'ancien reste dans la liste. */
+  private openNewStrand() {
+    const id = newStrandId();
+    this.localStrands = [localStrand(id), ...this.localStrands];
+    this.selectStrand(id);
+  }
+
+  /** Le premier message d'un fil neuf le nomme tout de suite dans la liste, sans attendre le serveur. */
+  private noteOpener(id: string, text: string) {
+    const local = this.localStrands.find((s) => s.id === id);
+    if (!local || local.opener) return;
+    this.localStrands = this.localStrands.map((s) => (s.id === id ? { ...s, opener: text } : s));
+    this.repaintStrands();
+    this.repaintStrandHead();
+  }
+
+  /** Le réglage entier du fil montré, avec ce qui change ; à l'écran tout de suite, la liste du serveur suit. */
+  private setStrand(change: Partial<Pick<StrandInfo, "title" | "description" | "archived">>) {
+    const id = this.activeStrand;
+    const next: StrandInfo = { ...this.strandInfo(id), ...change };
+    const sent = this.ws.sendStrand({
+      type: "strand",
+      id,
+      title: next.title,
+      description: next.description,
+      archived: next.archived,
+    });
+    if (!sent) {
+      this.noteStrand("Hors ligne : le réglage n'est pas parti.");
+      return;
+    }
+    const known = this.strands.some((s) => s.id === id);
+    this.strands = known ? this.strands.map((s) => (s.id === id ? next : s)) : this.strands;
+    this.localStrands = known
+      ? this.localStrands
+      : [next, ...this.localStrands.filter((s) => s.id !== id)];
+    this.repaintStrands();
+    this.repaintStrandHead();
+  }
+
+  private runCommand(command: StrandCommand) {
+    switch (command.name) {
+      case "clear":
+        this.openNewStrand();
+        return;
+      case "rename":
+        this.setStrand({ title: command.arg.slice(0, STRAND_TITLE_MAX) });
+        return;
+      case "describe":
+        this.setStrand({ description: command.arg.slice(0, STRAND_DESCRIPTION_MAX) });
+        return;
+      case "archive":
+        this.setStrand({ archived: true });
+        return;
+      case "unarchive":
+        this.setStrand({ archived: false });
+        return;
+      case "help":
+        this.renderCommandHints(COMMANDS);
+        return;
+      case "unknown":
+        this.noteStrand(`Commande inconnue : ${command.typed} — tape /aide.`);
+        return;
+    }
+  }
+
+  /** Une note sous l'en-tête du fil, le temps d'être lue. */
+  private noteStrand(text: string) {
+    this.strandNote = text;
+    if (this.strandNoteTimer !== null) window.clearTimeout(this.strandNoteTimer);
+    this.strandNoteTimer = window.setTimeout(() => {
+      this.strandNote = "";
+      this.strandNoteTimer = null;
+      this.repaintStrandHead();
+    }, STRAND_NOTE_MS);
+    this.repaintStrandHead();
+  }
+
+  /** Les commandes que le début tapé peut devenir : un clic (ou Tab) complète. */
+  private renderCommandHints(hints: readonly (typeof COMMANDS)[number][]) {
+    this.commandsEl.replaceChildren(
+      ...hints.map((c) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-command";
+        const usage = document.createElement("code");
+        usage.textContent = c.usage;
+        const help = document.createElement("span");
+        help.textContent = c.help;
+        button.append(usage, help);
+        button.addEventListener("click", () => this.completeCommand(c));
+        return button;
+      }),
+    );
+    this.commandsEl.hidden = hints.length === 0;
+  }
+
+  private completeCommand(c: (typeof COMMANDS)[number]) {
+    this.inputEl.value = `/${c.words[0]}${c.usage.includes("<") ? " " : ""}`;
+    this.renderCommandHints([]);
+    this.inputEl.focus();
+  }
+
+  /** La liste des fils : les vivants, puis les archivés repliés. */
+  private repaintStrands() {
+    const all = this.allStrands;
+    const live = all.filter((s) => !s.archived || s.id === this.activeStrand);
+    const archived = all.filter((s) => s.archived && s.id !== this.activeStrand);
+    const head = document.createElement("div");
+    head.className = "strands-head";
+    const title = document.createElement("span");
+    title.textContent = "Fils de travail";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "strands-new";
+    add.textContent = "＋ Nouveau";
+    add.title = "Ouvrir un fil neuf (/clear) : l'actuel reste dans la liste";
+    add.addEventListener("click", () => this.openNewStrand());
+    // sur un téléphone, la liste est un tiroir : de quoi le refermer sans choisir
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "strands-close";
+    close.textContent = "✕";
+    close.title = "Fermer la liste";
+    close.addEventListener("click", () =>
+      document.getElementById("chat-container")?.classList.remove("strands-open"),
+    );
+    head.append(title, add, close);
+    const list = document.createElement("ul");
+    list.className = "strands-list";
+    list.append(...live.map((s) => this.buildStrandItem(s)));
+    const parts: HTMLElement[] = [head, list];
+    if (archived.length) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "strands-archived";
+      toggle.setAttribute("aria-expanded", String(this.showArchived));
+      toggle.textContent = `${this.showArchived ? "▾" : "▸"} Archivés (${archived.length})`;
+      toggle.addEventListener("click", () => {
+        this.showArchived = !this.showArchived;
+        this.repaintStrands();
+      });
+      parts.push(toggle);
+      if (this.showArchived) {
+        const old = document.createElement("ul");
+        old.className = "strands-list archived";
+        old.append(...archived.map((s) => this.buildStrandItem(s)));
+        parts.push(old);
+      }
+    }
+    this.strandsEl.replaceChildren(...parts);
+  }
+
+  private buildStrandItem(s: StrandInfo): HTMLElement {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "strand-item";
+    if (s.id === this.activeStrand) {
+      button.classList.add("active");
+      button.setAttribute("aria-current", "true");
+    }
+    if (this.unreadStrands.has(s.id)) {
+      button.classList.add("unread");
+      button.setAttribute("aria-label", `${strandLabel(s)} — nouvelle réponse`);
+    }
+    button.textContent = strandLabel(s);
+    if (s.description) button.title = s.description;
+    button.addEventListener("click", () => this.selectStrand(s.id));
+    item.append(button);
+    return item;
+  }
+
+  /** L'en-tête du fil montré : son nom, sa description, de quoi les changer ; ou leur éditeur. */
+  private repaintStrandHead() {
+    const menu = document.createElement("button");
+    menu.type = "button";
+    menu.className = "strands-toggle";
+    menu.textContent = "☰";
+    menu.title = "Les fils de travail";
+    menu.addEventListener("click", () =>
+      document.getElementById("chat-container")?.classList.toggle("strands-open"),
+    );
+    const info = this.strandInfo(this.activeStrand);
+    if (this.strandEditing) {
+      this.strandHeadEl.replaceChildren(menu, this.buildStrandEditor(info));
+      return;
+    }
+    const text = document.createElement("div");
+    text.className = "strand-head-text";
+    const name = document.createElement("strong");
+    name.textContent = strandLabel(info);
+    text.append(name);
+    if (info.archived) {
+      const badge = document.createElement("span");
+      badge.className = "strand-badge";
+      badge.textContent = "archivé";
+      text.append(badge);
+    }
+    const about = document.createElement("div");
+    about.className = "strand-description";
+    about.textContent = info.description || "Sans description — ce qu'elle relit en tête de ce fil (/description).";
+    if (!info.description) about.classList.add("empty");
+    text.append(about);
+    if (this.strandNote) {
+      const note = document.createElement("div");
+      note.className = "strand-note";
+      note.setAttribute("role", "status");
+      note.textContent = this.strandNote;
+      text.append(note);
+    }
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "strand-edit";
+    edit.textContent = "✎";
+    edit.title = "Le titre et la description de ce fil";
+    edit.addEventListener("click", () => {
+      this.strandEditing = true;
+      this.repaintStrandHead();
+      this.strandHeadEl.querySelector("input")?.focus();
+    });
+    this.strandHeadEl.replaceChildren(menu, text, edit);
+  }
+
+  private buildStrandEditor(info: StrandInfo): HTMLElement {
+    const form = document.createElement("form");
+    form.className = "strand-editor";
+    const title = document.createElement("input");
+    title.type = "text";
+    title.maxLength = STRAND_TITLE_MAX;
+    title.placeholder = "Titre";
+    title.value = info.title;
+    const description = document.createElement("textarea");
+    description.rows = 2;
+    description.maxLength = STRAND_DESCRIPTION_MAX;
+    description.placeholder = "De quoi parle ce fil : ce qu'elle relit en tête, à chaque message";
+    description.value = info.description;
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.textContent = "Enregistrer";
+    const archive = document.createElement("button");
+    archive.type = "button";
+    archive.textContent = info.archived ? "Désarchiver" : "Archiver";
+    archive.addEventListener("click", () => {
+      this.strandEditing = false;
+      this.setStrand({ archived: !info.archived });
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Annuler";
+    const close = () => {
+      this.strandEditing = false;
+      this.repaintStrandHead();
+    };
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close();
+    });
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      this.strandEditing = false;
+      this.setStrand({ title: title.value.trim(), description: description.value.trim() });
+    });
+    const buttons = document.createElement("div");
+    buttons.className = "strand-editor-buttons";
+    buttons.append(save, archive, cancel);
+    form.append(title, description, buttons);
+    return form;
   }
 
   // ── Ses outils en direct (ADR 0116) ───────────────────────────────
@@ -1271,7 +1761,7 @@ export class ChatOverlay {
     const known = this.work.some((card) => card.key === key);
     this.work = withToolFrame(this.work, frame);
     const card = this.work.find((c) => c.key === key);
-    if (card && isRunning(card)) this.hideTyping();
+    if (card && isRunning(card) && (card.strand ?? "") === this.typingThread) this.hideTyping();
     if (known && card && this.repaintCard(card)) return;
     this.repaint({ animate: false });
   }

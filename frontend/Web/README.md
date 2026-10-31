@@ -105,6 +105,12 @@ Unity.
   (`ui/proMarkdown.ts` : tout le HTML échappé d'abord, liens http(s) seulement, tableaux et citations compris),
   jamais lue à voix haute. Interrupteur allumé, le chat prend tout l'écran sur un fond qui cache la pièce et la vie
   intérieure se replie ; elle revient comme elle était en sortant du mode (`main.ts`, `#app.pro-mode`).
+- Les fils de travail (ADR 0164, `ui/strands.ts`, pur) : en mode pro, le chat devient un client à plusieurs fils —
+  la liste à gauche (un tiroir ☰ sur un téléphone), l'en-tête du fil montré (titre et petite description, ✎), le fil
+  avec Mika caché. Chaque message part avec son fil (`chat.strand`) ; les commandes du champ : `/clear` (ou
+  `/nouveau`) ouvre un fil neuf sans rien effacer, `/renommer`, `/description`, `/archiver`, `/desarchiver`, `/aide` ;
+  `//` en tête échappe. Le cache garde les 50 derniers messages de chaque fil (`chatSync.trimThreads`) ; un fil qu'on
+  ouvre sans ses messages se relit au serveur (`strand_history`).
 - Les tests vitest sont dans des dossiers `__tests__`.
 
 Les ADR cités sont dans `backendv2/docs/decisions.md`.

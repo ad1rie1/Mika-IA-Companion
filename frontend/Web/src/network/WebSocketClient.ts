@@ -3,6 +3,8 @@ import type {
   ChatFrame,
   ChatMode,
   VerdictFrame,
+  StrandFrame,
+  StrandHistoryFrame,
   ComposingFrame,
   PresenceFrame,
   ServerMessageMap,
@@ -786,12 +788,17 @@ export class WebSocketClient {
     message: string,
     clientMsgId: string | undefined,
     mode: ChatMode,
-    attachments?: ChatFrame["attachments"]
+    attachments?: ChatFrame["attachments"],
+    strand?: string
   ): ChatFrame & { person_id?: string } {
     const frame: ChatFrame = { type: "chat", message };
     if (attachments) frame.attachments = attachments;
     frame.client_msg_id = clientMsgId;
-    if (mode === "pro") frame.mode = "pro";
+    if (mode === "pro") {
+      frame.mode = "pro";
+      // son fil de travail (ADR 0164) : porté par la trame, comme le mode
+      if (strand) frame.strand = strand;
+    }
     return this.withIdentity(frame);
   }
 
@@ -805,9 +812,9 @@ export class WebSocketClient {
    * Returns false when the frame was queued because the socket is down, or
    * behind MAX_IN_FLIGHT messages still waiting for their ack.
    */
-  sendChat(message: string, clientMsgId?: string, mode: ChatMode = ""): boolean {
+  sendChat(message: string, clientMsgId?: string, mode: ChatMode = "", strand?: string): boolean {
     this.stopComposing(false); // le message clôt la saisie de lui-même
-    return this.send(this.chatFrame(message, clientMsgId, mode));
+    return this.send(this.chatFrame(message, clientMsgId, mode, undefined, strand));
   }
 
   /**
@@ -827,7 +834,8 @@ export class WebSocketClient {
     message: string,
     attachments: Array<{ name: string; type: string; data: string }>,
     clientMsgId?: string,
-    mode: ChatMode = ""
+    mode: ChatMode = "",
+    strand?: string
   ): boolean {
     this.stopComposing(false);
     return this.send(
@@ -835,7 +843,8 @@ export class WebSocketClient {
         message,
         clientMsgId,
         mode,
-        attachments.map(({ name, type, data }) => ({ name, type, data }))
+        attachments.map(({ name, type, data }) => ({ name, type, data })),
+        strand
       )
     );
   }
@@ -855,6 +864,16 @@ export class WebSocketClient {
 
   /** Une de ses réponses jugée (ADR 0113) : jamais mise en file, comme une décision. */
   sendVerdict(frame: VerdictFrame): boolean {
+    return this.sendNow(frame);
+  }
+
+  /** Un fil de travail réglé (ADR 0164) : jamais mis en file — l'écran dit s'il est parti. */
+  sendStrand(frame: StrandFrame): boolean {
+    return this.sendNow(frame);
+  }
+
+  /** Les messages d'un fil de travail qu'on ouvre sans les avoir (ADR 0164). */
+  requestStrandHistory(frame: StrandHistoryFrame): boolean {
     return this.sendNow(frame);
   }
 

@@ -79,6 +79,8 @@ class Delivery:
     attachments: tuple[str, ...] = ()
     #: le mode dans lequel elle a répondu (``pro``, ADR 0116) ; ``""`` : la conversation ordinaire
     mode: str = ""
+    #: le fil de travail où elle répond (ADR 0164) ; ``None`` : son fil avec la personne
+    strand: str | None = None
 
 
 class DeliveryPort(Protocol):
@@ -111,6 +113,8 @@ class Activity:
     duration_us: int = 0
     text: str = ""
     outcome: str = ""
+    #: le fil de travail où elle répond (ADR 0164) ; ``None`` : son fil avec la personne
+    strand: str | None = None
 
 
 class ActivityPort(Protocol):

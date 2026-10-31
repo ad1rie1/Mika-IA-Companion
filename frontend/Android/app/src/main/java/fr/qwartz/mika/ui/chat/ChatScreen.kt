@@ -53,6 +53,7 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.net.LinkState
+import fr.qwartz.mika.data.net.StrandInfo
 import fr.qwartz.mika.avatar3d.LiveAvatar3D
 import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.ui.avatar.AvatarBackdrop
@@ -102,6 +103,12 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var sheet by rememberSaveable { mutableStateOf(false) }
+    // les fils de travail du mode pro (ADR 0164) : leur liste, le fil ouvert, la feuille et le réglage
+    val strands by vm.strands.collectAsStateWithLifecycle()
+    val activeStrand by vm.activeStrand.collectAsStateWithLifecycle()
+    var strandSheet by rememberSaveable { mutableStateOf(false) }
+    var strandEdit by rememberSaveable { mutableStateOf(false) }
+    val currentStrand = activeStrand?.let { id -> strands.firstOrNull { it.id == id } ?: StrandInfo(id) }
 
     // Lue tant qu'elle est à l'écran : dès la reprise, et à chaque nouveau message.
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
@@ -261,6 +268,15 @@ fun ChatScreen(
                     if (link is LinkState.Refused) {
                         RefusedBanner(onRetry = vm::retryConnection, onLogout = { confirmLogout = true })
                     }
+                    // en mode pro, le fil de travail ouvert ; le fil avec elle est caché (ADR 0164)
+                    if (proMode) {
+                        StrandBar(
+                            currentStrand,
+                            onList = { strandSheet = true },
+                            onEdit = { if (currentStrand != null) strandEdit = true },
+                            onNew = vm::newStrand,
+                        )
+                    }
                     val needsPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !asked && !notificationsGranted
                     if (needsPrompt) {
                         NotificationPrompt(
@@ -278,6 +294,7 @@ fun ChatScreen(
                         stage = stage,
                         verdictErrors = verdictErrors,
                         wide = proMode,
+                        emptyText = if (proMode) stringResource(R.string.strand_empty) else null,
                         modifier = Modifier.weight(1f),
                     )
                     ApprovalTray(approvals, onDecide = vm::decide, modifier = Modifier.heightIn(max = trayMax))
@@ -301,6 +318,34 @@ fun ChatScreen(
             onDocuments = {
                 sheet = false
                 pickDocuments.launch(DOCUMENT_TYPES)
+            },
+        )
+    }
+
+    if (strandSheet && proMode) {
+        StrandSheet(
+            strands = strands,
+            active = activeStrand,
+            onDismiss = { strandSheet = false },
+            onOpen = { id ->
+                strandSheet = false
+                vm.openStrand(id)
+            },
+            onNew = {
+                strandSheet = false
+                vm.newStrand()
+            },
+        )
+    }
+
+    val editing = currentStrand
+    if (strandEdit && proMode && editing != null) {
+        StrandEditDialog(
+            editing,
+            onDismiss = { strandEdit = false },
+            onSave = { title, description, archived ->
+                strandEdit = false
+                vm.saveStrand(editing.id, title, description, archived)
             },
         )
     }

@@ -18,6 +18,9 @@ import fr.qwartz.mika.avatar3d.Avatar3DState
 import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.data.chat.ChatRepository
 import fr.qwartz.mika.data.chat.MessageAttachment
+import fr.qwartz.mika.data.chat.StoredMessage
+import fr.qwartz.mika.data.chat.Strands
+import fr.qwartz.mika.data.chat.WorkCard
 import fr.qwartz.mika.data.db.Kv
 import fr.qwartz.mika.data.files.ComposerDraft
 import fr.qwartz.mika.data.files.StagedFile
@@ -25,6 +28,7 @@ import fr.qwartz.mika.data.mind.StatusLine
 import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaProtocol
+import fr.qwartz.mika.data.net.StrandInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -37,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -64,15 +69,77 @@ class ChatViewModel(
 ) : ViewModel() {
     val zone: ZoneId = ZoneId.systemDefault()
 
+    /** Une opératrice voit le lien « ouvrir la console » sous une réponse ratée. */
+    val operator: StateFlow<Boolean> = graph.auth.session
+        .map { (it as? Session.LoggedIn)?.profile?.operator == true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * Le mode pro (ADR 0116) : l'interrupteur « Pro » de la barre de saisie, retenu sur l'appareil, qui ne vaut que
+     * pour une opératrice — ailleurs il n'apparaît pas, et rien ne part en mode pro.
+     */
+    val proMode: StateFlow<Boolean> = combine(
+        operator,
+        graph.settings.settings.map { it.proMode }.distinctUntilChanged(),
+    ) { op, on -> op && on }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Le fil de travail ouvert en mode pro (ADR 0164), retenu sur l'appareil ; `null` : aucun encore. */
+    val activeStrand: StateFlow<String?> = graph.store.observeKv(Kv.ACTIVE_STRAND)
+        .map { it?.takeIf(Strands::isValidId) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * Ce que l'écran montre : en mode pro, le fil de travail ouvert, seul — le fil avec Mika est caché ; sinon, le fil
+     * avec elle, seul (aucun message d'un fil de travail). `null` : le fil avec elle.
+     */
+    private val view: StateFlow<String?> = combine(proMode, activeStrand) { pro, active ->
+        // en mode pro sans fil encore (le temps d'en ouvrir un) : un fil vide, jamais le fil avec elle
+        if (pro) active ?: NO_STRAND else null
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Le fil vu, les messages relus d'un coup : ce que [items] et [strands] lisent. */
+    private val thread = graph.chat.observe()
+
     val items: StateFlow<List<ChatItem>> = combine(
-        graph.chat.observe(),
-        graph.chatEngine.ephemeral,
-        graph.chatEngine.truncated,
-        graph.chatEngine.typing,
-        // ses cartes de travail (ADR 0116) : en mémoire seulement
-        graph.chatEngine.work,
-    ) { messages, ephemeral, truncated, typing, work ->
-        ChatItems.build(messages, ephemeral, truncated, typing, graph.clock.wallMs(), zone, work.cards)
+        combine(
+            thread,
+            graph.chatEngine.ephemeral,
+            graph.chatEngine.truncated,
+            graph.chatEngine.typing,
+            // ses cartes de travail (ADR 0116) : en mémoire seulement
+            graph.chatEngine.work,
+        ) { messages, ephemeral, truncated, typing, work -> Snapshot(messages, ephemeral, truncated, typing, work.cards) },
+        view,
+        proMode,
+        graph.chatEngine.typingIn,
+    ) { snap, strand, pro, typingIn ->
+        val ordinary = !pro
+        ChatItems.build(
+            messages = snap.messages.filter { it.strand == strand },
+            // ses pensées et les notes de la machine sont du fil avec elle ; la troncature aussi
+            ephemeral = if (ordinary) snap.ephemeral else emptyList(),
+            truncated = ordinary && snap.truncated,
+            typing = snap.typing && typingIn == strand,
+            nowMs = graph.clock.wallMs(),
+            zone = zone,
+            work = snap.work.filter { it.strand == strand },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private class Snapshot(
+        val messages: List<StoredMessage>,
+        val ephemeral: List<StoredMessage>,
+        val truncated: Boolean,
+        val typing: Boolean,
+        val work: List<WorkCard>,
+    )
+
+    /**
+     * Ses fils de travail à lister (ADR 0164) : la liste du serveur, plus ceux qu'il ne connaît pas encore (le fil
+     * ouvert ici, encore vide ; un fil dont les messages sont arrivés avant sa liste).
+     */
+    val strands: StateFlow<List<StrandInfo>> = combine(graph.chatEngine.strands, thread, activeStrand) { server, all, active ->
+        Strands.visible(server, all, active, graph.clock.wallMs())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Une seconde : le compte à rebours de « nouvel essai dans N s ». */
@@ -156,22 +223,93 @@ class ChatViewModel(
         Avatar3DState.of(mind, typing)
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Avatar3DState())
 
-    /** Une opératrice voit le lien « ouvrir la console » sous une réponse ratée. */
-    val operator: StateFlow<Boolean> = graph.auth.session
-        .map { (it as? Session.LoggedIn)?.profile?.operator == true }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
-    /**
-     * Le mode pro (ADR 0116) : l'interrupteur « Pro » de la barre de saisie, retenu sur l'appareil, qui ne vaut que
-     * pour une opératrice — ailleurs il n'apparaît pas, et rien ne part en mode pro.
-     */
-    val proMode: StateFlow<Boolean> = combine(
-        operator,
-        graph.settings.settings.map { it.proMode }.distinctUntilChanged(),
-    ) { op, on -> op && on }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     fun setProMode(on: Boolean) {
         viewModelScope.launch { graph.settings.setProMode(on) }
+    }
+
+    /**
+     * Le fil choisi ici en dernier (ouvert, ou neuf) : la base le retient, mais l'écran l'apprend un instant plus
+     * tard — un message tapé juste après `/clear` va déjà au fil neuf.
+     */
+    private var chosen: String? = null
+
+    /** Le fil de travail ouvert, s'il y en a un ; sinon un fil neuf, qui devient le fil ouvert. */
+    private suspend fun ensureStrand(): String {
+        (chosen ?: activeStrand.value)?.let { return it }
+        return choose(Strands.newId(graph.clock.wallMs()))
+    }
+
+    private suspend fun choose(id: String): String {
+        chosen = id
+        graph.store.kvPut(Kv.ACTIVE_STRAND, id)
+        return id
+    }
+
+    /**
+     * Ouvrir un de ses fils de travail. S'il a au serveur des messages que ce téléphone n'a pas (un fil ouvert sur la
+     * page web, ou plus ancien que ce qu'on garde), on les demande.
+     */
+    fun openStrand(id: String) {
+        if (!Strands.isValidId(id)) return
+        viewModelScope.launch {
+            choose(id)
+            val known = graph.chatEngine.strands.value.firstOrNull { it.id == id }?.count ?: 0
+            val here = Strands.localCount(graph.chat.observe().first(), id)
+            if (known > here) graph.connection.requestStrandHistory(id)
+        }
+    }
+
+    /** Un fil neuf (`/clear`) : rien ne s'efface, l'ancien reste dans la liste. */
+    fun newStrand() {
+        viewModelScope.launch { choose(Strands.newId(graph.clock.wallMs())) }
+    }
+
+    /** Régler un fil : son réglage entier (titre, description, archivé). Un refus se dit dans la barre de saisie. */
+    fun saveStrand(id: String, title: String, description: String, archived: Boolean) {
+        viewModelScope.launch { graph.connection.setStrand(id, title, description, archived) }
+    }
+
+    /** Ce qu'on sait du réglage d'un fil (pour une commande qui n'en change qu'une partie). */
+    private fun settingOf(id: String): StrandInfo = strands.value.firstOrNull { it.id == id } ?: StrandInfo(id)
+
+    /**
+     * Une commande tapée en mode pro (`/clear`, `/renommer`…) : elle s'exécute ici, rien ne part dans le fil. Les
+     * fichiers en préparation restent dans la barre.
+     */
+    private fun runCommand(command: Strands.Command) {
+        input = ""
+        composingIdle?.cancel()
+        composingIdle = null
+        graph.connection.composing(false)
+        notices = emptyList()
+        when (command) {
+            Strands.Command.Clear -> newStrand()
+            Strands.Command.Help -> notices = Strands.HELP
+            is Strands.Command.Unknown -> notices = listOf(Strands.unknownNotice(command.typed))
+            is Strands.Command.Rename -> if (command.title.isBlank()) {
+                notices = listOf(USAGE_RENAME)
+            } else {
+                viewModelScope.launch {
+                    val id = ensureStrand()
+                    val s = settingOf(id)
+                    graph.connection.setStrand(id, command.title, s.description, s.archived)
+                }
+            }
+            is Strands.Command.Describe -> if (command.text.isBlank()) {
+                notices = listOf(USAGE_DESCRIBE)
+            } else {
+                viewModelScope.launch {
+                    val id = ensureStrand()
+                    val s = settingOf(id)
+                    graph.connection.setStrand(id, s.title, command.text, s.archived)
+                }
+            }
+            Strands.Command.Archive, Strands.Command.Unarchive -> viewModelScope.launch {
+                val id = ensureStrand()
+                val s = settingOf(id)
+                graph.connection.setStrand(id, s.title, s.description, command == Strands.Command.Archive)
+            }
+        }
     }
 
     val notificationsAsked: StateFlow<Boolean> = graph.settings.settings
@@ -194,6 +332,16 @@ class ChatViewModel(
     private var composingIdle: Job? = null
 
     init {
+        // Un réglage de fil refusé, ou parti hors ligne : dit dans la barre de saisie (ADR 0164).
+        viewModelScope.launch { graph.chatEngine.strandNotices.collect { notices = listOf(it) } }
+        // Le mode pro s'ouvre toujours sur un fil de travail : le dernier ouvert, sinon un neuf.
+        // (lu de la base même, pas de [activeStrand] : sa valeur de départ, nulle, n'est pas « aucun fil »)
+        viewModelScope.launch {
+            val stored = graph.store.observeKv(Kv.ACTIVE_STRAND).map { it?.takeIf(Strands::isValidId) }
+            combine(proMode, stored) { pro, active -> pro && active == null }
+                .distinctUntilChanged()
+                .collect { missing -> if (missing && chosen == null) choose(Strands.newId(graph.clock.wallMs())) }
+        }
         // Ce modèle appartient à l'activité et survit à l'écran : session fermée, il oublie ce qui était
         // tapé et ne prend plus rien (un partage fait ensuite est pour la session suivante) ; rouverte
         // sur le même compte, il reprend le brouillon gardé. Ouverte sur un autre compte, ce n'est pas
@@ -337,11 +485,14 @@ class ChatViewModel(
     }
 
     fun send() {
-        val text = input.trim()
-        val files = attachments.toList()
         if (!canSend) return
-        // le mode qu'avait le message à l'envoi : il le garde, renvoi compris
-        val mode = if (proMode.value) MikaProtocol.CHAT_MODE_PRO else null
+        val pro = proMode.value
+        // en mode pro, une commande (`/clear`…) s'exécute ici ; `//` en tête échappe (ADR 0164)
+        if (pro) Strands.parse(input)?.let { return runCommand(it) }
+        val text = (if (pro) Strands.unescape(input) else input).trim()
+        val files = attachments.toList()
+        // le mode qu'avait le message à l'envoi : il le garde, renvoi compris ; son fil de travail aussi
+        val mode = if (pro) MikaProtocol.CHAT_MODE_PRO else null
         // le message clôt la saisie de lui-même (la socket le sait) : son délai n'a plus rien à clore
         composingIdle?.cancel()
         composingIdle = null
@@ -349,7 +500,8 @@ class ChatViewModel(
         attachments.clear()
         notices = emptyList()
         viewModelScope.launch {
-            val result = graph.chat.send(text, files, mode)
+            val strand = if (pro) ensureStrand() else null
+            val result = graph.chat.send(text, files, mode, strand)
             if (result is ChatRepository.SendResult.Rejected) {
                 // Rien n'est parti : tout revient dans la barre de saisie, avec la raison.
                 notices = listOf(result.reason)
@@ -450,6 +602,10 @@ class ChatViewModel(
     fun ownFile(cid: String, local: String): File? = graph.files.locate(cid, local)
 
     private companion object {
+        /** Une vue de fil de travail sans fil encore : aucun message n'y est (un identifiant n'est jamais vide). */
+        const val NO_STRAND = ""
+        const val USAGE_RENAME = "Écris le titre après la commande : /renommer Devis IN"
+        const val USAGE_DESCRIBE = "Écris la description après la commande : /description Le commercial d'IN, montants HT"
         const val KEY_CAMERA = "camera_path"
         const val DRAFT_DEBOUNCE_MS = 400L
         const val GREETING_MS = 2_600L

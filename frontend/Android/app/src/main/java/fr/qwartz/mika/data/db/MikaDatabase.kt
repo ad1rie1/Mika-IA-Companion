@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** La base locale : un cache du fil et de sa file d'envoi, jamais la référence (c'est le serveur). */
-@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 4, exportSchema = true)
+@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 5, exportSchema = true)
 abstract class MikaDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun outbox(): OutboxDao
@@ -44,9 +44,20 @@ abstract class MikaDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Version 5 : les fils de travail du mode pro (ADR 0164) — le fil d'un message, et celui d'un message en
+         * partance. Le cache garde son fil : ses messages d'avant sont tous du fil avec elle.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN strand TEXT")
+                db.execSQL("ALTER TABLE outbox ADD COLUMN strand TEXT")
+            }
+        }
+
         fun open(context: Context): MikaDatabase =
             Room.databaseBuilder(context, MikaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
     }
 }
@@ -80,4 +91,6 @@ object Kv {
     const val PHONE_QUEUE = "phone_queue"
     /** Les réponses proposées qui attendent un geste, le temps de leur échéance (JSON, ADR 0120). */
     const val PHONE_DRAFTS = "phone_drafts"
+    /** Le fil de travail ouvert en mode pro (ADR 0164) : retrouvé à la réouverture ; effacé avec la session. */
+    const val ACTIVE_STRAND = "active_strand"
 }

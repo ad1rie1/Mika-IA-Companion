@@ -120,6 +120,8 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 | `where` | `lat`, `lon`, `accuracy?`, `label?`, `age_ms?` — ou `off: true` | où est la personne, si elle l'a permis (ADR 0119) ; authentifié seulement |
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 | `verdict` | `message_id`, `verdict` (`ok` \| `ko` \| vide), `comment?` | juger une de ses réponses (ADR 0113) ; opératrice authentifiée seulement |
+| `strand` | `id`, `title`, `description`, `archived` | régler un de ses fils de travail (ADR 0164) ; opératrice authentifiée seulement |
+| `strand_history` | `id`, `before?` | les messages d'un de ses fils de travail (ADR 0164) ; opératrice authentifiée seulement |
 
 `chat` :
 
@@ -141,8 +143,11 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 - `mode` (clé absente d'ordinaire) : `"pro"` demande une réponse de travail (ADR 0116, ci-dessous). Toute autre
   valeur vaut « absent ». Honoré seulement sur une connexion **authentifiée d'opératrice** ; ailleurs, le message est
   ordinaire, sans erreur. Un renvoi garde son `mode`.
-- Débits : 20 `chat` par 10 s ; 12 par 10 s pour `sync`, `read`, `where`, `approval` et `verdict` réunis (au-delà,
-  ignorées). Au plus 8 `chat` en attente sur une connexion, comptés à la réception : au-delà, `overloaded` — les
+- `strand` (clé absente d'ordinaire, ADR 0164) : le fil de travail où le message est écrit — un identifiant que le
+  client choisit (1 à 40 lettres, chiffres, `_` ou `-`), propre au compte. Honoré seulement avec `mode: "pro"` ;
+  sinon, ou invalide, le message va au fil avec elle, sans erreur. Un renvoi garde son `strand`.
+- Débits : 20 `chat` par 10 s ; 12 par 10 s pour `sync`, `read`, `where`, `approval`, `verdict`, `strand` et
+  `strand_history` réunis (au-delà, ignorées). Au plus 8 `chat` en attente sur une connexion, comptés à la réception : au-delà, `overloaded` — les
   derniers d'une rafale, jamais les premiers.
 
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
@@ -190,10 +195,25 @@ par défaut) et **seulement application au premier plan** — rien en arrière-p
 seconde passe, sans son tempérament ni sa voix de chat, longue et structurée s'il le faut, en Markdown — et ses
 outils se voient en direct (trame `tool`, §4). Le dernier message d'une rafale décide du mode de la réponse.
 
+**Les fils de travail** (ADR 0164) : en mode pro, le client tient des fils à part, chacun son contexte — un client de
+chat à plusieurs conversations, où le fil avec Mika se cache. Un message pro porte son `strand` ; Mika n'y relit que
+les messages de ce fil, sous son titre et sa petite description, et y répond dans ce fil. Deux fils sont deux tours :
+une question dans l'un ne supplante pas la réponse qui s'écrit dans l'autre. Ouvrir un fil, c'est choisir un
+identifiant neuf et y écrire (`/clear` dans le client web) ; rien ne s'efface, un fil se range en l'archivant. Tout
+reste dans sa vie : elle s'en souvient comme du reste.
+
 L'identité vient toujours de la session ou du jeton : il n'y a pas de trame pour se présenter.
 
 `approval` (ADR 0064) : `digest` est **celui de la carte affichée** — le serveur refuse un accord sur autre chose que
 ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte.
+
+`strand` (ADR 0164) : le réglage entier d'un de ses fils de travail — `title` (120 caractères au plus) et
+`description` (2 000 au plus ; ce que Mika relit en tête de ce fil, à chaque message), vides permis, et `archived`
+(booléen). Le dernier réglage vaut ; un fil peut se régler avant son premier message. Réponse : `strand_result` ; la
+liste `strands` suit, à tous ses écrans d'opératrice.
+
+`strand_history` (ADR 0164) : les 200 derniers messages du fil `id` avant `before` (un identifiant de message ; absent :
+les plus récents), pour un écran qui ouvre un fil sans en avoir les messages. Réponse : un `history` de mode `strand`.
 
 `verdict` (ADR 0113) : son opératrice dit si une de ses réponses était adaptée (`ok`) ou non (`ko`), et, si elle veut,
 ce qu'elle aurait dû dire ou pourquoi (`comment`, 2 000 caractères au plus) ; un `verdict` vide retire l'avis. Le
@@ -257,8 +277,10 @@ répondre — réessaie ».
   actif) ; jamais pour une connexion absente.
 - `mode` : présent sur une parole, `"pro"` ou `""` ; absent d'une trame sans texte ou de repli. Une réponse pro
   (ADR 0116) : `speak` toujours faux, `voice_reason:
-  "pro"` ; son texte peut porter du **Markdown** (blocs de code, `code`, gras, italique, listes, titres, liens) et
-  forme **une seule bulle** — une ligne vide ne la coupe pas, pas de rythme de frappe.
+  "pro"` ; son texte peut porter du **Markdown** (blocs de code, `code`, gras, italique, listes, titres, tableaux,
+  citations, liens) et forme **une seule bulle** — une ligne vide ne la coupe pas, pas de rythme de frappe.
+- `strand` (absent hors d'un fil de travail, ADR 0164) : le fil de travail où elle répond. Le client la range dans ce
+  fil, jamais dans le fil avec elle.
 
 **`history`** — un morceau du fil :
 
@@ -271,7 +293,11 @@ répondre — réessaie ».
 ```
 
 - `mode` : `initial` (à l'ouverture, ou `reset`) ou `catchup` (réponse à `sync`, ou les messages d'une rafale et la
-  question d'un tour posé d'un autre appareil, juste avant la `speech` qui y répond).
+  question d'un tour posé d'un autre appareil, juste avant la `speech` qui y répond) ; `strand` : la réponse à
+  `strand_history`, avec `strand` (le fil) et `more` (il en reste de plus anciens) — son `last_id` n'est pas un
+  curseur.
+- `initial` et `catchup` portent tout le compte, fils de travail compris : une ligne d'un fil de travail porte
+  `strand` (ADR 0164) ; le client la range dans ce fil. Un seul curseur suffit donc à tout rattraper.
 - `ts` en **millisecondes** depuis l'époque Unix.
 - `text` d'un message de la personne : ce qu'elle a tapé ; ses fichiers par leur nom et leur sorte (`image`,
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
@@ -343,8 +369,25 @@ notifiée, jamais gardée par le serveur — un client la garde **en mémoire se
   épisode, au même `reply_to`.
 - `args` (JSON, en texte) et `result` (texte brut) : bornés à 2 000 caractères (`…[coupé]`) ; à montrer en texte
   brut, jamais interprétés.
+- `strand` (absent hors d'un fil de travail, ADR 0164) : le fil de travail où elle répond.
 - `done` et la `speech` arrivent dans un ordre ou dans l'autre.
 - Un client qui ne connaît pas la trame l'ignore.
+
+**`strands`** — ses fils de travail (ADR 0164), aux seules connexions **authentifiées d'opératrice** : à
+l'ouverture (après le `history` initial, le visage et le panneau), après un réglage (`strand`) et après chaque message écrit dans un fil. La
+liste entière, du plus récemment actif au plus ancien, archivés compris :
+
+```json
+{"type": "strands", "items": [{"id": "s1mx4k2", "title": "Devis Intelligent Networks",
+  "description": "Le commercial d'IN ; montants HT.", "archived": false, "count": 12,
+  "first_at": 1790601612771, "last_at": 1790605212771, "opener": "liste moi les devis"}]}
+```
+
+- `first_at`, `last_at` en millisecondes ; `count` : ses messages (0 pour un fil seulement réglé) ; `opener` : le début
+  de son premier message (120 caractères au plus), de quoi le nommer sans titre.
+
+**`strand_result`** — le sort d'un réglage : `{"type": "strand_result", "id": "s1mx4k2", "status": "ok"}` ;
+`status` : `ok`, `invalid` (un champ trop long), `forbidden` (pas une opératrice), `failed` (réessayer).
 
 **`emotion_update`** — son visage entre deux tours, seulement vers un écran regardé : `person_id`, `emotion`,
 `emotion_intensity`, `emotion_blend` (`[{"emotion", "weight"}]`) et `emotion_state`, comme dans `speech` :

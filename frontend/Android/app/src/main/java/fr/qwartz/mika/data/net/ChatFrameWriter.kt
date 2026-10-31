@@ -18,9 +18,10 @@ class OutgoingFile(
 )
 
 /**
- * La trame `chat`, écrite en flux : `{"type":"chat","message":…,"client_msg_id":…,"mode":"pro","attachments":[…]}`
- * (la clé `mode` est omise pour un message ordinaire, la clé `attachments` sans fichier). Le mode pro (ADR 0116)
- * est gardé avec le message dans sa file d'envoi : un renvoi le garde.
+ * La trame `chat`, écrite en flux : `{"type":"chat","message":…,"client_msg_id":…,"mode":"pro","strand":…,
+ * "attachments":[…]}` (la clé `mode` est omise pour un message ordinaire, `strand` hors d'un fil de travail ou sans le
+ * mode pro, `attachments` sans fichier). Le mode pro (ADR 0116) et le fil de travail (ADR 0164) sont gardés avec le
+ * message dans sa file d'envoi : un renvoi les garde.
  *
  * Le base64 vient de `java.util.Base64` : sans retour à la ligne, contrairement à
  * `android.util.Base64.DEFAULT` que le serveur refuserait (`b64decode(validate=True)`). Il est écrit
@@ -31,8 +32,14 @@ object ChatFrameWriter {
     private const val CHUNK = 48 * 1024
 
     /** La taille exacte, en octets UTF-8, de la trame que [write] produira pour ces tailles de fichiers. */
-    fun frameBytes(message: String, clientMsgId: String, files: List<OutgoingFile>, mode: String? = null): Long {
-        var total = utf8(head(message, clientMsgId, mode)).toLong()
+    fun frameBytes(
+        message: String,
+        clientMsgId: String,
+        files: List<OutgoingFile>,
+        mode: String? = null,
+        strand: String? = null,
+    ): Long {
+        var total = utf8(head(message, clientMsgId, mode, strand)).toLong()
         if (files.isEmpty()) return total + 1 // "}"
         total += utf8(",\"attachments\":[").toLong()
         files.forEachIndexed { i, f ->
@@ -42,8 +49,15 @@ object ChatFrameWriter {
         return total + 2 // "]}"
     }
 
-    fun write(sink: BufferedSink, message: String, clientMsgId: String, files: List<OutgoingFile>, mode: String? = null) {
-        sink.writeUtf8(head(message, clientMsgId, mode))
+    fun write(
+        sink: BufferedSink,
+        message: String,
+        clientMsgId: String,
+        files: List<OutgoingFile>,
+        mode: String? = null,
+        strand: String? = null,
+    ) {
+        sink.writeUtf8(head(message, clientMsgId, mode, strand))
         if (files.isEmpty()) {
             sink.writeUtf8("}")
             return
@@ -65,17 +79,28 @@ object ChatFrameWriter {
     }
 
     /** La trame entière en texte : OkHttp n'envoie de trame texte que depuis une `String`. */
-    fun render(message: String, clientMsgId: String, files: List<OutgoingFile>, mode: String? = null): String {
+    fun render(
+        message: String,
+        clientMsgId: String,
+        files: List<OutgoingFile>,
+        mode: String? = null,
+        strand: String? = null,
+    ): String {
         val buffer = Buffer()
-        write(buffer, message, clientMsgId, files, mode)
+        write(buffer, message, clientMsgId, files, mode, strand)
         return buffer.readUtf8()
     }
 
     fun base64Length(bytes: Long): Long = 4 * ((bytes + 2) / 3)
 
-    private fun head(message: String, clientMsgId: String, mode: String?): String =
-        "{\"type\":\"${MikaProtocol.TYPE_CHAT}\",\"message\":${quote(message)},\"client_msg_id\":${quote(clientMsgId)}" +
-            if (mode == MikaProtocol.CHAT_MODE_PRO) ",\"mode\":\"${MikaProtocol.CHAT_MODE_PRO}\"" else ""
+    /** Le début de la trame ; le fil de travail ne part qu'avec le mode pro (le serveur l'ignorerait sinon). */
+    private fun head(message: String, clientMsgId: String, mode: String?, strand: String?): String {
+        val pro = mode == MikaProtocol.CHAT_MODE_PRO
+        val work = strand?.takeIf { pro && MikaProtocol.STRAND_ID.matches(it) }
+        return "{\"type\":\"${MikaProtocol.TYPE_CHAT}\",\"message\":${quote(message)},\"client_msg_id\":${quote(clientMsgId)}" +
+            (if (pro) ",\"mode\":\"${MikaProtocol.CHAT_MODE_PRO}\"" else "") +
+            (if (work != null) ",\"strand\":${quote(work)}" else "")
+    }
 
     private fun fileHead(f: OutgoingFile): String =
         "{\"name\":${quote(f.name)},\"type\":${quote(f.mime)},\"data\":\""

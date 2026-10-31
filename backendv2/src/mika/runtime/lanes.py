@@ -46,7 +46,7 @@ class _Slot:
 
     req: EpisodeRequest
     futures: list[asyncio.Future[EpisodeReport]] = field(default_factory=list)
-    key: tuple[str, str, str | None] | None = None
+    key: tuple[str, str, str | None, str | None] | None = None
 
 
 class Lanes:
@@ -71,7 +71,7 @@ class Lanes:
         self._counter = itertools.count()
         self._workers: list[asyncio.Task[None]] = []
         #: les tours de réponse en file (pas encore commencés), par (type, adresse, salon)
-        self._waiting: dict[tuple[str, str, str | None], _Slot] = {}
+        self._waiting: dict[tuple[str, str, str | None, str | None], _Slot] = {}
         #: les épisodes en cours par voie
         self._busy: dict[str, int] = dict.fromkeys(self.capacities, 0)
         #: ceux d'entre eux qui ne sont pas du premier plan
@@ -220,8 +220,9 @@ class Lanes:
         self._workers.clear()
 
 
-def _turn_key(req: EpisodeRequest) -> tuple[str, str, str | None] | None:
-    """Le tour d'une demande de réponse : (type, adresse, salon). ``None`` pour ce qui ne répond à rien."""
+def _turn_key(req: EpisodeRequest) -> tuple[str, str, str | None, str | None] | None:
+    """Le tour d'une demande de réponse : (type, adresse, salon, fil de travail). ``None`` pour ce qui ne répond à
+    rien."""
     if req.reply_to is None or not req.target:
         return None
-    return (req.kind, req.target, req.room)
+    return (req.kind, req.target, req.room, req.strand)

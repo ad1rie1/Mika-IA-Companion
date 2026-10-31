@@ -339,9 +339,12 @@ async def _own_words(s: ExpressionState, frame: Frame, ports: Mapping[str, Any])
 
 
 def _where(t: Any, ep: Any) -> tuple[Any, ...]:
-    """Le fil de cet épisode : son salon, ou le fil privé avec sa cible."""
-    room = ep.attrs.get("room")
-    return (t.c.room == room,) if room else (t.c.person == ep.target, t.c.room.is_(None))
+    """Le fil de cet épisode : son salon, son fil de travail (ADR 0164), ou le fil privé avec sa cible."""
+    room, strand = ep.attrs.get("room"), ep.attrs.get("strand")
+    if room:
+        return (t.c.room == room,)
+    return (t.c.person == ep.target, t.c.room.is_(None),
+            t.c.strand == strand if strand else t.c.strand.is_(None))
 
 
 #: au plus tant de messages du fil relus pour y retrouver ses entrées en matière (trois conversations, largement)
@@ -824,4 +827,5 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
         # ce qui part avec la parole (des références opaques ici) ; jamais avec une pensée à voix haute
         attachments=tuple(d.attachments) if persona == voice.SPEAKING else (),
         mode=d.mode if persona == voice.SPEAKING else "",
+        strand=d.strand if persona == voice.SPEAKING else None,
     ))

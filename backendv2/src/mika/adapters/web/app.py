@@ -874,6 +874,10 @@ class _Session:
         await self.send(self.hub.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL),
                                          verdicts=self._judges()))
         await self._refresh()
+        listed = getattr(self.port, "strands", None)
+        if self._judges() and listed is not None:
+            # ses fils de travail (ADR 0164), après le visage et le panneau : l'ouverture garde son ordre
+            await self.send(protocol.strands(listed(c.handle)))
 
     async def run(self) -> None:
         try:
@@ -1109,6 +1113,12 @@ class _Session:
         elif kind == "verdict":
             if self.conn.control.allow():
                 await self.verdict(frame)
+        elif kind == "strand":
+            if self.conn.control.allow():
+                await self.set_strand(frame)
+        elif kind == "strand_history":
+            if self.conn.control.allow():
+                await self.strand_history(frame)
         elif kind == "chat":
             self.enqueue_chat(frame)
 
@@ -1131,6 +1141,41 @@ class _Session:
         await self.send({"type": "approval_result", "id": proposal, "status": status})
         await self.hub.push_approvals([self.conn.handle])
         await self.hub.refresh_panels()
+
+    async def set_strand(self, frame: dict[str, Any]) -> None:
+        """Un fil de travail réglé depuis le chat (ADR 0164) : son titre, sa petite description, archivé ou non — le
+        réglage entier. Par une opératrice connectée et authentifiée, pour ses propres fils. La réponse dit le sort ;
+        la liste suit, à tous ses écrans."""
+        strand = protocol.strand_id(frame.get("id"))
+        if strand is None:
+            return
+        reply = {"type": "strand_result", "id": strand}
+        if not self._judges() or self.account is None or not self._session_valid():
+            await self.send(reply | {"status": "forbidden"})
+            return
+        title, description = frame.get("title"), frame.get("description")
+        setter = getattr(self.port, "set_strand", None)
+        status = await setter(self.conn.handle, strand, title=title if isinstance(title, str) else "",
+                              description=description if isinstance(description, str) else "",
+                              archived=frame.get("archived") is True) if setter is not None else "failed"
+        await self.send(reply | {"status": status})
+        if status == "ok":
+            await self.hub.push_strands(self.conn.handle)
+
+    async def strand_history(self, frame: dict[str, Any]) -> None:
+        """Les messages d'un de ses fils de travail (ADR 0164), pour un écran qui l'ouvre sans les avoir : les plus
+        récents avant ``before`` (tous s'il est absent). Une opératrice authentifiée seulement."""
+        strand = protocol.strand_id(frame.get("id"))
+        history = getattr(self.port, "strand_history", None)
+        if strand is None or history is None or not self._judges() or not self._session_valid():
+            return
+        try:
+            before = int(frame["before"]) if frame.get("before") is not None else None
+        except (TypeError, ValueError):
+            before = None
+        rows, more = history(self.conn.handle, strand, before, protocol.HISTORY_MAX)
+        await self.send(self.hub.history("strand", rows, life=self.hub.life(), verdicts=True)
+                        | {"strand": strand, "more": more})
 
     def _judges(self) -> bool:
         """Une connexion d'opératrice, authentifiée : elle voit et donne son avis sur ses réponses (ADR 0113)."""
@@ -1270,11 +1315,14 @@ class _Session:
         # ses octets gardés avant que le message n'entre dans sa vie : il les désigne (ADR 0106)
         files = await self.port.keep_attachments(c.handle, [a.data for a in kept]) if kept else []
         body = "\n".join(x for x in [text, render(seen)] if x).strip()
+        mode = protocol.chat_mode(frame.get("mode")) if self._judges() else ""
         perception = PerceptionReceived(
             handle=c.handle, channel=c.channel, text=Content.of(body), authenticated=c.authenticated,
             client_msg_id=cid or None, display_name=c.display_name,
             # le mode pro (ADR 0116) : demandé par une opératrice seulement ; ailleurs, la conversation ordinaire
-            mode=protocol.chat_mode(frame.get("mode")) if self._judges() else "",
+            mode=mode,
+            # son fil de travail (ADR 0164) : seulement en mode pro
+            strand=protocol.strand_id(frame.get("strand")) if mode else None,
             # ce qu'elle a tapé est le début du texte ; la suite, ce que ses pièces jointes ont donné à percevoir
             # (pour le prompt) — le fil relu ne montre que le premier, et les fichiers par leur nom (G-6)
             typed_chars=len(text) if seen else None,
@@ -1286,6 +1334,8 @@ class _Session:
         if admission.status == "accepted" and not admission.duplicate:
             c.composing_said = False  # sa perception a clos la saisie au journal (``presence``)
         await self.send(protocol.ack(cid, admission.status, rejected))
+        if perception.strand is not None and admission.status == "accepted" and not admission.duplicate:
+            await self.hub.push_strands(c.handle)  # un fil ouvert, ou qui avance (ADR 0164)
         if admission.held:
             # elle dort : la réponse attend son réveil — « Mika écrit… » ne tourne pas pendant sa nuit
             await self.send(protocol.silence(c.handle, self.hub.face(c.handle), user_message_id=admission.seq,

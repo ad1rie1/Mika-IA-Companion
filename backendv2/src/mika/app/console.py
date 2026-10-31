@@ -257,6 +257,7 @@ EVENT_LABELS: dict[str, str] = {
     "identity.expired": "Une inconnue de passage oubliée (silencieuse depuis longtemps)",
     "transcript.compacted": "Un fil replié en résumé",
     "transcript.judged": "Une de ses réponses jugée par son opératrice",
+    "transcript.strand_set": "Un fil de travail réglé (titre, description, archivé)",
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
     "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",
     "memory.promise_resolved": "Une promesse tenue ou abandonnée", "memory.reinforced": "Un souvenir renforcé",

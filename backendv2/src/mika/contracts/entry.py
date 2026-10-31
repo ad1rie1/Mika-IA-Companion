@@ -53,6 +53,24 @@ class HistoryRow:
     #: outils dont elle s'est servie (JSON : ``[[nom, réussi], …]``, leurs noms seulement — ADR 0108)
     mode: str = ""
     tools: str = ""
+    #: le fil de travail du message (ADR 0164) ; ``""`` : le fil avec elle
+    strand: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class StrandItem:
+    """Un fil de travail du mode pro tel qu'un écran le liste (ADR 0164) : son identifiant, ce que son opératrice
+    en a écrit, archivé ou non, combien de messages, le premier et le dernier instant (µs), et le début de son
+    premier message — de quoi le nommer quand il n'a pas de titre."""
+
+    id: str
+    title: str = ""
+    description: str = ""
+    archived: bool = False
+    count: int = 0
+    first_at: int = 0
+    last_at: int = 0
+    opener: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +133,20 @@ class MindPort(Protocol):
     def recent(self, handle: str, limit: int) -> list[HistoryRow]: ...
 
     def after(self, handle: str, after_id: int, limit: int) -> tuple[list[HistoryRow], bool]: ...
+
+    def strands(self, handle: str) -> list[StrandItem]:
+        """Les fils de travail de ``handle`` (ADR 0164), du plus récemment actif au plus ancien."""
+        ...
+
+    def strand_history(self, handle: str, strand: str, before: int | None, limit: int) -> tuple[list[HistoryRow],
+                                                                                                 bool]:
+        """Les ``limit`` derniers messages d'un fil de travail de ``handle`` avant ``before`` (tous s'il est nul), du
+        plus ancien au plus récent, et s'il en reste de plus anciens."""
+        ...
+
+    async def set_strand(self, handle: str, strand: str, *, title: str, description: str, archived: bool) -> str:
+        """Un fil de travail réglé par celle à qui il est : ``ok``, ``invalid`` ou ``failed``."""
+        ...
 
     def life(self) -> str:
         """L'empreinte de sa vie : la même tant que c'est le même journal depuis sa genèse (une sauvegarde
