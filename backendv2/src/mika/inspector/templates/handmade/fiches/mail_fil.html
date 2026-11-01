@@ -1,0 +1,20 @@
+{# La fiche d'un mail, son onglet « Fil » dessiné (app/handmade/mail_fiches.py, ADR 0121) : la conversation dans l'ordre
+   — les mails reçus à gauche, ceux partis de sa boîte à droite, ce mail en évidence —, sa pagination. #}
+{% from "_navigation.html" import pager as pages %}
+<div class="now-page mailthread">
+  <section class="now-card" aria-labelledby="mailthread-title">
+    <header class="now-card-head"><h2 id="mailthread-title">La conversation</h2>{% if total %}<span class="person-count now-num">{{ total }}</span>{% endif %}<p>Du plus ancien au plus récent : reçus à gauche, partis de sa boîte à droite.</p></header>
+    {% if entries %}
+    <ol class="person-thread mailthread-list">
+      {% for e in entries %}
+      <li class="{{ 'mine' if e.sent }}{{ ' here' if e.here }}">
+        <p class="person-meta">{{ "↗ parti · " if e.sent }}{{ e.text }}{% if e.rel %} · <time title="{{ e.at }}">{{ e.rel }}</time>{% endif %}</p>
+        <p class="person-bubble mailthread-bubble">{% if e.here %}<b>{{ e.title }}</b> <span class="now-tag info">ce mail</span>{% elif e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">{{ empty }}</p>{% endif %}
+    {% if paged %}<div class="hm-pager">{{ pages(pager) }}</div>{% endif %}
+    {% for n in notes %}<p class="person-tab-note mailthread-note">{{ n }}</p>{% endfor %}
+  </section>
+</div>

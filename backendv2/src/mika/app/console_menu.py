@@ -41,7 +41,7 @@ MENU = (
     MenuGroup("Relations & échanges", "people", (
         MenuLink("Personnes", "personnes"),
         MenuLink("Conversations", "fil"),
-        MenuLink("Courrier", "courrier", ("reglages/boites",)),
+        MenuLink("Courrier", "courrier"),
         MenuLink("Teams", "teams", ("reglages/teams",)),
         MenuLink("Identités et moyens de communication", "identites"),
     )),

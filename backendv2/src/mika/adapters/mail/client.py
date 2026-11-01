@@ -40,7 +40,7 @@ from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from mika.adapters.database import Target
 from mika.adapters.mail import compose
@@ -48,7 +48,7 @@ from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
 from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, answer
-from mika.adapters.mail.parse import Part, attachment_files, parse, read
+from mika.adapters.mail.parse import Part, attachment_files, parse, parse_parts
 from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
     AccountInfo,
@@ -71,6 +71,16 @@ log = logging.getLogger("mika.mail")
 FLAGS_WINDOW = 200
 #: « tous les dossiers » : ce qu'un dossier seulement synchronisé (pas relevé) range au plus à chaque relève
 SYNC_ALL_BATCH = 50
+#: les expéditeurs dont les images distantes s'affichent d'emblée (ADR 0175) : au plus autant, les plus récents
+IMAGES_FROM_MAX = 500
+
+
+class ImagesFrom(Protocol):
+    """Où se gardent les expéditeurs dont on affiche les images distantes (les réglages)."""
+
+    def mail_images(self) -> tuple[str, ...]: ...
+
+    async def save_mail_images(self, addresses: tuple[str, ...]) -> None: ...
 
 
 def _local_tz() -> tzinfo:
@@ -81,8 +91,10 @@ class ImapSmtpMail:
     def __init__(self, config: Callable[[], MailConfig], cache: Path | Target, *,
                  now: Callable[[], datetime] = lambda: datetime.now(UTC), tz: tzinfo | None = None,
                  timeout: float = 30.0, her: Callable[[], str] | None = None,
-                 microsoft: MicrosoftSignIn | None = None) -> None:
+                 microsoft: MicrosoftSignIn | None = None, images: ImagesFrom | None = None) -> None:
         self._config = config
+        #: les expéditeurs dont les images s'affichent (sans endroit où les garder, aucun)
+        self._images = images
         #: son nom d'expéditrice quand un compte n'en dit pas : celui de sa persona, que l'application fournit
         self._her = her or (lambda: compose.DEFAULT_NAME)
         self._now = now
@@ -196,7 +208,7 @@ class ImapSmtpMail:
         comprend pas devient une ligne qui le dit (on ne le relira pas à chaque relevé : il est rangé, et le curseur
         passe)."""
         try:
-            mail, parts = read(raw, str(uid), account=key, folder=folder, complete=True)
+            mail, parts = parse_parts(raw, str(uid), account=key, folder=folder, complete=True)
         except Exception as exc:  # un mail hostile ou cassé n'arrête jamais un relevé
             log.warning("courrier : un mail illisible dans %s/%s (%s)", key, folder, type(exc).__name__)
             mail, parts = Mail(f"<illisible-{hashlib.sha256(raw).hexdigest()[:20]}@mika>", "(expéditeur illisible)",
@@ -329,7 +341,7 @@ class ImapSmtpMail:
                 if not rows:
                     raise FileNotFoundError("Ce message n'est plus disponible sur le serveur.")
                 number, flags, raw = rows[0]
-                full, parts = read(raw, str(number), account=key, folder=mail.folder, complete=True)
+                full, parts = parse_parts(raw, str(number), account=key, folder=mail.folder, complete=True)
                 if full.message_id != mail.message_id:
                     raise ValueError("Ce message a changé sur le serveur. Actualise le dossier.")
                 self._cache.store(replace(full, seen="\\seen" in flags, flagged="\\flagged" in flags,
@@ -727,10 +739,28 @@ class ImapSmtpMail:
 
     # ── l'oubli ──
     async def forget(self, subject: str) -> int:
-        """Oublier un correspondant (``mail:<adresse>``) : ce que le cache garde de lui (``MailCache.forget``)."""
+        """Oublier un correspondant (``mail:<adresse>``) : ce que le cache garde de lui (``MailCache.forget``), et
+        qu'on affichait ses images."""
         if not subject.startswith(HANDLE_PREFIX):
             return 0
-        return self._cache.forget(subject[len(HANDLE_PREFIX):])
+        address = subject[len(HANDLE_PREFIX):]
+        if self.images_shown(address):
+            await self.show_images(address, False)
+        return self._cache.forget(address)
+
+    # ── images distantes (ADR 0175) ──
+    def images_shown(self, address: str) -> bool:
+        wanted = address.strip().lower()
+        return bool(wanted) and self._images is not None and wanted in self._images.mail_images()
+
+    async def show_images(self, address: str, shown: bool) -> None:
+        wanted = address.strip().lower()
+        if self._images is None:
+            raise RuntimeError("aucun endroit où retenir cet expéditeur")
+        if not wanted or "@" not in wanted or len(wanted) > 320:
+            raise ValueError("adresse invalide")
+        kept = tuple(a for a in self._images.mail_images() if a != wanted)
+        await self._images.save_mail_images(((wanted,) if shown else ()) + kept[:IMAGES_FROM_MAX - 1])
 
     # ── état ──
     async def test(self, account: str) -> tuple[bool, str]:

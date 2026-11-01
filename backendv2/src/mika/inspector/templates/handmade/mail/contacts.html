@@ -1,0 +1,30 @@
+{# Courrier › Contacts (app/handmade/mail.py) : dans l'espace du courrier, une ligne par adresse — son initiale, son
+   nom et son adresse, combien de mails dans chaque sens, le dernier échange —, ses échanges en un clic, et « Écrire »
+   (le formulaire que la console a préparé pour cette adresse). #}
+{% from "handmade/mail/space.html" import space with context %}
+{% from "_navigation.html" import pager as pages %}
+{% from "_forms.html" import action_button %}
+{% from "_cells.html" import cell %}
+<div class="now-page person-tab mail mail-contacts-page">
+{% call space(side, before) %}
+    <section class="now-card mail-list" id="{{ table.id }}" aria-labelledby="{{ table.id }}-title">
+      <header class="now-card-head"><h2 id="{{ table.id }}-title">{{ table.title }}</h2>{% if table.count is not none %}<span class="person-count now-num">{{ table.count }}</span>{% endif %}</header>
+      {% if people %}
+      <ul class="mail-contacts">
+        {% for c in people %}
+        <li>
+          <span class="mail-avatar" aria-hidden="true">{{ c.initial }}</span>
+          <p class="mail-contact-who">{% if c.href %}<a class="mail-contact-name" href="{{ c.href }}" title="Ses échanges">{{ c.name }}</a>{% else %}<span class="mail-contact-name">{{ c.name }}</span>{% endif %}{% if c.address %}<code>{{ c.address }}</code>{% endif %}</p>
+          <p class="mail-contact-counts"><span><b>{{ c.received }}</b> reçu{{ 's' if c.received not in ('0', '1') }}</span><span><b>{{ c.sent }}</b> envoyé{{ 's' if c.sent not in ('0', '1') }}</span></p>
+          <span class="mail-when">{% if c.last %}{{ cell(c.last) }}{% endif %}</span>
+          <div class="mail-contact-do">{% if c.href %}<a class="btn small quiet" href="{{ c.href }}">Ses échanges</a>{% endif %}{% if c.write %}{{ action_button(c.write) }}{% endif %}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="now-empty">{{ table.empty }}{{ '' if (table.empty|string)[-1:] in '.!?…' else '.' }}</p>{% endif %}
+      {% if note and people %}<p class="person-tab-note mail-after">{{ note }}.</p>{% endif %}
+      {% set p = table.pager or {} %}
+      <div class="hm-pager{{ ' single' if not (p.prev or p.next or p.older or p.newer) }}">{{ pages(table.pager) }}</div>
+    </section>
+{% endcall %}
+</div>

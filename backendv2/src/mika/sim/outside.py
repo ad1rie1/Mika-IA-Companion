@@ -64,6 +64,8 @@ class FakeMail:
     outgoing_files: dict[str, tuple[File, ...]] = field(default_factory=dict)
     #: les images intégrées d'un mail, par sa référence : (Content-ID, type, octets)
     inline: dict[str, tuple[tuple[str, str, bytes], ...]] = field(default_factory=dict)
+    #: les expéditeurs dont les images distantes s'affichent (ADR 0175)
+    images_from: set[str] = field(default_factory=set)
 
     # ── comptes ──
     def configured(self) -> bool:
@@ -221,6 +223,14 @@ class FakeMail:
 
     def inline_images(self, ref):
         return self.inline.get(ref, ())
+
+    def images_shown(self, address):
+        return address.strip().lower() in self.images_from
+
+    async def show_images(self, address, shown):
+        wanted = address.strip().lower()
+        self.actions.append(("images", wanted, "oui" if shown else "non"))
+        (self.images_from.add if shown else self.images_from.discard)(wanted)
 
     async def file(self, ref, part):
         found = self.files.get((ref, part))

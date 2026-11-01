@@ -109,6 +109,11 @@ def _width(column) -> int:
     return 8
 
 
+#: les seules colonnes d'octets du courrier : le message brut d'un envoi, et les morceaux des pièces d'un mail, chacun
+#: d'au plus ``CHUNK`` (ADR 0172)
+BYTES = {("sent", "source"), ("blobs", "data")}
+
+
 def test_the_mail_schema_fits_mariadb():
     assert MAIL.tables, "aucune table déclarée"
     for table in MAIL.tables.values():
@@ -118,7 +123,7 @@ def test_the_mail_schema_fits_mariadb():
                 assert isinstance(kind, Text), f"{table.name}.{column.name} : un texte ni Key ni LongText"
             if isinstance(kind, Key):
                 assert kind.length, f"{table.name}.{column.name} : une Key sans borne"
-            assert not isinstance(kind, LargeBinary) or column.name == "source", f"{table.name}.{column.name}"
+            assert not isinstance(kind, LargeBinary) or (table.name, column.name) in BYTES, f"{table.name}.{column.name}"
         keys = [(f"index {ix.name}", list(ix.columns)) for ix in table.indexes]
         keys += [(f"contrainte {c.name}", list(c.columns)) for c in table.constraints if list(c.columns)]
         for what, columns in keys:

@@ -1,0 +1,187 @@
+{# Courrier › Paramètres (ADR 0173), ouvert par le bouton en haut à droite du courrier : ses boîtes en cartes (où chacune
+   en est, comment elle lit et envoie, sa voix, son dernier relevé), puis les paramètres généraux du courrier (son
+   relevé, ce qu'elle t'en dit, les réponses qu'elle prépare) ; une boîte se modifie sur cette même page, ses réglages
+   rangés par sujet — chacun à côté de ce qu'il règle. Les champs, leurs noms et leurs jetons sont ceux des réglages
+   (pages/settings_form.py, pages/reglages.py) : rien ne s'enregistre autrement qu'ailleurs. #}
+{% from "_forms.html" import field %}
+{% from "_navigation.html" import pager %}
+{% set s = sections[0] %}
+{% set about = {
+  "La boîte": "Son adresse, le nom sous lequel la console la désigne, et si elle est active.",
+  "Connexion": "Comment elle entre dans la boîte, pour lire comme pour envoyer : par mot de passe, ou par ton compte Microsoft.",
+  "Lire": "Le serveur IMAP, et les dossiers où elle remarque ce qui arrive.",
+  "Envoyer": "Le serveur SMTP. Sans lui, la boîte ne fait que lire.",
+  "Sa voix": "Comment elle écrit depuis cette boîte : en son nom, en assistante ou à ta place, sur quel ton, avec quelles consignes, et la signature ajoutée sous chaque envoi.",
+} %}
+{# un sujet dont tous les champs attendent un autre (MailAccount, ``unless``) dit ce qu'il attend, tant qu'il l'attend #}
+{% set waiting = {
+  "Sa voix": ("smtp_host", "Elle n'écrit depuis cette boîte qu'avec un serveur d'envoi : donne-le dans « Envoyer », au-dessus."),
+} %}
+<div class="now-page mailset">
+{% for m in s.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+
+{% if s.record %}{% set rec = s.record %}
+  {# ── une boîte, sur sa page ── #}
+  <p class="mailset-back"><a href="{{ rec.cancel }}">← Tous les paramètres du courrier</a></p>
+  {# le formulaire suit ce qu'on tape : serveurs proposés d'après l'adresse, ports d'après leur chiffrement #}
+  <script src="{{ PREFIX }}/static/handmade/courrier_boite.js?v={{ ASSET_VERSION }}" defer></script>
+  <form method="post" action="{{ action }}" class="form mailset-account" id="enregistrement"{{ ' data-new' if rec.new }}>
+    {# Entrée enregistre, jamais « charger la liste » (le premier bouton d'un formulaire est son défaut) #}
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
+    {% if rec.back %}<input type="hidden" name="_retour" value="{{ rec.back }}">{% endif %}
+    {% if rec.stash %}<input type="hidden" name="_reserve" value="{{ rec.stash }}">{% endif %}
+    <header class="mailset-account-head">
+      <h2>{% if rec.new %}Ajouter une boîte{% else %}La boîte <span class="mono">{{ rec.key }}</span>{% endif %}</h2>
+      <p>{% if rec.new %}Ce qu'il faut pour qu'elle relève cette boîte, puis, si tu veux, qu'elle y écrive.{% else %}Ses réglages, rangés par sujet. Un mot de passe n'est jamais réaffiché : vide, il reste tel quel.{% endif %}</p>
+    </header>
+    {% for e in rec.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    {% set titles = rec.groups|map(attribute="title")|list %}
+    {% set every = (rec.groups + rec.advanced)|map(attribute="fields")|sum(start=[]) %}
+    {% for g in rec.groups %}{% set more = rec.advanced|selectattr("title", "equalto", g.title)|list %}
+    {% set named_here = loop.first and rec.keyed %}
+    <section class="mailset-row" aria-labelledby="mailset-g{{ loop.index }}">
+      <div class="mailset-row-about"><h3 id="mailset-g{{ loop.index }}">{{ g.title }}</h3>{% if about.get(g.title) %}<p>{{ about[g.title] }}</p>{% endif %}</div>
+      <div class="now-card mailset-row-fields">
+        {% if waiting.get(g.title) %}{% set on, note = waiting[g.title] %}{% set by = every|selectattr("path", "equalto", on)|first %}
+        <p class="now-muted mailset-waiting" data-only="{{ on }}="{{ ' hidden' if by and by.value }}>{{ note }}</p>
+        {% endif %}
+        <div class="mailset-fields">
+          {# l'adresse d'abord, puis le nom court qui la désigne #}
+          {% for f in g.fields %}{{ field(f) }}
+          {% if loop.first and named_here %}
+          <div class="field{{ ' has-error' if rec.name_error }}"><label for="rec-{{ s.key }}-nom">Nom court</label>
+            <input id="rec-{{ s.key }}-nom" name="_cle" value="{{ rec.name }}" required maxlength="60" autocomplete="off">
+            <span class="help">Le nom sous lequel les autres réglages la désignent : {{ rec.name_rule }}.</span>
+            {% if rec.name_error %}<span class="error">{{ rec.name_error }}</span>{% endif %}</div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% if more %}
+        <details class="hm-subfold mailset-more"{{ ' open' if rec.open }}><summary>Plus de réglages <span class="now-muted">— rarement utiles</span></summary>
+          <div class="mailset-fields">{% for f in more[0].fields %}{{ field(f) }}{% endfor %}</div>
+        </details>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+    {% for g in rec.advanced if g.title not in titles %}
+    <section class="mailset-row" aria-labelledby="mailset-a{{ loop.index }}">
+      <div class="mailset-row-about"><h3 id="mailset-a{{ loop.index }}">{{ g.title or "Autres réglages" }}</h3><p>Rarement utiles : les valeurs par défaut conviennent presque toujours.</p></div>
+      <div class="now-card mailset-row-fields"><div class="mailset-fields">{% for f in g.fields %}{{ field(f) }}{% endfor %}</div></div>
+    </section>
+    {% endfor %}
+    <div class="form-actions mailset-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ rec.cancel }}">Annuler</a></div>
+  </form>
+
+{% else %}
+  {# ── ses boîtes ── #}
+  {% for r in s.records %}
+  <section class="mailset-row" id="boites" aria-labelledby="mailset-boxes">
+    <div class="mailset-row-about">
+      <h2 id="mailset-boxes">Ses boîtes <span class="person-count now-num">{{ r.total }}</span></h2>
+      <p>Chaque boîte qu'elle relève, avec sa façon d'y écrire. Ce qu'elle y prépare d'elle-même, et pour qui, se règle dans le tableau de chaque boîte (Réglages › Canaux).</p>
+      <p><a class="btn small" href="{{ r.add }}">＋ Ajouter une boîte</a></p>
+    </div>
+    <div class="mailset-row-fields">
+      {% if r.rows %}
+      <ul class="mailset-boxes">
+        {% for row in r.rows %}{% set c = row.card or {} %}{% set name = c.title or row.key %}
+        <li class="now-card mailset-box">
+          <div class="mailset-box-head">
+            <span class="mailset-initial" aria-hidden="true">{{ name[:1]|upper }}</span>
+            <div class="mailset-box-name">
+              <h3><a href="{{ row.edit }}">{{ name }}</a>{% if name != row.key %} <span class="mono now-muted">{{ row.key }}</span>{% endif %}</h3>
+              {% if c.lead %}<p class="mailset-address">{{ c.lead }}</p>{% endif %}
+            </div>
+            {% if c.tags %}<p class="mailset-tags">{% for text, tone in c.tags %}<span class="now-tag {{ tone }}">{{ text }}</span>{% endfor %}</p>{% endif %}
+          </div>
+          {% if c.facts %}<dl class="obj-facts mailset-box-facts">{% for label, value in c.facts %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>{% endif %}
+          {% if c.activity %}<p class="mailset-activity {{ c.activity_tone }}">{{ c.activity }}</p>{% endif %}
+          <div class="mailset-box-actions">
+            <a class="btn small" href="{{ row.edit }}">Modifier</a>
+            {% if c.fiche %}<a class="btn small quiet" href="{{ c.fiche }}">Sa fiche</a>{% endif %}
+            {% if c.box %}<a class="btn small quiet" href="{{ c.box }}">Ses messages</a>{% endif %}
+            <form method="post" action="{{ action }}" class="inline mailset-remove" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
+              <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+              <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
+              <button class="btn quiet small danger">Retirer</button>
+            </form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% set pp = r.pager or {} %}
+      {% if pp.prev or pp.next %}{{ pager(r.pager) }}{% endif %}
+      {% else %}
+      <div class="now-card mailset-empty"><p class="now-empty">Aucune boîte encore. Ajoutes-en une pour qu'elle relève ton courrier, et, si tu veux, qu'elle y réponde.</p>
+        <p><a class="btn" href="{{ r.add }}">＋ Ajouter une boîte</a></p></div>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+
+  {# ── les paramètres généraux du courrier ── #}
+  {% if params %}{% set p = params %}
+  <form method="post" action="{{ p.action }}" class="form mailset-params" id="general">
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_faculte" value="{{ p.owner }}">
+    <input type="hidden" name="_groupe" value=""><input type="hidden" name="_retour" value="{{ p.back }}">
+    {% for m in p.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+    {% for e in p.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    {% if p.refused %}<div class="flash danger">Des surcharges enregistrées sont refusées et ignorées : {% for k, v in p.refused.items() %}{{ k }} ({{ v }}){{ " ; " if not loop.last }}{% endfor %}.</div>{% endif %}
+    {% set ns = namespace(elsewhere=[]) %}
+    {% for g in p.groups %}{% set mine = g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}
+    {% set ns.elsewhere = ns.elsewhere + (g["items"]|rejectattr("field")|list) + (g["items"]|selectattr("field")|selectattr("field.readonly")|list) %}
+    {% if mine %}
+    <section class="mailset-row" aria-labelledby="mailset-p{{ loop.index }}">
+      <div class="mailset-row-about">
+        {% if loop.first %}<p class="now-kicker">Pour toutes ses boîtes</p>{% endif %}
+        <h3 id="mailset-p{{ loop.index }}">{{ g.title }}</h3>
+      </div>
+      <div class="now-card mailset-row-fields">
+        <div class="mailset-params-list">
+          {% for it in mine %}
+          <div class="mailset-param{{ ' is-overridden' if it.overridden }}">
+            {{ field(it.field) }}
+            {% if it.source != "défaut" or it.overridden or it.pending %}
+            <p class="mailset-param-meta">
+              {% if it.source != "défaut" %}<span class="now-tag {{ it.tone }}" title="{{ it.source_label }}">{{ it.source }}</span>{% endif %}
+              {% if it.drivers %}<span>piloté par <b>{{ it.drivers }}</b></span>{% endif %}
+              {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
+              {% if it.pending %}<span class="st-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
+              {% if it.overridden %}<button class="btn quiet small" form="mailset-reset" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
+            </p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
+    {% endfor %}
+    <div class="form-actions mailset-actions">
+      <button class="btn">Enregistrer</button>
+      <span class="now-muted">Une valeur changée devient une surcharge, bornée et journalisée avec ton nom. <a href="{{ p.advanced }}">Le détail de chaque paramètre →</a></span>
+    </div>
+    {% if ns.elsewhere %}
+    <section class="mailset-row" aria-labelledby="mailset-elsewhere">
+      <div class="mailset-row-about"><h3 id="mailset-elsewhere">Réglé ailleurs</h3><p>{{ ns.elsewhere|map(attribute="label")|join(", ") }} : lus ici, réglés là où ils ont leur sens.</p></div>
+      <div class="now-card mailset-row-fields mailset-links">
+        <a href="{{ PREFIX }}/reglages/canaux"><b>Réglages › Canaux</b><span>Le tableau de chaque boîte : qui peut lui écrire, à qui elle prépare des réponses d'elle-même, comment elles partent.</span></a>
+        <a href="{{ PREFIX }}/reglages/droits"><b>Réglages › Droits</b><span>Ce qu'elle envoie à ta place, et qui peut le lui demander.</span></a>
+        <p class="now-muted">Une boîte décochée (« Actif », sur sa page) n'est ni relevée ni utilisée pour écrire.</p>
+      </div>
+    </section>
+    {% endif %}
+  </form>
+  {% if p.overridden %}
+  <form method="post" action="{{ p.action }}" class="inline" id="mailset-reset">
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_faculte" value="{{ p.owner }}">
+    <input type="hidden" name="_groupe" value=""><input type="hidden" name="_retour" value="{{ p.back }}">
+  </form>
+  {% endif %}
+  {% endif %}
+{% endif %}
+</div>

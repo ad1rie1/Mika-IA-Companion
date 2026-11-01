@@ -814,6 +814,9 @@ form.inline { display: inline; }
 
 
 /* La roue d'une fiche (ADR 0103) : ses réglages et ce qui est technique, en haut à droite. */
+.gear-link { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; white-space: nowrap; }
+.gear-link .menu-icon { width: 16px; height: 16px; flex: none; }
+.gear-link.on { border-color: var(--border-strong); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .gear-menu { position: relative; margin-left: auto; }
 .gear-menu > summary { list-style: none; }
 .gear-menu > summary::-webkit-details-marker { display: none; }

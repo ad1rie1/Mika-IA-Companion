@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "27"
+ASSET_VERSION = "29"
 
 log = logging.getLogger("mika.console")
 
@@ -303,9 +303,10 @@ class UI:
     def env(self) -> render.Env:
         return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp, frame=self.frame)
 
-    def frame(self, html: str) -> str:
-        """L'adresse du cadre où se lit ce document HTML natif, tel qu'il a été écrit (ADR 0169)."""
-        return f"{PREFIX}/document/{self.documents.keep(html)}"
+    def frame(self, html: str, images: tuple[tuple[str, str, bytes], ...] = (), remote: bool = False) -> str:
+        """L'adresse du cadre où se lit ce document HTML natif, tel qu'il a été écrit (ADR 0169), avec ses images
+        intégrées (ADR 0172), et ses images distantes quand on les a permises (ADR 0175)."""
+        return f"{PREFIX}/document/{self.documents.keep(html, images, remote=remote)}"
 
     # ── navigation ──
     def attention_items(self) -> list[dict[str, Any]]:

@@ -1,4 +1,5 @@
-"""Un mail tel qu'il a été écrit, dans son cadre isolé (ADR 0169) : ses styles restent, rien n'y agit."""
+"""Un mail tel qu'il a été écrit, dans son cadre isolé (ADR 0169) : ses styles restent, rien n'y agit ; ses
+images intégrées s'y montrent (ADR 0172)."""
 
 from html.parser import HTMLParser
 
@@ -103,5 +104,30 @@ def test_documents_wait_by_digest_and_only_the_latest_are_kept():
     first = documents.keep("<p>un</p>")
     assert documents.keep("<p>un</p>") == first and len(first) == 40
     second, third = documents.keep("<p>deux</p>"), documents.keep("<p>trois</p>")
-    assert documents.get(first) is None and documents.get(second) == "<p>deux</p>"
-    assert documents.get(third) == "<p>trois</p>" and documents.get("inconnu") is None
+    assert documents.get(first) is None and documents.get(second).html == "<p>deux</p>"
+    assert documents.get(third).html == "<p>trois</p>" and documents.get("inconnu") is None
+
+
+def test_inline_images_take_their_place_as_data_and_nothing_else_does():
+    """ADR 0172 : une image ``cid:`` arrive avec le document ; le cadre ne charge toujours rien du dehors."""
+    logo = ("<Logo.1@Exemple.fr>", "image/PNG", b"\x89PNG-logo")
+    hostile = ("svg@x", "image/svg+xml", b"<svg onload='run()'/>")
+    result = framed_html('<img src="cid:logo.1%40exemple.fr" alt="Logo" width="82"><img src="CID:svg@x" alt="Dessin">'
+                         '<img src="cid:inconnu@x" alt="Absent"><img src="cid:logo.1@exemple.fr" '
+                         'srcset="https://tracker.example/2x.png 2x">', (logo, hostile))
+    parsed = Tags(result)
+    sources = [a.get("src") for t, a in parsed.tags if t == "img"]
+    assert sources == ["data:image/png;base64,iVBORy1sb2dv"] * 2  # encodé, casse ignorée ; le même logo deux fois
+    assert "svg" not in result and "run()" not in result and "tracker.example" not in result
+    assert ">Dessin</span>" in result and ">Absent</span>" in result  # sans image sûre : son texte
+
+
+def test_documents_keep_their_images_within_a_budget_and_change_digest_with_them():
+    documents = Documents(budget=1000)
+    plain = documents.keep("<p>un</p>")
+    with_logo = documents.keep("<p>un</p>", (("a@x", "image/png", b"x" * 600),))
+    assert with_logo != plain and documents.get(with_logo).images[0][2] == b"x" * 600
+    heavy = documents.keep("<p>deux</p>", (("b@x", "image/png", b"y" * 600),))
+    assert documents.get(with_logo) is None and documents.get(heavy) is not None  # le plus ancien cède
+    alone = documents.keep("<p>trois</p>", (("c@x", "image/png", b"z" * 5000),))
+    assert documents.get(alone) is not None  # même au-delà du budget, le dernier venu reste

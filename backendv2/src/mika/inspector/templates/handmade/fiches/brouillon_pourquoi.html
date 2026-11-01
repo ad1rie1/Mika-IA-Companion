@@ -1,0 +1,51 @@
+{# La fiche d'un brouillon, son onglet « Pourquoi » dessiné (app/handmade/mail_fiches.py, ADR 0121) : le mail auquel il
+   répond (son objet, qui l'a écrit, quand, son début), ce qu'elle en avait retenu, les consignes données ; à côté,
+   pourquoi elle l'a écrit et la proposition au journal. Un mail reste du texte. #}
+{% from "_cells.html" import cell %}
+<div class="now-page draftwhy">
+  <div class="mailf-grid">
+    <div class="now-stack">
+      <article class="now-card" aria-labelledby="draftwhy-mail">
+        <header class="now-card-head"><h2 id="draftwhy-mail">Le mail auquel il répond</h2>{% if origin %}<a class="now-more" href="{{ origin.href }}">l'ouvrir →</a>{% endif %}</header>
+        {% if origin %}
+        <p class="draftwhy-subject"><a href="{{ origin.href }}">{{ origin.subject }}</a></p>
+        <p class="person-meta">de {{ origin.sender }}{% if origin.when %} · {{ origin.when }}{% endif %}</p>
+        {% if origin.opening %}<blockquote class="obj-quote draftwhy-opening">{{ origin.opening }}</blockquote>{% endif %}
+        {% elif missing %}<p class="now-empty">ce mail n'est plus dans la boîte : <a href="{{ missing }}">ce qu'elle en sait</a></p>
+        {% else %}<p class="now-empty">ce n'est pas une réponse : un message écrit de lui-même</p>{% endif %}
+      </article>
+
+      {% if retained %}
+      <article class="now-card mailknown-quote" aria-label="Ce qu'elle en avait retenu">
+        <p class="now-eyebrow">Ce qu'elle en avait retenu</p>
+        <blockquote class="obj-quote">{{ retained }}</blockquote>
+      </article>
+      {% endif %}
+
+      {% if asks %}
+      <section class="now-card" aria-labelledby="draftwhy-asks">
+        <header class="now-card-head"><h2 id="draftwhy-asks">Les consignes</h2><span class="person-count now-num">{{ asks|length }}</span></header>
+        <ul class="draftwhy-asks">
+          {% for a in asks %}<li><p class="person-meta">{{ a.title }}</p><blockquote class="obj-quote">{{ a.text }}</blockquote></li>{% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+    </div>
+
+    <aside class="now-stack mailf-side" aria-label="Pourquoi elle l'a écrit">
+      <section class="now-card" aria-labelledby="draftwhy-why">
+        <header class="now-card-head"><h2 id="draftwhy-why">Pourquoi elle l'a écrit</h2></header>
+        {% if known %}
+        <p class="draftwhy-tag"><span class="now-tag{{ ' info' if asked }}">{{ "demandé" if asked else "d'elle-même" }}</span></p>
+        <p class="draftwhy-said">{{ "Tu le lui as demandé : elle l'a écrit dans la voix de la boîte." if asked else "Elle l'a préparé d'elle-même : cette boîte lui permet de préparer des réponses." }}</p>
+        {% else %}<p class="now-empty">écrit d'ici : elle ne l'a jamais proposé</p>{% endif %}
+        {% if needs_reply or proposal %}
+        <dl class="obj-facts">
+          {% if needs_reply %}<div><dt>Réponse attendue</dt><dd>{{ needs_reply }}</dd></div>{% endif %}
+          {% if proposal %}<div><dt>Sa proposition</dt><dd>{{ cell(proposal) }}</dd></div>{% endif %}
+        </dl>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+</div>

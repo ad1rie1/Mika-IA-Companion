@@ -217,6 +217,11 @@ class Prose:
     reading: bool = False
     #: source HTML d'un document natif, assainie par le rendu ; jamais acceptée d'une app Forge
     html: str = ""
+    #: les images que ce HTML désigne par ``cid:`` : (Content-ID, type, octets), montrées à leur place
+    images: tuple[tuple[str, str, bytes], ...] = ()
+    #: ses images distantes se chargent (``http``/``https`` seulement) : l'opérateur l'a voulu, pour ce mail ou pour
+    #: son expéditeur (ADR 0175) ; sinon elles restent masquées (ADR 0169)
+    remote: bool = False
 
 
 @dataclass(frozen=True, slots=True)

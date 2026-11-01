@@ -223,6 +223,39 @@ def test_nested_model_group_paths_defaults_and_inheritance():
     assert not f["title"].advanced and f["count"].advanced  # sans Knob : avancé
 
 
+class Sending(BaseModel):
+    """Des champs qui en attendent un autre (``unless``), seuls ou avec ``only``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    host: str = ""
+    port: Annotated[int, Knob(lo=1, hi=65_535, unless=(("host", ("",)),))] = 587
+    mode: Literal["a", "b"] = "a"
+    secret_b: Annotated[str, Knob(only=(("mode", ("b",)),), unless=(("host", ("",)),))] = ""
+
+
+class Outer(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    off: bool = False
+    send: Annotated[Sending, Knob(unless=(("off", ("true",)),))] = Sending()
+
+
+def test_unless_hides_while_another_field_holds_one_of_its_values():
+    f = fields_by_path(Sending)
+    assert f["port"].conditional and not f["host"].conditional
+    assert not visible(f["port"], {"host": ""}) and visible(f["port"], {"host": "smtp.exemple.org"})
+    # avec ``only`` : les deux doivent le laisser paraître
+    assert not visible(f["secret_b"], {"host": "smtp.exemple.org", "mode": "a"})
+    assert not visible(f["secret_b"], {"host": "", "mode": "b"})
+    assert visible(f["secret_b"], {"host": "smtp.exemple.org", "mode": "b"})
+    # rebasé dans un modèle imbriqué, et hérité de son groupe
+    nested = fields_by_path(Outer)
+    assert nested["send.port"].unless == (("off", ("true",)), ("send.host", ("",)))
+    assert not visible(nested["send.port"], {"off": True, "send.host": "smtp.exemple.org"})
+    assert visible(nested["send.port"], {"off": False, "send.host": "smtp.exemple.org"})
+
+
 def test_records_mapping_and_yaml():
     f = fields_by_path(Sample)
     assert [(i.path, i.kind) for i in f["rows"].item] == [("name", "text"), ("weight", "float")]
@@ -310,6 +343,11 @@ def test_real_mail_config():
     assert {v for v, _ in f["smtp_security"].choices} == {"starttls", "ssl", "none"}
     assert {v for v, _ in f["voice"].choices} == {"elle", "assistante", "proprietaire"}
     assert f["tone"].kind == "textarea" and f["instructions"].kind == "textarea" and f["folders"].kind == "lines"
+    # ce qui ne sert pas au choix fait ne paraît pas ; l'envoi et la voix attendent un serveur d'envoi
+    assert not visible(f["password"], {"auth": "microsoft"}) and visible(f["oauth_client_id"], {"auth": "microsoft"})
+    assert not visible(f["display_name"], {"voice": "elle", "smtp_host": "s"})
+    assert visible(f["sender_name"], {"voice": "elle", "smtp_host": "s"})
+    assert not visible(f["voice"], {"smtp_host": ""}) and not visible(f["smtp_port"], {"smtp_host": ""})
 
 
 # ── flatten / nest ────────────────────────────────────────────────────────
@@ -459,6 +497,14 @@ def test_hidden_field_is_not_written():
     assert values == {"mode": "b", "only_b": False}
     values, _ = parse(FIELDS, form("inner.fast", inner__fast="on"), current=CURRENT)  # enabled vrai
     assert values == {"inner.fast": True}
+
+
+def test_a_field_waiting_for_another_is_not_written():
+    fields, current = describe(Sending), flatten(Sending())
+    values, errors = parse(fields, form("host", "port", host="", port="465"), current=current)
+    assert values == {"host": ""} and errors == {}
+    values, _ = parse(fields, form("host", "port", host="smtp.exemple.org", port="465"), current=current)
+    assert values == {"host": "smtp.exemple.org", "port": 465}
 
 
 def test_yaml_field_uses_the_given_loader():

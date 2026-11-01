@@ -227,20 +227,87 @@ def _groups_of(fields: list[forms.FormField]) -> list[tuple[str, list[forms.Form
     return list(out.items())
 
 
+def back_to(target: str) -> str:
+    """Un retour dans la console seulement (jamais une autre adresse) ; vide sinon."""
+    target = target.strip()
+    if target.startswith(PREFIX + "/") and "//" not in target and "\\" not in target and len(target) < 2000 \
+            and all(ord(ch) >= 32 for ch in target):
+        return target
+    return ""
+
+
+def _moved_by(ps: Any, owner: str) -> dict[str, list[str]]:
+    """Les curseurs du tempérament qui pilotent chaque paramètre de cette faculté."""
+    labels = ps.slider_labels()
+    moved_by: dict[str, list[str]] = {}
+    for slider, moved in ps.influence(owner).items():
+        for path, _lo, _hi in moved:
+            moved_by.setdefault(path, []).append(labels.get(slider, slider))
+    return moved_by
+
+
+def params_view(ui: Any, owner: str, state: Mapping[str, Any], back: str) -> dict[str, Any] | None:
+    """Les paramètres internes d'une faculté, tous ses groupes d'un coup, pour une page qui les règle avec autre chose
+    (Courrier › Paramètres, ADR 0173) : le contexte de leur formulaire, qui revient à ``back`` une fois enregistré.
+    ``None`` : cette faculté n'a pas de paramètres ici."""
+    ps = ui.deps.parameters
+    p = ps.plan(owner) if ps is not None else None
+    if p is None:
+        return None
+    fields = [f for f in ps.fields(owner) if f.kind != "group"]
+    errors: Mapping[str, str] = state.get("errors") or {}
+    return {"owner": owner, "label": _label_of(ui, owner), "action": faculty_url(owner), "back": back,
+            "groups": _param_views(ps, owner, _groups_of(fields), state, _moved_by(ps, owner)),
+            "overridden": sorted(ps.overrides().get(owner) or {}), "messages": list(state.get("messages") or []),
+            "refused": dict(p.refused), "advanced": faculty_url(owner),
+            "general": [m for k, m in errors.items() if not any(k == f.path or k.startswith(f.path + ".")
+                                                                for f in fields)]}
+
+
+def _param_views(ps: Any, owner: str, groups: list[tuple[str, list[forms.FormField]]], state: Mapping[str, Any],
+                 moved_by: Mapping[str, list[str]]) -> list[dict[str, Any]]:
+    """Les groupes de paramètres d'une faculté, prêts pour leur formulaire : chaque paramètre, son champ (ce qui a été
+    tapé, s'il a été refusé), sa valeur, d'où elle vient, ses bornes, s'il est surchargé."""
+    p = ps.plan(owner)
+    flat, natural = forms.flatten(p.value), forms.flatten(p.natural)
+    journaled = ps.journaled(owner)
+    live = forms.flatten(journaled) if journaled is not None else None
+    overrides = ps.overrides().get(owner) or {}
+    errors: Mapping[str, str] = state.get("errors") or {}
+    typed: Mapping[str, Any] = state.get("values") or {}
+    given = {**flat, **typed}
+    views = []
+    for title, fs in groups:
+        items = []
+        for f in fs:
+            source = p.sources.get(f.path, "défaut")
+            meta = {"source": source, "source_label": SOURCES_FR.get(source, source), "tone": TONES.get(source, ""),
+                    "drivers": ", ".join(moved_by.get(f.path, ())), "bounds": _bounds(f), "path": f.path,
+                    "natural": _value(f, natural.get(f.path)) if source == "surcharge" else "",
+                    "pending": _value(f, live.get(f.path)) if live is not None and live.get(f.path) != flat.get(
+                        f.path) else "",
+                    "overridden": any(k == f.path or k.startswith(f.path + ".") for k in overrides)}
+            view = None
+            if f.kind not in ("records", "mapping"):
+                view = field_view(f, given.get(f.path), error=_err(f.path, errors), prefix=f"p-{owner}")
+                raw = given.get(f.path)
+                if view is not None and f.kind in ("float", "slider") and isinstance(raw, float) \
+                        and f.path not in typed:
+                    view["value"] = params_shown(raw)  # 6 chiffres : renvoyé sans y toucher, rien ne change
+                if view is not None and f.kind == "duration":
+                    view["placeholder"] = "ex. 10 min, 1 h 30"
+            items.append({"field": view, "label": f.label, "help": f.help, "value": _value(f, flat.get(f.path)),
+                          **meta})
+        views.append({"title": title, "items": items})
+    return views
+
+
 async def faculty_page(ui: Any, request: Request, owner: str, state: Mapping[str, Any]) -> dict[str, Any]:
     ps = ui.deps.parameters
     p = ps.plan(owner) if ps is not None else None
     if p is None:
         return {"blocks": [Note("Faculté inconnue.", "warn")]}
     fields = [f for f in ps.fields(owner) if f.kind != "group"]
-    flat, natural = forms.flatten(p.value), forms.flatten(p.natural)
-    journaled = ps.journaled(owner)
-    live = forms.flatten(journaled) if journaled is not None else None
-    labels = ps.slider_labels()
-    moved_by: dict[str, list[str]] = {}
-    for slider, moved in ps.influence(owner).items():
-        for path, _lo, _hi in moved:
-            moved_by.setdefault(path, []).append(labels.get(slider, slider))
     groups = _groups_of(fields)
     one_page = len(fields) <= ONE_PAGE_MAX or len(groups) <= 1
     wanted = str(state.get("group") or request.query_params.get("groupe", "") or "")
@@ -263,31 +330,7 @@ async def faculty_page(ui: Any, request: Request, owner: str, state: Mapping[str
                                         count=len(fs), active=_slug(title) == current)
                                 for title, fs in groups), title="Groupes"))
     errors: Mapping[str, str] = state.get("errors") or {}
-    typed: Mapping[str, Any] = state.get("values") or {}
-    given = {**flat, **typed}
-    views = []
-    for title, fs in shown:
-        items = []
-        for f in fs:
-            source = p.sources.get(f.path, "défaut")
-            meta = {"source": source, "source_label": SOURCES_FR.get(source, source), "tone": TONES.get(source, ""),
-                    "drivers": ", ".join(moved_by.get(f.path, ())), "bounds": _bounds(f), "path": f.path,
-                    "natural": _value(f, natural.get(f.path)) if source == "surcharge" else "",
-                    "pending": _value(f, live.get(f.path)) if live is not None and live.get(f.path) != flat.get(
-                        f.path) else "",
-                    "overridden": any(k == f.path or k.startswith(f.path + ".") for k in overrides)}
-            view = None
-            if f.kind not in ("records", "mapping"):
-                view = field_view(f, given.get(f.path), error=_err(f.path, errors), prefix=f"p-{owner}")
-                raw = given.get(f.path)
-                if view is not None and f.kind in ("float", "slider") and isinstance(raw, float) \
-                        and f.path not in typed:
-                    view["value"] = params_shown(raw)  # 6 chiffres : renvoyé sans y toucher, rien ne change
-                if view is not None and f.kind == "duration":
-                    view["placeholder"] = "ex. 10 min, 1 h 30"
-            items.append({"field": view, "label": f.label, "help": f.help, "value": _value(f, flat.get(f.path)),
-                          **meta})
-        views.append({"title": title, "items": items})
+    views = _param_views(ps, owner, shown, state, _moved_by(ps, owner))
     panel = Panel("handmade/reglages/parametres.html", {
         "owner": owner, "label": _label_of(ui, owner), "groups": views, "panel_messages": state.get("messages") or [],
         "action": faculty_url(owner), "group": _slug(shown[0][0]) if not one_page else "",
@@ -310,15 +353,16 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
     data, lists = got
     owner = data.get("_faculte", "")
     group = data.get("_groupe", "")
+    back = back_to(data.get("_retour", ""))
     if ps.plan(owner) is None:
         return None, {"messages": [("danger", "Faculté inconnue.")]}, 400
     if data.get("_apercu"):
         planned_, errors = ps.preview(owner, lists)
         values, _ = forms.parse(ps.fields(owner), lists, current={})
         if planned_ is None:
-            return None, {"owner": owner, "group": group, "errors": errors, "values": values,
+            return None, {"owner": owner, "group": group, "back": back, "errors": errors, "values": values,
                           "messages": [("danger", "Pas d'aperçu : corrige les champs signalés.")]}, 400
-        return None, {"owner": owner, "group": group, "values": values,
+        return None, {"owner": owner, "group": group, "back": back, "values": values,
                       "preview": effect(ui, {owner: planned_})}, 200
     try:
         if data.get("_reinitialiser") or data.get("_reinitialiser_chemin"):
@@ -327,10 +371,10 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
         else:
             changed, errors = await ps.change(owner, lists)
     except ValueError as exc:
-        return None, {"owner": owner, "group": group, "messages": [("danger", f"Refusé : {exc}")]}, 400
+        return None, {"owner": owner, "group": group, "back": back, "messages": [("danger", f"Refusé : {exc}")]}, 400
     if errors:
         values, _ = forms.parse(ps.fields(owner), lists, current={})
-        return None, {"owner": owner, "group": group, "errors": errors, "values": values,
+        return None, {"owner": owner, "group": group, "back": back, "errors": errors, "values": values,
                       "messages": [("danger", "Rien n'a été enregistré : corrige les champs signalés.")]}, 400
     if changed:
         await operations.audit(ui.kernel, f"console.parametres.{owner}", by=account.handle,
@@ -339,6 +383,8 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
     label = _label_of(ui, owner)
     ui.flash(token, "ok" if changed else "info",
              f"{label} : surcharges enregistrées et journalisées." if changed else "Rien n'a changé.")
+    if back:  # une page qui les règle avec autre chose (Courrier › Paramètres) : on y revient
+        return secure(RedirectResponse(f"{back}{'&' if '?' in back else '?'}flash={token}", status_code=303)), {}, 303
     return secure(RedirectResponse(faculty_url(owner, groupe=group, flash=token), status_code=303)), {}, 303
 
 

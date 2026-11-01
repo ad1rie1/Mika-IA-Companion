@@ -2,8 +2,8 @@
 scripts ni styles), pièces jointes (nom, type, taille — jamais leur contenu),
 envoi de masse reconnu.
 
-``read`` rend aussi ses pièces avec leurs octets (``Part``), que le cache garde
-(ADR 0172) : chaque pièce jointe, à son rang (celui du lien de
+``parse_parts`` rend aussi ses pièces avec leurs octets (``Part``), que le
+cache garde (ADR 0172) : chaque pièce jointe, à son rang (celui du lien de
 téléchargement), et chaque image intégrée que le HTML désigne par ``cid:``.
 Elles ne vont qu'au cache, jamais au modèle.
 
@@ -142,8 +142,8 @@ def parse(raw: bytes, uid: str = "", *, account: str = "", folder: str = "", com
     return _mail(BytesParser(policy=policy.default).parsebytes(raw), raw, complete, account=account, folder=folder)
 
 
-def read(raw: bytes, uid: str = "", *, account: str = "", folder: str = "",
-         complete: bool = False) -> tuple[Mail, tuple[Part, ...]]:
+def parse_parts(raw: bytes, uid: str = "", *, account: str = "", folder: str = "",
+                complete: bool = False) -> tuple[Mail, tuple[Part, ...]]:
     """Le mail (comme ``parse``) et ses pièces, avec leurs octets, en une seule lecture."""
     msg = BytesParser(policy=policy.default).parsebytes(raw)
     return _mail(msg, raw, complete, account=account, folder=folder), parts_of(msg)

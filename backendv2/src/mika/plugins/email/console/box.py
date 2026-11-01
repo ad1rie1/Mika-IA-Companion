@@ -13,6 +13,8 @@ from urllib.parse import urlencode
 
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    ActionSlot,
+    Badge,
     Block,
     Column,
     InspectContext,
@@ -32,20 +34,25 @@ from mika.plugins.email import EMAIL, EmailParams, EmailState, name_of, params_o
 from mika.plugins.email.console.common import (
     BOX_PAGE,
     SECTION,
+    VIEWS,
     account_scope,
     add_account,
+    answered,
     clip,
     fresh_important,
+    her_badge,
     important,
     mail_key,
     state_badge,
+    to_answer,
     unread,
     workspace,
 )
 from mika.ports.mail import MailQuery
 
-STATES = (("non_lus", "non lus"), ("importants", "importants, non lus"), ("suivis", "suivis (drapeau)"),
-          ("remarques", "remarqués"), ("pas_remarques", "pas remarqués"))
+#: ce qu'on filtre ; « non lus » : par toi (le drapeau du serveur), pas par elle (ADR 0175)
+STATES = (("non_lus", "non lus"), ("importants", "importants, non lus"), ("a_traiter", "à traiter (réponse attendue)"),
+          ("suivis", "suivis (drapeau)"), ("remarques", "remarqués"), ("pas_remarques", "pas remarqués"))
 INBOX = "INBOX"
 
 
@@ -56,29 +63,19 @@ def _in_box(port: Any, keys: list[str], folder: str) -> int:
     return sum(f.total for key in keys for f in port.folders(key) if wanted is None or f.name == wanted)
 
 
-def _keep(state: str, m: Any, seen: Any, p: EmailParams) -> bool:
-    if state == "non_lus":
-        return unread(m, seen)
-    if state == "importants":
-        return seen is not None and unread(m, seen) and important(seen, p)
-    if state == "suivis":
-        return m.flagged
-    if state == "remarques":
-        return seen is not None
-    if state == "pas_remarques":
-        return seen is None
-    return True
-
-
 def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account: str, folder: str,
           several: bool, total: int) -> tuple[Table, int]:
     """La liste du dossier, et combien de mails ont été relus du cache pour la faire."""
     state, query, sender = ctx.value("etat") or "", ctx.value("q") or "", ctx.value("de") or ""
     marked = tuple(s.mails)
-    refs = tuple(k for k, m in s.mails.items() if important(m, p) and not m.read) if state == "importants" \
-        else marked if state == "remarques" else None
-    exclude = marked if state == "pas_remarques" else tuple(k for k, m in s.mails.items() if m.read) \
-        if state in ("non_lus", "importants") else ()
+    refs: tuple[str, ...] | None = None
+    if state == "importants":
+        refs = tuple(k for k, m in s.mails.items() if important(m, p))
+    elif state == "a_traiter":  # répondu ailleurs : le serveur le sait, même quand elle l'avait déjà lu
+        refs = tuple(k for k, m in s.mails.items() if to_answer(m) and not answered(port, k))
+    elif state == "remarques":
+        refs = marked
+    exclude = marked if state == "pas_remarques" else ()
     request = ctx.pager(size=BOX_PAGE)
     result = port.messages_page(MailQuery(account=account, folder="" if folder == "*" else (folder or INBOX),
         text=query, sender=sender, seen=False if state in ("non_lus", "importants") else None,
@@ -100,12 +97,16 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
                                 emphasis=unread(m, seen)),
                            Text(sender_label, secondary=label.name if label and several else m.address)]
         cells += [When(m.date) if m.date else None,
-                  Text("★ Suivi · " + ("Non lu" if unread(m, seen) else "Lu")) if m.flagged else state_badge(seen, m, p)]
+                  Text("★ Suivi · " + ("Non lu" if unread(m, seen) else "Lu")) if m.flagged else state_badge(seen, m, p),
+                  her_badge(seen), Badge("réponse attendue", "warn") if to_answer(seen) and not m.answered else None]
         ref = Ref.subject("mail", mail_key(m.ref), m.subject or "(sans objet)")
         rows.append(Row(tuple(cells), href=Ref(ref.kind, ref.key, ref.text, (*context, ("retour", back)))))
-    columns: list[Any] = [Column("Message", role="title"), "Expéditeur", Column("Date", "fit"), Column("État", "fit", role="badge")]
+    columns: list[Any] = [Column("Message", role="title"), "Expéditeur", Column("Date", "fit"), Column("État", "fit", role="badge"),
+                          Column("Elle", "fit", role="badge"), Column("Son tri", "fit", role="badge")]
     filtered = state or query or sender
-    if folder == "*":
+    if state in VIEWS:  # une vue de la barre de côté (« À traiter », « Suivis ») : son nom
+        where = VIEWS[state]
+    elif folder == "*":
         where = "Tous les dossiers"
     elif account:
         where = next((f.label for f in port.folders(account) if f.name == (folder or INBOX)), folder or "Réception")
@@ -130,14 +131,22 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                Param("de", "Expéditeur", placeholder="nom ou adresse"),
                Param("q", "Recherche", placeholder="objet ou contenu du message"))
     if port is None or not port.accounts():
-        return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Réglages › Plugins › Boîtes aux "
-                                           "lettres pour recevoir et envoyer des messages.",
+        return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Courrier › Paramètres (en haut "
+                                           "à droite) pour recevoir et envoyer des messages.",
                                            title="Aucun compte de messagerie"),
-                                      Nav((NavItem("Ajouter un compte", add_account()),))])]
+                                      Nav((NavItem("Ajouter un compte", add_account()),))], state=s)]
     account = account_scope(port, ctx)
     if account and port.account(account) is None:
-        return [workspace(port, ctx, [Note("Ce compte n'existe plus. Choisis une boîte dans la liste.", tone="warn")])]
+        return [workspace(port, ctx, [Note("Ce compte n'existe plus. Choisis une boîte dans la liste.", tone="warn")],
+                          state=s)]
     folder = ctx.param("dossier") or INBOX
     total = _in_box(port, [account] if account else [a.key for a in port.accounts()], folder)
     table, _ = _list(s, ctx, p, port, account, folder, not account and len(port.accounts()) > 1, total)
-    return [workspace(port, ctx, [table], filters=filters, folders=True)]
+    # ranger ce qu'on a coché (la boîte dessinée en fait des cases sur chaque ligne et une barre au-dessus), puis,
+    # au bout de la liste, remonter plus loin dans un dossier
+    items: list[Block] = [ActionSlot("email.ranger", title="Ranger la sélection"), table]
+    chosen = port.account(account) if account else None
+    if chosen is not None and chosen.ready and folder != "*" and ctx.value("etat") not in VIEWS:
+        items.append(ActionSlot("email.historique", (("compte", account), ("dossier", folder)),
+                                title="Charger des messages plus anciens", presentation="button"))
+    return [workspace(port, ctx, items, filters=filters, folders=True, state=s)]

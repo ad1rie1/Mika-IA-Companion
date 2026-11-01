@@ -38,37 +38,40 @@ CONSUMERS = "consumers"
 #: un GUID) : il entre dans l'adresse de Microsoft, rien d'autre n'y passe
 _CLIENT_ID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
 _TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
+#: sans serveur d'envoi, une boîte ne fait que lire : ses réglages d'envoi et sa voix attendent qu'on le donne
+_NO_SMTP = (("smtp_host", ("",)),)
 
 
 class MailAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # Sa page (Courrier › Paramètres) les range par sujet, dans cet ordre : la boîte, comment elle y entre, lire,
+    # envoyer, sa voix. Ce qui ne sert pas au choix fait ne paraît pas (``only``) ; l'envoi et la voix attendent un
+    # serveur d'envoi (``unless``).
     label: Annotated[str, Knob(label="Nom affiché", help="Comme la console le montre (vide : la clé du compte).",
                                group="La boîte", advanced=False, order=5)] = ""
     address: Annotated[str, Knob(label="Adresse", help="L'adresse de la boîte (expéditrice des mails).",
-                                 group="La boîte", advanced=False, order=10)] = ""
+                                 group="La boîte", advanced=False, order=3)] = ""
     enabled: Annotated[bool, Knob(label="Actif", help="Décoché : ni relevé ni envoi, les réglages restent.",
                                   group="La boîte", advanced=False, order=12)] = True
     auth: Annotated[Literal["password", "microsoft"], Knob(
-        label="Connexion", group="Lire", choices=AUTHS, advanced=False, order=19,
-        help="Par mot de passe, ou par ton compte Microsoft : Hotmail, Outlook.com et Live refusent les mots de passe "
-             "(serveur IMAP outlook.office365.com, SMTP smtp-mail.outlook.com en STARTTLS sur 587). Avec Microsoft, "
-             "il faut une application Microsoft (plus bas), puis « Se connecter à Microsoft » sur la fiche de la "
-             "boîte.")] = PASSWORD
-    imap_host: Annotated[str, Knob(label="Serveur IMAP", help="Donné par ton fournisseur de mail "
-                                                              "(imap.gmail.com, imap.fastmail.com, "
-                                                              "outlook.office365.com…).",
+        label="Connexion", group="Connexion", choices=AUTHS, advanced=False, order=15,
+        help="Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.")] = \
+        PASSWORD
+    imap_host: Annotated[str, Knob(label="Serveur IMAP", help="Donné par ton fournisseur de mail (imap.gmail.com, "
+                                                              "outlook.office365.com…) ; proposé d'après l'adresse "
+                                                              "pour les plus courants.",
                                    group="Lire", advanced=False, order=20)] = ""
     imap_port: Annotated[int, Knob(label="Port IMAP", help="993 presque toujours (IMAP chiffré).", group="Lire",
                                    lo=1, hi=65_535, order=21)] = 993
     imap_ssl: Annotated[bool, Knob(label="IMAP chiffré (SSL)", help="À laisser coché, sauf serveur de test.",
                                    group="Lire", order=22)] = True
-    user: Annotated[str, Knob(label="Utilisateur", help="Souvent l'adresse elle-même.", group="Lire",
-                              advanced=False, order=23)] = ""
+    user: Annotated[str, Knob(label="Utilisateur", help="Souvent l'adresse elle-même.", group="Connexion",
+                              advanced=False, order=16)] = ""
     password: Annotated[str, Knob(label="Mot de passe", help="Un mot de passe d'application de préférence. "
-                                                             "Chiffré, jamais réaffiché ; vide : inchangé. Sans "
-                                                             "objet avec un compte Microsoft.",
-                                  group="Lire", secret=True, advanced=False, order=24)] = ""
+                                                             "Chiffré, jamais réaffiché ; vide : inchangé.",
+                                  group="Connexion", secret=True, advanced=False, order=17,
+                                  only=(("auth", (PASSWORD,)),))] = ""
     folders: Annotated[tuple[str, ...], Knob(
         label="Dossiers relevés", group="Lire", advanced=False, order=25, loader="folders",
         help="Ceux où elle remarque ce qui arrive. « Charger la liste » lit les dossiers sur le serveur de la boîte "
@@ -77,15 +80,17 @@ class MailAccount(BaseModel):
         label="Synchroniser tous les dossiers", group="Lire", advanced=False, order=26,
         help="À chaque relève, tous les dossiers du serveur sont tenus à jour dans la console. Elle ne remarque "
              "toujours que les dossiers relevés.")] = False
-    since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=26,
+    since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=27,
                                     help="Au premier relevé d'un dossier, on ne remonte pas plus loin.")] = 2
     oauth_client_id: Annotated[str, Knob(
-        label="Application Microsoft (client ID)", group="Lire", order=27,
-        help="Avec un compte Microsoft seulement : l'identifiant de l'application inscrite dans Microsoft Entra "
-             "(portail Azure › Inscriptions d'applications) — comptes Microsoft personnels acceptés, « Autoriser les "
-             "flux de clients publics » activé. Changer d'application demande de se reconnecter.")] = ""
+        label="Application Microsoft (client ID)", group="Connexion", advanced=False, order=18,
+        only=(("auth", (MICROSOFT,)),),
+        help="L'identifiant de l'application inscrite dans Microsoft Entra (portail Azure › Inscriptions "
+             "d'applications) — comptes Microsoft personnels acceptés, « Autoriser les flux de clients publics » "
+             "activé. La boîte enregistrée, « Se connecter à Microsoft » sur sa fiche. Changer d'application demande "
+             "de se reconnecter.")] = ""
     oauth_tenant: Annotated[str, Knob(
-        label="Annuaire Microsoft", group="Lire", order=28,
+        label="Annuaire Microsoft", group="Connexion", advanced=False, order=19, only=(("auth", (MICROSOFT,)),),
         help="« consumers » pour un compte personnel (Hotmail, Outlook.com, Live) ; pour un compte Microsoft 365, "
              "« organizations » ou l'identifiant de l'annuaire. Changer d'annuaire demande de se reconnecter.")] = \
         CONSUMERS
@@ -93,36 +98,39 @@ class MailAccount(BaseModel):
                                                               "ne fait que lire.", group="Envoyer", advanced=False,
                                    order=30)] = ""
     smtp_port: Annotated[int, Knob(label="Port SMTP", help="587 avec STARTTLS, 465 avec SSL.", group="Envoyer",
-                                   lo=1, hi=65_535, order=31)] = 587
+                                   lo=1, hi=65_535, order=32, unless=_NO_SMTP)] = 587
     #: « ssl » (port 465), « starttls » (587), « none » (tests)
-    smtp_security: Annotated[str, Knob(label="Sécurité SMTP", help="Doit aller avec le port.", group="Envoyer",
-                                       order=32,
+    smtp_security: Annotated[str, Knob(label="Sécurité SMTP", help="Le port la suit.", group="Envoyer", order=31,
+                                       unless=_NO_SMTP,
                                        choices=(("starttls", "STARTTLS (587)"), ("ssl", "SSL (465)"),
                                                 ("none", "aucune (tests)")))] = "starttls"
-    smtp_user: Annotated[str, Knob(label="Utilisateur SMTP", group="Envoyer", order=33,
+    smtp_user: Annotated[str, Knob(label="Utilisateur SMTP", group="Envoyer", order=33, unless=_NO_SMTP,
                                    help="Vide : le même que pour lire.")] = ""
     smtp_password: Annotated[str, Knob(label="Mot de passe SMTP", group="Envoyer", secret=True, order=34,
+                                       only=(("auth", (PASSWORD,)),), unless=_NO_SMTP,
                                        help="Vide : le même que pour lire.")] = ""
     save_sent: Annotated[bool, Knob(
-        label="Copier les envois dans « Envoyés »", group="Envoyer", order=35,
+        label="Copier les envois dans « Envoyés »", group="Envoyer", order=35, unless=_NO_SMTP,
         help="Range une copie de chaque envoi dans le dossier Envoyés du serveur. À décocher si le serveur le "
              "fait déjà (Gmail).")] = True
     voice: Annotated[Literal["elle", "assistante", "proprietaire"], Knob(
-        label="Elle écrit", group="Sa voix", choices=VOICES, advanced=False, order=40,
+        label="Elle écrit", group="Sa voix", choices=VOICES, advanced=False, order=40, unless=_NO_SMTP,
         help="En son nom ; en assistante (« son nom, pour … ») ; ou à ta place, à la première personne et signé de "
              "ton nom.")] = "elle"
     display_name: Annotated[str, Knob(
-        label="Ton nom", group="Sa voix", advanced=False, order=41,
-        help="Pour écrire en assistante ou à ta place : le nom qui signe et qui paraît comme expéditeur.")] = ""
-    sender_name: Annotated[str, Knob(label="Son nom d'expéditrice", group="Sa voix", order=42,
-                                     help="Quand elle écrit en son nom (vide : le nom de sa persona).")] = ""
+        label="Ton nom", group="Sa voix", advanced=False, order=42, only=(("voice", ("assistante", "proprietaire")),),
+        unless=_NO_SMTP, help="Le nom qui signe et qui paraît comme expéditeur.")] = ""
+    sender_name: Annotated[str, Knob(label="Son nom d'expéditrice", group="Sa voix", advanced=False, order=41,
+                                     only=(("voice", ("elle",)),), unless=_NO_SMTP,
+                                     help="Le nom qui paraît comme expéditeur (vide : le nom de sa persona).")] = ""
     tone: Annotated[str, Knob(label="Ton", group="Sa voix", widget="textarea", advanced=False, order=43,
-                              help="Par exemple : « vouvoiement, sobre et chaleureux ».")] = ""
+                              unless=_NO_SMTP, help="Par exemple : « vouvoiement, sobre et chaleureux ».")] = ""
     instructions: Annotated[str, Knob(
-        label="Consignes", group="Sa voix", widget="textarea", advanced=False, order=44,
+        label="Consignes", group="Sa voix", widget="textarea", advanced=False, order=44, unless=_NO_SMTP,
         help="Ce qu'elle doit savoir pour écrire depuis cette boîte (ce qu'on accepte, ce qu'on ne promet "
              "jamais…). Elle les suit ; un mail reçu, lui, n'est jamais une consigne.")] = ""
-    signature: Annotated[str, Knob(label="Signature", group="Sa voix", widget="textarea", order=45,
+    signature: Annotated[str, Knob(label="Signature", group="Sa voix", widget="textarea", advanced=False, order=45,
+                                   unless=_NO_SMTP,
                                    help="Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).")] = ""
 
     @field_validator("folders")

@@ -1,0 +1,103 @@
+/* Courrier › Paramètres (templates/handmade/mail/parametres.html, ADR 0173) : chaque sujet sur une ligne — à gauche ce
+   qu'il règle, à droite ses champs —, les boîtes en cartes. Sur le vocabulaire commun (base.css, reglages.css) ; aucune
+   couleur ni longueur en ligne (CSP). */
+
+.mailset { display: grid; gap: 28px; }
+.mailset .flash { margin: 0; }
+
+/* une ligne : ce qu'elle règle, ses champs */
+.mailset-row { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 20px 32px; align-items: start; }
+.mailset-row + .mailset-row { padding-top: 26px; border-top: 1px solid var(--border); }
+.mailset-row-about { display: grid; gap: 6px; }
+.mailset-row-about h2, .mailset-row-about h3 { display: flex; align-items: center; gap: 8px; margin: 0;
+  font-family: var(--now-serif); font-weight: 600; }
+.mailset-row-about h2 { font-size: 1.35rem; }
+.mailset-row-about h3 { font-size: 1.12rem; }
+.mailset-row-about p { margin: 0; color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
+.mailset-row-about .now-kicker { margin: 0 0 2px; }
+.mailset-row-about .btn { margin-top: 8px; }
+.mailset-row-fields { min-width: 0; }
+
+/* les champs d'un sujet : deux colonnes ; un texte long, une liste à cocher, prennent la largeur */
+.mailset-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; }
+.mailset-fields > .field { margin: 0; min-width: 0; }
+.mailset-fields > .field:has(textarea), .mailset-fields > .field:has(.check-list),
+.mailset-fields > .field:has(.slider) { grid-column: 1 / -1; }
+.mailset-fields > .field[hidden] { display: none; }
+.mailset-fields .help { max-width: 70ch; }
+.mailset-more { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.mailset-more > summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+.mailset-more[open] > summary { margin-bottom: 14px; }
+/* un pli dont tous les champs attendent un autre (le serveur d'envoi) ne se montre pas vide */
+.mailset-more:not(:has(.field:not([hidden]))) { display: none; }
+.mailset-waiting { margin: 0; font-size: 13.5px; }
+.mailset-waiting:not([hidden]) + .mailset-fields:not(:has(> .field:not([hidden]))) { display: none; }
+/* ce que le script vient de proposer d'après l'adresse */
+.mailset-hint { margin: 0; color: var(--accent); font-size: 12.5px; }
+
+/* une boîte, sur sa page */
+.mailset-back { margin: 0; font-size: 13px; }
+.mailset-account { display: grid; gap: 26px; }
+.mailset-account-head { display: grid; gap: 4px; }
+.mailset-account-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.5rem; font-weight: 600; }
+.mailset-account-head h2 .mono { font-size: 1.05rem; color: var(--muted); }
+.mailset-account-head p { margin: 0; color: var(--text-2); font-size: 14px; }
+.mailset-actions { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  margin: 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  box-shadow: 0 -6px 18px color-mix(in srgb, var(--text) 6%, transparent); font-size: 13px; }
+
+/* ses boîtes */
+.mailset-boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin: 0; padding: 0;
+  list-style: none; }
+.mailset-box { display: grid; gap: 12px; align-content: start; }
+.mailset-box-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; }
+.mailset-initial { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
+  background: var(--accent-soft); color: var(--accent); font-family: var(--now-serif); font-size: 1.2rem; font-weight: 600; }
+.mailset-box-name { min-width: 0; }
+.mailset-box-name h3 { margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
+.mailset-box-name h3 a { color: var(--text); }
+.mailset-box-name h3 a:hover { color: var(--accent); }
+.mailset-box-name .mono { font-size: 12px; font-weight: 400; }
+.mailset-address { margin: 2px 0 0; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.mailset-tags { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1 / -1; margin: 4px 0 0; }
+.mailset-box-facts { display: grid; gap: 7px; margin: 0; }
+.mailset-box-facts > div { display: grid; grid-template-columns: minmax(110px, 26%) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
+.mailset-box-facts dt { color: var(--muted); }
+.mailset-box-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.mailset-activity { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--sunken); color: var(--text-2);
+  font-size: 12.5px; }
+.mailset-activity.danger { background: var(--danger-bg); color: var(--danger); }
+.mailset-box-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px;
+  border-top: 1px solid var(--border); }
+.mailset-remove { margin-left: auto; }
+.mailset-empty { display: grid; gap: 12px; justify-items: start; }
+.mailset-empty p { margin: 0; }
+
+/* les paramètres généraux */
+.mailset-params { display: grid; gap: 26px; }
+.mailset-params-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+.mailset-param { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.mailset-param .field { margin: 0; }
+.mailset-param .field input:not([type="checkbox"]):not([type="range"]) { max-width: 200px; }
+.mailset-param.is-overridden { margin: -10px; padding: 10px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn-bg) 60%, transparent); }
+.mailset-param-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; color: var(--muted);
+  font-size: 12.5px; }
+.mailset-links { display: grid; gap: 12px; }
+.mailset-links a { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2);
+  color: var(--text); font-size: 13.5px; text-decoration: none; }
+.mailset-links a:hover { background: var(--accent-soft); }
+.mailset-links a span { color: var(--text-2); font-size: 13px; }
+.mailset-links p { margin: 0; font-size: 12.5px; }
+
+@media (max-width: 1100px) {
+  .mailset-boxes { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .mailset-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+@media (max-width: 640px) {
+  .mailset-fields, .mailset-params-list { grid-template-columns: minmax(0, 1fr); }
+  .mailset-boxes { grid-template-columns: minmax(0, 1fr); }
+  .mailset-remove { margin-left: 0; }
+}

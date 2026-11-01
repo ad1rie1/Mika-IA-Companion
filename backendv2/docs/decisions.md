@@ -24,11 +24,11 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1130,7 +1130,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un mail proposé s'approuvait sans aperçu, et son corps dormait en clair au journal, hors de portée de l'oubli.
 
-*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132, 0166, 0171.*
+*Révise 0022 (en partie), 0025 (en partie). Révisée par 0037, 0132, 0166, 0171, 0172, 0175.*
 
 ### 0037 — Ce qui vient d'ailleurs : borné, cité, désigné par nous, montré en privé, en arrière-plan
 
@@ -1385,6 +1385,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* ses listes ne disaient ni la date ni son propre tri : pour trier, elle rouvrait chaque mail, cinq au plus par épisode. « facture EDF » ne trouvait pas « Facture de votre contrat EDF ». Une recherche au-delà des deux jours relevés répondait « Rien ne correspond », et elle concluait que le mail n'existait pas.
 
+*Révisée par 0175.*
+
 ### 0171 — Les dossiers d'une boîte : cochés dans la liste du serveur, tous synchronisés si on le veut
 
 - Synchroniser et relever sont deux choses. Un dossier **relevé**, elle le remarque : chaque mail qui y arrive est trié, puis devient une pensée. Un dossier seulement **synchronisé** est tenu à jour pour la console, sans rien lui rendre.
@@ -1396,6 +1398,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* seule la réception se synchronisait. La liste des dossiers n'était lue qu'au premier relevé, et seulement si aucun dossier n'était encore connu : un « Actualiser le dossier » fait avant ce premier relevé la figeait sur la réception. Les dossiers relevés se tapaient à la main, un nom IMAP par ligne. Relever tous les dossiers lui aurait fait remarquer les spams et chacun de tes envois.
 
 *Révise 0027 (en partie).*
+
+### 0172 — Les pièces d'un mail sont gardées avec lui
+
+- Le relevé lit déjà chaque mail entier : ses pièces jointes et ses images intégrées (`cid:`) vont au cache du courrier, à côté de lui (`parts`). Leurs octets sont à part, une fois par contenu (`blobs`), en morceaux d'1 Mio : une ligne tient dans un paquet de MariaDB et dans une sauvegarde. Rien n'en va au modèle ni au journal.
+- Télécharger ou transférer une pièce gardée ne demande plus le serveur. Une pièce absente (trop grosse, cédée, ou d'un mail relevé avant) se relit sur le serveur, comme avant. Le message entier (`.eml`) reste au serveur.
+- Les pièces partent avec leur mail : oubli du correspondant, élagage, mail rangé ou supprimé ailleurs. Des octets qu'aucune pièce ne désigne plus s'effacent avec la dernière.
+- Bornes : une pièce de plus de 25 Mio reste sur le serveur. Au-delà de 4 Gio en tout, les pièces dont le dernier mail est le plus ancien cèdent leurs octets, jusqu'aux neuf dixièmes ; elles restent listées.
+- Dans le cadre d'un mail HTML (0169), une image intégrée prend sa place en `data:` : PNG, GIF, JPEG, WebP ou BMP, 8 Mio par mail. Le cadre ne charge toujours rien du dehors ; la page garde ses documents dans 64 Mio. Un mail relevé avant le dit sur sa fiche, et « Récupérer ses pièces » le relit (`reread`).
+
+*Pourquoi :* les octets d'une pièce étaient jetés au relevé, puis relus sur le serveur à chaque téléchargement : un mail rangé ou supprimé ailleurs perdait ses pièces, et un logo de signature (`cid:`) ne s'affichait jamais.
+
+*Révise 0027 (en partie), 0169 (en partie).*
 
 ## Les fournisseurs de modèles
 
@@ -1922,7 +1936,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* des menus rangés par propriétaire, des tables plafonnées sans le dire, toute la configuration sur une page.
 
-*Révise 0025 (en partie). Révisée par 0042, 0121.*
+*Révise 0025 (en partie). Révisée par 0042, 0121, 0173.*
 
 ### 0042 — La console dit pourquoi, en mots, et ne laisse rien partir par erreur
 
@@ -2040,7 +2054,44 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* reconstruit sans CSS, un mail mis en page (colonnes, encadrés, boutons) devenait illisible. Le bac à sable garde la console aussi sûre qu'avant, sans priver le mail de sa forme.
 
-*Révise 0025 (en partie).*
+*Révise 0025 (en partie). Révisée par 0172, 0175.*
+
+### 0173 — Les réglages du courrier vivent dans le Courrier, en haut à droite
+
+- Courrier › Paramètres s'ouvre par un bouton en haut à droite de chaque page du courrier (`Destination.gear`) : ce n'est pas un onglet de plus, et la barre de côté ne porte plus de lien vers les réglages.
+- La page réunit ses boîtes, en cartes (où chacune en est, comment elle lit et envoie, sa voix, son dernier relevé), et les paramètres généraux du courrier (relevé, ce qu'elle en dit, ses brouillons), jusque-là seuls sous Réglages › Paramètres avancés. Une boîte se modifie sur la même page, chaque sujet à côté de ce qu'il règle.
+- Une page de réglages peut ainsi vivre là où l'on se sert de ce qu'elle règle (`SettingsPage.home`, `params`, `template`) : ses liens et ses retours y mènent, un formulaire refusé s'y remontre. Elle s'enregistre toujours par les réglages et les paramètres, avec leurs gardes, leur audit et leur journal.
+- L'ancienne adresse, Réglages › Plugins › Boîtes aux lettres, mène à la nouvelle.
+- Tous les onglets du courrier et de ses fiches sont dessinés (ADR 0121), le brouillon disparu de la boîte compris.
+
+*Pourquoi :* les réglages du courrier étaient loin du courrier, sous une autre mise en page et sans ses paramètres généraux ; ceux d'une boîte s'étalaient en grille de trois colonnes.
+
+*Révise 0029 (en partie). Révisée par 0174, 0175.*
+
+### 0174 — Le formulaire d'une boîte ne montre que ce qui sert, et suit ce qu'on tape
+
+- Une boîte se règle dans cet ordre : la boîte (l'adresse d'abord, puis son nom court), la connexion, lire, envoyer, sa voix. La connexion vaut pour lire comme pour envoyer : elle a sa ligne, avec l'utilisateur et, selon le choix, le mot de passe ou l'application Microsoft.
+- Ce qui ne sert pas au choix fait ne paraît pas (`Knob.only`) : le mot de passe ou l'application Microsoft, « Ton nom » ou « Son nom d'expéditrice ». Les réglages d'envoi et sa voix attendent un serveur d'envoi (`Knob.unless` : masqué tant qu'un autre champ vaut l'une de ses valeurs, vide ici) ; tant qu'il manque, la page dit ce qu'elle attend. Un champ masqué ne s'écrit pas.
+- La console suit chaque changement, à la frappe comme au choix (`console.js`, `data-only` et sa négation `chemin!=valeur`). Sur une boîte neuve, l'adresse d'un fournisseur courant propose ses serveurs, leurs ports et la connexion ; un compte Microsoft choisi propose ceux de Microsoft ; l'utilisateur suit l'adresse ; un port suit son chiffrement (`static/handmade/courrier_boite.js`). Rien de ce qu'on a tapé ou choisi n'est écrasé. Ces fournisseurs sont une aide à la saisie, gardée dans le script ; sans lui, tout se tape à la main.
+- Partout dans la console, une liste dont chaque choix est une valeur et qui ne peut rester vide n'offre plus de « — ».
+
+*Pourquoi :* la connexion par Microsoft était rangée sous « Lire », ses deux champs obligatoires sous « rarement utiles », et rien ne réagissait à la connexion, à la voix ni au serveur d'envoi. Sans serveur d'envoi, la voix ne sert pas : un brouillon d'une boîte qui ne peut pas envoyer est refusé. Le « — » ne menait qu'à « choisissez une valeur ».
+
+*Révise 0173 (en partie).*
+
+### 0175 — Le courrier au quotidien : ton non-lu, sa lecture à part, ranger d'un coup, ses images, ses outils
+
+- Dans la console, « non lu » est le tien : le drapeau du serveur, que la console ou un autre client posent. Ce qu'elle a lu ou rangé elle-même (`Seen.by_her`) se montre à part (« lu par elle », « archivé par elle ») et ne sort plus un mail de tes non-lus. Ses outils gardent leur sens (ADR 0168).
+- Ouvrir un mail ne le marque toujours pas lu, sauf si le réglage « Ouvrir un mail le marque lu » (Courrier › Paramètres, Lecture) le demande : dès l'ouverture, ou après 3 ou 10 secondes passées à le lire, onglet visible. Le script de la console envoie alors « Marquer comme lu » ; sans lui, rien ne change.
+- La boîte se lit comme une messagerie. À côté, ce qu'on lit (Réception, À traiter, Suivis, ses brouillons, Envoyés, Contacts), puis les comptes et leurs dossiers, sur chaque page : ils remplacent les onglets, que la page tait. La liseuse se place à côté de la liste dès que la place le permet, dessous sinon. Elle donne le message précédent et le suivant (j, k ; Échap la ferme) et, en tête, ce qu'elle en sait : ce qu'elle en a retenu, son tri, sa réponse. « À traiter » : ce que son tri juge attendre une réponse, sans réponse partie.
+- Chaque ligne a sa case ; la barre au-dessus range ce qu'on a coché sur le serveur (lu, non lu, archiver, suivre, ne plus suivre, corbeille ; jamais de suppression définitive d'un coup). Les gestes courants du message sont à portée, « Lui demander une réponse » à côté de Répondre ; déplacer et jeter restent dans « Plus d'actions ».
+- Ses images distantes restent masquées (ADR 0169), sauf si on les permet : pour ce mail (`?images=1`), ou « Toujours pour cet expéditeur ». La liste de ces expéditeurs vit dans les réglages (`mail_images`), à part des comptes ; oublier le correspondant l'en retire. Le cadre garde alors ses images `http`/`https` (ni `srcset`, ni attribut `background`) et se sert sous sa politique (`FRAME_CSP_REMOTE`), qui n'ouvre que les images, sans référent.
+- Elle range elle-même (`email_tidy`) : marquer lu ou non lu, suivre, archiver, déplacer, mettre à la corbeille, jusqu'à 25 mails à la fois, jamais une suppression. Le résultat dit, mail par mail, ce qui est fait, ce qui l'était déjà, ce que le serveur a refusé, et chaque mail que tu n'avais pas encore lu : il informe sans interdire. Ce qu'elle range ne lui est plus signalé. C'est un outil qui agit, réservé à sa propriétaire par le minimum vital et réglable dans Réglages › Droits ; tant qu'un outil natif ne sait pas attendre un accord, « demande à la personne » et « demande-toi » ne lui font pas de carte.
+- Un point de prêt qui n'écrit pas (ADR 0122) refuse un outil qui agit avant qu'il ne coure : la lecture seule ne bloquait que l'écriture au journal, et un rangement sur le serveur serait passé.
+
+*Pourquoi :* un mail qu'elle avait lu disparaissait de tes non-lus ; ouvrir un mail ne le marquait jamais lu, et « Marquer comme lu » était caché ; tout se rangeait mail par mail, en ouvrant chacun ; la liseuse tombait sous la liste, à faire défiler à chaque mail ; ce qu'elle savait d'un mail ne se lisait que sur sa fiche ; une lettre d'information restait sans ses images ; elle ne pouvait ni trier ni ranger ta boîte.
+
+*Révise 0027 (en partie), 0168 (en partie), 0169 (en partie), 0173 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

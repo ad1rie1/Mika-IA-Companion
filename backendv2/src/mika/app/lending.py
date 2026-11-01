@@ -40,6 +40,7 @@ from mika.runtime.tools import (
     offer,
 )
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 
 PREFIX = "/mcp/pret"
 #: au-delà, un point refuse les appels de la minute (429) : un agent qui boucle ne la noie pas
@@ -133,6 +134,11 @@ class Lending:
         if refused:
             self._note(point, name, False)
             return Outcome(refused, is_error=True)
+        if spec.acts and not entry.get("writes"):
+            # un outil qui agit agit aussi au-dehors (ranger un courrier sur son serveur) : la lecture seule le refuse
+            # avant qu'il ne coure, pas seulement quand il écrirait au journal (ADR 0175)
+            self._note(point, name, False)
+            return Outcome(str(ReadOnly(phrase("runtime.tools.refused.read_only"))), is_error=True)
         mind = self.kernel.mind
         handle = str(entry.get("by") or "")
         eid = f"pret:{point}:{secrets.token_hex(6)}"

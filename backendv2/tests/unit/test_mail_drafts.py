@@ -72,6 +72,11 @@ def fixed(**values) -> dict[str, list[str]]:
     return {"_fixes": list(values), **{k: [str(v)] for k, v in values.items()}}
 
 
+def tidy(gesture: str, *mails: str) -> dict[str, list[str]]:
+    """La barre de la liste : les mails cochés, et le bouton du geste."""
+    return {"_champs": ["mails", "geste"], "mails": list(mails), "geste": [gesture]}
+
+
 def mail(n: int, subject: str, body: str, *, account: str = "perso", sender: str = ALICE, at: int = START,
          bulk: bool = False) -> Mail:
     address = sender.split("<")[-1].rstrip(">")
@@ -334,10 +339,11 @@ def test_tidying_acts_on_the_server_and_quiets_her(tmp_path):
     async def scenario(kernel, llm):
         await sleep(15 * MINUTE)
         out = {"before": sorted(m.mail for m in kernel.mind.frame().get(email_c.UNREAD))}
-        out["archive"] = await perform(kernel, "email.ranger", fixed(mail="<m1@exemple.fr>", geste="archiver"),
-                                       by="user_1", nonce="g1")
-        out["follow"] = await perform(kernel, "email.ranger", fixed(mail="<m4@exemple.fr>", geste="suivre"),
-                                      by="user_1", nonce="g2")
+        # les cases cochées de la liste (ADR 0175) : une valeur par mail, sous le même nom
+        out["archive"] = await perform(kernel, "email.ranger", tidy("archiver", "<m1@exemple.fr>"), by="user_1",
+                                       nonce="g1")
+        out["follow"] = await perform(kernel, "email.ranger", tidy("suivre", "<m4@exemple.fr>"), by="user_1",
+                                      nonce="g2")
         box.read_on_another_device("<m2@exemple.fr>")
         out["trash"] = await perform(kernel, "email.corbeille", form(), by="user_1", subject="<m3@exemple.fr>",
                                      nonce="c1")
@@ -361,7 +367,7 @@ def test_tidying_acts_on_the_server_and_quiets_her(tmp_path):
     assert out["how"]["<m1@exemple.fr>"] == "archivé" and out["how"]["<m2@exemple.fr>"] == "ailleurs"
     assert out["how"]["<m3@exemple.fr>"] == "corbeille"
     listed = next(b for b in walk(out["box"]) if isinstance(b, Table) and b.title.startswith("Tous les dossiers"))
-    starred = {r.cells[0].text: r.cells[-1] for r in listed.rows}
+    starred = {r.cells[0].text: r.cells[3] for r in listed.rows}  # la colonne « État »
     assert starred["À suivre"].text == "★ Suivi · Non lu"
     nav = [b for b in walk(out["box"]) if isinstance(b, Nav) and b.title == "Dossiers"]
     assert nav and "Archives" in [i.text for i in nav[-1].items]

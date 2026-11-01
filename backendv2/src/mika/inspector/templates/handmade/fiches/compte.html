@@ -42,7 +42,7 @@
         <summary>Ses réglages, sans secret</summary>
         {% if details %}<dl class="obj-facts">{% for label, value in details %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>
         {% else %}<p class="now-empty">aucun réglage connu</p>{% endif %}
-        <p class="now-after now-muted">Ils se modifient dans Réglages › Plugins › Boîtes aux lettres.</p>
+        <p class="now-after now-muted">Ils se modifient dans <a href="{{ PREFIX }}/courrier/parametres">Courrier › Paramètres</a>.</p>
       </details>
     </div>
   </div>

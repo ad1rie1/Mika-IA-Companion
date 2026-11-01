@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import email.utils
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -21,13 +21,13 @@ from mika.kernel.inspect import Ref
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, keeper_name
 from mika.plugins.email.console.common import SECTION, can_send, clip, mail_key, ready, resolve, unread
-from mika.plugins.email.console.mail import _server
+from mika.plugins.email.console.mail import _read_draft, apply
 from mika.ports.mail import addresses
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
-NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Réglages › Plugins › Boîtes aux lettres)."
+NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Courrier › Paramètres)."
 
 
 class WriteArgs(BaseModel):
@@ -73,9 +73,19 @@ class FolderArgs(BaseModel):
     dossier: Annotated[str, Knob(label="Dossier", widget="hidden")] = Field(default="INBOX", max_length=300)
 
 
+#: ce qu'on fait des mails cochés dans la liste (sur le serveur) ; jamais de suppression définitive d'un coup
+GESTURES = (("lu", "Marquer lu"), ("non_lu", "Marquer non lu"), ("archiver", "Archiver"), ("suivre", "Suivre"),
+            ("ne_plus_suivre", "Ne plus suivre"), ("corbeille", "Corbeille"))
+#: au plus autant de mails rangés d'un coup (une page de la boîte en compte douze)
+TIDY_MAX = 100
+
+
 class TidyArgs(BaseModel):
-    mail: Annotated[str, Knob(label="Mail", widget="hidden")] = Field(min_length=1, max_length=500)
-    geste: Annotated[str, Knob(label="Geste", widget="hidden")] = Field(min_length=1, max_length=40)
+    mails: Annotated[tuple[str, ...], Knob(label="Mails", advanced=False,
+                                           help="Ceux qu'on a cochés dans la liste (une clé par ligne).")] = \
+        Field(min_length=1, max_length=TIDY_MAX)
+    geste: Annotated[Literal["lu", "non_lu", "archiver", "suivre", "ne_plus_suivre", "corbeille"],
+                     Knob(label="Geste", choices=GESTURES, advanced=False)] = "lu"
 
 
 def _check(to: str, cc: str) -> None:
@@ -153,7 +163,7 @@ async def _forward(s: EmailState, frame: Frame, args: ForwardArgs, ctx: Any) -> 
               description="Sans attendre la prochaine relève (même si elle dort).")
 def _poll(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     if not ready(ctx.ports.get("mail")):
-        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Réglages › Plugins › Boîtes aux lettres).")
+        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Courrier › Paramètres).")
     return Done(drafts=(POLL_ASKED.draft(by=ctx.by),), message="Relève demandée : les nouveaux mails arrivent "
                 "dans quelques secondes.")
 
@@ -200,9 +210,6 @@ async def _reread(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Do
     return Done(message=f"{n} nouveau(x) mail(s) dans « {args.dossier} »." if n else "Rien de nouveau.")
 
 
-GESTURES = ("lu", "non_lu", "suivre", "ne_plus_suivre", "archiver", "corbeille")
-
-
 @EMAIL.action("historique", title="Charger des messages plus anciens", args=FolderArgs, emits=[],
               description="Charge jusqu'à 50 messages antérieurs aux messages déjà synchronisés dans ce dossier.")
 async def _older(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Done:
@@ -219,19 +226,39 @@ async def _older(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Don
                        (("compte", args.compte), ("dossier", args.dossier))))
 
 
-@EMAIL.action("ranger", title="Ranger", args=TidyArgs, emits=[READ],
-              description="Un geste rapide sur un mail de la liste (sur le serveur).")
+@EMAIL.action("ranger", title="Ranger la sélection", args=TidyArgs, emits=[READ],
+              description="Un geste sur les mails cochés de la liste, sur le serveur : lu, non lu, archiver, suivre, "
+                          "corbeille.")
 async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
-    if args.geste not in GESTURES:
-        raise Refused("Geste inconnu.")
     port = ctx.ports.get("mail")
-    ref = resolve(s, port, args.mail) if port is not None else None
-    if ref is None:
-        raise Refused("Ce mail n'est plus dans la boîte.")
-    m = port.cached_one(ref)
-    if args.geste == "lu" and m is not None and not unread(m, s.mails.get(ref)):
-        return Done(message="Déjà lu.", tone="info")
-    done = await _server(dataclasses.replace(ctx, subject=ref), s, args.geste)
-    return dataclasses.replace(done, go=Ref("local", f"/inspecteur/{SECTION}/reception", "",
-                                            tuple((k, v) for k, v in (("compte", m.account if m else ""),
-                                                                      ("dossier", m.folder if m else "")) if v)))
+    if port is None:
+        raise Refused("Courrier non branché.")
+    found = [m for m in (port.cached_one(r) for r in dict.fromkeys(
+        ref for ref in (resolve(s, port, key) for key in args.mails if len(key) <= 500) if ref is not None)) if m]
+    if not found:
+        raise Refused("Ces mails ne sont plus dans la boîte.")
+    if args.geste == "lu":  # par lot : une session par compte et par dossier
+        todo = [m for m in found if unread(m, s.mails.get(m.ref))]
+        try:
+            failed = await port.mark_seen([m.ref for m in todo]) if todo else 0
+        except (OSError, RuntimeError, ValueError):
+            failed = len(todo)
+        drafts = tuple(d for m in todo for d in _read_draft(s, m.ref, ctx.by, "lu"))
+        done = len(todo) - failed
+        note = f" ({failed} refusé(s) par le serveur)" if failed else ""
+        said = f"{done} mail(s) marqué(s) comme lu(s){note}." if todo else "Déjà lus."
+        return Done(drafts=drafts, message=said, tone="info" if not todo else "ok")
+    drafts_: list[Any] = []
+    refused = 0
+    for m in found:
+        try:
+            got, _ = await apply(port, s, m, args.geste, ctx.by)
+        except (OSError, RuntimeError, ValueError):  # une erreur IMAP est une OSError ou une ImapError
+            refused += 1
+            continue
+        drafts_.extend(got)
+    label = dict(GESTURES)[args.geste].lower()
+    note = f" ; {refused} refusé(s) par le serveur" if refused else ""
+    if refused == len(found):
+        raise Refused(f"Le serveur a refusé : {label}, pour {refused} mail(s).")
+    return Done(drafts=tuple(drafts_), message=f"{label.capitalize()} : {len(found) - refused} mail(s){note}.")

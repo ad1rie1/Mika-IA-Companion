@@ -304,7 +304,8 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
    enregistrement laisse une ligne dans **Réglages › Historique des réglages**. On lui écrit par une application
    dédiée (le frontend web, le client Unity, l'application Android), avec un compte : il n'y a pas de robot de
    messagerie (ADR 0060). Un client natif s'authentifie par un jeton de son compte (`mika token create <compte>`).
-4. Ses boîtes aux lettres : **Réglages › Plugins › Boîtes aux lettres** (`/inspecteur/reglages/boites`) — un
+4. Ses boîtes aux lettres : **Courrier › Paramètres**, le bouton en haut à droite du courrier
+   (`/inspecteur/courrier/parametres`) — un
    enregistrement par boîte : serveurs IMAP/SMTP, dossiers relevés, et sa voix (en son nom, en assistante, ou à ta
    place ; ton, consignes, signature ; préparer des réponses d'elle-même). « Tester la connexion » sur la fiche de
    la boîte. Une fois la boîte enregistrée, « Charger la liste », sous « Dossiers relevés », lit ses dossiers sur

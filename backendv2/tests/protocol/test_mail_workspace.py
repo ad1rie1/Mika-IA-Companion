@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import re
 from dataclasses import replace
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
-from mika.inspector.framed import FRAME_CSP
+from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE
 from mika.ports.mail import Attachment, File
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import framed, mailbox
@@ -47,8 +48,10 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
     assert '<span class="person-count now-num">1</span>' in searched and "Personnel · message 529" in searched
     assert not box.sent and not box.actions  # consulter ne marque pas lu et n'envoie rien
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S).group()
-    assert "Comptes" not in tabs and "Réglages" not in tabs
-    assert 'href="/inspecteur/reglages/boites"' in page
+    assert "Comptes" not in tabs and "Réglages" not in tabs and "Paramètres" not in tabs
+    # ses paramètres : le bouton en haut à droite, plus un lien dans la barre de côté (ADR 0172)
+    assert re.search(r'<a class="btn quiet gear-link" href="/inspecteur/courrier/parametres[^"]*"', page)
+    assert "Gérer les comptes" not in page
     assert client.get("/inspecteur/courrier/comptes", follow_redirects=False).status_code == 301
 
 
@@ -186,6 +189,27 @@ def test_legacy_cache_is_labelled_and_all_attachment_links_are_paginated(world):
     assert 'fichier-30.txt' in get(client, url + '?pg1=2')
 
 
+def test_inline_images_show_in_the_frame_and_a_mail_kept_before_rereads_its_parts(world):  # noqa: F811
+    """ADR 0172 : le logo intégré (``cid:``) s'affiche dans le cadre ; un mail relevé avant que ses pièces soient
+    gardées le dit, et se relit pour les garder."""
+    client, box = setup(world)
+    m = box.cached_one('pro:<projet@example.test>')
+    logo = b'\x89PNG\r\n\x1a\n-logo-atelier'
+    box.inbox[box.inbox.index(m)] = replace(m, html=m.html + '<img src="cid:logo@atelier" alt="Logo intégré">',
+                                            parts_kept=False)
+    box.inline[m.ref] = (('logo@atelier', 'image/png', logo),)
+    url = '/inspecteur/fiche/mail/' + quote(m.ref, safe='')
+    page = get(client, url)
+    mail = framed(client, page)
+    assert f'src="data:image/png;base64,{base64.b64encode(logo).decode()}"' in mail
+    assert 'tracker.example.test' not in mail  # l'image distante, elle, reste masquée
+    assert 'relevé avant que ses pièces soient gardées' in page and 'Récupérer ses pièces' in page
+    done = client.post('/inspecteur/action/email.completer', data=posted_form(page, 'email.completer'))
+    assert done.status_code == 200, done.text
+    assert ('reread', m.ref) in box.actions
+    assert 'Récupérer ses pièces' not in get(client, url)
+
+
 def test_inbox_reading_list_and_table_keep_account_filters_and_return_path(world):  # noqa: F811
     client, box = setup(world)
     url = '/inspecteur/courrier/reception?compte=perso&q=message&etat=non_lus'
@@ -211,7 +235,10 @@ def test_a_line_opens_the_message_under_the_list_with_its_actions(world):  # noq
     sous la liste (``?lire=``) avec ses actions, préparées à son nom (leur jeton), et un lien vers sa fiche."""
     client, box = setup(world)
     listing = get(client, "/inspecteur/courrier/reception?compte=perso")
-    assert listing.count('<li class="') >= 12 and len(re.findall(r'<li class="[^"]*"><a href="\?', listing)) == 12
+    # une case par ligne, qui appartient à la barre de la liste (ADR 0175), puis le lien qui ouvre le message
+    lines = re.findall(r'<li class="[^"]*"><label class="mail-check"><input type="checkbox" name="mails" value="[^"]+" '
+                       r'form="mail-bulk"[^>]*></label><a href="\?', listing)
+    assert listing.count('<li class="') >= 12 and len(lines) == 12
     assert 'rel="next"' in listing and "Choisis un message pour le lire ici." in listing
     key = quote("pro:<projet@example.test>", safe="")
     page = get(client, f"/inspecteur/courrier/reception?compte=pro&lire={key}")
@@ -223,3 +250,101 @@ def test_a_line_opens_the_message_under_the_list_with_its_actions(world):  # noq
     assert 'name="csrf"' in form  # le retour ramène au message ouvert
     assert 'name="_retour" value="/inspecteur/courrier/reception?compte=pro&lire=' in form
     assert not box.sent and not box.actions  # lire ne marque pas lu et n'envoie rien
+
+
+# ── Le courrier au quotidien (ADR 0175) ───────────────────────────────────
+
+BULK = r'name="mails" value="([^"]+)" form="mail-bulk"'
+
+
+def test_the_side_names_what_you_read_on_every_mail_page(world):  # noqa: F811
+    """À côté : ce qu'on lit (à la place des onglets, que la feuille tait), les comptes, les dossiers — sur chaque page
+    du courrier."""
+    client, _ = setup(world)
+    page = get(client, "/inspecteur/courrier/reception?compte=perso")
+    side = page.split('aria-label="Le courrier, ses comptes et ses dossiers"')[1].split("</aside>")[0]
+    for label in ("Réception", "À traiter", "Suivis", "Ses brouillons", "Envoyés", "Contacts", "Comptes", "Dossiers"):
+        assert label in side, label
+    assert "/inspecteur/courrier/reception?compte=perso&etat=a_traiter&dossier=%2A" in side
+    assert 'class="hm-workspace mail-views"' in page
+    assert "<h2>Suivis</h2>" in get(client, "/inspecteur/courrier/reception?compte=perso&etat=suivis&dossier=*")
+    assert "<h2>À traiter</h2>" in get(client, "/inspecteur/courrier/reception?compte=perso&etat=a_traiter&dossier=*")
+    for tab in ("brouillons", "envoyes", "contacts"):
+        assert "Dossiers" in get(client, f"/inspecteur/courrier/{tab}?compte=perso")
+    # remonter plus loin : au bout de la liste, plus dans la barre du haut
+    assert page.index("Charger des messages plus anciens") > page.index('class="mail-lines"')
+
+
+def test_checked_lines_are_tidied_at_once_on_the_server(world):  # noqa: F811
+    client, box = setup(world)
+    url = "/inspecteur/courrier/reception?compte=perso&etat=non_lus"
+    page = get(client, url)
+    keys = re.findall(BULK, page)[:2]
+    assert len(keys) == 2 and 'action="/inspecteur/action/email.ranger"' in page
+    nothing = client.post("/inspecteur/action/email.ranger", data=posted_form(page, "email.ranger", geste="lu"))
+    assert nothing.status_code == 400 and not box.actions  # rien de coché : rien ne part
+    done = client.post("/inspecteur/action/email.ranger", data=posted_form(page, "email.ranger", mails=keys, geste="lu"))
+    assert done.status_code == 200, done.text
+    assert ("seen_many", tuple(keys)) in box.actions  # par lot, sur le serveur
+    after = get(client, url)
+    assert all(f'value="{k}" form="mail-bulk"' not in after for k in keys)  # sortis de tes non-lus
+    other = re.findall(BULK, after)[0]
+    moved = client.post("/inspecteur/action/email.ranger",
+                        data=posted_form(after, "email.ranger", mails=[other], geste="archiver"))
+    assert moved.status_code == 200 and any(a[:2] == ("move", other) for a in box.actions)
+    assert not box.sent
+
+
+def test_remote_images_show_once_or_always_for_a_sender(world):  # noqa: F811
+    client, box = setup(world)
+    key = quote("pro:<projet@example.test>", safe="")
+    url = f"/inspecteur/fiche/mail/{key}"
+    page = get(client, url)
+    assert "Images masquées" in page and "Les afficher cette fois" in page and "Toujours pour cet expéditeur" in page
+    assert "tracker.example.test" not in framed(client, page)
+
+    def frame_of(text):
+        src = re.search(r'<iframe class="document-frame" src="([^"]+)"', text).group(1)
+        return client.get(src)
+
+    once = frame_of(get(client, url + "?images=1"))
+    assert once.headers["content-security-policy"] == FRAME_CSP_REMOTE
+    assert once.headers["referrer-policy"] == "no-referrer"
+    assert 'src="https://tracker.example.test/pixel"' in once.text and "window.mailExecuted" not in once.text
+    assert not box.images_from  # cette fois seulement
+    reader = get(client, f"/inspecteur/courrier/reception?compte=pro&lire={key}")
+    assert "reception?compte=pro&lire=" in reader and "&images=1" in reader  # la liseuse reste sur la boîte
+    done = client.post("/inspecteur/action/email.images", data=posted_form(page, "email.images"))
+    assert done.status_code == 200 and box.images_from == {"lea@example.test"}
+    always = get(client, url)
+    assert "Ne plus les afficher" in always and "Images masquées" not in always
+    assert frame_of(always).headers["content-security-policy"] == FRAME_CSP_REMOTE
+    off = client.post("/inspecteur/action/email.images_masquer", data=posted_form(always, "email.images_masquer"))
+    assert off.status_code == 200 and not box.images_from
+    assert frame_of(get(client, url)).headers["content-security-policy"] == FRAME_CSP
+
+
+def test_the_reader_steps_through_the_list_and_reads_after_a_delay_only_when_asked(world):  # noqa: F811
+    client, box = setup(world)
+    listing = get(client, "/inspecteur/courrier/reception?compte=perso")
+    keys = re.findall(BULK, listing)
+
+    def reader(n):
+        page = get(client, "/inspecteur/courrier/reception?compte=perso&" + urlencode({"lire": keys[n]}))
+        return page.split('class="now-card mail-reader"')[1]
+
+    middle = reader(1)
+    assert 'rel="prev"' in middle and urlencode({"lire": keys[0]}) in middle
+    assert 'rel="next"' in middle and urlencode({"lire": keys[2]}) in middle
+    assert 'rel="prev"' not in reader(0)
+    assert "Lui demander une réponse" in middle and "Marquer comme lu" in middle  # à portée
+    assert "data-read-after" not in middle  # ouvrir ne marque rien comme lu, par défaut
+    saved = client.post("/inspecteur/reglages/comportement-email", follow_redirects=False, data={
+        "csrf": client.cookies.get("csrftoken"), "_faculte": "email", "_groupe": "",
+        "_retour": "/inspecteur/courrier/parametres", "_champs": ["read_on_open"], "read_on_open": "3s"})
+    assert saved.status_code == 303
+    assert 'data-read-after="3"' in reader(1)
+    assert 'data-read-after="3"' in get(client, "/inspecteur/fiche/mail/" + quote(keys[1], safe=""))
+    assert "Ouvrir un mail le marque lu" in get(client, "/inspecteur/courrier/parametres")
+    assert not box.actions and not box.sent  # le script s'en charge : la page, elle, ne marque rien
+

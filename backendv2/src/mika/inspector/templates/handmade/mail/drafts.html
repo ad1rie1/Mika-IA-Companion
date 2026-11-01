@@ -1,0 +1,57 @@
+{# Courrier › Brouillons (app/handmade/mail.py) : dans l'espace du courrier, ce qui attend ton accord en enveloppes —
+   l'objet, à qui, depuis quelle boîte et dans quelle voix, en réponse à quoi, d'où il vient, ce qu'il faut vérifier —
+   puis ce qui est déjà décidé, en lignes. Chaque liste garde sa pagination. #}
+{% from "handmade/mail/space.html" import space with context %}
+{% from "_navigation.html" import pager as pages %}
+{% from "_cells.html" import cell %}
+{% macro pager_of(t) -%}{% set p = t.pager or {} %}<div class="hm-pager{{ ' single' if not (p.prev or p.next or p.older or p.newer) }}">{{ pages(t.pager) }}</div>{%- endmacro %}
+<div class="now-page person-tab mail mail-drafts-page">
+{% call space(side, before) %}
+    <section class="now-card mail-drafts" id="{{ waiting.id }}" aria-labelledby="{{ waiting.id }}-title">
+      <header class="now-card-head"><h2 id="{{ waiting.id }}-title">{{ waiting.title }}</h2>{% if waiting.count %}<span class="person-count now-num">{{ waiting.count }}</span>{% endif %}</header>
+      {% if waiting.drafts %}
+      <ul class="mail-envelopes">
+        {% for d in waiting.drafts %}
+        <li class="mail-envelope{{ ' waiting' if d.waiting }}{{ ' check' if d.check }}">
+          <p class="mail-envelope-head">
+            {% if d.href %}<a class="mail-envelope-subject" href="{{ d.href }}">{{ d.subject }}</a>{% else %}<span class="mail-envelope-subject">{{ d.subject }}</span>{% endif %}
+            {% if d.state %}<span class="now-tag {{ d.state.tone }}">{{ d.state.text }}</span>{% endif %}{% if d.check %}<span class="now-tag {{ d.check.tone }}">{{ d.check.text }}</span>{% endif %}
+          </p>
+          <dl class="mail-envelope-facts">
+            {% if d.to %}<div><dt>À</dt><dd>{{ d.to }}</dd></div>{% endif %}
+            {% if d.box %}<div><dt>Depuis</dt><dd>{{ d.box }}{% if d.voice %} <span class="now-muted">· {{ d.voice }}</span>{% endif %}</dd></div>{% endif %}
+            {% if d.answer %}<div><dt>En réponse à</dt><dd>{{ cell(d.answer) }}</dd></div>{% endif %}
+          </dl>
+          <p class="mail-envelope-foot">
+            {% if d.origin %}<span class="now-tag{{ ' info' if d.origin == 'demandé' }}">{{ d.origin }}</span>{% endif %}
+            {% if d.when %}<span class="now-muted">proposé {{ cell(d.when) }}</span>{% endif %}
+            {% if d.href %}<a class="btn small mail-envelope-open" href="{{ d.href }}">Relire le brouillon</a>{% endif %}
+          </p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="now-empty">{{ waiting.empty }}.</p>{% endif %}
+      {{ pager_of(waiting) }}
+    </section>
+
+    {% if done %}
+    <section class="now-card mail-list" id="{{ done.id }}" aria-labelledby="{{ done.id }}-title">
+      <header class="now-card-head"><h2 id="{{ done.id }}-title">{{ done.title }}</h2>{% if done.count %}<span class="person-count now-num">{{ done.count }}</span>{% endif %}</header>
+      {% if done.drafts %}
+      <ul class="mail-lines mail-decided">
+        {% for d in done.drafts %}
+        <li><a href="{{ d.href or '#' }}">
+          <span class="mail-dot {{ d.state.tone if d.state }}" aria-hidden="true"></span>
+          <span class="mail-who">{{ 'à ' ~ d.to if d.to else '—' }}</span>
+          <span class="mail-what"><span class="mail-subject">{{ d.subject }}</span>{% if d.box %}<span class="mail-snippet"> — depuis {{ d.box }}</span>{% endif %}</span>
+          <span class="mail-tags">{% if d.state %}<span class="now-tag {{ d.state.tone }}">{{ d.state.text }}</span>{% endif %}</span>
+          <span class="mail-when">{% if d.when %}{{ cell(d.when) }}{% endif %}</span>
+        </a></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="now-empty">{{ done.empty }}.</p>{% endif %}
+      {{ pager_of(done) }}
+    </section>
+    {% endif %}
+{% endcall %}
+</div>

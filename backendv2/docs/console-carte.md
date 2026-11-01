@@ -105,15 +105,32 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - **Conversations** : Messages, un fil jour par jour (le texte, l'interlocuteur, la date, le lien vers
   l'explication d'une réponse ; la colonne « réponse » dit pourquoi un message est resté sans réponse et y mène) ;
   les questions sans réponse ; **Ses réponses jugées**, les avis de l'opératrice (ADR 0113).
-- **Courrier** : Réception et Envoyés en boîte aux lettres (une ligne par message, douze par page, le message
-  ouvert dans une liseuse sous la liste, `?lire=`), Brouillons, Contacts. Le compte, le dossier et les filtres se
-  gardent dans la pagination et au retour d'un message ; consulter n'envoie rien et ne marque rien comme lu. Un
+- **Courrier** : Réception et Envoyés en boîte aux lettres (une ligne par message, douze par page, une case pour la
+  cocher ; le message ouvert dans une liseuse, `?lire=`, à côté de la liste dès que la place le permet, dessous
+  sinon, avec le précédent et le suivant — j, k, Échap — et, en tête, ce qu'elle en sait), Brouillons (« À décider »
+  en enveloppes : à qui, depuis quelle boîte et dans quelle voix, en réponse à quoi, d'où il vient ; « Déjà décidés »
+  en lignes), Contacts (une ligne par adresse, « Ses échanges » et « Écrire »), tous dans le même espace : à côté, ce
+  qu'on lit (Réception, À traiter, Suivis, ses brouillons, Envoyés, Contacts — à la place des onglets, que la page
+  tait), les comptes et leurs dossiers ; au-dessus, écrire, actualiser et chercher. La barre de la liste range ce
+  qu'on a coché, sur le serveur (lu, non lu, archiver, suivre, corbeille) ; « Charger des messages plus anciens » est
+  au bout de la liste. « Non lu » est le tien (le drapeau du serveur) ; ce qu'elle a lu ou rangé se dit à part
+  (« lu par elle »), ADR 0175. Les fiches dessinent aussi leurs onglets secondaires : la boîte › Sa voix (les trois voix, l'expéditeur
+  tel qu'il partira, la signature, le texte qu'elle lit), le mail › Fil (en bulles, reçus à gauche, partis à droite)
+  et Ce qu'elle en sait, le brouillon › Pourquoi (le mail auquel il répond, les consignes) et Historique (le parcours,
+  les deux versions) ; un brouillon disparu de la boîte garde une fiche qui dit ce qu'elle en sait. Le compte, le dossier et les filtres se
+  gardent dans la pagination et au retour d'un message ; consulter n'envoie rien et ne marque rien comme lu, sauf
+  si le réglage « Ouvrir un mail le marque lu » le demande (le script de la console envoie « Marquer comme lu »). Un
   mail HTML se lit tel qu'il a été écrit, avec ses styles, dans un cadre isolé (ADR 0169) : ni script, ni
-  formulaire, ni image distante (son texte de remplacement à sa place) ; ses liens web et `mailto:` s'ouvrent dans
-  un nouvel onglet ; sa version texte reste accessible ; un message long se lit en parties de 50 000 caractères au
-  plus. Les brouillons
-  qu'elle propose sont distingués de ceux du serveur. Les boîtes se règlent dans Réglages › Plugins › Boîtes aux
-  lettres.
+  formulaire, ni image distante (son texte de remplacement à sa place), sauf si on les affiche pour ce mail ou
+  « Toujours pour cet expéditeur » (ADR 0175) ; ses images intégrées (`cid:`) s'y montrent (ADR 0172) ; ses liens web et `mailto:` s'ouvrent dans un nouvel onglet ; sa version texte reste accessible ; un
+  message long se lit en parties de 50 000 caractères au plus. Ses pièces jointes se téléchargent depuis le cache,
+  sans le serveur ; un mail relevé avant qu'elles soient gardées le dit, et « Récupérer ses pièces » le relit. Les brouillons
+  qu'elle propose sont distingués de ceux du serveur. **Paramètres**, le bouton en haut à droite (pas un onglet,
+  ADR 0173) : ses boîtes en cartes (où chacune en est, comment elle lit et envoie, sa voix, son dernier relevé), une
+  boîte sur sa page (la boîte, la connexion, lire, envoyer, sa voix, chacun à côté de ce qu'il règle ; ce qui ne sert
+  pas au choix fait ne paraît pas, et une adresse courante propose ses serveurs, ADR 0174), puis les paramètres
+  généraux du courrier (relevé, ce qu'elle en dit, ses brouillons, la lecture). L'ancienne adresse, Réglages › Plugins › Boîtes
+  aux lettres, y mène.
 - **Teams** (ADR 0069) : Conversations, Réponses (ses réponses rédigées à la place de la personne et leur sort),
   Extension (la clé).
 - **Identités et moyens de communication** : Moyens de communication, Identités à confirmer, Noms à relier (un nom
@@ -299,7 +316,7 @@ rôle par rôle (`CallLog.profile`).
 | Canaux | Dépôts git | le jeton de ses dépôts distants (aussi : Connexions extérieures › Dépôts Git) |
 | | Notifications du téléphone | la clé Firebase (collée ici ou posée en fichier), d'où elle vient, les téléphones notifiables, ce qui est parti, le dernier échec (ADR 0077) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
-| | Boîtes aux lettres | chaque boîte a sa page (la boîte, lire, envoyer, sa voix ; ce qu'elle prépare d'elle-même : le tableau de sa boîte, Réglages › Canaux) |
+| | Courrier | ses boîtes et ses paramètres généraux vivent dans Courrier › Paramètres, en haut à droite du courrier (ADR 0173) ; ce qu'elle prépare d'elle-même : le tableau de chaque boîte, Réglages › Canaux |
 | | Teams | la clé de l'extension, son nom, son ton, sa signature (comment ses réponses partent : le tableau de Teams, Réglages › Canaux) |
 | | Outils extérieurs (MCP) | chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; en main ; bornes (qui peut quoi : sur sa fiche, « Accès aux outils »). Nom fixe (il entre dans le nom de ses outils). ADR 0064, 0128, 0131 |
 | | Flux RSS | adresses suivies |
@@ -346,7 +363,9 @@ rôle par rôle (`CallLog.profile`).
   sa surface.
 - **Formulaires** : un groupe = un cadre titré avec sa phrase d'explication ;
   l'aide de chaque champ sous lui ; les options rarement utiles repliées sous
-  « Options avancées » ; une seule barre « Enregistrer » par page. Une saisie non
+  « Options avancées » ; un champ qui ne sert pas au choix fait ne paraît pas, et
+  paraît dès qu'il sert (à la frappe comme au choix) ; une liste qui ne peut
+  rester vide n'offre pas de « — » ; une seule barre « Enregistrer » par page. Une saisie non
   enregistrée se signale et la sortie est protégée ; les erreurs ont un résumé
   navigable au clavier.
 - **Actions d'en-tête** : une barre de boutons ; le formulaire s'ouvre en

@@ -36,6 +36,9 @@ class Destination:
     #: contexte commun conservé lorsqu'on change d'onglet (ex. le compte courrier)
     context: tuple[str, ...] = ()
     automatic_actions: bool = True
+    #: des onglets rangés derrière le bouton en haut à droite de la page plutôt que dans sa barre d'onglets (ses
+    #: paramètres : Courrier › Paramètres, ADR 0173)
+    gear: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +119,14 @@ class SettingsPage:
     form: bool = True
     #: des blocs propres à cette page (un historique, une table de résolution)
     extra: Callable[[], Sequence[Any]] | None = None
+    #: « destination/onglet » : la page vit là où l'on se sert de ce qu'elle règle (Courrier › Paramètres, ADR
+    #: 0173), pas sous Réglages ; ses liens et ses retours y mènent (elle s'enregistre toujours sous Réglages)
+    home: str = ""
+    #: le propriétaire dont les paramètres internes se règlent aussi sur cette page (tous ses groupes)
+    params: str = ""
+    #: son propre gabarit (sous ``templates/``) et ses feuilles, à la place de ``handmade/reglages/page.html``
+    template: str = ""
+    styles: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +291,10 @@ def check(nav: Sequence[NavGroup], registry: Any, builtins: Mapping[str, Builtin
             slugs.add(v.name)
         if not slugs:
             problems.append(f"destination {d.key} : aucun onglet")
+        problems += [f"destination {d.key} : bouton vers un onglet inconnu {name}" for name in d.gear
+                     if name not in slugs]
+        if slugs and slugs <= set(d.gear):
+            problems.append(f"destination {d.key} : tous ses onglets sont derrière le bouton")
         for name in d.order:
             if name not in slugs:
                 problems.append(f"destination {d.key} : ordre vers un onglet inconnu {name}")

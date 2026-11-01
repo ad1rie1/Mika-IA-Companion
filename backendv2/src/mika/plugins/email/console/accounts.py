@@ -1,6 +1,6 @@
 """Ses comptes : l'état de chaque boîte, ses dossiers, et **comment elle y écrit**
 (le texte exact qu'elle lit avant d'écrire). Les réglages eux-mêmes (serveurs,
-mot de passe, voix) se modifient dans Réglages › Plugins › Boîtes aux lettres : un lien y
+mot de passe, voix) se modifient dans Courrier › Paramètres : un lien y
 mène, et l'enregistrement ramène ici. Une boîte Microsoft (Hotmail, Outlook.com) se
 connecte depuis sa fiche : « Se connecter à Microsoft » donne un code à entrer chez
 Microsoft (ADR 0166)."""
@@ -34,6 +34,7 @@ from mika.kernel.operate import Done, Refused
 from mika.plugins.email import EMAIL, POLL_ASKED, EmailState, params_of
 from mika.plugins.email.console.common import (
     NO_PORT,
+    SETTINGS,
     VOICE_LABEL,
     add_account,
     box_link,
@@ -109,8 +110,8 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         + (Fields((("fiche", Ref.subject("compte", a.key, "état, dossiers, tester la connexion")),
                                    ("réglages", edit_account(a.key)))),)))
     blocks: list[Block] = [Fields((("nouvelle boîte", add_account()),
-                                   ("tous les réglages", Ref("local", "/inspecteur/reglages/boites",
-                                                             "Réglages › Plugins › Boîtes aux lettres"))))]
+                                   ("tous les réglages", Ref("local", SETTINGS,
+                                                             "Courrier › Paramètres"))))]
     blocks.append(Table(("nom", Column("clé", "fit"), "adresse", Column("elle écrit", "fit"), "relevés",
                          Column("état", "fit"), Column("dernier relevé", "fit"), Column("non lus", "num"),
                          Column("réponses préparées", "fit")), tuple(rows), title=f"Comptes ({len(rows)})",
@@ -144,7 +145,7 @@ def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: 
 
 
 @EMAIL.inspect("etat", title="État", subject="compte", order=10,
-               description='Vérifie la connexion, les derniers relevés et les dossiers de cette boîte. Les connexions se modifient dans Réglages › Plugins › Boîtes aux lettres.')
+               description='Vérifie la connexion, les derniers relevés et les dossiers de cette boîte. Les connexions se modifient dans Courrier › Paramètres.')
 def _tab_state(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     info = port.account(ctx.subject) if port is not None else None

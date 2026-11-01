@@ -6,6 +6,7 @@
 {% from "_forms.html" import action_button %}
 {% from "_cells.html" import cell %}
 {% from "_navigation.html" import filters_form %}
+{% from "_icons.html" import icon %}
 {# Une fiche dont la composition dessine l'en-tête ou la vue d'ensemble (ADR 0121) : les feuilles et les scripts
    qu'elle déclare (Overview.styles, Overview.scripts) ; un panneau, les siennes (Panel.styles). #}
 {% block head %}
@@ -21,7 +22,8 @@
   {% if head_actions|selectattr('danger')|list %}<details class="action-overflow"><summary class="btn quiet">Autres actions</summary><div class="toolbar action-overflow-panel">{% for a in head_actions if a.danger %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
 </div>
 {% endif %}
-{% if gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
+{% if gear and gear|length == 1 %}{% set g = gear[0] %}<a class="btn quiet gear-link{{ ' on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ icon('settings') }}{{ g.title }}</a>
+{% elif gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
 {% endmacro %}
 {% macro head_and_body() %}
 {% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}

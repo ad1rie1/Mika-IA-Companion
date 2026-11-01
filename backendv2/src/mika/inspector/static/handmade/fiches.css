@@ -1,6 +1,7 @@
 /* Les fiches dessinées des objets (app/handmade/fiches.py, ADR 0121) : un but, un réveil, une conversation et une
-   réponse Teams, une boîte aux lettres, un mail, un brouillon. Sur le vocabulaire commun (base.css) ; aucune couleur
-   ni longueur en ligne (CSP) : une jauge est un attribut SVG, un ton une classe. */
+   réponse Teams, une boîte aux lettres (et sa voix), un mail (son fil, ce qu'elle en sait), un brouillon (pourquoi, son
+   historique). Sur le vocabulaire commun (base.css) ; aucune couleur ni longueur en ligne (CSP) : une jauge est un
+   attribut SVG, un ton une classe. */
 
 /* ── L'en-tête : sa sorte, son nom, sa ligne, ses étiquettes, ses faits ── */
 .obj-head { display: grid; flex: 1 1 520px; gap: 6px; min-width: 0; }
@@ -143,6 +144,46 @@ a.teams-draft-text:hover { color: var(--accent); }
 .draftf-heads dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .draftf-text { display: grid; gap: 12px; min-width: 0; }
 .draftf-decide { border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+
+.draftf-state { margin: 0 0 8px; }
+
+/* ── Un texte cité (ce qu'elle a retenu, ce qu'elle lit, une consigne, un début de mail) ── */
+.obj-quote { margin: 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--accent-soft); color: var(--text);
+  font-family: var(--now-serif); font-size: 15px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.mailknown-quote { display: grid; gap: 10px; }
+.mailknown-quote .now-eyebrow { margin: 0; }
+.mailknown-quote .obj-quote { font-size: clamp(15px, 1.4vw, 17px); }
+
+/* ── Une boîte, « Sa voix » : ses trois façons d'écrire, ce que verra le destinataire ── */
+.mailvoice-voices { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.mailvoice-voices li { display: grid; gap: 2px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; opacity: .72; }
+.mailvoice-voices li.on { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); opacity: 1; }
+.mailvoice-voice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0; font-size: 14px; }
+.mailvoice-voices .person-meta { margin: 0; font-size: 12.5px; }
+.mailvoice-reads { font-size: 14px; }
+.mailvoice-sig-title { margin: 0 0 8px; }
+.mailvoice-signature { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunken); color: var(--text-2);
+  font: 13px/1.5 var(--font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mailvoice-prepares { margin: 0; font-size: 13.5px; line-height: 1.6; }
+
+/* ── Un mail, « Fil » : la conversation, reçus à gauche, partis à droite ── */
+.mailthread-list { margin-top: 4px; }
+.mailthread-list li.here .person-bubble { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.mailthread-bubble a { color: var(--text); }
+.mailthread-bubble a:hover { color: var(--accent); }
+.mailthread-note { margin-top: 14px; }
+
+/* ── Un brouillon, « Pourquoi », « Historique » ───────────────────────── */
+.draftwhy-subject { margin: 0; font-family: var(--now-serif); font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
+.draftwhy-subject a { color: var(--text); }
+.draftwhy-subject a:hover { color: var(--accent); }
+.draftwhy-opening { margin-top: 12px; color: var(--text-2); font-size: 14px; }
+.draftwhy-asks { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.draftwhy-asks .person-meta { margin: 0 0 4px; }
+.draftwhy-tag { margin: 0 0 8px; }
+.draftwhy-said { margin: 0 0 4px; color: var(--text-2); font-size: 13.5px; }
+.drafthist-text { color: var(--text); font-size: 14px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.drafthist-versions .now-card-head { align-items: center; }
 
 @media (max-width: 1000px) {
   .mailf-grid { grid-template-columns: minmax(0, 1fr); }

@@ -15,7 +15,7 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel
-from mika.inspector.framed import FRAME_CSP, framed_html
+from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
@@ -330,9 +330,12 @@ class Subjects:
     async def document(self, request: Request) -> Response:
         """Le cadre d'un document HTML natif (ADR 0169) : sa propre politique, sans script ni rien du dehors."""
         kept = self.ui.documents.get(request.path_params["digest"])
-        source = kept if kept is not None else "<p>Ce message n'est plus prêt : recharge la page pour le relire.</p>"
-        return secure(HTMLResponse(framed_html(source), status_code=200 if kept is not None else 404, headers={
-            "Content-Security-Policy": FRAME_CSP, "Referrer-Policy": "no-referrer"}))
+        page = framed_html(kept.html, kept.images, remote=kept.remote) if kept is not None else \
+            framed_html("<p>Ce message n'est plus prêt : recharge la page pour le relire.</p>")
+        # des images distantes permises (ADR 0175) : chargées sans référent, rien d'autre du dehors
+        policy = FRAME_CSP_REMOTE if kept is not None and kept.remote else FRAME_CSP
+        return secure(HTMLResponse(page, status_code=200 if kept is not None else 404, headers={
+            "Content-Security-Policy": policy, "Referrer-Policy": "no-referrer"}))
 
     def routes(self) -> list[Any]:
         g = self.ui.guarded

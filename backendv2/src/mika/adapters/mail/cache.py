@@ -241,7 +241,7 @@ class MailCache:
         """Garde un mail à sa place (compte, dossier, UID) et rend ce qui est gardé, avec sa référence :
         celle qu'il avait déjà à cette place (ou à sa place provisoire, s'il vient d'être déplacé),
         sinon celle que lui attribue ``_assign``. Un mail oublié (``forget``) n'est pas gardé de nouveau :
-        il est rendu tel quel. ``parts`` : ses pièces, lues de son message entier (``parse.read``), qui
+        il est rendu tel quel. ``parts`` : ses pièces, lues de son message entier (``parse.parse_parts``), qui
         remplacent celles qu'il avait ; sans elles, il garde les siennes."""
         fingerprint = self._print(m.address, m.subject, m.date, m.body)
         account, folder, mid = fit(m.account, ACCOUNT), fit(m.folder, FOLDER), fit(m.message_id, MID)

@@ -42,7 +42,7 @@ PARITY: dict[str, tuple[str, str]] = {
     "Modules › Email (brouillons)": ("/inspecteur/courrier/brouillons", "Brouillons"),
     "Modules › Email (envoyés)": ("/inspecteur/courrier/envoyes", "Envoyés"),
     "Modules › Email (contacts)": ("/inspecteur/courrier/contacts", "Contacts"),
-    "Modules › Email (comptes)": ("/inspecteur/courrier/comptes", "Boîtes aux lettres"),
+    "Modules › Email (comptes)": ("/inspecteur/courrier/comptes", "Ses boîtes"),
     "Modules › RSS": ("/inspecteur/sens/flux", "Flux RSS"),
     "Modules › Caméra": ("/inspecteur/sens/camera", "Caméra"),
     "Modules › Forge": ("/inspecteur/apps", "Apps forgées"),

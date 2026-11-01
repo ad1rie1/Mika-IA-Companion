@@ -210,13 +210,15 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     url = f"{BASE}/boites"
     client.get(url)
     account = {"_section": "courrier", "_enregistrement": "accounts", "_ancienne": "", "_cle": "perso",
-               "_champs": ["address", "imap_host", "user", "password", "imap_port", "voice", "tone"],
+               # sa voix ne s'écrit qu'avec un serveur d'envoi (sans lui, elle n'écrit pas depuis la boîte)
+               "_champs": ["address", "imap_host", "user", "password", "imap_port", "smtp_host", "voice", "tone"],
                "address": "mika@exemple.fr", "imap_host": "imap.exemple.fr", "user": "mika",
+               "smtp_host": "smtp.exemple.fr",
                "password": CANARY_MAIL, "imap_port": "993", "voice": "proprietaire", "tone": "sobre",
                "_retour": "/inspecteur/courrier/comptes"}
     mail = post(client, url, account)
     assert mail.status_code == 200 and CANARY_MAIL not in mail.text
-    assert "/inspecteur/reglages/boites" in str(mail.url)  # ancien onglet redirigé vers la configuration
+    assert "/inspecteur/courrier/parametres" in str(mail.url)  # ancien onglet : les paramètres du courrier
     saved = client.portal.call(live.settings.email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.voice == "proprietaire" and saved.tone == "sobre"
     # modifier sans retaper le mot de passe le garde ; un retour hors de la console est ignoré

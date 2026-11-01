@@ -4924,8 +4924,8 @@ email:
 
   # Le lot d'outils « email », tel qu'il est décrit dans la liste des outils qu'elle peut charger.
   bundle: >-
-    tes boîtes aux lettres : lister, chercher et lire ce qui est arrivé, préparer une réponse (elle attend l'accord
-    de la personne qui s'occupe de toi)
+    tes boîtes aux lettres : lister, chercher et lire ce qui est arrivé, le ranger, préparer une réponse (elle attend
+    l'accord de la personne qui s'occupe de toi)
   # entre deux prénoms de qui approuve (« Adrien ou Bea »), avec ses espaces
   keepers_or: " ou "
 
@@ -5246,6 +5246,64 @@ email:
       # ajouté derrière (avec son espace de tête)
       to_fill: " Il reste des passages [À COMPLÉTER] : {who} devra les remplir."
       would_go: "Ce qui partirait :"
+
+    tidy:
+      # L'outil email_tidy : un même geste sur plusieurs mails, sur le serveur ; jamais de suppression définitive.
+      # Les noms des gestes (read, unread, flag, unflag, archive, move, trash) sont lus par le code : ne pas les
+      # traduire.
+      description: >-
+        Ranger des mails de ta boîte, sur le serveur : les marquer lus ou non lus, les suivre (un drapeau) ou ne plus
+        les suivre, les archiver, les déplacer dans un dossier, les mettre à la corbeille. Un même geste pour
+        plusieurs mails à la fois. Tu ne supprimes jamais rien définitivement.
+      mails: "les références des mails (entre crochets, comme les donnent email_list et email_search), 25 au plus"
+      action: >-
+        le geste : read (marquer lu), unread (marquer non lu), flag (suivre), unflag (ne plus suivre), archive
+        (archiver), move (déplacer dans folder), trash (mettre à la corbeille)
+      folder: "pour move : le dossier où les mettre (son nom ou son libellé)"
+      # ses refus pour tout l'appel
+      not_here: Ranger ta boîte ne t'est pas permis ici.
+      which_folder: "Pour déplacer, dis dans quel dossier (folder)."
+      # un mail par ligne. {ref} : sa référence ; {sender} : l'expéditeur ; {subject} : l'objet ; {outcome} : done (et
+      # into), already, refused, missed ou unknown_folder ; {unseen} : unseen, ou rien
+      line: "[{ref}] de {sender} : « {subject} » — {outcome}{unseen}"
+      # ce qui vient d'être fait. Le nom de chaque clé est le code du geste : NE PAS RENOMMER.
+      done:
+        read: marqué lu
+        unread: marqué non lu
+        flag: suivi
+        unflag: plus suivi
+        archive: archivé
+        move: déplacé
+        trash: mis à la corbeille
+      # derrière archive, move et trash (avec son espace de tête). {folder} : le dossier d'arrivée
+      into: " (« {folder} »)"
+      # ce qui l'était déjà : rien n'a changé. Le nom de chaque clé est le code du geste : NE PAS RENOMMER.
+      already:
+        read: déjà lu
+        unread: déjà non lu
+        flag: déjà suivi
+        unflag: n'était pas suivi
+        archive: déjà archivé
+        move: déjà dans ce dossier
+        trash: déjà à la corbeille
+      # {why} : ce que le serveur a répondu (technique)
+      refused: "le serveur a refusé : {why}"
+      # marquer lu se fait par lot : celui-ci, le serveur ne l'a pas pris
+      missed: le serveur ne l'a pas marqué lu
+      # {folder} : le dossier demandé
+      unknown_folder: "pas de dossier « {folder} » dans cette boîte"
+      # derrière un mail marqué lu, archivé, déplacé ou mis à la corbeille que personne n'avait encore ouvert sur le
+      # serveur (avec son espace de tête). {who} : qui s'occupe d'elle (son prénom)
+      unseen: " (pas encore lu par {who})"
+      # une référence qu'elle ne trouve pas, ou un mail parti de sa boîte. {ref} : la référence donnée
+      not_found: "[{ref}] — introuvable dans ce que tu as relevé"
+      sent: "[{ref}] — un mail parti de ta boîte : il ne se range pas d'ici"
+      # après les mails, pour chaque boîte où le dossier demandé n'existe pas. {account} : la boîte ; {folders} :
+      # folder_named (ou le nom seul quand c'est le même), séparés par des virgules, ou no_folders
+      folders: "Les dossiers de la boîte {account} : {folders}"
+      # {label} : son libellé ; {name} : son nom sur le serveur
+      folder_named: "{label} ({name})"
+      no_folders: aucun connu
 
     # Son brouillon est parti : ce qu'elle en sait (une pensée qu'elle garde). {who} : le destinataire ; {subject} :
     # l'objet ; {edited} : edited, ou rien

@@ -83,14 +83,14 @@ def test_a_five_megabyte_hostile_html_mail_is_read_in_well_under_a_second():
 def test_an_unreadable_mail_does_not_come_back_at_every_poll(tmp_path, servers, monkeypatch):
     Imap.boxes["INBOX"].add(raw_mail(4, "Piégé", "x"), uid=4)
     Imap.boxes["INBOX"].add(raw_mail(5, "Normal", "Rien de spécial."), uid=5)
-    real = mail_client.parse
+    real = mail_client.parse_parts
 
     def poisoned(raw, uid="", **kw):
         if b"Pi=C3=A9g=C3=A9" in raw or "Piégé".encode() in raw:
             raise RecursionError("un mail construit pour casser la lecture")
         return real(raw, uid, **kw)
 
-    monkeypatch.setattr(mail_client, "parse", poisoned)
+    monkeypatch.setattr(mail_client, "parse_parts", poisoned)
     box = box_for(tmp_path, account(*servers))
     first = go(box.fetch_new(10))
     assert [m.subject for m in first] == ["Coucou", "(un mail illisible)", "Normal"]  # rangé, dit, et le reste passe

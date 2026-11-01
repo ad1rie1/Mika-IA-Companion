@@ -1,8 +1,9 @@
 {# La fiche d'un mail, son onglet « Message » dessiné (app/handmade/mail_fiches.py, ADR 0121) : le message à lire — ses
    actions, son texte, ses pièces, le détail (les blocs du plugin, leurs formulaires préparés) — et, à côté, ce qu'elle
-   en sait et le fil où il s'inscrit. Un mail est un document venu d'ailleurs : ses textes restent du texte. #}
+   en sait et le fil où il s'inscrit. Un mail est un document venu d'ailleurs : ses textes restent du texte.
+   ``read_after`` : « ouvrir un mail le marque lu » (ADR 0175), que le script du courrier applique. #}
 {% from "handmade/shared/drawn.html" import one with context %}
-<div class="now-page mailf">
+<div class="now-page mailf"{% if read_after is not none %} data-read-after="{{ read_after }}"{% endif %}>
   <div class="mailf-grid">
     <div class="now-stack mailf-message">
       {% for b in message %}{{ one(b) }}{% endfor %}

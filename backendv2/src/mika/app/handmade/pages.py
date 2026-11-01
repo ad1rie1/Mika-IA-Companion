@@ -66,7 +66,8 @@ DRAWN: dict[str, Drawn] = {
     "fil/questions": CARDS,
     "courrier/reception": Shaped(mail.box, "handmade/mail.css", forms=True),
     "courrier/envoyes": Shaped(mail.box, "handmade/mail.css", forms=True),
-    **{f"courrier/{t}": CARDS for t in ("brouillons", "contacts")},
+    "courrier/brouillons": Shaped(mail.drafts, "handmade/mail.css", forms=True),
+    "courrier/contacts": Shaped(mail.contacts, "handmade/mail.css", forms=True),
     # Activité : décisions, buts, projets, dessins
     **{f"decisions/{t}": CARDS for t in ("maintenant", "envers", "initiatives", "selections", "episodes",
                                           "echeances")},

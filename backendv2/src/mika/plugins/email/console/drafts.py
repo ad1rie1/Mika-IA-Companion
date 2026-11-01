@@ -134,7 +134,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     page, pager = paginate(done, ctx.pager(size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in page), title=f"Déjà décidés ({len(done)})", pager=pager,
                         empty="aucun encore", layout="list", link_label="Voir le brouillon"))
-    return [workspace(port, ctx, blocks, view="brouillons")]
+    return [workspace(port, ctx, blocks, view="brouillons", state=s)]
 
 
 @EMAIL.subject("brouillon", label="Brouillon", plural="Brouillons", icon="✎")

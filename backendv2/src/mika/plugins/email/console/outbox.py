@@ -83,7 +83,7 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         empty="aucun envoi ne correspond" if query else "rien n'est encore parti de sa boîte",
                         caption="Tous les envois conservés et les messages synchronisés du dossier Envoyés.",
                         layout="list", link_label="Lire le message"))
-    return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),))]
+    return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),), state=s)]
 
 
 @EMAIL.inspect("contacts", title="Contacts", section=SECTION, order=40,
@@ -111,4 +111,4 @@ def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [workspace(port, ctx, [Table(("nom", "adresse", Column("reçus", "num"), Column("envoyés", "num"), Column("dernier échange", "fit")),
                   rows, title="Contacts", pager=pager,
                   empty="aucun contact ne correspond" if query else "aucun échange encore",
-                  caption="Comptés sur tous les messages synchronisés et les envois conservés. Un clic ouvre les échanges ; déplie une ligne pour écrire.")], view="contacts", filters=(Param("q", "Recherche", placeholder="nom ou adresse"),))]
+                  caption="Comptés sur tous les messages synchronisés et les envois conservés. Un clic ouvre les échanges ; déplie une ligne pour écrire.")], view="contacts", filters=(Param("q", "Recherche", placeholder="nom ou adresse"),), state=s)]

@@ -222,7 +222,8 @@
       }
     });
 
-    // Champs conditionnels : data-only="chemin=v1|v2;chemin2=v" (toutes), alternatives « || » (l'une).
+    // Champs conditionnels : data-only="chemin=v1|v2;chemin2!=v" (toutes ; « != » : n'en vaut aucune),
+    // alternatives « || » (l'une).
     function valueOf(form, name) {
       var input = (form || document).querySelector('[name="' + name + '"]');
       if (!input) return null;
@@ -233,8 +234,10 @@
       return cond.split(";").every(function (part) {
         var i = part.indexOf("=");
         if (i < 0) return true;
-        var v = valueOf(form, part.slice(0, i));
-        return v === null || part.slice(i + 1).split("|").indexOf(v) !== -1;
+        var not = i > 0 && part.charAt(i - 1) === "!";
+        var v = valueOf(form, part.slice(0, not ? i - 1 : i));
+        if (v === null) return true;
+        return (part.slice(i + 1).split("|").indexOf(v) !== -1) !== not;
       });
     }
     var originalDisabled = new WeakMap();
@@ -248,7 +251,11 @@
         });
       });
     }
-    document.querySelectorAll("select, input").forEach(function (i) { i.addEventListener("change", syncOnly); });
+    // à la frappe aussi : un champ qui en fait paraître d'autres une fois rempli (le serveur d'envoi d'une boîte)
+    document.querySelectorAll("select, input").forEach(function (i) {
+      i.addEventListener("change", syncOnly);
+      if (i.type !== "checkbox" && i.type !== "radio") i.addEventListener("input", syncOnly);
+    });
     syncOnly();
     setupFormStatus();
     setupValidation();

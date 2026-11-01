@@ -39,6 +39,7 @@ from mika.app.apercu_inner import inner
 from mika.app.apercu_mail import mailbox
 from mika.app.console import NAVIGATION
 from mika.app.server import build
+from mika.contracts import email as email_c
 from mika.contracts import runtime as rt
 from mika.inspector.pages.journal import EPISODE_TABS
 from mika.kernel.events import Content, Origin
@@ -98,6 +99,18 @@ async def _approvals(kernel) -> None:
             args_json=json.dumps({"draft": "brouillon-demo-supprime", "account": "perso"}),
             summary=Content.of("Relire une demande dont le brouillon a été supprimé"), context="user_1"),
     ], emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-validations")
+
+
+async def _noticed(kernel, box) -> None:
+    """Le mail des maquettes, remarqué comme le relevé l'aurait fait : la liseuse dit ce qu'elle en sait (ADR 0175)."""
+    m = box.cached_one("atelier:<maquettes@example.net>")
+    if m is None:
+        return
+    await kernel.mind.append([email_c.NOTICED.draft(
+        source="email", kind=email_c.MAIL, summary=Content.of("Léa attend ton avis sur les deux pistes avant jeudi."),
+        pertinence=0.85, emotion="curious", intensity=0.4, bundle="email", mail=m.ref, sender=m.sender,
+        address=m.address, importance=0.85, needs_reply=True, account=m.account, folder=m.folder,
+        dedupe_key=f"mail:{m.ref}")], emitter="email", origin=Origin.EXTERNAL, correlation="apercu-courrier")
 
 
 class _Model(PersonaSimLLM):
@@ -218,6 +231,7 @@ def export(out: Path) -> list[str]:
             demo_mail = mailbox(clock.now)
             live.kernel.ports["mail"] = demo_mail
             client.portal.call(lambda: _approvals(live.kernel))
+            client.portal.call(lambda: _noticed(live.kernel, demo_mail))
             for kind, keys in (("mail", [m.ref for m in demo_mail.inbox] + [m.ref for m in demo_mail.outgoing]),
                                ("brouillon", ["stream", "brouillon-demo-supprime"])):
                 for key in keys:
@@ -254,6 +268,9 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/personnes?q=personne-inconnue", "/inspecteur/fil/messages?handle=user_1",
                      "/inspecteur/courrier/reception?compte=atelier",
                      "/inspecteur/courrier/reception?compte=atelier&vue_pg1=table",
+                     # un message ouvert dans la liseuse, et une vue de la barre de côté (ADR 0175)
+                     "/inspecteur/courrier/reception?compte=atelier&lire=atelier%3A%3Cmaquettes%40example.net%3E",
+                     "/inspecteur/courrier/reception?etat=a_traiter&dossier=%2A",
                      "/inspecteur/courrier/reception?compte=perso&dossier=Archives",
                      "/inspecteur/courrier/reception?q=aucun-resultat",
                      "/inspecteur/reglages/apercu?q=modele", "/inspecteur/reglages/apercu?q=memoire",

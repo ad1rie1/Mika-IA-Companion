@@ -1,0 +1,30 @@
+{# La fiche d'un brouillon, son onglet « Historique » dessiné (app/handmade/mail_fiches.py, ADR 0121) : son parcours —
+   écrit, retouché, proposé, décidé, parti —, puis ses deux versions côte à côte quand il a été retouché (ce qu'elle
+   apprend de la retouche). #}
+<div class="now-page drafthist">
+  <section class="now-card" aria-labelledby="drafthist-way">
+    <header class="now-card-head"><h2 id="drafthist-way">Ce qui lui est arrivé</h2></header>
+    {% if entries %}
+    <ol class="obj-journey">
+      {% for e in entries %}
+      <li class="{{ e.tone }}">
+        <p>{% if e.href %}<a href="{{ e.href }}">{{ e.title|capitalize }}</a>{% else %}<b>{{ e.title|capitalize }}</b>{% endif %}{% if e.rel %} <span class="now-muted">· <time title="{{ e.at }}">{{ e.rel }}</time></span>{% endif %}</p>
+        {% if e.text %}<p class="obj-journey-text">{{ e.text }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">{{ empty }}</p>{% endif %}
+  </section>
+
+  {% if versions %}
+  <div class="now-grid two drafthist-versions">
+    {% for v in versions %}
+    <article class="now-card" aria-label="{{ v.title }}">
+      <header class="now-card-head"><h2>{{ v.title }}</h2>{% if loop.first %}<span class="now-tag">la sienne</span>{% else %}<span class="now-tag warn">retouchée</span>{% endif %}</header>
+      <div class="drafthist-text">{{ v.text }}</div>
+    </article>
+    {% endfor %}
+  </div>
+  <p class="person-tab-note">Elle apprend ce que tu as changé : la prochaine fois, elle en tiendra compte.</p>
+  {% endif %}
+</div>

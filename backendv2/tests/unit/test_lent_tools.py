@@ -21,7 +21,9 @@ from mika.contracts import goals as goals_c
 from mika.inspector.mcp import ConsoleHost
 from mika.kernel.rights import Rights
 from mika.ports.llm import LLMResponse
+from mika.ports.mail import Mail
 from mika.sim.clock import run_virtual
+from mika.sim.outside import FakeMail
 from mika.vocab.access import ALONE, INTERNAL, OWNER, Table, ToolRule
 from mika.vocab.canals import Canals
 from mika.vocab.phrasebook import phrase
@@ -111,6 +113,32 @@ def test_a_point_lends_only_its_tools_read_only_or_writing(tmp_path):
     # ses derniers appels, le plus récent d'abord (un outil qu'il ne prête pas n'est pas un appel)
     assert [(c.tool, c.ok) for c in lending.recent("agent")] == [("goal_remind", True), ("goal_remind", False),
                                                                 ("memory_search", True)]
+
+
+def test_a_read_only_point_never_runs_a_tool_that_acts_outside(tmp_path):
+    """Lire seulement, c'est aussi ne rien faire au-dehors : ranger un courrier sur son serveur est refusé avant que
+    l'outil ne coure (ADR 0175), pas seulement à l'écriture au journal."""
+    kernel, clock, _, _ = _kernel(tmp_path)
+    box = FakeMail()
+    box.deliver(Mail("<m1@exemple.fr>", "Léa <lea@exemple.fr>", "lea@exemple.fr", "Devis", 0, "…"))
+    kernel.ports["mail"] = box
+    entries = {"agent": {"digest": hashlib.sha256(TOKEN.encode()).hexdigest(), "by": "user_1",
+                         "tools": ["email_tidy"], "writes": False}}
+    app = Lending(kernel, lambda: entries).app()
+    tidy = {"name": "email_tidy", "arguments": {"mails": ["<m1@exemple.fr>"], "action": "archive"}}
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            return await _rpc(app, "tools/call", tidy)
+        finally:
+            await kernel.stop()
+
+    _, refused = run_virtual(clock, main)
+    assert refused["result"]["isError"]
+    assert refused["result"]["content"][0]["text"] == phrase("runtime.tools.refused.read_only")
+    assert not box.actions  # le serveur n'a rien vu
 
 
 def test_the_door_of_a_point(tmp_path, monkeypatch):

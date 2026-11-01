@@ -36,6 +36,7 @@ from mika.plugins.email import (
     FAILED,
     GONE,
     REFUSED,
+    REPLIED,
     WAITING,
     EmailParams,
     EmailState,
@@ -48,7 +49,7 @@ from mika.ports.mail import Mail, reference_key, split_ref
 SECTION = "courrier"
 BOX = f"/inspecteur/{SECTION}/reception"
 ACCOUNTS = BOX
-SETTINGS = "/inspecteur/reglages/boites"
+SETTINGS = "/inspecteur/courrier/parametres"
 PAGE = 25
 #: une boîte (réception, envoyés) se lit par douzaine : sa liste tient au-dessus du message ouvert
 BOX_PAGE = 12
@@ -61,8 +62,10 @@ TODAY_MAX = 500
 BATCH = 250
 NO_MAIL = "Aucun mail demandé : choisis-en un dans le courrier."
 UNKNOWN = "Ce mail n'est ni dans la boîte, ni parmi les envoyés, ni dans ce qu'elle a remarqué."
-NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte dans Réglages › Plugins › Boîtes aux lettres."
+NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte dans Courrier › Paramètres."
 NO_PORT = "Courrier non configuré : aucune boîte aux lettres n'est branchée."
+#: la réception d'une boîte, quelle que soit sa casse sur le serveur (ADR 0171)
+INBOX = "INBOX"
 VOICE_LABEL = {"elle": "en son nom", "assistante": "en assistante", "proprietaire": "à ta place"}
 #: où en est un brouillon, en toutes lettres (et son ton) : ce qu'elle en sait (sa proposition)…
 DRAFT_STATES = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvé, en partance", "info"),
@@ -135,9 +138,10 @@ def important(seen: Seen, p: EmailParams) -> bool:
 
 
 def unread(mail: Mail | None, seen: Seen | None) -> bool:
-    """Pas encore lu : ni sur le serveur (quand on le sait), ni par elle."""
+    """Pas encore lu **par l'opérateur** (ADR 0175) : le drapeau du serveur, qu'un autre client ou la console posent.
+    Ce qu'elle a lu n'y compte pas (``by_her``) ; un mail que la boîte n'a plus ne garde que ce qu'elle en sait."""
     if mail is not None:
-        return not mail.seen and (seen is None or not seen.read)
+        return not mail.seen
     return seen is not None and not seen.read
 
 
@@ -146,8 +150,19 @@ def state_badge(seen: Seen | None, mail: Mail | None, p: EmailParams) -> Badge:
         if seen is not None and important(seen, p):
             return Badge("important, non lu" + (", signalé" if seen.mentioned else ""), "warn")
         return Badge("non lu" + (", signalé" if seen is not None and seen.mentioned else ""), "info")
-    how = seen.how if seen is not None and seen.read and seen.how not in ("", "lu") else ""
-    return Badge(f"lu ({how})" if how else "lu", "ok")
+    return Badge("lu", "ok")
+
+
+def her_badge(seen: Seen | None) -> Badge | None:
+    """Ce qu'elle en a fait, à part du « lu » de l'opérateur : « lu par elle », « archivé par elle »…"""
+    if seen is None or not seen.read or not seen.by_her:
+        return None
+    return Badge(f"{'lu' if seen.how in ('', 'lu') else seen.how} par elle", "info")
+
+
+def to_answer(seen: Seen | None) -> bool:
+    """Son tri y attend une réponse, et personne n'a encore répondu (ni un brouillon d'elle, ni un autre client)."""
+    return seen is not None and seen.needs_reply and seen.how != REPLIED
 
 
 def pertinence(seen: Seen | None) -> Meter | None:
@@ -191,7 +206,7 @@ def box_note(port: Any, p: EmailParams) -> Note:
         return Note(NOT_CONFIGURED, tone="warn")
     if not port.configured():
         return Note("Aucun compte n'est prêt à relever (serveur, utilisateur ou compte inactif) : voir "
-                    "Réglages › Plugins › Boîtes aux lettres.", tone="warn")
+                    "Courrier › Paramètres.", tone="warn")
     n = sum(1 for a in port.accounts() if a.ready)
     boxes = "Boîte aux lettres configurée" if n == 1 else f"{n} boîtes aux lettres configurées"
     return Note(f"{boxes} : relevée(s) toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée "
@@ -232,42 +247,79 @@ def account_scope(port: Any, ctx: InspectContext) -> str:
     return key or (accounts[0].key if len(accounts) == 1 else "")
 
 
+#: les vues de la réception que la barre de côté nomme (``?etat=``), dans tous les dossiers
+VIEWS = {"a_traiter": "À traiter", "suivis": "Suivis"}
+
+
+def answered(port: Any, ref: str) -> bool:
+    """Le serveur dit qu'on y a répondu (depuis la console, un autre client ou un brouillon d'elle parti)."""
+    m = port.cached_one(ref) if port is not None else None
+    return bool(m is not None and m.answered)
+
+
+def _views(port: Any, ctx: InspectContext, s: EmailState | None, view: str, account: str) -> Nav:
+    """Ce qu'on lit (ADR 0175) : la réception, ce qui attend une réponse, les suivis, ses brouillons à décider, les
+    envoyés, les contacts — à la place des onglets, dans le compte choisi."""
+    keep = (("compte", ctx.param("compte")),) if ctx.param("compte") else ()
+    state = ctx.param("etat") if view == "reception" else ""
+    folder = ctx.param("dossier") or INBOX
+    mine = [(k, m) for k, m in (s.mails.items() if s is not None else ()) if not account or m.account == account]
+    inbox = sum(f.unseen for a in port.accounts() if not account or a.key == account
+                for f in port.folders(a.key) if f.role == "inbox")
+    pending = sum(1 for d in (s.drafts.values() if s is not None else ()) if d.state == WAITING
+                  and (not account or d.account == account))
+
+    def box(text: str, state_: str = "", count: int | None = None) -> NavItem:
+        params = keep + ((("etat", state_), ("dossier", "*")) if state_ else ())
+        on = view == "reception" and (state == state_ if state_ else state not in VIEWS and folder == INBOX)
+        return NavItem(text, Ref("local", BOX, "", params), count=count or None, active=on)
+
+    def tab(text: str, slug: str, count: int | None = None) -> NavItem:
+        return NavItem(text, Ref("local", f"/inspecteur/{SECTION}/{slug}", "", keep), count=count or None,
+                       active=view == slug, tone="warn" if count else "")
+
+    return Nav((box("Réception", count=inbox),
+                box(VIEWS["a_traiter"], "a_traiter", sum(1 for k, m in mine if to_answer(m) and not answered(port, k))),
+                box(VIEWS["suivis"], "suivis"), tab("Ses brouillons", "brouillons", pending), tab("Envoyés", "envoyes"),
+                tab("Contacts", "contacts")), title="Courrier")
+
+
 def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str = "reception",
-              filters: tuple[Param, ...] = (), folders: bool = False) -> Workspace:
-    """Le même espace courrier pour réception, brouillons, envoyés et contacts."""
+              filters: tuple[Param, ...] = (), folders: bool = False, state: EmailState | None = None) -> Workspace:
+    """Le même espace courrier pour réception, brouillons, envoyés et contacts : à côté, ce qu'on lit, les comptes et
+    les dossiers du compte choisi ; au-dessus, écrire et actualiser, puis la recherche. ``folders`` : cette vue
+    montre un dossier (la réception)."""
     accounts = port.accounts() if port is not None else []
     account = account_scope(port, ctx)
     base = f"/inspecteur/{SECTION}/{view}"
+    side: list[Block] = [_views(port, ctx, state, view, account)] if accounts else []
     nav = [NavItem("Toutes les boîtes", Ref("local", base, ""), active=not ctx.param("compte"))]
     for a in accounts:
         inbox = next((f for f in port.folders(a.key) if f.role == "inbox"), None)
         nav.append(NavItem(a.name, Ref("local", base, "", (("compte", a.key),)),
                            count=inbox.unseen if inbox else None, active=ctx.param("compte") == a.key,
                            tone="" if a.ready else "warn"))
-    side: list[Block] = [Nav(tuple(nav), title="Comptes")]
+    side.append(Nav(tuple(nav), title="Comptes"))
     chosen = port.account(account) if port is not None else None
     if chosen:
         side.append(Note(chosen.address, tone="muted"))
-    if folders and accounts:
-        folder = ctx.param("dossier") or "INBOX"
-        known = port.folders(account) if chosen else []
+    if accounts:
+        listed = folders and ctx.param("etat") not in VIEWS
+        folder = ctx.param("dossier") or INBOX
+        # la réception est en tête de ce qu'on lit : les dossiers disent les autres
+        known = [f for f in port.folders(account) if f.role != "inbox" and f.name != INBOX] if chosen else []
         entries = [NavItem(f.label + " (serveur)" if f.role == "drafts" else f.label, box_link(f.label, account=account, folder=f.name),
-                           count=f.unseen or None, active=folder == f.name) for f in known]
-        if not known:
-            entries.append(NavItem("Réception", box_link("Réception", account=account), active=folder == "INBOX"))
+                           count=f.unseen or None, active=listed and folder == f.name) for f in known]
         entries.append(NavItem("Tous les dossiers", box_link("Tous les dossiers", account=account, folder="*"),
-                               active=folder == "*"))
+                               active=listed and folder == "*"))
         side.append(Nav(tuple(entries), title="Dossiers"))
-    side.append(Nav((NavItem("Gérer les comptes", Ref("local", SETTINGS, "")),), title="Réglages"))
     actions: list[Block] = []
     if can_send(port) and (not account or (chosen is not None and chosen.can_send)):
         initial = ((("account", account),) if chosen and chosen.can_send else ()) + (("_bouton", "Envoyer le message"),)
         actions.append(ActionSlot("email.ecrire", initial, title="Nouveau message", presentation="button"))
     if folders and chosen and chosen.ready and ctx.param("dossier") != "*":
-        actions.append(ActionSlot("email.relire", (("compte", account), ("dossier", ctx.param("dossier") or "INBOX")),
+        actions.append(ActionSlot("email.relire", (("compte", account), ("dossier", ctx.param("dossier") or INBOX)),
                                   title="Actualiser le dossier", presentation="button"))
-        actions.append(ActionSlot("email.historique", (("compte", account), ("dossier", ctx.param("dossier") or "INBOX")),
-                                  title="Charger des messages plus anciens", presentation="button"))
     elif folders and ready(port):
         actions.append(ActionSlot("email.relever", title="Actualiser les boîtes", presentation="button"))
     content: list[Block] = [Toolbar(tuple(actions))] if actions else []
@@ -280,7 +332,7 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
         if status.error:
             content.append(Note(f"{chosen.name} : {status.error}", tone="danger", title="Synchronisation en échec"))
         elif not chosen.ready:
-            content.append(Note("Ce compte est inactif ou incomplet. Ouvre « Gérer les comptes » pour le configurer.",
+            content.append(Note("Ce compte est inactif ou incomplet : règle-le dans Courrier › Paramètres, en haut à droite.",
                                 tone="warn"))
     content.extend(items)
     return Workspace(tuple(side), tuple(content))

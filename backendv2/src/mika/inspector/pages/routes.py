@@ -61,7 +61,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 
 #: les anciens onglets qui ont pris leur propre place (la requête suit)
 MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
-              ("courrier", "comptes"): "reglages/boites",
+              ("courrier", "comptes"): "courrier/parametres",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
               ("reglages", "sens"): "reglages/plugins",
               ("reglages", "parametres"): "reglages/comportement",
@@ -261,12 +261,19 @@ class Pages:
             return RedirectResponse(target, status_code=301)
         if key in MOVED and "tab" not in request.path_params and not tab:
             return RedirectResponse(f"{PREFIX}/{MOVED[key]}", status_code=301)
+        forms_ = self.ui.settings_forms
+        asked = request.path_params.get("tab", "")
+        if key == "reglages" and not tab and forms_ is not None and asked in forms_.pages \
+                and forms_.pages[asked][1].home:  # une page de réglages qui vit ailleurs (Courrier › Paramètres)
+            return RedirectResponse(forms_.url(asked, **dict(request.query_params)), status_code=301)
         d = self.dests.get(key)
         if d is None:
             return self.render_page(request, title="Page inconnue", active="", status=404,
                                     blocks=[Note("Cette page n'existe pas.", "warn")])
         tabs = self.tabs_of(d)
-        slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
+        # l'onglet par défaut : le premier de la barre (pas un de ceux rangés derrière le bouton du haut)
+        first = next((t[0] for t in tabs if t[0] not in d.gear), tabs[0][0] if tabs else "")
+        slug = tab or request.path_params.get("tab", "") or first
         current = next((t for t in tabs if t[0] == slug), None)
         if current is None:
             return RedirectResponse(dest_url(d.key), status_code=303)
@@ -278,11 +285,14 @@ class Pages:
         if drawn:
             got = {**got, "blocks": drawn.pop("blocks"), **({} if drawn.pop("panel") else {"panel": None})}
         tab_list = [{"title": t, "href": f"{dest_url(d.key)}/{s}", "on": s == slug, "badge": self.tab_badge(b),
-                     "group": b.group if isinstance(b, Builtin) else ""} for s, t, b in tabs]
+                     "group": b.group if isinstance(b, Builtin) else "", "slug": s} for s, t, b in tabs]
         context = {k: request.query_params[k] for k in d.context if request.query_params.get(k)}
         if context:
             for t in tab_list:
                 t["href"] += ("&" if "?" in t["href"] else "?") + urlencode(context)
+        # ses paramètres : un bouton en haut à droite, pas un onglet de plus (ADR 0173)
+        gear = [t for t in tab_list if t["slug"] in d.gear]
+        tab_list = [t for t in tab_list if t["slug"] not in d.gear]
         if d.layout == "menu":
             # des pages rangées par rubrique (le menu de gauche y mène) : la page porte le titre de la sous-page
             group = next((t["group"] for t in tab_list if t["on"]), "")
@@ -301,7 +311,8 @@ class Pages:
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
                                 eyebrow=d.label if current[1] != d.label else "",
-                                subtitle=item.description or d.description, tabs=tab_list, blocks=got["blocks"],
+                                subtitle=item.description or d.description, tabs=tab_list, gear=gear,
+                                blocks=got["blocks"],
                                 console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                 head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                 filters=got.get("filters") or (), panel=got.get("panel"),
@@ -623,6 +634,13 @@ class Pages:
             if response is not None:
                 return response
             owner = state.get("owner", "")
+            forms_ = self.ui.settings_forms
+            page = forms_.carrying(owner, state.get("back", "")) if forms_ is not None else ""
+            if page:  # refusés sur la page qui les porte (Courrier › Paramètres) : remontrés là
+                panel = await forms_.panel(self.ui, request, page, {}, params=state)
+                key, slug = forms_.home(page)
+                return await self.destination(request, key=key, tab=slug, status=status,
+                                              produced={"blocks": [], "panel": panel})
             target = f"{reglages.FACULTY_PAGE}{owner}" if owner and self.ui.builtins.get(
                 f"reglages.{reglages.FACULTY_PAGE}{owner}") else "comportement"
             got = await reglages.faculty_page(self.ui, request, owner, state) if owner else \
@@ -642,7 +660,8 @@ class Pages:
             return response
         panel = await forms_.panel(self.ui, request, tab, states)
         general = [m for st in states.values() for m in st.messages] if "" in states else []
-        return await self.destination(request, key="reglages", tab=tab, status=status,
+        key, slug = forms_.home(tab)  # là où vit la page (Courrier › Paramètres), sinon Réglages
+        return await self.destination(request, key=key, tab=slug, status=status,
                                       produced={"blocks": [], "panel": panel, "messages": general})
 
     async def settings_probe(self, request: Request) -> Response:

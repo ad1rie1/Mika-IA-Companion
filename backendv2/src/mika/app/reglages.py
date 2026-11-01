@@ -24,6 +24,7 @@ from mika.adapters.imaging.models import list_image_models
 from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig, tokens_fr
 from mika.adapters.llm.models import ListingFailed, list_models, settle_limits
 from mika.adapters.mail import MailConfig
+from mika.adapters.mail.config import MailAccount
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
@@ -45,6 +46,7 @@ from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
+from mika.plugins.email.console.common import VOICE_LABEL
 from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
@@ -539,6 +541,36 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             raise ValueError(str(exc)[:200] or type(exc).__name__) from None
         return [(f.name, f.name if f.label == f.name else f"{f.label} ({f.name})") for f in found]
 
+    def describe_mailbox(key: str, account: MailAccount) -> dict[str, Any]:
+        """La carte d'une boîte (Courrier › Paramètres, ADR 0173) : où elle en est, son adresse, comment elle lit et
+        envoie, sa voix, ce que dit son dernier relevé — et où la lire."""
+        port = live.kernel.ports.get("mail") if live.kernel is not None else None
+        status = port.status(key) if port is not None and port.account(key) is not None else None
+        if not account.enabled:
+            tags = [("inactive", "")]
+        elif not account.ready:
+            tags = [("incomplète", "warn")]
+        elif status is not None and status.error:
+            tags = [("en erreur", "danger")]
+        else:
+            tags = [("prête", "ok")]
+        tags.append((f"elle y écrit {VOICE_LABEL.get(account.voice, account.voice)}", "info"))
+        if account.microsoft:
+            tags.append(("compte Microsoft", ""))
+        reads = f"{account.imap_host} · {account.user}" if account.imap_host else "pas de serveur IMAP"
+        facts = [("Lire", reads), ("Envoyer", account.smtp_host or "rien : elle ne fait que lire"),
+                 ("Dossiers relevés", ", ".join(account.folders))]
+        now = live.kernel.mind.clock.now() if live.kernel is not None else 0
+        if status is not None and status.error:
+            activity, tone = f"Dernière erreur : {status.error}"[:300], "danger"
+        elif status is not None and status.last_poll:
+            activity, tone = f"Relevée {ago(now, status.last_poll)}", ""
+        else:
+            activity, tone = "Jamais relevée encore", ""
+        return {"title": account.label or key, "tags": tags, "lead_label": "Adresse", "lead": account.address or "—",
+                "lead_plain": True, "facts": facts, "activity": activity, "activity_tone": tone,
+                "fiche": f"/inspecteur/fiche/compte/{key}", "box": f"/inspecteur/courrier/reception?compte={key}"}
+
     def mail_facts() -> list[tuple[str, str]]:
         accounts = settings.email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
@@ -683,7 +715,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def plugin_settings() -> list[Any]:
         rows = (
-            ("Courrier", "Boîtes, serveurs, identifiants et façon d'écrire", "boites", "email", "courrier/reception"),
+            ("Courrier", "Boîtes, serveurs, identifiants, façon d'écrire ; relevé et brouillons", "boites", "email",
+             "courrier/reception"),
             ("Flux RSS", "Adresses des flux suivis", "flux", "rss", "sens/flux"),
             ("Outils extérieurs", "Serveurs MCP : à quoi ils servent pour elle, où les joindre, pour qui",
              "serveurs-mcp", "", "outils/serveurs"),
@@ -827,11 +860,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
-                        facts=mail_facts, fixed_names=("accounts",),
+                        facts=mail_facts, fixed_names=("accounts",), describe={"accounts": describe_mailbox},
                         loaders={"folders": mail_folders}, named_loaders=("folders",),
-                        pages=(SettingsPage("boites", "Boîtes aux lettres", ("accounts",), description=(
-                            "Chaque boîte a sa page : lire (IMAP), envoyer (SMTP), sa voix dans cette boîte et ce "
-                            "qu'elle y prépare d'elle-même. Ce qui s'y passe se lit dans Courrier.")),)),
+                        # ses paramètres vivent dans le Courrier, en haut à droite : ses boîtes et ses paramètres
+                        # généraux (relevé, ce qu'elle en dit, ses brouillons), sur une seule page (ADR 0173)
+                        pages=(SettingsPage("boites", "Paramètres", ("accounts",), description=(
+                            "Ses boîtes aux lettres — lire (IMAP), envoyer (SMTP), sa voix dans chacune — et ce que "
+                            "fait le courrier de toutes : son relevé, ce qu'elle en dit, les réponses qu'elle "
+                            "prépare."), home="courrier/parametres", params="email",
+                            template="handmade/mail/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
         SettingsSection("mcp", "Outils extérieurs", "sens", McpConfig, settings.mcp, save_mcp, order=15,
                         description="Les serveurs MCP dont elle peut utiliser les outils (ADR 0064). Jetons et "
                                     "variables secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,

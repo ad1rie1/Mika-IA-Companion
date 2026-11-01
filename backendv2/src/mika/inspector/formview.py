@@ -34,13 +34,20 @@ def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str =
         "path": f.path, "id": f"{prefix}-{f.path.replace('.', '-')}", "label": f.label,
         "help": f.help, "kind": kind, "value": checked(value) if kind == "bool" else "" if kind == "file" else text,
         "error": error, "unit": _unit(f), "readonly": f.readonly,
-        "required": f.required and kind != "bool", "choices": list(f.choices), "lo": f.lo, "hi": f.hi,
+        "required": (f.required or _no_blank(f, kind)) and kind != "bool", "choices": list(f.choices), "lo": f.lo,
+        "hi": f.hi,
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
         "only": only_attr(f),
         "rows": _rows(text, kind), "group": f.group,
         # des lignes à choisir parmi une liste (les dossiers d'une boîte) : une case par choix, cochée si elle y est
         "selected": text.split("\n") if kind == "lines" and f.choices and text else [],
     }
+
+
+def _no_blank(f: forms.FormField, kind: str) -> bool:
+    """Une liste dont chaque choix est une valeur et qui ne peut rester vide : pas de « — » à y choisir (il ne
+    donnerait que « choisissez une valeur »)."""
+    return kind == "select" and bool(f.choices) and not f.nullable and all(v != "" for v, _ in f.choices)
 
 
 #: l'unité d'un champ telle qu'on la lit en français
@@ -56,15 +63,16 @@ def _unit(f: forms.FormField) -> str:
 
 
 def only_attr(f: forms.FormField) -> str:
-    """Les conditions d'affichage d'un champ pour ``console.js`` : ``chemin=v1|v2``
-    reliées par « ; » (toutes), et des alternatives reliées par « || » (l'une)."""
-    def one(only: forms.Only) -> str:
-        return ";".join(f"{path}={'|'.join(vals)}" for path, vals in only)
+    """Les conditions d'affichage d'un champ pour ``console.js`` : ``chemin=v1|v2`` (il vaut l'une)
+    ou ``chemin!=v1|v2`` (il n'en vaut aucune, ``Knob.unless``), reliées par « ; » (toutes), et des
+    alternatives reliées par « || » (l'une)."""
+    def one(only: forms.Only, sign: str = "=") -> list[str]:
+        return [f"{path}{sign}{'|'.join(vals)}" for path, vals in only]
 
-    if not f.only and not f.only_any:
+    if not f.conditional:
         return ""
     alternatives = [tuple(f.only) + tuple(alt) for alt in f.only_any] or [tuple(f.only)]
-    return "||".join(one(alt) for alt in alternatives)
+    return "||".join(";".join(one(alt) + one(f.unless, "!=")) for alt in alternatives)
 
 
 def _rows(text: str, kind: str) -> int:

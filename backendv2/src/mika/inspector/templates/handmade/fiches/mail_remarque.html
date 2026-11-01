@@ -1,0 +1,45 @@
+{# La fiche d'un mail, son onglet « Ce qu'elle en sait » dessiné (app/handmade/mail_fiches.py, ADR 0121) : ce qu'il
+   faut savoir d'abord (une demande en cours, close), ce qu'elle en a retenu en grand, ses mesures en tuiles, sa
+   réponse (le brouillon et où il en est), le reste en lignes. Ce qui manque se dit (jamais remarqué, oublié). #}
+{% from "_cells.html" import cell %}
+<div class="now-page mailknown">
+  {% for a in alerts %}<p class="obj-alert {{ a.tone }}">{{ a.text }}</p>{% endfor %}
+
+  {% for q in quotes %}
+  <article class="now-card mailknown-quote" aria-label="{{ q.title }}">
+    <p class="now-eyebrow">{{ q.title }}</p>
+    <blockquote class="obj-quote">{{ q.text }}</blockquote>
+  </article>
+  {% endfor %}
+
+  {% if tiles %}
+  <ul class="person-tiles-list" aria-label="Ses mesures">
+    {% for t in tiles %}<li><span class="person-tile-label">{{ t.label }}</span><span class="person-tile-value">{{ cell(t.value) }}</span></li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if facts or reply %}
+  <div class="now-grid{{ ' two' if facts and reply }}">
+    {% if facts %}
+    <section class="now-card" aria-labelledby="mailknown-facts">
+      <header class="now-card-head"><h2 id="mailknown-facts">{{ facts_title or "Ce qu'elle en sait" }}</h2></header>
+      <dl class="obj-facts">{% for p in facts %}<div><dt>{{ p.label|capitalize }}</dt><dd>{{ cell(p.value) }}</dd></div>{% endfor %}</dl>
+    </section>
+    {% endif %}
+    {% if reply %}
+    <section class="now-card" aria-labelledby="mailknown-reply">
+      <header class="now-card-head"><h2 id="mailknown-reply">Sa réponse</h2></header>
+      <dl class="obj-facts">{% for p in reply %}<div><dt>{{ p.label|capitalize }}</dt><dd>{{ cell(p.value) }}</dd></div>{% endfor %}</dl>
+    </section>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if quotes or tiles or facts %}{% for n in quiet %}<p class="person-tab-note">{{ n }}</p>{% endfor %}
+  {% else %}
+  <section class="now-card" aria-labelledby="mailknown-none">
+    <header class="now-card-head"><h2 id="mailknown-none">Ce qu'elle en sait</h2></header>
+    {% for n in quiet %}<p class="now-empty">{{ n }}</p>{% else %}<p class="now-empty">rien de plus que la boîte</p>{% endfor %}
+  </section>
+  {% endif %}
+</div>

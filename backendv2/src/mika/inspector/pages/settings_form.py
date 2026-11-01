@@ -45,6 +45,7 @@ from starlette.responses import RedirectResponse, Response
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel, SettingsPage, SettingsSection, SettingsTab
 from mika.inspector.formview import field_view
+from mika.inspector.pages.reglages import back_to, params_view
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel import forms
 from mika.kernel.clock import US
@@ -261,6 +262,31 @@ class SettingsForms:
         return s.pages or (SettingsPage(s.key, s.label, (), s.description, commands=True, blocks=True,
                                         yaml=s.yaml),)
 
+    def url(self, page: str, **query: str) -> str:
+        """L'adresse où se lit une page de réglages : la sienne (``SettingsPage.home``), sinon sous Réglages. Ses
+        formulaires s'enregistrent toujours sous Réglages (``page_url``)."""
+        found = self.pages.get(page)
+        home = found[1].home if found else ""
+        if not home:
+            return page_url(page, **query)
+        query = {k: v for k, v in query.items() if v}
+        return f"{PREFIX}/{home}" + (f"?{urlencode(query)}" if query else "")
+
+    def carrying(self, owner: str, back: str) -> str:
+        """La page de réglages qui porte les paramètres de ``owner`` et vit à l'adresse ``back`` (où leur formulaire
+        refusé se remontre) ; vide : aucune."""
+        path = back.split("?", 1)[0]
+        return next((key for key, (_s, pg) in self.pages.items()
+                     if owner and pg.params == owner and pg.home and path == f"{PREFIX}/{pg.home}"), "")
+
+    def home(self, page: str) -> tuple[str, str]:
+        """La destination et l'onglet où vit une page de réglages (Réglages et la page, d'ordinaire)."""
+        found = self.pages.get(page)
+        if found and found[1].home:
+            key, _, slug = found[1].home.partition("/")
+            return key, slug
+        return "reglages", page
+
     def page_for(self, section: str, path: str = "") -> str:
         """La page d'une section qui montre ce chemin (ou sa première page)."""
         s = self.sections.get(section)
@@ -277,18 +303,22 @@ class SettingsForms:
             rubric = self.rubrics.get(s.tab)
             for pg in self.pages_of(s):
                 n += 1
-                key = f"reglages.{pg.key}"
+                # une page qui vit ailleurs (Courrier › Paramètres) y est un onglet, hors du sous-menu des réglages
+                key = pg.home.replace("/", ".", 1) if pg.home else f"reglages.{pg.key}"
 
                 async def fn(ui: Any, request: Request, _page: str = pg.key) -> Any:
                     return await self.panel(ui, request, _page, {})
 
-                out[key] = Builtin(key, pg.title, fn, group=rubric.title if rubric else "",
+                out[key] = Builtin(key, pg.title, fn, group=rubric.title if rubric and not pg.home else "",
                                    order=(rank.get(s.tab, 50) + 1) * 100 + n,
                                    description=pg.description or s.description)
         return out
 
     # ── rendre ──
-    async def panel(self, ui: Any, request: Request, page: str, states: Mapping[str, State]) -> Panel:
+    async def panel(self, ui: Any, request: Request, page: str, states: Mapping[str, State],
+                    params: Mapping[str, Any] | None = None) -> Panel:
+        """Une page de réglages ; ``params`` : l'état d'un formulaire de ses paramètres internes refusé (ses valeurs
+        tapées, ses erreurs), quand la page en porte (``SettingsPage.params``)."""
         s, pg = self.pages[page]
         csrf = ui.csrf(request)
         env = ui.env()
@@ -315,8 +345,13 @@ class SettingsForms:
         record = view.get("record")
         heading = (("Ajouter · " + record["label"]) if record["new"] else
                    "Modifier · " + (record["key"] or record["label"])) if record else ""
-        return Panel("handmade/reglages/page.html", {"sections": [view], "action": page_url(page), "page_heading": heading},
-                     styles=("handmade/reglages.css",))
+        # une page qui a son gabarit titre elle-même son formulaire : la page garde son titre (Courrier › Paramètres)
+        context: dict[str, Any] = {"sections": [view], "action": page_url(page),
+                                   **({} if pg.template else {"page_heading": heading})}
+        if pg.params and not record:  # ses paramètres internes, sur la même page (ADR 0173)
+            context["params"] = params_view(ui, pg.params, params or {}, self.url(page))
+        return Panel(pg.template or "handmade/reglages/page.html", context,
+                     styles=("handmade/reglages.css", *pg.styles))
 
     def _fields(self, s: SettingsSection, pg: SettingsPage) -> list[forms.FormField]:
         assert s.model is not None
@@ -372,7 +407,7 @@ class SettingsForms:
             if view is not None:
                 if f.secret and f.path in state.stashed:
                     view["has_value"] = True  # tapé, gardé côté serveur : vide = le garder
-                view["hidden"] = bool(f.only or f.only_any) and not forms.visible(f, given)
+                view["hidden"] = f.conditional and not forms.visible(f, given)
                 placed.append((f, view))
         if placed:
             groups, advanced = _grouped(placed)
@@ -418,13 +453,13 @@ class SettingsForms:
                                                  if refs else "")
             describe = s.describe.get(f.path)
             card = call(describe, key, entry, label=f"carte {s.key}.{f.path}") if describe is not None else None
-            rows.append({"key": key, "cells": cells, "edit": page_url(page, enregistrement=f.path, cle=key),
+            rows.append({"key": key, "cells": cells, "edit": self.url(page, enregistrement=f.path, cle=key),
                          "confirm": confirm[:600], "card": None if isinstance(card, Failed) else card})
         return {"path": f.path, "label": f.label, "help": f.help, "keyed": keyed,
                 "columns": [i.label for i in shown] + [i.label for i in secrets_], "rows": rows,
                 "total": len(items),
                 "pager": render._pager(Pager(number=number, size=RECORDS_PAGE, total=len(items)), query),
-                "add": page_url(page, enregistrement=f.path, cle="", nouveau="1")}
+                "add": self.url(page, enregistrement=f.path, cle="", nouveau="1")}
 
     def _record_view(self, s: SettingsSection, current: Any, editing: tuple[str, str], state: State,
                      loaded: Mapping[str, list[tuple[str, str]]], page: str) -> dict[str, Any] | None:
@@ -465,7 +500,7 @@ class SettingsForms:
                 if f.secret and f.path in state.stashed:
                     view["has_value"] = True  # tapé, gardé côté serveur : vide = le garder
                 # ce qui ne sert pas au type choisi n'apparaît pas (le script suit les changements)
-                view["hidden"] = bool(f.only or f.only_any) and not forms.visible(f, given)
+                view["hidden"] = f.conditional and not forms.visible(f, given)
                 placed.append((f, view))
         groups, advanced = _grouped(placed)
         label = next((f.label for f in forms.describe(s.model) if f.path == path), path)
@@ -475,7 +510,7 @@ class SettingsForms:
                 "name_rule": forms.record_names(s.model, path)[1], "groups": groups,
                 "advanced": advanced, "open": any(v.get("error") for f, v in placed if f.advanced),
                 "general": _placed([f.path for f in fields] + [RECORD_KEY], state.record_errors),
-                "back": state.back, "cancel": state.back or page_url(page)}
+                "back": state.back, "cancel": state.back or self.url(page)}
 
     def _loader_paths(self, s: SettingsSection, path: str) -> list[str]:
         found = forms.record_model(s.model, path) if s.model is not None else None
@@ -782,7 +817,7 @@ class SettingsForms:
         if back:  # revenir d'où l'on venait (une page de la console : le courrier, ses comptes)
             sep = "&" if "?" in back else "?"
             return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
-        return secure(RedirectResponse(page_url(page, flash=token), status_code=303))
+        return secure(RedirectResponse(self.url(page, flash=token), status_code=303))
 
 
 def _choice_errors(s: SettingsSection, current: Any, new: BaseModel) -> dict[str, str]:
@@ -800,15 +835,6 @@ def _choice_errors(s: SettingsSection, current: Any, new: BaseModel) -> dict[str
         if str(value) not in {v for v, _ in choices()}:
             errors[path] = f"choix inconnu : « {str(value)[:80]} »"
     return errors
-
-
-def back_to(target: str) -> str:
-    """Un retour dans la console seulement (jamais une autre adresse) ; vide sinon."""
-    target = target.strip()
-    if target.startswith(PREFIX + "/") and "//" not in target and "\\" not in target and len(target) < 2000 \
-            and all(ord(ch) >= 32 for ch in target):
-        return target
-    return ""
 
 
 def _entry(current: Any, path: str, key: str, keyed: bool) -> BaseModel | None:

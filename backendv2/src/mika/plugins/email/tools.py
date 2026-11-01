@@ -7,6 +7,11 @@
   relevé : au-delà, « rien » ne veut pas dire que le mail n'existe pas
   (ADR 0168). Réservés à ses propriétaires (``owner_only``), ou à elle quand elle
   travaille.
+- **Ranger** (``email_tidy``) : un même geste sur plusieurs mails, sur le
+  serveur — lu, non lu, suivi, plus suivi, archivé, déplacé, corbeille ; jamais
+  de suppression définitive. Le résultat dit, mail par mail, ce qui a été fait
+  ou refusé, et ce que personne n'avait encore ouvert : il informe, il
+  n'interdit pas. Un mail remarqué et rangé ne lui est plus signalé.
 - **Écrire** (``email_draft``) : un brouillon, dans la voix du compte, gardé par
   l'adaptateur ; elle le **propose** (capacité ``email.send``) avec le
   condensé de ce qui partirait. Le journal ne garde que l'identifiant du
@@ -22,7 +27,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -49,13 +54,21 @@ from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
 from mika.vocab.canals import mail_rule_for_all, mail_send
-from mika.vocab.episodes import WORKING, Kind, is_work_target
+from mika.vocab.episodes import WORKING, Kind, is_work_target, task_of
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.rights import here_allowed
 
 EPISODES = [Kind.REPLY, *WORKING, Kind.TASK]
 BODY_SHOWN = 6000
+#: au plus tant de mails rangés d'un même geste
+TIDY_MAX = 25
+#: comment un mail qu'elle avait remarqué quitte ses non-lus quand elle le range (``Seen.how``, les mêmes mots que la
+#: console) ; marquer non lu, suivre, ne plus suivre : il n'en quitte rien
+TIDY_HOW = {"read": "lu", "archive": "archivé", "move": "déplacé", "trash": "corbeille"}
+#: ce qu'un geste a donné pour un mail : fait à l'instant, déjà ainsi, refusé
+DONE, ALREADY, REFUSED = "done", "already", "refused"
 #: une page plus loin que la dernière : ``Page.bounds`` la ramène à la dernière (le mail le plus ancien relevé)
 LAST_PAGE = 10**9
 
@@ -177,6 +190,14 @@ class DraftArgs(BaseModel):
     account: str = Field(default="", max_length=40, description=phrase("email.tools.draft.account"))
     reply_all: bool = Field(default=False, description=phrase("email.tools.draft.reply_all"))
     quote: bool = Field(default=True, description=phrase("email.tools.draft.quote"))
+
+
+class TidyArgs(BaseModel):
+    mails: list[Annotated[str, Field(min_length=1, max_length=400)]] = Field(
+        min_length=1, max_length=TIDY_MAX, description=phrase("email.tools.tidy.mails"))
+    action: Literal["read", "unread", "flag", "unflag", "archive", "move", "trash"] = Field(
+        description=phrase("email.tools.tidy.action"))
+    folder: str = Field(default="", max_length=300, description=phrase("email.tools.tidy.folder"))
 
 
 @EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True)
@@ -397,6 +418,143 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
                                          phrase("email.header.to", who=shown.to),
                                          phrase("email.header.subject", subject=shown.subject), "",
                                          shown.text[:3000])), proof=True)
+
+
+# ── Ranger ────────────────────────────────────────────────────────────────
+
+
+def _may_tidy(frame: Frame) -> bool:
+    """Ranger ici : ce que ses droits laissent de cet outil qui agit (la règle de la porte d'offre, revérifiée à
+    l'exécution) ; elle seule, avec sa boîte, ou dans une de ses tâches de courrier."""
+    return here_allowed(frame, BUNDLE, "email_tidy", acts=True,
+                        tasks=lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
+
+
+def _folder_named(folders: list[Any], wanted: str) -> Any:
+    """Le dossier demandé : par son nom sur le serveur, sinon par son nom ou son libellé (« Archives ») sans tenir
+    compte de la casse ; ``None`` s'il n'existe pas dans cette boîte."""
+    exact = next((f for f in folders if f.name == wanted), None)
+    if exact is not None:
+        return exact
+    folded = wanted.casefold()
+    return next((f for f in folders if folded in (f.name.casefold(), f.label.casefold())), None)
+
+
+def _folders_line(account: str, folders: list[Any]) -> str:
+    """Les dossiers d'une boîte (leur libellé et leur nom sur le serveur) : où l'on peut ranger."""
+    named = [inert(f.name, 80) if f.label == f.name else
+             phrase("email.tools.tidy.folder_named", label=inert(f.label, 60), name=inert(f.name, 80))
+             for f in folders]
+    return phrase("email.tools.tidy.folders", account=account,
+                  folders=", ".join(named) or phrase("email.tools.tidy.no_folders"))
+
+
+def _refusal(exc: Exception) -> str:
+    """Ce que le serveur a répondu, dit comme une donnée (une réponse IMAP peut porter ce qu'elle veut)."""
+    return phrase("email.tools.tidy.refused", why=inert(str(exc), 200) or type(exc).__name__)
+
+
+async def _gesture(port: Any, ref: str, action: str, folder: str) -> str:
+    """Un geste sur un mail, sur le serveur ; rend le dossier d'arrivée quand il en change (sinon rien). Jamais de
+    suppression définitive : ``port.delete`` n'est pas un geste d'elle."""
+    if action == "unread":
+        await port.set_flags(ref, seen=False)
+        return ""
+    if action in ("flag", "unflag"):
+        await port.set_flags(ref, flagged=action == "flag")
+        return ""
+    if action == "archive":
+        return str(await port.archive(ref))
+    if action == "trash":
+        return str(await port.trash(ref))
+    return str(await port.move(ref, folder))
+
+
+@EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"), args=TidyArgs,
+            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True)
+async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
+    port, refused = _port(ctx)
+    if refused is not None:
+        return refused
+    if not _may_tidy(ctx.frame):
+        return ToolResult(ok=False, content=phrase("email.tools.tidy.not_here"))
+    action, wanted = args.action, args.folder.strip()
+    if action == "move" and not wanted:
+        return ToolResult(ok=False, content=phrase("email.tools.tidy.which_folder"))
+    mails: dict[str, Any] = {}
+    missing: list[str] = []
+    for given in dict.fromkeys(r.strip().strip("[]").strip() for r in args.mails):
+        m = await port.get(given) if given else None
+        if m is not None:
+            mails.setdefault(m.ref, m)
+        elif given:
+            missing.append(phrase("email.tools.tidy.sent", ref=inert(given, 200)) if port.sent_mail(given) is not None
+                           else phrase("email.tools.tidy.not_found", ref=inert(given, 200)))
+    boxes: dict[str, list[Any]] = {}
+    outcome: dict[str, tuple[str, str]] = {}  # réf → (ce qui en est dit, ce que ça a donné)
+    targets: dict[str, str] = {}
+    lost: set[str] = set()  # les boîtes où le dossier demandé n'existe pas
+    todo: list[Any] = []
+    already = family("email.tools.tidy.already")
+    for m in mails.values():
+        if m.account not in boxes:
+            boxes[m.account] = port.folders(m.account)
+        folders = boxes[m.account]
+        role = next((f.role for f in folders if f.name == m.folder), "")
+        if action == "move":
+            target = _folder_named(folders, wanted)
+            if target is None:
+                lost.add(m.account)
+                outcome[m.ref] = (phrase("email.tools.tidy.unknown_folder", folder=inert(wanted, 80)), REFUSED)
+                continue
+            targets[m.ref] = target.name
+        there = {"read": m.seen, "unread": not m.seen, "flag": m.flagged, "unflag": not m.flagged,
+                 "archive": role == "archive", "trash": role == "trash", "move": targets.get(m.ref) == m.folder}
+        if there[action]:
+            outcome[m.ref] = (already[action], ALREADY)
+        else:
+            todo.append(m)
+    done = family("email.tools.tidy.done")
+    if action == "read" and todo:
+        # par lot : une session par boîte et par dossier ; ce que le serveur n'a pas pris se relit dans le cache
+        try:
+            await port.mark_seen([m.ref for m in todo])
+        except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
+            outcome.update((m.ref, (_refusal(exc), REFUSED)) for m in todo)
+        else:
+            for m in todo:
+                now = await port.get(m.ref)
+                outcome[m.ref] = (done["read"], DONE) if now is not None and now.seen else \
+                    (phrase("email.tools.tidy.missed"), REFUSED)
+    else:
+        for m in todo:
+            try:
+                where = await _gesture(port, m.ref, action, targets.get(m.ref, ""))
+            except (OSError, RuntimeError, ValueError) as exc:
+                outcome[m.ref] = (_refusal(exc), REFUSED)
+                continue
+            into = phrase("email.tools.tidy.into", folder=inert(where, 80)) if where else ""
+            outcome[m.ref] = (done[action] + into, DONE)
+    # elle n'en parlera plus : un mail qu'elle avait remarqué et pas lu, lu ou rangé par elle (``by`` vide)
+    state, how, who = ctx.frame.state("email"), TIDY_HOW.get(action, ""), keepers(ctx.frame)
+    quiet, lines = [], []
+    for m in mails.values():
+        said, result = outcome[m.ref]
+        seen = state.mails.get(m.ref)
+        if how and result != REFUSED and seen is not None and not seen.read:
+            quiet.append(READ.draft(mail=m.ref, how=how))
+        # ce que personne n'avait encore ouvert sur le serveur : elle le sait, et en fait ce qu'elle veut
+        unseen = phrase("email.tools.tidy.unseen", who=who) if how and result == DONE and not m.seen else ""
+        lines.append(phrase("email.tools.tidy.line", ref=m.ref, sender=inert(m.sender, 200),
+                            subject=inert(m.subject, 200), outcome=said, unseen=unseen))
+    if quiet:
+        await ctx.emit(*quiet)
+    lines += missing
+    lines += [_folders_line(account, boxes[account]) for account in sorted(lost)]
+    results = [result for _, result in outcome.values()]
+    # ranger prouve qu'une exécution a produit, quand un mail a changé (ADR 0104)
+    return ToolResult(ok=any(r != REFUSED for r in results), content="\n".join((phrase("email.tools.data"), *lines)),
+                      proof=DONE in results)
 
 
 # ── Ce qui part ───────────────────────────────────────────────────────────

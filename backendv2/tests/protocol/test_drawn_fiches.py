@@ -20,8 +20,8 @@ from mika.contracts import wakeup as wakeup_c
 from mika.kernel.events import Content, Origin
 from mika.ports.mail import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.mail import Draft as MailDraft
-from mika.sim.outside import FakeMail
 from mika.ports.teams import Draft as TeamsDraft
+from mika.sim.outside import FakeMail
 from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.courrier import framed, mailbox
 from tests.protocol.test_teams_web import DM, batch, headers, new_key
@@ -218,7 +218,10 @@ def test_a_mailbox_shows_its_state_folders_and_how_she_writes_there(world):  # n
     assert "Ses dossiers" in page and "Archives" in page and "/inspecteur/courrier/reception?compte=pro" in page
     assert "Comment elle y écrit" in page and "/inspecteur/action/email.ecrire" in page
     voice = drawn(client, "/inspecteur/fiche/compte/pro?onglet=voix")
-    assert 'class="now-page person-tab"' in voice and "Ce qu'elle lit avant d'écrire" in voice
+    assert 'class="now-page mailvoice"' in voice and "Ce qu'elle lit avant d'écrire" in voice
+    assert "Comment elle y écrit" in voice and "en assistante" in voice and "à ta place" in voice  # les trois voix
+    assert "<atelier@example.test>" in voice  # l'expéditeur tel qu'il partira
+    assert "pas de signature" in voice and "/inspecteur/reglages/canaux?canal=courrier:pro" in voice
 
 
 def test_a_microsoft_mailbox_says_how_to_connect_it(world, monkeypatch):  # noqa: F811
@@ -246,9 +249,14 @@ def test_a_mail_reads_with_what_she_knows_beside_it(world):  # noqa: F811
     assert not box.actions and not box.sent  # consulter ne range rien
     sent = drawn(client, "/inspecteur/fiche/mail/" + quote(box.outgoing[0].ref, safe=""))
     assert "Mail parti de sa boîte" in sent and "Bien reçu !" in sent
-    for tab in ("fil", "remarque"):
-        other = drawn(client, "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe="") + "?onglet=" + tab)
-        assert 'class="now-page person-tab"' in other, tab
+    base = "/inspecteur/fiche/mail/" + quote("pro:<projet@example.test>", safe="")
+    thread = drawn(client, base + "?onglet=fil")
+    assert 'class="now-page mailthread"' in thread and "La conversation" in thread
+    assert '<li class=" here">' in thread and "ce mail" in thread  # reçu : à gauche, en évidence
+    known = drawn(client, base + "?onglet=remarque")
+    assert 'class="now-page mailknown"' in known and "Elle ne l'a pas (ou plus) remarqué" in known  # l'état vide
+    gone = drawn(client, "/inspecteur/fiche/mail/" + quote(box.outgoing[0].ref, safe="") + "?onglet=fil")
+    assert '<li class="mine here">' in gone and "↗ parti" in gone  # parti de sa boîte : à droite
 
 
 def test_a_draft_is_an_envelope_with_its_decisions_and_its_journey(world):  # noqa: F811
@@ -266,11 +274,59 @@ def test_a_draft_is_an_envelope_with_its_decisions_and_its_journey(world):  # no
     for action in ("email.envoyer_brouillon", "email.retoucher", "email.refuser_brouillon", "email.reprendre"):
         assert f"/inspecteur/action/{action}" in page, action
     assert "D'où il vient" in page and "Ce qui lui est arrivé" in page  # à côté : son origine, son parcours
+    why = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=pourquoi")
+    assert 'class="now-page draftwhy"' in why and "Le mail auquel il répond" in why
+    assert "Maquettes du projet" in why and "de Léa Martin <lea@example.test>" in why  # le mail, lu dans la boîte
+    assert "Voici les maquettes." in why and "Elle l'a préparé d'elle-même" in why
+    history = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+    assert 'class="now-page drafthist"' in history and "Ce qui lui est arrivé" in history and "Proposé" in history
+    assert "Sa version" not in history  # jamais retouché : une seule version
     refused = client.post("/inspecteur/action/email.refuser_brouillon",
                           data={**form_of(page, "email.refuser_brouillon"), "note": "trop sec"}, follow_redirects=False)
     assert refused.status_code == 303
     decided = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}")
     assert "Où il en est" in decided and "refusé" in decided and "email.envoyer_brouillon" not in decided
+    assert "Refusé" in drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+
+
+def propose(client, live, draft_id: str, **more) -> None:
+    append(client, live, [rt.EFFECT_PROPOSED.draft(
+        capability="email.send", owner="email", summary=Content.of("Répondre à Léa"), context="email",
+        args_json=json.dumps({"draft": draft_id, "account": "pro", **more}))], "runtime")
+
+
+def test_a_retouched_draft_shows_both_versions_and_a_vanished_one_keeps_its_fiche(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    draft = box.save_draft(MailDraft(id="", account="pro", to="lea@example.test", subject="Re: Maquettes",
+                                     body="Merci Léa, je regarde les deux pistes.", reply_to="pro:<projet@example.test>",
+                                     edited_by="user_1", original_body="Merci !"))
+    propose(client, live, draft.id, mail="pro:<projet@example.test>")
+    history = drawn(client, f"/inspecteur/fiche/brouillon/{draft.id}?onglet=historique")
+    assert "Sa version" in history and "Merci !" in history and "Merci Léa, je regarde les deux pistes." in history
+    propose(client, live, "parti-de-la-boite")
+    vanished = drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite")
+    assert 'class="now-page draftf"' in vanished and "n'est plus dans la boîte" in vanished
+    assert "attend ton accord" in vanished and "il ne partira pas" in vanished  # où il en est, sans texte
+    assert "email.envoyer_brouillon" not in vanished
+    assert 'class="now-page draftwhy"' in drawn(client, "/inspecteur/fiche/brouillon/parti-de-la-boite?onglet=pourquoi")
+
+
+def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    draft = box.save_draft(MailDraft(id="", account="pro", to="lea@example.test", subject="Re: Maquettes",
+                                     body="Merci Léa, retour jeudi.", reply_to="pro:<projet@example.test>"))
+    propose(client, live, draft.id, mail="pro:<projet@example.test>")
+    drafts = drawn(client, "/inspecteur/courrier/brouillons")
+    assert 'mail-drafts-page' in drafts and 'class="hm-workspace mail-views"' in drafts  # l'espace du courrier
+    assert "À décider" in drafts and "Re: Maquettes" in drafts and "Relire le brouillon" in drafts
+    assert f'href="/inspecteur/fiche/brouillon/{draft.id}"' in drafts and "Maquettes du projet" in drafts
+    assert "Déjà décidés" in drafts and "aucun encore" in drafts.lower()
+    contacts = drawn(client, "/inspecteur/courrier/contacts")
+    assert 'mail-contacts-page' in contacts and "lea@example.test" in contacts and "Ses échanges" in contacts
+    assert "/inspecteur/action/email.ecrire" in contacts and 'value="lea@example.test"' in contacts  # « Écrire »
+    assert "reception?dossier=%2A&de=lea%40example.test" in contacts  # ses échanges, dans la réception
+    empty = drawn(client, "/inspecteur/courrier/contacts?q=personne-inconnue")
+    assert "aucun contact ne correspond" in empty.lower()
 
 
 def test_every_fiche_kind_is_registered_once():

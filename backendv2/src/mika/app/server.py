@@ -385,7 +385,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         return name_of(kernel.mind.root.slices["self"].persona)
 
     # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages (ADR 0166)
-    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings)),
+    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings),
+                                 images=settings),
              "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}

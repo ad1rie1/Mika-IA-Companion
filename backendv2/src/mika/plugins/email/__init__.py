@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -61,6 +61,11 @@ BUNDLE = "email"
 IMPORTANT = 0.8
 #: comment un mail quitte ses non-lus quand un brouillon d'elle y a répondu (``Seen.how``)
 REPLIED = "répondu"
+#: … et quand le relevé le trouve lu dans un autre client
+ELSEWHERE = "ailleurs"
+#: dans la console, ouvrir un mail le marque-t-il lu ? (ADR 0175) : le délai en secondes de chaque choix (``jamais`` :
+#: aucun)
+READ_AFTER_S = {"aussitot": 0, "3s": 3, "10s": 10}
 #: un mail écrit par un opérateur reste sous ses yeux (« TES MAILS ») pendant deux jours
 SENT_SHOWN_FOR = 2 * DAY
 #: ce qu'elle garde des mails écrits par un opérateur
@@ -122,7 +127,7 @@ class EmailParams(BaseModel):
              "préparer d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
     boxes_off: Annotated[tuple[str, ...], Knob(
         label="Boîtes décochées", group="Envoyer", readonly=True,
-        help="Réglées dans Réglages › Plugins › Boîtes aux lettres : elle n'y prépare rien d'elle-même, quelles que "
+        help="Réglées dans Courrier › Paramètres : elle n'y prépare rien d'elle-même, quelles que "
              "soient ses règles d'envoi.")] = ()
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
@@ -142,6 +147,13 @@ class EmailParams(BaseModel):
     draft_within_us: Annotated[int, Knob(
         label="Préparer dans les", group="Brouillons", lo=HOUR, hi=7 * DAY,
         help="Passé ce délai après son arrivée, un mail n'appelle plus de réponse préparée d'elle-même.")] = 2 * DAY
+    read_on_open: Annotated[Literal["jamais", "aussitot", "3s", "10s"], Knob(
+        label="Ouvrir un mail le marque lu", group="Lecture",
+        choices=(("jamais", "jamais : tu le marques toi-même"), ("aussitot", "dès qu'il s'ouvre"),
+                 ("3s", "après 3 secondes de lecture"), ("10s", "après 10 secondes de lecture")),
+        help="Dans la console : tel quel, ouvrir un mail ne change rien ; sinon il est marqué lu, sur le serveur "
+             "aussi, dès qu'il s'ouvre ou après quelques secondes passées à le lire (le script de la console s'en "
+             "charge). Ce qu'elle a lu, elle, n'y compte pas.")] = "jamais"
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +173,9 @@ class Seen:
     how: str = ""
     #: les annonces qui n'ont rien dit (un silence choisi, une panne) : au-delà d'un plafond, elle n'insiste pas
     mention_attempts: int = 0
+    #: c'est elle qui l'a lu ou rangé (un de ses outils), pas un opérateur ni un autre client : la console le
+    #: montre à part, son « non lu » étant celui de l'opérateur (ADR 0175)
+    by_her: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,9 +257,10 @@ class PollAsked(Payload):
 
 #: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
+#: v5 : ``Seen.by_her`` (ADR 0175)
 #: ``background_from`` (retiré le 2026-10-28) : les mails se taisaient en réponse quand le ton de la personne était
 #: lourd — une décision de comportement ; elle voit ce qui compte, et juge
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4,
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=5,
                 retired_params=("background_from",))
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
@@ -284,7 +300,9 @@ def _read(s: EmailState, e, cx) -> EmailState:
     m = s.mails.get(e.data.mail)
     if m is None or m.read:
         return s
-    return replace(s, mails=s.mails.set(e.data.mail, replace(m, read=True, how=e.data.how or "lu")))
+    # sans opérateur, c'est elle — sauf ce que le relevé a vu lu ou répondu dans un autre client
+    her = not e.data.by and e.data.how not in (ELSEWHERE, REPLIED)
+    return replace(s, mails=s.mails.set(e.data.mail, replace(m, read=True, how=e.data.how or "lu", by_her=her)))
 
 
 @EMAIL.reducer(c.SENT)

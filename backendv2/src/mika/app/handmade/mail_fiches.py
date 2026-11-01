@@ -1,11 +1,15 @@
 """Les fiches du courrier, dessinées (ADR 0027, 0121) : une boîte aux lettres, un mail, un brouillon.
 
 - **Une boîte** (``compte``) : si elle relève (son état, sa dernière erreur), ses dossiers et ce qu'ils ont de non lu
-  (chacun mène à sa liste), comment elle y écrit, et « Écrire depuis cette boîte » ; « Sa voix » bloc par bloc.
+  (chacun mène à sa liste), comment elle y écrit, et « Écrire depuis cette boîte » ; « Sa voix » : les trois façons
+  d'écrire (la sienne mise en avant), l'expéditeur tel qu'il partira, la signature, le texte exact qu'elle lit.
 - **Un mail** : le message à lire — ses actions, son texte, ses pièces, le détail replié (les blocs du plugin) — et, à
-  côté, ce qu'elle en sait et le fil où il s'inscrit ; « Fil » et « Ce qu'elle en sait » bloc par bloc.
+  côté, ce qu'elle en sait et le fil où il s'inscrit ; « Fil » en conversation (reçus à gauche, partis à droite) ;
+  « Ce qu'elle en sait » : ce qu'elle en a retenu en grand, ses mesures en tuiles, sa réponse, le reste en lignes.
 - **Un brouillon** : l'enveloppe de ce qui partira (de, à, copie, objet, le texte tel qu'il partira) et ce que tu peux
-  en faire ; à côté, d'où il vient et son parcours ; ses deux versions, quand tu l'as retouché.
+  en faire ; à côté, d'où il vient et son parcours ; ses deux versions, quand tu l'as retouché. « Pourquoi » : le mail
+  auquel il répond, ce qu'elle en avait retenu, les consignes ; « Historique » : son parcours et ses deux versions. Un
+  brouillon disparu de la boîte garde sa fiche : ce qu'elle en sait.
 
 Les données sont celles du plugin ``email`` : son port (les comptes, les dossiers, le message, l'aperçu exact d'un
 brouillon), sa tranche, et ses propres onglets lus pour les cartes de côté (``side_view``). Les formulaires sont ceux
@@ -20,7 +24,8 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look
+from mika.adapters.mail.compose import sender
+from mika.app.handmade import Look, excerpt
 from mika.app.handmade.fiche_parts import (
     STYLES,
     draw,
@@ -37,13 +42,38 @@ from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
-from mika.plugins.email import WAITING
+from mika.plugins.email import READ_AFTER_S, WAITING, params_of
 from mika.plugins.email.console.accounts import signin_note
-from mika.plugins.email.console.common import VOICE_LABEL, box_link, clip, mail_key, resolve
+from mika.plugins.email.console.common import VOICE_LABEL, box_link, clip, draft_state, mail_key, resolve
 
 ACCOUNT, MAIL, DRAFT = "compte", "mail", "brouillon"
 #: le fil d'un mail, à côté du message : ses premiers messages
 THREAD_SHOWN = 6
+#: les trois façons d'écrire depuis une boîte, dites pour la page « Sa voix »
+VOICES = (("elle", "Elle écrit comme elle-même, sous son nom d'expéditrice ; tu n'apparais pas."),
+          ("assistante", "Elle écrit pour toi, en assistante : l'expéditeur dit son nom, pour le tien."),
+          ("proprietaire", "Elle écrit à ta place, à la première personne : l'expéditeur et la signature sont les "
+                           "tiens."))
+#: ce que dit « Ce qu'elle en sait » d'un mail : ses mesures, en tuiles (le reste, en lignes)
+TILES = {"pertinence estimée": "Pertinence estimée", "ce que son attention en a gardé": "Ce que son attention en a gardé",
+         "important": "Important", "réponse attendue": "Réponse attendue"}
+#: un début de mail, sous le mail auquel répond un brouillon
+OPENING = 420
+
+
+def _pairs(item: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Les faits d'un bloc rendu, par leur libellé."""
+    return {p["label"]: p["value"] for p in item.get("pairs", [])}
+
+
+def _text(cell: dict[str, Any] | None) -> str:
+    text = str((cell or {}).get("text") or "")
+    return "" if text == "—" else text
+
+
+def _alert(item: dict[str, Any]) -> dict[str, str]:
+    """Une note de la faculté, dite en tête (son ton ; une note sans ton, discrète)."""
+    return {"tone": item.get("tone") if item.get("tone") in ("info", "ok", "warn", "danger") else "", "text": item["text"]}
 
 
 def _port(ui: UI) -> Any:
@@ -89,7 +119,7 @@ class AccountFiche(Overview):
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "voix":
-            return whole(ui, blocks, query, forms)
+            return self._voice(ui, key, blocks, query) or whole(ui, blocks, query, forms)
         if tab != "etat":
             return None
         port = _port(ui)
@@ -134,6 +164,28 @@ class AccountFiche(Overview):
             box=render.href(box_link("", account=key)))
 
 
+    def _voice(self, ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+        """« Sa voix » : les trois façons d'écrire (la sienne mise en avant), l'expéditeur tel qu'il partira, la
+        signature, ce qu'elle prépare d'elle-même, et le texte exact qu'elle lit avant d'écrire."""
+        port = _port(ui)
+        info = port.account(key) if port is not None else None
+        items = rendered(ui, blocks, query)
+        facts = next((_pairs(d) for d in items if d["t"] == "fields"), None)
+        if info is None or facts is None:
+            return None
+        her = _text(facts.get("son nom d'expéditrice"))
+        reads = next((d["text"] for d in items if d["t"] == "prose" and d["title"].startswith("Ce qu'elle lit")), "")
+        prepares = _text(facts.get("réponses préparées d'elle-même"))
+        return draw(
+            "compte_voix.html", tables="cards",
+            voices=[{"label": VOICE_LABEL.get(v, v), "text": text, "on": v == info.voice} for v, text in VOICES],
+            sender=sender(info, her) if her else sender(info), owner=info.display_name.strip(), her=her,
+            signature=info.signature.strip(), reads=reads, prepares=prepares == "oui",
+            alerts=[_alert(d) for d in items if d["t"] == "note" and d.get("tone") == "warn"],
+            canals=(facts.get("pour qui, et comment elles partent") or {}).get("href", ""),
+            edit=(facts.get("modifier") or {}).get("href", ""))
+
+
 # ── un mail ──
 
 
@@ -144,6 +196,8 @@ class MailFiche(Overview):
     slug = ""
     title = "Message"
     styles = STYLES
+    #: « ouvrir un mail le marque lu » (ADR 0175), appliqué par le script du courrier
+    scripts = ("handmade/courrier.js",)
     tabs = ("message", "fil", "remarque")
 
     def render(self, ui: UI, key: str) -> Markup | None:
@@ -160,8 +214,10 @@ class MailFiche(Overview):
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
-        if tab in ("fil", "remarque"):
-            return whole(ui, blocks, query, forms)
+        if tab == "fil":
+            return _thread(ui, key, blocks, query) or whole(ui, blocks, query, forms)
+        if tab == "remarque":
+            return _known(ui, blocks, query) or whole(ui, blocks, query, forms)
         if tab != "message":
             return None
         port, s = _port(ui), _state(ui)
@@ -181,7 +237,46 @@ class MailFiche(Overview):
                     message=[shaped(d) for d in rendered(ui, blocks, query)],
                     known=side_view(ui, "email", "remarque", key, "remarque"),
                     thread=thread if total > 1 else [], more=total > len(thread), total=total,
-                    thread_tab=fiche_url(MAIL, key, "fil"), known_tab=fiche_url(MAIL, key, "remarque"))
+                    thread_tab=fiche_url(MAIL, key, "fil"), known_tab=fiche_url(MAIL, key, "remarque"),
+                    read_after=READ_AFTER_S.get(params_of(ui.kernel.mind.frame()).read_on_open))
+
+
+def _thread(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+    """« Fil » : la conversation dans l'ordre — les mails reçus à gauche, ceux partis de sa boîte à droite, ce mail
+    en évidence ; la pagination de la faculté."""
+    items = rendered(ui, blocks, query)
+    timeline = next((d for d in items if d["t"] == "timeline"), None)
+    if timeline is None:
+        return None
+    entries = [{**e, "sent": e["title"].startswith("↗ ") or e["tone"] == "info",
+                "title": e["title"].removeprefix("↗ "), "here": bool(e["meta"])} for e in timeline["entries"]]
+    pager = timeline.get("pager") or {}
+    return draw("mail_fil.html", tables="cards", entries=entries, empty=timeline["empty"], pager=timeline.get("pager"),
+                paged=any(pager.get(k) for k in ("prev", "next", "older", "newer")),
+                total=pager.get("total") if isinstance(pager.get("total"), int) else len(entries),
+                notes=[d["text"] for d in items if d["t"] == "note"])
+
+
+def _known(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup:
+    """« Ce qu'elle en sait » : ce qu'elle en a retenu en grand, ses mesures en tuiles, sa réponse (le brouillon et où
+    il en est), ce qu'il faut savoir en tête, le reste en lignes."""
+    out: dict[str, Any] = {"alerts": [], "quiet": [], "tiles": [], "facts": [], "facts_title": "", "quotes": [],
+                           "reply": []}
+    for d in rendered(ui, blocks, query):
+        if d["t"] == "fields" and d["title"] == "Sa réponse":
+            out["reply"] = d["pairs"]
+        elif d["t"] == "fields":
+            out["facts_title"] = d["title"]
+            for p in d["pairs"]:
+                (out["tiles"] if p["label"] in TILES else out["facts"]).append(
+                    {**p, "label": TILES.get(p["label"], p["label"])})
+        elif d["t"] == "prose":
+            out["quotes"].append({"title": d["title"], "text": d["text"]})
+        elif d["t"] == "note" and d.get("tone") != "muted":  # une demande en cours, close : en tête
+            out["alerts"].append(_alert(d))
+        elif d["t"] == "note":
+            out["quiet"].append(d["text"])
+    return draw("mail_remarque.html", tables="cards", **out)
 
 
 # ── un brouillon ──
@@ -209,14 +304,16 @@ class DraftFiche(Overview):
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
-        if tab in ("pourquoi", "historique"):
-            return whole(ui, blocks, query, forms)
+        if tab == "pourquoi":
+            return _why(ui, key, blocks, query) or whole(ui, blocks, query, forms)
+        if tab == "historique":
+            return _history(ui, blocks, query) or whole(ui, blocks, query, forms)
         if tab != "brouillon":
             return None
         port = _port(ui)
         got = port.draft(key) if port is not None else None
         if got is None:
-            return None
+            return _gone(ui, key)
         seen = _seen(ui, key)
         shown = port.preview(got.id)
         answered = port.cached_one(got.reply_to) if got.reply_to else None
@@ -235,6 +332,55 @@ class DraftFiche(Overview):
             notes=[d for d in items if d["t"] == "note" and not _long(d) and d.get("tone") != "warn"],
             why=side_view(ui, "email", "pourquoi", key, "pourquoi"),
             history=[d for d in history if d["t"] != "grid"], versions=[d for d in history if d["t"] == "grid"])
+
+
+def _gone(ui: UI, key: str) -> Markup | None:
+    """Un brouillon que la boîte n'a plus (supprimé, la boîte vidée) mais qu'elle a proposé : sa fiche dit ce qu'elle en
+    sait — où il en était, d'où il venait, son parcours ; son texte, lui, n'est plus là."""
+    seen = _seen(ui, key)
+    if seen is None:
+        return None
+    history = side_view(ui, "email", "historique", key, "historique")
+    state, tone = draft_state(seen.state)
+    return draw("brouillon.html", forms={}, tables="cards", gone=True, waiting=False, envelope=None, answered=None,
+                blocked="", text=[], actions=[], notes=[], state={"text": state, "tone": tone},
+                was_waiting=seen.state == WAITING, why=side_view(ui, "email", "pourquoi", key, "pourquoi"),
+                history=[d for d in history if d["t"] != "grid"], versions=[d for d in history if d["t"] == "grid"])
+
+
+def _why(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+    """« Pourquoi » : le mail auquel il répond (son objet, qui l'a écrit, quand, son début), ce qu'elle en avait retenu,
+    pourquoi elle l'a écrit (demandé, ou d'elle-même), les consignes données, la proposition au journal."""
+    items = rendered(ui, blocks, query)
+    facts = next((_pairs(d) for d in items if d["t"] == "fields"), None)
+    if facts is None:
+        return None
+    port, seen = _port(ui), _seen(ui, key)
+    got = port.draft(key) if port is not None else None
+    ref = got.reply_to if got is not None and got.reply_to else seen.mail if seen is not None else ""
+    m = port.cached_one(ref) if port is not None and ref else None
+    look = Look.of(ui, DAY)
+    origin = {"subject": clip(m.subject, 160) or "(sans objet)", "sender": m.sender, "href": fiche_url(MAIL, mail_key(m.ref)),
+              "when": look.day(m.date) if m.date else "", "opening": excerpt(m.body, OPENING)} if m is not None else None
+    link = facts.get("le mail")
+    return draw("brouillon_pourquoi.html", tables="cards", origin=origin,
+                missing=link["href"] if origin is None and link and link.get("href") else "",
+                retained=_text(facts.get("ce qu'elle en avait retenu")), asked=bool(seen is not None and seen.asked), known=seen is not None,
+                needs_reply=_text(facts.get("réponse attendue")), proposal=facts.get("la proposition"),
+                asks=[{"title": d["title"], "text": d["text"]} for d in items if d["t"] == "prose"])
+
+
+def _history(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+    """« Historique » : son parcours (écrit, retouché, proposé, décidé, parti), puis ses deux versions côte à côte quand
+    il a été retouché."""
+    items = rendered(ui, blocks, query)
+    timeline = next((d for d in items if d["t"] == "timeline"), None)
+    if timeline is None:
+        return None
+    grid = next((d for d in items if d["t"] == "grid"), None)
+    versions = [{"title": x["title"], "text": x["text"]} for x in grid["items"] if x["t"] == "prose"] if grid else []
+    return draw("brouillon_historique.html", tables="cards", entries=timeline["entries"], empty=timeline["empty"],
+                versions=versions)
 
 
 def _long(item: dict[str, Any]) -> bool:

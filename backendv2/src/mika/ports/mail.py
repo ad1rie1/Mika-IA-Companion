@@ -413,6 +413,16 @@ class MailPort(Protocol):
         bornées (ADR 0172). Lecture seule : l'inspecteur."""
         ...
 
+    def images_shown(self, address: str) -> bool:
+        """Les images distantes des mails de cet expéditeur s'affichent-elles d'emblée (ADR 0175) ? Lecture seule :
+        l'inspecteur."""
+        ...
+
+    async def show_images(self, address: str, shown: bool) -> None:
+        """Retient (ou oublie) que les images distantes de cet expéditeur s'affichent : un réglage de l'opérateur,
+        qu'oublier ce correspondant efface aussi. Lève ``RuntimeError`` (en français) sans endroit où le garder."""
+        ...
+
     async def forward(self, ref: str, to: str, subject: str, body: str, *, cc: str = "", by: str = "",
                       attachments: bool = True) -> str: ...
 

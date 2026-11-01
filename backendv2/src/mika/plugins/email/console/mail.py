@@ -5,6 +5,7 @@ et ce qu'on peut en faire : répondre, lui faire rédiger une réponse, ranger
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -52,6 +53,7 @@ from mika.plugins.email import (
     params_of,
 )
 from mika.plugins.email.console.common import (
+    BOX,
     NO_MAIL,
     PAGE,
     UNKNOWN,
@@ -157,10 +159,34 @@ def _asked(s: EmailState, ctx: InspectContext, port: Any) -> tuple[str | None, N
     return (ref, None) if ref is not None else (None, Note(UNKNOWN, tone="muted"))
 
 
-def _body(text: str, what: str, html: str = "") -> Block:
+def _body(text: str, what: str, html: str = "", images: tuple[tuple[str, str, bytes], ...] = (),
+          remote: bool = False) -> Block:
     if not text.strip() and not html:
         return Note("Ce message ne contient pas de texte.", tone="muted")
-    return Prose(text, title=what, reading=True, html=html)
+    return Prose(text, title=what, reading=True, html=html, images=images if html else (), remote=bool(html) and remote)
+
+
+#: une image distante dans un mail HTML (une balise ``<img>`` ou un fond en ``url(…)``) : ce que le cadre masque
+REMOTE_IMAGE = re.compile(r"""<img\b[^>]*\bsrc\s*=\s*["']?\s*https?:|url\(\s*["']?\s*https?:""", re.I)
+
+
+def _images(s: EmailState, ctx: InspectContext, port: Any, m: Any) -> tuple[bool, list[Block]]:
+    """Ses images distantes (ADR 0175) : se chargent-elles (cette fois, ``?images=1`` ; ou pour son expéditeur), et
+    ce qu'on en dit au-dessus du mail — de quoi les afficher, ou cesser de les afficher pour cet expéditeur."""
+    if not m.html or not REMOTE_IMAGE.search(m.html[:400_000]):
+        return False, []
+    if port.images_shown(m.address):
+        return True, [Note(f"Ses images s'affichent : tu l'as voulu pour {m.address}.", tone="muted"),
+                      ActionSlot("email.images_masquer", compact=True)]
+    if ctx.param("images") == "1":
+        return True, [Note("Ses images s'affichent pour cette fois.", tone="muted"),
+                      ActionSlot("email.images", compact=True)]
+    kept = tuple((k, v) for k, v in ctx.params.items() if k not in ("flash", "images"))
+    once = Ref("local", BOX, "Les afficher cette fois", (*kept, ("images", "1"))) if ctx.param("lire") \
+        else Ref.subject("mail", mail_key(m.ref), "Les afficher cette fois", (*kept, ("images", "1")))
+    return False, [Note("Ses images distantes sont masquées : les charger dit à l'expéditeur que tu as ouvert ce "
+                        "mail.", tone="muted", title="Images masquées"),
+                   Nav((NavItem("Les afficher cette fois", once),)), ActionSlot("email.images", compact=True)]
 
 
 def _download_link(ref: str, part: str, label: str) -> Ref:
@@ -181,7 +207,8 @@ async def _download(s: EmailState, frame: Frame, ctx: InspectContext, key: str, 
     return Download(file.name, file.data)
 
 
-def _document(ctx: InspectContext, ref: str, text: str, title: str = "", html: str = "", *, kind: str = "mail") -> list[Block]:
+def _document(ctx: InspectContext, ref: str, text: str, title: str = "", html: str = "", *, kind: str = "mail",
+              images: tuple[tuple[str, str, bytes], ...] = (), remote: bool = False) -> list[Block]:
     size = 50_000
     parts, start = [], 0
     while start < len(text):
@@ -201,7 +228,7 @@ def _document(ctx: InspectContext, ref: str, text: str, title: str = "", html: s
         html = ""
         blocks.append(Note(f"Message long : lecture en texte, partie {page} sur {pages}." +
                            (" Le téléchargement contient le message entier." if kind == "mail" else ""), tone="info"))
-    blocks.append(_body(parts[page - 1] if parts else "", title, html))
+    blocks.append(_body(parts[page - 1] if parts else "", title, html, images, remote))
     links = []
     context = tuple((k, v) for k, v in ctx.params.items() if k != "page_texte")
     for number, label in ((page - 1, "Partie précédente"), (page + 1, "Partie suivante")):
@@ -266,19 +293,29 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         slots.append(ActionSlot("email.transferer", (
             ("original", m.ref), ("subject", forward_subject(m.subject)[:200]), ("_bouton", "Transférer le message")),
             title="Transférer", presentation="button"))
+    # ce qu'on fait de chaque mail, à portée ; le reste (déplacer, jeter) dans « Plus d'actions » (ADR 0175)
+    slots.append(ActionSlot("email.rediger", title="Lui demander une réponse", presentation="button"))
     slots.append(ActionSlot("email.archiver", presentation="button"))
+    slots.append(ActionSlot("email.classer" if unread(m, s.mails.get(ref)) else "email.non_lu", presentation="button"))
+    slots.append(ActionSlot("email.ne_plus_suivre" if m.flagged else "email.suivre", presentation="button"))
     slots.append(Disclosure("Plus d’actions", (Toolbar((
-        ActionSlot("email.classer" if unread(m, s.mails.get(ref)) else "email.non_lu", presentation="button"),
-        ActionSlot("email.ne_plus_suivre" if m.flagged else "email.suivre", presentation="button"),
         ActionSlot("email.deplacer", presentation="button"),
-        ActionSlot("email.rediger", title="Lui faire préparer une réponse", presentation="button"),
         ActionSlot("email.corbeille", presentation="button"), ActionSlot("email.supprimer", presentation="button"),
     )),)))
     blocks.append(Toolbar(tuple(slots)))
+    cids = "cid:" in m.html.lower()
     if not m.complete:
         blocks.extend((Note("Ce message provient d'un ancien cache : son contenu peut être incomplet. Charge le message intégral pour le lire en entier.", tone="warn"),
                        ActionSlot("email.completer", title="Charger le message intégral", presentation="button")))
-    blocks.extend(_document(ctx, m.ref, m.body, html=m.html))
+    elif not m.parts_kept and (m.attachments or cids):
+        blocks.extend((Note("Ce message a été relevé avant que ses pièces soient gardées : ses images intégrées ne "
+                            "s'affichent pas et ses pièces jointes se relisent sur le serveur. Récupère-le pour les "
+                            "garder avec lui.", tone="info"),
+                       ActionSlot("email.completer", title="Récupérer ses pièces", presentation="button")))
+    remote, said = _images(s, ctx, port, m)
+    blocks.extend(said)
+    blocks.extend(_document(ctx, m.ref, m.body, html=m.html, images=port.inline_images(m.ref) if cids else (),
+                            remote=remote))
     blocks.extend(_files(m.ref, m.attachments))
     blocks.append(Disclosure("Détails du message", (Fields((*pairs,
         ("Dossier", m.folder), ("Répondre à", m.reply_to or m.sender),
@@ -373,17 +410,18 @@ class NoArgs(BaseModel):
 
 
 @EMAIL.action("completer", title="Charger le message intégral", args=NoArgs, emits=[], subject="mail",
-              description="Récupère le contenu complet depuis le serveur du compte.")
+              description="Récupère le message complet depuis le serveur du compte, avec ses pièces.")
 async def _complete(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     port = _port(ctx)
     ref = resolve(s, port, ctx.subject)
     try:
-        m = await port.document(ref) if ref else None
+        m = await port.reread(ref) if ref else None
     except (OSError, RuntimeError, ValueError):
         raise Refused("Le message n'a pas pu être récupéré. Vérifie la connexion du compte.") from None
     if m is None:
         raise Refused("Ce message n'est plus disponible.")
-    return Done(message="Le message intégral est disponible.", go=Ref.subject("mail", mail_key(ref), m.subject))
+    return Done(message="Le message intégral et ses pièces sont disponibles.",
+                go=Ref.subject("mail", mail_key(ref), m.subject))
 
 
 class AskArgs(BaseModel):
@@ -416,6 +454,31 @@ def _read_draft(s: EmailState, ref: str, by: str, how: str) -> tuple[Any, ...]:
     return (READ.draft(mail=ref, by=by, how=how),) if seen is not None and not seen.read else ()
 
 
+async def apply(port: Any, s: EmailState, m: Any, verb: str, by: str) -> tuple[tuple[Any, ...], str]:
+    """Un geste sur un mail de la boîte, sur le serveur : ce qu'elle doit en savoir, et ce qui a été fait. Lève
+    l'erreur du serveur (``OSError``, ``RuntimeError``, ``ValueError``) ; ``ValueError`` aussi pour un geste
+    inconnu."""
+    if verb == "lu":
+        await port.set_flags(m.ref, seen=True)
+        return _read_draft(s, m.ref, by, "lu"), "Marqué comme lu : elle n'en parlera plus."
+    if verb == "non_lu":
+        await port.set_flags(m.ref, seen=False)
+        return (), "Marqué non lu."
+    if verb in ("suivre", "ne_plus_suivre"):
+        await port.set_flags(m.ref, flagged=verb == "suivre")
+        return (), "Suivi." if verb == "suivre" else "Plus suivi."
+    if verb == "archiver":
+        where = await port.archive(m.ref)
+        return _read_draft(s, m.ref, by, "archivé"), f"Archivé dans « {where} »."
+    if verb == "corbeille":
+        where = await port.trash(m.ref)
+        return _read_draft(s, m.ref, by, "corbeille"), f"Mis dans « {where} »."
+    if verb == "supprimer":
+        await port.delete(m.ref)
+        return _read_draft(s, m.ref, by, "supprimé"), "Supprimé définitivement."
+    raise ValueError("geste inconnu")
+
+
 async def _server(ctx: Any, s: EmailState, verb: str) -> Done:
     port = _port(ctx)
     m = _mail_of(s, ctx.ports, ctx.subject)
@@ -425,27 +488,10 @@ async def _server(ctx: Any, s: EmailState, verb: str) -> Done:
             return Done(drafts=_read_draft(s, ref, ctx.by, "lu"), message="Classé comme lu.")
         raise Refused("Ce mail n'est plus dans la boîte.")
     try:
-        if verb == "lu":
-            await port.set_flags(m.ref, seen=True)
-            return Done(drafts=_read_draft(s, m.ref, ctx.by, "lu"), message="Marqué comme lu : elle n'en parlera plus.")
-        if verb == "non_lu":
-            await port.set_flags(m.ref, seen=False)
-            return Done(message="Marqué non lu (sur le serveur ; elle, l'a déjà vu).")
-        if verb in ("suivre", "ne_plus_suivre"):
-            await port.set_flags(m.ref, flagged=verb == "suivre")
-            return Done(message="Suivi." if verb == "suivre" else "Plus suivi.")
-        if verb == "archiver":
-            where = await port.archive(m.ref)
-            return Done(drafts=_read_draft(s, m.ref, ctx.by, "archivé"), message=f"Archivé dans « {where} ».")
-        if verb == "corbeille":
-            where = await port.trash(m.ref)
-            return Done(drafts=_read_draft(s, m.ref, ctx.by, "corbeille"), message=f"Mis dans « {where} ».")
-        if verb == "supprimer":
-            await port.delete(m.ref)
-            return Done(drafts=_read_draft(s, m.ref, ctx.by, "supprimé"), message="Supprimé définitivement.")
+        drafts, message = await apply(port, s, m, verb, ctx.by)
     except (OSError, RuntimeError, ValueError) as exc:  # une erreur IMAP est une OSError ou une ImapError
         raise Refused(f"Le serveur a refusé : {exc}"[:300]) from None
-    raise Refused("Geste inconnu.")
+    return Done(drafts=drafts, message=message)
 
 
 def _is(pred: Any) -> Any:
@@ -534,6 +580,39 @@ async def _trash(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
               available=lambda s, frame, key, ports=None: _in_trash(s, _mail_of(s, ports, key), ports))
 async def _delete(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     return await _server(ctx, s, "supprimer")
+
+
+def _shown(ports: Any, m: Any) -> bool:
+    port = ports.get("mail") if ports is not None else None
+    return port is not None and m is not None and port.images_shown(m.address)
+
+
+async def _show_images(s: EmailState, ctx: Any, shown: bool) -> Done:
+    port = _port(ctx)
+    m = _mail_of(s, ctx.ports, ctx.subject)
+    if m is None or not m.address:
+        raise Refused("Ce mail n'est plus dans la boîte.")
+    try:
+        await port.show_images(m.address, shown)
+    except (RuntimeError, ValueError) as exc:
+        raise Refused(f"Impossible de le retenir : {exc}."[:300]) from None
+    return Done(message=f"Les images des mails de {m.address} s'afficheront." if shown else
+                f"Les images des mails de {m.address} restent masquées.")
+
+
+@EMAIL.action("images", title="Toujours pour cet expéditeur", args=NoArgs, emits=[], subject="mail", order=50,
+              description="Ses mails s'afficheront avec leurs images distantes, celui-ci et les suivants.",
+              available=lambda s, frame, key, ports=None: (m := _mail_of(s, ports, key)) is not None
+              and bool(m.address) and not _shown(ports, m))
+async def _images_on(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
+    return await _show_images(s, ctx, True)
+
+
+@EMAIL.action("images_masquer", title="Ne plus les afficher", args=NoArgs, emits=[], subject="mail", order=51,
+              description="Ses mails reviennent sans leurs images distantes.",
+              available=lambda s, frame, key, ports=None: _shown(ports, _mail_of(s, ports, key)))
+async def _images_off(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
+    return await _show_images(s, ctx, False)
 
 
 def _can_ask(s: EmailState, frame: Frame, key: str, ports: Any = None) -> bool:

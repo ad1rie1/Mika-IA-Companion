@@ -153,8 +153,9 @@ class Env:
     now: int
     #: une graduation courte : ``stamp(instant, étendue)``
     stamp: Callable[[int, int], str] | None = None
-    #: l'adresse du cadre isolé d'un document HTML natif (ADR 0169) ; sans elle, sa version simplifiée
-    frame: Callable[[str], str] | None = None
+    #: l'adresse du cadre isolé d'un document HTML natif (ADR 0169) : sa source, ses images intégrées, et si ses images
+    #: distantes se chargent (ADR 0175) ; sans elle, sa version simplifiée
+    frame: Callable[[str, tuple[tuple[str, str, bytes], ...], bool], str] | None = None
 
 
 def cell(value: Any, env: Env) -> dict[str, Any]:
@@ -339,10 +340,11 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         return {"t": "note", "text": b.text, "tone": tone(b.tone) or "info", "title": b.title}
     if isinstance(b, Prose):
         text = b.text[:TEXT_MAX]
-        frame = env.frame(b.html) if b.html and env.frame is not None else ""
+        frame = env.frame(b.html, b.images, b.remote) if b.html and env.frame is not None else ""
         return {"t": "prose", "text": text, "title": b.title,
                 "clamp": bool(b.clamp) and len(text) > b.clamp, "short": text[:b.clamp] if b.clamp else "",
                 "reading": b.reading, "rich": bool(b.html), "frame": frame, "sandbox": SANDBOX,
+                "remote": bool(frame) and b.remote,
                 "html": "" if frame else readable_html(b.html) if b.html else readable_text(text) if b.reading else ""}
     if isinstance(b, Code):
         text = b.text[:TEXT_MAX]

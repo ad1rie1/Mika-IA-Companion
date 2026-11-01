@@ -58,7 +58,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("Relations & échanges", (
         Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
-                    subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
+                    subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False,
+                    # ses paramètres (ses boîtes, son relevé, ce qu'elle en dit) : en haut à droite (ADR 0173)
+                    builtin=("courrier.parametres",), gear=("parametres",)),
         Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
                     subjects=("conversation_teams", "reponse_teams")),

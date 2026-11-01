@@ -1,0 +1,48 @@
+{# La fiche d'une boîte aux lettres, son onglet « Sa voix » dessiné (app/handmade/mail_fiches.py, ADR 0121) : les trois
+   façons d'écrire depuis une boîte (celle de cette boîte mise en avant), l'expéditeur tel qu'il partira, la
+   signature, ce qu'elle y prépare d'elle-même, et le texte exact qu'elle lit avant d'écrire. #}
+<div class="now-page mailvoice">
+  {% for a in alerts %}<p class="obj-alert {{ a.tone }}">{{ a.text }}</p>{% endfor %}
+
+  <div class="mailf-grid">
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="mailvoice-how">
+        <header class="now-card-head"><h2 id="mailvoice-how">Comment elle y écrit</h2>{% if edit %}<a class="now-more" href="{{ edit }}">changer →</a>{% endif %}</header>
+        <ul class="mailvoice-voices">
+          {% for v in voices %}
+          <li class="{{ 'on' if v.on }}">
+            <p class="mailvoice-voice"><b>{{ v.label }}</b>{% if v.on %} <span class="now-tag info">cette boîte</span>{% endif %}</p>
+            <p class="person-meta">{{ v.text }}</p>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <article class="now-card" aria-labelledby="mailvoice-reads">
+        <header class="now-card-head"><h2 id="mailvoice-reads">Ce qu'elle lit avant d'écrire</h2><p>Le texte exact, tel qu'il entre dans ce qu'elle lit quand elle écrit depuis cette boîte.</p></header>
+        {% if reads %}<blockquote class="obj-quote mailvoice-reads">{{ reads }}</blockquote>
+        {% else %}<p class="now-empty">rien de plus que sa voix habituelle</p>{% endif %}
+      </article>
+    </div>
+
+    <aside class="now-stack mailf-side" aria-label="Ce que verra le destinataire">
+      <section class="now-card" aria-labelledby="mailvoice-seen">
+        <header class="now-card-head"><h2 id="mailvoice-seen">Ce que verra le destinataire</h2></header>
+        <dl class="draftf-heads">
+          <div><dt>De</dt><dd>{{ sender }}</dd></div>
+          {% if owner %}<div><dt>Ton nom</dt><dd>{{ owner }}</dd></div>{% endif %}
+          {% if her %}<div><dt>Le sien</dt><dd>{{ her }}</dd></div>{% endif %}
+        </dl>
+        <p class="now-eyebrow mailvoice-sig-title">Signature, sous chaque envoi</p>
+        {% if signature %}<pre class="mailvoice-signature">{{ signature }}</pre>
+        {% else %}<p class="now-empty">pas de signature</p>{% endif %}
+      </section>
+
+      <section class="now-card" aria-labelledby="mailvoice-self">
+        <header class="now-card-head"><h2 id="mailvoice-self">Réponses d'elle-même</h2>{% if prepares %}<span class="now-tag ok">oui</span>{% else %}<span class="now-tag">non</span>{% endif %}</header>
+        <p class="mailvoice-prepares">{% if prepares %}Elle prépare des réponses aux mails qui en attendent une ; chacune attend ton accord.{% else %}Elle ne prépare rien d'elle-même depuis cette boîte.{% endif %}</p>
+        {% if canals %}<p class="now-after"><a href="{{ canals }}">Pour qui, et comment ça part : le tableau de cette boîte (Réglages › Canaux) →</a></p>{% endif %}
+      </section>
+    </aside>
+  </div>
+</div>

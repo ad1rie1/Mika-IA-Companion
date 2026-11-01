@@ -228,6 +228,19 @@ test('champ masqué : aucune validation ni envoi ; valeur retrouvée et lecture 
   assert.equal(await page.locator('[name=verrouille]').isDisabled(), true);
 });
 
+test('champ qui en attend un autre (« != ») : paraît à la frappe, se masque quand on le vide', async t => {
+  const page = await open(t, { html: fixture(`<form><input name="serveur" value="">
+    <div data-only="serveur!=" hidden><input type="hidden" name="_champs" value="port"><input name="port" value="587"></div>
+    <p data-only="serveur=">Donne d'abord un serveur.</p><button>Enregistrer</button></form>`) });
+  assert.equal(await page.locator('[name=port]').isVisible(), false);
+  assert.equal(await page.getByText("Donne d'abord un serveur.").isVisible(), true);
+  await page.locator('[name=serveur]').pressSequentially('smtp.exemple.org');
+  assert.equal(await page.locator('[name=port]').isVisible(), true);
+  assert.equal(await page.getByText("Donne d'abord un serveur.").isVisible(), false);
+  await page.locator('[name=serveur]').fill('');
+  assert.deepEqual(await page.locator('form').evaluate(el => Array.from(new FormData(el).keys())), ['serveur']);
+});
+
 test('filtres : modifier une liste ne navigue pas avant Filtrer', async t => {
   const page = await open(t, { html: fixture('<form class="filters"><input name="q" value="bonjour"><select name="etat"><option value="a">A</option><option value="b">B</option></select><button>Filtrer</button></form>') });
   let navigations = 0;

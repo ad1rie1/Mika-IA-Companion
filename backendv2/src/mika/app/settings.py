@@ -56,6 +56,8 @@ EMAIL_KEY = "email"
 #: les connexions Microsoft des boîtes aux lettres (ADR 0166) : par boîte, le jeton de renouvellement scellé, et
 #: l'application et l'annuaire qui l'ont délivré — à part des comptes, que le formulaire de la console réécrit
 MAIL_GRANTS_KEY = "mail_oauth"
+#: les expéditeurs dont la console affiche les images distantes (ADR 0175) : des adresses, les plus récentes d'abord
+MAIL_IMAGES_KEY = "mail_images"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 #: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
@@ -334,6 +336,14 @@ class Settings:
             grants[account] = {"refresh_sealed": self.box.seal(grant.refresh), "client_id": grant.client_id,
                                "tenant": grant.tenant}
             await self._put(MAIL_GRANTS_KEY, grants)
+
+    def mail_images(self) -> tuple[str, ...]:
+        """Les expéditeurs dont les images distantes s'affichent d'emblée (ADR 0175)."""
+        got = self._get(MAIL_IMAGES_KEY)
+        return tuple(str(a) for a in got if isinstance(a, str)) if isinstance(got, list | tuple) else ()
+
+    async def save_mail_images(self, addresses: tuple[str, ...]) -> None:
+        await self._put(MAIL_IMAGES_KEY, list(addresses))
 
     async def save_mail_account(self, name: str, **fields: Any) -> MailConfig:
         """Crée ou modifie un compte (la ligne de commande) : les champs ``None`` ne changent pas."""

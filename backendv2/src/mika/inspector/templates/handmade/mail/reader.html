@@ -1,8 +1,10 @@
-{# La liseuse du courrier (app/handmade/mail.py) : le message ouvert sous la liste — l'en-tête de sa fiche, puis son
-   onglet « Message » (ses actions, son texte, ses pièces), ses formulaires préparés à son nom. #}
+{# La liseuse du courrier (app/handmade/mail.py) : le message ouvert — l'en-tête de sa fiche, le précédent et le suivant
+   de la liste, ce qu'elle en sait (ce qu'elle en a retenu, son tri, sa réponse ; ADR 0175), puis son onglet « Message »
+   (ses actions, son texte, ses pièces), ses formulaires préparés à son nom. ``read_after`` : le réglage « ouvrir le
+   marque lu », que le script de la console applique. #}
 {% from "handmade/shared/drawn.html" import one with context %}
 {% from "_cells.html" import cell %}
-<section class="now-card mail-reader" aria-labelledby="mail-reader-title">
+<section class="now-card mail-reader" id="lecture" aria-labelledby="mail-reader-title"{% if read_after is not none %} data-read-after="{{ read_after }}"{% endif %}>
   {% if missing %}
   <p class="now-empty" id="mail-reader-title">Ce message n'est plus là. <a href="{{ close }}">Fermer</a></p>
   {% else %}
@@ -12,8 +14,22 @@
       <p class="now-sub">{{ head.subtitle }}{% for f in head.facts %} · <span class="now-muted">{{ f.label }}</span> {{ cell(f.value) }}{% endfor %}</p>
       {% if head.badges %}<p class="person-entry-tags">{% for b in head.badges %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}</p>{% endif %}
     </div>
-    <p class="mail-reader-links"><a href="{{ fiche }}">Ouvrir en grand →</a><a class="mail-close" href="{{ close }}" title="Fermer le message" aria-label="Fermer le message">✕</a></p>
+    <nav class="mail-reader-links" aria-label="Ce message">
+      {% if prev %}<a class="mail-step" href="{{ prev }}" rel="prev" data-mail-prev title="Message précédent (k)" aria-label="Message précédent">‹</a>{% else %}<span class="mail-step off" aria-hidden="true">‹</span>{% endif %}
+      {% if next %}<a class="mail-step" href="{{ next }}" rel="next" data-mail-next title="Message suivant (j)" aria-label="Message suivant">›</a>{% else %}<span class="mail-step off" aria-hidden="true">›</span>{% endif %}
+      <a href="{{ fiche }}">Ouvrir en grand →</a>
+      <a class="mail-close" href="{{ close }}" data-mail-close title="Fermer le message (Échap)" aria-label="Fermer le message">✕</a>
+    </nav>
   </header>
+  {% if her %}
+  <aside class="mail-her" aria-label="Ce qu'elle en sait">
+    <p class="mail-her-kicker">Ce qu'elle en sait</p>
+    {% if her.said %}<blockquote class="mail-her-said">{{ her.said }}</blockquote>{% endif %}
+    {% if her.facts %}<p class="mail-her-facts">{% for label, value in her.facts %}{% if value is none %}<span class="now-tag warn">{{ label }}</span>{% else %}<span><span class="now-muted">{{ label }}</span> {{ cell(value) }}</span>{% endif %}{% endfor %}</p>{% endif %}
+    {% for n in her.notes %}<p class="mail-her-note">{{ n }}</p>{% endfor %}
+    <p class="mail-her-more"><a href="{{ her.more }}">En détail →</a></p>
+  </aside>
+  {% endif %}
   <div class="now">{% for b in blocks %}{{ one(b) }}{% endfor %}</div>
   {% endif %}
 </section>

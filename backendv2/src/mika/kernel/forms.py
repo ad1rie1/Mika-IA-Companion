@@ -108,6 +108,9 @@ class Knob:
     only: Only = ()
     #: affiché si **l'une** de ces conditions tient (chacune comme ``only``) — « ou » ; s'ajoute à ``only``
     only_any: tuple[Only, ...] = ()
+    #: masqué tant que le champ ``chemin`` vaut l'une de ces valeurs (``(("smtp_host", ("",)),)`` : affiché une fois
+    #: ce champ rempli) ; chaque condition masque seule, et toutes s'ajoutent à ``only`` et ``only_any``
+    unless: Only = ()
     secret: bool = False
     readonly: bool = False
     order: int = 100
@@ -168,6 +171,13 @@ class FormField:
     nullable: bool = False
     #: d'autres conditions d'affichage, dont une seule doit tenir (``Knob.only_any``)
     only_any: tuple[Only, ...] = ()
+    #: les conditions qui le masquent (``Knob.unless``)
+    unless: Only = ()
+
+    @property
+    def conditional(self) -> bool:
+        """Son affichage dépend-il d'autres champs ?"""
+        return bool(self.only or self.only_any or self.unless)
 
 
 # ── Décrire ───────────────────────────────────────────────────────────────
@@ -182,6 +192,7 @@ class _Scope:
     advanced: bool = False
     readonly: bool = False
     only: Only = ()
+    unless: Only = ()
     defaults: BaseModel | None = None  # la valeur par défaut du parent, qui prime sur celles du modèle
 
 
@@ -217,13 +228,14 @@ def _describe_field(name: str, info: FieldInfo, scope: _Scope) -> list[FormField
         "keys": knob.keys, "choices_from": scope.prefix + knob.choices_from if knob.choices_from else "",
         "nullable": nullable,
         "only_any": tuple(_rebase_only(alt, scope.prefix) for alt in knob.only_any),
+        "unless": scope.unless + _rebase_only(knob.unless, scope.prefix),
     }
     if knob.widget == "file":  # un modèle (``Upload``), mais un seul contrôle : pas un groupe
         return [_make(kind="file", **common)]
     if _groups(annotation, knob, nullable):
         marker = _make(kind="group", **{**common, "default": None, "only_any": ()})
         child = _Scope(prefix=path + ".", group=label, advanced=marker.advanced, readonly=marker.readonly,
-                       only=marker.only, defaults=default if isinstance(default, BaseModel) else None)
+                       only=marker.only, unless=marker.unless, defaults=default if isinstance(default, BaseModel) else None)
         return [marker, *_describe(annotation, child)]
     record = _record_model(annotation)
     if record is not None and knob.widget != "yaml":
@@ -318,11 +330,11 @@ def _make(*, kind: str, path: str, label: str, help: str, group: str, advanced: 
           required: bool, default: Any, order: int, loader: str, subject: str, only: Only, keys: Pairs,
           choices_from: str, nullable: bool, secret: bool = False, choices: Pairs = (),
           lo: float | None = None, hi: float | None = None, step: float | None = None, unit: str = "",
-          item: tuple[FormField, ...] = (), only_any: tuple[Only, ...] = ()) -> FormField:
+          item: tuple[FormField, ...] = (), only_any: tuple[Only, ...] = (), unless: Only = ()) -> FormField:
     return FormField(path=path, label=label, help=help, group=group, kind=kind, advanced=advanced, secret=secret,
                      readonly=readonly, required=required, default=default, lo=lo, hi=hi, step=step, unit=unit,
                      choices=choices, loader=loader, subject=subject, only=only, order=order, item=item,
-                     keys=keys, choices_from=choices_from, nullable=nullable, only_any=only_any)
+                     keys=keys, choices_from=choices_from, nullable=nullable, only_any=only_any, unless=unless)
 
 
 def _knob_of(metadata: Iterable[Any]) -> Knob:
@@ -681,7 +693,7 @@ def parse(fields: Sequence[FormField], form: Mapping[str, Any], *, current: Mapp
     # un champ masqué par sa condition ne s'écrit pas (sa case absente n'est pas un « non »)
     merged = {**current, **values}
     for f in fields:
-        if (f.only or f.only_any) and not _visible(f, merged):
+        if f.conditional and not _visible(f, merged):
             values.pop(f.path, None)
             for path in [p for p in errors if p == f.path or p.startswith(f.path + ".")]:
                 del errors[path]
@@ -790,11 +802,12 @@ def _visible(f: FormField, values: Mapping[str, Any]) -> bool:
     def holds(only: Only) -> bool:
         return all(_choice(values.get(path)) in allowed for path, allowed in only)
 
-    return holds(f.only) and (not f.only_any or any(holds(alt) for alt in f.only_any))
+    return (holds(f.only) and (not f.only_any or any(holds(alt) for alt in f.only_any))
+            and not any(holds((cond,)) for cond in f.unless))
 
 
 def visible(f: FormField, values: Mapping[str, Any]) -> bool:
-    """Le champ s'affiche-t-il avec ces valeurs (aplaties) ? (``only`` et ``only_any``)."""
+    """Le champ s'affiche-t-il avec ces valeurs (aplaties) ? (``only``, ``only_any`` et ``unless``)."""
     return _visible(f, values)
 
 
