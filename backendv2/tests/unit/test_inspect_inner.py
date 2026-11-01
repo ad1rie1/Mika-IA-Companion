@@ -37,6 +37,7 @@ from mika.kernel.inspect import (
     Chart,
     Disclosure,
     Fields,
+    Grid,
     InspectContext,
     Meter,
     Note,
@@ -128,6 +129,8 @@ def text_of(blocks: list[Any]) -> str:
             out += [text_of(list(r.detail)) for r in b.rows if isinstance(r, Row)]
         elif isinstance(b, Disclosure):
             out += [b.title, text_of(list(b.items))]
+        elif isinstance(b, Grid):
+            out.append(text_of(list(b.items)))
         elif isinstance(b, Fields):
             out += [b.title, *(f"{k} : {_cell(v)}" for k, v in b.pairs)]
         elif isinstance(b, Prose):
@@ -152,12 +155,18 @@ def warnings(blocks: list[Block]) -> list[str]:
 def unfolded(blocks):
     for b in blocks:
         yield b
-        if isinstance(b, Disclosure):
+        if isinstance(b, (Disclosure, Grid)):
             yield from unfolded(b.items)
 
 
 def table(blocks: list[Block], title: str) -> Table:
-    return next(b for b in unfolded(blocks) if isinstance(b, Table) and b.title.startswith(title))
+    """Le tableau de ce titre — ou celui d'un repli de ce titre (le repli porte le titre)."""
+    for b in unfolded(blocks):
+        if isinstance(b, Table) and b.title.startswith(title):
+            return b
+        if isinstance(b, Disclosure) and b.title.startswith(title):
+            return next(x for x in b.items if isinstance(x, Table))
+    raise LookupError(title)
 
 
 def fields(blocks: list[Block], title: str) -> dict[str, str]:
@@ -255,7 +264,7 @@ def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
     soi = text_of(shown[("self", "soi")])
     assert "0,50" in soi and "jamais bousculée" in soi and "réactivité" in soi and "humeur de fond" in soi
     assert "Elle ne s'est pas encore racontée" in soi
-    curve = next(b for b in shown[("self", "soi")] if isinstance(b, Chart))
+    curve = next(b for b in unfolded(shown[("self", "soi")]) if isinstance(b, Chart))
     assert curve.y == (0.0, 1.0) and curve.series[0].label == "Estime"
     nights = shown[("self", "nuits")]
     assert table(nights, "Toutes ses nuits").rows == () and "pas encore de nuit racontée" in text_of(nights)
@@ -526,7 +535,7 @@ def test_esteem_is_a_measured_series_and_its_curve_is_drawn(tmp_path):
     assert (spec.label, spec.lo, spec.hi) == ("Estime", 0, 1)
     assert rested == 0.5 and 0.4 < knocked < 0.5
     assert seen and seen[0] == ("self.estime", 7 * DAY)
-    curve = next(b for b in blocks if isinstance(b, Chart))
+    curve = next(b for b in unfolded(blocks) if isinstance(b, Chart))
     assert curve.y == (0.0, 1.0) and len(curve.series[0].points) == 3
     stat = next(b for b in blocks if isinstance(b, Stats)).items[0]
     assert isinstance(stat.value, Meter) and stat.trend is not None and "remonte vers 0,50" in stat.sub
@@ -551,7 +560,7 @@ def test_her_story_and_her_nights_show_and_a_forgotten_journal_reads_forgotten(t
     soi, nights, dreamt, forgotten = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 17, 0))
     for blocks in (soi, nights, forgotten):
         assert failures(blocks) == []
-    story = next(b for b in soi if isinstance(b, Prose))
+    story = next(b for b in unfolded(soi) if isinstance(b, Prose))
     assert story.text == NARRATIVE
     assert fields(soi, "Son récit d'elle-même")["écrit"] != "jamais"
     persona = fields(soi, "La persona")

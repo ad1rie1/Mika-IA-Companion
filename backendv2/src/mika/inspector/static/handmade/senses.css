@@ -6,11 +6,11 @@
 
 /* une conversation : une ligne qui s'ouvre sur ses bulles */
 .senses-convs { display: grid; gap: 8px; }
-.senses-conv { border: 1px solid var(--border); border-radius: 12px; }
+.senses-conv { border: 1px solid var(--border); border-radius: var(--radius); }
 .senses-conv > summary { display: grid; gap: 4px; padding: 12px 14px; cursor: pointer; list-style: none; }
 .senses-conv > summary::-webkit-details-marker { display: none; }
-.senses-conv > summary:hover { background: var(--surface-2); border-radius: 12px; }
-.senses-conv[open] > summary { border-bottom: 1px solid var(--border); border-radius: 12px 12px 0 0; background: var(--surface-2); }
+.senses-conv > summary:hover { background: var(--surface-2); border-radius: var(--radius); }
+.senses-conv[open] > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; background: var(--surface-2); }
 .senses-conv-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .senses-conv-top b::before { content: "▸ "; color: var(--muted); font-size: 11px; }
 .senses-conv[open] .senses-conv-top b::before { content: "▾ "; }
@@ -23,7 +23,7 @@
 
 /* des lignes : une réponse proposée, une position */
 .senses-list, .senses-where { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.senses-list li, .senses-where li { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.senses-list li, .senses-where li { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); }
 .senses-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; }
 .senses-text { margin: 0; font-size: 13.5px; white-space: pre-line; }
 .senses-place { margin: 0; font-size: 15px; font-weight: 600; }

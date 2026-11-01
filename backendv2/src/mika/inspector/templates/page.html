@@ -13,11 +13,17 @@
 {% for s in (fiche_styles or [])|list + (panel_styles or [])|list %}<link rel="stylesheet" href="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}">
 {% endfor %}{% for s in fiche_scripts or [] %}<script src="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}" defer></script>
 {% endfor %}{% endblock %}
+{# Les actions de la page (ADR 0176) : à droite du titre, la première en avant — celles que la page dessine
+   (``head_links`` : des liens ; ``head_extra`` : le HTML d'un onglet dessiné), puis les actions automatiques ;
+   les dangereuses sous « Autres actions ». La roue des paramètres (ADR 0173) ferme la barre. #}
 {% macro head_side() %}
-{% if head_actions %}
+{% set own = head_links or head_extra %}
+{% if head_actions or own %}
 <div class="action-bar" role="group" aria-label="Actions">
+  {% for text, href in head_links or [] %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}
+  {{ head_extra or '' }}
   {% for a in head_actions if not a.danger %}
-  {{ action_button(a, loop.first) }}
+  {{ action_button(a, loop.first and not own) }}
   {% endfor %}
   {% if head_actions|selectattr('danger')|list %}<details class="action-overflow"><summary class="btn quiet">Autres actions</summary><div class="toolbar action-overflow-panel">{% for a in head_actions if a.danger %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
 </div>
@@ -38,7 +44,7 @@
     {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
     {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
   </div>
-{{ head_side() }}
+{% set side = head_side() %}{% if side|trim %}<div class="page-head-side">{{ side }}</div>{% endif %}
 </div>
 {% endif %}
 {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}

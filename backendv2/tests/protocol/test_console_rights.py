@@ -27,6 +27,10 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
                  "Le projet « Le site »", "détail des accès", "<code>memory_search</code>", "Ce que le code fixe"):
         assert part in page, part
     assert "Droits exacts" not in page  # sans qui ni canal choisis, pas de droits exacts
+    # une sorte de ressource par sous-onglet (ADR 0176), ce que le code fixe au bout
+    for pane in ("d-vie", "d-forge", "d-services", "d-projets", "d-canaux", "d-code"):
+        assert f'href="#{pane}"' in page and f'id="{pane}" data-pane' in page, pane
+    assert 'id="r-memory"' in page and 'id="r-project-' in page
     home = html_of(client.get("/inspecteur"))
     assert 'href="/inspecteur/reglages/droits"' in home and "/inspecteur/outils/droits" not in home  # menu Réglages
     # les droits exacts : toi par le chat web — jamais réglé : toi, tout, par sa ligne
@@ -41,6 +45,7 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     shown = html_of(client.get(PAGE, params={"detail": f"project:{pid}"}))
     assert "Le projet « Le site »" in shown and "Comportement par défaut" in shown and "← Retour" in shown
     assert f'href="/inspecteur/fiche/project/{pid}?onglet=acces"' in shown and "Modifier" in shown
+    assert f'href="?#r-project-{pid}"' in shown  # « Retour » ramène à sa ligne, dans son sous-onglet
     # l'onglet « Accès » du projet, dessiné, sa ligne d'avant réglage cochée comme elle vaut ; ajouter : une ligne
     # fermée, enregistrée (le navigateur envoie ce qui est coché, le test le dit)
     tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))

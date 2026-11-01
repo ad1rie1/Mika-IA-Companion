@@ -12,6 +12,8 @@ Android et une extension Teams.
 - `backendv2/README.md` pour démarrer en local ; `backendv2/deploy/README.md` pour la mise en service ;
 - dans `backendv2/docs/` : `protocole-chat.md` (`/ws`), `protocole-monde.md` (`mika.world/1`), `console-carte.md` (la
   console) ;
+- `.claude/rules/console.md` : les règles du thème et de la disposition de la console (ADR 0176), chargées dès qu'on
+  touche un de ses fichiers ;
 - `frontend/Web/README.md`, `frontend/Android/README.md`, `frontend/Extension/README.md`, `INJECTION/CLAUDE.md`.
 
 En cas de désaccord entre une doc et le code, le code fait foi : corriger la doc.

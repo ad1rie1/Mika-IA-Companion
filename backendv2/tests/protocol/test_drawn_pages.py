@@ -111,8 +111,8 @@ def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811
 
 def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
     """Outils › Ce qu'elle peut faire (ADR 0134) : ses familles d'outils, chacune avec son tableau de droits né du
-    minimum vital ; une recherche ne garde que les familles qui répondent ; un tableau s'enregistre d'un envoi, et
-    « remettre » revient au minimum vital."""
+    minimum vital, une famille par sous-onglet (ADR 0176) ; une recherche ne garde que les familles qui répondent,
+    l'une sous l'autre ; un tableau s'enregistre d'un envoi, et « remettre » revient au minimum vital."""
     client, live, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/tous")
@@ -121,8 +121,13 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
         assert part in page, part
     assert 'name="qui.1|proprietaire" checked' in page and 'name="canal.2|interne" checked' in page
     assert 'type="checkbox" name="o"' not in page  # plus de grille à cocher
+    assert 'href="#f-memory">Mémoire <span class="hm-count">2</span>' in page and 'id="f-memory" data-pane' in page
+    # la famille demandée a sa section en premier : sans ancre, c'est elle que les sous-onglets montrent
+    panes = drawn(client, "/inspecteur/outils/tous?famille=memory").split('class="hm-subpanes"', 1)[1]
+    assert panes.index('id="f-memory"') < panes.index("data-pane")
     only = drawn(client, "/inspecteur/outils/tous?q=memory_search")
     assert 'id="f-memory-title"' in only and 'id="f-email-title"' not in only and "tout voir" in only
+    assert "data-subtabs" not in only  # filtrée : tout ce qui répond se lit d'un coup
     # régler la mémoire : toi seule ; puis revenir au minimum vital
     csrf = client.cookies.get("csrftoken")
     done = client.post("/inspecteur/outils/familles/regler", data={
@@ -137,13 +142,15 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
 
 
 def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
-    """Outils › Venus d'ailleurs : brancher un service et leurs réglages en boutons ; une carte par service branché,
-    une par app — pas les listes génériques de la console."""
+    """Outils › Venus d'ailleurs : brancher un service et leurs réglages en boutons de la barre de titre (ADR 0176) ;
+    une carte par service branché, une par app — pas les listes génériques de la console."""
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/serveurs")
-    actions = page.split('class="toolbar hm-toolbar elsewhere-actions"')[1].split("</div>")[0]
+    head, body = page.split('<div class="page-head-side">')[1].split('<div class="stack">', 1)
+    actions = head.split('<div class="action-bar" role="group" aria-label="Actions">')[1].split("</div>")[0]
     assert "Brancher un service" in actions and "Leurs réglages" in actions
+    assert "Brancher un service</a>" not in body
     assert "Les services branchés" in page and "Les outils de ses apps" in page
     assert "Comprendre cette liste" not in page and "un nouveau service" not in page
 

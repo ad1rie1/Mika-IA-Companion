@@ -1,15 +1,17 @@
 {# Un tableau de droits (ADR 0134), le même dessin pour un canal (Réglages › Canaux) et une famille de ses outils
    (Outils › Ses propres outils) : des lignes lues de haut en bas — qui, par où, quand, ses colonnes, ses outils —, puis
-   le comportement par défaut, obligatoire. Chaque bouton envoie tout le tableau (``t.action``, ``cle`` : sa clé). #}
+   le comportement par défaut, obligatoire. Chaque bouton envoie tout le tableau (``t.action``, ``cle`` : sa clé).
+   ``status`` : ce qu'on en dit à côté de son titre (réglé, minimum vital), quand rien d'autre ne le dit ; ``heading``
+   : son titre, quand celui de sa ressource est déjà au-dessus. #}
 {% from "_navigation.html" import pager as pages %}
-{% macro tableau(t, locked) -%}
+{% macro tableau(t, locked, status='', heading='') -%}
 <form method="post" action="{{ t.action }}" class="access-form" id="t-{{ t.id }}">
   {% if not locked %}<input type="hidden" name="csrf" value="{{ t.csrf }}"><input type="hidden" name="cle" value="{{ t.key }}">
   <button class="service-hidden" name="faire" value="" tabindex="-1" aria-hidden="true">Enregistrer</button>{% endif %}
   <section class="now-card access-card table-block" aria-labelledby="t-{{ t.id }}-title">
     <header class="access-head">
       <div>
-        <h2 id="t-{{ t.id }}-title">{{ t.title }}</h2>
+        <h2 id="t-{{ t.id }}-title">{{ heading or t.title }}{% if status %} {{ status }}{% endif %}</h2>
         <p>{{ t.intro }}</p>
         {% if t.note %}<p class="now-muted">{{ t.note }}</p>{% endif %}
         {% if t.below %}<p class="server-alert warn">⚠ En dessous du minimum vital : {{ t.below }}</p>{% endif %}

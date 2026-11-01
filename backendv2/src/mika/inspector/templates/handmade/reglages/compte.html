@@ -1,13 +1,9 @@
-{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : les deux boutons d'ajout au-dessus
-   de la liste, ajouter un utilisateur ou un opérateur, le modifier (qui c'est, ses droits, son mot de passe), ses
-   applications connectées. Champs, noms et boutons : ceux de la console. #}
+{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : ajouter un utilisateur ou un
+   opérateur, le modifier (qui c'est, ses droits, son mot de passe), ses applications connectées. Sur la liste, les
+   deux boutons d'ajout sont dans la barre de titre (``page_links``, ADR 0176) : rien ici. Champs, noms et boutons :
+   ceux de la console. #}
 {% from "_navigation.html" import pager %}
-{% if mode == "list" %}
-<nav class="hm-actions" aria-label="Ajouter un compte">
-  <a class="btn" href="{{ add_user }}">＋ Ajouter un utilisateur</a>
-  <a class="btn quiet" href="{{ add_operator }}">＋ Ajouter un opérateur</a>
-</nav>
-{% elif mode == "create" %}
+{% if mode == "create" %}
 <form method="post" action="{{ action }}" class="form now-card hm-form record-form">
   <h2 class="hm-form-title">{{ 'Un opérateur' if operator_role else 'Un utilisateur' }}</h2>
   <p class="help">{% if operator_role %}Parle avec elle, et ouvre aussi la console : tout ce qu'elle vit, sa configuration, les approbations et les apps. Un opérateur compte parmi ses propriétaires.{% else %}Se connecte au chat (le web, le téléphone) et parle avec elle, sans ouvrir la console.{% endif %}

@@ -1,9 +1,10 @@
 """Réglages › Droits, dessiné (ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie interne (ses
-familles d'outils), les apps de la Forge, les services MCP, ses projets, ses canaux —, chaque outil avec sa
-description, et pour chaque ressource un lien vers **le détail de ses accès** : son tableau de règles, lu tel qu'il est
-écrit, avec « Modifier » vers la page qui le règle et « Retour ». Les droits exacts, outil par outil, seulement quand
-on a choisi **qui** et **par quel canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux
-portes, le plafond) — jamais une recopie.
+familles d'outils), les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une
+ressource par sous-onglet (ADR 0176), chaque outil avec sa description, et pour chaque ressource un lien vers **le
+détail de ses accès** : son tableau de règles, lu tel qu'il est écrit, avec « Modifier » vers la page qui le règle et
+« Retour » (vers sa ligne). Les droits exacts, outil par outil, seulement quand on a choisi **qui** et **par quel
+canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux portes, le plafond) — jamais une
+recopie.
 """
 
 from __future__ import annotations
@@ -155,9 +156,11 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
     def entry(key: str, label: str, description: str, specs: Sequence[Any], detail: str,
               exact_: str = "") -> dict[str, Any]:
         table = tables.get(detail)
-        return {"key": key, "label": label, "description": description,
-                "tools": [_tool_row(ui, s, tools_got) for s in specs],
+        tools = [_tool_row(ui, s, tools_got) for s in specs]
+        return {"key": key, "id": row_id(key), "label": label, "description": description, "tools": tools,
+                "open": sum(not t["closed"] for t in tools),
                 "detail": "?" + "&".join(filter(None, (f"detail={detail}", query))) if table is not None else "",
+                "detail_key": detail if table is not None else "",
                 "edit": render.href(table.href) if table is not None and table.href is not None else "",
                 "exact": exact_}
 
@@ -181,15 +184,25 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
                 for t in tables.values() if t.resource.startswith("project:")]
     canals = [entry(t.resource, t.title, t.note, (), t.resource) for t in tables.values()
               if t.resource.startswith("canal:")]
-    out = [{"title": "Vie interne", "hint": "ses propres outils, famille par famille", "rows": internal},
-           {"title": "Apps de la Forge", "hint": "une app suit son projet ; sans projet, ses propres lignes",
-            "rows": forged},
-           {"title": "Services MCP", "hint": "les outils venus d'ailleurs, service par service", "rows": services},
-           {"title": "Projets", "hint": "le voir, le piloter, ses fichiers, ses apps", "rows": projects},
-           {"title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus", "rows": canals}]
+    # un sous-onglet par sorte (ADR 0176) : celles qui ont des outils les replient sous la ligne de leur ressource
+    out = [{"id": "d-vie", "title": "Vie interne", "hint": "ses propres outils, famille par famille",
+            "rows": internal, "folds": True},
+           {"id": "d-forge", "title": "Apps de la Forge",
+            "hint": "une app suit son projet ; sans projet, ses propres lignes", "rows": forged, "folds": True},
+           {"id": "d-services", "title": "Services MCP", "hint": "les outils venus d'ailleurs, service par service",
+            "rows": services, "folds": True},
+           {"id": "d-projets", "title": "Projets", "hint": "le voir, le piloter, ses fichiers, ses apps",
+            "rows": projects, "folds": False},
+           {"id": "d-canaux", "title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus",
+            "rows": canals, "folds": False}]
     for s in out:
-        s["pager"] = _one_page(sum(1 + len(r["tools"]) for r in s["rows"]))
+        s["pager"] = _one_page(len(s["rows"]))
     return out
+
+
+def row_id(key: str) -> str:
+    """L'ancre de la ligne d'une ressource : « Retour » y ramène, et son sous-onglet s'ouvre avec elle."""
+    return "r-" + _UNSAFE.sub("-", key)
 
 
 def _one_page(rows: int) -> Any:
@@ -233,9 +246,12 @@ def page(ui: UI, items: Sequence[Any], query: Mapping[str, str]) -> Markup:
     got = exact(ui, who, canal) if who is not None and canal else None
     kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
     shown = detail(ui, query["detail"]) if query.get("detail") else None
+    listed = sections(ui, got, kept)
+    # « Retour » ramène à la ligne de la ressource, dans son sous-onglet
+    back = next((r["id"] for s in listed for r in s["rows"] if shown and r["detail_key"] == query["detail"]), "")
     return Markup(env.get_template("handmade/droits/page.html").render(
         whos=[{"key": w.key, "label": w.label, "on": w is who} for w in all_whos],
         canals=[{"key": k, "label": label, "on": k == canal} for k, label in CANAL_CHOICES],
         chosen=(who.label if who else "", dict(CANAL_CHOICES).get(canal, "")), got=got,
-        canal_said=_what(got["canal"]) if got else "", sections=sections(ui, got, kept), kept=kept,
+        canal_said=_what(got["canal"]) if got else "", sections=listed, kept=kept, back=back,
         detail=shown, fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous"))

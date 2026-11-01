@@ -1,0 +1,6 @@
+{# Les actions d'une page dessinée, pour sa barre de titre (ADR 0176) : ses liens en boutons, puis les actions de la
+   barre d'outils qu'elle remonte (``items``, rendus comme la console les numérote) ; la première en avant. #}
+{% from "handmade/shared/drawn.html" import one with context %}
+{% from "_forms.html" import action_button %}
+{% for text, href in links or [] %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}
+{% for x in items or [] %}{% if x.t == "action" and x.presentation == "button" %}{{ action_button(forms.get(x.slot), loop.first and not links) }}{% else %}{{ one(x) }}{% endif %}{% endfor %}

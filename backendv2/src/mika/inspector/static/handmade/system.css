@@ -17,7 +17,7 @@
 .sys-dot.st-never { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 .sys-dot.st-running { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st) 25%, transparent); }
 
-.sys-fine { display: flex; align-items: center; margin: 0; padding: 12px 16px; border-radius: 14px; background: var(--ok-bg); color: var(--ok); font-size: 14px; }
+.sys-fine { display: flex; align-items: center; margin: 0; padding: 12px 16px; border-radius: var(--radius); background: var(--ok-bg); color: var(--ok); font-size: 14px; }
 .sys-issues { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .sys-issues > li { display: grid; gap: 8px; padding: 14px 0 14px 14px; border-top: 1px solid var(--border); box-shadow: inset 3px 0 0 var(--st); }
 .sys-issues > li:first-child { border-top: 0; }
@@ -48,14 +48,14 @@
 .sys-health-main .now-sub { margin: 0; }
 .sys-health-stamp { margin: 0; color: var(--muted); font-size: 12.5px; }
 .sys-health-counts { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.sys-health-counts li { display: grid; gap: 2px; min-width: 96px; padding: 10px 14px; border-radius: 12px; background: var(--surface-2);
+.sys-health-counts li { display: grid; gap: 2px; min-width: 96px; padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2);
   color: var(--muted); font-size: 12.5px; }
 .sys-health-counts .now-num { color: var(--text); font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; }
 .sys-health-counts li.warn .now-num { color: var(--warn); } .sys-health-counts li.danger .now-num { color: var(--danger); }
 /* les tuiles d'une rangée ont la même hauteur ; le lien et « Le détail » restent en bas, sur une ligne */
 .sys-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: stretch; gap: 12px;
   margin: 0; padding: 0; list-style: none; }
-.sys-check { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px;
+.sys-check { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface); box-shadow: inset 3px 0 0 var(--st); }
 .sys-check.tone-ok { box-shadow: none; }
 .sys-check.tone-ok .now-tag { display: none; }
@@ -109,7 +109,7 @@
 .sys-out-hero { display: grid; gap: 18px; }
 .sys-out-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none;
   counter-reset: none; }
-.sys-out-flow li { position: relative; display: grid; gap: 2px; padding: 10px 14px 10px 46px; border-radius: 12px;
+.sys-out-flow li { position: relative; display: grid; gap: 2px; padding: 10px 14px 10px 46px; border-radius: var(--radius);
   background: var(--surface-2); font-size: 12.5px; }
 .sys-out-flow li b { color: var(--text); font-size: 14px; }
 .sys-out-flow li:not(:last-child)::after { content: "→"; position: absolute; top: 50%; right: -10px; z-index: 1;

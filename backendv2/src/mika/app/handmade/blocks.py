@@ -50,3 +50,20 @@ def page(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], name: str = ""
     drawn = [shape(d, name) for d in render.blocks(blocks, ui.env(), query)]
     return Markup(env.get_template("handmade/shared/blocks.html").render(blocks=drawn, tables=tables,
                                                                         forms=forms or {}))
+
+
+def head(links: Sequence[tuple[str, str]] = (), items: Sequence[Mapping[str, Any]] = (),
+         forms: Mapping[str, Any] | None = None) -> Markup:
+    """Les actions d'une page dessinée, pour sa barre de titre (ADR 0176) : des liens (texte, adresse), puis des
+    blocs rendus (les éléments de la barre d'outils qu'elle remonte, ``lift``) ; rien à porter : vide."""
+    if not links and not items:
+        return Markup("")
+    return Markup(env.get_template("handmade/shared/head.html").render(links=list(links), items=list(items),
+                                                                      forms=forms or {}))
+
+
+def lift(items: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """La première barre d'outils de blocs rendus — les actions de la page : ses éléments, pour la barre de titre
+    (ADR 0176) —, et les autres blocs."""
+    bar = next((d for d in items if d.get("t") == "toolbar"), None)
+    return (list(bar["items"]) if bar else []), [d for d in items if d is not bar]

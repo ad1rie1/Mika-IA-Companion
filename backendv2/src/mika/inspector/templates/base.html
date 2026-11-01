@@ -17,47 +17,64 @@
 <input type="checkbox" id="nav-open" class="sr" aria-label="Afficher le menu">
 <div class="app">
   <label for="nav-open" class="scrim" aria-hidden="true"></label>
-  <aside class="sidebar" id="navigation" aria-label="Navigation principale">
-    <div class="brand"><a class="brand-link" href="{{ PREFIX }}/" aria-label="Mika · Accueil"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">Console de pilotage</span></span></a><button type="button" class="nav-close" data-nav-close aria-label="Fermer le menu" hidden>×</button></div>
-    <form class="search" method="get" action="{{ PREFIX }}/recherche" role="search">
-      <label class="sr" for="q-global">Rechercher une page, une personne, un projet…</label>
-      <input id="q-global" type="search" name="q" placeholder="Rechercher…" autocomplete="off" value="{{ search_q or '' }}"><kbd aria-hidden="true">/</kbd>
-    </form>
-    <nav class="primary-nav" aria-label="Rubriques">
+  {# La barre du haut (ADR 0176) : les rubriques et leurs menus, « Aller à… », son état, le compte. Sur un écran
+     étroit, les rubriques passent dans un panneau (la case #nav-open, sans script aussi). #}
+  <header class="topbar">
+    <button type="button" class="menu-toggle" data-nav-toggle aria-controls="navigation" aria-expanded="false" hidden><span aria-hidden="true">☰</span><span class="sr">Menu</span></button>
+    <noscript><label for="nav-open" class="menu-toggle">☰<span class="sr">Menu</span></label></noscript>
+    <a class="brand-link" href="{{ PREFIX }}/" aria-label="Mika · Accueil"><span class="brand-mark" aria-hidden="true">M</span><span class="brand-name">Mika</span></a>
+    <nav class="primary-nav" id="navigation" aria-label="Rubriques">
+      <div class="nav-panel-head"><b>Menu</b><button type="button" class="nav-close" data-nav-close aria-label="Fermer le menu" hidden>×</button></div>
     {% for g in nav %}
-      {% if g.label %}<details class="nav-group{{ ' active' if g.active }}" data-nav-group="{{ g.label }}"{{ ' open' if g.active }}>
-        <summary class="nav-group-label">{{ icon(g.icon) }}<span>{{ g.label }}</span>{% if g.badge %}<span class="nav-attention" role="img" aria-label="Des éléments demandent ton attention" title="Des éléments demandent ton attention"></span>{% endif %}</summary>
-      {% else %}<div class="nav-group">{% endif %}
-        {% for it in g["items"] %}
-        <a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}"{% if it.on %} aria-current="page"{% endif %}>
-          {% if not g.label %}{{ icon(it.icon) }}{% endif %}<span>{{ it.label }}</span>
-          {% if it.badge %}<span class="count" title="demande ton attention">{{ it.badge }}</span>{% endif %}
-        </a>
-        {% endfor %}
-      {% if g.label %}</details>{% else %}</div>{% endif %}
+      {% if g.label %}<details class="nav-group{{ ' active' if g.active }}" data-nav-group="{{ g.label }}">
+        <summary class="nav-group-label"><span>{{ g.short or g.label }}</span>{% if g.badge %}<span class="nav-attention" role="img" aria-label="Des éléments demandent ton attention" title="Des éléments demandent ton attention"></span>{% endif %}{{ icon('chevron') }}</summary>
+        <div class="nav-menu">
+          <div class="nav-menu-head"><b>{{ g.label }}</b>{% if g.question %}<span>{{ g.question }}</span>{% endif %}</div>
+          <div class="nav-menu-items">
+          {% for it in g["items"] %}<a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}"{% if it.on %} aria-current="page"{% endif %}><span class="nav-item-label">{{ it.label }}{% if it.badge %}<span class="count" title="demande ton attention">{{ it.badge }}</span>{% endif %}</span>{% if it.hint %}<span class="nav-item-hint">{{ it.hint }}</span>{% endif %}</a>
+          {% endfor %}
+          </div>
+        </div>
+      </details>
+      {% else %}{% for it in g["items"] %}<a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}" data-top{% if it.on %} aria-current="page"{% endif %}><span class="nav-item-label">{{ it.label }}</span></a>{% endfor %}{% endif %}
     {% endfor %}
     </nav>
-    <div class="sidebar-foot">
-      <div class="theme" role="group" aria-label="Thème">
-        <button type="button" data-theme-set="auto" aria-pressed="true">Auto</button>
-        <button type="button" data-theme-set="light" aria-pressed="false">Clair</button>
-        <button type="button" data-theme-set="dark" aria-pressed="false">Sombre</button>
-      </div>
-      <div class="who"><span>{{ who }}</span>
-        <form method="post" action="{{ PREFIX }}/deconnexion" class="inline-form"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn quiet small">Déconnexion</button></form></div>
+    <div class="topbar-side">
+      <form class="search" method="get" action="{{ PREFIX }}/recherche" role="search" data-goto>
+        <label class="sr" for="q-global">Aller à une page, chercher une personne, un projet…</label>
+        {{ icon('search') }}<input id="q-global" type="search" name="q" placeholder="Aller à…" autocomplete="off" value="{{ search_q or '' }}"><kbd aria-hidden="true">Ctrl K</kbd>
+      </form>
+      {% set lead = vitals[1:3] if vitals else [] %}
+      {% set alerts = (vitals or [])|selectattr('dot', 'in', ['warn', 'danger'])|list %}
+      <details class="topbar-pop status-menu" data-vitals="{{ PREFIX }}/_vitals">
+        <summary class="status-pill" title="Son état, en ce moment">
+          <span class="mood{% if lead and lead[0].swatch %} sw-{{ lead[0].swatch }}{% elif vitals %} {{ vitals[0].dot }}{% endif %}" data-status-mood aria-hidden="true"></span>
+          <b>{{ her }}</b><span class="status-digest" data-status-digest>{{ lead|map(attribute='text')|join(' · ') }}</span>
+          <span class="status-alerts" data-status-alerts{% if not alerts %} hidden{% endif %}>{{ icon('alert') }}<span>{{ alerts|length }}</span></span>
+        </summary>
+        <div class="pop status-pop">
+          <div class="pop-title">{{ her }}, en ce moment</div>
+          <div class="vitals-list" data-vitals-items>{% include "_vitals.html" %}</div>
+        </div>
+      </details>
+      <span class="vitals-live" data-vitals-live role="status"></span>
+      <details class="topbar-pop account-menu">
+        <summary class="avatar" aria-label="Compte : {{ who }}" title="{{ who }}">{{ (who or '?')[:1]|upper }}</summary>
+        <div class="pop account-pop">
+          <div class="pop-title">{{ who }}</div>
+          <div class="theme" role="group" aria-label="Thème">
+            <button type="button" data-theme-set="auto" aria-pressed="true">Auto</button>
+            <button type="button" data-theme-set="light" aria-pressed="false">Clair</button>
+            <button type="button" data-theme-set="dark" aria-pressed="false">Sombre</button>
+          </div>
+          <form method="post" action="{{ PREFIX }}/deconnexion"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="pop-row">Déconnexion</button></form>
+        </div>
+      </details>
     </div>
-  </aside>
-  <div class="main">
-    <header class="vitals" data-vitals="{{ PREFIX }}/_vitals">
-      <button type="button" class="menu-toggle" data-nav-toggle aria-controls="navigation" aria-expanded="false" hidden><span aria-hidden="true">☰</span> Menu</button>
-      <noscript><label for="nav-open" class="menu-toggle">☰ Menu</label></noscript>
-      <span class="kv-inline" data-vitals-items>{% include "_vitals.html" %}</span>
-      <span class="vitals-live" data-vitals-live role="status">Actualisation auto</span>
-    </header>
-    <main class="content" id="contenu" tabindex="-1">
-    {% block content %}{% endblock %}
-    </main>
-  </div>
+  </header>
+  <main class="content" id="contenu" tabindex="-1">
+  {% block content %}{% endblock %}
+  </main>
 </div>
 </body>
 </html>

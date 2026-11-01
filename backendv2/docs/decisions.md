@@ -28,7 +28,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1995,7 +1995,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les blocs génériques rendaient tout pareil, et aucune page ne répondait à « comment va-t-elle, et pourquoi ? ».
 
-*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123.*
+*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123, 0176.*
 
 ### 0122 — Régler ses outils, et ce qu'elle expose en MCP
 
@@ -2092,6 +2092,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* un mail qu'elle avait lu disparaissait de tes non-lus ; ouvrir un mail ne le marquait jamais lu, et « Marquer comme lu » était caché ; tout se rangeait mail par mail, en ouvrant chacun ; la liseuse tombait sous la liste, à faire défiler à chaque mail ; ce qu'elle savait d'un mail ne se lisait que sur sa fiche ; une lettre d'information restait sans ses images ; elle ne pouvait ni trier ni ranger ta boîte.
 
 *Révise 0027 (en partie), 0168 (en partie), 0169 (en partie), 0173 (en partie).*
+
+### 0176 — La console redessinée : la navigation en haut, trois gabarits, un onglet par écran
+
+- Plus de menu à gauche : les rubriques sont en haut, chacune un menu de ses pages, une ligne d'explication par page ; sur un écran étroit, un panneau. « Aller à… » (Ctrl K, `/`) trouve une page de la console puis cherche partout (`/recherche` ; sans script, le formulaire). Son état tient dans une pastille (son humeur, son énergie, les alertes) qui se déplie sur ses vitaux ; le thème et la déconnexion sont dans le menu du compte.
+- Fond blanc, des filets plutôt que des aplats gris ; Inter servie par la console (`static/fonts`, `font-src 'self'`), Inter Display pour les titres, plus de serif ; trois arrondis (6, 4, 3 px) ; pas d'ombre, sauf sur ce qui flotte ; des contrôles de 32 px, 44 sur un écran tactile.
+- Une action est à côté de ce qu'elle touche. Celles de la page (écrire, relever, ajouter, brancher) sont dans sa barre de titre, à droite du titre, la première en avant, les dangereuses sous « Autres actions », la roue de ses réglages (`gear`, ADR 0173) au bout : un onglet dessiné les y remonte (`Drawn.render` rend un triplet), un panneau les y nomme (`page_links`). Celles d'un objet sont sur sa ligne, sa carte ou sa fiche. Enregistrer est dans la barre d'enregistrement du formulaire, une seule.
+- Trois gabarits. Le client : ce qu'on lit à gauche, la liste, la liseuse à côté (ADR 0175). Le paramétrage : une ligne par réglage, son nom et son aide à gauche, sa valeur à droite, deux par rangée quand la place le permet ; la barre d'enregistrement passe au premier plan dès qu'une valeur change ; une page à plusieurs sujets se lit en sous-onglets, une colonne à gauche (Courrier › Paramètres, les paramètres avancés) ; le tempérament se règle comme une table de mixage, tous ses curseurs d'un coup, le milieu marqué, l'aide du curseur touché à côté (`SettingsSection.aside`). La vue d'un objet : un seul bandeau d'alerte, une bande de chiffres qui mènent à leurs onglets, puis des tuiles.
+- Un onglet tient dans un écran autant que possible : ce qui dépasse devient un onglet ou un sous-onglet, une liste se pagine.
+
+*Pourquoi :* le thème était trop gros, trop rond, gris en clair ; le menu de gauche mangeait la largeur ; les actions changeaient de place d'une page à l'autre, et des pages défilaient sans fin.
+
+*Révise 0121 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

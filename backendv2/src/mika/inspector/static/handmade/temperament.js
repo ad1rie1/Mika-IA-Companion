@@ -154,3 +154,39 @@
 
   select.addEventListener("change", function () { show(select.value); });
 })();
+/* La table de mixage (ADR 0176) : à droite, « Ce qu'il règle » dit l'aide du curseur qu'on survole, qu'on atteint au
+   clavier ou qu'on déplace ; un curseur qui s'écarte nettement du milieu (0,5 : comme la plupart des gens) se marque.
+   Sans ce script, chaque curseur garde son aide pour un lecteur d'écran, et la page s'enregistre de même. */
+(function () {
+  "use strict";
+  var help = document.querySelector("[data-temper-help]");
+  var form = document.querySelector(".hm-split > .hm-form");
+  if (!help || !form) return;
+  var title = help.querySelector("[data-temper-help-title]");
+  var text = help.querySelector("[data-temper-help-text]");
+  var value = help.querySelector("[data-temper-help-value]");
+  var fieldOf = function (target) {
+    var field = target.closest && target.closest(".group > .field");
+    return field && !field.closest(".mapping") ? field : null;
+  };
+  function mark(field) {
+    var range = field.querySelector("input[type=range]");
+    if (range) field.classList.toggle("off-mid", Math.abs(Number(range.value) - 0.5) >= 0.15);
+  }
+  function show(field) {
+    var label = field.querySelector("label");
+    var said = field.querySelector(".help");
+    var range = field.querySelector("input[type=range]");
+    title.textContent = label ? label.textContent.trim() : "";
+    text.textContent = said ? said.textContent.trim() : "";
+    text.classList.remove("now-muted");
+    value.hidden = !range;
+    if (range) value.textContent = "valeur " + String(range.value).replace(".", ",") + " · le trait au milieu : 0,5, comme la plupart";
+    form.querySelectorAll(".field.is-hot").forEach(function (f) { f.classList.remove("is-hot"); });
+    field.classList.add("is-hot");
+  }
+  form.addEventListener("mouseover", function (ev) { var f = fieldOf(ev.target); if (f) show(f); });
+  form.addEventListener("focusin", function (ev) { var f = fieldOf(ev.target); if (f) show(f); });
+  form.addEventListener("input", function (ev) { var f = fieldOf(ev.target); if (f) { mark(f); show(f); } });
+  form.querySelectorAll(".group > .field").forEach(mark);
+})();

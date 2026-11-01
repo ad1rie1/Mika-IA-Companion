@@ -1,22 +1,42 @@
-{# La recherche, dessinée (inspector/pages/subjects.py, ``search_view``) : chaque sorte de résultat en carte (les
-   pages de la console, les textes où chercher, les personnes, les projets…), ses liens et leur détail, sa pagination.
-   Aucun style en ligne (CSP). #}
+{# La recherche, dessinée (inspector/pages/subjects.py, ``search_view``) : en sous-onglets (ADR 0176) — « Tout » d'abord,
+   chaque sorte de résultat en carte avec ses premiers liens ; puis une section par sorte (les pages de la console, les
+   textes où chercher, les personnes, les projets…), tous ses liens en colonnes et sa pagination. Les sortes sans
+   résultat se disent en une ligne. Aucun style en ligne (CSP). #}
 {% from "_navigation.html" import pager as pages %}
+{% set found = v.groups|selectattr("items")|list %}
+{% set silent = v.groups|rejectattr("items")|list %}
+{% macro items(list) -%}
+{% for i in list %}<li>{% if i.href %}<a href="{{ i.href }}">{{ i.label }}</a>{% else %}<span>{{ i.label }}</span>{% endif %}{% if i.sub %}<span class="search-sub">{{ i.sub }}</span>{% endif %}</li>{% endfor %}
+{%- endmacro %}
 <div class="now-page recherche">
-  {% if v.groups %}
-  <p class="person-counts">{% for g in v.groups if g["items"] %}<span><span class="now-num">{{ g["items"]|length }}</span> {{ g.title|lower }}</span>{% endfor %}</p>
-  <div class="search-groups">
-    {% for g in v.groups %}
-    <section class="now-card search-group" aria-label="{{ g.title }}">
-      <header class="now-card-head"><h2>{{ g.title }}</h2>{% if g["items"] %}<span class="person-count now-num">{{ g["items"]|length }}</span>{% endif %}</header>
-      {% if g["items"] %}
-      <ul class="search-items">
-        {% for i in g["items"] %}<li>{% if i.href %}<a href="{{ i.href }}">{{ i.label }}</a>{% else %}<span>{{ i.label }}</span>{% endif %}{% if i.sub %}<span class="search-sub">{{ i.sub }}</span>{% endif %}</li>{% endfor %}
-      </ul>
-      {% else %}<p class="now-empty">{{ g.empty or 'aucun résultat' }}</p>{% endif %}
-      {% if g.pager and (g.pager.older or g.pager.newer or g.pager.next or g.pager.prev) %}<div class="episode-pager">{{ pages(g.pager) }}</div>{% endif %}
-    </section>
-    {% endfor %}
+  {% if found %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Résultats par sorte">
+      <a href="#r-tout">Tout <span class="hm-count">{{ found|sum(attribute="shown") }}</span></a>
+      <div class="hm-subnav-sep"></div>
+      {% for g in found %}<a href="#{{ g.id }}">{{ g.title }} <span class="hm-count">{{ g.shown }}</span></a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+      <section id="r-tout" data-pane aria-label="Tout">
+        <div class="search-groups">
+          {% for g in found %}
+          <section class="now-card search-group" aria-label="{{ g.title }} (les premiers)">
+            <header class="now-card-head"><h2>{{ g.title }}</h2><span class="person-count now-num">{{ g.shown }}</span></header>
+            <ul class="search-items">{{ items(g["items"][:6]) }}</ul>
+            {% if g["items"]|length > 6 or g.paged %}<p class="search-more"><a href="#{{ g.id }}">Voir {{ 'les ' ~ g.shown if not g.paged else 'tout' }} →</a></p>{% endif %}
+          </section>
+          {% endfor %}
+        </div>
+        {% if silent %}<p class="search-silent now-muted">Rien dans : {% for g in silent %}{{ g.title|lower }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+      </section>
+      {% for g in found %}
+      <section class="now-card search-group search-pane" id="{{ g.id }}" data-pane aria-label="{{ g.title }}">
+        <header class="now-card-head"><h2>{{ g.title }}</h2><span class="person-count now-num">{{ g.shown }}</span></header>
+        <ul class="search-items search-columns">{{ items(g["items"]) }}</ul>
+        {% if g.paged %}<div class="episode-pager">{{ pages(g.pager) }}</div>{% endif %}
+      </section>
+      {% endfor %}
+    </div>
   </div>
   {% else %}
   <section class="now-card"><p class="now-empty">{{ v.note or ('rien ne correspond' if v.q else "tape un nom, un numéro d'événement, un titre") }}</p></section>

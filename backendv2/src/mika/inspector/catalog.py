@@ -39,6 +39,9 @@ class Destination:
     #: des onglets rangés derrière le bouton en haut à droite de la page plutôt que dans sa barre d'onglets (ses
     #: paramètres : Courrier › Paramètres, ADR 0173)
     gear: tuple[str, ...] = ()
+    #: le titre d'un premier onglet : la page à l'adresse même de la destination, dessinée à part (Personnes : ses
+    #: cartes) ; les onglets des facultés le suivent et y ramènent (ADR 0176)
+    lead: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +57,8 @@ class MenuLink:
     label: str
     target: str
     also: tuple[str, ...] = ()
+    #: ce qu'on y trouve, en quelques mots, sous le lien dans le menu de sa rubrique (ADR 0176)
+    hint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +68,10 @@ class MenuGroup:
     items: tuple[MenuLink, ...]
     #: la rubrique porte son nom, lu dans sa persona au rendu (ADR 0070) ; ``label`` n'en est que le repli
     her: bool = False
+    #: son nom dans la barre du haut, quand ``label`` y serait trop long (ADR 0176)
+    short: str = ""
+    #: la question de l'opératrice à laquelle la rubrique répond, en tête de son menu
+    question: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +197,9 @@ class SettingsSection:
     prefill: Callable[[Mapping[str, str]], Any] | None = None
     #: un dessin de la composition (ADR 0121), au-dessus du formulaire : ``fn(paramètres) -> HTML`` (déjà échappé)
     head: Callable[[Mapping[str, str]], Any] | None = None
+    #: ce dessin se pose à côté du formulaire, dans une colonne à droite, plutôt qu'au-dessus (ADR 0176 : le tempérament,
+    #: ses curseurs d'un coup à gauche, son caractère et sa forme à droite)
+    aside: bool = False
     #: « Voir l'effet » : ``preview(ui, valeur validée)`` → des blocs, rien d'écrit (absent : pas de bouton)
     preview: Callable[[Any, Any], Sequence[Any]] | None = None
     #: juste avant ``save`` : ``adjust(valeur validée)`` → (valeur à enregistrer, notes) — ce qui se lit ailleurs pour

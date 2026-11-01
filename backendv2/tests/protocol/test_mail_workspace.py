@@ -53,6 +53,13 @@ def test_account_scope_survives_tabs_search_pagination_and_composing(world, tmp_
     assert re.search(r'<a class="btn quiet gear-link" href="/inspecteur/courrier/parametres[^"]*"', page)
     assert "Gérer les comptes" not in page
     assert client.get("/inspecteur/courrier/comptes", follow_redirects=False).status_code == 301
+    # écrire et relever : les actions de la page, dans sa barre de titre, la roue au bout (ADR 0176)
+    for tab in ("reception", "brouillons", "contacts"):
+        shown = get(client, f"/inspecteur/courrier/{tab}?compte=perso")
+        head, body = shown.split('<div class="page-head-side">')[1].split('<div class="stack">', 1)
+        assert head.index("Nouveau message") < head.index("gear-link")
+        assert ("Actualiser le dossier" in head) == (tab == "reception")
+        assert "Nouveau message</summary>" not in body and "hm-toolbar" not in body
 
 
 def test_reader_displays_html_safely_and_replies_from_the_original_account(world):  # noqa: F811

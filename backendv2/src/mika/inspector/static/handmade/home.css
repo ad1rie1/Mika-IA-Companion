@@ -4,14 +4,14 @@
 /* ce qui t'attend : une ligne par priorité, sa valeur dans une pastille de son ton */
 .home-priorities { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .home-priorities > li > a, .home-priorities > li > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center;
-  gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2);
+  gap: 14px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
   color: var(--text); text-decoration: none; }
 .home-priorities > li > a:hover { border-color: color-mix(in srgb, var(--tone) 45%, var(--border)); }
 .home-priorities > li.st-warn { --tone: var(--warn); --tone-bg: var(--warn-bg); }
 .home-priorities > li.st-danger { --tone: var(--danger); --tone-bg: var(--danger-bg); }
 .home-priorities > li.st-info { --tone: var(--info); --tone-bg: var(--info-bg); }
 .home-priority-value { display: inline-grid; place-items: center; min-width: 44px; height: 36px; padding: 0 10px;
-  border-radius: 10px; background: var(--tone-bg, var(--sunken)); color: var(--tone, var(--text)); font-weight: 700; font-size: 15px; }
+  border-radius: var(--radius); background: var(--tone-bg, var(--sunken)); color: var(--tone, var(--text)); font-weight: 700; font-size: 15px; }
 .home-priority-text { display: grid; gap: 2px; min-width: 0; }
 .home-priority-text strong { font-size: 14px; font-weight: 600; }
 .home-priority-text span { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }

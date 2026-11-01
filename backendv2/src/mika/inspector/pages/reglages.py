@@ -41,6 +41,7 @@ from mika.kernel.inspect import (
     INT_MAX,
     Badge,
     Column,
+    Disclosure,
     Nav,
     NavItem,
     Note,
@@ -213,8 +214,9 @@ def overview(ui: Any) -> list[Any]:
         Table((Column("faculté"), Column("nom technique", "fit"), Column("paramètres", "num"),
                "dérive du tempérament", "surcharges", "réglés ailleurs", "refus", "en vigueur"), tuple(rows),
               title="Les facultés", empty="Aucune faculté n'a de paramètres."),
-        Table((Column("curseur", "fit"), "ce qu'il pilote (à 0 → à 1)"), tuple(drive),
-              title="Ce que pilote chaque curseur du tempérament"),
+        # le détail du tempérament, replié : la page est d'abord la liste des facultés (ADR 0176)
+        Disclosure("Ce que pilote chaque curseur du tempérament",
+                   (Table((Column("curseur", "fit"), "ce qu'il pilote (à 0 → à 1)"), tuple(drive)),)),
     ]
 
 

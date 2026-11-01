@@ -216,7 +216,10 @@ def _progress(p: Project) -> Meter:
 
 
 def _next_words(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext) -> str:
-    """La prochaine exécution en mots : quand, ou pourquoi pas."""
+    """La prochaine exécution en mots : quand, ou pourquoi pas. En pause, « à la reprise » : la raison de la pause
+    se dit une fois, dans le bandeau de sa vue d'ensemble (ADR 0176)."""
+    if p.status == c.PAUSED:
+        return "à la reprise"
     why = why_not_now(p, s, frame)
     if not why:
         return "dès que possible"
@@ -619,7 +622,7 @@ def _plan_section(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section
         slots.append(ActionSlot("projects.plan_valider", (), title="Valider le plan", presentation="button"))
     if p.status == c.ACTIVE and p.plan_state != c.TO_FRAME:
         slots.append(ActionSlot("projects.plan_reviser", (), title="Demander une révision" if p.plan_state
-                                else "Lui faire écrire un plan"))
+                                else "Lui faire écrire un plan", presentation="button"))
     if slots:
         items.append(Toolbar(tuple(slots), title="Sa réponse"))
     return Section("Le plan", tuple(items), description="Ce qu'on lui a demandé et comment elle s'y prend : ses "
@@ -648,28 +651,15 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
     if plan is not None:
         blocks.append(plan)
     target = pick(p, frame.now, pm) if p.status == c.ACTIVE else None
-    blocks.append(Grid((
-        Fields((("état", _state(p)), ("objectifs", _progress(p)),
-                ("exécutions", f"{p.runs} en tout · {runs_today(p, frame.now)} sur 24 h (au plus {daily_cap(p, pm)})"),
-                ("pannes d'affilée", Badge(str(p.failures), "danger") if p.failures else "aucune")),
-               title="Où il en est"),
-        Fields((("quand", _next_words(p, s, frame, ctx)),
-                ("sur quoi", Text(f"n° {target.id} · {_text(texts, target.text_ref)}", clamp=80)
-                 if target is not None else "—"),
-                ("mode", _mode(p)), ("plage de travail", window_words(p))),
-               title="Prochaine exécution"),
-        Fields((("dernier commit", _commit_ref(p, p.last_commit) if p.last_commit else "aucun encore"),
-                ("dépôt distant", _remote_ref(p)),
-                ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
-                 if p.remote_line else "aucun"),
-                ("l'histoire complète", _link(p, "onglet Dépôt git", "git"))),
-               title="Son dépôt"),
-    ), columns=3))
-    blocks.append(Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
-                  else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes.", "muted"))
-    if p.status != c.ARCHIVED:
-        blocks.append(Fields((("changer son cadre, son mode, son rythme",
-                               _link(p, "dans l'onglet Comportement et outils", "comportement")),)))
+    # Une bande de chiffres, puis des tuiles : ce qui se lit d'un coup ; le détail vit dans les onglets (ADR 0176).
+    blocks.append(Stats((
+        Stat("Objectifs", _progress(p), href=_link(p, tab="objectifs")),
+        Stat("Exécutions", str(p.runs), f"{runs_today(p, frame.now)} sur 24 h (au plus {daily_cap(p, pm)})",
+             href=_link(p, tab="executions")),
+        Stat("Pannes d'affilée", str(p.failures) if p.failures else "aucune", tone="danger" if p.failures else ""),
+        Stat("Dernier commit", Text(p.last_commit[:7], "mono") if p.last_commit else "aucun encore",
+             f"dépôt distant : {_host(p.remote) or 'aucun'}", href=_link(p, tab="git")),
+    ), title="Où il en est"))
     open_rows = []
     for o in sorted(p.objectives, key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id)):
         if o.status == c.DROPPED:
@@ -678,18 +668,36 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                               Badge(KIND_FR.get(o.kind, o.kind), KIND_TONE.get(o.kind, "")),
                               Badge(OBJ_FR.get(o.status, o.status), OBJ_TONE.get(o.status, "")),
                               _last_words(o, frame.now, pm)), href=_link(p, tab="objectifs")))
-    blocks.append(Table((Column("n°", "fit"), Column("objectif"), Column("sorte", "fit"), Column("état", "fit"),
-                         Column("dernier passage")), tuple(open_rows[:8]), title="Ses objectifs",
-                        empty="aucun objectif : ajoutes-en un (onglet Objectifs)",
-                        caption="Tous les objectifs, leur cadence et leurs boutons : onglet Objectifs."
-                        if len(open_rows) > 8 else ""))
     recent = ctx.events([c.RUN_REPORTED], 5, where=("project", p.id))
-    blocks.append(Timeline(tuple(
-        Entry(e.at, f"{VERDICT_FR.get(e.data.verdict, e.data.verdict)} — objectif n° {e.data.objective}"
-              if e.data.objective else VERDICT_FR.get(e.data.verdict, e.data.verdict),
-              _said(e.data.summary), tone=VERDICT_TONE.get(e.data.verdict, ""),
-              meta=f"commit {e.data.commit}" if e.data.commit else "", href=Ref("episode", e.correlation, ""))
-        for e in recent), title="Dernières exécutions", empty="aucune exécution encore"))
+    blocks.append(Grid((
+        Table((Column("n°", "fit"), Column("objectif"), Column("sorte", "fit"), Column("état", "fit"),
+               Column("dernier passage")), tuple(open_rows[:6]), title="Ses objectifs",
+              empty="aucun objectif : ajoutes-en un (onglet Objectifs)",
+              caption="Tous les objectifs, leur cadence et leurs boutons : onglet Objectifs."
+              if len(open_rows) > 6 else ""),
+        Timeline(tuple(
+            Entry(e.at, f"{VERDICT_FR.get(e.data.verdict, e.data.verdict)} — objectif n° {e.data.objective}"
+                  if e.data.objective else VERDICT_FR.get(e.data.verdict, e.data.verdict),
+                  _said(e.data.summary), tone=VERDICT_TONE.get(e.data.verdict, ""),
+                  meta=f"commit {e.data.commit}" if e.data.commit else "", href=Ref("episode", e.correlation, ""))
+            for e in recent), title="Dernières exécutions", empty="aucune exécution encore"),
+    ), columns=2))
+    blocks.append(Grid((
+        Fields((("quand", _next_words(p, s, frame, ctx)),
+                ("sur quoi", Text(f"n° {target.id} · {_text(texts, target.text_ref)}", clamp=80)
+                 if target is not None else "—"),
+                ("mode", _mode(p)), ("plage de travail", window_words(p))),
+               title="Prochaine exécution"),
+        Prose(_text(texts, p.description_ref), title="Le cadre") if p.description_ref
+        else Note("Aucun cadre écrit : elle suit le titre, ses objectifs et les consignes. Il se change dans l'onglet "
+                  "Comportement et outils.", "muted", title="Le cadre"),
+        Fields((("dernier commit", _commit_ref(p, p.last_commit) if p.last_commit else "aucun encore"),
+                ("dépôt distant", _remote_ref(p)),
+                ("dernier échange", Text(p.remote_line, tone="ok" if p.remote_ok else "danger", clamp=90)
+                 if p.remote_line else "aucun"),
+                ("l'histoire complète", _link(p, "onglet Dépôt git", "git"))),
+               title="Son dépôt"),
+    ), columns=3))
     if decisions:
         blocks.append(Table((Column("n°", "fit"), Column("la question"), Column("ce qui est choisi")), tuple(
             Row((f"D{d.id}", Text(_text(texts, d.title_ref), clamp=100), Text(_text(texts, d.choice_ref), clamp=200)),

@@ -1,44 +1,132 @@
 /* Réglages › Droits (handmade/droits/page.html, ADR 0133, 0134) : qui peut quoi, ressource par ressource, le détail
    d'une ressource ; Réglages › Canaux et Outils › Ce qu'elle peut faire (handmade/droits/tableau.html). Les tableaux
-   reprennent ceux des accès (tools.css : access-table, access-default) ; ici, ce qui n'est qu'à ces pages. */
+   reprennent ceux des accès (tools.css : access-table, access-default) ; ici, ce qui n'est qu'à ces pages. Les trois
+   pages se lisent en sous-onglets (base.css : hm-subtabs, ADR 0176). */
 .rights-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px;
   margin-bottom: 14px; }
-.rights-head h2 { margin: 0 0 4px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.rights-head h2, .rights-who-about h2 { margin: 0 0 4px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
 .rights-head p { margin: 0; max-width: 76ch; color: var(--text-2); font-size: 13.5px; }
 
 /* ── La légende des tons ─────────────────────────────────────────────────────── */
 .rights-note { margin: 8px 0 0; color: var(--text-2); font-size: 13px; }
-.rights-floors { margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); }
-.rights-floors p { margin: 0 0 4px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .06em;
+.rights-floors { margin-top: 10px; padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2); }
+.rights-floors p { margin: 0 0 4px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .06em; }
 .rights-floors ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }
 .rights-floors li + li { margin-top: 3px; }
 
-/* Réglages › Canaux, Outils › Ses propres outils : un tableau par entrée, replié (handmade/droits/tableau.html) */
-.access-canal-entry > summary { cursor: pointer; padding: 12px 16px; font-size: 15px; }
-.access-canal-entry > summary .now-muted { font-weight: 400; font-size: 13px; }
-.access-canal-entry > form { padding: 0 8px 8px; }
-.access-tool.sub { padding-left: 22px; color: var(--text-2); }
+/* ── Qui peut quoi : l'explication, puis le choix sur une ligne, le bouton au bout ─────────────── */
+.rights-who { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 32px; }
+.rights-who-about { flex: 1 1 440px; min-width: 0; }
+.rights-who-about p { margin: 0; max-width: 92ch; color: var(--text-2); font-size: 13.5px; }
+.rights-pick { flex: 0 1 auto; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; min-width: 0; margin: 0; }
+.rights-pick-field { display: grid; gap: 4px; min-width: 0; }
+.rights-pick-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.rights-pick .access-select { width: auto; min-width: 0; max-width: 100%; }
+.rights-pick-go { display: flex; flex-wrap: wrap; gap: 8px; }
+.rights-chosen { flex: 1 1 100%; margin: 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-2);
+  font-size: 13.5px; }
 
-/* Outils › Ce qu'elle peut faire : une famille, ses outils décrits, « Régler les droits » qui ouvre son tableau */
-.access-family .access-head { padding: 14px 16px 6px; }
-.access-tool-list { list-style: none; margin: 0; padding: 4px 16px 12px; display: grid; gap: 6px; }
-.access-tool-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13.5px; }
-.access-tool-list code { font-size: 12.5px; }
-.access-tool-desc { color: var(--text-2); flex: 1 1 320px; }
-.access-rules { margin: 0 8px 8px; }
-.access-rules > summary { display: inline-block; list-style: none; cursor: pointer; margin: 0 8px 8px; }
-.access-rules > summary::-webkit-details-marker { display: none; }
-.access-rules[open] > summary { display: none; }
+/* ── Une ressource par ligne : son nom, sa description, ses outils en étiquettes ; dépliée, ses outils décrits ── */
+.rights-res-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.rights-res-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0 16px;
+  border-bottom: 1px solid var(--border); scroll-margin-top: 72px; }
+.rights-res-list > li:target { background: var(--accent-soft); }
+.rights-fold { min-width: 0; }
+.rights-fold > summary { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) auto; align-items: baseline;
+  gap: 4px 18px; padding: 9px 6px; border-radius: var(--radius-sm); cursor: pointer; list-style: none; }
+.rights-fold > summary::-webkit-details-marker { display: none; }
+.rights-fold > summary:hover { background: var(--hover); }
+.rights-res-name { font-weight: 600; }
+.rights-res-name::before { content: "›"; display: inline-block; width: 14px; color: var(--muted); font-weight: 400;
+  transition: transform .12s; }
+.rights-fold[open] .rights-res-name::before { transform: rotate(90deg); }
+.rights-res-body { display: grid; gap: 5px; min-width: 0; }
+.rights-res-about { color: var(--text-2); font-size: 13px; }
+.rights-res-count { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rights-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.rights-chip { padding: 0 6px; border-radius: var(--radius-xs); background: var(--sunken); color: var(--text-2);
+  font: 11.5px/1.6 var(--mono); overflow-wrap: anywhere; }
+.rights-chip.on { background: var(--ok-bg); color: var(--ok); }
+.rights-chip.shut { background: none; color: var(--muted); text-decoration: line-through;
+  box-shadow: inset 0 0 0 1px var(--border); }
+.rights-legend { margin: 0; color: var(--muted); font-size: 12.5px; }
+.rights-fold .hm-table-wrap { margin: 2px 0 12px 20px; }
+.rights-fold .rights-list td:nth-child(3) { width: 32%; min-width: 220px; }
+.rights-res-list > li > .rights-link { padding: 9px 6px; font-size: 13px; white-space: nowrap; }
 
-/* la liste des ressources et de leurs outils, le détail d'une ressource */
+/* la liste des outils d'une ressource, le tableau des projets et des canaux, le détail d'une ressource */
 .rights-list th[scope=row] { font-weight: 650; white-space: nowrap; }
 .rights-list .rights-tool td { color: var(--text-2); font-size: 13px; }
-.rights-list .rights-tool-name { padding-left: 18px; white-space: nowrap; }
+.rights-list .rights-tool-name { white-space: nowrap; }
 .rights-list .rights-tool.shut td { color: var(--muted); }
-.rights-list .rights-link { text-align: right; white-space: nowrap; }
-.rights-list .rights-res th, .rights-list .rights-res td { padding-top: 12px; }
+.rights-list td.rights-link { text-align: right; white-space: nowrap; }
 .rights-actions { display: flex; gap: 8px; align-items: center; }
-.rights-pick { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 6px 0 4px; }
-.rights-pick .access-select { width: auto; min-width: 200px; }
-.rights-fixed > summary { cursor: pointer; padding: 12px 16px; font-weight: 650; }
-.rights-fixed-list { margin: 4px 16px 12px; padding-left: 18px; font-size: 13.5px; color: var(--text-2); }
+
+/* ce que le code fixe : ce qui n'est pas un outil, et ce que les outils déclarent, côte à côte */
+.rights-fixed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 4px 40px; }
+.rights-fixed-list { margin: 0 0 8px; padding-left: 18px; color: var(--text-2); font-size: 13.5px; }
+.rights-fixed-list li + li { margin-top: 5px; }
+.rights-fixed-note { margin: -4px 0 8px; font-size: 13px; }
+
+/* ── Réglages › Canaux, Outils › Ce qu'elle peut faire : la légende courte, le reste replié en colonnes ── */
+.access-legend > h2 { margin: 0 0 6px; }
+.access-legend > p { margin: 0; max-width: 120ch; color: var(--text-2); font-size: 13.5px; }
+.access-legend > .server-alert { margin: 0 0 8px; }
+.access-legend-more { margin-top: 10px; }
+.access-legend-more > summary { cursor: pointer; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.access-legend-more[open] > summary { margin-bottom: 10px; }
+.access-legend .access-legend-more dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px 28px; }
+.access-legend .access-legend-more dl > div { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; }
+
+/* Réglages › Canaux : un type par sous-onglet, son tableau, puis ses exceptions repliées */
+.access-canal-pane { display: grid; gap: 12px; min-width: 0; }
+.access-canal-pane > .now-subhead { margin: 10px 0 0; }
+.access-canal-pane > .now-subhead .now-muted { font-weight: 400; letter-spacing: 0; text-transform: none; }
+.access-canal-main, .access-canal-entry { min-width: 0; scroll-margin-top: 72px; }
+.access-card h2 .now-tag { margin-left: 4px; vertical-align: 2px; }
+.access-canal-entry > summary { cursor: pointer; padding: 4px 0; font-size: 15px; }
+.access-canal-entry > summary .now-muted { font-weight: 400; font-size: 13px; }
+.access-canal-entry[open] > summary { margin-bottom: 12px; }
+.access-canal-entry .access-card { padding: 0; border: 0; }
+.access-tool.sub { padding-left: 22px; color: var(--text-2); }
+/* dans un sous-onglet, la place est comptée (la colonne des sous-onglets en prend) : les en-têtes passent à la ligne,
+   « qui » ne prend que ce qu'il montre, les menus se serrent — le tableau tient sans défiler à 1440 px */
+.hm-subpanes .access-table thead th { white-space: normal; vertical-align: bottom; }
+.hm-subpanes .access-table th, .hm-subpanes .access-table td { padding-left: 4px; padding-right: 4px; }
+.hm-subpanes .access-table td:nth-child(2) { min-width: 150px; }
+.hm-subpanes .access-select { min-width: 108px; }
+
+/* Outils › Ce qu'elle peut faire : une famille, ses outils décrits (le nom, lit ou agit, ce qu'il fait, en colonnes),
+   son tableau ; dans son sous-onglet, le tableau ouvert sous la liste */
+.access-family { min-width: 0; scroll-margin-top: 72px; }
+.access-family > .access-head { margin-bottom: 8px; }
+.access-tool-list { display: grid; gap: 6px; margin: 0 0 14px; padding: 0; list-style: none; }
+.access-tool-list li { display: grid; grid-template-columns: minmax(0, 180px) 52px minmax(0, 1fr); align-items: baseline;
+  gap: 4px 10px; font-size: 13.5px; }
+.access-tool-list li > a { min-width: 0; overflow-wrap: anywhere; }
+.access-tool-list li > .now-tag { justify-self: start; }
+.access-tool-list code { font-size: 12.5px; }
+.access-tool-desc { color: var(--text-2); }
+.access-rules > summary { display: inline-block; list-style: none; cursor: pointer; }
+.access-rules > summary::-webkit-details-marker { display: none; }
+.access-rules[open] > summary { display: none; }
+.access-family .access-rules .access-card { padding: 14px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+.can-prompts > summary { padding: 2px 0; }
+
+@media (max-width: 700px) {
+  .rights-pick, .rights-pick-field { flex: 1 1 100%; }
+  .rights-pick .access-select { width: 100%; }
+  .rights-res-list > li { grid-template-columns: minmax(0, 1fr); }
+  .rights-res-list > li > .rights-link { padding: 0 6px 10px 20px; }
+  .rights-fold > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .rights-res-body { grid-column: 1 / -1; grid-row: 2; padding-left: 14px; }
+  .rights-fold .hm-table-wrap { margin-left: 0; }
+  /* ses outils dépliés : un outil par bloc (son nom, ce qu'il fait, ses droits exacts), plus de colonnes à serrer */
+  .rights-fold .rights-list, .rights-fold .rights-list tbody, .rights-fold .rights-list tr, .rights-fold .rights-list td { display: block; }
+  .rights-fold .rights-list thead { display: none; }
+  .rights-fold .rights-list tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .rights-fold .rights-list td, .rights-fold .rights-list td:nth-child(2), .rights-fold .rights-list td:nth-child(3) {
+    width: auto; min-width: 0; padding: 2px 0; border: 0; }
+  .access-tool-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .access-tool-desc { grid-column: 1 / -1; }
+}

@@ -24,6 +24,7 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.identity.inspect import people as everyone_of
 from mika.faculties.social.sections import profile_parts, refs_of
+from mika.inspector.catalog import destinations
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import num_fr
@@ -34,9 +35,8 @@ BASE = f"{PREFIX}/personnes"
 FRAGMENT = f"{PREFIX}/_personnes"
 #: tant de cartes par page
 PAGE = 30
-#: les onglets de la destination que cette page résume : (titre, adresse), sous « Le détail »
-DETAIL = (("L'annuaire des identités", "personnes"), ("Les liens, un par un", "liens"),
-          ("Les connexions vivantes", "presents"))
+#: la destination dont cette page est le premier onglet
+KEY = "personnes"
 #: les proximités qu'on choisit, dans l'ordre (vide : tout le monde)
 LEVELS = (("", "Tout le monde"), (social_c.CLOSE, "Proches"), (social_c.FRIEND, "Amitiés"),
           (social_c.ACQUAINTANCE, "Connaissances"), (social_c.STRANGER, "Pas encore de lien"))
@@ -110,7 +110,6 @@ def directory(look: Look, query: Mapping[str, str]) -> dict[str, Any]:
         "page": page, "pages": pages,
         "prev": _page_href(query, page - 1) if page > 1 else "",
         "next": _page_href(query, page + 1) if page < pages else "",
-        "detail": [{"title": t, "href": f"{BASE}/{slug}"} for t, slug in DETAIL],
     }
 
 
@@ -129,10 +128,18 @@ class PeoplePage:
         kept = {k: v for k, v in query.items() if k in ("q", "proximite", "presence", "page") and v}
         return FRAGMENT + ("?" + urlencode(kept) if kept else "")
 
+    def tabs(self) -> list[dict[str, Any]]:
+        """La barre d'onglets de la destination, la même sur ses autres onglets (ADR 0176) : cette page d'abord, sous
+        le titre que la destination lui donne, puis les onglets des facultés."""
+        lead = destinations(self.ui.deps.navigation)[KEY].lead
+        return [{"title": lead, "href": BASE, "on": True},
+                *({"title": v.title, "href": f"{BASE}/{v.name}", "on": False}
+                  for v in self.ui.inspection.in_section(KEY))]
+
     async def page(self, request: Request) -> Response:
         query = dict(request.query_params)
         return self.ui.page(request, "handmade/people/page.html", "Personnes", now=self.snapshot(query),
-                            fragment=self._fragment_url(query), base=BASE)
+                            fragment=self._fragment_url(query), base=BASE, tabs=self.tabs())
 
     async def fragment(self, request: Request) -> Response:
         return self.ui.fragment("handmade/people/body.html", now=self.snapshot(dict(request.query_params)),

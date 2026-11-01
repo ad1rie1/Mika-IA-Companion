@@ -39,11 +39,11 @@
 .mailset-back { margin: 0; font-size: 13px; }
 .mailset-account { display: grid; gap: 26px; }
 .mailset-account-head { display: grid; gap: 4px; }
-.mailset-account-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.5rem; font-weight: 600; }
+.mailset-account-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.15rem; font-weight: 600; }
 .mailset-account-head h2 .mono { font-size: 1.05rem; color: var(--muted); }
 .mailset-account-head p { margin: 0; color: var(--text-2); font-size: 14px; }
 .mailset-actions { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
-  margin: 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+  margin: 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
   box-shadow: 0 -6px 18px color-mix(in srgb, var(--text) 6%, transparent); font-size: 13px; }
 
 /* ses boîtes */
@@ -51,7 +51,7 @@
   list-style: none; }
 .mailset-box { display: grid; gap: 12px; align-content: start; }
 .mailset-box-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; }
-.mailset-initial { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
+.mailset-initial { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius);
   background: var(--accent-soft); color: var(--accent); font-family: var(--now-serif); font-size: 1.2rem; font-weight: 600; }
 .mailset-box-name { min-width: 0; }
 .mailset-box-name h3 { margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
@@ -64,7 +64,7 @@
 .mailset-box-facts > div { display: grid; grid-template-columns: minmax(110px, 26%) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
 .mailset-box-facts dt { color: var(--muted); }
 .mailset-box-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.mailset-activity { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--sunken); color: var(--text-2);
+.mailset-activity { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--sunken); color: var(--text-2);
   font-size: 12.5px; }
 .mailset-activity.danger { background: var(--danger-bg); color: var(--danger); }
 .mailset-box-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px;
@@ -79,12 +79,12 @@
 .mailset-param { display: grid; gap: 6px; align-content: start; min-width: 0; }
 .mailset-param .field { margin: 0; }
 .mailset-param .field input:not([type="checkbox"]):not([type="range"]) { max-width: 200px; }
-.mailset-param.is-overridden { margin: -10px; padding: 10px; border-radius: 10px;
+.mailset-param.is-overridden { margin: -10px; padding: 10px; border-radius: var(--radius);
   background: color-mix(in srgb, var(--warn-bg) 60%, transparent); }
 .mailset-param-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; color: var(--muted);
   font-size: 12.5px; }
 .mailset-links { display: grid; gap: 12px; }
-.mailset-links a { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2);
+.mailset-links a { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2);
   color: var(--text); font-size: 13.5px; text-decoration: none; }
 .mailset-links a:hover { background: var(--accent-soft); }
 .mailset-links a span { color: var(--text-2); font-size: 13px; }
@@ -100,4 +100,53 @@
   .mailset-fields, .mailset-params-list { grid-template-columns: minmax(0, 1fr); }
   .mailset-boxes { grid-template-columns: minmax(0, 1fr); }
   .mailset-remove { margin-left: 0; }
+}
+
+/* ── Courrier › Paramètres en sous-onglets (ADR 0176) : la colonne de gauche mène à une section, une seule se montre
+   (``:target`` ; sans cible, ses boîtes). Un seul formulaire porte les paramètres généraux : ce qui est masqué part avec lui. */
+.mailset-tabs { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; align-items: start; }
+.mailset-nav { position: sticky; top: 64px; display: grid; gap: 1px; }
+.mailset-nav-title { margin: 0 0 6px; padding: 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); }
+.mailset-nav a { display: block; padding: 6px 10px; border-radius: var(--radius); color: var(--text-2); font-size: 13px; }
+.mailset-nav a:hover { background: var(--hover); color: var(--text); text-decoration: none; }
+.mailset-tabs:not(:has(.mailset-row:target)) .mailset-nav a[data-mailset-tab="boites"],
+.mailset-tabs:has(#boites:target) .mailset-nav a[data-mailset-tab="boites"],
+.mailset-tabs:has(#ailleurs:target) .mailset-nav a[data-mailset-tab="ailleurs"],
+.mailset-tabs:has(#courrier-1:target) .mailset-nav a[data-mailset-tab="courrier-1"],
+.mailset-tabs:has(#courrier-2:target) .mailset-nav a[data-mailset-tab="courrier-2"],
+.mailset-tabs:has(#courrier-3:target) .mailset-nav a[data-mailset-tab="courrier-3"],
+.mailset-tabs:has(#courrier-4:target) .mailset-nav a[data-mailset-tab="courrier-4"],
+.mailset-tabs:has(#courrier-5:target) .mailset-nav a[data-mailset-tab="courrier-5"],
+.mailset-tabs:has(#courrier-6:target) .mailset-nav a[data-mailset-tab="courrier-6"],
+.mailset-tabs:has(#courrier-7:target) .mailset-nav a[data-mailset-tab="courrier-7"],
+.mailset-tabs:has(#courrier-8:target) .mailset-nav a[data-mailset-tab="courrier-8"],
+.mailset-tabs:has(#courrier-9:target) .mailset-nav a[data-mailset-tab="courrier-9"],
+.mailset-tabs:has(#courrier-10:target) .mailset-nav a[data-mailset-tab="courrier-10"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.mailset-panes { display: grid; gap: 16px; min-width: 0; }
+.mailset-panes .mailset-row { grid-template-columns: minmax(0, 1fr); gap: 12px; scroll-margin-top: 72px; }
+.mailset-panes .mailset-row + .mailset-row { padding-top: 0; border-top: 0; }
+.mailset-panes .mailset-row-about { max-width: 90ch; }
+.mailset-tabs:has(.mailset-row:target) .mailset-row:not(:target) { display: none; }
+.mailset-tabs:not(:has(.mailset-row:target)) .mailset-row:not(#boites) { display: none; }
+/* la barre d'enregistrement des paramètres généraux : seulement sur l'une de leurs sections */
+.mailset-tabs:not(:has(.mailset-params .mailset-row:not(#ailleurs):target)) .mailset-params > .mailset-actions { display: none; }
+.mailset-panes .mailset-params { display: grid; gap: 16px; }
+/* une ligne par réglage : son nom et son aide à gauche, sa valeur à droite */
+.mailset-panes .mailset-params-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 36px; }
+.mailset-panes .mailset-param { padding: 10px 0; border-top: 1px solid var(--border); }
+.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) { grid-template-columns: minmax(0, 1fr) minmax(130px, 40%);
+  column-gap: 16px; align-items: center; }
+.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > :is(input, select) { grid-column: 2; grid-row: 1 / span 3; width: 100%; }
+.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > :is(label, .label, .help) { grid-column: 1; }
+.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > .error { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .mailset-tabs { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .mailset-nav { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+  .mailset-nav-title { flex-basis: 100%; }
+  .mailset-nav a { border: 1px solid var(--border); }
+}
+@media (max-width: 700px) {
+  .mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) { grid-template-columns: minmax(0, 1fr); }
+  .mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > * { grid-column: 1 !important; grid-row: auto !important; }
 }

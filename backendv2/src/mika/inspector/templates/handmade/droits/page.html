@@ -1,9 +1,11 @@
 {# Réglages › Droits (app/handmade/rights.py, ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie
-   interne, les apps de la Forge, les services MCP, ses projets, ses canaux —, chaque outil décrit, et le lien du
-   détail des accès de chacune (son tableau, « Modifier », « Retour »). Les droits exacts, outil par outil, seulement
-   quand on a choisi qui et par quel canal. #}
+   interne, les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une sorte par
+   sous-onglet (ADR 0176) ; une ressource tient sur sa ligne (sa description, ses outils en étiquettes), ses outils
+   décrits se déplient dessous, et le lien du détail de ses accès (son tableau, « Modifier », « Retour »). Les droits
+   exacts, outil par outil, seulement quand on a choisi qui et par quel canal : les étiquettes disent alors ce qui
+   est ouvert, la ligne dépliée dit comment. #}
 {% from "_navigation.html" import pager as pages %}
-<div class="now-page service">
+<div class="now-page service rights-page">
   {% if detail %}
   <section class="now-card rights-card" aria-labelledby="rights-detail">
     <header class="rights-head">
@@ -14,7 +16,7 @@
         {% if detail.note %}<p class="rights-note">{{ detail.note }}</p>{% endif %}
       </div>
       <div class="rights-actions">
-        <a class="btn quiet" href="?{{ kept }}">← Retour</a>
+        <a class="btn quiet" href="?{{ kept }}{{ '#' ~ back if back }}">← Retour</a>
         {% if detail.edit %}<a class="btn" href="{{ detail.edit }}">Modifier</a>{% endif %}
       </div>
     </header>
@@ -23,7 +25,7 @@
         <table class="access-table">
           <thead><tr><th scope="col" class="access-n">#</th>{% for c in detail.columns %}<th scope="col">{{ c }}</th>{% endfor %}</tr></thead>
           <tbody>
-            {% for r in detail.rows %}<tr>{% for cell in r %}<td{{ ' class="access-n"' if loop.first }}>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+            {% for r in detail.rows %}<tr>{% for cell in r %}<td{% if loop.first %} class="access-n"{% endif %}>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
             <tr class="access-default"><td class="access-n"></td><th scope="row">Comportement par défaut</th>{% for cell in detail.default[1:] %}<td>{{ cell }}</td>{% endfor %}</tr>
           </tbody>
         </table>
@@ -33,77 +35,129 @@
     {% if detail.floors %}<div class="rights-floors"><p>Ce qu'aucune ligne n'ouvre</p><ul>{% for f in detail.floors %}<li>{{ f }}</li>{% endfor %}</ul></div>{% endif %}
   </section>
   {% else %}
-  <section class="now-card rights-card" id="rights-who" aria-labelledby="rights-who-title">
-    <header class="rights-head">
-      <div>
-        <h2 id="rights-who-title">Qui peut quoi</h2>
-        <p>Ce qu'elle a, ressource par ressource, chaque outil décrit ; « détail des accès » ouvre le tableau de règles de la ressource. Choisis <b>qui</b> et <b>par quel canal</b> pour lire les droits exacts, outil par outil — la règle du moteur, les deux portes et le plafond compris.</p>
-      </div>
-    </header>
+  <section class="now-card rights-card rights-who" id="rights-who" aria-labelledby="rights-who-title">
+    <div class="rights-who-about">
+      <h2 id="rights-who-title">Qui peut quoi</h2>
+      <p>Ce qu'elle a, ressource par ressource, chaque outil décrit ; « détail des accès » ouvre le tableau de règles de la ressource. Choisis <b>qui</b> et <b>par quel canal</b> pour lire les droits exacts, outil par outil — la règle du moteur, les deux portes et le plafond compris.</p>
+    </div>
     <form method="get" class="rights-pick">
-      <label for="rights-qui">Qui</label>
-      <select id="rights-qui" name="qui" class="access-select">
-        <option value="">—</option>
-        {% for w in whos %}<option value="{{ w.key }}"{{ ' selected' if w.on }}>{{ w.label }}</option>{% endfor %}
-      </select>
-      <label for="rights-canal">Par quel canal</label>
-      <select id="rights-canal" name="canal" class="access-select">
-        <option value="">—</option>
-        {% for c in canals %}<option value="{{ c.key }}"{{ ' selected' if c.on }}>{{ c.label }}</option>{% endfor %}
-      </select>
-      <button class="btn" type="submit">Voir les droits exacts</button>
-      {% if got %}<a class="btn quiet" href="?">Tout effacer</a>{% endif %}
+      <div class="rights-pick-field">
+        <label for="rights-qui">Qui</label>
+        <select id="rights-qui" name="qui" class="access-select">
+          <option value="">—</option>
+          {% for w in whos %}<option value="{{ w.key }}"{{ ' selected' if w.on }}>{{ w.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="rights-pick-field">
+        <label for="rights-canal">Par quel canal</label>
+        <select id="rights-canal" name="canal" class="access-select">
+          <option value="">—</option>
+          {% for c in canals %}<option value="{{ c.key }}"{{ ' selected' if c.on }}>{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="rights-pick-go">
+        <button class="btn" type="submit">Voir les droits exacts</button>
+        {% if got %}<a class="btn quiet" href="?">Tout effacer</a>{% endif %}
+      </div>
     </form>
     {% if got %}
     <p class="rights-chosen"><b>{{ chosen[0] | capitalize }}</b>, par <b>{{ chosen[1] }}</b> — le canal laisse au plus : {{ canal_said }}</p>
     {% elif whos | selectattr('on') | list or canals | selectattr('on') | list %}
-    <p class="now-muted">Choisis les deux — qui, et par quel canal — pour lire les droits exacts.</p>
+    <p class="rights-chosen now-muted">Choisis les deux — qui, et par quel canal — pour lire les droits exacts.</p>
     {% endif %}
   </section>
 
-  {% for s in sections %}
-  <section class="now-card rights-card table-block" aria-labelledby="rights-s-{{ loop.index }}">
-    <header class="rights-head"><div><h2 id="rights-s-{{ loop.index }}">{{ s.title }}</h2><p>{{ s.hint }}</p></div></header>
-    {% if s.rows %}
-    <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ s.title }}">
-      <table class="access-table rights-list">
-        <thead><tr><th scope="col">Ressource, ses outils</th><th scope="col">Description</th>{% if got %}<th scope="col">Droits exacts</th>{% endif %}<th scope="col"></th></tr></thead>
-        <tbody>
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ressources">
+      <p class="hm-subnav-title">Ressources</p>
+      {% for s in sections %}<a href="#{{ s.id }}">{{ s.title }} <span class="hm-count">{{ s.rows | length }}</span></a>{% endfor %}
+      <div class="hm-subnav-sep"></div>
+      <a href="#d-code">Ce que le code fixe</a>
+    </nav>
+    <div class="hm-subpanes">
+      {% for s in sections %}
+      <section class="now-card rights-card table-block" id="{{ s.id }}" data-pane aria-labelledby="{{ s.id }}-title">
+        <header class="rights-head">
+          <div><h2 id="{{ s.id }}-title">{{ s.title }}</h2><p>{{ s.hint }}{% if s.folds and s.rows %} — une ligne par ressource, ses outils décrits en la dépliant{% endif %}.</p></div>
+          {% if got and s.folds and s.rows %}<p class="rights-legend"><span class="rights-chip on">ouvert</span> <span class="rights-chip shut">fermé</span> pour {{ chosen[0] }}, par {{ chosen[1] }}</p>{% endif %}
+        </header>
+        {% if s.rows and s.folds %}
+        <ul class="rights-res-list" role="list">
           {% for r in s.rows %}
-          <tr class="rights-res">
-            <th scope="row">{{ r.label }}</th>
-            <td>{{ r.description }}</td>
-            {% if got %}<td>{{ r.exact }}</td>{% endif %}
-            <td class="rights-link">{% if r.detail %}<a href="{{ r.detail }}">détail des accès</a>{% endif %}</td>
-          </tr>
-          {% for x in r.tools %}
-          <tr class="rights-tool{{ ' shut' if x.closed }}">
-            <td class="rights-tool-name">— <a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span></td>
-            <td>{{ x.description }}</td>
-            {% if got %}<td>{{ x.exact }}</td>{% endif %}
-            <td></td>
-          </tr>
+          <li class="rights-res" id="{{ r.id }}">
+            <details class="rights-fold">
+              <summary>
+                <span class="rights-res-name">{{ r.label }}</span>
+                <span class="rights-res-body">
+                  {% if r.description %}<span class="rights-res-about">{{ r.description }}</span>{% endif %}
+                  <span class="rights-chips">{% for x in r.tools %}<span class="rights-chip{{ ' shut' if got and x.closed }}{{ ' on' if got and not x.closed }}">{{ x.name }}</span>{% endfor %}</span>
+                </span>
+                <span class="rights-res-count now-muted">{% if got %}{{ r.open }} / {{ r.tools | length }} ouvert{{ 's' if r.open > 1 }}{% else %}{{ r.tools | length }} outil{{ 's' if r.tools | length > 1 }}{% endif %}</span>
+              </summary>
+              <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ r.label }} : ses outils">
+                <table class="access-table rights-list">
+                  <thead><tr><th scope="col">Outil</th><th scope="col">Description</th>{% if got %}<th scope="col">Droits exacts</th>{% endif %}</tr></thead>
+                  <tbody>
+                    {% for x in r.tools %}
+                    <tr class="rights-tool{{ ' shut' if x.closed }}">
+                      <td class="rights-tool-name"><a href="{{ x.href }}"><code>{{ x.name }}</code></a> <span class="now-tag {{ 'warn' if x.nature == 'agit' else 'info' }}">{{ x.nature }}</span></td>
+                      <td>{{ x.description }}</td>
+                      {% if got %}<td>{{ x.exact }}</td>{% endif %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+            {% if r.detail %}<a class="rights-link" href="{{ r.detail }}">détail des accès</a>{% endif %}
+          </li>
           {% endfor %}
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="hm-pager single">{{ pages(s.pager) }}</div>
-    {% else %}<p class="now-muted">Rien pour l'instant.</p>{% endif %}
-  </section>
-  {% endfor %}
+        </ul>
+        <div class="hm-pager single">{{ pages(s.pager) }}</div>
+        {% elif s.rows %}
+        <div class="hm-table-wrap" tabindex="0" role="region" aria-label="{{ s.title }}">
+          <table class="access-table rights-list">
+            <thead><tr><th scope="col">Ressource</th><th scope="col">Description</th>{% if got %}<th scope="col">Droits exacts</th>{% endif %}<th scope="col"></th></tr></thead>
+            <tbody>
+              {% for r in s.rows %}
+              <tr class="rights-res" id="{{ r.id }}">
+                <th scope="row">{{ r.label }}</th>
+                <td>{{ r.description }}</td>
+                {% if got %}<td>{{ r.exact }}</td>{% endif %}
+                <td class="rights-link">{% if r.detail %}<a href="{{ r.detail }}">détail des accès</a>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="hm-pager single">{{ pages(s.pager) }}</div>
+        {% else %}<p class="now-muted">Rien pour l'instant.</p>{% endif %}
+      </section>
+      {% endfor %}
 
-  <details class="now-card rights-card rights-fixed">
-    <summary>Ce que le code fixe</summary>
-    <ul class="rights-fixed-list">{% for f in fixed %}<li>{{ f }}</li>{% endfor %}</ul>
-    {% if tools.reserved %}
-    <p class="now-muted">Nés à toi et elle seule ({{ tools.count }} outil{{ 's' if tools.count > 1 }}, une ligne de leur famille peut les ouvrir) :</p>
-    <ul class="rights-fixed-list">{% for family, names in tools.reserved %}<li><b>{{ family }}</b> : {% for n in names %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>
-    {% endif %}
-    {% if tools.guarded %}
-    <p class="now-muted">Gardés par une condition ({{ tools.guarded_count }}) :</p>
-    <ul class="rights-fixed-list">{% for why, names in tools.guarded %}<li>{{ why }} : {% for n in names %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>
-    {% endif %}
-  </details>
+      <section class="now-card rights-card rights-fixed" id="d-code" data-pane aria-labelledby="d-code-title">
+        <header class="rights-head"><div><h2 id="d-code-title">Ce que le code fixe</h2><p>ce qu'aucun tableau ne change, et ce que ses outils déclarent d'eux-mêmes.</p></div></header>
+        <div class="rights-fixed-grid">
+          <div>
+            <p class="now-subhead first">Ce qui n'est pas un outil</p>
+            <ul class="rights-fixed-list">{% for f in fixed %}<li>{{ f }}</li>{% endfor %}</ul>
+          </div>
+          {% if tools.reserved or tools.guarded %}
+          <div>
+            {% if tools.reserved %}
+            <p class="now-subhead first">Nés à toi et elle seule</p>
+            <p class="now-muted rights-fixed-note">{{ tools.count }} outil{{ 's' if tools.count > 1 }} ; une ligne de leur famille peut les ouvrir.</p>
+            <ul class="rights-fixed-list">{% for family, names in tools.reserved %}<li><b>{{ family }}</b> : {% for n in names %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>
+            {% endif %}
+            {% if tools.guarded %}
+            <p class="now-subhead">Gardés par une condition ({{ tools.guarded_count }})</p>
+            <ul class="rights-fixed-list">{% for why, names in tools.guarded %}<li>{{ why }} : {% for n in names %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+  </div>
   {% endif %}
 </div>

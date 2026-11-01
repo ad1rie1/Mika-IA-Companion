@@ -8,6 +8,7 @@ Lecture seule, bornée ; un texte effacé par l'oubli se montre comme tel.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from sqlalchemy import select
 
@@ -42,8 +43,10 @@ from mika.kernel.inspect import (
     Cell,
     Chart,
     Column,
+    Disclosure,
     Entry,
     Fields,
+    Grid,
     InspectContext,
     Meter,
     Note,
@@ -273,7 +276,12 @@ def _persona(s: SelfState) -> list[Block]:
               description="Son estime d'elle-même (lente, elle revient vers 0,5), le récit qu'elle fait d'elle, "
                           "sa persona et son tempérament.")
 def _inspect_self(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    return [*_esteem(s, frame, ctx), *_narrative(s, frame, ctx), *_persona(s)]
+    # un écran large : l'estime (sa courbe et ses derniers coups côte à côte, ses règles), le récit à côté de ses
+    # faits, la persona ; le tempérament, détaillé dans Réglages, replié (ADR 0176)
+    *head, curve, rules, knocks = _esteem(s, frame, ctx)
+    persona, temperament, character = _persona(s)
+    return [*head, Grid((curve, knocks)), rules, Grid(tuple(_narrative(s, frame, ctx))), persona, character,
+            Disclosure(temperament.title, (replace(temperament, title=""),))]
 
 
 # ── Qui elle devient (ADR 0088) ───────────────────────────────────────────

@@ -2,7 +2,7 @@
 .running { display: grid; gap: 18px; }
 .running-doing { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .running-doing li { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
-  border-radius: 12px; background: color-mix(in srgb, var(--info-bg) 45%, transparent); }
+  border-radius: var(--radius); background: color-mix(in srgb, var(--info-bg) 45%, transparent); }
 .running-doing li.late { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn-bg) 45%, transparent); }
 .running-say { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0; font-size: 16px; font-weight: 600; }
 .running-say.idle { font-weight: 400; color: var(--text-2); }

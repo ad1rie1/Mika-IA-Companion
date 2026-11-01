@@ -214,8 +214,8 @@ async def chronologie(ui: Any, request: Request) -> Any:
             "filters": TIMELINE_PARAMS}
 
 
-#: la chronologie, par page
-CHRONOLOGY_PAGE = 100
+#: la chronologie, par page : deux colonnes de vingt sur un écran large (ADR 0176)
+CHRONOLOGY_PAGE = 40
 
 
 def _episode_correlations(ui: Any, correlations: set[str]) -> set[str]:

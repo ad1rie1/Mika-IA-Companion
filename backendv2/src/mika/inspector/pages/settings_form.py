@@ -372,6 +372,7 @@ class SettingsForms:
                                "preview": render.blocks(state.preview, env, query) if state.preview else []}
         drawn = call(s.head, query, label=f"en-tête {s.key}") if s.head is not None else None
         out["head"] = None if isinstance(drawn, Failed) else drawn
+        out["aside"] = s.aside and out["head"] is not None
         if s.model is None:
             return out
         fields = self._fields(s, pg) if pg.form else []

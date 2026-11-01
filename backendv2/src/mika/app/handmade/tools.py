@@ -36,9 +36,10 @@ class Catalogue(Drawn):
 
 
 class Elsewhere(Drawn):
-    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service, leurs réglages) en boutons, une carte par
-    service branché (l'onglet du plugin MCP), une carte par app et les outils qu'elle lui donne (la vue de la Forge).
-    Lus dans leurs tableaux, par le nom de leurs colonnes ; un tableau qu'il ne reconnaît pas reste tel quel."""
+    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service, leurs réglages) en boutons de la barre de
+    titre, une carte par service branché (l'onglet du plugin MCP), une carte par app et les outils qu'elle lui donne
+    (la vue de la Forge). Lus dans leurs tableaux, par le nom de leurs colonnes ; un tableau qu'il ne reconnaît pas
+    reste tel quel."""
 
     styles = ("handmade/tools.css",)
 
@@ -58,10 +59,11 @@ class Elsewhere(Drawn):
         apps = _table(rest, GIVEN)
         others = [b for b in rest if b is not services and b is not apps]
         html = Markup(env.get_template("handmade/outils/ailleurs.html").render(
-            links=links, services=_services(services, shown) if services is not None else None,
+            services=_services(services, shown) if services is not None else None,
             apps=_apps(apps) if apps is not None else None,
             services_empty=services.empty if services is not None else "", apps_empty=apps.empty if apps is not None else ""))
-        return html + (blocks.page(ui, others, query, forms=forms) or Markup(""))
+        # brancher un service, leurs réglages : les actions de la page, dans sa barre de titre (ADR 0176)
+        return html + (blocks.page(ui, others, query, forms=forms) or Markup("")), [], blocks.head(links)
 
 
 #: la page des services branchés (où « Brancher » revient)

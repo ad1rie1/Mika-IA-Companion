@@ -112,9 +112,10 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
         Badge("opérateur", "ok") if a.operator else Badge("utilisateur", "muted"),
         Badge("actif", "ok") if a.active else Badge("désactivé", "muted")),
         href=Ref("local", _account_url(compte=str(a.id)), ""), tone="" if a.active else "muted") for a in window)
-    # les deux boutons d'ajout, au-dessus des chiffres et de la liste
-    add = Panel("handmade/reglages/compte.html", {"mode": "list", "add_user": _account_url(nouveau=USER),
-                                                  "add_operator": _account_url(nouveau=OPERATOR)})
+    # les deux boutons d'ajout : les actions de la page, à droite de son titre (ADR 0176)
+    add = Panel("handmade/reglages/compte.html", {"mode": "list", "page_links": [
+        ("＋ Ajouter un utilisateur", _account_url(nouveau=USER)),
+        ("＋ Ajouter un opérateur", _account_url(nouveau=OPERATOR))]})
     return {"messages": messages, "panel": add, "blocks": [
         Stats((Stat("Comptes", len(accounts)), Stat("Opérateurs actifs", sum(1 for a in accounts
                                                                                if a.operator and a.active)),

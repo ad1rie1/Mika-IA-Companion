@@ -162,9 +162,9 @@ def _said(cell: Mapping[str, Any] | None) -> str:
     return "" if text == "—" else text
 
 
-def box(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Markup | None:
+def box(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
     """Courrier › Réception, Envoyés : l'espace de travail du plugin, la barre qui range ce qu'on a coché, sa liste en
-    lignes, ce qui suit la liste (remonter plus loin), la liseuse."""
+    lignes, ce qui suit la liste (remonter plus loin), la liseuse ; écrire et relever, dans la barre de titre."""
     space, tables = _space(ui, blocks, query)
     if space is None or not tables:  # pas de boîte, un compte inconnu : bloc par bloc
         return drawn_blocks.page(ui, blocks, query, forms=forms)
@@ -173,10 +173,12 @@ def box(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[
     tidy = next((d for d in items if d["t"] == "action" and d["key"] == TIDY), None)
     at = items.index(table)
     shown = lines(table, query)
-    return Markup(env.get_template("handmade/mail/box.html").render(
-        side=space["sidebar"], before=[d for d in items[:at] if d is not tidy], after=items[at + 1:], table=table,
+    actions, before = drawn_blocks.lift([d for d in items[:at] if d is not tidy])
+    page = Markup(env.get_template("handmade/mail/box.html").render(
+        side=space["sidebar"], before=before, after=items[at + 1:], table=table,
         lines=shown, reader=reader(ui, key, query, forms, shown) if key else "", forms=forms,
         bulk=forms.get(tidy["slot"]) if tidy is not None else None, gestures=GESTURES))
+    return page, [], drawn_blocks.head(items=actions, forms=forms)
 
 
 def _draft(table: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
@@ -193,15 +195,17 @@ def _draft(table: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
             "waiting": row.get("tone") == "warn"}
 
 
-def drafts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Markup | None:
+def drafts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
     """Courrier › Brouillons : ce qui attend ton accord en enveloppes, ce qui est décidé en lignes."""
     space, tables = _space(ui, blocks, query)
     if space is None or not tables:  # pas de courrier branché : bloc par bloc
         return drawn_blocks.page(ui, blocks, query, forms=forms)
     lists = [{**t, "drafts": [_draft(t, r) for r in t["rows"]]} for t in tables]
-    return Markup(env.get_template("handmade/mail/drafts.html").render(
-        side=space["sidebar"], before=[d for d in space["items"] if d["t"] != "table"], waiting=lists[0],
+    actions, before = drawn_blocks.lift([d for d in space["items"] if d["t"] != "table"])
+    page = Markup(env.get_template("handmade/mail/drafts.html").render(
+        side=space["sidebar"], before=before, waiting=lists[0],
         done=lists[1] if len(lists) > 1 else None, forms=forms))
+    return page, [], drawn_blocks.head(items=actions, forms=forms)
 
 
 def _contact(table: Mapping[str, Any], row: Mapping[str, Any], forms: Mapping[str, Any]) -> dict[str, Any]:
@@ -215,13 +219,15 @@ def _contact(table: Mapping[str, Any], row: Mapping[str, Any], forms: Mapping[st
             "href": row.get("href", ""), "write": {**write, "title": "Écrire"} if write else None}
 
 
-def contacts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Markup | None:
+def contacts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
     """Courrier › Contacts : une ligne par adresse, ses échanges en un clic, « Écrire » à côté."""
     space, tables = _space(ui, blocks, query)
     if space is None or not tables:
         return drawn_blocks.page(ui, blocks, query, forms=forms)
     table = tables[0]
-    return Markup(env.get_template("handmade/mail/contacts.html").render(
-        side=space["sidebar"], before=[d for d in space["items"] if d is not table], table=table,
+    actions, before = drawn_blocks.lift([d for d in space["items"] if d is not table])
+    page = Markup(env.get_template("handmade/mail/contacts.html").render(
+        side=space["sidebar"], before=before, table=table,
         people=[_contact(table, r, forms) for r in table["rows"]], forms=forms,
         note=str(table.get("caption") or "").split(". ")[0].rstrip(".")))
+    return page, [], drawn_blocks.head(items=actions, forms=forms)

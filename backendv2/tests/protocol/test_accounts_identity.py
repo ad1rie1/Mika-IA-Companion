@@ -80,7 +80,8 @@ def test_the_console_adds_a_user_or_an_operator_each_a_person_at_once(world):  #
     client, live, _ = world
     bootstrap(client)
     listing = html.unescape(client.get(ACCOUNTS).text)
-    assert f"{ACCOUNTS}?nouveau=utilisateur" in listing and f"{ACCOUNTS}?nouveau=operateur" in listing
+    head = listing.split('<div class="page-head-side">')[1].split('<div class="stack">')[0]  # la barre de titre (ADR 0176)
+    assert f"{ACCOUNTS}?nouveau=utilisateur" in head and f"{ACCOUNTS}?nouveau=operateur" in head
     form = html.unescape(client.get(f"{ACCOUNTS}?nouveau=utilisateur").text)
     assert "Ajouter un utilisateur" in form and 'name="role" value="utilisateur"' in form
     assert "Ajouter un opérateur" in html.unescape(client.get(f"{ACCOUNTS}?nouveau=operateur").text)

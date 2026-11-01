@@ -4,7 +4,7 @@ Ce que chaque entrée du menu de `/inspecteur/` montre, et sous quelle forme. Le
 `app/console_menu.py` ; les destinations (adresses, onglets, libellés) dans `app/console.py` ; les réglages dans
 `app/reglages.py` ; les pages dessinées à la main dans `app/handmade/` (gabarits `inspector/templates/handmade/`,
 feuilles `inspector/static/handmade/`, la table `app/handmade/pages.py::DRAWN`). Les décisions sont dans les ADR
-0025, 0029, 0042, 0045, 0103 et 0121 à 0124.
+0025, 0029, 0042, 0045, 0103, 0121 à 0124 et 0176.
 
 Trois règles tiennent toute la console :
 
@@ -12,12 +12,31 @@ Trois règles tiennent toute la console :
    découpée par le rendu (25 lignes, `?pg<n>=`) ; une pagination à curseur
    (le journal) sait revenir aux plus récents et au début.
 2. **Une page de configuration ne montre qu'un sujet.** Chaque section de
-   réglages est découpée en sous-pages ; chaque champ dit ce qu'il fait, sous lui
-   (jamais seulement au survol).
+   réglages est découpée en sous-pages ; chaque champ dit ce qu'il fait, sous son nom
+   (jamais seulement au survol — sauf dans la table de mixage du tempérament, où l'aide
+   du curseur touché se lit à côté).
 3. **Un champ ne se montre que s'il sert.** Un choix limité est un sélecteur
    (modèle, budgets, rôle) ; un champ qui ne vaut que pour un type de fournisseur
    n'apparaît qu'avec lui ; ce que le SDK ou la CLI sait déjà (URL, hôte,
    commande) est rangé dans « Options avancées ».
+
+## Le cadre
+
+Toute page a la même barre du haut (`inspector/templates/base.html`, ADR 0176) : les rubriques du menu, chacune un menu
+déroulant (sa question en tête, puis ses pages, chacune avec une ligne d'explication, `MenuLink.hint`) ; « Aller à… »
+(Ctrl K ou `/`), qui propose à la frappe les pages de la console, puis « Chercher partout » (la recherche globale ; sans
+script, le formulaire y mène) ; son état en pastille — son humeur et son énergie, le nombre d'alertes —, qui se déplie
+sur tous ses vitaux, relus toutes les 10 s (`/_vitals`) ; le menu du compte (le thème, la déconnexion). Un seul menu
+s'ouvre à la fois ; un clic ailleurs ou Échap le ferme. Sur un écran étroit, les rubriques passent dans un panneau, ouvert
+par le bouton Menu (sans script : une case à cocher). Sous la barre, chaque page a sa barre de titre : le chemin, le
+titre, ses faits, et ses actions à droite (les dangereuses sous « Autres actions »), la roue qui ouvre ses réglages
+(`gear`, ADR 0173) au bout. Une action est à côté de ce qu'elle touche : celles de la page dans la barre de titre —
+Courrier (Nouveau message, Actualiser), Venus d'ailleurs (Brancher un service, Leurs réglages), Comptes (Ajouter un
+utilisateur, un opérateur) ; un onglet dessiné les y remonte (`Drawn.render` rend un triplet ; `blocks.lift` et
+`blocks.head` dans `app/handmade/blocks.py`), un panneau les y nomme (`page_links`) —, celles d'un objet sur sa ligne,
+sa carte ou sa fiche, Enregistrer dans la barre d'enregistrement. Le contenu prend toute la largeur de l'écran, comme la barre du haut ; seuls les paragraphes gardent une mesure de lecture. Le style : fond blanc et filets, Inter servie par la console (`static/fonts`, `font-src 'self'`),
+trois arrondis, une ombre seulement pour ce qui flotte (menus, panneaux, la barre d'enregistrement quand une valeur a
+changé).
 
 ## Le menu
 
@@ -30,18 +49,20 @@ Trois règles tiennent toute la console :
 | **Activité** | Projets · Buts et rappels · Table de l'arbitre · Que ferait-elle ? · En cours · Initiatives · Ses choix · Épisodes · Échéances | « Que fait-elle, pourquoi parle-t-elle ou se tait-elle ? » |
 | **Outils** | Ce qu'elle peut faire · Venus d'ailleurs · Prêter à un agent · Apps forgées | « Que peut-elle faire, et pour qui ? » |
 | **Connexions extérieures** | Flux RSS · Caméra · Dessins · Appareils · Localisation · Messages du téléphone · Réveils par API · Dépôts Git | « Que perçoit-elle du dehors, qui la fait agir ? » |
-| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnalité · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Canaux · Historique des réglages | « Que décide l'opératrice ? » |
+| **Réglages** | Tous les réglages · Modèles de texte · Modèles d'image · Personnage · Configuration des plugins · Transcription · Paramètres avancés · Comptes opérateurs · Droits · Canaux · Historique des réglages | « Que décide l'opératrice ? » |
 | **Système** | Santé générale · Processus · Anomalies · File de sortie · Moteur des modèles · Écrans du monde · Appels et coûts · Stockage et sauvegardes · Journal d'événements · Actions des opérateurs · Diagnostic avancé · Contributions · Toutes les vues · Simulations | « La machine tient-elle ? » |
 
-Le menu regroupe les destinations de `app/console.py` sans changer leurs adresses : liens, fiches, vues des
+Dans la barre, « Relations & échanges » s'appelle « Échanges » et « Connexions extérieures » « Connexions »
+(`MenuGroup.short`). Le menu regroupe les destinations de `app/console.py` sans changer leurs adresses : liens, fiches, vues des
 facultés et formulaires gardent les leurs (`InspectorDeps.menu` transmet la présentation à l'inspecteur). Dans une
 rubrique, une destination a soit un seul lien (la page entière), soit un lien par onglet, dans leur ordre et sous
 leur nom (`tests/protocol/test_console_navigation.py`) ; À valider et Réglages font exception : des raccourcis
 nommés par la tâche. Sa rubrique porte son nom, lu dans sa persona au rendu (`MenuGroup.her`, ADR 0070). La page
 la plus précise allume le bon lien : une fiche ouverte depuis une liste allume l'entrée de cette liste (un
 brouillon : « À valider › Brouillons de courrier »). Les compteurs restent sur les sous-pages ; une rubrique
-affiche un point d'attention, sans additionner des listes qui peuvent contenir la même demande. La recherche
-globale trouve aussi les pages de la console, sans tenir compte des accents.
+affiche un point d'attention, sans additionner des listes qui peuvent contenir la même demande ; la rubrique de la page
+courante est soulignée dans la barre. La recherche globale trouve aussi les pages de la console, sans tenir compte des
+accents.
 
 Toute la console est dessinée (ADR 0121) : les onglets des destinations sur les données de leur faculté (des
 chiffres en tuiles, des faits en grille, des listes en cartes ou en lignes serrées, des tableaux sobres pour
@@ -54,7 +75,7 @@ le but et son plan, ce qu'un réveil fait faire et sa clé, le fil en bulles, ce
 formulaires que la console a préparés à leur place, leurs autres onglets bloc par bloc. Les pages de détail ont
 chacune leur gabarit (`inspector/templates/handmade/`, inclus comme un panneau, leurs blocs au repli ou quand une
 liste est demandée en tableau) : un épisode et ses sept onglets (`episode/`), un événement (`evenement/`), « pourquoi
-a-t-elle dit ça ? » et « pourquoi n'a-t-elle pas répondu ? » (`parole/`), la recherche (`recherche/`).
+a-t-elle dit ça ? » et « pourquoi n'a-t-elle pas répondu ? » (`parole/`), la recherche (`recherche/` : « Tout », une carte par sorte avec ses premiers liens, puis une section par sorte, en sous-onglets).
 
 ## Page par page
 
@@ -79,7 +100,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   besoins, ses pensées, les gens, le fil de sa journée, ce qu'elle entreprend et la journée en chiffres. Elle se
   relit toutes les 20 s ; une lecture qui échoue tait sa carte.
 - **Humeur, Postures, Besoins, Sommeil et rythme, Monde et corps, Estime et récit, Qui elle devient** : un onglet
-  par question ; l'état présent d'abord, son historique ensuite.
+  par question ; l'état présent d'abord, son historique ensuite. Estime et récit : sa courbe et ses derniers coups
+  côte à côte, son récit à côté de ses faits, la persona, son tempérament replié (il se règle dans Réglages).
 - **Pensées, Ce qu'elle remarque, Attentes, Journal et rêves** : les pensées vivantes et les attentes au premier
   plan, les historiques et les règles repliés ; le journal et les récits de ses nuits se lisent comme des
   documents.
@@ -94,7 +116,9 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 - **Personnes** (`/inspecteur/personnes`, `app/handmade/people.py`) : une carte par personne — ce qu'elle est pour
   elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là, qui lui manque, une
-  recherche et des filtres (proximité, en ligne). L'annuaire, les liens et les présents restent sous « Le détail ».
+  recherche et des filtres (proximité, en ligne). Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
+  (cette page), Annuaire, Liens, Présents — la destination déclare ce premier onglet dessiné à part
+  (`Destination.lead`), ses autres onglets y ramènent.
 - **La fiche d'une personne** s'ouvre sur sa **vue d'ensemble** (`app/handmade/person/`) : ce qu'elle ressent
   envers elle, leur histoire, ce qu'elle sait d'elle, ce qui reste en suspens, leurs derniers mots. Les onglets des
   facultés suivent, dessinés sur leurs données (Échanges en conversation, Mémoire en cartes, les listes en
@@ -126,7 +150,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   message long se lit en parties de 50 000 caractères au plus. Ses pièces jointes se téléchargent depuis le cache,
   sans le serveur ; un mail relevé avant qu'elles soient gardées le dit, et « Récupérer ses pièces » le relit. Les brouillons
   qu'elle propose sont distingués de ceux du serveur. **Paramètres**, le bouton en haut à droite (pas un onglet,
-  ADR 0173) : ses boîtes en cartes (où chacune en est, comment elle lit et envoie, sa voix, son dernier relevé), une
+  ADR 0173), une section à la fois (une colonne de sous-onglets à gauche, des ancres ; ce qui est masqué part quand même
+  avec le formulaire, et la section ouverte se retrouve après l'enregistrement, ADR 0176) : ses boîtes en cartes (où chacune en est, comment elle lit et envoie, sa voix, son dernier relevé), une
   boîte sur sa page (la boîte, la connexion, lire, envoyer, sa voix, chacun à côté de ce qu'il règle ; ce qui ne sert
   pas au choix fait ne paraît pas, et une adresse courante propose ses serveurs, ADR 0174), puis les paramètres
   généraux du courrier (relevé, ce qu'elle en dit, ses brouillons, la lecture). L'ancienne adresse, Réglages › Plugins › Boîtes
@@ -157,8 +182,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - **Exécutions** : toutes, filtrables par projet et par verdict ; chacune mène à son épisode (prompt, outils,
   appels, décision) et à son commit.
 - **Décisions techniques** : toutes, filtrables par projet et par statut.
-- **La fiche** gouverne, onglet par onglet : *Vue d'ensemble* (ce qui attend ta décision, trois cartes, le cadre,
-  les objectifs, les dernières exécutions, les décisions en vigueur) · *Objectifs* (chaque ligne se lance, se
+- **La fiche** gouverne, onglet par onglet : *Vue d'ensemble* (ce qui attend ta décision, le plan, une bande de chiffres « Où il en est », puis des tuiles : ses objectifs et ses dernières exécutions côte à côte, la prochaine exécution, le cadre et son dépôt — la raison d'une pause n'est dite qu'une fois, dans son bandeau —,
+  les décisions en vigueur) · *Objectifs* (chaque ligne se lance, se
   coche, se modifie, se retire ; un constant ne se coche pas) · *Exécutions* (issue, verdict, preuve, commit,
   durée) · *Décisions* (contexte, options, raison ; remplacer, retirer) · *Fichiers* (dossiers à parcourir, lire,
   télécharger, déposer) · *Dépôt git* (historique paginé, un commit en diff coloré, ce qui n'est pas enregistré, le
@@ -224,14 +249,16 @@ techniques sont dans « Détails techniques ».
 ### Outils (ADR 0064, 0122, 0123, 0128, 0129, 0130, 0131, 0133)
 
 - **Ce qu'elle peut faire** (`outils/tous`, `?q=`, `?lot=`, `inspector/pages/families.py`, ADR 0134) : ses outils
-  internes, famille par famille (un lot) : chaque outil avec sa description (lit ou agit, le lien de sa fiche), et
-  « Régler les droits » qui ouvre le tableau de la famille (`handmade/droits/tableau.html`) — qui,
+  internes, une famille (un lot) par sous-onglet, son nombre d'outils dans la colonne (ADR 0176) ; filtrée (`?q=`,
+  `?lot=`), les familles qui répondent l'une sous l'autre. Chaque outil avec sa description (lit ou agit, le lien de sa
+  fiche), puis le tableau de la famille (`handmade/droits/tableau.html`), ouvert dans son sous-onglet (filtrée :
+  « Régler les droits » l'ouvre) — qui,
   par où, quand, un outil qui lit, un outil qui agit, ce qu'elle en garde, ses outils —, né du minimum vital que le
   code déclare (`owner_only` : à toi et elle seule ; sinon à tout le monde et elle seule), modifiable ; « Revenir au
   minimum vital » ; un avertissement quand un tableau descend en dessous. Une case grisée (🔒) dit ce que l'outil ne
   sait pas faire (attendre un accord) ou ce qui n'a pas de sens pour lui (garder ce qui est déjà à elle). `?famille=`
-  ouvre un tableau ; chaque bouton envoie tout le tableau (`/outils/familles/regler`). Dessous, replié, le texte exact
-  que son prompt porte sur ses outils, situation par situation. `?outil=<nom>` ouvre sa fiche : où elle peut s'en
+  ouvre un tableau ; chaque bouton envoie tout le tableau (`/outils/familles/regler`). Dans un dernier sous-onglet
+  (filtrée : dessous, replié), le texte exact que son prompt porte sur ses outils, situation par situation. `?outil=<nom>` ouvre sa fiche : où elle peut s'en
   servir, par ses droits (le tableau de sa famille, ou de son service ou de son app), ses arguments, ses derniers
   appels. Ce qui vient d'ailleurs (un service, une app) a ses tableaux sur sa propre fiche.
 - **Venus d'ailleurs** (`outils/serveurs`, l'onglet du plugin MCP) : les services branchés (état, outils servis /
@@ -291,7 +318,9 @@ techniques sont dans « Détails techniques ».
 
 ### Réglages
 
-Aucune page n'a de sélecteur de pages en tête : le menu de gauche, les onglets et **Tous les réglages** y mènent.
+Aucune page n'a de sélecteur de pages en tête : le menu Réglages de la barre du haut, les onglets et **Tous les
+réglages** y mènent. Un formulaire de réglages range un champ par ligne : son nom et son aide à gauche, sa valeur à
+droite, deux par rangée quand la place le permet (un texte long, une liste à cocher, un curseur gardent la largeur).
 Tous les réglages est l'annuaire, construit à partir des pages déclarées sans charger leurs valeurs : catégories,
 descriptions courtes, recherche par plusieurs mots sans tenir compte des accents ; les paramètres internes y sont
 repliés à part, ouverts quand une recherche les trouve. Une liste d'entrées (des fournisseurs, des boîtes…) se lit
@@ -307,10 +336,10 @@ rôle par rôle (`CallLog.profile`).
 | Intelligence | Fournisseurs (menu : Modèles de texte) | chaque fournisseur a sa page : type, modèle (**sélecteur** chargé chez le fournisseur, même pour un fournisseur pas encore enregistré), connexion, clé ; options avancées repliées (URL, hôte, commande, créneaux, température…) ; ses budgets (contexte, sortie, caractères par jeton) ; un échec est journalisé, sans basculement |
 | | Qui sert quoi | un sélecteur par rôle, rangés par famille (voix, mémoire, compréhension, sens, travail), et ce qui sert **vraiment** chaque rôle après replis — sauf `polish` (rendre naturel), qui n'en a pas |
 | | Fournisseurs d'images, Qui dessine quoi (menu : Modèles d'image) | les fournisseurs d'images et leurs rôles (`draw`, `edit`, `own`), ADR 0061 |
-| Personnage (menu : Personnalité) | Identité | nom, nature, description (une phrase), langue, fuseau |
+| Personnage | Identité | nom, nature, description (une phrase), langue, fuseau |
 | | Portrait | son portrait en prose — le seul texte qui la décrit, lu partout (ADR 0138) —, ce qui est vrai d'elle, ses centres d'intérêt |
 | | Sa parole | ses exemples de voix en chat, ses salutations (seuls leurs premiers mots lui sont montrés), son fil de référence pour l'autrice |
-| | Tempérament | en tête, **son caractère, écrit** par le modèle d'après ses curseurs (ADR 0139) : le texte, le modèle, quand — ou « en cours d'écriture » ; après « Enregistrer », une modale suit l'écriture (`/inspecteur/reglages/temperament/etat`, JSON) et montre le texte quand il est là. Puis **la forme de son caractère** : une figure de tous ses curseurs (les 28 du caractère et son chronotype), rangés par famille ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots. Puis **partir d'un profil** : changer le sélecteur dessine la différence sur la figure sans rien remplir (`static/handmade/temperament.js`) ; « Pré-remplir » (`?profil=<clé>`) ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette. Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ce que pilote chaque curseur ; **Voir l'effet** (`app/handmade/temperament.py`, `SettingsSection.prefill`) |
+| | Tempérament | une **table de mixage** (ADR 0176, `SettingsSection.aside`) : à gauche, tous ses curseurs d'un coup, famille par famille en colonnes, le milieu (0,5) marqué, ceux qui s'en écartent nettement en couleur ; l'aide du curseur qu'on survole, atteint au clavier ou déplace se lit à droite (« Ce qu'il règle »). À droite aussi, **son caractère, écrit** par le modèle d'après ses curseurs (ADR 0139) : le texte, le modèle, quand — ou « en cours d'écriture » ; après « Enregistrer », une modale suit l'écriture (`/inspecteur/reglages/temperament/etat`, JSON) et montre le texte quand il est là. Puis **la forme de son caractère** : une figure de tous ses curseurs (les 28 du caractère et son chronotype), rangés par famille ; la forme proposée pleine, celle d'aujourd'hui en pointillé, la valeur de chaque sommet dans une bulle au survol, au clavier ou au toucher ; ses traits les plus marqués en mots. Puis **partir d'un profil** : changer le sélecteur dessine la différence sur la figure sans rien remplir (`static/handmade/temperament.js`) ; « Pré-remplir » (`?profil=<clé>`) ouvre le formulaire sur ses valeurs, rien n'est enregistré avant « Enregistrer » ; ses 18 profils repliés, chacun avec sa silhouette. Puis ses curseurs, l'humeur de fond, sa réaction, sa défense, ses précisions (celles qui sont écrites ; les autres repliées sous « Écrire d'autres précisions »), ce que pilote chaque curseur (replié) ; **Voir l'effet** (`app/handmade/temperament.py`, `SettingsSection.prefill`) |
 | | Autrices | en tête, **où elles écrivent** : flux par flux (le chat, chaque boîte mail, Teams, le téléphone), l'autrice qui y écrit, ce qu'elle récrit et ce qui l'en empêcherait (aucun modèle au rôle « rendre naturel », Teams désactivé). Puis **ses autrices** en cartes, sous leur nom (où elles écrivent, leurs codes en bref ; ajouter, modifier, retirer), et **Qui écrit où**, une ligne par flux (`app/authors.py`, `app/handmade/authors.py`, ADR 0124). Les codes portent toute la forme du flux — longueur, registre, émojis, mise en forme (ADR 0140) : lus par l'autrice, ou par le premier jet quand aucune seconde passe ne suit |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Dépôts git | le jeton de ses dépôts distants (aussi : Connexions extérieures › Dépôts Git) |
@@ -323,11 +352,11 @@ rôle par rôle (`CallLog.profile`).
 | | Transcription | service, modèle, clé |
 | | Appareils | jeton des appareils |
 | | Réveils par API | chaque réveil a sa page : **à quoi il sert** (obligatoire), actif, consignes (elles priment sur le texte d'un appel, cité), projet, impersonnel, outils (lots), ignorer son rythme, à qui rendre compte, bornes. Nom fixe (la fin de son URL). Sa clé se génère sur sa fiche (Connexions extérieures › Réveils par API), montrée une fois. ADR 0068 |
-| Paramètres avancés | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
-| | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
-| Comptes opérateurs | Comptes | liste paginée ; deux boutons, « Ajouter un utilisateur » (le chat, sans la console) et « Ajouter un opérateur » (la console aussi), chaque compte une personne dès l'ajout, sa fiche liée depuis la page du compte ; modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, et « révoquer » — audité (ADR 0062) |
-| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/rights.py`) : ce qu'elle a, ressource par ressource — *Vie interne* (ses familles d'outils), *Apps de la Forge*, *Services MCP*, *Projets*, *Canaux* —, chaque ressource avec sa description et ses outils décrits (lit ou agit, le lien de sa fiche), et « détail des accès » (`?detail=<ressource>`) : son tableau de règles lu tel qu'il est écrit, ses planchers, « Modifier » vers la page qui le règle, « ← Retour ». Les droits exacts, outil par outil, seulement quand on a choisi qui (`?qui=` : toi quand elle te répond ou te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, elle seule) et par quel canal (`?canal=` : le chat web en privé ou en salon, l'app Android, Internet, elle seule) : une colonne « Droits exacts » dit ce qu'elle en fait et les lignes qui en décident (la ressource ; le canal ou le plafond s'ils ont serré), et ce que le canal laisse au plus. Replié, ce que le code fixe. Une lecture : rien ne s'y règle |
-| Droits | Canaux | dessiné (`reglages/canaux`, `inspector/pages/canals.py`, ADR 0134) : par où ça lui arrive — chaque type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule), puis ses instances (le chat web en privé ou en salon, chaque boîte, un réseau), chacun avec son tableau (`handmade/droits/tableau.html`) : ce qu'il laisse passer au plus (répondre, outils qui lisent et qui agissent, projets, fichiers, garde) ; sur tes comptes, préparer d'elle-même et comment ça part (l'ADR 0132 s'y fond : qui écrit, c'est tout le monde ou une adresse). Un canal qu'on n'a pas réglé montre son minimum vital ; « Revenir au minimum vital ». `?canal=` ouvre un tableau ; chaque bouton envoie tout le tableau (`/reglages/canaux/regler`) et rejournalise le courrier et Teams |
+| Paramètres avancés | Vue d'ensemble | provenance des paramètres, les facultés en colonnes, ce que pilote chaque curseur (replié) |
+| | une page par faculté | ses chiffres en bande, ses groupes en colonne à gauche, ses paramètres **rangés par groupe** (un groupe = une page, une ligne par paramètre : son nom et son aide, d'où il vient et ses bornes, sa valeur), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
+| Comptes opérateurs | Comptes | liste paginée ; deux boutons dans la barre de titre, « Ajouter un utilisateur » (le chat, sans la console) et « Ajouter un opérateur » (la console aussi), chaque compte une personne dès l'ajout, sa fiche liée depuis la page du compte ; modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret), douze par page, et « révoquer » — audité (ADR 0062) |
+| Droits | Droits | dessiné (`reglages/droits`, ADR 0133, 0134, `app/handmade/rights.py`) : ce qu'elle a, ressource par ressource, une sorte par sous-onglet (ADR 0176) — *Vie interne* (ses familles d'outils), *Apps de la Forge*, *Services MCP*, *Projets*, *Canaux*, *Ce que le code fixe* —, chaque ressource sur sa ligne, avec sa description et ses outils en étiquettes, ses outils décrits en la dépliant (lit ou agit, le lien de sa fiche), et « détail des accès » (`?detail=<ressource>`) : son tableau de règles lu tel qu'il est écrit, ses planchers, « Modifier » vers la page qui le règle, « ← Retour » vers sa ligne. Qui et par quel canal se choisissent sur une ligne, en tête. Les droits exacts, outil par outil, seulement quand on a choisi qui (`?qui=` : toi quand elle te répond ou te parle d'elle-même, chaque personne qui a un compte, un autre compte, une inconnue, elle seule) et par quel canal (`?canal=` : le chat web en privé ou en salon, l'app Android, Internet, elle seule) : les étiquettes disent quels outils sont ouverts, une colonne « Droits exacts » dit ce qu'elle en fait et les lignes qui en décident (la ressource ; le canal ou le plafond s'ils ont serré), et ce que le canal laisse au plus. Une lecture : rien ne s'y règle |
+| Droits | Canaux | dessiné (`reglages/canaux`, `inspector/pages/canals.py`, ADR 0134) : par où ça lui arrive — un sous-onglet par type (le chat web, l'app Android, Teams, le courrier, Internet, elle seule, ADR 0176), et dedans ses instances, repliées (le chat web en privé ou en salon, chaque boîte, un réseau), chacun avec son tableau (`handmade/droits/tableau.html`) : ce qu'il laisse passer au plus (répondre, outils qui lisent et qui agissent, projets, fichiers, garde) ; sur tes comptes, préparer d'elle-même et comment ça part (l'ADR 0132 s'y fond : qui écrit, c'est tout le monde ou une adresse). Un canal qu'on n'a pas réglé montre son minimum vital ; « Revenir au minimum vital ». `?canal=` ouvre un tableau et son sous-onglet ; chaque bouton envoie tout le tableau (`/reglages/canaux/regler`) et rejournalise le courrier et Teams |
 | Historique des réglages | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 
 ### Système
@@ -342,15 +371,15 @@ rôle par rôle (`CallLog.profile`).
 | | Écrans du monde | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
 | | Appels et coûts | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |
 | | Stockage et sauvegardes | taille des bases, dernier instantané ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification, les archives gardées |
-| Journaux | Journal d'événements | le journal, filtrable, paginé dans les deux sens |
+| Journaux | Journal d'événements | le journal, filtrable, quarante par page, paginé dans les deux sens |
 | | Actions des opérateurs | ce que les opérateurs ont fait |
 | Anatomie | Diagnostic avancé · Contributions · Toutes les vues | le mécanisme |
 | Outils | Simulations | les rapports |
 
 ## Les formes
 
-- **Cadres** (`Stats`) : un nombre, un état ; toujours en tête de page, jamais
-  plus de six.
+- **Cadres** (`Stats`) : un nombre, un état, en une bande de cases jointes ;
+  toujours en tête de page, jamais plus de six.
 - **Tables** : une ligne entière mène à sa fiche ; le détail se déplie sous la
   ligne par un chevron ; le compte total s'affiche au-dessus ; 25 lignes par
   page par défaut. Une collection en fiches ou en fil passe en tableau sobre par
@@ -361,15 +390,26 @@ rôle par rôle (`CallLog.profile`).
 - **Fiches** (`Fields`) : libellé à gauche, valeur à droite, deux colonnes au
   plus en largeur. Une fiche de collection ou de réglage mène à sa page sur toute
   sa surface.
+- **Listes** : une liste sans long texte (des lignes serrées) passe en colonnes sur un
+  écran large ; une entrée dont on ouvre le détail prend toute la largeur. Une suite de
+  replis (Contributions) se range sur trois colonnes.
+- **Sous-onglets** : une page à plusieurs sujets les met dans une colonne à gauche, un
+  seul ouvert à droite (`.hm-subtabs`, `data-subtabs`, `data-pane`, `handmade/base.css`
+  et `console.js`) ; l'adresse garde la section ouverte (son ancre), Précédent y revient,
+  un enregistrement la retrouve ; sans script, les sections se suivent.
 - **Formulaires** : un groupe = un cadre titré avec sa phrase d'explication ;
-  l'aide de chaque champ sous lui ; les options rarement utiles repliées sous
+  l'aide de chaque champ sous son nom, sa valeur à droite (un texte long, une liste
+  à cocher ou un curseur sur toute la largeur) — les réglages comme le formulaire
+  d'une action qui a sa page (créer un projet : ses groupes deux par deux sur un
+  écran large) ; les options rarement utiles repliées sous
   « Options avancées » ; un champ qui ne sert pas au choix fait ne paraît pas, et
   paraît dès qu'il sert (à la frappe comme au choix) ; une liste qui ne peut
-  rester vide n'offre pas de « — » ; une seule barre « Enregistrer » par page. Une saisie non
-  enregistrée se signale et la sortie est protégée ; les erreurs ont un résumé
-  navigable au clavier.
-- **Actions d'en-tête** : une barre de boutons ; le formulaire s'ouvre en
-  panneau sous l'en-tête, un seul à la fois.
+  rester vide n'offre pas de « — » ; une seule barre « Enregistrer » par page, collée en bas,
+  qui passe au premier plan dès qu'une valeur change. Une saisie non enregistrée se
+  signale et la sortie est protégée ; les erreurs ont un résumé navigable au clavier.
+- **Actions d'en-tête** : une barre de boutons, à droite de la barre de titre (celles
+  de la page, voir « Le cadre ») ; le formulaire s'ouvre en panneau sous l'en-tête, un
+  seul à la fois.
 
 ## Composants communs et langage de la Forge
 
@@ -429,7 +469,9 @@ principal, identifiants uniques, aucun lien ni formulaire imbriqué, en-têtes a
 `test_console_navigation.py` et `test_inspector_pages.py` (sous `tests/protocol/`), `tests/unit/test_forge_console.py`,
 `tests/unit/test_console_pagination.py` et `tests/contract/test_mail_feeds.py`.
 
-`tests/browser/console.cjs` les complète avec un vrai navigateur : menu au clavier, mode sans JavaScript,
+`tests/browser/console.cjs` les complète avec un vrai navigateur (les fichiers de `static/` servis depuis les sources :
+feuilles des pages dessinées, scripts, polices) : la barre du haut (menus des rubriques, panneau mobile au clavier,
+« Aller à… »), mode sans JavaScript,
 recherche des rubriques, champs conditionnels, filtres, état des formulaires, panneaux imbriqués, expiration de
 session, contrastes et largeur de chaque page exportée à 390 et 1440 px. Depuis `backendv2`, avec Playwright
 disponible pour Node (ou son dossier dans `NODE_PATH`) et Chrome installé :

@@ -25,16 +25,31 @@ async function open(t, { file = 'accueil.html', width = 1440, html, vitalsStatus
   if (clock) await page.clock.install();
   await page.route('http://console.test/**', async route => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/console.css')) return route.fulfill({ path: path.join(assets, 'console.css'), contentType: 'text/css' });
-    if (url.pathname.endsWith('/console.js')) return route.fulfill({ path: path.join(assets, 'console.js'), contentType: 'application/javascript' });
+    // les fichiers de la console (feuilles des pages dessinées, scripts, polices), depuis les sources
+    // (l'export les appelle « ../static/… », le cadre « /inspecteur/static/… »)
+    const at = url.pathname.indexOf('/static/');
+    if (at !== -1) {
+      const rel = url.pathname.slice(at + '/static/'.length);
+      const type = { css: 'text/css', js: 'application/javascript', woff2: 'font/woff2' }[rel.split('.').pop()] || 'application/octet-stream';
+      return route.fulfill({ path: path.join(assets, rel), contentType: type });
+    }
     if (url.pathname.endsWith('/_vitals')) return route.fulfill({ status: vitalsStatus, body: '<span>État actualisé</span>', contentType: 'text/html' });
     if (url.pathname.startsWith('/cadres/')) return route.fulfill({ path: path.join(preview, 'cadres', path.basename(url.pathname)), contentType: 'text/html' });
     const appPath = url.pathname.startsWith('/inspecteur/');
     if (!url.pathname.startsWith('/preview/') && !appPath) return route.fulfill({ status: 404, body: 'Route hors aperçu' });
     let filename = appPath ? (url.pathname.slice('/inspecteur/'.length) || 'accueil').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) + '.html' : path.basename(url.pathname);
     if (!html && url.search) {
-      const candidate = (filename.replace(/\.html$/, '') + '_' + url.search.slice(1).replace(/[^A-Za-z0-9._-]+/g, '_')).slice(0, 120) + '.html';
-      try { await fs.access(path.join(preview, 'clair', candidate)); filename = candidate; } catch { /* export sans ce filtre */ }
+      // l'export nomme une page « chemin_requête », ses paramètres dans l'ordre où il l'a demandée, qui n'est pas
+      // toujours celui du lien ; un lien relatif « ?… » remplace la requête : depuis une page déjà filtrée, on retire
+      // des segments de la fin jusqu'à retrouver son chemin
+      const orders = xs => xs.length < 2 ? [xs] : xs.flatMap((x, i) => orders(xs.filter((_, j) => j !== i)).map(rest => [x, ...rest]));
+      const params = url.search.slice(1).split('&');
+      const queries = (params.length > 4 ? [params] : orders(params)).map(xs => xs.join('&').replace(/[^A-Za-z0-9._-]+/g, '_'));
+      const parts = filename.replace(/\.html$/, '').split('_');
+      found: for (let n = parts.length; n > 0; n--) for (const query of queries) {
+        const candidate = (parts.slice(0, n).join('_') + '_' + query).slice(0, 120) + '.html';
+        try { await fs.access(path.join(preview, 'clair', candidate)); filename = candidate; break found; } catch { /* export sans ce filtre */ }
+      }
     }
     const body = html || await fs.readFile(path.join(preview, 'clair', filename), 'utf8');
     return route.fulfill({ body: body.replace('</head>', '<script src="/inspecteur/static/console.js"></script></head>'), contentType: 'text/html' });
@@ -64,17 +79,25 @@ test('formulaire : erreurs annoncées, lien au champ avancé et saisie préserv�
 
 test('mémoire : filtres, tableau, contenu complet et source au clavier', async t => {
   const page = await open(t, { file: 'memoire_souvenirs_person_Adrien.html', width: 390, javaScriptEnabled: false });
-  const items = page.locator('.collection.list .collection-item');
+  // la liste dessinée (ADR 0121) : une entrée par souvenir, sa sensibilité en étiquette
+  const items = page.locator('.person-list .person-entries > li');
   const count = await items.count();
   assert.ok(count >= 2);
-  assert.match(await items.allTextContents().then(xs => xs.join(' ')), /secret/);
-  await page.getByRole('link', { name: 'Tableau', exact: true }).click();
+  assert.match(await items.locator('.person-entry-tags').allTextContents().then(xs => xs.join(' ')), /secret/);
+  const modes = page.getByRole('navigation', { name: 'Affichage : Ses souvenirs', exact: true });
+  await modes.getByRole('link', { name: 'Tableau', exact: true }).click();
+  // le tableau garde le filtre et les mêmes souvenirs
   assert.equal(await page.locator('main [name=person]').inputValue(), 'Adrien');
-  await page.getByRole('link', { name: 'Liste', exact: true }).click();
+  assert.equal(await page.locator('#pg1 table.hm-table tbody > tr:not(.hm-table-detail)').count(), count);
+  await modes.getByRole('link', { name: 'Liste', exact: true }).click();
   assert.equal(await items.count(), count);
-  await items.first().locator('summary').first().focus();
+  const detail = items.first().locator('details.person-entry-detail');
+  await detail.locator(':scope > summary').focus();
   await page.keyboard.press('Enter');
-  assert.equal(await items.first().locator('details').first().evaluate(el => el.open), true);
+  assert.equal(await detail.evaluate(el => el.open), true);
+  // le contenu complet, en entier dans le détail
+  assert.equal(await detail.getByRole('article', { name: 'En entier', exact: true }).locator('.document-text').textContent(),
+    await items.first().locator('.person-entry-text').textContent());
   await items.first().getByRole('link', { name: 'Voir l’origine →', exact: true }).click();
   assert.equal(await page.locator('h1').count(), 1);
   assert.match(await page.locator('main').textContent(), /souvenir/i);
@@ -82,22 +105,30 @@ test('mémoire : filtres, tableau, contenu complet et source au clavier', async 
 
 test('pensées : historique replié, lisible au clavier, sans confondre les pensées dissipées', async t => {
   const page = await open(t, { file: 'pensees_pensees.html' });
-  const live = page.locator('.collection.cards');
+  const live = page.getByRole('region', { name: 'Ce qui lui trotte dans la tête', exact: true });
+  assert.ok(await live.locator('.person-entries > li').count() >= 1);
   assert.equal(await live.getByText('Cette idée de titre me préoccupait', { exact: false }).count(), 0);
-  const history = page.locator('details.card').filter({ has: page.locator('summary > b', { hasText: /^Historique des pensées$/ }) });
+  const history = page.locator('details.person-fold').filter({ has: page.locator(':scope > summary', { hasText: /^Historique des pensées$/ }) });
   assert.equal(await history.evaluate(el => el.open), false);
   await history.locator(':scope > summary').focus();
   await page.keyboard.press('Enter');
-  assert.equal(await history.getByText('Cette idée de titre me préoccupait', { exact: false }).isVisible(), true);
+  const faded = history.locator('.person-entries > li').filter({ hasText: 'Cette idée de titre me préoccupait' });
+  assert.equal(await faded.isVisible(), true);
+  // la pensée dissipée se dit éteinte, pas vivante
+  assert.equal(await faded.locator('.person-entry-tags').textContent(), 'éteinte');
 });
 
 test('relecture mémoire : détail lisible, clé liée au passage et confirmation annulable', async t => {
   const page = await open(t, { file: 'memoire_consolidation.html', width: 390 });
-  const item = page.locator('.collection.cards .collection-item').first();
-  await item.locator('.collection-details > summary').click();
-  assert.equal(await item.locator('.document-text').isVisible(), true);
+  const item = page.getByRole('region', { name: 'Passages à reprendre', exact: true }).locator('.person-entries > li').first();
+  await item.locator('details.person-entry-detail > summary').click();
+  assert.equal(await item.getByRole('article', { name: 'Détail du passage', exact: true }).locator('.document-text').isVisible(), true);
   const form = item.locator('form');
-  assert.equal(await form.locator('input[name=key]').getAttribute('type'), 'hidden');
+  const key = form.locator('input[name=key]');
+  assert.equal(await key.getAttribute('type'), 'hidden');
+  // la clé est celle du passage affiché (« message n° 85 » → 85)
+  const passage = await item.locator('.person-entry-title a').getAttribute('href');
+  assert.equal(passage, `/inspecteur/evenement/${await key.getAttribute('value')}`);
   let posts = 0, confirmed = false;
   page.on('request', req => { if (req.method() === 'POST') posts += 1; });
   page.once('dialog', async dialog => { confirmed = true; await dialog.dismiss(); });
@@ -118,45 +149,65 @@ test('onglets mobiles : l’onglet courant reste dans le cadre au chargement', a
 test('compte mobile : les applications ont leur état et une révocation annulable', async t => {
   const page = await open(t, { file: 'reglages_comptes_compte_1.html', width: 390 });
   const apps = page.getByRole('list', { name: 'Applications connectées', exact: true });
-  assert.equal(await apps.getByRole('heading', { name: 'Écran de démonstration', exact: true }).isVisible(), true);
-  let posts = 0;
+  // chaque application, son nom en titre de l'entrée et son état en étiquette
+  const app = apps.getByRole('listitem').filter({ has: page.locator('.person-entry-title', { hasText: /^Écran de démonstration$/ }) });
+  assert.equal(await app.locator('.person-entry-title').isVisible(), true);
+  let posts = 0, asked = '';
   page.on('request', req => { if (req.method() === 'POST') posts += 1; });
-  page.once('dialog', dialog => dialog.dismiss());
-  await apps.getByRole('button', { name: 'révoquer', exact: true }).click();
+  page.once('dialog', dialog => { asked = dialog.message(); dialog.dismiss(); });
+  await app.getByRole('button', { name: 'révoquer', exact: true }).click();
+  assert.match(asked, /Écran de démonstration/);
   assert.equal(posts, 0);
-  assert.equal(await apps.getByText('actif', { exact: true }).isVisible(), true);
+  assert.equal(await app.locator('.person-entry-tags').getByText('actif', { exact: true }).isVisible(), true);
 });
 
 test('projets : fiches et tableau montrent les mêmes projets, sans JavaScript', async t => {
   const page = await open(t, { file: 'projets.html', javaScriptEnabled: false });
-  const count = await page.locator('.collection.cards .collection-item').count();
+  const cards = page.locator('#pg1 .person-entries > li');
+  const count = await cards.count();
   assert.ok(count >= 2);
-  const names = await page.locator('.collection-heading h4').allTextContents();
-  await page.getByRole('navigation', { name: 'Affichage : Projets', exact: true }).getByRole('link', { name: 'Tableau', exact: true }).click();
-  assert.equal(await page.locator('.collection.cards').count(), 0);
-  for (const name of names) assert.ok((await page.locator('.tbl').first().textContent()).includes(name));
-  await page.getByRole('navigation', { name: 'Affichage : Projets', exact: true }).getByRole('link', { name: 'Fiches', exact: true }).click();
-  assert.equal(await page.locator('.collection.cards .collection-item').count(), count);
+  const names = await cards.locator('.person-entry-title').allTextContents();
+  const modes = page.getByRole('navigation', { name: 'Affichage : Projets', exact: true });
+  await modes.getByRole('link', { name: 'Tableau', exact: true }).click();
+  assert.equal(await modes.getByRole('link', { name: 'Tableau', exact: true }).getAttribute('aria-current'), 'page');
+  assert.equal(await cards.count(), 0);
+  const table = page.getByRole('region', { name: 'Projets', exact: true }).locator('table.hm-table');
+  assert.equal(await table.locator('tbody > tr:not(.hm-table-detail)').count(), count);
+  for (const name of names) assert.ok((await table.textContent()).includes(name), name);
+  await modes.getByRole('link', { name: 'Fiches', exact: true }).click();
+  assert.equal(await cards.count(), count);
 });
 
 test('fil : lecture directe, détails et explication accessibles au clavier', async t => {
   const page = await open(t, { file: 'fil_messages.html' });
-  const first = page.locator('.collection.feed .collection-item:has(.collection-open)').first();
-  const body = (await first.locator('.collection-body').textContent()).replace(/^texte/, '').trim();
+  // le fil dessiné (ADR 0121) : chaque message en bulle, lisible sans rien ouvrir ; ses détails sont
+  // la fiche de l'événement (« n° … ») et l'explication la page « pourquoi ? »
+  const thread = page.getByRole('region', { name: 'Ses messages', exact: true });
+  const first = thread.locator('.person-thread > li.mine').filter({ has: page.getByRole('link', { name: 'pourquoi ?', exact: true }) }).first();
+  const bubble = first.locator('.person-bubble');
+  assert.equal(await bubble.isVisible(), true);
+  const body = (await bubble.textContent()).trim();
   assert.ok(body.length > 10);
-  const details = first.locator('.collection-details > summary');
-  await details.focus();
+  const why = first.getByRole('link', { name: 'pourquoi ?', exact: true });
+  assert.match(await why.getAttribute('href'), /^\/inspecteur\/parole\/\d+$/);
+  await first.locator('.person-number a').focus();
   await page.keyboard.press('Enter');
-  assert.equal(await first.locator('.collection-details').evaluate(el => el.open), true);
-  assert.ok((await first.locator('.document-text').textContent()).includes(body));
-  assert.match(await first.locator('.collection-open').getAttribute('href'), /^\/inspecteur\/parole\/\d+$/);
+  await page.waitForURL(/\/inspecteur\/evenement\/\d+$/);
+  assert.match(await page.locator('h1').textContent(), /^Parole · n° \d+$/);
+  assert.ok((await page.locator('main .person-bubble').first().textContent()).includes(body));
+  await page.goBack();
+  await why.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForURL(/\/inspecteur\/parole\/\d+$/);
+  assert.equal(await page.locator('h1').textContent(), 'Pourquoi a-t-elle dit ça ?');
+  assert.ok((await page.locator('main').textContent()).includes(body));
 });
 
 test('validation : aperçu relisible, blocage visible et Entrée sans décision', async t => {
   const page = await open(t, { file: 'approbations_en_attente.html' });
-  const cards = page.locator('.approval-card');
+  const cards = page.locator('article.hm-approval');
   assert.equal(await cards.count(), 2);
-  assert.match(await cards.first().locator('.document-text').textContent(), /bea@example\.net/);
+  assert.match(await cards.first().getByRole('region', { name: 'Aperçu', exact: true }).locator('.document-text').textContent(), /bea@example\.net/);
   assert.equal(await cards.last().getByRole('button', { name: 'Approuver', exact: true }).isDisabled(), true);
   assert.equal(await cards.last().getByRole('alert').isVisible(), true);
   let posts = 0;
@@ -169,18 +220,20 @@ test('validation : aperçu relisible, blocage visible et Entrée sans décision'
 
 test('menu mobile : clavier, focus contenu, Échap et raccourci de recherche', async t => {
   const page = await open(t, { width: 390 });
-  assert.equal(await page.locator('.sidebar').evaluate(el => el.inert), true);
+  assert.equal(await page.locator('#navigation').evaluate(el => el.inert), true);
   const button = page.getByRole('button', { name: 'Menu', exact: true });
   await button.focus();
   await page.keyboard.press('Enter');
   assert.equal(await button.getAttribute('aria-expanded'), 'true');
-  assert.equal(await page.locator('.main').evaluate(el => el.inert), true);
+  assert.equal(await page.locator('.content').evaluate(el => el.inert), true);
   assert.equal(await page.locator('[data-nav-close]').evaluate(el => el === document.activeElement), true);
-  await page.locator('.sidebar-foot button').last().focus();
+  // le focus reste dans le panneau : du dernier élément au premier, et retour
+  const last = page.locator('#navigation summary').last();
+  await last.focus();
   await page.keyboard.press('Tab');
-  assert.equal(await page.locator('.brand-link').evaluate(el => el === document.activeElement), true);
+  assert.equal(await page.locator('[data-nav-close]').evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Shift+Tab');
-  assert.equal(await page.locator('.sidebar-foot button').last().evaluate(el => el === document.activeElement), true);
+  assert.equal(await last.evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Escape');
   assert.equal(await button.getAttribute('aria-expanded'), 'false');
   assert.equal(await button.evaluate(el => el === document.activeElement), true);
@@ -188,19 +241,41 @@ test('menu mobile : clavier, focus contenu, Échap et raccourci de recherche', a
   assert.equal(await page.locator('#q-global').evaluate(el => el === document.activeElement), true);
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.waitForFunction(() => !document.querySelector('.sidebar').inert);
+  await page.waitForFunction(() => !document.querySelector('#navigation').inert);
 });
 
-test('rubriques mémorisées, page courante ouverte, sans sélecteur de pages', async t => {
+test('rubriques : la page courante marquée dans la barre, un menu ouvert à la fois, Échap le ferme', async t => {
   const page = await open(t, { file: 'systeme_stockage.html' });
-  const group = page.locator('[data-nav-group="Mika"]');
-  await group.locator('summary').click();
-  await page.waitForFunction(() => sessionStorage.getItem('mika.console.nav.Mika') === 'true');
-  await page.reload();
-  assert.equal(await group.evaluate(el => el.open), true);
-  assert.equal(await page.locator('[data-nav-group="Système"]').evaluate(el => el.open), true);
-  // le menu de gauche suffit : plus de « Changer de page dans cette rubrique »
+  const system = page.locator('[data-nav-group="Système"]');
+  assert.equal(await system.evaluate(el => el.classList.contains('active') && !el.open), true);
+  const mika = page.locator('[data-nav-group="Mika"]');
+  await mika.locator('summary').click();
+  assert.equal(await mika.evaluate(el => el.open), true);
+  assert.equal(await mika.getByRole('link', { name: /Besoins/ }).isVisible(), true);
+  await system.locator('summary').click();
+  assert.equal(await mika.evaluate(el => el.open), false);
+  assert.equal(await system.evaluate(el => el.open), true);
+  assert.equal(await system.locator('a[aria-current=page]').count(), 1);
+  await page.keyboard.press('Escape');
+  assert.equal(await system.evaluate(el => el.open), false);
+  // la barre du haut suffit : pas de « Changer de page dans cette rubrique »
   assert.equal(await page.locator('.submenu-shell').count(), 0);
+});
+
+test('aller à : les pages de la console à la frappe, flèches et Entrée, puis la recherche partout', async t => {
+  const page = await open(t);
+  await page.keyboard.press('Control+k');
+  const input = page.locator('#q-global');
+  assert.equal(await input.evaluate(el => el === document.activeElement), true);
+  await input.pressSequentially('besoin');
+  const list = page.getByRole('listbox', { name: 'Aller à', exact: true });
+  assert.equal(await list.isVisible(), true);
+  assert.match(await list.getByRole('option').first().textContent(), /Besoins/);
+  assert.match(await list.getByRole('option').last().textContent(), /Chercher « besoin » partout/);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await list.getByRole('option').nth(1).getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('Escape');
+  assert.equal(await list.isVisible(), false);
 });
 
 test('sans JavaScript : le menu mobile et les rubriques restent consultables', async t => {
@@ -208,7 +283,7 @@ test('sans JavaScript : le menu mobile et les rubriques restent consultables', a
   await page.locator('label.menu-toggle').click();
   assert.equal(await page.locator('#nav-open').isChecked(), true);
   await page.locator('[data-nav-group="Mika"] > summary').click();
-  assert.equal(await page.getByRole('link', { name: 'Émotions et besoins' }).isVisible(), true);
+  assert.equal(await page.getByRole('link', { name: /^Besoins/ }).isVisible(), true);
   await page.locator('.scrim').click({ position: { x: 375, y: 300 } });
   assert.equal(await page.locator('#nav-open').isChecked(), false);
 });
@@ -292,6 +367,8 @@ test('bouton retirer lisible en clair et sombre, au repos et au survol', async t
     return values[0] * .2126 + values[1] * .7152 + values[2] * .0722;
   };
   for (const theme of ['light', 'dark']) {
+    // le thème est dans le menu du compte (ADR 0176)
+    if (!await page.locator('.account-menu').evaluate(el => el.open)) await page.locator('.account-menu > summary').click();
     await page.locator(`[data-theme-set=${theme}]`).click();
     for (const quiet of [true, false]) for (const hover of [false, true]) {
       const button = page.getByRole('button', { name: 'retirer', exact: true }).first();
@@ -338,17 +415,21 @@ test('réglages : catégories accessibles sans JavaScript et recherche des param
 
 test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et lire sa version HTML', async t => {
   const page = await open(t, { file: 'courrier_reception_compte_atelier.html', width: 390 });
-  const navigation = page.locator('.workspace-navigation');
+  // comptes et dossiers : un volet replié sur un écran étroit (data-responsive-menu)
+  const navigation = page.locator('details.hm-workspace-side');
   assert.equal(await navigation.evaluate(el => el.open), false);
-  await navigation.locator('summary').focus();
+  await navigation.locator(':scope > summary').focus();
   await page.keyboard.press('Enter');
-  assert.equal(await navigation.getByRole('link', { name: 'Archives', exact: true }).isVisible(), true);
+  const folders = navigation.getByRole('navigation', { name: 'Dossiers', exact: true });
+  assert.equal(await folders.getByRole('link', { name: 'Archives', exact: true }).isVisible(), true);
   await page.keyboard.press('Enter');  // toujours sur le résumé : Entrée replie la liste
   assert.equal(await navigation.evaluate(el => el.open), false);
-  await page.locator('.collection-open').first().click();
-  const frame = page.locator('iframe.document-frame');
+  // le message s'ouvre dans la liseuse, sous la liste (ADR 0175)
+  await page.getByRole('region', { name: 'Réception', exact: true }).locator('.mail-lines a', { hasText: 'Maquettes du projet' }).click();
+  const reader = page.getByRole('region', { name: /Maquettes du projet/ });
+  assert.equal(await reader.evaluate(el => el.classList.contains('mail-reader')), true);
+  const frame = reader.locator('iframe.document-frame');
   assert.equal(await frame.isVisible(), true);
-  assert.match(await page.locator('h1').textContent(), /Maquettes du projet/);
   // le mail tel qu'il a été écrit, dans son cadre isolé (ADR 0169), à la hauteur de son contenu
   assert.equal(await page.frameLocator('iframe.document-frame').locator('strong').first().textContent(), 'Ton retour jeudi');
   await page.waitForFunction(() => {
@@ -356,73 +437,114 @@ test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et l
     return f.contentDocument && f.style.height === f.contentDocument.documentElement.scrollHeight + 'px';
   });
   assert.equal(await page.getByRole('link', { name: 'maquettes.pdf', exact: true }).isVisible(), true);
-  assert.equal(await page.locator('[data-nav-group="Relations & échanges"]').evaluate(el => el.open), true);
+  // sa rubrique est marquée dans la barre (ADR 0176), le courrier comme page courante
+  const group = page.locator('[data-nav-group="Relations & échanges"]');
+  assert.equal(await group.evaluate(el => el.classList.contains('active')), true);
+  assert.equal(await group.locator('a[aria-current=page]').getAttribute('href'), '/inspecteur/courrier');
 });
 
 test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', async t => {
   const page = await open(t, { file: 'outils_tous_lot_email.html', javaScriptEnabled: false });
-  const tool = page.locator('.can-tool a[href*="outil=email_read"]').first();
+  // la grille par famille (ADR 0123) : chaque outil de la famille mène à sa fiche
+  const tool = page.locator('section.access-family .access-tool-list a[href*="outil=email_read"]').first();
   await tool.focus();
   await page.keyboard.press('Enter');
+  await page.waitForURL(/outil=email_read/);
   assert.equal(await page.locator('h1').textContent(), 'email_read');
-  const rules = page.locator('details').filter({ has: page.locator('summary', { hasText: 'Arguments et règles d’utilisation' }) });
+  const rules = page.locator('details.person-fold').filter({ has: page.locator(':scope > summary', { hasText: 'Arguments et règles d’utilisation' }) });
   assert.equal(await rules.evaluate(el => el.open), false);
-  await rules.locator('summary').click();
+  await rules.locator(':scope > summary').click();
   assert.equal(await rules.getByRole('heading', { name: 'Ses arguments', exact: true }).isVisible(), true);
-  await page.locator('nav.crumbs a', { hasText: "Ce qu'elle peut faire" }).click();
-  assert.equal(await page.locator('form.can-card input[name=lot]').inputValue(), 'email');
-  assert.ok(await page.locator('.can-family[open] .can-tool').count() > 0);
+  await page.getByRole('navigation', { name: "Fil d'Ariane", exact: true }).getByRole('link', { name: "Ce qu'elle peut faire", exact: true }).click();
+  // de retour sur la grille, toujours filtrée sur sa famille : la seule montrée, ses droits dépliés
+  await page.waitForURL(/\?lot=email$/);
+  assert.match(await page.locator('main .server-alert').textContent(), /Seulement la famille « email »/);
+  const families = page.locator('section.access-family');
+  assert.equal(await families.count(), 1);
+  assert.equal(await families.getAttribute('id'), 'f-email');
+  assert.ok(await families.locator('details.access-rules[open] .access-tool').count() > 0);
 });
 
 test('activité et sorties : relevé daté, erreurs prioritaires et relances adaptées', async t => {
   const page = await open(t, { file: 'decisions_en_cours.html' });
   assert.equal(await page.getByRole('link', { name: 'Actualiser', exact: true }).isVisible(), true);
-  assert.match(await page.locator('main').textContent(), /Relevé /);
+  assert.match(await page.locator('main').textContent(), /Relevé \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/);
   assert.equal(await page.getByRole('heading', { name: 'En ce moment', exact: true }).isVisible(), true);
   assert.equal(await page.getByRole('heading', { name: "Ce qu'elle vient de faire", exact: true }).isVisible(), true);
   await page.getByRole('link', { name: 'Sorties à vérifier', exact: true }).click();
-  const cards = page.locator('.outbox-problem');
+  assert.equal(await page.locator('h1').textContent(), 'File de sortie');
+  // « À traiter » : un départ coincé par entrée, son état en étiquette
+  const review = page.getByRole('region', { name: 'À traiter', exact: true });
+  const cards = review.locator('.hm-outbox-list > li');
   assert.equal(await cards.count(), 3);
-  const interrupted = cards.filter({ hasText: 'interrompu (à vérifier)' });
+  const state = text => cards.filter({ has: page.locator('.now-tag', { hasText: text }) });
+  const interrupted = state(/^Interrompu \(à vérifier\)$/);
+  assert.equal(await interrupted.count(), 1);
   assert.equal(await interrupted.getByRole('button', { name: 'Relancer', exact: true }).count(), 0);
   assert.equal(await interrupted.getByRole('button', { name: 'Marquer comme vu', exact: true }).isVisible(), true);
-  assert.equal(await cards.filter({ hasText: 'échoué' }).getByRole('button', { name: 'Relancer', exact: true }).isVisible(), true);
-  const beforeHistory = await page.evaluate(() => document.querySelector('.outbox-review').compareDocumentPosition(document.querySelector('#pg1')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(await state(/^Échoué$/).getByRole('button', { name: 'Relancer', exact: true }).isVisible(), true);
+  // les erreurs passent avant l'historique des départs
+  const beforeHistory = await page.evaluate(() => document.querySelector('.outbox-review').compareDocumentPosition(
+    document.querySelector('[aria-labelledby=out-recent]')) & Node.DOCUMENT_POSITION_FOLLOWING);
   assert.ok(beforeHistory);
 });
 
 test('santé : problèmes prioritaires, contrôles repliables et diagnostic accessible au clavier', async t => {
   const page = await open(t, { file: 'systeme_sante.html', width: 390, javaScriptEnabled: false });
-  assert.equal(await page.getByRole('region', { name: 'Bilan de santé', exact: true }).isVisible(), true);
-  assert.equal(await page.getByRole('heading', { name: 'Points à examiner', exact: true }).isVisible(), true);
-  const healthy = page.locator('details.card').filter({ has: page.locator('summary > b', { hasText: /^Contrôles sans problème/ }) }).first();
-  assert.equal(await healthy.evaluate(el => el.open), false);
-  await healthy.locator(':scope > summary').focus();
+  // le bilan (ADR 0121) : son verdict en titre, ses comptes ; puis une tuile par contrôle
+  const summary = page.locator('section.sys-health');
+  assert.equal(await summary.isVisible(), true);
+  assert.equal(await summary.locator('.now-eyebrow').textContent(), 'Bilan de santé');
+  assert.match(await summary.getByRole('heading', { level: 2 }).textContent(), /dégradé/);
+  const checks = page.getByRole('list', { name: 'Les contrôles de santé', exact: true }).locator(':scope > li.sys-check');
+  // les problèmes d'abord : aucun contrôle en forme avant un contrôle à examiner
+  const tones = await checks.evaluateAll(els => els.map(el => el.classList.contains('tone-ok')));
+  assert.ok(tones.length >= 2 && tones[0] === false, JSON.stringify(tones));
+  assert.equal(tones.indexOf(false, tones.indexOf(true)), -1, JSON.stringify(tones));
+  const outbox = checks.filter({ has: page.getByRole('heading', { name: 'File de sortie', exact: true }) });
+  assert.equal(await outbox.evaluate(el => el.classList.contains('tone-ok')), false);
+  // son détail replié, qui s'ouvre au clavier
+  const detail = outbox.locator('.sys-check-more > details');
+  assert.equal(await detail.evaluate(el => el.open), false);
+  await detail.locator(':scope > summary').focus();
   await page.keyboard.press('Enter');
-  assert.equal(await healthy.evaluate(el => el.open), true);
-  const outbox = page.locator('.collection.cards .collection-item').filter({ has: page.getByRole('heading', { name: 'File de sortie', exact: true }) });
+  assert.equal(await detail.evaluate(el => el.open), true);
+  assert.equal(await detail.locator('pre').isVisible(), true);
   await outbox.getByRole('link', { name: 'Ouvrir le diagnostic →', exact: true }).focus();
   await page.keyboard.press('Enter');
+  await page.waitForURL(/\/inspecteur\/systeme\/sorties$/);
   assert.equal(await page.locator('h1').textContent(), 'File de sortie');
 });
 
 test('épisode : résumé de l’échec, déroulé, données complètes puis retour au résumé', async t => {
   const page = await open(t, { file: 'episode_apercu-activite-connexion.html', javaScriptEnabled: false });
-  assert.match(await page.locator('main').textContent(), /Le service de transcription n’a pas répondu/);
+  // le résumé de l'échec, en tête (ADR 0121)
+  assert.equal(await page.locator('.episode-hero .episode-outcome').textContent(), 'échec');
+  assert.match(await page.locator('.episode-hero .now-lede').textContent(), /Le service de transcription n’a pas répondu/);
   const tabs = page.getByRole('navigation', { name: 'Onglets', exact: true });
   assert.equal(await tabs.getByRole('link', { name: 'Résumé', exact: true }).getAttribute('aria-current'), 'page');
   await tabs.getByRole('link', { name: 'Déroulé', exact: true }).click();
-  assert.ok(await page.locator('.collection.list .collection-item').count() >= 2);
-  const event = page.locator('.collection.list .collection-item').last();
-  await event.locator('.collection-details > summary').focus();
+  // le déroulé : un événement par ligne, la raison de la fin citée
+  const events = page.locator('ol.episode-feed > li');
+  assert.ok(await events.count() >= 2);
+  const event = events.last();
+  assert.match(await event.locator('q').textContent(), /Le service de transcription/);
+  // les données complètes : sur la fiche de l'événement, ouverte puis dépliée au clavier
+  await event.getByRole('link', { name: /^Fin d’épisode$|^Fin d'épisode$/ }).focus();
   await page.keyboard.press('Enter');
-  assert.match(await event.locator('pre').first().textContent(), /Le service de transcription/);
-  await event.getByRole('link', { name: 'Ouvrir l’événement →', exact: true }).click();
+  await page.waitForURL(/\/inspecteur\/evenement\/\d+$/);
   assert.match(await page.locator('h1').textContent(), /Fin d’épisode|Fin d'épisode/);
+  const raw = page.locator('details.person-fold').filter({ has: page.locator(':scope > summary', { hasText: /^Ses données brutes$/ }) });
+  assert.equal(await raw.evaluate(el => el.open), false);
+  await raw.locator(':scope > summary').focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await raw.locator('pre').isVisible(), true);
+  assert.match(await raw.locator('pre').textContent(), /Le service de transcription/);
   await page.goBack();
   await tabs.getByRole('link', { name: 'Résumé', exact: true }).click();
-  assert.equal(await page.getByRole('link', { name: 'Contexte transmis', exact: true }).isVisible(), true);
-  await page.getByRole('link', { name: 'Contexte transmis', exact: true }).click();
+  assert.equal(await tabs.getByRole('link', { name: 'Résumé', exact: true }).getAttribute('aria-current'), 'page');
+  // le contexte transmis au modèle : l'onglet « Prompt », qui dit qu'il n'a pas été gardé
+  await tabs.getByRole('link', { name: 'Prompt', exact: true }).click();
   assert.match(await page.locator('main').textContent(), /n'a pas été gardé/);
 });
 
@@ -431,13 +553,18 @@ test('épisode de réponse : distinguer qui parle du destinataire et retrouver l
   const file = files.find(name => /^episode_01[^_]+\.html$/.test(name));
   assert.ok(file, 'un épisode de réponse dans la vie fictive');
   const page = await open(t, { file, width: 390 });
-  const spoken = page.locator('.collection.feed .collection-item').first();
-  assert.equal(await spoken.locator('.collection-heading h4').textContent(), 'elle');
-  assert.equal(await spoken.locator('.collection-fields dt').first().textContent(), 'À');
-  const name = await spoken.locator('.collection-fields dd').first().textContent();
-  assert.match(name, /adrien|Béa/);
-  const message = await page.locator('.document-text').textContent();
-  await page.getByRole('link', { name: /^Message n° / }).click();
+  // ce qu'elle a dit : sa bulle (« mine »), le destinataire nommé après « à »
+  const spoken = page.getByRole('region', { name: "Ce qu'elle a dit", exact: true }).locator('.person-thread > li').first();
+  assert.equal(await spoken.evaluate(el => el.classList.contains('mine')), true);
+  const to = (await spoken.locator('.person-meta').textContent()).trim().match(/^à (\S+) ·/);
+  assert.ok(to, 'le destinataire est nommé');
+  assert.match(to[1], /adrien|B[ée]a/);
+  // le message déclencheur : la bulle de l'autre (« theirs »), signée de son auteur, sans « à »
+  const trigger = page.getByRole('region', { name: "Ce qui l'a déclenché", exact: true }).locator('.person-thread > li').first();
+  assert.equal(await trigger.evaluate(el => el.classList.contains('theirs')), true);
+  assert.ok((await trigger.locator('.person-meta').textContent()).trim().startsWith(`${to[1]} · `));
+  const message = await trigger.locator('.person-bubble').textContent();
+  await trigger.getByRole('link', { name: /^message n° \d+$/ }).click();
   assert.match(await page.locator('h1').textContent(), /Message ou signal reçu/);
   assert.ok((await page.locator('main').textContent()).includes(message));
 });

@@ -3,12 +3,12 @@
 /* le journal : une page qu'on lit, en serif, une ligne de texte aérée */
 .nights-journal { display: grid; gap: 16px; padding: 28px 32px; }
 .nights-journal-head { display: grid; gap: 4px; }
-.nights-journal-head h2 { margin: 0; font-family: var(--now-serif); font-size: clamp(1.5rem, 2.2vw, 1.9rem); font-weight: 600; }
-.nights-page { max-width: 68ch; color: var(--text); font-family: var(--now-serif); font-size: 16.5px; line-height: 1.8;
+.nights-journal-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.25rem; font-weight: 600; }
+.nights-page { max-width: 68ch; color: var(--text); font-size: 15px; line-height: 1.75;
   white-space: pre-line; overflow-wrap: anywhere; }
 .nights-page::first-letter { text-transform: uppercase; }
 .nights-told { display: grid; gap: 6px; max-width: 68ch; padding: 14px 18px; border-left: 3px solid var(--accent-soft);
-  border-radius: 0 12px 12px 0; background: var(--surface-2); }
+  border-radius: 0 var(--radius) var(--radius) 0; background: var(--surface-2); }
 .nights-told p:last-child { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.6; }
 
 /* sa journée en cours */

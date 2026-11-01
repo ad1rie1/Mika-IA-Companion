@@ -27,7 +27,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("Relations & échanges", (
         Destination("personnes", "Personnes", "Les gens qu'elle connaît et ce qui les lie.",
-                    subjects=("person",)),
+                    subjects=("person",), lead="Vue d'ensemble"),
         Destination("identites", "Identités", "Qui parle derrière chaque moyen de communication, et ce "
                     "que ça ouvre.",
                     subjects=("handle",)),

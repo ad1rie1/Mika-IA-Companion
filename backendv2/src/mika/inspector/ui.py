@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "29"
+ASSET_VERSION = "34"
 
 log = logging.getLogger("mika.console")
 
@@ -60,7 +60,7 @@ LOGIN_FAILURES_PER_IP = 20
 LOGIN_WINDOW_S = 60.0
 
 SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
+    "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; font-src 'self'; img-src 'self' data:; "
                                "connect-src 'self'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; "
                                "base-uri 'none'",
     "X-Content-Type-Options": "nosniff",
@@ -149,7 +149,8 @@ class Drawn:
     """Un onglet d'une destination, dessiné par la composition (ADR 0121) : les mêmes données que sa faculté (ses
     blocs), une autre forme. ``render`` reçoit aussi les formulaires que la console a préparés pour les actions de
     ces blocs (``forms`` : ``Forms``) ; il rend son HTML (déjà échappé), un couple (HTML, blocs
-    que la console rend après), ou ``None`` : ses blocs, tels quels. ``styles`` et ``scripts`` : ce que ses gabarits
+    que la console rend après), un triplet (HTML, blocs, actions de la page : le HTML que la barre de titre porte à
+    droite, ADR 0176), ou ``None`` : ses blocs, tels quels. ``styles`` et ``scripts`` : ce que ses gabarits
     demandent (sous ``static/``). ``last`` : son HTML vient après les blocs et le panneau de la console (un onglet
     qui ne redessine que sa liste, sous les chiffres et les boutons qui restent à la console). ``panel`` : la console
     garde le panneau de l'onglet ; faux, le dessin dit ce qu'il disait."""
@@ -362,11 +363,12 @@ class UI:
                 badges[key] = badges.get(key, 0) + item["count"]
         groups = []
         for gi, group in enumerate(self.deps.menu):
-            items = [{"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon,
+            items = [{"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon, "hint": link.hint,
                       "on": current == (gi, li), "badge": badges.get((gi, li), 0)}
                      for li, link in enumerate(group.items)]
-            groups.append({"label": self.her_name() if group.her else group.label, "icon": group.icon,
-                           "items": items,
+            label = self.her_name() if group.her else group.label
+            groups.append({"label": label, "short": label if group.her else (group.short or group.label),
+                           "question": group.question, "icon": group.icon, "items": items,
                            "active": current is not None and current[0] == gi,
                            "badge": any(i["badge"] for i in items)})
         return groups

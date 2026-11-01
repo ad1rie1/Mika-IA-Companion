@@ -2,13 +2,13 @@
    commun (base.css). */
 
 /* Réglages › Personnage › Autrices (app/handmade/authors.py, ADR 0124) : où chacune écrit, flux par flux. */
-.authors-warn { margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); }
+.authors-warn { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn); }
 .authors-warn a { color: inherit; font-weight: 600; }
-.authors-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.authors-grid { display: grid; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .authors-row { display: grid; grid-template-columns: minmax(160px, 1.1fr) minmax(130px, .8fr) minmax(0, 2.4fr); gap: 4px 16px;
   align-items: baseline; padding: 9px 14px; border-top: 1px solid var(--border); font-size: 13.5px; }
 .authors-row:first-child { border-top: 0; }
-.authors-row.head { background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--muted); font-size: 12px;
+.authors-row.head { background: transparent; color: var(--muted); font-size: 12px;
   font-weight: 600; }
 .authors-row a { font-weight: 600; }
 .authors-row.off .authors-flow { color: var(--text-2); }
@@ -22,15 +22,14 @@
 /* Réglages › Personnage › Tempérament (app/handmade/temperament.py) : la forme de son caractère, partir d'un profil, ses profils.
    La forme proposée : pleine, dans l'accent (validé contre le fond, clair et sombre) ; celle d'aujourd'hui : grise, en
    pointillé — la seconde marque qui les distingue sans la couleur. */
-:root { --temper-mark: #6544ce; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --temper-mark: #8f6fe3; } }
-:root[data-theme="dark"] { --temper-mark: #8f6fe3; }
+/* la marque de la forme : l'accent de la console, clair et sombre (ADR 0176) */
+:root { --temper-mark: var(--accent); }
 /* son caractère écrit (ADR 0139) : le texte, ou « en cours » ; la modale qui suit l'écriture après Enregistrer */
 .temper-character { display: grid; gap: 10px; }
 .temper-char-text { margin: 0; padding: 10px 14px; border-left: 3px solid var(--temper-mark); background: var(--sunken);
-  border-radius: 0 8px 8px 0; white-space: pre-wrap; line-height: 1.45; }
+  border-radius: 0 var(--radius) var(--radius) 0; white-space: pre-wrap; line-height: 1.45; }
 .temper-char-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--text-2); }
-.temper-dialog { border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); color: var(--text);
+.temper-dialog { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text);
   padding: 20px 22px; width: min(560px, 92vw); }
 .temper-dialog::backdrop { background: color-mix(in srgb, var(--text) 40%, transparent); }
 .temper-dialog h3 { margin: 0 0 6px; }
@@ -63,10 +62,10 @@
 .temper-tip text { fill: var(--text-2); font-size: 11.5px; }
 .temper-tip .temper-tip-head { fill: var(--text); font-weight: 600; }
 .temper-legend[hidden], .temper-hint[hidden] { display: none; }
-.temper-hint { padding: 7px 10px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 12.5px; }
+.temper-hint { padding: 7px 10px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn); font-size: 12.5px; }
 .temper-label { fill: var(--text-2); font-size: 12.5px; }
 .temper-sector { fill: none; }
-.temper-sector.tinted { fill: color-mix(in srgb, var(--text) 4%, transparent); }
+.temper-sector.tinted { fill: color-mix(in srgb, var(--accent) 5%, transparent); }
 .temper-bracket { fill: none; stroke: var(--border-strong); stroke-width: 1.5; stroke-linecap: round; }
 .temper-choices { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
 .temper-choices dt { color: var(--muted); }
@@ -83,13 +82,13 @@
 .temper-pick-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .temper-pick-row select { flex: 1 1 260px; max-width: 520px; }
 .temper-pick .help { color: var(--muted); font-size: 12.5px; }
-.temper-proposing { padding: 8px 12px; border-radius: 8px; background: var(--info-bg); color: var(--info); }
+.temper-proposing { padding: 8px 12px; border-radius: var(--radius); background: var(--info-bg); color: var(--info); }
 .temper-proposing a { color: inherit; font-weight: 600; }
 .temper-profiles > summary { cursor: pointer; color: var(--text-2); font-weight: 600; }
 .temper-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 14px; margin: 12px 0 0;
   padding: 0; list-style: none; }
 .temper-list li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
 .temper-list li.on { border-color: color-mix(in srgb, var(--temper-mark) 45%, var(--border)); }
 .temper-list li.proposed { background: var(--info-bg); }
 .temper-mini { width: 52px; height: 52px; }
@@ -103,3 +102,53 @@
   .temper-list li { grid-template-columns: 44px minmax(0, 1fr); }
   .temper-list li .btn { grid-column: 2; justify-self: start; }
 }
+
+/* ── Le tempérament en table de mixage (ADR 0176) : tous ses curseurs d'un coup, famille par famille en colonnes, le
+   milieu marqué (0,5 : comme la plupart des gens) ; à droite, son caractère écrit, ce que règle le curseur qu'on touche,
+   la forme de son caractère et ses profils. L'aide d'un curseur se lit à droite quand on le survole ou le règle. */
+.hm-split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.hm-split-side { display: grid; gap: 14px; align-content: start; position: sticky; top: 64px; max-height: calc(100vh - 76px);
+  overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.hm-split-side .now-card { padding: 14px 16px; }
+.hm-split-side .now-card-head { margin-bottom: 8px; }
+.hm-split-side .now-card-head p { flex-basis: 100%; }
+.hm-split-side .temper-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.hm-split-side .temper-fig { width: 100%; max-width: 300px; margin: 0 auto; }
+.hm-split-side .temper-pick-row { flex-wrap: wrap; }
+.hm-split-side .temper-pick select { width: 100%; }
+.settings .hm-split > .hm-form { display: block; column-count: 3; column-gap: 18px; }
+.settings .hm-split > .hm-form > * { column-span: all; }
+.settings .hm-split > .hm-form > fieldset.group:not(:has(.mapping)) { column-span: none; break-inside: avoid; display: block; margin: 0 0 16px;
+  padding: 0; border: 0; }
+.settings .hm-split > .hm-form > fieldset.group:not(:has(.mapping)) > legend { display: block; width: 100%; margin: 0 0 4px; padding: 0 0 6px;
+  border-bottom: 1px solid var(--border); font: 600 13px var(--display); }
+.settings .hm-split .group:not(:has(.mapping)) > .field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 1.15fr);
+  align-items: center; gap: 0 10px; padding: 3px 0; border-top: 0; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > label { font-weight: 500; font-size: 12.5px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > :is(select, input) { grid-column: 2; grid-row: 1; min-height: 28px; padding: 2px 6px; font-size: 12.5px; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > .slider { grid-column: 2; grid-row: 1; display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px; gap: 8px; position: relative; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > .slider::before { content: ""; grid-column: 1; grid-row: 1; justify-self: center;
+  align-self: center; width: 2px; height: 12px; border-radius: 1px; background: var(--border-strong); pointer-events: none; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > .slider > input { grid-column: 1; grid-row: 1; min-height: 0; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > .slider > output { font-size: 12px; font-weight: 600; color: var(--muted); text-align: right; }
+.settings .hm-split .group:not(:has(.mapping)) > .field.off-mid > label { color: var(--text); font-weight: 600; }
+.settings .hm-split .group:not(:has(.mapping)) > .field.off-mid > .slider > output { color: var(--accent); }
+.settings .hm-split .group:not(:has(.mapping)) > .field:hover, .settings .hm-split .group:not(:has(.mapping)) > .field.is-hot {
+  background: var(--hover); box-shadow: -6px 0 0 var(--hover), 6px 0 0 var(--hover); }
+/* l'aide de chaque curseur : lue à droite (« Ce qu'il règle ») et par les lecteurs d'écran, pas sous chaque ligne */
+.settings .hm-split .group:not(:has(.mapping)) > .field > .help { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; }
+.settings .hm-split .group:not(:has(.mapping)) > .field > .error { grid-column: 1 / -1; }
+.temper-help { min-height: 96px; }
+.temper-help h2 { font: 600 13.5px var(--display); margin: 0 0 3px; }
+.temper-help p { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.temper-help .now-muted { font-size: 12px; }
+.temper-help .temper-help-ends { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+@media (max-width: 1280px) { .settings .hm-split > .hm-form { column-count: 2; } }
+@media (max-width: 1000px) {
+  .hm-split { grid-template-columns: minmax(0, 1fr); }
+  .hm-split-side { position: static; max-height: none; order: -1; }
+}
+@media (max-width: 640px) { .settings .hm-split > .hm-form { column-count: 1; } }

@@ -197,8 +197,11 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert head == ["projects.lancer", "projects.pause", "projects.consigne", "projects.archiver"]
     overview = tabs["apercu"]
     assert "À décider (1)" in flat(overview) and "installer requests" in flat(overview)
-    grid = next(b for b in overview if isinstance(b, Grid))
-    assert [f.title for f in grid.items] == ["Où il en est", "Prochaine exécution", "Son dépôt"]
+    # une bande de chiffres, puis des tuiles (ADR 0176)
+    assert next(b for b in overview if isinstance(b, Stats)).title == "Où il en est"
+    grids = [b for b in overview if isinstance(b, Grid)]
+    assert [[f.title for f in g.items] for g in grids] == [["Ses objectifs", "Dernières exécutions"],
+                                                           ["Prochaine exécution", "Le cadre", "Son dépôt"]]
     assert "Dernières exécutions" in flat(overview) and "Décisions en vigueur (les dernières)" in flat(overview)
     # par défaut, ce qui vit (le ponctuel fait se filtre) ; tous : ce qui revient d'abord
     assert [r.cells[2].text for r in tables(tabs["objectifs"])["Ses objectifs"].rows] == ["constant"]

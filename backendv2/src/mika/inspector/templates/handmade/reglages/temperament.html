@@ -28,6 +28,12 @@
     <form method="dialog" class="temper-dialog-actions"><button class="btn" type="submit">Fermer</button></form>
   </dialog>
 </section>
+{# la table de mixage (ADR 0176) : l'aide du curseur qu'on touche, lue ici (static/handmade/temperament.js) #}
+<section class="now-card temper-help" data-temper-help aria-labelledby="temper-help-title" aria-live="polite">
+  <h2 id="temper-help-title" data-temper-help-title>Ce qu'il règle</h2>
+  <p class="now-muted" data-temper-help-text>Survole un curseur, ou règle-le : ce qu'il règle s'affiche ici.</p>
+  <p class="temper-help-ends" data-temper-help-value hidden></p>
+</section>
 <section class="now-card temper" aria-labelledby="temper-title">
   <header class="now-card-head">
     <h2 id="temper-title">La forme de son caractère</h2>

@@ -45,7 +45,7 @@ from mika.inspector.pages.settings_form import RECORD_KEY
 from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Column, Disclosure, Nav, NavItem, Note, Ref, Row, Table, Text, When
 from mika.plugins.email.console.common import VOICE_LABEL
 from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
@@ -515,8 +515,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         rows = tuple((Text(labels.get(slider, slider)), Text(
             " · ".join(f"{o} › {p} ({_num(lo)} → {_num(hi)})" for o, p, lo, hi in moved) or "rien (non branché)",
             "text" if moved else "muted", clamp=500)) for slider, moved in params.influences().items())
-        return [Table((Column("curseur", "fit"), "ce qu'il pilote (à 0 → à 1)"), rows,
-                      title="Ce que pilote chaque curseur")]
+        # replié sous la table de mixage : l'aide du curseur touché le dit déjà à côté (ADR 0176)
+        return [Disclosure("Ce que pilote chaque curseur", (Table((Column("curseur", "fit"),
+                                                                  "ce qu'il pilote (à 0 → à 1)"), rows),))]
 
     # ── sens ──
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
@@ -828,7 +829,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                     "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
                                     "ses paramètres (Paramètres avancés), et ce qui s'écarte du milieu se dit au modèle "
                                     "(ADR 0100).",
-                        blocks=drives, preview=temperament_effect,
+                        blocks=drives, preview=temperament_effect, aside=True,
                         pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(
                             "Des curseurs (0,5 = comme la plupart des gens ; la console s'arrête à 0,1 et 0,9), "
                             "une humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. "

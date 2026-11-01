@@ -6,7 +6,7 @@
 .handle-head-who { margin: 2px 0 0; font-size: 14px; }
 
 .handle { display: grid; gap: 18px; }
-.handle-alert { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; }
+.handle-alert { margin: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px; }
 .handle-alert.warn { background: var(--warn-bg); color: var(--warn); }
 .handle-alert a { color: inherit; font-weight: 600; }
 

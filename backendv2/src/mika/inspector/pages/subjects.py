@@ -81,8 +81,21 @@ def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str) -> 
             link = cells[0] if cells and isinstance(cells[0], Ref) else None
             items.append({"label": plain(cells[0]) if cells else "", "href": render.href(link) if link else "",
                           "sub": plain(cells[1]) if len(cells) > 1 else ""})
-        groups.append({"title": b.title, "items": items, "empty": b.empty, "pager": render.pager_ctx(b.pager, query)})
+        # sa section (un sous-onglet, ADR 0176) : sa pagination y ramène
+        key = f"r-{len(groups) + 1}"
+        pager = render.pager_ctx(b.pager, query)
+        paged = bool(pager and any(pager.get(k) for k in ("prev", "next", "older", "newer")))
+        if pager:
+            pager = {**pager, **{k: v + "#" + key for k, v in pager.items() if k in PAGER_LINKS and v},
+                     "links": [{**x, "href": x["href"] + "#" + key} if x.get("href") else x
+                               for x in pager.get("links") or []]}
+        groups.append({"title": b.title, "items": items, "empty": b.empty, "pager": pager, "paged": paged, "id": key,
+                       "shown": pager["total"] if paged and pager.get("total") else len(items)})
     return {"q": q, "only": only, "groups": groups, "note": note}
+
+
+#: les liens d'une pagination (``render.pager_ctx``) qui changent de page
+PAGER_LINKS = frozenset({"prev", "next", "older", "newer", "first"})
 
 
 class Subjects:

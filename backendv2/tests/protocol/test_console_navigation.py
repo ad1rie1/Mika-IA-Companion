@@ -86,7 +86,9 @@ def test_page_and_subject_keep_the_correct_menu_open(world, path, group, label):
     page = client.get('/inspecteur/' + path)
     assert page.status_code == 200
     menu = primary_nav(page.text)
-    assert f'data-nav-group="{group}" open' in menu
+    # la rubrique de la page est marquée dans la barre du haut (ADR 0176) : son menu reste fermé jusqu'au clic
+    assert f'<details class="nav-group active" data-nav-group="{group}">' in menu
+    assert menu.count('class="nav-group active"') == 1
     current = re.findall(r'<a class="nav-item on"[^>]*>(.*?)</a>', menu, re.S)
     assert len(current) == 1 and label in current[0]
 
@@ -135,16 +137,16 @@ def test_search_finds_settings_without_accents_and_preserves_subject_filter(worl
     page = client.get('/inspecteur/recherche?q=identite')
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
-    # la recherche est dessinée (ADR 0121) : une carte par sorte de résultat
-    results = re.search(r'Pages de la console.*?</section>', page.text, re.S).group()
+    # la recherche est dessinée (ADR 0121) : « Tout », puis une section par sorte de résultat (ADR 0176)
+    def section(text: str) -> str:
+        return re.search(r'data-pane aria-label="Pages de la console">.*?</section>', text, re.S).group()
+
+    assert '<a href="#r-tout">Tout' in page.text
+    results = section(page.text)
     assert 'href="/inspecteur/reglages/identite"' in results
     assert 'href="/inspecteur/identites"' in results
-    providers = client.get('/inspecteur/recherche?q=fournisseurs').text
-    results = re.search(r'Pages de la console.*?</section>', providers, re.S).group()
-    assert 'href="/inspecteur/reglages/fournisseurs"' in results
-    rhythm = client.get('/inspecteur/recherche?q=sommeil').text
-    results = re.search(r'Pages de la console.*?</section>', rhythm, re.S).group()
-    assert 'href="/inspecteur/vie/rythme"' in results
+    assert 'href="/inspecteur/reglages/fournisseurs"' in section(client.get('/inspecteur/recherche?q=fournisseurs').text)
+    assert 'href="/inspecteur/vie/rythme"' in section(client.get('/inspecteur/recherche?q=sommeil').text)
     assert 'Pages de la console' not in client.get('/inspecteur/recherche?q=identite&sorte=person').text
     assert 'Pages de la console' not in client.get('/inspecteur/recherche?q=aucune-page-de-ce-nom').text
 

@@ -991,7 +991,7 @@ TRUSTS = Param("confiance", "confiance du canal", kind="select",
                choices=tuple((t.value, TRUST_SHORT[t]) for t in ChannelTrust if t is not ChannelTrust.INTERNAL))
 
 
-@IDENTITY.inspect("personnes", title="Personnes", section="personnes", order=10, params=[SEARCH],
+@IDENTITY.inspect("personnes", title="Annuaire", section="personnes", order=10, params=[SEARCH],
                   description="Retrouver une personne, ses moyens de communication, ses échanges et son lien avec elle.")
 def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     q = fold(str(ctx.value("q") or ""))

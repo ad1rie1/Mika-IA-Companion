@@ -233,6 +233,8 @@ class Pages:
             title = ctx["heading"] + " · " + title
         if "page_subtitle" in panel_ctx:
             ctx["subtitle"] = panel_ctx.pop("page_subtitle")
+        if "page_links" in panel_ctx:  # les actions de la page, à droite de son titre (ADR 0176)
+            ctx["head_links"] = panel_ctx.pop("page_links")
         flash = self.ui.pop_flash(request.query_params.get("flash", ""))
         if flash:
             ctx["messages"] = [flash, *ctx.get("messages", [])]
@@ -293,6 +295,9 @@ class Pages:
         # ses paramètres : un bouton en haut à droite, pas un onglet de plus (ADR 0173)
         gear = [t for t in tab_list if t["slug"] in d.gear]
         tab_list = [t for t in tab_list if t["slug"] not in d.gear]
+        if d.lead:  # sa page, dessinée à part (Personnes) : le premier onglet, qui y ramène (ADR 0176)
+            tab_list.insert(0, {"title": d.lead, "href": dest_url(d.key), "on": False, "badge": 0, "group": "",
+                                "slug": ""})
         if d.layout == "menu":
             # des pages rangées par rubrique (le menu de gauche y mène) : la page porte le titre de la sous-page
             group = next((t["group"] for t in tab_list if t["on"]), "")
@@ -333,14 +338,16 @@ class Pages:
         forms = Forms(self.slot_forms(request, render.blocks(blocks, self.ui.env(), query), ""),
                       lambda rendered, subject: self.slot_forms(request, rendered, subject), self.ui.csrf(request))
         out = call(drawn.render, self.ui, blocks, query, forms, label=f"onglet dessiné {where}")
+        head: Any = ""
         if isinstance(out, tuple):
             html, rest = out[0], list(out[1])
+            head = out[2] if len(out) > 2 else ""
         elif out is None or isinstance(out, Failed):
             return {}
         else:
             html, rest = out, []
         return {"blocks": rest, "panel": drawn.panel, "overview": html, "overview_last": drawn.last,
-                "fiche_styles": drawn.styles, "fiche_scripts": drawn.scripts}
+                "fiche_styles": drawn.styles, "fiche_scripts": drawn.scripts, "head_extra": head}
 
     async def view(self, request: Request) -> Response:
         owner, name = request.path_params["owner"], request.path_params["name"]

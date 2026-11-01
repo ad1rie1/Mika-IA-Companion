@@ -76,9 +76,23 @@
   </form>
 
 {% else %}
+  {# Une section à la fois (ADR 0176) : la colonne de gauche mène à chacune (``:target``) ; sans cible, ses boîtes. Un seul
+     formulaire porte les paramètres généraux : ce qui est masqué part avec lui à l'enregistrement. #}
+  {% set navs = namespace(items=[("boites", "Ses boîtes")], elsewhere=False) %}
+  {% if params %}{% for g in params.groups %}
+    {% if g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}{% set navs.items = navs.items + [("courrier-" ~ loop.index, g.title)] %}{% endif %}
+    {% if (g["items"]|rejectattr("field")|list) or (g["items"]|selectattr("field")|selectattr("field.readonly")|list) %}{% set navs.elsewhere = True %}{% endif %}
+  {% endfor %}{% endif %}
+  {% if navs.elsewhere %}{% set navs.items = navs.items + [("ailleurs", "Réglé ailleurs")] %}{% endif %}
+  <div class="mailset-tabs">
+  <nav class="mailset-nav" aria-label="Paramètres du courrier">
+    <p class="mailset-nav-title">Le courrier</p>
+    {% for anchor, title in navs.items %}<a href="#{{ anchor }}" data-mailset-tab="{{ anchor }}">{{ title }}</a>{% endfor %}
+  </nav>
+  <div class="mailset-panes">
   {# ── ses boîtes ── #}
   {% for r in s.records %}
-  <section class="mailset-row" id="boites" aria-labelledby="mailset-boxes">
+  <section class="mailset-row" id="boites" data-pane aria-labelledby="mailset-boxes">
     <div class="mailset-row-about">
       <h2 id="mailset-boxes">Ses boîtes <span class="person-count now-num">{{ r.total }}</span></h2>
       <p>Chaque boîte qu'elle relève, avec sa façon d'y écrire. Ce qu'elle y prépare d'elle-même, et pour qui, se règle dans le tableau de chaque boîte (Réglages › Canaux).</p>
@@ -135,7 +149,7 @@
     {% for g in p.groups %}{% set mine = g["items"]|selectattr("field")|rejectattr("field.readonly")|list %}
     {% set ns.elsewhere = ns.elsewhere + (g["items"]|rejectattr("field")|list) + (g["items"]|selectattr("field")|selectattr("field.readonly")|list) %}
     {% if mine %}
-    <section class="mailset-row" aria-labelledby="mailset-p{{ loop.index }}">
+    <section class="mailset-row" id="courrier-{{ loop.index }}" data-pane aria-labelledby="mailset-p{{ loop.index }}">
       <div class="mailset-row-about">
         {% if loop.first %}<p class="now-kicker">Pour toutes ses boîtes</p>{% endif %}
         <h3 id="mailset-p{{ loop.index }}">{{ g.title }}</h3>
@@ -166,7 +180,7 @@
       <span class="now-muted">Une valeur changée devient une surcharge, bornée et journalisée avec ton nom. <a href="{{ p.advanced }}">Le détail de chaque paramètre →</a></span>
     </div>
     {% if ns.elsewhere %}
-    <section class="mailset-row" aria-labelledby="mailset-elsewhere">
+    <section class="mailset-row" id="ailleurs" data-pane aria-labelledby="mailset-elsewhere">
       <div class="mailset-row-about"><h3 id="mailset-elsewhere">Réglé ailleurs</h3><p>{{ ns.elsewhere|map(attribute="label")|join(", ") }} : lus ici, réglés là où ils ont leur sens.</p></div>
       <div class="now-card mailset-row-fields mailset-links">
         <a href="{{ PREFIX }}/reglages/canaux"><b>Réglages › Canaux</b><span>Le tableau de chaque boîte : qui peut lui écrire, à qui elle prépare des réponses d'elle-même, comment elles partent.</span></a>
@@ -183,5 +197,7 @@
   </form>
   {% endif %}
   {% endif %}
+  </div>
+  </div>
 {% endif %}
 </div>

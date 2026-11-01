@@ -14,7 +14,15 @@
       <input type="hidden" name="_champs" value="{{ f.path }}">
       <span class="label">{{ f.label }}</span>
       {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}
-      <div class="mapping-rows">{% for r in f.rows %}{{ field(r) }}{% endfor %}</div>
+      {# une longue liste de textes libres (une précision par trait) : ce qui est écrit, les autres repliés (ADR 0176) ;
+         une liste de choix (qui sert quoi) reste entière #}
+      {% set written = f.rows|selectattr("value")|list + f.rows|rejectattr("value")|selectattr("error")|list %}
+      {% if f.rows|length > 8 and f.rows|selectattr("kind", "equalto", "text")|list|length == f.rows|length %}
+      {% if written %}<div class="mapping-rows">{% for r in written %}{{ field(r) }}{% endfor %}</div>{% endif %}
+      <details class="mapping-more"><summary>{{ "Écrire d'autres " if written else "Écrire des " }}{{ f.label|lower }} <span class="now-muted">({{ f.rows|length - written|length }})</span></summary>
+        <div class="mapping-rows">{% for r in f.rows if r not in written %}{{ field(r) }}{% endfor %}</div>
+      </details>
+      {% else %}<div class="mapping-rows">{% for r in f.rows %}{{ field(r) }}{% endfor %}</div>{% endif %}
       {% if f.error %}<span class="error">{{ f.error }}</span>{% endif %}
     </div>
     {% else %}{{ field(f) }}{% endif %}
@@ -61,13 +69,15 @@
   {% endif %}
 
   {% if not s.record %}
-  {% if s.head %}{{ s.head }}{% endif %}
+  {% if s.head and not (s.aside and s.form) %}{{ s.head }}{% endif %}
   {% for r in s.records %}
   {{ records(r, s.csrf, s.key, action) }}
   {% endfor %}
 
   {% if s.form %}
   {% if s.preview %}<div class="now">{{ sober(s.preview) }}</div>{% endif %}
+  {# un en-tête posé à côté (``SettingsSection.aside``, ADR 0176) : le formulaire à gauche, le dessin à droite #}
+  {% if s.aside %}<div class="hm-split">{% endif %}
   <form method="post" action="{{ action }}" class="form now-card hm-form">
     <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
@@ -78,6 +88,7 @@
     <div class="form-actions"><button class="btn">Enregistrer</button>{% if s.form.preview %}
       <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>{% endif %}</div>
   </form>
+  {% if s.aside %}<aside class="hm-split-side" aria-label="À côté du formulaire">{{ s.head }}</aside></div>{% endif %}
   {% endif %}
 
   {% if s.commands %}

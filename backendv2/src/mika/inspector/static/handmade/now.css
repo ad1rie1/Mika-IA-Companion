@@ -62,7 +62,7 @@
 .need-line.n-expression { stroke: var(--s2); }
 .need-line.n-curiosity { stroke: var(--s3); }
 .lane-hit { fill: transparent; }
-.lane-hit:hover { fill: color-mix(in srgb, var(--text) 7%, transparent); }
+.lane-hit:hover { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
 .lane-now { stroke: var(--accent); stroke-width: 1.5; }
 .mark { stroke: var(--surface); stroke-width: 1.5; }
 .mark-reply { fill: var(--accent); }
@@ -99,17 +99,17 @@
 
 /* ── Dans sa tête ─────────────────────────────────────────────────────── */
 .now-thoughts { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.now-thoughts li { padding: 11px 13px 12px 15px; border-left: 3px solid var(--sw); border-radius: 12px;
+.now-thoughts li { padding: 11px 13px 12px 15px; border-left: 3px solid var(--sw); border-radius: var(--radius);
   background: color-mix(in srgb, var(--sw) 8%, var(--surface-2)); }
 .now-thoughts li > p:first-child { margin: 0; font-family: var(--now-serif); font-size: 15px; line-height: 1.45; }
 .now-thought-meta { margin: 6px 0 9px; color: var(--muted); font-size: 12px; }
 .now-awaited { margin-bottom: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--sw) 35%, var(--border));
-  border-radius: 12px; background: color-mix(in srgb, var(--sw) 10%, var(--surface)); }
+  border-radius: var(--radius); background: color-mix(in srgb, var(--sw) 10%, var(--surface)); }
 .now-awaited p { margin: 0; }
 .now-awaited .now-awaited-head, .now-dream .now-dream-head { margin: 0 0 4px; color: color-mix(in srgb, var(--sw) 70%, var(--text));
   font-size: 11.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
 .now-awaited-head span { text-transform: none; letter-spacing: 0; }
-.now-dream { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px;
+.now-dream { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius);
   background: linear-gradient(135deg, color-mix(in srgb, var(--emo-dreamy) 14%, var(--surface)), var(--surface) 70%); }
 .now-dream-text { margin: 0; font-family: var(--now-serif); font-style: italic; line-height: 1.5; }
 
@@ -139,7 +139,7 @@
 .now-today { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0;
   list-style: none; }
 .now-today li > a, .now-today li > span { display: block; }
-.now-today li { padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.now-today li { padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); }
 .now-today a { display: block; color: inherit; }
 .now-today a:hover .now-today-label { color: var(--accent); }
 .now-today-value { display: block; font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; line-height: 1.15; }

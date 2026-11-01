@@ -27,34 +27,44 @@
   }
 
   function setupNavigation() {
+    // Sur un écran étroit, les rubriques passent dans un panneau (ADR 0176) : la case #nav-open l'ouvre, sans script
+    // aussi ; avec lui, le bouton Menu, le focus gardé dans le panneau et Échap.
     var toggle = document.querySelector("[data-nav-toggle]");
-    var sidebar = document.querySelector(".sidebar");
+    var panel = document.querySelector("#navigation");
     var checkbox = document.querySelector("#nav-open");
-    if (!toggle || !sidebar || !checkbox) return function () {};
-    var mobile = window.matchMedia("(max-width: 900px)");
-    var main = document.querySelector(".main");
-    var close = sidebar.querySelector("[data-nav-close]");
+    if (!toggle || !panel || !checkbox) return function () {};
+    var mobile = window.matchMedia("(max-width: 1080px)");
+    var content = document.querySelector(".content");
+    var side = document.querySelector(".topbar-side");
+    var close = panel.querySelector("[data-nav-close]");
     checkbox.tabIndex = -1;
     toggle.hidden = false;
     close.hidden = false;
     function setOpen(open, restoreFocus) {
       checkbox.checked = mobile.matches && open;
-      sidebar.inert = mobile.matches && !checkbox.checked;
-      main.inert = checkbox.checked;
+      panel.inert = mobile.matches && !checkbox.checked;
+      if (content) content.inert = checkbox.checked;
+      if (side) side.inert = checkbox.checked;
       toggle.setAttribute("aria-expanded", String(checkbox.checked));
       document.body.classList.toggle("nav-is-open", checkbox.checked);
-      if (checkbox.checked) close.focus();
-      else if (restoreFocus) toggle.focus();
+      if (checkbox.checked) {
+        // la rubrique de la page courante, dépliée dans le panneau
+        panel.querySelectorAll(".nav-group.active").forEach(function (g) { g.open = true; });
+        close.focus();
+      } else if (restoreFocus) toggle.focus();
     }
     toggle.addEventListener("click", function () { setOpen(true); });
     close.addEventListener("click", function () { setOpen(false, true); });
     checkbox.addEventListener("change", function () { setOpen(checkbox.checked, true); });
-    mobile.addEventListener("change", function () { setOpen(false); });
+    mobile.addEventListener("change", function () {
+      panel.querySelectorAll(".nav-group").forEach(function (g) { g.open = false; });
+      setOpen(false);
+    });
     document.addEventListener("keydown", function (ev) {
       if (!checkbox.checked) return;
       if (ev.key === "Escape") { ev.preventDefault(); setOpen(false, true); }
       if (ev.key === "Tab") {
-        var focusable = Array.from(sidebar.querySelectorAll("a, button, input, summary"))
+        var focusable = Array.from(panel.querySelectorAll("a, button, input, summary"))
           .filter(function (el) { return !el.disabled && el.checkVisibility(); });
         var first = focusable[0], last = focusable[focusable.length - 1];
         if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
@@ -62,22 +72,136 @@
       }
     });
     setOpen(false);
+    return function () { if (mobile.matches) setOpen(true); };
+  }
 
-    // La rubrique courante reste dépliée ; les autres retrouvent le choix de l'opérateur.
-    document.querySelectorAll("[data-nav-group]").forEach(function (group) {
-      var key = "mika.console.nav." + group.getAttribute("data-nav-group");
-      try {
-        var stored = sessionStorage.getItem(key);
-        if (stored !== null) group.open = stored === "true";
-      } catch (e) { /* stockage indisponible */ }
-      var current = !!group.querySelector('[aria-current="page"]');
-      if (current) group.open = true;
-      group.addEventListener("toggle", function () {
-        if (current) return;  // dépliée d'office sur sa propre page : ce n'est pas le choix de l'opérateur
-        try { sessionStorage.setItem(key, String(group.open)); } catch (e) { /* stockage indisponible */ }
+  // Les menus de la barre du haut (les rubriques, son état, le compte) : un seul ouvert à la fois ; un clic ailleurs
+  // ou Échap le ferme ; sur un écran large, survoler une autre rubrique quand un menu est ouvert passe à la sienne.
+  function setupTopMenus() {
+    var wide = window.matchMedia("(min-width: 1081px)");
+    var menus = Array.from(document.querySelectorAll(".topbar .nav-group, .topbar .topbar-pop"));
+    function closeAll(except) { menus.forEach(function (m) { if (m !== except) m.open = false; }); }
+    menus.forEach(function (m) {
+      m.addEventListener("toggle", function () { if (m.open && wide.matches) closeAll(m); });
+      if (m.classList.contains("nav-group")) {
+        var hovered = 0;
+        m.addEventListener("mouseenter", function () {
+          if (!wide.matches || m.open) return;
+          if (menus.some(function (o) { return o.open && o.classList.contains("nav-group"); })) {
+            closeAll(m); m.open = true; hovered = Date.now();
+          }
+        });
+        // le clic qui suit l'ouverture au survol ne referme pas le menu qu'on vient d'atteindre
+        m.querySelector("summary").addEventListener("click", function (ev) {
+          if (hovered && Date.now() - hovered < 800) ev.preventDefault();
+          hovered = 0;
+        });
+      }
+    });
+    document.addEventListener("click", function (ev) {
+      if (!wide.matches && ev.target.closest("#navigation")) return;
+      menus.forEach(function (m) {
+        if (m.open && !m.contains(ev.target) && (wide.matches || !m.classList.contains("nav-group"))) m.open = false;
       });
     });
-    return function () { if (mobile.matches) setOpen(true); };
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      menus.forEach(function (m) {
+        if (!m.open || (!wide.matches && m.classList.contains("nav-group"))) return;
+        var inside = m.contains(document.activeElement);
+        m.open = false;
+        if (inside) m.querySelector("summary").focus();
+      });
+    });
+  }
+
+  // « Aller à… » (ADR 0176) : sous la recherche, les pages de la console qui répondent à ce qu'on tape (les liens des
+  // rubriques et leur ligne d'explication, sans tenir compte des accents), puis « Chercher partout ». Flèches, Entrée,
+  // Échap ; Ctrl K ou « / » y mènent. Sans script, le formulaire envoie à la recherche globale.
+  function setupGoto() {
+    var form = document.querySelector("form[data-goto]");
+    var input = document.querySelector("#q-global");
+    if (!form || !input) return;
+    var fold = function (t) { return t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); };
+    var pages = Array.from(document.querySelectorAll("#navigation a.nav-item")).map(function (a) {
+      var group = a.closest(".nav-group");
+      var label = a.querySelector(".nav-item-label");
+      var hint = a.querySelector(".nav-item-hint");
+      var name = label ? label.firstChild.textContent.trim() : a.textContent.trim();
+      var section = group ? group.getAttribute("data-nav-group") : "";
+      return { href: a.getAttribute("href"), name: name, hint: hint ? hint.textContent.trim() : "", section: section,
+               key: fold(name + " " + (hint ? hint.textContent : "") + " " + section) };
+    });
+    var list = document.createElement("div");
+    list.className = "goto-list";
+    list.id = "goto-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Aller à");
+    list.hidden = true;
+    form.appendChild(list);
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-controls", "goto-list");
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-autocomplete", "list");
+    var items = [], selected = 0;
+    function render() {
+      var q = fold(input.value.trim());
+      var words = q.split(/\s+/).filter(Boolean);
+      var found = pages.filter(function (p) { return words.every(function (w) { return p.key.indexOf(w) !== -1; }); });
+      if (!words.length) found = [];
+      found = found.slice(0, 9);
+      items = found.map(function (p) { return { href: p.href, name: p.name, hint: p.hint, section: p.section }; });
+      if (input.value.trim()) items.push({ search: true, name: "Chercher « " + input.value.trim() + " » partout", hint: "personnes, projets, souvenirs, réglages…" });
+      selected = Math.min(selected, Math.max(0, items.length - 1));
+      list.textContent = "";
+      if (!items.length) { list.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
+      if (found.length) {
+        var head = document.createElement("div"); head.className = "goto-group"; head.textContent = "Pages de la console";
+        list.appendChild(head);
+      }
+      items.forEach(function (it, i) {
+        var el = document.createElement(it.search ? "div" : "a");
+        el.className = "goto-item";
+        el.id = "goto-" + i;
+        el.setAttribute("role", "option");
+        el.setAttribute("aria-selected", String(i === selected));
+        if (it.href) el.href = it.href;
+        var b = document.createElement("b"); b.textContent = it.name; el.appendChild(b);
+        if (it.hint) { var d = document.createElement("span"); d.className = "d"; d.textContent = it.hint; el.appendChild(d); }
+        if (it.section) { var s = document.createElement("span"); s.className = "s"; s.textContent = it.section; el.appendChild(s); }
+        el.addEventListener("mousedown", function (ev) { ev.preventDefault(); choose(i); });
+        if (it.search && found.length) {
+          var head2 = document.createElement("div"); head2.className = "goto-group"; head2.textContent = "Ailleurs";
+          list.appendChild(head2);
+        }
+        list.appendChild(el);
+      });
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      input.setAttribute("aria-activedescendant", "goto-" + selected);
+    }
+    function choose(i) {
+      var it = items[i];
+      if (!it) return;
+      if (it.search) form.submit(); else window.location = it.href;
+    }
+    function hide() { list.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
+    input.addEventListener("input", function () { selected = 0; render(); });
+    input.addEventListener("focus", function () { if (input.value.trim()) render(); });
+    input.addEventListener("blur", function () { setTimeout(hide, 120); });
+    input.addEventListener("keydown", function (ev) {
+      if (list.hidden) return;
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        selected = (selected + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+        render();
+        var el = document.getElementById("goto-" + selected);
+        if (el) el.scrollIntoView({ block: "nearest" });
+      } else if (ev.key === "Enter" && items[selected] && !items[selected].search) {
+        ev.preventDefault();
+        choose(selected);
+      } else if (ev.key === "Escape") { ev.preventDefault(); hide(); }
+    });
   }
 
   function setupFormStatus() {
@@ -109,6 +233,7 @@
         var dirty = initial === null || signature() !== initial;
         if (dirty) edited.add(form); else edited.delete(form);
         status.textContent = dirty ? "Modifications non enregistrées" : "";
+        bar.classList.toggle("is-dirty", dirty);
       }
       form.addEventListener("input", update);
       form.addEventListener("change", update);
@@ -138,7 +263,68 @@
     for (var parent = input.parentElement; parent; parent = parent.parentElement) {
       if (parent.tagName === "DETAILS") parent.open = true;
     }
+    // une page en sous-onglets (une section par ancre, ``data-pane``, ADR 0176) : montrer celle du champ
+    var pane = input.closest("[data-pane][id]");
+    if (pane && !pane.checkVisibility()) {
+      location.replace("#" + pane.id);
+      window.dispatchEvent(new Event("hashchange"));  // les sous-onglets montrent la section avant le focus
+    }
     input.focus();
+  }
+
+  // Les pages en sous-onglets (``data-pane``, ADR 0176) : la section ouverte (l'ancre de l'adresse) se retrouve après un
+  // enregistrement, qui revient sans ancre ; sans script, la page revient sur sa première section.
+  function setupPanes() {
+    var panes = document.querySelectorAll("[data-pane][id]");
+    if (!panes.length) return;
+    var key = "mika.console.pane:" + location.pathname;
+    document.querySelectorAll("form").forEach(function (form) {
+      form.addEventListener("submit", function () {
+        var open = location.hash && document.getElementById(location.hash.slice(1));
+        try {
+          if (open && open.hasAttribute("data-pane")) sessionStorage.setItem(key, open.id);
+          else sessionStorage.removeItem(key);
+        } catch (e) { /* stockage indisponible */ }
+      });
+    });
+    var kept = null;
+    try { kept = sessionStorage.getItem(key); sessionStorage.removeItem(key); } catch (e) { /* stockage indisponible */ }
+    if (!location.hash && kept && document.getElementById(kept)) location.replace("#" + kept);
+  }
+
+  // Des sous-onglets (``[data-subtabs]``, ADR 0176) : la section de l'ancre (ou celle qui contient l'élément visé), la
+  // première sinon ; les autres masquées, son lien marqué. Un clic change l'ancre sans faire sauter la page ; Précédent
+  // revient à la section d'avant. Sans script, les sections se suivent.
+  function setupSubtabs() {
+    document.querySelectorAll("[data-subtabs]").forEach(function (box) {
+      var panes = Array.from(box.querySelectorAll("[data-pane][id]")).filter(function (p) {
+        return p.parentElement.closest("[data-subtabs]") === box;
+      });
+      if (!panes.length) return;
+      var links = Array.from(box.querySelectorAll(".hm-subnav a[href^='#']"));
+      function show() {
+        var target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+        var on = panes.find(function (p) { return target && p.contains(target); }) || panes[0];
+        panes.forEach(function (p) { p.hidden = p !== on; });
+        links.forEach(function (a) {
+          if (a.getAttribute("href") === "#" + on.id) a.setAttribute("aria-current", "true");
+          else a.removeAttribute("aria-current");
+        });
+      }
+      links.forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button !== 0) return;
+          ev.preventDefault();
+          history.pushState(null, "", a.getAttribute("href"));
+          show();
+          var top = box.getBoundingClientRect().top;
+          if (top < 0) box.scrollIntoView({ block: "start" });
+        });
+      });
+      window.addEventListener("hashchange", show);
+      window.addEventListener("popstate", show);
+      show();
+    });
   }
 
   function setupValidation() {
@@ -179,7 +365,9 @@
 
   ready(function () {
     applyTheme(readTheme());
-    var openNavigation = setupNavigation();
+    setupNavigation();
+    setupTopMenus();
+    setupGoto();
     // Les longues rubriques restent accessibles sans prendre tout l'écran mobile.
     document.querySelectorAll("[data-responsive-menu]").forEach(function (menu) {
       var narrow = window.matchMedia(menu.getAttribute("data-responsive-menu") || "(max-width: 1100px)");
@@ -209,16 +397,17 @@
       });
     });
 
-    // « / » pour chercher.
+    // « / » ou Ctrl K : « Aller à… ».
     var search = document.querySelector("#q-global");
     document.addEventListener("keydown", function (ev) {
       var t = ev.target;
-      if (ev.key === "/" && search && !ev.defaultPrevented && !ev.ctrlKey && !ev.metaKey && !ev.altKey &&
-          !t.isContentEditable && !(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement ||
-          t instanceof HTMLSelectElement)) {
+      var slash = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !t.isContentEditable &&
+        !(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement);
+      var ctrlK = (ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K");
+      if (search && !ev.defaultPrevented && (slash || ctrlK)) {
         ev.preventDefault();
-        openNavigation();
         search.focus();
+        search.select();
       }
     });
 
@@ -257,6 +446,8 @@
       if (i.type !== "checkbox" && i.type !== "radio") i.addEventListener("input", syncOnly);
     });
     syncOnly();
+    setupPanes();
+    setupSubtabs();
     setupFormStatus();
     setupValidation();
 
@@ -408,7 +599,20 @@
             var box = document.querySelector("[data-vitals-items]");
             // Fragment rendu par le serveur (échappé par Jinja), jamais du texte extérieur brut.
             if (box) box.innerHTML = html;
-            if (live) { live.textContent = "À jour"; live.classList.remove("t-warn"); }
+            var digest = box && box.querySelector(".vitals-digest");
+            if (digest) {
+              var said = document.querySelector("[data-status-digest]");
+              var alerts = document.querySelector("[data-status-alerts]");
+              var mood = document.querySelector("[data-status-mood]");
+              if (said) said.textContent = digest.getAttribute("data-digest");
+              if (alerts) {
+                var n = Number(digest.getAttribute("data-alerts") || 0);
+                alerts.hidden = !n;
+                alerts.querySelector("span").textContent = String(n);
+              }
+              if (mood) mood.className = "mood " + (digest.getAttribute("data-mood") || "");
+            }
+            if (live) { live.textContent = ""; live.classList.remove("t-warn"); }
             delay = 10000;
             setTimeout(tick, delay);
           })

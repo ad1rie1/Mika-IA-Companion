@@ -4,7 +4,7 @@
 
 /* ── Le résumé : son issue en grand, de la couleur de son ton ────────── */
 .episode-hero { padding: 26px 30px; }
-.episode-outcome { margin: 8px 0 0; font-family: var(--now-serif); font-size: clamp(1.9rem, 3.4vw, 2.6rem); font-weight: 600;
+.episode-outcome { margin: 8px 0 0; font-family: var(--now-serif); font-size: clamp(1.5rem, 2.4vw, 1.9rem); font-weight: 650;
   line-height: 1.05; letter-spacing: -.015em; }
 .episode-hero.ok .episode-outcome { color: var(--ok); }
 .episode-hero.warn .episode-outcome { color: var(--warn); }
@@ -52,7 +52,7 @@
 .event-path .hm-chip { cursor: default; }
 .event-facts { margin-top: 16px; }
 
-/* ── La recherche : une carte par sorte de résultat ──────────────────── */
+/* ── La recherche : « Tout » (une carte par sorte, ses premiers liens), puis une section par sorte (ADR 0176) ── */
 .search-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--now-gap);
   align-items: start; }
 .search-items { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
@@ -60,3 +60,8 @@
 .search-items li:first-child { padding-top: 0; border-top: 0; }
 .search-items a { font-weight: 600; overflow-wrap: anywhere; }
 .search-sub { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.search-more { margin: 10px 0 0; font-size: 13px; }
+.search-silent { margin: 14px 0 0; font-size: 13px; }
+/* une sorte ouverte : tous ses liens en colonnes */
+.search-columns { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); column-gap: 32px; }
+.search-columns li:nth-child(-n+4) { padding-top: 9px; border-top: 1px solid var(--border); }

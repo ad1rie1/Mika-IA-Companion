@@ -12,7 +12,7 @@
   font-weight: 600; }
 .person-avatar .now-presence { right: 3px; bottom: 3px; width: 18px; height: 18px; border-width: 3px; }
 .person-head-text { display: grid; gap: 6px; min-width: 0; }
-.person-head-text h1 { font-family: var(--now-serif); font-size: clamp(2rem, 3vw, 2.7rem); font-weight: 600; letter-spacing: -.015em; line-height: 1.05; }
+.person-head-text h1 { font-family: var(--display); font-size: 24px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
 .person-head-facts { margin: 0; color: var(--text-2); font-size: 13.5px; }
 .person-head-links { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; color: var(--muted); font-size: 13px; }
 
@@ -20,7 +20,7 @@
 .person-live { position: absolute; top: 16px; right: 18px; padding: 3px 10px; font-size: 11.5px; }
 .person-hero { grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); align-items: start; }
 .person-bond { display: grid; gap: 12px; padding-left: 28px; border-left: 1px solid var(--border); }
-.person-hard { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn);
+.person-hard { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn);
   font-size: 13px; }
 .person-word { font-size: clamp(2.2rem, 4vw, 3.2rem); }
 .person-meters { display: grid; gap: 0; }

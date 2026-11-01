@@ -56,7 +56,7 @@ from tests.fixtures.mika import befriend, boot, build, connect, said
 
 #: (propriétaire, nom) → (titre, paramètres, destination)
 OWN_VIEWS = {
-    ("identity", "personnes"): ("Personnes", ("q",), "personnes"),
+    ("identity", "personnes"): ("Annuaire", ("q",), "personnes"),
     ("identity", "annuaire"): ("Moyens de communication", ("q", "confiance"), "identites"),
     ("identity", "revendications"): ("Identités à confirmer", (), "identites"),
     ("identity", "politique"): ("Règles de divulgation", (), "identites"),

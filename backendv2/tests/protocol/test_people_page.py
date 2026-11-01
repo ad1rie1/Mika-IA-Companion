@@ -33,10 +33,16 @@ def test_a_card_per_person(world):  # noqa: F811
     card = re.search(r'<li class="people-card.*?</li>\s*</ul>', text, re.S).group()
     assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in card
     assert '<span class="now-tag owner">propriétaire</span>' in card and "lui a écrit à l'instant" in card
-    # les onglets des facultés restent, sous « Le détail »
-    assert all(f'href="/inspecteur/personnes/{tab}"' in text for tab in ("personnes", "liens", "presents"))
+    # une seule barre d'onglets, la même sur les quatre pages : cette page, puis les onglets des facultés (ADR 0176)
+    bar = r'<nav class="tabs" aria-label="Onglets">(.*?)</nav>'
+    expected = [("/inspecteur/personnes", "Vue d'ensemble"), ("/inspecteur/personnes/personnes", "Annuaire"),
+                ("/inspecteur/personnes/liens", "Liens"), ("/inspecteur/personnes/presents", "Présents")]
+    assert re.findall(r'href="([^"]+)"[^>]*>([^<]+)</a>', re.search(bar, text, re.S).group(1)) == expected
     for tab in ("personnes", "liens", "presents"):
-        assert client.get(f"/inspecteur/personnes/{tab}").status_code == 200, tab
+        page = client.get(f"/inspecteur/personnes/{tab}")
+        assert page.status_code == 200, tab
+        tabs = re.search(bar, html.unescape(page.text), re.S).group(1)
+        assert re.findall(r'href="([^"?]+)[^"]*"[^>]*>([^<]+)</a>', tabs) == expected, tab
 
 
 def test_search_and_filters(world):  # noqa: F811

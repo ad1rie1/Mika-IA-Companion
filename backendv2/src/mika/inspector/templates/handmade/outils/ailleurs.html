@@ -1,9 +1,8 @@
-{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons ; une carte par service
+{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons de la barre de titre (la
+   console les y porte) ; une carte par service
    branché (son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard) ; une carte par app et les
    outils qu'elle lui donne. #}
 <div class="now-page elsewhere">
-  {% if links %}<div class="toolbar hm-toolbar elsewhere-actions" role="group" aria-label="Ses services">{% for text, href in links %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}</div>{% endif %}
-
   {% if services is not none %}
   <section class="now-card" aria-labelledby="elsewhere-services">
     <header class="now-card-head">
