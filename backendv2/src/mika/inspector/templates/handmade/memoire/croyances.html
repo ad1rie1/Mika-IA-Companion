@@ -1,0 +1,39 @@
+{# Elle › Mémoire › Croyances (app/handmade/tabs/memory.py, ADR 0177) : ce qu'elle tient pour vrai, une entrée par
+   croyance — sa confiance en avant (un chiffre, sa jauge), son texte, son origine (on le lui a dit, elle l'a vu, elle
+   le déduit) et qui ; une croyance remplacée s'estompe, celle qui la remplace mène à elle. La pagination et la
+   bascule « Tableau » de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+<div class="now-page memories beliefs" data-tab="memoire/croyances">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="beliefs-title">
+    {{ tab.head(t.title, "beliefs-title", t.count, list=t) }}
+    {% if items %}
+    <ul class="memories-list" role="list">
+      {% for m in items %}
+      <li class="memories-item belief{{ ' faded' if m.faded }}">
+        <div class="belief-trust" title="Sa confiance, effective : elle baisse lentement avec le temps">
+          {% if m.trust %}<span class="belief-trust-value now-num">{{ m.trust.text }}</span>{{ tab.bar(m.trust.w, 'confidence') }}{% else %}<span class="belief-trust-value now-muted">—</span>{% endif %}
+          <span class="belief-trust-label">confiance</span>
+        </div>
+        <div class="belief-main">
+          <div class="memories-text">{{ tab.cell(m.text) }}</div>
+          <p class="memories-meta">
+            {% if m.origin %}<span class="belief-origin o-{{ m.origin.kind or 'other' }}">{{ m.origin.text }}</span>{% if m.origin.who %}<span class="now-muted">par {{ m.origin.who }}</span>{% endif %}{% endif %}
+            {{ mem.tags(m.tags) }}
+            {% if m.about %}<span>sur {{ tab.cell(m.about) }}</span>{% endif %}
+            {% if m.born %}<span class="memories-when">née {{ tab.cell(m.born) }}</span>{% endif %}
+          </p>
+          {% set replaces %}{% if m.replaces %}<span class="belief-replaces">remplace {{ tab.cell(m.replaces) }}</span>{% endif %}{% endset %}
+          {{ mem.foot(m, t, replaces) }}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </section>
+  {% endif %}
+</div>

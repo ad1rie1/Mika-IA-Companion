@@ -1,0 +1,38 @@
+{# Elle › Mémoire › La vie des autres (app/handmade/tabs/memory.py, ADR 0177) : un agenda de ce qui arrive aux gens
+   qu'elle connaît — ce qui dure en ce moment, ce qui vient (le plus proche d'abord), ce qui est passé et comment ça a
+   tourné —, chaque moment avec sa date en pavé de calendrier ; une date qui revient chaque année l'est à sa prochaine
+   fois. La pagination et la bascule « Tableau » de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+<div class="now-page memories moments" data-tab="memoire/moments">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="moments-title">
+    {{ tab.head(t.title, "moments-title", t.count, list=t) }}
+    {% for g in groups %}
+    <section class="moments-group {{ g.id }}" aria-labelledby="moments-{{ g.id }}">
+      <header class="moments-group-head"><h3 id="moments-{{ g.id }}">{{ g.title }}</h3><span class="person-count now-num">{{ g["items"]|length }}</span><p>{{ g.lede }}</p></header>
+      <ul class="memories-list" role="list">
+        {% for m in g["items"] %}
+        <li class="memories-item moment{{ ' faded' if m.faded }}">
+          {% if m.day %}<div class="moment-day" title="{{ m.when.exact if m.when else '' }}"><span class="moment-day-n now-num">{{ m.day.d }}</span><span class="moment-day-m">{{ m.day.m }}</span><span class="moment-day-w">{{ m.day.w }}</span></div>
+          {% else %}<div class="moment-day none"><span class="moment-day-m">sans date</span></div>{% endif %}
+          <div class="moment-main">
+            <div class="memories-text">{{ tab.cell(m.text) }}</div>
+            <p class="memories-meta">
+              {{ mem.tags(m.tags) }}
+              {% if m.who %}<span>de {{ tab.cell(m.who) }}</span>{% endif %}
+              {% if m.when and m.at %}<span class="memories-when">{{ 'depuis ' if g.id == 'current' }}{{ tab.cell(m.when) }}</span>{% endif %}
+            </p>
+            {{ mem.foot(m, t) }}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% else %}{{ tab.empty(t.empty) }}{% endfor %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </section>
+  {% endif %}
+</div>

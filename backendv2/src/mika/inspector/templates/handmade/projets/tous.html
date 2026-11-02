@@ -1,0 +1,51 @@
+{# Activité › Projets › Ses projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en chiffres (ce qui attend
+   ton accord en tête quand il y en a), puis une entrée par projet, en deux colonnes sur un grand écran — son mode,
+   son état, où il en est, ses objectifs en jauge, sa prochaine exécution et la dernière, pour qui ; le reste
+   (priorité, plage de travail, agenda, outils, dépôt distant, ce qui sort) replié. La bascule « Fiches / Tableau »
+   et la pagination de la console ; « Créer un projet » est dans la barre de titre. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "handmade/shared/macros.html" import bar %}
+<div class="now-page prj" data-tab="projets/tous">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  {% if band["items"] %}{{ tab.block(band) }}{% endif %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-title">
+    {{ tab.head(t.title, "prj-title", t.count, list=t) }}
+    {% if items %}
+    <ul class="prj-list" role="list">
+      {% for p in items %}
+      <li class="prj-item{{ ' waiting' if p.waiting }}{{ ' archived' if p.archived }}">
+        <div class="prj-top">
+          <p class="prj-title">{% if p.title.t == "link" %}<a href="{{ p.title.href }}">{{ p.title.text }}</a>{% else %}{{ tab.cell(p.title) }}{% endif %}</p>
+          <span class="prj-tags">
+            {% if p.waiting %}<span class="now-tag warn">attend ton accord</span>{% endif %}
+            {% if p.mode %}<span class="now-tag {{ p.mode.tone }}">{{ p.mode.text }}</span>{% endif %}
+            {% if p.state %}<span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif %}
+          </span>
+        </div>
+        {% if p.where %}<p class="prj-where">{{ tab.cell(p.where) }}</p>{% endif %}
+        {% if p.goals %}
+        <div class="prj-goals"><span class="prj-goals-label">Objectifs</span>{{ bar(p.goals.w, "goal " ~ p.goals.tone) }}<span class="prj-goals-text">{{ p.goals.text }}</span></div>
+        {% elif p.goals_text %}<p class="prj-goals"><span class="prj-goals-label">Objectifs</span><span class="prj-goals-text">{{ p.goals_text }}</span></p>{% endif %}
+        <dl class="prj-facts">
+          {% if p.next %}<div><dt>Prochaine exécution</dt><dd>{{ tab.cell(p.next) }}</dd></div>{% endif %}
+          <div><dt>Dernière</dt><dd>{{ tab.cell(p.last) if p.last else 'aucune encore' }}</dd></div>
+          {% if p.who %}<div><dt>Pour</dt><dd>{{ tab.cell(p.who) }}</dd></div>{% endif %}
+        </dl>
+        <div class="prj-foot">
+          {% if p.href %}<a href="{{ p.href }}">{{ t.link_label or 'Ouvrir l’espace de travail' }} →</a>{% endif %}
+          {% if p.facts or p.detail %}
+          <details class="person-entry-detail"{{ ' open' if p.open }}>
+            <summary>Son rythme, ses outils, son dépôt</summary>
+            {% if p.facts %}<dl class="prj-more">{% for f in p.facts %}<div><dt>{{ f.label|capitalize }}</dt><dd>{{ tab.cell(f.value) }}</dd></div>{% endfor %}</dl>{% endif %}
+            {% if p.detail %}<div class="stack">{{ tab.inner(p.detail) }}</div>{% endif %}
+          </details>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {% if t.caption and items %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ t.caption }}</p></details>{% endif %}
+  </section>
+</div>

@@ -1,0 +1,131 @@
+{# Elle › Humeur et corps › Estime et récit (app/handmade/tabs/life.py, ADR 0177) : une bande de chiffres qui mène à
+   ses sous-onglets, un bandeau si elle doute ; puis, un sujet par sous-onglet : son estime (sur son échelle, sa
+   courbe, ses derniers coups, ses règles repliées), son récit, sa persona, son tempérament (sa réaction, sa défense,
+   ses curseurs par famille, de part et d'autre du milieu). Sa persona et son tempérament se règlent dans Réglages. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+{% set panes = {"Estime": "soi-estime", "Au dernier coup": "soi-estime", "Son récit": "soi-recit", "La persona": "soi-persona"} %}
+<div class="now-page vie vie-soi" data-tab="vie/soi">
+  {% if doubt %}<p class="person-tab-note warn">{{ doubt }}</p>{% endif %}
+
+  <section class="person-tiles vie-band" aria-label="Elle, en chiffres">
+    <ul class="person-tiles-list">{% for x in band %}
+      <li class="{{ x.tone }}"><a href="#{{ panes.get(x.label, 'soi-estime') }}"><span class="person-tile-label">{{ x.label }}</span><span class="person-tile-value">{% if x.value.t == "meter" %}<span class="now-num">{{ x.value.text }}</span>{% else %}{{ tab.cell(x.value) }}{% endif %}</span>{% if x.sub %}<span class="person-tile-sub">{{ x.sub }}</span>{% endif %}</a></li>
+    {% endfor %}</ul>
+  </section>
+
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ce qu'elle est">
+      <p class="hm-subnav-title">Elle</p>
+      <a href="#soi-estime"{% if doubt %} class="warn"{% endif %}>Son estime</a>
+      <a href="#soi-recit">Son récit</a>
+      <a href="#soi-persona">Sa persona</a>
+      <a href="#soi-temperament">Son tempérament</a>
+    </nav>
+    <div class="hm-subpanes">
+
+      {# ── son estime ── #}
+      <section id="soi-estime" data-pane class="now-card vie-pane" aria-labelledby="soi-estime-title">
+        <header class="now-card-head"><h2 id="soi-estime-title">Son estime</h2><p>lente : elle revient vers son repos ; ce qui la bouscule, ce qu'elle mène à bout, ce qu'on lui dit d'elle</p></header>
+        {% if scale %}
+        <figure class="vie-scale">
+          <svg width="100%" height="58" role="img" aria-label="Son estime : {{ scale.text }} sur une échelle de 0 à 1{% if scale.doubt is not none %} ; elle doute sous {{ scale.doubt_text }}{% endif %}{% if scale.sure is not none %}, sûre d'elle au-dessus de {{ scale.sure_text }}{% endif %}">
+            <rect class="vie-scale-track" x="{{ scale.lo }}%" y="22" width="{{ scale.hi - scale.lo }}%" height="10" rx="5"/>
+            {% if scale.doubt is not none %}<rect class="vie-scale-doubt" x="{{ scale.lo }}%" y="22" width="{{ scale.doubt - scale.lo }}%" height="10"/>{% endif %}
+            {% if scale.sure is not none %}<rect class="vie-scale-sure" x="{{ scale.sure }}%" y="22" width="{{ scale.hi - scale.sure }}%" height="10"/>{% endif %}
+            {% if scale.doubt is not none %}<text class="vie-scale-word" x="{{ scale.lo }}%" y="50">elle doute · sous {{ scale.doubt_text }}</text>{% endif %}
+            {% if scale.sure is not none %}<text class="vie-scale-word" x="{{ scale.hi }}%" y="50" text-anchor="end">sûre d'elle · dès {{ scale.sure_text }}</text>{% endif %}
+            <line class="vie-scale-mark" x1="{{ scale.value }}%" x2="{{ scale.value }}%" y1="16" y2="38"/>
+            <circle class="vie-scale-now {{ scale.tone }}" cx="{{ scale.value }}%" cy="27" r="7"/>
+            <text class="vie-scale-value" x="{{ scale.value }}%" y="11" text-anchor="middle">{{ scale.text }}</text>
+          </svg>
+        </figure>
+        {% endif %}
+        <div class="vie-two inner">
+          <div>
+            <h3 class="now-subhead first">Sur sept jours</h3>
+            {{ vie.curve(chart) }}
+          </div>
+          <div{% if t_knocks %} id="{{ t_knocks.id }}"{% endif %}>
+            <h3 class="now-subhead first">Ses derniers coups{% if t_knocks and t_knocks.count %} <span class="person-count now-num">{{ t_knocks.count }}</span>{% endif %}</h3>
+            {% if knocks %}
+            <ol class="vie-knocks" role="list">
+              {% for k in knocks %}<li><span class="vie-knock {{ k.tone }} now-num">{{ k.delta }}</span><span>{{ k.why }}</span><span class="vie-when">{{ tab.cell(k.when) }}</span></li>{% endfor %}
+            </ol>
+            {% else %}{{ tab.empty((t_knocks or {}).empty or "jamais bousculée") }}{% endif %}
+            {{ tab.pager(t_knocks) }}
+          </div>
+        </div>
+        <details class="hm-subfold vie-rules">
+          <summary>Ses règles</summary>
+          {{ vie.facts(rules) }}
+        </details>
+      </section>
+
+      {# ── son récit ── #}
+      <section id="soi-recit" data-pane class="now-card vie-pane" aria-labelledby="soi-recit-title">
+        <header class="now-card-head"><h2 id="soi-recit-title">Son récit d'elle-même</h2><p>ce qu'elle se raconte d'elle, réécrit quand assez de choses ont changé</p></header>
+        <div class="vie-story">
+          <div>
+            {% if prose %}
+            <p class="now-eyebrow">{{ prose.title }}</p>
+            <div class="vie-story-text">{{ prose.text }}</div>
+            {% else %}{{ tab.empty(untold or "elle ne s'est pas encore racontée") }}{% endif %}
+          </div>
+          <aside aria-label="Où en est son récit">{{ vie.facts(story, "vie-facts") }}</aside>
+        </div>
+      </section>
+
+      {# ── sa persona ── #}
+      <section id="soi-persona" data-pane class="now-card vie-pane" aria-labelledby="soi-persona-title">
+        <header class="now-card-head"><h2 id="soi-persona-title">Sa persona</h2><p>ce qui ne bouge pas d'elle-même</p><a class="now-more" href="{{ PREFIX }}/reglages/personnalite">La régler →</a></header>
+        {% set pe = persona %}
+        {% if pe.identity %}<p class="vie-identity">{% for x in pe.identity %}<span><span class="now-muted">{{ x.label }}</span> {{ tab.cell(x.value) }}</span>{% endfor %}</p>{% endif %}
+        <div class="vie-persona">
+          {% for x in pe.texts %}
+          <section class="vie-persona-text" aria-label="{{ x.label }}">
+            <h3 class="now-subhead first">{{ x.label }}</h3>
+            {% if x.text %}<p class="vie-reading">{{ x.text }}</p>{% else %}<p class="now-empty">rien</p>{% endif %}
+          </section>
+          {% endfor %}
+          {% for x in pe.lists %}
+          <section class="vie-persona-list" aria-label="{{ x.label }}">
+            <h3 class="now-subhead first">{{ x.label }}</h3>
+            {% if x.pairs %}
+            <ul class="vie-samples" role="list">{% for a, b in x.pairs %}<li><span class="vie-sample-in">{{ a }}</span><span class="vie-sample-out">{{ b }}</span></li>{% endfor %}</ul>
+            {% elif x.entries %}
+            <ul class="vie-bullets" role="list">{% for i in x.entries %}<li>{{ i }}</li>{% endfor %}</ul>
+            {% else %}<p class="now-empty">rien</p>{% endif %}
+          </section>
+          {% endfor %}
+        </div>
+      </section>
+
+      {# ── son tempérament ── #}
+      {% set tp = temperament %}
+      <section id="soi-temperament" data-pane class="now-card vie-pane" aria-labelledby="soi-temperament-title">
+        <header class="now-card-head"><h2 id="soi-temperament-title">Son tempérament</h2><p>profil : <b>{{ tp.profile }}</b> · au milieu, comme la plupart des gens</p><a class="now-more" href="{{ PREFIX }}/reglages/temperament">Le régler →</a></header>
+        <dl class="vie-character">
+          <div><dt>Son humeur de fond</dt><dd>{{ tab.cell(tp.background) }}</dd></div>
+          {% for p in character %}<div><dt>{{ vie.cap(p.label) }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}
+        </dl>
+        <div class="vie-families">
+          {% for f in tp.families %}
+          <section class="vie-family" aria-label="{{ f.name }}">
+            <h3 class="now-subhead first">{{ f.name }}</h3>
+            <ul class="vie-sliders" role="list">
+              {% for x in f.sliders %}
+              <li{% if x.far %} class="far"{% endif %} title="{{ x.help }}">
+                <p class="vie-slider-head"><span>{{ x.label }}</span><span class="now-num">{{ x.value }}</span></p>
+                <svg class="vie-slider" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% if x.x2 > x.x1 %}<line class="fill" x1="{{ x.x1 }}" x2="{{ x.x2 }}" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% endif %}<line class="mid" x1="50" x2="50" y1="0" y2="10" vector-effect="non-scaling-stroke"/></svg>
+                {% if x.lo %}<p class="vie-slider-ends"><span>{{ x.lo }}</span><span>{{ x.hi }}</span></p>{% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+          </section>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+  </div>
+</div>

@@ -1,33 +1,33 @@
 """Les onglets des destinations de la console qui sont dessinés (ADR 0121), par « destination/onglet » : la console
-les reçoit (``InspectorDeps.drawn``) et retombe sur leurs blocs si un dessin échoue. Un onglet sans forme à lui est
-dessiné bloc par bloc (``Blocks``)."""
+les reçoit (``InspectorDeps.drawn``) et retombe sur leurs blocs si un dessin échoue. Chacun a sa forme (ADR 0177) :
+ceux de chaque destination sont déclarés par son module de ``tabs/`` ; les autres, plus anciens, ici."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from markupsafe import Markup
-
-from mika.app.handmade import blocks, conversations, mail, nights, rights, running, senses, system, tools
+from mika.app.handmade import conversations, mail, nights, rights, running, senses, system, tools
+from mika.app.handmade.tabs import (
+    approvals,
+    apps,
+    decisions,
+    goals,
+    identities,
+    life,
+    memory,
+    people,
+    projects,
+    settings,
+    teams,
+    thoughts,
+    threads,
+    wakeups,
+)
+from mika.app.handmade.tabs import senses as sense_tabs
+from mika.app.handmade.tabs import system as system_tabs
+from mika.app.handmade.tabs import tools as tool_tabs
 from mika.inspector.ui import UI, Drawn
-
-
-class Blocks(Drawn):
-    """Un onglet dessiné bloc par bloc : des tuiles, des faits, des listes, un fil, ses formulaires (ceux que la
-    console a préparés, avec leur jeton).
-    ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation) ; ``styles`` :
-    la feuille de son panneau, s'il en a un (Prêter à un agent)."""
-
-    def __init__(self, tables: str = "cards", *styles: str) -> None:
-        self.tables = tables
-        self.styles = styles
-
-    def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
-               forms: Mapping[str, Any] | None = None) -> Any:
-        drawn = blocks.page(ui, items, query, tables=self.tables, forms=forms)
-        # rien à dessiner, mais un panneau qui a sa feuille (Prêter à un agent) : dessiné quand même, pour la charger
-        return Markup("") if drawn is None and self.styles else drawn
 
 
 class Shaped(Drawn):
@@ -46,53 +46,46 @@ class Shaped(Drawn):
         return self.draw(ui, items, query, forms or {}) if self.forms else self.draw(ui, items, query)
 
 
-CARDS = Blocks()
-#: des données d'exploitation (des modèles, des appels, des tables) : en colonnes
-TABLES = Blocks("table")
-
 DRAWN: dict[str, Drawn] = {
     # Elle : humeur et corps, pensées et nuits, mémoire
-    **{f"vie/{t}": CARDS for t in ("humeur", "postures", "needs", "rythme", "monde", "soi", "devenir")},
-    **{f"pensees/{t}": CARDS for t in ("pensees", "remarque", "attentes")},
+    **life.TABS,
+    **thoughts.TABS,
     "pensees/nuits": Shaped(nights.nights, "handmade/nights.css"),
-    **{f"memoire/{t}": CARDS for t in ("souvenirs", "croyances", "recues", "place", "promesses", "moments",
-                                        "voir-venir", "consolidation")},
+    **memory.TABS,
     # Relations & échanges : le détail des personnes, identités, conversations, courrier, Teams
-    **{f"personnes/{t}": CARDS for t in ("personnes", "liens", "presents")},
-    **{f"identites/{t}": CARDS for t in ("annuaire", "revendications", "noms", "politique")},
-    **{f"teams/{t}": CARDS for t in ("conversations", "reponses", "extension")},
+    **people.TABS,
+    **identities.TABS,
+    **teams.TABS,
     "fil/messages": Shaped(conversations.messages),
     "fil/jugees": Shaped(conversations.judged),
-    "fil/questions": CARDS,
+    **threads.TABS,
     "courrier/reception": Shaped(mail.box, "handmade/mail.css", forms=True),
     "courrier/envoyes": Shaped(mail.box, "handmade/mail.css", forms=True),
     "courrier/brouillons": Shaped(mail.drafts, "handmade/mail.css", forms=True),
     "courrier/contacts": Shaped(mail.contacts, "handmade/mail.css", forms=True),
-    # Activité : décisions, buts, projets, dessins
-    **{f"decisions/{t}": CARDS for t in ("maintenant", "envers", "initiatives", "selections", "episodes",
-                                          "echeances")},
+    # Activité : décisions, buts, projets
+    **decisions.TABS,
     "decisions/en_cours": Shaped(running.running, "handmade/decisions.css"),
-    **{f"buts/{t}": CARDS for t in ("vivants", "clos")},
-    **{f"projets/{t}": CARDS for t in ("tous", "toutes_executions", "toutes_decisions")},
+    **goals.TABS,
+    **projects.TABS,
     # Outils, puis Connexions extérieures
     "outils/tous": tools.Catalogue(), "outils/serveurs": tools.Elsewhere(),
-    "outils/expose": Blocks("cards", "handmade/tools.css"),
-    **{f"sens/{t}": CARDS for t in ("flux", "camera", "dessins", "appareils")},
+    **tool_tabs.TABS,
+    **sense_tabs.TABS,
     "sens/messages": Shaped(senses.messages, "handmade/senses.css"),
     "sens/positions": Shaped(senses.positions, "handmade/senses.css"),
-    "reveils/reveils": CARDS, "apps/apps": CARDS,
+    **wakeups.TABS,
+    **apps.TABS,
     # Système : chaque page à part (des actions dans leurs lignes et leurs panneaux)
     "systeme/processus": Shaped(system.processes, "handmade/system.css"),
     "systeme/sorties": Shaped(system.outbox, "handmade/system.css", panel=False, forms=True),
     "systeme/sante": Shaped(system.health, "handmade/system.css", panel=False),
-    **{f"systeme/{t}": CARDS for t in ("anomalies", "chronologie", "monde", "contributions", "simulations")},
-    **{f"systeme/{t}": TABLES for t in ("passerelle", "appels", "stockage", "operations", "vues", "etat")},
+    **system_tabs.TABS,
     # Approbations : leur historique (les demandes en attente : leur panneau, dans le même vocabulaire)
-    "approbations/historique": CARDS,
+    **approvals.TABS,
     # Réglages : les chiffres et les groupes au-dessus du formulaire des paramètres de chaque faculté (son panneau,
     # dans le même vocabulaire), la vue d'ensemble, les comptes, le journal des modifications, qui peut quoi
-    "reglages/comportement": CARDS, "reglages/comportement-*": CARDS, "reglages/comptes": CARDS,
-    "reglages/journal": TABLES,
+    **settings.TABS,
     "reglages/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False),
     # l'accueil est une page à lui (home.py) ; la Forge garde ses contrats d'interface
 }

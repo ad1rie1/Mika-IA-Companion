@@ -1,0 +1,57 @@
+{# Système › Moteur des modèles (app/handmade/tabs/system.py, ADR 0177) : un bandeau (un rôle sans fournisseur, des
+   appels qui attendent un créneau), la bande de chiffres ; puis côte à côte chaque fournisseur — ses créneaux en cases
+   (occupés en couleur), qui attend, s'il préempte, son quota en jauges, ce qu'il a fait ces dernières 24 heures — et
+   qui sert quoi, en vrai : les rôles par fournisseur, ceux que personne ne sert d'abord. Aucun modèle configuré : le
+   bandeau seul. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-gw" data-tab="systeme/passerelle">
+  {{ sx.band(band) }}
+  {% if stats %}
+  {{ tab.block(stats) }}
+  {{ sx.notes(notes) }}
+  <div class="sys-cols two">
+    <section class="now-card" id="{{ providers_t.id }}" aria-labelledby="sys-gw-providers">
+      {{ tab.head(providers_t.title, "sys-gw-providers", providers|length, "Ses créneaux (un appel par créneau à la fois), qui attend, son quota d'abonnement.") }}
+      {% if providers %}
+      <ul class="sys-rows" role="list">
+        {% for p in providers %}
+        <li class="{{ 'is-warn' if p.waiting }}">
+          <div class="sys-row-top">
+            <p class="sys-row-name"><b class="mono">{{ p.name }}</b>{% if p.preempt %} <span class="now-tag info" title="Un fournisseur à un seul créneau préempte : une réponse interrompt un travail de fond.">préempte</span>{% endif %}</p>
+            <p class="sys-gw-slots" title="{{ p.busy }} créneau{{ 'x' if p.busy > 1 }} occupé{{ 's' if p.busy > 1 }} sur {{ p.total }}">{% for s in p.slots %}<span class="sys-slot {{ s }}" aria-hidden="true"></span>{% endfor %}<span class="now-num">{{ p.busy }} / {{ p.total }}</span>{% if p.waiting %}<span class="warn"> · {{ p.waiting }} en attente</span>{% endif %}</p>
+          </div>
+          {% if p.quota %}
+          <ul class="sys-gw-quota" role="list">
+            {% for q in p.quota %}<li class="{{ q.tone }}"><span>{{ q.label }}</span>{{ tab.bar(q.w, 'sys-gw-q ' ~ q.tone) }}<span class="now-num">{{ q.text }}</span></li>{% endfor %}
+          </ul>
+          {% endif %}
+          {% if p.day %}
+          <p class="sys-row-meta"><span class="k">24 h</span> <span class="now-num">{{ p.day.calls }}</span> appel{{ 's' if p.day.calls != 1 }}{% if p.day.failures %} · <span class="danger"><span class="now-num">{{ p.day.failures }}</span> échec{{ 's' if p.day.failures > 1 }}</span>{% endif %} · médiane {{ p.day.median }} s · lent {{ p.day.slow }} s{% if p.day.last_failure %} · dernier échec {{ p.day.last_failure }}{% if p.day.last_role %} ({{ p.day.last_role }}){% endif %}{% endif %}</p>
+          {% else %}<p class="sys-row-meta now-muted">aucun appel ces dernières 24 heures</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(providers_t.empty) }}{% endif %}
+      <p class="person-tab-note sys-foot">{{ providers_t.caption }} <a href="{{ PREFIX }}/reglages/fournisseurs">Les fournisseurs →</a></p>
+    </section>
+    <section class="now-card" id="{{ roles_t.id }}" aria-labelledby="sys-gw-roles">
+      {{ tab.head(roles_t.title, "sys-gw-roles", roles_t.count, "Les rôles par fournisseur qui les sert vraiment, replis compris.") }}
+      {% if unserved %}
+      <div class="sys-gw-group none">
+        <h3>Personne <span class="now-muted">· chaque appel de ces rôles échoue</span></h3>
+        <p class="sys-ct-chips">{% for r in unserved %}<span class="now-tag danger sys-chip" title="{{ r.tech }}">{{ r.label }}</span>{% endfor %}</p>
+      </div>
+      {% endif %}
+      {% for name, roles in served %}
+      <div class="sys-gw-group">
+        <h3><span class="mono">{{ name }}</span> <span class="now-muted now-num">{{ roles|length }}</span></h3>
+        <p class="sys-ct-chips">{% for r in roles %}<span class="now-tag sys-chip" title="{{ r.tech }}">{{ r.label }}</span>{% endfor %}</p>
+      </div>
+      {% endfor %}
+      {% if not unserved and not served %}{{ tab.empty(roles_t.empty or "aucun rôle") }}{% endif %}
+      <p class="person-tab-note sys-foot">{{ roles_t.caption }} <a href="{{ PREFIX }}/reglages/roles">Qui sert quoi →</a></p>
+    </section>
+  </div>
+  {% endif %}
+</div>

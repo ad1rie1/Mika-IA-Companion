@@ -1,0 +1,50 @@
+{# Relations & échanges › Teams › Réponses (app/handmade/tabs/teams.py, ADR 0177) : ce qu'elle a préparé à ta place.
+   D'abord une file à valider — chaque réponse qui attend ton accord, le message auquel elle répond et, en face, ce
+   qu'elle a écrit (comme sur sa fiche), « Examiner et décider » sur sa ligne — ; puis, en liste, ce que les autres
+   sont devenues. Ce que dit le plugin de « Envoyer à ta place » en pied, avec son lien. La pagination et la bascule
+   « Tableau » sont celles du plugin. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/teams/_teams.html" as tm %}
+<div class="now-page teams-tab teams-replies" data-tab="teams/reponses">
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="teams-wait-title">
+    {% if waiting or done %}
+    {{ tab.head("Attendent ton accord", "teams-wait-title", waiting|length, "elle ne les envoie pas sans toi : relis ce qui partira, puis envoie, retouche ou refuse", list=t) }}
+    {% if waiting %}
+    <ul class="teams-queue" role="list">
+      {% for r in waiting %}
+      <li class="teams-pending">
+        <p class="teams-pending-head"><b>{{ r.conversation }}</b><span class="now-muted">{% if r.why %}{{ tab.cell(r.why) }} · {% endif %}proposée {{ tab.cell(r.when) }}</span>{% if r.edited and r.edited.text %}{{ tab.cell(r.edited) }}{% endif %}</p>
+        <ol class="person-thread teams-qa">
+          {% if r.answered %}<li class="theirs"><p class="person-bubble">{{ r.answered.text }}</p><p class="person-meta">{{ r.answered.who }}</p></li>{% endif %}
+          <li class="mine"><p class="person-bubble teams-text">{{ r.text }}</p><p class="person-meta">sa réponse{% if not r.answered %} · un message nouveau, en réponse à rien{% endif %}</p></li>
+        </ol>
+        <div class="teams-do">{% if r.href %}<a class="btn small" href="{{ r.href }}">Examiner et décider</a>{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Aucune réponse n'attend ton accord.</p>{% endif %}
+
+    <h3 class="teams-sub">Ce qu'elles sont devenues <span class="hm-count">{{ done|length }}</span></h3>
+    {% if done %}
+    <ul class="teams-done" role="list">
+      {% for r in done %}
+      <li>
+        <span class="teams-state">{{ tab.cell(r.state) }}</span>
+        <p class="teams-done-main"><a href="{{ r.href }}"><b>{{ r.conversation }}</b></a> <span class="teams-done-text">{{ r.text }}</span></p>
+        <span class="teams-when">{% if r.edited and r.edited.text %}{{ tab.cell(r.edited) }} {% endif %}{{ tab.cell(r.when) }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Rien d'autre pour l'instant.</p>{% endif %}
+    {% else %}
+    {{ tab.head("Ses réponses", "teams-wait-title", 0, "ce qu'elle prépare à ta place dans Teams, et ce que c'est devenu", list=t) }}
+    {{ tab.empty(t.empty) }}
+    {% endif %}
+    {{ tab.pager(t) }}
+    {% if about %}<p class="person-tab-note teams-about">{{ about }} <a href="{{ PREFIX }}/envoi">Envoyer à ta place →</a></p>{% endif %}
+  </section>
+  {% else %}
+  {{ tm.unplugged(notes, False) }}
+  {% endif %}
+</div>

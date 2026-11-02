@@ -293,10 +293,21 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .crumbs [aria-hidden="true"] { opacity: .5; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 16px; }
 .page-title { min-width: 0; }
-.page-head p { margin: 4px 0 0; color: var(--text-2); max-width: 110ch; }
+.page-head p { margin: 6px 0 0; color: var(--text-2); font-size: 12.5px; max-width: 110ch; }
 .page-head .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.head-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
+.head-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
 .head-facts span.k { color: var(--muted); margin-right: 5px; }
+.head-facts span.k:empty { display: none; }
+/* des faits séparés par un filet (la maquette) */
+.head-facts > span + span::before { content: ""; display: inline-block; width: 1px; height: 12px; margin: 0 12px;
+  background: var(--border-strong); vertical-align: -1px; }
+/* la vue d'un objet : son nom, son état à côté */
+.page-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+/* sur un écran étroit, les faits passent à la ligne : un espacement plutôt qu'un filet en tête de ligne */
+@media (max-width: 640px) {
+  .head-facts { gap: 4px 14px; }
+  .head-facts > span + span::before { display: none; }
+}
 
 .tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border); margin: 0 0 18px; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
@@ -305,10 +316,27 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .tab:hover { color: var(--text); text-decoration: none; }
 .tab.on { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
 .tab .count { background: var(--accent); color: var(--on-accent); }
+/* combien un onglet en compte, en petit (la maquette : « Objectifs 8 ») */
+.tab .tab-n { color: var(--muted); font-size: 11.5px; font-weight: 500; }
 /* ce qui règle une destination (``gear``, ADR 0176) : au bout de la barre d'onglets, à droite */
 .tabs-row { display: flex; align-items: flex-end; gap: 22px; margin: 0 0 18px; border-bottom: 1px solid var(--border); }
 .tabs-row .tabs { flex: 1 1 auto; min-width: 0; margin: 0; border-bottom: 0; }
 .tab-gear { margin-left: auto; }
+/* des filtres de petits choix (la période) : des boutons à choix au bout de la barre d'onglets (la maquette) */
+.tabs-tail { flex: none; align-self: center; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.quick-filters { display: flex; justify-content: flex-end; margin: 0 0 16px; }
+/* un bouton à choix (ADR 0176, la maquette) : la période, Fiches / Tableau ; le choix en vigueur en violet doux */
+.seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--raised); }
+.seg a { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--radius-sm);
+  color: var(--text-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.seg a:hover { color: var(--text); text-decoration: none; }
+.seg a[aria-current] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+@media (max-width: 640px) {
+  .tabs-row:has(> .tabs-tail) { flex-wrap: wrap; row-gap: 0; }
+  .tabs-row:has(> .tabs-tail) > .tabs { flex-basis: 100%; order: 2; }
+  .tabs-row > .tabs-tail { order: 1; padding-bottom: 6px; }
+}
 .tab-gear .menu-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .tabs-more, .gear-tabs { position: relative; flex: none; }
 .tabs-more > summary, .gear-tabs > summary { list-style: none; cursor: pointer; }
@@ -517,7 +545,7 @@ input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var
 input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; box-shadow: var(--ring); }
 textarea { width: 100%; min-height: 4.5rem; font: inherit; font-size: 13px; line-height: 1.5; padding: 7px 10px; }
 textarea.mono { font: 12.5px/1.5 var(--mono); }
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-weight: 550;
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-weight: 500;
   min-height: var(--ctl); padding: 5px 12px; font-size: 13px; line-height: 1.25; border-radius: var(--radius);
   border: 1px solid var(--inverse); background: var(--inverse); color: var(--on-inverse); cursor: pointer;
   transition: background .12s, border-color .12s, color .12s; white-space: nowrap; }
@@ -528,6 +556,8 @@ textarea.mono { font: 12.5px/1.5 var(--mono); }
 /* au survol : plus sombre en clair, plus claire en sombre (le contraste tient) */
 .btn.danger:hover { background: var(--danger-hover); border-color: var(--danger-hover); }
 .btn.small { min-height: 28px; padding: 3px 10px; font-size: 12.5px; }
+/* un bouton d'icône (« ⋯ » : les autres actions) : carré, à la hauteur des contrôles */
+.btn.icon { width: var(--ctl); padding: 0; font-size: 16px; letter-spacing: .04em; }
 .btn.quiet.danger { color: var(--danger); background: var(--raised); border-color: var(--border-strong); }
 .btn.quiet.danger:hover { background: var(--danger-bg); border-color: var(--danger); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -836,8 +866,8 @@ form.inline { display: inline; }
 .page-view .stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
 .page-view .stat { padding: 12px 16px; }
 .page-view .stat .value { font-size: 22px; }
-.view-switch { display: inline-flex; padding: 2px; gap: 2px; margin-left: auto; border: 1px solid var(--border-strong); background: var(--surface); border-radius: var(--radius); font-size: 12px; }
-.view-switch a { padding: 3px 10px; color: var(--text-2); border-radius: var(--radius-sm); }
+.view-switch { display: inline-flex; padding: 2px; gap: 2px; margin-left: auto; border: 1px solid var(--border-strong); background: var(--raised); border-radius: var(--radius); font-size: 12px; }
+.view-switch a { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; color: var(--text-2); border-radius: var(--radius-sm); font-weight: 500; }
 .view-switch a[aria-current] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .view-switch a:hover { text-decoration: none; color: var(--text); }
 .collection { display: grid; gap: 14px; }

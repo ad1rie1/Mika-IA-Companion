@@ -1,0 +1,41 @@
+{# Activité › Décisions › Que ferait-elle ? (app/handmade/tabs/decisions.py, ADR 0177) : sans personne choisie, ce
+   qu'il faut faire et les personnes dont une ligne existe, en puces ; pour une personne, son verdict en grand (le ton
+   de la console : elle pourrait, un veto la retient, rien ne la pousse), ses lignes de l'arbitre, la plus forte
+   d'abord, et ce qui vise « n'importe qui de présent », replié. Lecture seule : rien n'est déclenché. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/decisions/macros.html" as dec with context %}
+<div class="now-page arb arb-towards" data-tab="decisions/envers">
+  {% if verdict %}
+  {{ dec.notes(notes) }}
+  <section class="now-card arb-verdict {{ verdict.tone }}" aria-labelledby="arb-verdict-title">
+    <p class="now-eyebrow" id="arb-verdict-title">{{ verdict.title }}</p>
+    <p class="arb-verdict-say">{{ verdict.text }}</p>
+    <p class="arb-verdict-sub">Lecture seule : la page montre ce que l’arbitre calcule maintenant, sans rien déclencher.</p>
+  </section>
+  <section class="now-card" id="{{ mine.id }}" aria-labelledby="arb-mine-title">
+    {{ tab.head(mine.title, "arb-mine-title", mine.count) }}
+    {% if items %}
+    <ul class="arb-lines" role="list">{% for x in items %}{{ dec.line(x) }}{% endfor %}</ul>
+    {% else %}{{ tab.empty(mine.empty) }}{% endif %}
+    {{ tab.pager(mine) }}
+    {% if shared %}
+    <details class="arb-shared" id="{{ shared.id }}">
+      <summary>Ce qui vise n’importe qui de présent <span class="hm-count">{{ shared.count }}</span></summary>
+      <p class="arb-shared-lede">Ces lignes n’ont pas de cible : si elles l’emportent, elle s’adresse à l’une des personnes présentes.</p>
+      {% if others %}<ul class="arb-lines" role="list">{% for x in others %}{{ dec.line(x) }}{% endfor %}</ul>
+      {% else %}{{ tab.empty(shared.empty) }}{% endif %}
+      {{ tab.pager(shared) }}
+    </details>
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="now-card arb-pick" aria-labelledby="arb-pick-title">
+    {{ tab.head("Envers qui ?", "arb-pick-title") }}
+    {% for n in notes %}<p class="arb-pick-say{{ ' ' ~ n.tone if n.tone != 'info' }}">{{ n.text }}</p>{% endfor %}
+    {% if people %}
+    <p class="hm-chips-title">Une ligne de l’arbitre existe envers :</p>
+    <ul class="hm-chips arb-people" role="list">{% for p in people %}<li>{% if p.href %}<a class="hm-chip" href="{{ p.href }}">{{ p.name }}</a>{% else %}<span class="hm-chip">{{ p.name }}</span>{% endif %}</li>{% endfor %}</ul>
+    {% else %}<p class="now-empty">Aucune ligne ne vise quelqu’un en propre pour l’instant : personne de présent, ou rien qui la pousse vers quelqu’un.</p>{% endif %}
+  </section>
+  {% endif %}
+</div>

@@ -1,0 +1,36 @@
+{# À valider › Historique des autorisations (app/handmade/tabs/approvals.py, ADR 0177) : une entrée par demande, la plus
+   récente d'abord, comme les demandes en attente — ce qu'elle voulait faire (relu au journal), la capacité, puis son
+   parcours : ta décision (qui, ta note), son exécution (réussie ou non, ce qu'elle a donné), chaque étape vers son
+   événement. Un trait à gauche dit où elle en est. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page hist" data-tab="approbations/historique">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="hist-title">
+    {{ tab.head(t.title, "hist-title", none, "Chaque demande que tu as tranchée : ce qu'elle voulait faire, ce que tu as décidé, et ce que son exécution a donné.") }}
+    {% if entries %}
+    <ol class="hist-list" role="list">
+      {% for e in entries %}
+      <li class="hist-item m-{{ e.mark }}">
+        <span class="hist-mark" aria-hidden="true"></span>
+        <div class="hist-main">
+          <p class="hist-eyebrow">{{ tab.cell(e.capability) }} · proposition {{ tab.cell(e.link) }}{% if e.about %} · à propos de {{ e.about }}{% endif %}</p>
+          <p class="hist-summary">{{ e.summary or "Le résumé de sa demande n'est plus au journal." }}</p>
+          <ol class="hist-steps" role="list">
+            {% for s in e.steps %}
+            <li>
+              <span class="now-tag {{ s.tone }}">{{ s.tag }}</span>
+              <span class="hist-step-text">{{ s.text }}</span>
+              <span class="hist-when">{% if s.href %}<a href="{{ s.href }}">{{ tab.cell(s.when) }}</a>{% else %}{{ tab.cell(s.when) }}{% endif %}</span>
+            </li>
+            {% endfor %}
+          </ol>
+          {% if e.key %}<p class="hist-key"><code>{{ e.key }}</code></p>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="hm-calm"><span class="hm-calm-dot" aria-hidden="true"></span><b>{{ t.empty }}</b> Quand tu approuveras ou refuseras une de ses demandes, elle s'inscrira ici avec ce qu'elle a donné.</p>
+    {% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

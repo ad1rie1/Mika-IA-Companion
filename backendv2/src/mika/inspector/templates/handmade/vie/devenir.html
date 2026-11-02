@@ -1,0 +1,74 @@
+{# Elle › Humeur et corps › Qui elle devient (app/handmade/tabs/life.py, ADR 0177) : un sujet par sous-onglet — ce
+   qu'elle sait d'elle (tenir parole, mener au bout, voir venir : ses marques, ce que son prompt en dit), ce qui la
+   passionne (et ses pistes), ce qu'elle a dit d'elle qui la définit, ses changements d'avis sur elle-même. La
+   pagination d'une liste revient à son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+{% set told = knowing | rejectattr("quiet") | list | length %}
+<div class="now-page vie vie-devenir" data-tab="vie/devenir">
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Qui elle devient">
+      <p class="hm-subnav-title">Qui elle devient</p>
+      <a href="#devenir-sait">Ce qu'elle sait d'elle <span class="hm-count">{{ told }}/{{ knowing | length }}</span></a>
+      <a href="#devenir-passions">Ce qui la passionne <span class="hm-count">{{ t_passions.count or 0 }}</span></a>
+      <a href="#devenir-definit">Ce qui la définit <span class="hm-count">{{ t_defining.count or 0 }}</span></a>
+      <a href="#devenir-avis">Ses changements d'avis <span class="hm-count">{{ t_changes.count or 0 }}</span></a>
+    </nav>
+    <div class="hm-subpanes">
+
+      <section id="devenir-sait" data-pane class="now-card vie-pane" aria-labelledby="devenir-sait-title">
+        <header class="now-card-head"><h2 id="devenir-sait-title">Ce qu'elle sait d'elle</h2><p>des tendances tirées de ses marques — son estime n'en dépend pas</p></header>
+        {% if knowing %}
+        <ul class="vie-knowing" role="list">
+          {% for k in knowing %}
+          <li{% if not k.quiet %} class="said"{% endif %}>
+            <h3>{{ vie.cap(k.name) }}</h3>
+            <p class="vie-knowing-marks now-num">{{ k.marks }}</p>
+            {% if k.quiet %}<p class="now-muted">Son prompt n'en dit {{ k.said }}.</p>{% else %}<blockquote class="now-voice vie-voice"><p>{{ k.said }}</p><footer>ce que son prompt en dit</footer></blockquote>{% endif %}
+            <p class="vie-knowing-rule">{{ k.rule }}</p>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(t_knowing.empty) }}{% endif %}
+        {{ tab.pager(t_knowing) }}
+      </section>
+
+      <section id="devenir-passions" data-pane class="now-card vie-pane" aria-labelledby="devenir-passions-title">
+        <header class="now-card-head"><h2 id="devenir-passions-title">Ce qui la passionne</h2><p>vive quand on la nourrit, endormie quand on l'oublie</p></header>
+        {% if passions %}
+        <ul class="vie-passions" role="list">
+          {% for p in passions %}
+          <li>
+            <p class="vie-passion-head"><span class="vie-passion-name">{{ tab.cell(p.subject) }}</span>{% if p.level %}<span class="now-tag {{ p.level.tone }}">{{ p.level.text }}</span>{% endif %}</p>
+            {% if p.glow %}<div class="vie-passion-glow" title="sa vivacité">{{ tab.bar(p.glow.w, "thought") }}<span class="now-num">{{ p.glow.text }}</span></div>{% endif %}
+            <p class="vie-meta"><span>{{ p.origin }}</span><span>{% if p.fed == "jamais" %}jamais nourrie{% else %}<span class="now-muted">nourrie</span> {{ p.fed }}{% if p.times and p.times != "0" %} · {{ p.times }} fois{% endif %}{% endif %}</span></p>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(t_passions.empty) }}{% endif %}
+        {{ tab.pager(t_passions) }}
+        {% if leads %}<h3 class="now-subhead">Ses pistes</h3>{{ vie.facts(leads, "vie-facts") }}{% endif %}
+      </section>
+
+      <section id="devenir-definit" data-pane class="now-card vie-pane" aria-labelledby="devenir-definit-title">
+        <header class="now-card-head"><h2 id="devenir-definit-title">Ce qui la définit</h2><p>ses goûts, ses avis, ce qui est vrai de sa vie : ce qu'elle a dit d'elle, qui tient des mois</p></header>
+        {% if defining %}
+        <ul class="vie-notes" role="list">
+          {% for d in defining %}<li><p>{{ tab.cell(d.text) }}</p><p class="vie-meta"><span class="now-tag">{{ d.kind }}</span><span class="vie-when">depuis {{ tab.cell(d.since) }}</span></p></li>{% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(t_defining.empty) }}{% endif %}
+        {{ tab.pager(t_defining) }}
+      </section>
+
+      <section id="devenir-avis" data-pane class="now-card vie-pane" aria-labelledby="devenir-avis-title">
+        <header class="now-card-head"><h2 id="devenir-avis-title">Ses changements d'avis sur elle-même</h2><p>ce qu'elle pensait d'elle, et ce qu'elle en pense maintenant</p></header>
+        {% if changes %}
+        <ul class="vie-notes vie-changes" role="list">
+          {% for c in changes %}<li><p class="vie-was">{{ tab.cell(c.was) }}</p><p class="vie-now">{{ tab.cell(c.now) }}</p><p class="vie-meta"><span class="now-tag">{{ c.kind }}</span><span class="vie-when">{{ tab.cell(c.when) }}</span></p></li>{% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(t_changes.empty) }}{% endif %}
+        {{ tab.pager(t_changes) }}
+      </section>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,53 @@
+{# Elle › Mémoire › Promesses (app/handmade/tabs/memory.py, ADR 0177) : celles qui l'engagent encore d'abord, leur
+   échéance à gauche (une promesse en retard le dit) ; puis, côte à côte, celles qu'elle a tenues et celles qu'elle a
+   abandonnées. Un filtre par statut ne garde que sa colonne ; la pagination et la bascule « Tableau » de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+{% macro promise(m, wide) -%}
+<li class="memories-item promise {{ m.state }}{{ ' late' if m.late }}{{ ' faded' if m.faded }}">
+  {% if wide %}
+  <div class="promise-due">
+    {% if m.late %}<span class="promise-due-word">en retard</span><span class="promise-due-when">échue {{ tab.cell(m.due) }}</span>
+    {% elif m.due %}<span class="promise-due-word">échéance</span><span class="promise-due-when">{{ tab.cell(m.due) }}</span>
+    {% else %}<span class="promise-due-word now-muted">sans échéance</span>{% endif %}
+  </div>
+  {% else %}<span class="promise-mark" aria-hidden="true"></span>{% endif %}
+  <div class="promise-main">
+    <div class="memories-text">{{ tab.cell(m.text) }}</div>
+    <p class="memories-meta">
+      {{ mem.tags(m.tags) }}
+      {% if m.to %}<span>à {{ tab.cell(m.to) }}</span>{% endif %}
+      {% if m.made %}<span class="memories-when">faite {{ tab.cell(m.made) }}</span>{% endif %}
+    </p>
+    {{ mem.foot(m, t) }}
+  </div>
+</li>
+{%- endmacro %}
+<div class="now-page memories promises" data-tab="memoire/promesses">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="promises-title">
+    {{ tab.head(t.title, "promises-title", t.count, list=t) }}
+    {% if items %}
+    {% if groups.open %}
+    <section class="promises-group" aria-labelledby="promises-open">
+      <h3 class="promises-group-head" id="promises-open">Elle s’y est engagée <span class="person-count now-num">{{ groups.open|length }}</span></h3>
+      <ul class="memories-list promises-open" role="list">{% for m in groups.open %}{{ promise(m, True) }}{% endfor %}</ul>
+    </section>
+    {% endif %}
+    {% if groups.kept or groups.dropped %}
+    <div class="promises-done">
+      {% for key, title in (("kept", "Tenues"), ("dropped", "Abandonnées")) if groups[key] %}
+      <section class="promises-group {{ key }}" aria-labelledby="promises-{{ key }}">
+        <h3 class="promises-group-head" id="promises-{{ key }}">{{ title }} <span class="person-count now-num">{{ groups[key]|length }}</span></h3>
+        <ul class="promises-closed" role="list">{% for m in groups[key] %}{{ promise(m, False) }}{% endfor %}</ul>
+      </section>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </section>
+  {% endif %}
+</div>

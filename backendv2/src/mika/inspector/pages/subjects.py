@@ -150,6 +150,11 @@ class Subjects:
         context = {k: v for k, v in request.query_params.items() if k not in ("onglet", "flash", "page", "taille")
                    and not is_page_param(k) and not k.startswith(("avant", "pg", "pile"))}
         tab_list, gear = self.tab_bar(request, kind, key, tabs, current, head, context)
+        counts = call(overview.counts, self.ui, key, label=f"comptes {kind}") if overview is not None else {}
+        if counts and not isinstance(counts, Failed):  # combien chaque onglet en compte, en petit (la maquette)
+            by_href = {fiche_url(kind, key, name): n for name, n in counts.items()}
+            for t in tab_list:
+                t["count"] = by_href.get(t["href"].split("&", 1)[0], 0)
         tabs_more: list[dict[str, Any]] = []
         if overview is not None and overview.slug:
             tab_list.insert(0, {"title": overview.title, "href": fiche_url(kind, key),
@@ -173,11 +178,16 @@ class Subjects:
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
         crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
             ([] if home and home.label == spec.plural else [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")])
+        # le fil d'Ariane d'une fiche (ADR 0176, la maquette) : sa rubrique, sa destination, l'objet par son numéro
+        # (« Activité / Projets / n° 257 ») ; un retour nommé le remplace
+        rubric = True
+        if key.isdigit():
+            crumbs.append((f"n° {key}", ""))
         if isinstance(head, Head) and head.back:
-            crumbs = [(head.back.text or "Retour", render.href(head.back))]
+            crumbs, rubric = [(head.back.text or "Retour", render.href(head.back))], False
         back = request.query_params.get("retour", "")
         if back.startswith(PREFIX + "/") and "//" not in back and "\\" not in back and len(back) < 2000:
-            crumbs = [("Retour à la liste", back)]
+            crumbs, rubric = [("Retour à la liste", back)], False
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
         if kind == "person" and isinstance(head, Head):
@@ -188,7 +198,7 @@ class Subjects:
         return self.pages.render_page(
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
-            crumbs=crumbs, tabs=tab_list, gear=gear, blocks=blocks,
+            crumbs=crumbs, rubric=rubric, tabs=tab_list, gear=gear, blocks=blocks,
             # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
             menu_path=crumbs[0][1] if crumbs else "",
             view_description=overview.description if shown is not None and current is None else

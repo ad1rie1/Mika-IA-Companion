@@ -1,0 +1,24 @@
+{# Ce que partagent les onglets de Mémoire (app/handmade/tabs/memory.py, ADR 0177) : les notes de la faculté, le pied
+   d'un élément retenu (vers son origine, son détail replié), l'aide d'une liste. À importer « with context » (le
+   détail d'un élément dessine ses formulaires). #}
+{% import "handmade/shared/tab.html" as tab with context %}
+
+{% macro notes(list) -%}
+{% for n in list %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+{%- endmacro %}
+
+{% macro foot(m, t, extra="") -%}
+<div class="memories-foot">
+  {% if m.href %}<a href="{{ m.href }}">{{ (t.link_label if t else '') or 'Voir l’origine' }} →</a>{% endif %}
+  {{ extra }}
+  {% if m.detail %}<details class="person-entry-detail"{{ ' open' if m.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(m.detail) }}</div></details>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro help(t, items) -%}
+{% if t and t.caption and items %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ t.caption }}</p></details>{% endif %}
+{%- endmacro %}
+
+{% macro tags(list) -%}
+{% for b in list %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}
+{%- endmacro %}

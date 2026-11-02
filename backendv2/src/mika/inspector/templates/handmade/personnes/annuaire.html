@@ -1,0 +1,39 @@
+{# Relations & échanges › Personnes › Annuaire (app/handmade/tabs/people.py, ADR 0177) : retrouver une personne — une
+   entrée par personne, dite comme sur la vue d'ensemble (son initiale de la couleur de ce qu'elle ressent envers
+   elle, sa présence, ce qu'elle est pour elle), puis ce que l'annuaire sait d'elle : par où elle lui écrit (chacun
+   de ses moyens de communication et ce que son canal prouve), la certitude, depuis quand elle la connaît, son dernier
+   message ; ses échanges et son lien à un clic. La recherche, la pagination et la bascule « Tableau » sont celles de
+   la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/personnes/_personnes.html" as pers %}
+{% set lede %}{% for c in counts %}{{ c.value }} {{ c.label }}{{ " · " if not loop.last }}{% endfor %}{% if counts %} · {% endif %}qui lui a écrit le plus récemment d'abord{% endset %}
+<div class="now-page pers pers-annuaire" data-tab="personnes/personnes">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="pers-dir-title">
+    {{ tab.head("Personnes", "pers-dir-title", t.count, lede, list=t) }}
+    {% if people %}
+    <ul class="pers-dir" role="list">
+      {% for p in people %}
+      <li class="pers-dir-item">
+        {{ pers.avatar(p) }}
+        <div class="pers-dir-main">
+          <p class="pers-head">{{ pers.name(p) }}{% if p.last %}<span class="pers-when">lui a écrit {{ tab.cell(p.last) }}</span>{% endif %}</p>
+          {% if p.handles %}
+          <ul class="pers-handles" role="list" aria-label="Ses moyens de communication">
+            {% for h in p.handles %}<li><a href="{{ h.href }}">{{ h.label }}</a><span class="now-tag {{ h.tone }}" title="ce que son canal prouve de qui écrit">{{ h.trust }}</span>{% if h.main %}<span class="now-muted">principal</span>{% endif %}</li>{% endfor %}
+            {% if p.more %}<li class="now-muted">et {{ p.more }} autre{{ 's' if p.more > 1 }}</li>{% endif %}
+          </ul>
+          {% else %}<p class="pers-meta now-muted">Aucun moyen de communication : connue seulement de nom.</p>{% endif %}
+          <p class="pers-meta">
+            {% if p.certainty %}<span><span class="now-muted">certitude</span> {{ p.certainty }}</span>{% endif %}
+            {% if p.first %}<span><span class="now-muted">connue depuis</span> {{ tab.cell(p.first) }}</span>{% endif %}
+            {% if not p.last %}<span class="now-muted">ne lui a jamais écrit</span>{% endif %}
+          </p>
+          {% if p.exchanges %}<p class="pers-links"><a href="{{ p.exchanges }}">Leurs échanges →</a><a href="{{ p.link }}">Leur lien →</a></p>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

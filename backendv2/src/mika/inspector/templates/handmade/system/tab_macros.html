@@ -1,0 +1,13 @@
+{# Ce que partagent les onglets de Système dans leur forme (app/handmade/tabs/system.py, ADR 0177) : le bandeau d'une
+   page (ce qui ne va pas, en une phrase ; un lien vers où le régler), ses notes, l'en-tête d'un jour d'un fil. #}
+{% macro band(b) -%}
+{% if b %}<p class="sys-band tone-{{ b.tone }}" role="status"><span class="sys-dot" aria-hidden="true"></span><span class="sys-band-text">{{ b.text }}</span>{% if b.href %}<a href="{{ b.href }}">{{ b.link }} →</a>{% endif %}</p>{% endif %}
+{%- endmacro %}
+
+{% macro notes(items) -%}
+{% for n in items %}<p class="person-tab-note {{ n.tone }}">{% if n.title %}<b>{{ n.title }}</b> {% endif %}{{ n.text }}</p>{% endfor %}
+{%- endmacro %}
+
+{% macro day(d, n=none) -%}
+<h3 class="sys-day">{{ d.name }}{% if n is not none %} <span class="now-muted now-num">{{ n }}</span>{% endif %}</h3>
+{%- endmacro %}

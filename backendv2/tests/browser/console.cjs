@@ -79,11 +79,11 @@ test('formulaire : erreurs annoncées, lien au champ avancé et saisie préserv�
 
 test('mémoire : filtres, tableau, contenu complet et source au clavier', async t => {
   const page = await open(t, { file: 'memoire_souvenirs_person_Adrien.html', width: 390, javaScriptEnabled: false });
-  // la liste dessinée (ADR 0121) : une entrée par souvenir, sa sensibilité en étiquette
-  const items = page.locator('.person-list .person-entries > li');
+  // la liste dans sa forme (ADR 0177) : une entrée par souvenir, sa sensibilité en étiquette
+  const items = page.locator('.memories-list > .memories-item');
   const count = await items.count();
   assert.ok(count >= 2);
-  assert.match(await items.locator('.person-entry-tags').allTextContents().then(xs => xs.join(' ')), /secret/);
+  assert.match(await items.locator('.memories-meta .now-tag').allTextContents().then(xs => xs.join(' ')), /secret/);
   const modes = page.getByRole('navigation', { name: 'Affichage : Ses souvenirs', exact: true });
   await modes.getByRole('link', { name: 'Tableau', exact: true }).click();
   // le tableau garde le filtre et les mêmes souvenirs
@@ -97,37 +97,39 @@ test('mémoire : filtres, tableau, contenu complet et source au clavier', async 
   assert.equal(await detail.evaluate(el => el.open), true);
   // le contenu complet, en entier dans le détail
   assert.equal(await detail.getByRole('article', { name: 'En entier', exact: true }).locator('.document-text').textContent(),
-    await items.first().locator('.person-entry-text').textContent());
+    await items.first().locator('.memories-text').textContent());
   await items.first().getByRole('link', { name: 'Voir l’origine →', exact: true }).click();
   assert.equal(await page.locator('h1').count(), 1);
   assert.match(await page.locator('main').textContent(), /souvenir/i);
 });
 
-test('pensées : historique replié, lisible au clavier, sans confondre les pensées dissipées', async t => {
+test('pensées : historique en sous-onglet, lisible au clavier, sans confondre les pensées dissipées', async t => {
   const page = await open(t, { file: 'pensees_pensees.html' });
   const live = page.getByRole('region', { name: 'Ce qui lui trotte dans la tête', exact: true });
-  assert.ok(await live.locator('.person-entries > li').count() >= 1);
+  assert.ok(await live.locator('.thoughts-list > li').count() >= 1);
   assert.equal(await live.getByText('Cette idée de titre me préoccupait', { exact: false }).count(), 0);
-  const history = page.locator('details.person-fold').filter({ has: page.locator(':scope > summary', { hasText: /^Historique des pensées$/ }) });
-  assert.equal(await history.evaluate(el => el.open), false);
-  await history.locator(':scope > summary').focus();
+  // l'historique est un sous-onglet (ADR 0177) : caché, puis ouvert au clavier depuis sa colonne
+  const history = page.getByRole('region', { name: 'Toutes ses pensées', exact: true });
+  assert.equal(await history.isVisible(), false);
+  await page.locator('.hm-subnav').getByRole('link', { name: 'Toutes ses pensées', exact: true }).focus();
   await page.keyboard.press('Enter');
-  const faded = history.locator('.person-entries > li').filter({ hasText: 'Cette idée de titre me préoccupait' });
+  assert.equal(await live.isVisible(), false);
+  const faded = history.locator('.thoughts-feed > li').filter({ hasText: 'Cette idée de titre me préoccupait' });
   assert.equal(await faded.isVisible(), true);
   // la pensée dissipée se dit éteinte, pas vivante
-  assert.equal(await faded.locator('.person-entry-tags').textContent(), 'éteinte');
+  assert.equal(await faded.locator('.now-tag').textContent(), 'éteinte');
 });
 
 test('relecture mémoire : détail lisible, clé liée au passage et confirmation annulable', async t => {
   const page = await open(t, { file: 'memoire_consolidation.html', width: 390 });
-  const item = page.getByRole('region', { name: 'Passages à reprendre', exact: true }).locator('.person-entries > li').first();
+  const item = page.getByRole('region', { name: 'Passages à reprendre', exact: true }).locator('.consol-queue > li').first();
   await item.locator('details.person-entry-detail > summary').click();
   assert.equal(await item.getByRole('article', { name: 'Détail du passage', exact: true }).locator('.document-text').isVisible(), true);
   const form = item.locator('form');
   const key = form.locator('input[name=key]');
   assert.equal(await key.getAttribute('type'), 'hidden');
   // la clé est celle du passage affiché (« message n° 85 » → 85)
-  const passage = await item.locator('.person-entry-title a').getAttribute('href');
+  const passage = await item.locator('.consol-passage-title a').getAttribute('href');
   assert.equal(passage, `/inspecteur/evenement/${await key.getAttribute('value')}`);
   let posts = 0, confirmed = false;
   page.on('request', req => { if (req.method() === 'POST') posts += 1; });
@@ -163,10 +165,11 @@ test('compte mobile : les applications ont leur état et une révocation annulab
 
 test('projets : fiches et tableau montrent les mêmes projets, sans JavaScript', async t => {
   const page = await open(t, { file: 'projets.html', javaScriptEnabled: false });
-  const cards = page.locator('#pg1 .person-entries > li');
+  // dans sa forme (ADR 0177) : une entrée par projet ; en tableau, la liste de la console
+  const cards = page.locator('#pg1 .prj-list > li');
   const count = await cards.count();
   assert.ok(count >= 2);
-  const names = await cards.locator('.person-entry-title').allTextContents();
+  const names = (await cards.locator('.prj-title').allTextContents()).map(name => name.trim());
   const modes = page.getByRole('navigation', { name: 'Affichage : Projets', exact: true });
   await modes.getByRole('link', { name: 'Tableau', exact: true }).click();
   assert.equal(await modes.getByRole('link', { name: 'Tableau', exact: true }).getAttribute('aria-current'), 'page');
@@ -203,19 +206,26 @@ test('fil : lecture directe, détails et explication accessibles au clavier', as
   assert.ok((await page.locator('main').textContent()).includes(body));
 });
 
-test('validation : aperçu relisible, blocage visible et Entrée sans décision', async t => {
+test('validation : la file, une demande ouverte, aperçu relisible, blocage visible et Entrée sans décision', async t => {
   const page = await open(t, { file: 'approbations_en_attente.html' });
-  const cards = page.locator('article.hm-approval');
-  assert.equal(await cards.count(), 2);
-  assert.match(await cards.first().getByRole('region', { name: 'Aperçu', exact: true }).locator('.document-text').textContent(), /bea@example\.net/);
-  assert.equal(await cards.last().getByRole('button', { name: 'Approuver', exact: true }).isDisabled(), true);
-  assert.equal(await cards.last().getByRole('alert').isVisible(), true);
+  const rows = page.locator('.apv-list a');
+  assert.equal(await rows.count(), 10);
+  assert.equal(await rows.first().getAttribute('aria-current'), 'true');
+  const card = page.locator('article.hm-approval');
+  assert.equal(await card.count(), 1);
+  assert.match(await card.getByRole('region', { name: 'Aperçu', exact: true }).locator('.document-text').textContent(), /bea@example\.net/);
   let posts = 0;
   page.on('request', req => { if (req.method() === 'POST') posts += 1; });
-  await cards.first().locator('[name=note]').fill('Une note, sans décision');
+  await card.locator('[name=note]').fill('Une note, sans décision');
   await page.keyboard.press('Enter');
   assert.equal(posts, 0);
-  assert.equal(await cards.count(), 2);
+  // la deuxième de la file : son brouillon a disparu, elle est bloquée
+  await rows.nth(1).click();
+  await page.waitForLoadState();
+  const blocked = page.locator('article.hm-approval');
+  assert.equal(await page.locator('.apv-list a').nth(1).getAttribute('aria-current'), 'true');
+  assert.equal(await blocked.getByRole('button', { name: 'Approuver', exact: true }).isDisabled(), true);
+  assert.equal(await blocked.getByRole('alert').isVisible(), true);
 });
 
 test('menu mobile : clavier, focus contenu, Échap et raccourci de recherche', async t => {

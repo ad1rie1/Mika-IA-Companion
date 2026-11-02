@@ -1,0 +1,86 @@
+/* Réglages › Paramètres avancés (vue d'ensemble, une faculté), Comptes, Journal des modifications, dans leur forme
+   (app/handmade/tabs/settings.py, ADR 0177) : des listes à filets, des colonnes sur un grand écran. Les autres pages de
+   réglages gardent handmade/reglages.css. Couleurs : les jetons. */
+
+/* d'où vient une valeur : quatre étiquettes, dans l'ordre où elles se recouvrent */
+.regx-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.regx-sources-lead { color: var(--muted); }
+.regx-source { display: inline-flex; align-items: center; gap: 6px; }
+.regx-source-text { color: var(--muted); }
+.regx-then { color: var(--border-strong); }
+.regx-note { margin: -6px 0 0; max-width: 110ch; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+/* les facultés, par famille, en colonnes */
+.regx-families { column-width: 250px; column-gap: 32px; }
+.regx-family { min-width: 0; margin-bottom: 18px; break-inside: avoid; }
+.regx-facs { display: grid; margin: 0; padding: 0; list-style: none; }
+.regx-fac { display: grid; gap: 3px; padding: 7px 0; border-top: 1px solid var(--border); }
+.regx-fac.has-override { box-shadow: inset 2px 0 var(--warn); padding-left: 10px; }
+.regx-fac.has-refused { box-shadow: inset 2px 0 var(--danger); padding-left: 10px; }
+.regx-fac-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0; font-size: 14px; font-weight: 600; }
+.regx-fac-top a { color: var(--text); }
+.regx-fac-top a:hover { color: var(--accent); }
+.regx-fac-n { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.regx-fac-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: 12px; }
+.regx-fac-tags code { color: var(--muted); font-size: 11.5px; }
+.regx-fac-tags .now-tag { font-size: 11.5px; }
+.regx-fac-plain { color: var(--muted); }
+
+/* ce que pilote chaque curseur */
+.regx-to-temper { margin: -4px 0 10px; font-size: 13px; }
+.regx-sliders { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+.regx-slider { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.regx-slider-name { margin: 0; font: 600 14px/1.3 var(--display); }
+.regx-moves { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.regx-moves li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; color: var(--text-2); }
+.regx-moves a { color: var(--text-2); }
+.regx-moves a:hover { color: var(--accent); }
+.regx-moves code { color: var(--text); font-size: 11.5px; overflow-wrap: anywhere; }
+.regx-range { margin-left: auto; color: var(--muted); white-space: nowrap; }
+
+/* les comptes : une entrée par compte, en colonnes */
+.regx-accts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+.regx-acct { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.regx-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--accent);
+  background: var(--accent-soft); font: 650 16px/1 var(--display); }
+.regx-acct.operator .regx-avatar { color: var(--on-accent); background: var(--accent); }
+.regx-acct.off .regx-avatar { color: var(--muted); background: none; border: 1px dashed var(--border-strong); }
+.regx-acct-main { display: grid; gap: 3px; min-width: 0; }
+.regx-acct-name { margin: 0; font: 600 15px/1.3 var(--display); overflow-wrap: anywhere; }
+.regx-acct-name a { color: var(--text); }
+.regx-acct-name a:hover { color: var(--accent); }
+.regx-acct.off .regx-acct-name a { color: var(--muted); }
+.regx-acct-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 12.5px; }
+.regx-acct-meta code { color: var(--muted); font-size: 12px; }
+.regx-acct-links { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; font-size: 12.5px; }
+.regx-help { margin-top: 10px; }
+
+/* le journal des modifications : jour par jour, l'heure à gauche */
+.regx-day { margin-top: 18px; }
+.regx-changes { display: grid; margin: 0; padding: 0; list-style: none; }
+.regx-change { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 14px; padding: 9px 0; border-top: 1px solid var(--border); }
+.regx-time { padding-top: 2px; color: var(--muted); font-size: 12.5px; }
+.regx-change-main { display: grid; gap: 3px; min-width: 0; }
+.regx-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; margin: 0; font-size: 14px; line-height: 1.5; }
+.regx-what .badge { margin-right: 4px; }
+.regx-change.params .regx-what { color: var(--text-2); font-size: 13.5px; }
+.regx-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.regx-meta a { color: var(--muted); }
+.regx-meta a:hover { color: var(--accent); }
+
+/* une bande de chiffres impaire sur deux colonnes : la dernière case prend la rangée, sans case vide */
+@media (max-width: 560px) {
+  .regx .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .regx-sliders { grid-template-columns: minmax(0, 1fr); }
+  .regx-range { margin-left: 0; }
+  /* d'où vient une valeur : une source par ligne */
+  .regx-sources { display: grid; gap: 4px; }
+  .regx-then { display: none; }
+}
+/* le formulaire des paramètres d'une faculté (le panneau de la console) sur un écran étroit : d'où vient la valeur sous
+   le paramètre, plutôt qu'en colonne étroite à côté (sa page charge cette feuille) */
+@media (max-width: 700px) {
+  .stack .params-form .param { grid-template-columns: minmax(0, 1fr); }
+}

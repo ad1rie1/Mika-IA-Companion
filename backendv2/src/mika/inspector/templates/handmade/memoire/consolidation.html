@@ -1,0 +1,105 @@
+{# Elle › Mémoire › Consolidation (app/handmade/tabs/memory.py, ADR 0177) : où en est la relecture, en une phrase et une
+   bande de chiffres (ce qu'elle garde mène à ses onglets) ; puis en sous-onglets les passages à reprendre (leur cause,
+   leur action sur leur ligne, la réponse du modèle repliée), ses relectures, les tris de la nuit (les souvenirs
+   presque identiques fondus) et l'état détaillé. Une page plus ancienne d'une liste ouvre son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+{% from "_forms.html" import action_button %}
+{% macro pane(id) -%}
+{% if id == "consol-queue" %}
+<section id="consol-queue" data-pane aria-labelledby="consol-queue-title">
+  <div class="now-card">
+    {% if queue %}
+    {{ tab.head(queue.title, "consol-queue-title", queue.count, "Ce que la relecture n’a pas pu traiter : elle le reprendra, ou attend qu’on le lui demande.") }}
+    {% if passages %}
+    {{ mem.notes(notes) }}
+    <ul class="consol-queue" role="list">
+      {% for p in passages %}
+      <li class="consol-passage">
+        <div class="consol-passage-top">
+          <p class="consol-passage-title">{{ tab.cell(p.title) }} {% if p.state %}<span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif %}</p>
+          {% if p.acts %}<div class="consol-passage-acts">{% for a in p.acts %}{{ action_button(forms.get(a.slot)) }}{% endfor %}</div>{% endif %}
+        </div>
+        {% if p.cause %}<p class="consol-passage-cause">{{ tab.cell(p.cause) }}</p>{% endif %}
+        <p class="memories-meta">
+          <span>{{ p.tries }} essai{{ 's' if p.tries not in ('0', '1') }}</span>
+          {% if p.next %}<span>prochaine reprise {{ tab.cell(p.next) }}</span>{% endif %}
+          {% if p.since %}<span class="memories-when">depuis {{ tab.cell(p.since) }}</span>{% endif %}
+        </p>
+        {% if p.detail %}<details class="person-entry-detail"{{ ' open' if p.open }}><summary>Ce que le modèle a répondu</summary><div class="stack">{{ tab.inner(p.detail) }}</div></details>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(queue.empty) }}{% endif %}
+    {{ tab.pager(queue) }}
+    {% else %}<header class="now-card-head"><h2 id="consol-queue-title">Passages à reprendre</h2></header>{{ mem.notes(notes) }}{% endif %}
+  </div>
+</section>
+{% elif id == "consol-runs" %}
+<section id="consol-runs" data-pane aria-labelledby="consol-runs-title">
+  <div class="now-card">
+    {{ tab.head(runs.title, "consol-runs-title", none, "Chaque relecture : jusqu’où elle a relu, ce qu’elle en a retenu, et avec quel modèle.") }}
+    {% if run_items %}
+    <ol class="consol-feed" role="list">
+      {% for r in run_items %}
+      <li class="{{ 'failed' if r.failed }}">
+        <span class="consol-feed-when">{{ tab.cell(r.when) }}</span>
+        <div class="consol-feed-body">
+          <p>Relue jusqu’au {{ tab.cell(r.upto) }} · <span class="now-num">{{ r.kept }}</span> élément{{ 's' if r.kept not in ('0', '1') }} retenu{{ 's' if r.kept not in ('0', '1') }} {% if r.outcome %}<span class="now-tag {{ r.outcome.tone }}">{{ r.outcome.text }}</span>{% endif %}</p>
+          <p class="memories-meta">{% if r.model and r.model != '—' %}<span class="consol-model">{{ r.model }}</span>{% endif %}{% if r.href %}<a href="{{ r.href }}">Ouvrir l’événement →</a>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(runs.empty) }}{% endif %}
+    {{ tab.pager(runs) }}
+  </div>
+</section>
+{% elif id == "consol-nights" %}
+<section id="consol-nights" data-pane aria-labelledby="consol-nights-title">
+  <div class="now-card">
+    {{ tab.head(nights.title, "consol-nights-title", none, "La nuit, les souvenirs presque identiques se fondent : le plus ancien numéro dans celui qu’elle garde.") }}
+    {% if night_items %}
+    <ol class="consol-feed" role="list">
+      {% for n in night_items %}
+      <li>
+        <span class="consol-feed-when">{{ n.night }}</span>
+        <div class="consol-feed-body">
+          <p><span class="now-num">{{ n.merges }}</span> fusion{{ 's' if n.merges not in ('0', '1') }}{% if n.pairs and n.pairs.text != '—' %} <span class="now-muted">· {{ tab.cell(n.pairs) }}</span>{% endif %}</p>
+          <p class="memories-meta">{% if n.when %}<span>triée {{ tab.cell(n.when) }}</span>{% endif %}{% if n.href %}<a href="{{ n.href }}">Ouvrir l’événement →</a>{% endif %}</p>
+          {% if n.detail %}<details class="person-entry-detail"><summary>Toutes les fusions</summary><div class="stack">{{ tab.inner(n.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(nights.empty) }}{% endif %}
+    {{ tab.pager(nights) }}
+  </div>
+</section>
+{% else %}
+<section id="consol-state" data-pane aria-label="État détaillé de la relecture">
+  {{ tab.block(rereading) }}
+</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page memories consol" data-tab="memoire/consolidation">
+  <p class="consol-lede">
+    {% set upto = f["relu jusqu'au message"] %}{% set last = f["dernière relecture"] %}
+    {% if upto and upto.t == "link" %}Relue jusqu’au message {{ tab.cell(upto) }}{% else %}Rien n’est encore relu{% endif %}
+    {%- if last and last.t == "link" %} · dernière relecture {{ tab.cell(last) }}{% endif %}
+    {%- if f["dernier message"] and f["dernier message"].t == "when" %} · dernier message {{ tab.cell(f["dernier message"]) }}{% endif %}
+  </p>
+  {{ tab.block(band) }}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="La relecture">
+      <a href="#consol-queue"{% if queue and queue.count %} class="warn"{% endif %}>À reprendre{% if queue %} <span class="hm-count">{{ queue.count or 0 }}</span>{% endif %}</a>
+      <a href="#consol-runs">Ses relectures</a>
+      <a href="#consol-nights">Les tris de la nuit</a>
+      <div class="hm-subnav-sep"></div>
+      <a href="#consol-state">État détaillé</a>
+    </nav>
+    <div class="hm-subpanes">
+      {% for id in panes %}{{ pane(id) }}{% endfor %}
+    </div>
+  </div>
+</div>

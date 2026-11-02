@@ -1,0 +1,57 @@
+{# Système › Écrans du monde (app/handmade/tabs/system.py, ADR 0177) : un bandeau (ce qui manque à un hôte connecté,
+   ou qui tient le bail sans avoir dit ce qu'il a chargé), la bande de chiffres ; puis côte à côte les connexions — le
+   moteur, qui, ses rôles, le bail d'hôte — et ce que chaque hôte a chargé : sa révision, ce qui lui manque en puces.
+   Le monde pas branché : sa note seule. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-wd" data-tab="systeme/monde">
+  {% if off %}
+  {% for n in off %}{{ sx.band({"tone": "info" if n.tone == "muted" else n.tone, "text": n.text}) }}{% endfor %}
+  <p class="now-empty">Aucun moteur de jeu ne peut se connecter à son monde sur ce serveur.</p>
+  {% else %}
+  {{ sx.band(band) }}
+  {{ tab.block(stats) }}
+  <div class="sys-cols two">
+    <section class="now-card" id="{{ sessions_t.id }}" aria-labelledby="sys-wd-sessions">
+      {{ tab.head(sessions_t.title, "sys-wd-sessions", sessions_t.count) }}
+      {% if sessions %}
+      <ul class="sys-rows" role="list">
+        {% for s in sessions %}
+        <li class="sys-wd-session{{ ' host' if s.lease and s.lease.tone == 'ok' }}">
+          <div class="sys-row-top">
+            <p class="sys-row-name"><b>{{ s.client }}</b> <span class="now-muted">· {{ tab.cell(s.who) }}</span></p>
+            {% if s.lease %}<span class="now-tag {{ s.lease.tone }}">{{ s.lease.text }}</span>{% endif %}
+          </div>
+          <p class="sys-row-meta">{% for r in s.roles %}<span class="now-tag">{{ r }}</span>{% endfor %}<span class="mono now-muted" title="acteur · connexion">{{ s.actor }} · {{ s.session }}</span></p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(sessions_t.empty) }}{% endif %}
+      {{ tab.pager(sessions_t) }}
+      {% if sessions_t.caption %}<p class="person-tab-note sys-foot">{{ sessions_t.caption }}</p>{% endif %}
+    </section>
+    <section class="now-card" id="{{ loaded_t.id }}" aria-labelledby="sys-wd-loaded">
+      {{ tab.head(loaded_t.title, "sys-wd-loaded", loaded_t.count) }}
+      {% if loaded %}
+      <ul class="sys-rows" role="list">
+        {% for r in loaded %}
+        <li class="{{ 'is-warn' if r.warn }}{{ ' gone' if not r.here }}">
+          <div class="sys-row-top">
+            <p class="sys-row-name"><b>{{ r.client }}</b> <span class="now-muted">· révision <span class="now-num">{{ r.rev }}</span> · {{ tab.cell(r.when) }}</span></p>
+            <span class="now-tag {{ 'ok' if r.here }}">{{ 'connecté' if r.here else 'parti' }}</span>
+          </div>
+          {% if r.lacks %}
+          <dl class="sys-wd-lacks">
+            {% for l in r.lacks %}<div><dt>{{ l.label }}</dt><dd>{% for x in l.things %}<span class="now-tag {{ 'warn' if r.here }}">{{ x }}</span>{% endfor %}</dd></div>{% endfor %}
+          </dl>
+          {% else %}<p class="sys-row-meta sys-ok-text">rien ne lui manque</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(loaded_t.empty) }}{% endif %}
+      {{ tab.pager(loaded_t) }}
+      {% if loaded_t.caption %}<p class="person-tab-note sys-foot">{{ loaded_t.caption }}</p>{% endif %}
+    </section>
+  </div>
+  {% endif %}
+</div>

@@ -49,7 +49,7 @@ def test_anomalies_have_one_clear_empty_state_and_do_not_hide_an_existing_incide
     monkeypatch.setattr(live.kernel.mind, "anomalies", ["Erreur de réduction à examiner"])
     body = page(client, "/inspecteur/systeme/anomalies")
     assert "Aucune anomalie enregistrée depuis le démarrage" not in body
-    assert "Erreur de réduction à examiner" in body and 'class="now-card person-list' in body  # dessinée, ADR 0121
+    assert "Erreur de réduction à examiner" in body and 'class="sys-an-list"' in body  # dans sa forme, ADR 0177
 
 
 def test_health_prioritizes_failed_checks_keeps_details_and_links_without_actions(world, monkeypatch):  # noqa: F811

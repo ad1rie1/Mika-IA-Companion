@@ -1,0 +1,23 @@
+/* Relations & échanges › Conversations › Questions sans réponse (app/handmade/tabs/threads.py, ADR 0177) : chaque
+   question dans sa bulle (base.css, comme le fil des messages), depuis combien de temps elle attend à côté. Fond
+   blanc et filets, pas de carte dans une carte ; les couleurs viennent des jetons. Classes fil-… */
+.fil-q-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.fil-q { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 18px; padding: 14px 0; border-top: 1px solid var(--border); }
+.fil-q:first-child { border-top: 0; padding-top: 2px; }
+.fil-q-wait { display: grid; align-content: start; gap: 2px; margin: 0; padding-top: 4px; }
+.fil-q-since { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.fil-q-wait .now-num { font: 650 1.15rem/1.2 var(--display); }
+.fil-q.warn .fil-q-wait .now-num { color: var(--warn); }
+.fil-q.danger .fil-q-wait .now-num { color: var(--danger); }
+.fil-q.warn { box-shadow: inset 2px 0 var(--warn); padding-left: 12px; }
+.fil-q.danger { box-shadow: inset 2px 0 var(--danger); padding-left: 12px; }
+.fil-q-main { display: grid; justify-items: start; gap: 2px; min-width: 0; }
+.fil-q-main .person-bubble { max-width: min(100%, 720px); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.fil-q-main .person-meta { padding: 0 6px; }
+.fil-q-forgotten { color: var(--muted); font-style: italic; }
+.fil-q-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; padding: 0 6px; font-size: 12.5px; }
+.fil-q-help { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+@media (max-width: 640px) {
+  .fil-q { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .fil-q-wait { display: flex; align-items: baseline; gap: 6px; padding-top: 0; }
+}

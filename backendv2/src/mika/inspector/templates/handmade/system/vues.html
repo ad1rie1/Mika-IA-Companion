@@ -1,0 +1,33 @@
+{# Système › Toutes les vues (app/handmade/tabs/system.py, ADR 0177) : chaque vue que les facultés déclarent, et où elle
+   est rangée — en une phrase, puis en sous-onglets : par destination (vers la destination), sur les fiches, par faculté
+   (avec où chacune se trouve), et celles qui sont cachées. Chaque groupe en colonnes ; chaque vue mène à elle. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page sys sys-views" data-tab="systeme/vues">
+  <p class="sys-lede"><span class="now-num">{{ total }}</span> vues, déclarées par <span class="now-num">{{ faculties }}</span> facultés : rangées dans <span class="now-num">{{ places }}</span> destinations, sur <span class="now-num">{{ subjects }}</span> sortes de fiches{% if hidden %}, et <span class="now-num">{{ hidden }}</span> cachée{{ 's' if hidden > 1 }}{% endif %}.</p>
+  {% if panes %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ranger les vues">
+      {% for p in panes %}<a href="#{{ p.id }}">{{ p.title }} <span class="hm-count">{{ p.n }}</span></a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+      {% for p in panes %}
+      <section id="{{ p.id }}" data-pane aria-labelledby="{{ p.id }}-title">
+        <div class="now-card">
+          {{ tab.head(p.title, p.id ~ "-title", p.n, p.lede) }}
+          <div class="sys-views-groups">
+            {% for g in p.groups %}
+            <section class="sys-views-group" aria-label="{{ g.label }}">
+              <h3>{% if g.href %}<a href="{{ g.href }}">{{ g.label }}</a>{% else %}{{ g.label }}{% endif %} <span class="now-muted now-num">{{ g.views|length }}</span></h3>
+              <ul role="list">
+                {% for v in g.views %}<li><a href="{{ v.href }}">{{ v.title }}</a> <span class="now-muted">· {% if p.where %}{{ v.where or v.nowhere or '—' }}{% else %}{{ v.faculty }}{% endif %}</span></li>{% endfor %}
+              </ul>
+            </section>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}<p class="now-empty">Aucune faculté ne déclare de vue.</p>{% endif %}
+</div>

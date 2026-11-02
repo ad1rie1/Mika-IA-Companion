@@ -1,0 +1,44 @@
+{# Système › Simulations (app/handmade/tabs/system.py, ADR 0177), le gabarit « client » : les rapports à gauche (leur
+   nom, leur dossier, leur sorte, quand ils ont changé), celui qu'on lit à droite, tel quel. Sans dossier de rapports :
+   sa note, et comment en faire. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-sim" data-tab="systeme/simulations">
+  {% if not t %}
+  {% for n in notes %}{{ sx.band({"tone": "info" if n.tone == "muted" else n.tone, "text": n.text}) }}{% endfor %}
+  <section class="now-card" aria-labelledby="sys-sim-how">
+    {{ tab.head("Faire un rapport", "sys-sim-how", none, "Le simulateur fait vivre des scénarios au noyau et écrit son rapport dans un dossier ; la console le lit si le serveur connaît ce dossier.") }}
+    <pre class="hm-code">mika sim run --report DOSSIER
+mika serve --reports DOSSIER</pre>
+  </section>
+  {% else %}
+  <div class="sys-sim-client">
+    <section class="now-card" id="{{ t.id }}" aria-labelledby="sys-sim-list">
+      {{ tab.head(t.title, "sys-sim-list", t.count) }}
+      {% if reports %}
+      <ul class="sys-sim-files" role="list">
+        {% for r in reports %}
+        <li class="{{ 'on' if r.on }}">
+          <a href="{{ r.href }}"{% if r.on %} aria-current="page"{% endif %}><span class="sys-sim-name">{{ r.name }}</span>{% if r.folder %}<span class="mono now-muted">{{ r.folder }}/</span>{% endif %}</a>
+          <span class="sys-sim-meta"><span class="now-tag">{{ r.kind }}</span> {{ tab.cell(r.when) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(t.empty) }}{% endif %}
+      {{ tab.pager(t) }}
+    </section>
+    <section class="now-card sys-sim-reader" aria-labelledby="sys-sim-read">
+      {% if reading %}
+      {{ tab.head(reading.title, "sys-sim-read") }}
+      <pre class="sys-sim-text">{{ reading.text }}</pre>
+      {% elif chosen %}
+      {{ tab.head(chosen, "sys-sim-read") }}
+      {{ sx.notes(notes) }}
+      {% else %}
+      {{ tab.head("Lire un rapport", "sys-sim-read") }}
+      <p class="now-empty">Choisis un rapport dans la liste : il s'ouvre ici, tel que le simulateur l'a écrit.</p>
+      {% endif %}
+    </section>
+  </div>
+  {% endif %}
+</div>

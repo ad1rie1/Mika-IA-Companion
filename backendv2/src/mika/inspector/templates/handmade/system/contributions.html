@@ -1,0 +1,61 @@
+{# Système › Contributions (app/handmade/tabs/system.py, ADR 0177) : ce que chaque faculté apporte, lu dans le registre.
+   En sous-onglets : l'ensemble — une bande de chiffres, puis une ligne par faculté, ce qu'elle apporte en nombres (un
+   point : rien) — et une faculté par sous-onglet : ce qu'elle publie, écoute, fournit (et qui le lit), ses sections,
+   ses preuves, ses processus, ses outils, ses capacités, ses vues, ses fiches, ses actions. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page sys sys-ct" data-tab="systeme/contributions">
+  <div class="hm-subtabs sys-many" data-subtabs>
+    <nav class="hm-subnav" aria-label="Les facultés">
+      <a href="#ct-all">Ensemble <span class="hm-count">{{ faculties|length }}</span></a>
+      <div class="hm-subnav-sep"></div>
+      <p class="hm-subnav-title">Une faculté</p>
+      {% for f in faculties %}<a href="#ct-{{ f.name }}">{{ f.label }}</a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+      <section id="ct-all" data-pane aria-labelledby="ct-all-title">
+        {{ tab.block(band) }}
+        <div class="now-card sys-ct-card">
+          {{ tab.head("Ce que chaque faculté apporte", "ct-all-title", none, lede ~ " Un point : rien de cette sorte.") }}
+          <div class="sys-ct-scroll" tabindex="0" role="region" aria-label="Ce que chaque faculté apporte">
+            <ul class="sys-ct-matrix" role="list">
+              <li class="sys-ct-head" aria-hidden="true"><span>faculté</span>{% for k, title, what in kinds %}<span title="{{ what }}">{{ title }}</span>{% endfor %}</li>
+              {% for f in faculties %}
+              <li>
+                <a href="#ct-{{ f.name }}">{{ f.label }}</a>
+                {% for k, title, what in kinds %}{% set n = f.counts[k] %}<span class="now-num{{ ' none' if not n }}" title="{{ title }} : {{ n }}">{{ n if n else '·' }}</span>{% endfor %}
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </section>
+      {% for f in faculties %}
+      <section id="ct-{{ f.name }}" data-pane aria-labelledby="ct-{{ f.name }}-title">
+        <div class="now-card">
+          <header class="now-card-head"><h2 id="ct-{{ f.name }}-title">{{ f.label }}</h2>{% if f.label != f.name %}<span class="mono now-muted">{{ f.name }}</span>{% endif %}</header>
+          <div class="sys-ct-kinds">
+            {% for k, title, what in kinds if f.lists[k] %}
+            <section class="sys-ct-kind{{ ' wide' if k in ('facts', 'publishes', 'listens') and f.lists[k]|length > 6 }}" aria-label="{{ title }}">
+              <h3>{{ title }} <span class="now-num now-muted">{{ f.lists[k]|length }}</span></h3>
+              <p class="now-muted sys-ct-what">{{ what }}</p>
+              {% if k == "facts" %}
+              <ul class="sys-ct-facts" role="list">
+                {% for x in f.lists[k] %}<li><span class="mono" title="{{ x.hint }}">{{ x.text }}</span> <span class="sys-ct-to">→ {% if x.readers %}{{ x.readers|join(', ') }}{% else %}<span class="now-muted">aucun autre lecteur déclaré</span>{% endif %}</span></li>{% endfor %}
+              </ul>
+              {% elif k in ("sections", "proofs") %}
+              <ul class="sys-ct-facts" role="list">
+                {% for x in f.lists[k] %}<li><span class="mono">{{ x.text }}</span> <span class="now-muted">{{ x.where }}</span></li>{% endfor %}
+              </ul>
+              {% else %}
+              <p class="sys-ct-chips">{% for x in f.lists[k] %}{% if x.href %}<a class="now-tag sys-chip" href="{{ x.href }}">{{ x.text }}</a>{% else %}<span class="now-tag sys-chip{{ ' mono' if k in technical }}"{% if x.hint %} title="{{ x.hint }}"{% endif %}>{{ x.text }}</span>{% endif %}{% endfor %}</p>
+              {% endif %}
+            </section>
+            {% endfor %}
+          </div>
+          {% if f.missing %}<p class="person-tab-note sys-foot">Rien de cette sorte : {{ f.missing|join(', ') }}.</p>{% endif %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+</div>

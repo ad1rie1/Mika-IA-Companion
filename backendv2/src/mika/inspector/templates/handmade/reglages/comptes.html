@@ -1,0 +1,26 @@
+{# Réglages › Comptes (app/handmade/tabs/settings.py, ADR 0177) : les comptes en chiffres, puis un par entrée — son nom,
+   son identifiant, son rôle, désactivé s'il l'est, vers sa page et vers la fiche de la personne qu'il est ; la bascule
+   « Tableau » et la pagination de la liste. Ajouter un compte : la barre de titre (le panneau de la console). #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page regx regx-accounts" data-tab="reglages/comptes">
+  {{ tab.block(band) }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="regx-accounts-title">
+    {{ tab.head("Comptes", "regx-accounts-title", t.count, "Un utilisateur parle avec elle ; un opérateur ouvre aussi la console.", list=t) }}
+    {% if items %}
+    <ul class="regx-accts" role="list">
+      {% for a in items %}
+      <li class="regx-acct{{ ' off' if a.off }}{{ ' operator' if a.operator }}">
+        <span class="regx-avatar" aria-hidden="true">{{ a.initial }}</span>
+        <div class="regx-acct-main">
+          <p class="regx-acct-name"><a href="{{ a.href }}">{{ a.name }}</a></p>
+          <p class="regx-acct-meta"><code>{{ a.login }}</code>{{ tab.cell(a.role) }}{% if a.off %}{{ tab.cell(a.state) }}{% endif %}</p>
+          <p class="regx-acct-links"><a href="{{ a.href }}">{{ t.link_label or 'Modifier le compte' }}</a>{% if a.person and a.person.t == 'link' %}<a href="{{ a.person.href }}">Sa fiche →</a>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {% if t.caption and items %}<p class="person-tab-note regx-help">{{ t.caption }}</p>{% endif %}
+  </section>
+</div>

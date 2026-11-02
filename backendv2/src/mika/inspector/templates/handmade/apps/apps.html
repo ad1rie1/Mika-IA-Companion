@@ -1,0 +1,30 @@
+{# Outils › Apps forgées (app/handmade/tabs/apps.py, ADR 0177) : ses apps en tuiles, comme un lanceur — leur titre vers
+   leur fiche (ses pages en onglets, le reste derrière la roue), leur nom, leur état (cassée : pourquoi), promue ou non,
+   leur version, leur agenda, leur dernier tour et ce qu'elles lui ont signalé ; la pagination et la bascule
+   « Tableau » de la vue. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page apx" data-tab="apps/apps">
+  {% if state %}<p class="person-tab-note {{ state.tone }}">{{ state.text }}</p>{% endif %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="apx-title">
+    {{ tab.head(t.title, "apx-title", t.count, ((broken ~ " cassée" ~ ("s" if broken > 1 else "") ~ " : elle ne s'en sert plus tant qu'on ne les a pas relancées. ") if broken else "") ~ "Ouvre une app pour l'utiliser, voir son état ou régler ses réglages.", list=t) }}
+    {% if items %}
+    <ul class="apx-tiles" role="list">
+      {% for a in items %}
+      <li class="apx-app {{ a.tone }}">
+        <a class="apx-open" href="{{ a.href }}">
+          <span class="apx-icon" aria-hidden="true">{{ (a.title or a.name)[:1]|upper }}</span>
+          <span class="apx-names"><span class="apx-title">{{ a.title }}</span><span class="apx-sub"><code class="apx-name">{{ a.name }}</code>{% if a.version %} · v{{ a.version }}{% endif %} · {{ a.schedule }}</span></span>
+        </a>
+        <p class="apx-tags">
+          <span class="now-tag {{ a.tone }}">{{ a.status.text }}</span>
+          {% if a.promoted %}<span class="now-tag info" title="Ses outils servent en conversation">promue</span>{% endif %}
+        </p>
+        {% if a.reason %}<p class="apx-reason">{{ a.reason }}</p>{% endif %}
+        <p class="apx-last{{ ' failed' if a.last_failed }}">{% if a.never %}jamais lancée{% elif a.last %}dernier tour : {{ a.last }}{% endif %}{% if a.signals %}<span class="apx-signals"> · signaux : {{ a.signals }}</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

@@ -1,0 +1,138 @@
+{# Connexions extérieures › Flux RSS (app/handmade/tabs/senses.py, ADR 0177) : où en est le relevé, en une phrase et une
+   bande de chiffres ; un flux qui ne répond plus, en bandeau ; puis en sous-onglets les derniers articles (leur
+   pertinence, leur résumé), ses flux (leur état, leur dernier relevé), ce qu'elle a remarqué (les titres de chaque
+   jour), ce qui lui a fait penser à ses amies et les mots qui la touchent. Une page plus ancienne d'une liste ouvre
+   son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/sens/_sens.html" as sx with context %}
+{% macro pane(id) -%}
+{% if id == "flux-articles" %}
+<section id="flux-articles" data-pane aria-labelledby="flux-articles-title" class="now-card">
+  {% if articles %}
+  {{ tab.head(articles.title, "flux-articles-title", articles.count, "Ce que ses flux ont publié, le plus récent d'abord : ce qu'elle a remarqué, et ce qu'elle a laissé passer.", list=articles) }}
+  {% if article_items %}
+  <ul class="sens-list sens-cols" role="list">
+    {% for a in article_items %}
+    <li class="sens-item flux-article{{ ' noticed' if a.noticed }}">
+      <div class="flux-article-top">
+        <p class="flux-article-title">{{ tab.cell(a.title) }}</p>
+        {{ sx.score(a.score) }}
+      </div>
+      <p class="sens-meta">
+        {% if a.noticed %}<span class="now-tag ok">remarqué</span>{% else %}<span class="now-tag">laissé passer</span>{% endif %}
+        <span>{{ a.feed }}</span>
+        {% if a.when %}<span class="sens-when">{{ tab.cell(a.when) }}</span>{% endif %}
+      </p>
+      {% if a.summary %}<p class="flux-article-summary">{{ a.summary }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}{{ tab.empty(articles.empty) }}{% endif %}
+  {{ tab.pager(articles) }}
+  {% else %}
+  <header class="now-card-head"><h2 id="flux-articles-title">Derniers articles relevés</h2></header>
+  {{ tab.empty("aucun lecteur de flux n'est branché : rien n'est relevé") }}
+  {% endif %}
+</section>
+{% elif id == "flux-feeds" %}
+<section id="flux-feeds" data-pane aria-labelledby="flux-feeds-title" class="now-card">
+  {% if feeds %}
+  {{ tab.head("Ses flux", "flux-feeds-title", feeds.count, "Chaque abonnement, et ce que son dernier relevé a donné.") }}
+  {% if feed_items %}
+  <ul class="sens-list" role="list">
+    {% for f in feed_items %}
+    <li class="sens-item flux-feed{{ ' broken' if f.broken }}">
+      <div class="flux-feed-top">
+        <p class="flux-feed-name">{{ tab.cell(f.name) }}</p>
+        {% if f.state %}{{ tab.cell(f.state) }}{% endif %}
+        <span class="sens-when">dernier succès {{ tab.cell(f.ok_at) }}</span>
+      </div>
+      {% if f.error %}<p class="flux-feed-error">{{ f.error }}</p>{% endif %}
+      <p class="flux-feed-counts">
+        <span><b class="now-num">{{ f.read }}</b> lus</span><span><b class="now-num">{{ f.new }}</b> nouveaux</span>
+        <span class="now-muted">au dernier relevé</span>
+        <span><b class="now-num">{{ f.cached }}</b> en cache</span><span><b class="now-num">{{ f.noticed }}</b> remarqués</span>
+      </p>
+      {% if f.detail %}<details class="person-entry-detail"><summary>Son dernier relevé</summary><div class="stack">{{ tab.inner(f.detail) }}</div></details>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}{{ tab.empty(feeds.empty) }}{% endif %}
+  {{ tab.pager(feeds) }}
+  {% if feeds.caption and feed_items %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ feeds.caption }}</p></details>{% endif %}
+  {% else %}
+  <header class="now-card-head"><h2 id="flux-feeds-title">Ses flux</h2></header>
+  {{ tab.empty("aucun lecteur de flux n'est branché") }}
+  {% endif %}
+</section>
+{% elif id == "flux-noticed" %}
+<section id="flux-noticed" data-pane aria-labelledby="flux-noticed-title" class="now-card">
+  {{ tab.head(noticed.title, "flux-noticed-title", noticed.count, noticed.caption) }}
+  {% if chart and chart.has %}<div class="flux-chart" aria-label="{{ chart.title }}"><p class="now-subhead first">{{ chart.title }}</p>{{ chart.svg }}</div>{% endif %}
+  {% if noticed_items %}
+  <ol class="sens-list sens-feed" role="list">
+    {% for n in noticed_items %}
+    <li class="sens-item">
+      <span class="sens-feed-when">{{ tab.cell(n.when) }}</span>
+      <div class="sens-feed-body">
+        <p class="sens-feed-text">{{ tab.cell(n.text) }}</p>
+        <p class="sens-meta"><span>{{ n.feed }}</span>{{ sx.score(n.score) }}{{ sx.event(n.event) }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}{{ tab.empty(noticed.empty) }}{% endif %}
+  {{ tab.pager(noticed) }}
+</section>
+{% elif id == "flux-friends" %}
+<section id="flux-friends" data-pane aria-labelledby="flux-friends-title" class="now-card">
+  {{ tab.head(friends.title, "flux-friends-title", friends.count) }}
+  {% if friend_items %}
+  <ol class="sens-list sens-feed" role="list">
+    {% for f in friend_items %}
+    <li class="sens-item">
+      <span class="sens-feed-when">{{ tab.cell(f.when) }}</span>
+      <div class="sens-feed-body">
+        <p class="sens-feed-text">{{ tab.cell(f.text) }}</p>
+        <p class="sens-meta"><span>pour {{ tab.cell(f.who) }}</span>{% if f.told %}<span class="now-tag ok">montré</span>{% else %}<span class="now-tag">pas encore montré</span>{% endif %}{{ sx.score(f.score) }}{{ sx.event(f.event) }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}{{ tab.empty(friends.empty) }}{% endif %}
+  {{ tab.pager(friends) }}
+  {% if friends.caption %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ friends.caption }}</p></details>{% endif %}
+</section>
+{% else %}
+<section id="flux-touch" data-pane aria-labelledby="flux-touch-title" class="now-card">
+  {{ tab.head("Ce qui la touche", "flux-touch-title", none, "Un titre qui touche ses centres d'intérêt, elle le remarque ; les autres, elle les laisse passer.") }}
+  <p class="flux-kept"><b class="now-num">{{ kept }}</b> titre{{ 's' if kept not in ('0', '1') }} remarqué{{ 's' if kept not in ('0', '1') }}, gardé{{ 's' if kept not in ('0', '1') }} en mémoire</p>
+  {% if words %}
+  <p class="now-subhead">Les mots qui la touchent</p>
+  <ul class="flux-words" role="list">{% for w in words %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% else %}{{ tab.empty("aucun mot encore : ses centres d'intérêt les lui donneront") }}{% endif %}
+</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page sens-page flux" data-tab="sens/flux">
+  {{ sx.state(state) }}
+  {% if broken %}
+  <p class="person-tab-note danger sens-alert" role="alert"><b>{{ broken|length }} flux ne répond{{ 'ent' if broken|length > 1 }} plus.</b>
+    {% for f in broken %}{{ f.name.text }}{% if f.error %} ({{ f.error }}){% endif %}{{ ', ' if not loop.last else '.' }}{% endfor %}
+    <a href="#flux-feeds">Voir ses flux</a></p>
+  {% endif %}
+  {{ tab.block(band) }}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ses flux">
+      <a href="#flux-articles">Derniers articles{% if articles %} <span class="hm-count">{{ articles.count or 0 }}</span>{% endif %}</a>
+      <a href="#flux-feeds"{% if broken %} class="danger"{% endif %}>Ses flux{% if feeds %} <span class="hm-count">{{ feeds.count or 0 }}</span>{% endif %}</a>
+      <a href="#flux-noticed">Ce qu'elle a remarqué <span class="hm-count">{{ noticed.count or 0 }}</span></a>
+      <a href="#flux-friends">Pour ses amies <span class="hm-count">{{ friends.count or 0 }}</span></a>
+      <div class="hm-subnav-sep"></div>
+      <a href="#flux-touch">Ce qui la touche</a>
+    </nav>
+    <div class="hm-subpanes">
+      {% for id in panes %}{{ pane(id) }}{% endfor %}
+    </div>
+  </div>
+</div>

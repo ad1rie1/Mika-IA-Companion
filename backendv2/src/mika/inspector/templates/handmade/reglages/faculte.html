@@ -1,0 +1,13 @@
+{# Réglages › Paramètres avancés › une faculté (app/handmade/tabs/settings.py, ADR 0177) : ses chiffres (ce que le
+   tempérament dérive mène au tempérament), des surcharges refusées en bandeau, d'où vient une valeur (les étiquettes que
+   reprend chaque paramètre), ses groupes dans la colonne de gauche. Le formulaire de ses paramètres suit : le panneau
+   de la console (handmade/reglages/parametres.html), au gabarit « paramétrage ». La bande, le bandeau et les groupes
+   restent enfants directs de la page : base.css les place autour du formulaire. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/reglages/_onglets.html" as regx %}
+<div class="now-page regx regx-faculty" data-tab="reglages/comportement-*">
+  {{ tab.block(band) }}
+  {% if refused %}<p class="person-tab-note danger" role="alert">{{ refused }}</p>{% endif %}
+  {{ regx.sources(sources) }}
+  {% if nav %}{{ tab.block(nav) }}{% endif %}
+</div>

@@ -90,7 +90,7 @@ def render_ago(us: int) -> str:
 async def attention(ui: Any, request: Request) -> list[Any]:
     report = health.report(ui.kernel)
     out: list[Any] = []
-    items = ui.attention_items()
+    items = ui.attention_items(distinct=True)  # chaque chose une fois : la file « À valider » par son total
     gateway = ui.kernel.deps.gateway
     cards = [Stat(i["label"], i["count"], i["hint"] or "à regarder", "warn", _local(i["href"], i["label"]))
              for i in items]

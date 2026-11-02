@@ -1,0 +1,41 @@
+{# Système › Journal d'événements (app/handmade/tabs/system.py, ADR 0177) : les familles d'événements de la page en
+   puces (elles filtrent par type) ; puis un fil jour par jour, en deux colonnes sur un grand écran — l'heure, ce qui
+   s'est passé (vers l'événement), son type et son numéro ; les événements d'un même épisode se suivent sans répéter
+   leur lien ; les données de chacun repliées. Les filtres, la pagination et la bascule « Tableau » de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-jr" data-tab="systeme/chronologie">
+  {{ sx.notes(notes) }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="sys-jr-title">
+    {{ tab.head(t.title, "sys-jr-title", none, "Du plus récent : tout ce qui lui est arrivé, tel que le journal le garde.", list=t) }}
+    {% if families %}
+    <nav class="hm-chips sys-jr-families" aria-label="Les familles d'événements de cette page">
+      <span class="hm-chips-title">Sur cette page</span>
+      {% if everything %}<a class="hm-chip" href="{{ everything.href }}">tous les types</a>{% endif %}
+      {% for f in families %}<a class="hm-chip{{ ' on' if f.on }}" href="{{ f.href }}"{% if f.on %} aria-current="page"{% endif %}>{{ f.name }} <span class="hm-count">{{ f.n }}</span></a>{% endfor %}
+    </nav>
+    {% endif %}
+    {% if days %}
+    <div class="sys-jr-days{{ ' many' if count > 12 }}">
+      {% for d in days %}
+      <section class="sys-jr-day" aria-label="{{ d.name }}">
+        {{ sx.day(d) }}
+        <ol class="sys-jr-feed" role="list">
+          {% for e in d["items"] %}
+          <li class="{{ 'same' if e.same }}">
+            <span class="sys-feed-when" title="{{ e.when.exact if e.when else '' }}">{{ e.hm or tab.cell(e.when) }}</span>
+            <span class="sys-jr-what">{% if e.href %}<a href="{{ e.href }}">{{ e.what.text }}</a>{% else %}{{ tab.cell(e.what) }}{% endif %}</span>
+            <span class="sys-jr-type mono" title="{{ e.type }}">{{ e.type }}</span>
+            <span class="sys-jr-seq now-num">n° {{ e.seq }}</span>
+            {% if e.data %}<details class="sys-jr-data"{{ ' open' if e.open }}><summary>Données</summary>{{ tab.inner(e.data) }}</details>{% endif %}
+            {% if e.corr and e.link and not e.same %}<span class="sys-jr-link">lié à {{ tab.cell(e.link) }}</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

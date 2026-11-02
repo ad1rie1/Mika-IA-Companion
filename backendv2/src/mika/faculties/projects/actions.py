@@ -635,7 +635,9 @@ def _pause(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> 
                                      about=p.about),), message="Projet en pause.", guard=_still(p.id, (c.ACTIVE,)))
 
 
-@PROJECTS.action("reprendre", title="Reprendre", args=NoArgs, emits=[RESUMED], subject="project", order=11,
+# la principale de la fiche (ADR 0176, la maquette) : « Lancer maintenant » (actif) ou « Reprendre » (en pause) — l'une
+# exclut l'autre —, puis « Donner une consigne » ; la pause et le reste sous « ⋯ »
+@PROJECTS.action("reprendre", title="Reprendre", args=NoArgs, emits=[RESUMED], subject="project", order=4,
                  available=_resumable, description="Il repart d'où il en était (ses pannes oubliées).")
 def _resume(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
@@ -688,7 +690,7 @@ class InstructionArgs(BaseModel):
 
 
 @PROJECTS.action("consigne", title="Donner une consigne", args=InstructionArgs, emits=[AMENDED], subject="project",
-                 order=20, available=_editable,
+                 order=7, available=_editable,
                  description="Une précision sur ce qu'elle doit faire, ajoutée au cadre du projet.")
 def _amend(s: ProjectsState, frame: Frame, args: InstructionArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)

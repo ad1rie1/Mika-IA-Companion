@@ -1,0 +1,11 @@
+{# Ce que partagent les onglets de Buts (app/handmade/tabs/goals.py, ADR 0177) : les notes de la faculté, le pied d'un
+   but (son détail replié : son titre mène à sa fiche). À importer « with context » (le détail dessine ses formulaires). #}
+{% import "handmade/shared/tab.html" as tab with context %}
+
+{% macro notes(list) -%}
+{% for n in list %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+{%- endmacro %}
+
+{% macro foot(g) -%}
+{% if g.detail %}<div class="gl-foot"><details class="person-entry-detail"><summary>Le détail</summary><div class="stack">{{ tab.inner(g.detail) }}</div></details></div>{% endif %}
+{%- endmacro %}

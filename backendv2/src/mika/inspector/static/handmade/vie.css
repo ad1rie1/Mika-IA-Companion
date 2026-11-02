@@ -1,0 +1,218 @@
+/* Elle › Humeur et corps (app/handmade/tabs/life.py, ADR 0177) : humeur, postures, besoins, sommeil et rythme, monde
+   et corps, estime et récit, qui elle devient — sur le vocabulaire commun (base.css ; l'humeur charge aussi now.css,
+   pour son plan plaisir × éveil). Fond blanc et filets, pas de carte dans une carte ; une émotion se porte par sa
+   classe (sw-<émotion> pose --sw), une longueur par un attribut SVG. */
+
+/* ── ce que partagent les onglets ─────────────────────────────────────── */
+.vie-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--now-gap); align-items: start; }
+.vie-two.wide-left { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.vie-two.inner { gap: 28px; margin-top: 18px; }
+.vie-voice { --sw: var(--accent); margin: 0 0 14px; }
+.vie-voice.warn { --sw: var(--warn); }
+.now-hero .vie-voice { --sw: inherit; }  /* dans son humeur en grand : la couleur de ce qu'elle ressent */
+.vie-voice footer { font-style: normal; }
+.vie-voice p::before { content: "«\00a0"; }
+.vie-voice p::after { content: "\00a0»"; }
+.vie-chart { min-width: 0; }
+.vie-chart .chart-body { grid-template-columns: 44px minmax(0, 1fr); }
+.vie-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.vie-when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.vie-said { display: block; margin: 0; color: var(--text-2); font-size: 13.5px; line-height: 1.5; quotes: "« " " »"; }
+.vie-said::before { content: open-quote; }
+.vie-said::after { content: close-quote; }
+.vie-fold > summary { cursor: pointer; font: 600 14px var(--display); }
+.vie-fold[open] > summary { margin-bottom: 10px; }
+.vie-fold-lede { margin: 0 0 14px; font-size: 12.5px; }
+.vie-facts { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+.vie-facts > div { grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); }
+.vie-pane > .now-card-head { margin-bottom: 16px; }
+
+/* une jauge signée : son milieu marqué, le chaud d'un côté, le froid de l'autre */
+.vie-signed { display: block; width: 100%; height: 8px; overflow: visible; }
+.vie-signed line { stroke-linecap: round; }
+.vie-signed .track { stroke: var(--sunken); stroke-width: 6px; }
+.vie-signed .fill { stroke: var(--muted); stroke-width: 6px; stroke-linecap: butt; }
+.vie-signed.warm .fill { stroke: var(--emo-happy); }
+.vie-signed.cold .fill { stroke: var(--emo-sad); }
+.vie-signed .mid { stroke: var(--border-strong); stroke-width: 1.5px; stroke-linecap: butt; }
+
+/* ── Humeur ───────────────────────────────────────────────────────────── */
+.vie-humeur .now-hero { box-shadow: none; }
+.vie-humeur .now-voice { margin-top: 20px; }
+.vie-tags { display: grid; margin: 0; padding: 0; list-style: none; }
+.vie-tags > li { display: grid; gap: 5px; padding: 11px 0 11px 12px; border-top: 1px solid var(--border);
+  border-left: 2px solid color-mix(in srgb, var(--sw, var(--border)) 70%, transparent); }
+.vie-tags > li:first-child { border-top: 0; }
+.vie-tag-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-size: 13.5px; }
+.vie-tag-head .swatch { font-weight: 600; }
+
+/* ── Postures ─────────────────────────────────────────────────────────── */
+.vie-stances { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 0 36px;
+  margin: 0; padding: 0; list-style: none; }
+.vie-stance { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; padding: 16px 0; border-top: 1px solid var(--border); }
+.vie-stance.grudge .now-avatar { border-color: var(--danger); }
+.vie-stance-main { display: grid; gap: 8px; min-width: 0; }
+.vie-stance-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 15px; font-weight: 600; }
+.vie-stance-head a { color: var(--text); }
+.vie-stance-head a:hover { color: var(--accent); }
+.vie-stance-head .vie-when { font-weight: 400; }
+.vie-stance-felt { margin: 0; color: var(--text-2); font-size: 13px; }
+.vie-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 18px; margin: 2px 0 0; }
+.vie-gauges > div { display: grid; gap: 4px; min-width: 0; }
+.vie-gauges dt { color: var(--muted); font-size: 11.5px; }
+.vie-gauges dd { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; }
+.vie-gauges .now-bar { width: calc(100% - 6px); }
+
+/* ── Besoins ──────────────────────────────────────────────────────────── */
+.vie-needs-block { display: grid; gap: 10px; }
+.vie-needs-block > .now-card-head { margin-bottom: 0; }
+.vie-needs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--now-gap); margin: 0; padding: 0; list-style: none; }
+.vie-need { display: grid; align-content: start; gap: 9px; }
+.vie-need.dominant { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.vie-need.warn { border-color: var(--warn-line); }
+.vie-need-head { display: flex; align-items: center; gap: 8px; margin: 0; }
+.vie-need-name { font: 600 15px var(--display); }
+.vie-need-value { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.vie-need-value > .now-num { font: 650 1.9rem/1.1 var(--display); letter-spacing: -.02em; }
+.vie-need.warn .vie-need-value > .now-num { color: var(--warn); }
+.vie-need-relief { margin: 2px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.vie-trend { color: var(--muted); font-size: 12.5px; }
+.vie-trend.monte { color: var(--warn); }
+.vie-trend.baisse { color: var(--ok); }
+
+/* ── Sommeil et rythme ────────────────────────────────────────────────── */
+.vie-day { margin: 4px 0 0; }
+.vie-day-svg { display: block; overflow: visible; }
+.vie-phase { fill: color-mix(in srgb, var(--sw) 24%, var(--surface)); stroke: var(--surface); stroke-width: 1.5; }
+.vie-sleep { fill: var(--now-sleep); }
+.vie-tick { stroke: color-mix(in srgb, var(--border-strong) 70%, transparent); stroke-width: 1; }
+.vie-tick.major { stroke: var(--border-strong); }
+.vie-phase-name { fill: var(--text); font: 600 11.5px var(--font); }
+.vie-hour { fill: var(--muted); font: 11px var(--font); font-variant-numeric: tabular-nums; }
+.vie-now { stroke: var(--accent); stroke-width: 2; }
+.vie-now-label { fill: var(--accent); font: 600 11px var(--font); }
+.vie-phases { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 0 0; padding: 0; list-style: none; color: var(--text-2); font-size: 12.5px; }
+.vie-phases b { font-weight: 600; color: var(--text); }
+.vie-sleep-key { display: inline-block; width: 14px; height: 5px; margin-right: 6px; border-radius: 2px; background: var(--now-sleep); vertical-align: 2px; }
+.vie-flags { margin: 0 0 14px; }
+.vie-flags li.info { border-color: transparent; background: var(--info-bg); color: var(--info); }
+.vie-nights { display: grid; margin: 0; padding: 0; list-style: none; }
+.vie-nights > li { display: grid; gap: 4px; padding: 11px 0; border-top: 1px solid var(--border); }
+.vie-nights > li:first-child { padding-top: 2px; border-top: 0; }
+.vie-night-head { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.vie-night-slept { font: 650 1.15rem var(--display); }
+.vie-night-roused { margin: 0; font-size: 12.5px; }
+
+/* ── Monde et corps ───────────────────────────────────────────────────── */
+.vie-intents { display: grid; margin: 0; padding: 0; list-style: none; }
+.vie-intents > li { display: grid; gap: 7px; padding: 12px 0; border-top: 1px solid var(--border); }
+.vie-intents > li:first-child { padding-top: 2px; border-top: 0; }
+.vie-intent-who { margin: 0; font-size: 13.5px; }
+.vie-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.vie-steps li { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12.5px; counter-increment: step; }
+.vie-steps li::before { content: counter(step) ". "; color: var(--muted); }
+.vie-places { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 0 28px; }
+.vie-place { padding: 10px 0 12px; border-top: 1px solid var(--border); }
+.vie-place h3 { margin: 0 0 6px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .04em; }
+.vie-place ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.vie-place li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.vie-id { color: var(--muted); font-size: 11.5px; }
+.vie-feed { display: grid; margin: 0; padding: 0; list-style: none; }
+.vie-feed > li { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--border); }
+.vie-feed > li:first-child { padding-top: 2px; border-top: 0; }
+.vie-feed p { margin: 0; }
+.vie-changes { overflow-wrap: anywhere; font-size: 12px; }
+
+/* ── Estime et récit ──────────────────────────────────────────────────── */
+.vie-band .person-tile-value .now-num { font-variant-numeric: tabular-nums; }
+.vie-scale { margin: 6px 0 0; }
+.vie-scale svg { display: block; overflow: visible; }
+.vie-scale-track { fill: var(--sunken); }
+.vie-scale-doubt { fill: color-mix(in srgb, var(--warn) 22%, transparent); }
+.vie-scale-sure { fill: color-mix(in srgb, var(--ok) 22%, transparent); }
+.vie-scale-word { fill: var(--muted); font: 11px var(--font); }
+.vie-scale-mark { stroke: var(--text-2); stroke-width: 1; }
+.vie-scale-now { fill: var(--accent); stroke: var(--surface); stroke-width: 2.5; }
+.vie-scale-now.warn { fill: var(--warn); }
+.vie-scale-now.ok { fill: var(--ok); }
+.vie-scale-value { fill: var(--text); font: 650 12px var(--font); font-variant-numeric: tabular-nums; }
+.vie-knocks { display: grid; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.vie-knocks > li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: baseline; gap: 10px;
+  padding: 8px 0; border-top: 1px solid var(--border); }
+.vie-knocks > li:first-child { border-top: 0; padding-top: 0; }
+.vie-knock { font-weight: 650; }
+.vie-knock.ok { color: var(--ok); }
+.vie-knock.danger { color: var(--danger); }
+.vie-rules { margin-top: 18px; }
+.vie-story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 440px); gap: 32px; align-items: start; }
+.vie-story-text { max-width: 74ch; margin-top: 8px; font-size: 15px; line-height: 1.65; white-space: pre-line; }
+.vie-story aside { padding-left: 24px; border-left: 1px solid var(--border); }
+.vie-identity { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 14px; font-size: 13.5px; }
+/* ses textes et ses listes coulent sur deux colonnes : un long portrait ne laisse pas de trou à côté de lui */
+.vie-persona { columns: 2 380px; column-gap: 36px; }
+.vie-persona > section { break-inside: avoid; padding: 12px 0 14px; border-top: 1px solid var(--border); }
+.vie-persona .now-subhead { margin-bottom: 6px; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.vie-reading { max-width: 74ch; margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-line; }
+.vie-bullets { display: grid; gap: 5px; margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.45; }
+.vie-samples { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.vie-samples li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.vie-sample-in { color: var(--muted); }
+.vie-sample-in::after { content: " →"; }
+.vie-character { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px 28px;
+  margin: 0 0 6px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.vie-character > div { display: grid; gap: 3px; }
+.vie-character dt { color: var(--muted); font-size: 12px; }
+.vie-character dd { margin: 0; font-size: 14px; }
+/* ses familles coulent sur trois colonnes (« Les autres » en compte douze) ; un curseur ne se coupe pas */
+.vie-families { columns: 3 280px; column-gap: 36px; }
+.vie-family { padding-top: 14px; }
+.vie-family .now-subhead { margin: 0 0 8px; break-after: avoid; }
+.vie-sliders { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.vie-sliders li { display: grid; gap: 2px; break-inside: avoid; }
+.vie-slider-head { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 13px; }
+.vie-sliders li.far .vie-slider-head > span:first-child { font-weight: 600; }
+.vie-slider { display: block; width: 100%; height: 10px; overflow: visible; }
+.vie-slider .track { stroke: var(--sunken); stroke-width: 5px; }
+.vie-slider .fill { stroke: var(--accent); stroke-width: 5px; }
+.vie-slider .mid { stroke: var(--border-strong); stroke-width: 1.5px; }
+.vie-slider-ends { display: flex; justify-content: space-between; gap: 10px; margin: 0; color: var(--muted); font-size: 11px; }
+
+/* ── Qui elle devient ─────────────────────────────────────────────────── */
+.vie-knowing { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 0 28px;
+  margin: 0; padding: 0; list-style: none; }
+.vie-knowing > li { display: grid; align-content: start; gap: 8px; padding: 12px 0 14px; border-top: 1px solid var(--border); }
+.vie-knowing h3 { margin: 0; font: 600 15px var(--display); }
+.vie-knowing-marks { margin: 0; font-size: 14px; }
+.vie-knowing p { margin: 0; }
+.vie-knowing .vie-voice { margin: 0; }
+.vie-knowing-rule { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.vie-passions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0 28px;
+  margin: 0; padding: 0; list-style: none; }
+.vie-passions > li { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.vie-passion-head { display: flex; align-items: center; gap: 8px; margin: 0; }
+.vie-passion-name { font-weight: 600; }
+.vie-passion-glow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 12.5px; }
+.vie-passion-glow .now-bar { --sw: var(--emo-curious); }
+.vie-notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 0 32px;
+  margin: 0; padding: 0; list-style: none; }
+.vie-notes > li { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.vie-notes p { margin: 0; }
+.vie-was { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.vie-now::before { content: "→ "; color: var(--accent); }
+
+/* ── Écrans plus étroits ──────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .vie-two, .vie-two.wide-left { grid-template-columns: minmax(0, 1fr); }
+  .vie-needs { grid-template-columns: minmax(0, 1fr); }
+  .vie-story { grid-template-columns: minmax(0, 1fr); }
+  .vie-story aside { padding: 14px 0 0; border-top: 1px solid var(--border); border-left: 0; }
+}
+@media (max-width: 700px) {
+  .vie-gauges { grid-template-columns: minmax(0, 1fr); }
+  .vie-stance { grid-template-columns: 36px minmax(0, 1fr); gap: 10px; }
+  .vie-stance .now-avatar { width: 36px; height: 36px; font-size: 16px; }
+  .vie-knocks > li { grid-template-columns: 54px minmax(0, 1fr); }
+  .vie-knocks .vie-when { grid-column: 2; margin: 0; }
+  .vie-facts > div { grid-template-columns: minmax(0, 42%) minmax(0, 1fr); }
+  .vie-hour { font-size: 10px; }
+}

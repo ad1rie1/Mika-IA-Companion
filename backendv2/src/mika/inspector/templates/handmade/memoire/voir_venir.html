@@ -1,0 +1,49 @@
+{# Elle › Mémoire › Voir venir (app/handmade/tabs/memory.py, ADR 0177) : côte à côte, ses attentes par sorte d'annonce
+   — l'écart moyen (Brier) placé sur une échelle de « toujours juste » à « pile ou face », et ce qu'elle en fait — ; et
+   qui tient ce qu'il annonce — ses moments tenus et manqués sur une même barre, ce que vaut désormais son annonce. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page memories ahead" data-tab="memoire/voir-venir">
+  <div class="ahead-grid">
+    <section class="now-card" aria-labelledby="ahead-expected">
+      <header class="now-card-head"><h2 id="ahead-expected">{{ expected.title }}</h2>{% if natures %}<span class="person-count now-num">{{ natures|length }}</span>{% endif %}<p>Ses attentes tombent-elles juste ? Plus la barre est courte, plus elle voyait juste.</p></header>
+      {% if natures %}
+      <ul class="ahead-list" role="list">
+        {% for n in natures %}
+        <li class="ahead-row">
+          <p class="ahead-name"><span>{{ n.nature }}</span>{% if n.verdict and n.verdict.text %}<span class="now-tag {{ n.verdict.tone }}">{{ n.verdict.text }}</span>{% endif %}</p>
+          {% if n.x is not none %}
+          <svg class="ahead-scale {{ n.tone }}" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
+            <line class="track" x1="0" x2="100" y1="7" y2="7" vector-effect="non-scaling-stroke"/>
+            <line class="fill" x1="0" x2="{{ n.x }}" y1="7" y2="7" vector-effect="non-scaling-stroke"/>
+            <line class="coin" x1="{{ coin }}" x2="{{ coin }}" y1="1" y2="13" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <p class="ahead-scale-legend" aria-hidden="true"><span>toujours juste</span><span class="ahead-coin">pile ou face</span><span></span></p>
+          {% endif %}
+          <p class="memories-meta"><span>écart moyen <span class="now-num">{{ n.brier }}</span></span><span>sur <span class="now-num">{{ n.seen }}</span> moment{{ 's' if n.seen not in ('0', '1') }} constaté{{ 's' if n.seen not in ('0', '1') }}</span></p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(expected.empty) }}<p class="ahead-help">Quand un moment annoncé a eu lieu, a été reporté ou annulé, elle compare ce qu’elle en attendait à ce qui est arrivé — par sorte d’annonce.</p>{% endif %}
+      {{ tab.pager(expected) }}
+    </section>
+
+    <section class="now-card" aria-labelledby="ahead-tellers">
+      <header class="now-card-head"><h2 id="ahead-tellers">{{ tellers.title }}</h2>{% if people %}<span class="person-count now-num">{{ people|length }}</span>{% endif %}<p>Qui tient ce qu’il annonce : ses moments tenus, et ceux reportés ou annulés.</p></header>
+      {% if people %}
+      <ul class="ahead-list" role="list">
+        {% for p in people %}
+        <li class="ahead-row">
+          <p class="ahead-name"><span>{{ p.who }}</span><span class="now-muted"><span class="now-num">{{ p.kept }}</span> tenu{{ 's' if p.kept > 1 }} · <span class="now-num">{{ p.missed }}</span> reporté{{ 's' if p.missed > 1 }} ou annulé{{ 's' if p.missed > 1 }}</span></p>
+          <svg class="ahead-split" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+            <line class="missed" x1="0" x2="100" y1="3" y2="3" vector-effect="non-scaling-stroke"/>
+            {% if p.split > 0 %}<line class="kept" x1="0" x2="{{ p.split }}" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% endif %}
+          </svg>
+          {% if p.worth %}<p class="memories-meta"><span>ce que vaut son annonce</span><span class="now-num">{{ p.worth.text }}</span></p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(tellers.empty) }}<p class="ahead-help">Chaque fois qu’un moment annoncé par quelqu’un tourne bien ou non, elle en tient compte la prochaine fois qu’il en annonce un.</p>{% endif %}
+      {{ tab.pager(tellers) }}
+    </section>
+  </div>
+</div>

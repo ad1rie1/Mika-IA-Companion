@@ -1,0 +1,65 @@
+{# Connexions extérieures › Caméra (app/handmade/tabs/senses.py, ADR 0177) : ce qu'elle voit en ce moment, appareil par
+   appareil (ce qui est notable en avant, ce dont elle parle encore), à côté de ses appareils (en direct ou silencieux,
+   leur dernière image — jamais l'image elle-même) ; puis ses regards, au journal. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/sens/_sens.html" as sx with context %}
+<div class="now-page sens-page cam" data-tab="sens/camera">
+  {{ sx.state(state) }}
+  <div class="sens-split">
+    <section class="now-card" id="{{ views.id }}" aria-labelledby="cam-views-title">
+      {{ tab.head("Ce qu'elle voit", "cam-views-title", none, views.caption) }}
+      {% if view_items %}
+      <ul class="sens-list" role="list">
+        {% for v in view_items %}
+        <li class="sens-item cam-view{{ ' notable' if v.notable }}">
+          <p class="sens-meta">
+            <b class="cam-device">{{ v.device }}</b>
+            {% if v.notable %}<span class="now-tag warn">quelque chose se passe</span>{% endif %}
+            {% if v.fresh %}<span class="now-tag ok">{{ v.fresh_word }}</span>{% endif %}
+            <span class="sens-when">vu {{ tab.cell(v.when) }}</span>
+          </p>
+          <p class="cam-seen{{ ' old' if not v.fresh }}">{{ tab.cell(v.text) }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(views.empty) }}{% endif %}
+      {{ tab.pager(views) }}
+    </section>
+    <section class="now-card" aria-labelledby="cam-devices-title">
+      {{ tab.head("Ses appareils", "cam-devices-title", devices.count if devices else (device_items|length or none)) }}
+      {% if device_items %}
+      <ul class="sens-list" role="list">
+        {% for d in device_items %}
+        <li class="sens-item cam-dev{{ ' live' if d.live }}">
+          <p class="cam-dev-top"><span class="sens-state-dot" aria-hidden="true"></span><b>{{ d.name }}</b>
+            <span class="now-tag {{ 'ok' if d.live else '' }}">{{ 'en direct' if d.live else 'silencieux' }}</span></p>
+          <p class="sens-meta">
+            {% if d.last %}<span>dernière image {{ tab.cell(d.last) }}</span>{% elif d.sub %}<span>{{ d.sub }}</span>{% else %}<span>aucune image encore</span>{% endif %}
+            {% if d.mime %}<span>{{ d.mime }}{% if d.size %} · {{ d.size }}{% endif %}</span>{% endif %}
+            {% if d.digest %}<code class="cam-digest" title="L'empreinte de sa dernière image : elle dit si l'image a changé">{{ d.digest }}</code>{% endif %}
+          </p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if devices %}{{ tab.pager(devices) }}{% endif %}
+      {% else %}{{ tab.empty("aucun appareil ne s'est encore connecté") }}{% endif %}
+    </section>
+  </div>
+  <section class="now-card" aria-labelledby="cam-looks-title">
+    {{ tab.head(looks.title, "cam-looks-title", none, "Chaque fois qu'elle a regardé : ce qu'elle a vu, et ce qui était notable.") }}
+    {% if looks.entries %}
+    <ol class="sens-list sens-feed" role="list">
+      {% for e in looks.entries %}
+      <li class="sens-item{{ ' warn' if e.tone == 'warn' }}">
+        <span class="sens-feed-when"><time title="{{ e.at }}">{{ e.rel }}</time></span>
+        <div class="sens-feed-body">
+          <p class="sens-feed-title">{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.meta %} <span class="now-muted">· {{ e.meta }}</span>{% endif %}</p>
+          {% if e.text %}<p class="sens-feed-text">{{ e.text }}</p>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(looks.empty) }}{% endif %}
+    {{ tab.pager(looks) }}
+  </section>
+</div>

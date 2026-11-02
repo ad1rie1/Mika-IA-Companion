@@ -1,0 +1,46 @@
+{# Système › Stockage et sauvegardes (app/handmade/tabs/system.py, ADR 0177) : un bandeau si les sauvegardes manquent ou
+   échouent, la bande de chiffres (ses bases, le journal, le dernier instantané) ; puis côte à côte ce que garde sa
+   base de vie (une barre par table) et ses sauvegardes — la dernière, sa vérification, ce qui n'est pas encore
+   sauvegardé, les archives gardées — avec les commandes pour sauvegarder, vérifier, restaurer. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-store" data-tab="systeme/stockage">
+  {{ sx.band(band) }}
+  {{ tab.block(bases) }}
+  <div class="sys-cols two">
+    <section class="now-card" id="{{ kept.id }}" aria-labelledby="sys-store-kept">
+      {{ tab.head(kept.title, "sys-store-kept", none, "Sa vie : à sauvegarder. Les projections jetables vivent à part et se reconstruisent depuis le journal.") }}
+      <ul class="sys-store-tables" role="list">
+        {% for x in tables %}
+        <li>
+          <p class="sys-store-name"><span class="mono">{{ x.name }}</span><span class="now-muted">{{ x.what }}</span></p>
+          {{ tab.bar(x.w, 'sys-store-bar') }}
+          <span class="now-num">{{ x.n }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {{ tab.pager(kept) }}
+    </section>
+    <section class="now-card" aria-labelledby="sys-store-saves">
+      {{ tab.head("Sauvegardes", "sys-store-saves") }}
+      {% if saved %}
+      <dl class="sys-store-saves">
+        {% for s in saves %}
+        <div class="is-{{ s.tone or 'plain' }}"><dt>{{ s.label }}</dt><dd><b>{{ tab.cell(s.value) }}</b>{% if s.sub %}<span class="now-muted">{{ s.sub }}</span>{% endif %}</dd></div>
+        {% endfor %}
+      </dl>
+      {% if last %}
+      <details class="hm-subfold sys-store-last"><summary>La dernière sauvegarde</summary><dl class="person-fields">{% for p in last.pairs %}<div><dt>{{ p.label }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}</dl></details>
+      {% endif %}
+      {% if archives %}
+      <h3 class="now-subhead">{{ archives.title }}</h3>
+      <ul class="sys-rows sys-store-archives" role="list">
+        {% for a in archive_items %}<li><span class="mono">{{ a.name }}</span><span class="now-num">{{ a.size }}</span><span class="now-muted">{{ tab.cell(a.when) }}</span></li>{% endfor %}
+      </ul>
+      {{ tab.pager(archives) }}
+      {% endif %}
+      {% else %}<p class="now-empty">Ce serveur ne note pas ses sauvegardes.</p>{% endif %}
+      {{ sx.notes(notes) }}
+    </section>
+  </div>
+</div>

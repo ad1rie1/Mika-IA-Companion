@@ -7,9 +7,17 @@
 .obj-head { display: grid; flex: 1 1 520px; gap: 6px; min-width: 0; }
 .obj-head .now-kicker { margin: 0; }
 .obj-head h1 { margin: 0; overflow-wrap: anywhere; }
+/* son nom, son état à côté (la maquette) */
+.obj-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .obj-head-lede { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 14.5px; line-height: 1.5; }
-.obj-head-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
-.obj-head-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 2px 0 0; font-size: 13.5px; }
+.obj-head-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 2px 0 0; font-size: 13px; }
+/* des faits séparés par un filet (la maquette) */
+.obj-head-facts > span + span::before { content: ""; display: inline-block; width: 1px; height: 12px; margin: 0 12px;
+  background: var(--border-strong); vertical-align: -1px; }
+@media (max-width: 640px) {
+  .obj-head-facts { gap: 4px 14px; }
+  .obj-head-facts > span + span::before { display: none; }
+}
 .obj-head-facts .now-muted { font-size: 12.5px; }
 
 /* ── Ce qui se dit avant tout, des faits, un parcours ─────────────────── */

@@ -17,7 +17,7 @@ from starlette.routing import Route
 from mika.adapters.web.accounts import password_problems
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
-from mika.inspector.formview import action_view, visible_fields
+from mika.inspector.formview import action_view, prefilled, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.canals import canals_post
 from mika.inspector.pages.episode_drawn import episode_panel
@@ -209,8 +209,11 @@ class Pages:
                                     blocks=[Note("Cette action n'est pas possible maintenant (l'objet a changé ?).",
                                                  "warn")])
         dynamic = dynamic_fields(self.ui.kernel, spec, subject, {}) if spec.fields else None
+        # l'état d'abord, puis ce que l'adresse demande (le bouton d'une ligne : « la démentir »)
+        asked = prefilled(dynamic if dynamic is not None else describe(spec.args), request.query_params)
         form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, dynamic=dynamic,
-                           subjects=self.subject_choices, values=initial_values(self.ui.kernel, spec, subject))
+                           subjects=self.subject_choices,
+                           values={**initial_values(self.ui.kernel, spec, subject), **asked})
         form["description"] = ""  # dite en sous-titre de la page
         home = self.dests.get(spec.section) if spec.section else next(
             (d for d in self.dests.values() if spec.subject and spec.subject in d.subjects), None)
@@ -226,6 +229,10 @@ class Pages:
         keep = [*keep, *((k, v) for k, v in query.items() if is_table_choice(k, v) and k not in dict(keep))]
         env = self.ui.env()
         fctx, active_filter = render.filters_ctx(filters, query)
+        # des filtres faits de petits choix : des boutons à choix au bout de la barre d'onglets, pas un formulaire
+        quick = render.quick_filters(fctx, keep)
+        if quick:
+            fctx, ctx["quick"] = [], quick
         reset = request.url.path + ("?" + urlencode(dict(keep)) if keep else "")
         panel_ctx = dict(panel.context) if panel else {}
         if panel_ctx.get("page_heading"):
@@ -314,15 +321,18 @@ class Pages:
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
+        # le fil d'Ariane (ADR 0176, la maquette) : sa rubrique, puis la destination — un lien quand le titre est
+        # celui de l'onglet (« Mika / Humeur et corps », puis « Besoins »)
+        crumbs = got.get("crumbs") or [(d.label, dest_url(d.key) if current[1] != d.label else "")]
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
-                                eyebrow=d.label if current[1] != d.label else "",
+                                rubric=not got.get("crumbs"),
                                 subtitle=item.description or d.description, tabs=tab_list, gear=gear,
                                 blocks=got["blocks"],
                                 console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                 head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                 filters=got.get("filters") or (), panel=got.get("panel"),
                                 messages=got.get("messages") or [],
-                                crumbs=got.get("crumbs") or [],
+                                crumbs=crumbs,
                                 status=status)
 
     def drawn(self, request: Request, where: str, got: Mapping[str, Any]) -> dict[str, Any]:
@@ -624,7 +634,16 @@ class Pages:
             await self.ui.deps.after_decision()
         outcome = {"approved": "oui", "rejected": "non", "changed": "change", "blocked": "bloque"}.get(status,
                                                                                                     "inconnu")
-        return RedirectResponse(f"{target}?fait={outcome}", status_code=303)
+        # décidée : la suivante de la file s'ouvre ; à relire (l'aperçu a changé, bloquée) : la même
+        again = status in ("changed", "blocked")
+        follow = str(proposal) if again else data.get("suivante", "")
+        query = {"fait": outcome, **({"demande": follow} if follow.isdigit() else {}),
+                 **({"sorte": kind} if (kind := data.get("sorte", "")[:200]) else {})}
+        # l'onglet de la file d'où l'on décide (« Courriers à envoyer ») : on y revient
+        tab = data.get("file", "")
+        if tab and len(tab) <= 40 and tab.replace("_", "").isalnum():
+            target = f"{target}/{tab}"
+        return RedirectResponse(f"{target}?{urlencode(query)}", status_code=303)
 
     async def settings_post(self, request: Request) -> Response:
         """Enregistrer une page de configuration : une section de réglages, les

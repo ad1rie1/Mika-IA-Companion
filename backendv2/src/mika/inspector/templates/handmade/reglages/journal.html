@@ -1,0 +1,29 @@
+{# Réglages › Journal des modifications (app/handmade/tabs/settings.py, ADR 0177) : jour par jour, chaque réglage
+   enregistré depuis la console (qui, quoi, sur quoi — jamais un contenu ni un secret) et chaque journalisation des
+   paramètres ; celles d'un même moment et d'une même origine (le démarrage) réunies en une ligne. Chaque ligne mène à
+   son événement ; la pagination est celle du journal. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page regx regx-journal" data-tab="reglages/journal">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="regx-journal-title">
+    {{ tab.head(t.title, "regx-journal-title", none, "Ce qu'un opérateur a enregistré, et quand ses paramètres ont été journalisés.") }}
+    {% if days %}
+    {% for d in days %}
+    <h3 class="now-subhead{{ ' first' if loop.first }} regx-day">{{ d.day }}</h3>
+    <ol class="regx-changes" role="list">
+      {% for c in d["items"] %}
+      <li class="regx-change{{ ' params' if c.params }}">
+        <span class="regx-time now-num">{{ c.time }}</span>
+        <div class="regx-change-main">
+          <p class="regx-what">{{ tab.cell(c.kind) }}
+            {% if c.params and c.what|length > 1 %}<span>Paramètres journalisés pour {{ c.what|length }}&nbsp;facultés&nbsp;:</span>{% endif %}
+            {% for w in c.what %}<span class="regx-what-one">{{ tab.cell(w) }}{{ ',' if not loop.last }}</span>{% endfor %}</p>
+          <p class="regx-meta">{% if c.by %}<span>par {{ tab.cell(c.by) }}</span>{% endif %}{% if c.on %}<span>{{ 'sur ' if not c.params }}{{ c.on }}</span>{% endif %}{% if c.hrefs|length == 1 %}<a href="{{ c.hrefs[0] }}">l'événement →</a>{% elif c.hrefs %}<a href="{{ c.hrefs[-1] }}">le premier événement →</a>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endfor %}
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

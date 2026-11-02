@@ -119,6 +119,29 @@ def _as_choice(f: forms.FormField, choices: Sequence[tuple[str, str]], value: An
     return dataclasses.replace(f, kind="select", choices=pairs)
 
 
+#: une valeur de départ posée par l'adresse d'une page d'action (« ?valeur.kind=denied ») : le bouton d'une ligne
+#: ouvre l'action déjà orientée ; l'opératrice relit et envoie elle-même
+PREFILL = "valeur."
+#: ce qu'une adresse peut pré-remplir : un choix offert, un texte, un objet — jamais une case à cocher (une
+#: confirmation se coche à la main), un secret, un champ caché ni un fichier
+PREFILLED_KINDS = frozenset({"select", "text", "textarea", "subject"})
+
+
+def prefilled(fields: Sequence[forms.FormField], query: Mapping[str, str]) -> dict[str, str]:
+    """Les valeurs de départ qu'une adresse demande (``valeur.<champ>``), pour les seuls champs qui s'y prêtent ; un
+    choix qui n'est pas offert est ignoré."""
+    asked = {k[len(PREFILL):]: str(v)[:500] for k, v in query.items() if k.startswith(PREFILL)}
+    out: dict[str, str] = {}
+    for f in fields:
+        value = asked.get(f.path)
+        if value is None or f.kind not in PREFILLED_KINDS or f.readonly or f.secret:
+            continue
+        if f.kind == "select" and value not in {c[0] if isinstance(c, tuple) else str(c) for c in f.choices}:
+            continue
+        out[f.path] = value
+    return out
+
+
 def visible_fields(view: Mapping[str, Any]) -> int:
     """Combien de champs un opérateur remplit dans ce formulaire (au-delà de deux : une page à part)."""
     return len([f for f in view.get("fields", ()) if f.get("kind") != "hidden"])

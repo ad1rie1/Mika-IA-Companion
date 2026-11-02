@@ -1,0 +1,59 @@
+{# Système › Diagnostic avancé (app/handmade/tabs/system.py, ADR 0177) : un bandeau si des tranches sont corrompues ;
+   puis en sous-onglets l'ensemble — ses tranches, la plus récemment modifiée d'abord (à quel événement, combien de
+   faits) — et une faculté par sous-onglet : ses faits lus maintenant (leur nom, leur sens, leur valeur, repliée si
+   elle est longue), puis sa tranche en JSON, repliée. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-state" data-tab="systeme/etat">
+  {{ sx.band(band) }}
+  <div class="hm-subtabs sys-many" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ses facultés">
+      <a href="#st-all">Ensemble <span class="hm-count">{{ panes|length }}</span></a>
+      <div class="hm-subnav-sep"></div>
+      <p class="hm-subnav-title">Une faculté</p>
+      {% for p in panes %}<a href="#{{ p.id }}"{% if p.tainted %} class="danger"{% endif %}>{{ p.label }}{% if p.facts %} <span class="hm-count">{{ p.facts|length }}</span>{% endif %}</a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+      <section id="st-all" data-pane aria-labelledby="st-all-title">
+        <div class="now-card">
+          {{ tab.head("Ses tranches", "st-all-title", panes|length, "L'état de chaque faculté, déduit du journal (" ~ head ~ " événements), et les faits qu'elle en tire pour les autres : la plus récemment modifiée d'abord.") }}
+          <p class="sys-lede"><span class="now-num">{{ total }}</span> faits lus maintenant{% if errors %}, dont <span class="danger"><span class="now-num">{{ errors }}</span> en erreur</span>{% endif %}.</p>
+          <ol class="sys-state-slices" role="list">
+            {% for p in recent %}
+            <li class="{{ 'is-danger' if p.tainted }}">
+              <a href="#{{ p.id }}"><b>{{ p.label }}</b>{% if p.label != p.owner %} <span class="mono now-muted">{{ p.owner }}</span>{% endif %}</a>
+              <span class="now-muted">{% if p.tainted %}<span class="now-tag danger">corrompue au n° {{ p.tainted }}</span>{% elif p.href %}modifiée au <a href="{{ p.href }}">n° {{ p.seq }}</a>{% if p.age %} · {{ p.age }} événement{{ 's' if p.age > 1 }} depuis{% endif %}{% else %}jamais modifiée{% endif %}</span>
+              <span class="now-num now-muted">{{ p.facts|length }} fait{{ 's' if p.facts|length != 1 }}</span>
+            </li>
+            {% endfor %}
+          </ol>
+        </div>
+      </section>
+      {% for p in panes %}
+      <section id="{{ p.id }}" data-pane aria-labelledby="{{ p.id }}-title">
+        <div class="now-card">
+          <header class="now-card-head"><h2 id="{{ p.id }}-title">{{ p.label }}</h2>{% if p.label != p.owner %}<span class="mono now-muted">{{ p.owner }}</span>{% endif %}<p>{% if p.tainted %}<span class="danger">Tranche corrompue au n° {{ p.tainted }} : son état est figé.</span>{% elif p.href %}Tranche modifiée au <a href="{{ p.href }}">n° {{ p.seq }}</a>.{% else %}Tranche jamais modifiée.{% endif %}</p></header>
+          {% if p.read %}
+          <ul class="sys-state-facts" role="list">
+            {% for f in p.read %}
+            <li class="{{ 'error' if f.error }}">
+              <p class="sys-state-name"><span class="mono">{{ f.name }}</span>{% if f.doc %}<span class="now-muted">{{ f.doc }}</span>{% endif %}</p>
+              {% if f.long %}<details class="sys-state-more"><summary><code class="sys-state-value">{{ f.short }}…</code></summary><code class="sys-state-value">{{ f.value }}</code></details>
+              {% else %}<code class="sys-state-value">{{ f.value }}</code>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          {% if p.families %}
+          <p class="sys-state-families"><span class="now-muted">Des familles, qui dépendent de leur argument (une personne, un objet) et ne se lisent pas seules :</span> {% for f in p.families %}<span class="mono" title="{{ f.doc }}">{{ f.name }}</span>{{ ', ' if not loop.last }}{% endfor %}</p>
+          {% endif %}
+          {% if not p.facts %}<p class="now-empty">Elle ne fournit aucun fait aux autres.</p>{% endif %}
+          {% if p.json %}
+          <details class="hm-subfold sys-state-json"><summary>Sa tranche en JSON{% if p.cut %} <span class="now-muted">(coupée)</span>{% endif %}</summary><pre class="hm-code">{{ p.json }}</pre></details>
+          {% endif %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+</div>

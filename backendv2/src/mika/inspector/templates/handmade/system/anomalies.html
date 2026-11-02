@@ -1,0 +1,58 @@
+{# Système › Anomalies (app/handmade/tabs/system.py, ADR 0177) : un bandeau (des tranches corrompues, des anomalies, ou
+   rien depuis le démarrage), la bande de chiffres ; côte à côte ce qui a échoué dans ses facultés et à l'arbitre — la
+   faculté, l'événement où c'est né, l'erreur en clair et telle quelle ; puis les traces du journal en fil, chacune en
+   mots, ses détails à la suite. La pagination et la bascule « Tableau » de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-an" data-tab="systeme/anomalies">
+  {{ sx.band(band) }}
+  {{ tab.block(stats) }}
+  {{ sx.notes(notes) }}
+  {% if lists %}
+  <div class="sys-cols{{ ' two' if lists|length > 1 }}">
+    {% for l in lists %}
+    <section class="now-card" id="{{ l.t.id }}" aria-labelledby="{{ l.id }}-title">
+      {{ tab.head(l.t.title, l.id ~ "-title", l.t.count, list=l.t) }}
+      {% if l["items"] %}
+      <ul class="sys-an-list" role="list">
+        {% for a in l["items"] %}
+        <li>
+          {% if a.faculty or a.href %}<p class="sys-an-top">
+            {% if a.faculty %}<b>{{ a.faculty }}</b>{% if a.owner and a.owner != a.faculty %} <span class="mono now-muted">{{ a.owner }}</span>{% endif %}{% endif %}
+            {% if a.eval %}<span class="now-tag">évaluation</span>{% endif %}
+            {% if a.href %}<a class="sys-an-ev" href="{{ a.href }}">événement n° {{ a.seq }} →</a>{% endif %}
+          </p>{% endif %}
+          <p class="sys-an-said">{{ a.said }}</p>
+          {% if a.raw %}<code class="sys-an-raw">{{ a.raw }}</code>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(l.t.empty) }}{% endif %}
+      {{ tab.pager(l.t) }}
+    </section>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <section class="now-card" id="{{ traces.id }}" aria-labelledby="sys-an-traces-title">
+    {{ tab.head("Traces du journal", "sys-an-traces-title", traces.count, "Ce que le journal a noté depuis le démarrage : un épisode supplanté, un oubli, une reconstruction. Des opérations normales, sauf celles marquées.", list=traces) }}
+    {% if trace_days %}
+    {% for d in trace_days %}
+    {{ sx.day(d) }}
+    <ol class="sys-feed" role="list">
+      {% for x in d["items"] %}
+      <li class="{{ 'is-warn' if x.warn }}">
+        <span class="sys-feed-when" title="{{ x.when.exact if x.when else '' }}">{{ x.hm or tab.cell(x.when) }}</span>
+        <div class="sys-feed-body">
+          <p><span class="now-tag {{ 'warn' if x.warn }}" title="{{ x.tech }}">{{ x.kind }}</span>
+          {% for f in x.facts %}<span class="sys-kv"><span class="now-muted">{{ f.k }}</span> <span class="mono">{{ f.v }}</span></span>{% endfor %}
+          {% if x.said %}<span class="mono now-muted">{{ x.said }}</span>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endfor %}
+    {% else %}{{ tab.empty(traces.empty) }}{% endif %}
+    {{ tab.pager(traces) }}
+  </section>
+</div>

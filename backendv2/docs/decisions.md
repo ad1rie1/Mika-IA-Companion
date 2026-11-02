@@ -28,7 +28,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -1995,7 +1995,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les blocs génériques rendaient tout pareil, et aucune page ne répondait à « comment va-t-elle, et pourquoi ? ».
 
-*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123, 0176.*
+*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123, 0176, 0177.*
 
 ### 0122 — Régler ses outils, et ce qu'elle expose en MCP
 
@@ -2103,7 +2103,24 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* le thème était trop gros, trop rond, gris en clair ; le menu de gauche mangeait la largeur ; les actions changeaient de place d'une page à l'autre, et des pages défilaient sans fin.
 
-*Révise 0121 (en partie).*
+*Révise 0121 (en partie). Révisée par 0177.*
+
+### 0177 — Chaque onglet a sa forme : plus de rendu bloc par bloc
+
+- Chaque onglet d'une destination a sa page à lui : un module par destination (`app/handmade/tabs/`) déclare ses onglets, chacun avec son gabarit (`templates/handmade/<destination>/`) et sa feuille. Le rendu bloc par bloc (`Blocks`) ne sert plus aucun onglet ; `test_no_tab_is_left_block_by_block` y veille.
+- Un onglet lit les blocs que sa faculté déclare, rendus une fois et numérotés comme la console les numérote (`Got`) : leurs ancres, leur pagination, la bascule « Tableau » et les jetons de leurs formulaires restent ceux de la console. Il lit aussi les faits d'une faculté quand ses blocs ne disent pas ce que la page montre.
+- La vue de la faculté reste la source : la console en MCP la sert telle quelle, et un onglet qui ne reconnaît pas ses blocs (un titre changé) rend la main à la console. Un onglet dessine aussi son état vide ; sa racine porte son nom (`data-tab`), que `test_every_drawn_tab_opens` vérifie.
+- Les filtres et le panneau d'un onglet restent ceux de la console, sauf s'il les dit lui-même (`Tab(panel=False)`).
+- Une page qui a besoin de ce que sa vue ne dit pas le fait ajouter à la vue (une colonne, repliée au besoin), plutôt que de le relire à côté : un moment de « La vie des autres » dit sa situation, son issue et s'il se fête, lus dans l'archive (un moment sorti de la mémoire de travail les garde) ; une ligne de l'arbitre porte son calcul pas à pas, un veto par étape, sa sorte, sa cible et le rythme maximal de sa sorte — Décisions ne relit ni l'arbitre ni le journal.
+- L'en-tête suit la maquette de l'ADR 0176 : le fil d'Ariane d'une destination dit sa rubrique puis la destination (« Mika / Humeur et corps », séparés par « / »), le titre reste celui de l'onglet (le menu nomme chaque onglet) ; des filtres de petits choix (quatre au plus, toujours posés) sont des boutons à choix au bout de la barre d'onglets, appliqués d'un clic ; « Fiches / Tableau » et les autres bascules ont le même dessin ; un bouton est en graisse 500.
+- Les actions de la barre de titre suivent la maquette : deux en vue, la principale (la première déclarée) à droite des autres, le reste et les dangereuses sous « ⋯ ». Une fiche dit sa rubrique, sa destination et son numéro (« Activité / Projets / n° 257 »), son état en étiquettes à côté de son nom, ses faits sur une ligne ; ses onglets peuvent dire leur compte (`Overview.counts`), les plus rares sous « Plus ».
+- « À valider » est une seule file et une seule page : tout ce qui attend une décision (les demandes d'envoi, les identités à confirmer, les noms à relier), ses onglets en sont des filtres (tout, les courriers, Teams, les identités, les noms) puis l'historique ; la composition déclare ces onglets et fournit ce qui n'est pas une demande d'envoi (`InspectorDeps.queue`), sans que l'inspecteur nomme une faculté. Courrier › Brouillons et Teams › Réponses restent dans leur destination pour retoucher un texte ; l'accueil ne compte la file qu'une fois.
+- Les demandes en attente se lisent comme un courrier : la file à gauche, une ligne chacune, la demande ouverte à droite, la suivante après chaque décision ; seule la demande ouverte calcule son aperçu ; elle dit sa source en liens (que la composition fournit : l'inspecteur ne nomme aucun plugin) et son historique (l'épisode qui l'a proposée, les dernières décisions du même genre). La fiche d'un projet ne décide plus ses demandes sur place : son bandeau mène à la file.
+- Une page d'action se pose déjà orientée par son adresse (`?valeur.<champ>=`) : un choix offert, un texte ou un objet, jamais une case « Je confirme », un secret ni un champ caché ; l'opératrice relit et envoie elle-même. Une action peut aussi tirer de l'état ses valeurs de départ (`initial=`) : relier un moyen de communication propose la personne que sa revendication vise, un démenti le nom revendiqué.
+
+*Pourquoi :* la plupart des onglets restaient des blocs génériques (63 sur 79) : tous se ressemblaient, et aucun ne suivait les gabarits de l'ADR 0176.
+
+*Révise 0121 (en partie), 0176 (en partie).*
 
 ## Ce que les sondes et les audits ont fixé
 

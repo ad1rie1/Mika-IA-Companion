@@ -397,9 +397,11 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .person-entry-side { display: flex; flex: none; align-items: center; gap: 10px; }
 
 /* « tout va bien » : une bande calme */
-.hm-calm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 12px 16px; border-radius: var(--radius);
+/* un paragraphe, sa pastille en tête de ligne : sur un écran étroit, le texte coule à côté d'elle */
+.hm-calm { display: block; margin: 0; padding: 12px 16px; border-radius: var(--radius);
   background: var(--ok-bg); color: var(--ok); font-size: 14px; }
-.hm-calm-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.hm-calm-dot { display: inline-block; width: 9px; height: 9px; margin-right: 10px; border-radius: 50%; background: var(--ok);
+  vertical-align: 1px; }
 
 /* une demande d'accord : ce qu'elle veut faire, ce qui partira, approuver ou refuser */
 .hm-approval { display: grid; gap: 14px; box-shadow: inset 4px 0 0 var(--st, var(--warn)); }
@@ -483,8 +485,12 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .record-roles .record-grid-row { grid-template-columns: minmax(140px, 1.6fr) repeat(3, minmax(70px, .7fr)) minmax(120px, 1fr) minmax(70px, .7fr); min-width: 620px; }
 .record-grid-row [role="cell"] { font-variant-numeric: tabular-nums; }
 .hm-commands .commands { display: flex; flex-wrap: wrap; gap: 8px; }
-.hm-modes { display: inline-flex; margin-left: auto; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12.5px; }
-.hm-modes a { padding: 3px 10px; border-radius: var(--radius); color: var(--text-2); text-decoration: none; }
+/* Fiches / Tableau : le bouton à choix de la console (``.seg``, la maquette) */
+.hm-modes { display: inline-flex; margin-left: auto; padding: 2px; gap: 2px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius); background: var(--raised); font-size: 12px; }
+.hm-modes a { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--radius-sm);
+  color: var(--text-2); font-weight: 500; text-decoration: none; white-space: nowrap; }
+.hm-modes a:hover { color: var(--text); }
 .hm-modes a[aria-current] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 /* à traiter (les sorties), rejouer, un outil, la connexion */

@@ -1,0 +1,147 @@
+/* Activité › Projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en entrées à filets (deux colonnes sur un
+   grand écran), ses exécutions jour par jour, ses décisions techniques rangées par projet. Préfixe prj- ; couleurs :
+   les jetons ; longueurs : des attributs SVG. */
+
+/* ── Ses projets ── */
+.prj-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 36px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1180px) { .prj-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.prj-item { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 14px 0; border-top: 1px solid var(--border); }
+.prj-item.waiting { padding-left: 12px; box-shadow: inset 3px 0 var(--warn); }
+.prj-item.archived { color: var(--muted); }
+.prj-item:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
+.prj-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.prj-title { flex: 1 1 240px; min-width: 0; margin: 0; font: 600 15.5px/1.35 var(--display); overflow-wrap: anywhere; }
+.prj-title a { color: var(--text); }
+.prj-title a:hover { color: var(--accent); }
+.prj-item.archived .prj-title a { color: var(--muted); }
+.prj-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.prj-where { margin: 0; max-width: 80ch; color: var(--text-2); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.prj-goals { display: grid; grid-template-columns: 70px minmax(80px, 220px) auto; align-items: center; gap: 10px; margin: 0;
+  font-size: 12.5px; }
+.prj-goals-label { color: var(--muted); }
+.prj-goals .now-bar { width: 100%; margin: 0; }
+.prj-goals .now-bar.warn .fill { stroke: var(--warn); }
+.prj-goals-text { color: var(--text-2); }
+.prj-facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; font-size: 12.5px; }
+.prj-facts > div { display: flex; gap: 6px; }
+.prj-facts dt { color: var(--muted); }
+.prj-facts dd { margin: 0; }
+.prj-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: 13px; }
+.prj-foot .person-entry-detail[open] { flex: 1 1 100%; }
+.prj-more { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 24px; margin: 10px 0 0; }
+.prj-more > div { display: grid; gap: 1px; }
+.prj-more dt { color: var(--muted); font-size: 12px; }
+.prj-more dd { margin: 0; font-size: 13px; }
+
+/* ── Exécutions : jour par jour ── */
+.prj-live { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border)); border-radius: var(--radius); color: var(--text);
+  font-weight: 500; }
+.prj-live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--info); }
+.prj-day { margin: 14px 0 2px; color: var(--muted); font: 600 11.5px/1.3 var(--font); letter-spacing: .07em;
+  text-transform: uppercase; }
+.now-card-head + .prj-day { margin-top: 0; }
+.prj-runs { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-runs > li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px 14px; padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.prj-runs > li:last-child { border-bottom: 0; }
+.prj-hm { padding-top: 2px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.prj-run { display: grid; gap: 6px; min-width: 0; }
+.prj-run-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.prj-run-what { flex: 1 1 300px; min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.prj-run-goal { color: var(--text-2); }
+.prj-summary { margin: 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--text-2); font-size: 13.5px;
+  line-height: 1.5; overflow-wrap: anywhere; }
+.prj-summary p { margin: 0; }
+.prj-runs > li.blocked .prj-summary { border-left-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.prj-run-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0; font-size: 12.5px; }
+.prj-commit { font-family: var(--mono); font-size: 12px; }
+
+/* ── Décisions techniques : par projet ── */
+.prj-dec-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px 40px; }
+@media (min-width: 1180px) { .prj-dec-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.prj-dec-group { min-width: 0; }
+.prj-dec-project { display: flex; align-items: baseline; gap: 8px; margin: 0 0 2px; font: 600 14px/1.3 var(--display); }
+.prj-dec-project a { color: var(--text); }
+.prj-dec-project a:hover { color: var(--accent); }
+.prj-dec-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-dec-list > li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 12px; padding: 12px 0;
+  border-top: 1px solid var(--border); }
+.prj-dec-n { align-self: start; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--accent); font-size: 12px; font-weight: 650; text-align: center; }
+.prj-dec-body { display: grid; gap: 5px; min-width: 0; }
+.prj-dec-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.prj-dec-q { flex: 1 1 220px; min-width: 0; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.prj-dec-choice { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.prj-dec-arrow { color: var(--accent); font-weight: 700; }
+.prj-dec-why { margin: 0; max-width: 80ch; color: var(--text-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.prj-dec-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.prj-dec-meta { margin: 0; color: var(--muted); font-size: 12px; }
+.prj-dec-list > li.faded .prj-dec-q, .prj-dec-list > li.faded .prj-dec-choice { color: var(--muted); }
+.prj-dec-list > li.faded .prj-dec-n { color: var(--muted); }
+
+/* ── Écrans étroits ── */
+@media (max-width: 560px) {
+  .prj .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .prj-goals { grid-template-columns: 64px minmax(0, 1fr); }
+  .prj-goals-text { grid-column: 1 / -1; }
+  .prj-runs > li { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Un projet › Vue d'ensemble (app/handmade/projects.py, ADR 0177) : la vue d'un objet de la maquette — un bandeau,
+   une bande de chiffres à filets (les dernières exécutions en barres), puis des tuiles en trois colonnes, chacune
+   vers son onglet. Couleurs : les jetons ; une barre prend sa couleur de sa classe. */
+.prj-ov { gap: 16px; }
+.prj-ov-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border)); border-radius: var(--radius);
+  background: var(--warn-bg); color: var(--warn); font-size: 13.5px; }
+.prj-ov-banner.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); background: var(--danger-bg);
+  color: var(--danger); }
+.prj-ov-banner-text { flex: 1 1 320px; font-weight: 550; }
+.prj-ov-banner .btn { flex: none; }
+.prj-ov-note { margin: -6px 0 0; color: var(--muted); font-size: 12.5px; }
+.prj-ov-note.info { color: var(--accent); }
+
+.prj-ov-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); margin: 0; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); list-style: none; }
+.prj-ov-band li { min-width: 0; border-left: 1px solid var(--border); }
+.prj-ov-band li:first-child { border-left: 0; }
+.prj-ov-band li > a, .prj-ov-band li > .prj-ov-band-label { color: inherit; }
+.prj-ov-band li > a { display: grid; gap: 4px; height: 100%; padding: 12px 16px; }
+.prj-ov-band li > a:hover { background: var(--hover); text-decoration: none; }
+.prj-ov-band li:not(:has(> a)) { display: grid; gap: 4px; padding: 12px 16px; }
+.prj-ov-band-label { color: var(--muted); font-size: 12.5px; }
+.prj-ov-band-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.prj-ov-band-value { font: 650 22px/1.2 var(--display); letter-spacing: -.01em; }
+.prj-ov-band li.danger .prj-ov-band-value { color: var(--danger); }
+.prj-ov-band-sub { color: var(--text-2); font-size: 12.5px; }
+.prj-ov-bars { width: auto; height: 20px; margin-left: auto; align-self: center; }
+.prj-ov-bars rect, .prj-ov-bars rect.ok { fill: var(--ok); }
+.prj-ov-bars rect.danger { fill: var(--danger); }
+.prj-ov-bars rect.warn { fill: var(--warn); }
+.prj-ov-bars rect.muted, .prj-ov-bars rect.info { fill: var(--border-strong); }
+@media (max-width: 640px) { .prj-ov-band li { border-left: 0; border-top: 1px solid var(--border); } .prj-ov-band li:first-child { border-top: 0; } }
+
+.prj-ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: stretch; }
+.prj-ov-tile { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.prj-ov-tile-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.prj-ov-tile-head h2 { font-size: 14.5px; }
+.prj-ov-tile-head h2 a { color: var(--text); }
+.prj-ov-tile-head h2 a:hover { color: var(--accent); text-decoration: none; }
+.prj-ov-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-ov-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 7px 0; border-top: 1px solid var(--border);
+  font-size: 13.5px; }
+.prj-ov-list li:first-child { border-top: 0; }
+.prj-ov-list-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prj-ov-decision .prj-ov-list-text { white-space: normal; }
+.prj-ov-choice { display: block; color: var(--text-2); font-size: 12.5px; }
+.prj-ov-when { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.prj-ov-dot { flex: none; align-self: center; }
+.prj-ov-dot.ok { --sw: var(--ok); } .prj-ov-dot.danger { --sw: var(--danger); } .prj-ov-dot.warn { --sw: var(--warn); }
+.prj-ov-more { margin: 0; font-size: 12.5px; }
+.prj-ov-prose { margin: 0; font-size: 13.5px; line-height: 1.55; white-space: pre-line; }
+.prj-ov-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 13px; }
+.prj-ov-dl { display: grid; gap: 6px; margin: 0; font-size: 13.5px; }
+.prj-ov-dl div { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 10px; }
+.prj-ov-dl dt { color: var(--muted); }
+.prj-ov-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

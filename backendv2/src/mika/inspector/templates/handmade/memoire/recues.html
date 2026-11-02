@@ -1,0 +1,48 @@
+{# Elle › Mémoire › Pièces reçues (app/handmade/tabs/memory.py, ADR 0177) : ce qu'on lui a envoyé, une entrée par
+   pièce — sa sorte en icône, son nom vers sa fiche, qui l'a envoyée, sa taille ; ce qu'elle y a lu, cité ; ce qui s'y
+   relie (vers l'onglet « Liens » de sa fiche) ; la télécharger. Une pièce retirée s'estompe : ses octets sont effacés,
+   ce qu'elle en a lu reste. La pagination de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+{% macro icon(kind) -%}
+<svg class="piece-icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+{%- if kind == "image" %}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M4 17.5l5-4.5 3.5 3 3-2.5 4.5 4"/>
+{%- elif kind == "audio" %}<path d="M5 10v4M8.5 7v10M12 4.5v15M15.5 8v8M19 10.5v3"/>
+{%- else %}<path d="M7 3.5h7l4.5 4.5v12.5H7z"/><path d="M14 3.5V8h4.5M9.5 12.5h6M9.5 16h6"/>{% endif -%}
+</svg>
+{%- endmacro %}
+<div class="now-page memories pieces" data-tab="memoire/recues">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="pieces-title">
+    {{ tab.head(t.title, "pieces-title", t.count, list=t) }}
+    {% if items %}
+    <ul class="memories-list" role="list">
+      {% for p in items %}
+      <li class="memories-item piece k-{{ p.kind }}{{ ' faded' if p.gone }}">
+        <span class="piece-icon" title="{{ p.sort }}">{{ icon(p.kind) }}</span>
+        <div class="piece-main">
+          <p class="piece-name">{{ tab.cell(p.name) }}{% if p.state %} <span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif %}</p>
+          <p class="memories-meta">
+            <span>{{ p.sort }}</span><span class="now-num">{{ p.size }}</span>
+            {% if p.from %}<span>de {{ tab.cell(p.from) }}</span>{% endif %}
+            {% if p.at %}<span class="memories-when">reçue {{ tab.cell(p.at) }}</span>{% endif %}
+          </p>
+          {% if p.seen %}<div class="piece-seen"><span class="now-eyebrow">ce qu’elle y a lu</span><div>{{ tab.cell(p.seen) }}</div></div>
+          {% elif p.unread %}<p class="piece-seen none">Rien n’a pu en être lu.</p>{% endif %}
+          {% if p.links or p.download %}
+          <p class="memories-foot">
+            {% if p.links %}<a href="{{ p.links }}">relié à {{ p.tied }} élément{{ 's' if p.tied > 1 }} de sa mémoire →</a>{% endif %}
+            {% if p.download %}<a class="piece-download" href="{{ p.download.href }}">Télécharger</a>{% endif %}
+          </p>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </section>
+  {% endif %}
+</div>

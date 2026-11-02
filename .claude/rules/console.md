@@ -44,6 +44,11 @@ dans le même lot.
   - pas de carte dans une carte.
 - **Une seule barre d'onglets par destination,** la même sur toutes ses pages. Si la page d'entrée est dessinée à part,
   elle est son premier onglet (`Destination.lead`). Pas de barre à un seul onglet, ni d'onglet qui répète un filtre.
+- **Le fil d'Ariane** d'une destination dit sa rubrique puis la destination (« Mika / Humeur et corps », séparés par
+  « / »), au-dessus du titre de l'onglet.
+- **Un filtre de petits choix** (quatre au plus, toujours posé : une période) est un bouton à choix (`.seg`) au bout de
+  la barre d'onglets, appliqué d'un clic, jamais un sélecteur et un bouton « Filtrer ». Les bascules (« Fiches /
+  Tableau ») ont le même dessin.
 - **Une page est dessinée** (ADR 0121). Son gabarit est sous `templates/handmade/` et sa mise en forme sous
   `app/handmade/`. Elle reprend le vocabulaire commun de `static/handmade/base.css` (`now-card`, `person-entries`,
   `hm-*`), jamais des blocs génériques seuls.
@@ -54,12 +59,15 @@ dans le même lot.
 - **Le paramétrage.** Une ligne par réglage : son nom et son aide à gauche, sa valeur à droite, deux par rangée quand
   la place le permet. Un texte long, une liste à cocher ou un curseur prennent toute la largeur. Le formulaire d'une
   action qui a sa page suit le même gabarit.
-- **La vue d'un objet** : un seul bandeau d'alerte, une bande de chiffres qui mènent à leurs onglets, puis des tuiles.
+- **La vue d'un objet** : le fil « rubrique / destination / n° », son état en étiquettes à côté de son nom, ses faits
+  sur une ligne séparés par des filets ; ses onglets disent leur compte, les plus rares sous « Plus » ; un seul
+  bandeau d'alerte, une bande de chiffres qui mènent à leurs onglets, puis des tuiles.
 
 ## Les actions
 
-- **Les actions de la page sont dans la barre de titre, à droite.** La première est en avant ; les dangereuses vont
-  sous « Autres actions » ; la roue des réglages (`gear`) ferme la barre. On les y met ainsi :
+- **Les actions de la page sont dans la barre de titre, à droite.** Deux en vue au plus : la principale (la première
+  déclarée) en avant, à droite des autres ; le reste et les dangereuses sous « ⋯ » ; la roue des réglages (`gear`)
+  ferme la barre. On les y met ainsi :
   - un panneau, par `page_links` ;
   - un onglet dessiné, par le triplet de `Drawn.render` (`blocks.lift` et `blocks.head`) ;
   - sinon, par les actions de la destination (`head_actions`).

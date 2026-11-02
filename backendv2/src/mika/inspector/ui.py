@@ -50,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "34"
+ASSET_VERSION = "42"
 
 log = logging.getLogger("mika.console")
 
@@ -124,12 +124,56 @@ class InspectorDeps:
     #: les propriétaires dont les vues gardent le rendu de la console, bloc par bloc (leur interface est un contrat :
     #: les apps de la Forge) ; les autres pages se dessinent dans le vocabulaire des pages dessinées
     plain_owners: frozenset[str] = frozenset()
+    #: la file « À valider » (ADR 0177) : ses onglets (``QueueTab``) et ce qui attend une décision sans être une
+    #: demande d'envoi (``QueueItem`` : une identité à confirmer, un nom à relier), que la composition fournit
+    #: (``app/handmade/waiting.py``) ; rien : la file ne montre que les demandes d'envoi
+    queue: Any = None
+    #: d'où vient une demande à autoriser, en liens (texte, adresse) : ``fn(ui, capacité, contexte, arguments)``
+    #: (``app/handmade/approval_sources.py``) — la boîte et le brouillon d'un mail, la conversation Teams, le service,
+    #: le projet, la personne ; rien : la demande ne dit pas sa source
+    approval_sources: Callable[..., Sequence[tuple[str, str]]] | None = None
 
 
 def wants_table(query: Mapping[str, str]) -> bool:
     """La page demande une liste en tableau (``vue_<table>=table``) : un onglet dessiné rend alors la main aux blocs
     de sa faculté, et à leur tableau (ADR 0121)."""
     return any(k.startswith("vue_") and v == "table" for k, v in query.items())
+
+
+@dataclass(frozen=True, slots=True)
+class QueueTab:
+    """Un onglet de la file « À valider » (ADR 0177), que la composition déclare : ce qu'il garde — les demandes de
+    ces capacités (``capabilities``), les éléments de ces sortes (``kinds``)."""
+
+    slug: str
+    title: str
+    capabilities: tuple[str, ...] = ()
+    kinds: tuple[str, ...] = ()
+    order: int = 100
+    description: str = ""
+    #: ce que dit l'onglet vide (« Aucun mail n'attend ton accord »)
+    empty: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class QueueItem:
+    """Ce qui attend une décision dans la file « À valider » sans être une demande d'envoi (ADR 0177) : une identité
+    à confirmer, un nom à relier. ``facts`` : des cellules rendues (``render.cell``) ; ``sources`` : d'où il vient,
+    en liens ; ``links`` : ses actions sur leur propre page (texte, adresse — leur retour est la file) ; ``actions`` :
+    des boutons que la console prépare (clé de l'action, valeurs posées, titre) ; ``warn`` : son seul bandeau."""
+
+    kind: str
+    key: str
+    label: str
+    summary: str
+    context: str = ""
+    at: int = 0
+    facts: tuple[tuple[str, Any], ...] = ()
+    sources: tuple[tuple[str, str], ...] = ()
+    links: tuple[tuple[str, str], ...] = ()
+    actions: tuple[tuple[str, Mapping[str, Any], str], ...] = ()
+    note: str = ""
+    warn: str = ""
 
 
 class Forms(dict[str, Any]):
@@ -194,6 +238,11 @@ class Overview:
     def links(self, ui: UI, key: str) -> Sequence[tuple[str, str]]:
         """Des liens (texte, adresse) posés avec les actions de l'en-tête, à droite : ses réglages, par exemple."""
         return ()
+
+    def counts(self, ui: UI, key: str) -> Mapping[str, int]:
+        """Combien chaque onglet en compte, par son nom (« objectifs » : 8), dits en petit à côté de son titre (la
+        maquette) ; rien : des onglets sans compte."""
+        return {}
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
@@ -310,9 +359,16 @@ class UI:
         return f"{PREFIX}/document/{self.documents.keep(html, images, remote=remote)}"
 
     # ── navigation ──
-    def attention_items(self) -> list[dict[str, Any]]:
+    def attention_items(self, *, distinct: bool = False) -> list[dict[str, Any]]:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
-        (l'accueil en fait des cadres qui mènent à la bonne page)."""
+        (l'accueil en fait des cadres qui mènent à la bonne page). ``distinct`` : chaque chose une fois (l'accueil) —
+        la file « À valider » par son seul « Tout ce qui attend », sans ses onglets ni les vues qui montrent les mêmes
+        demandes (``InspectorDeps.queue.covers``, ADR 0177)."""
+        covered: set[str] = set()
+        queue = self.deps.queue
+        if distinct and queue is not None:
+            covered = {f"{PREFIX}/{path}" for path in getattr(queue, "covers", ())} | \
+                {f"{PREFIX}/approbations/{tab.slug}" for tab in getattr(queue, "tabs", ())}
         out: list[dict[str, Any]] = []
         for g in self.deps.navigation:
             for d in g.items:
@@ -321,11 +377,15 @@ class UI:
                     b = self.builtins.get(key)
                     if b is None or b.badge is None:
                         continue
+                    if f"{base}/{b.slug}" in covered:
+                        continue
                     n = int(b.badge(self) or 0)
                     if n:
                         out.append({"label": f"{d.label} › {b.title}", "count": n, "hint": "",
                                     "href": f"{base}/{b.slug}"})
                 for v in self.inspection.in_section(d.key):
+                    if f"{base}/{v.name}" in covered:
+                        continue
                     got = self.inspection.badge(v)
                     if got and got[0]:
                         out.append({"label": f"{d.label} › {v.title}", "count": got[0],

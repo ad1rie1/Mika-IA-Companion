@@ -1,0 +1,30 @@
+{# Relations & échanges › Conversations › Questions sans réponse (app/handmade/tabs/threads.py, ADR 0177) : ce qu'on
+   lui a demandé et à quoi elle n'a pas encore répondu, comme le fil des messages le dirait — chaque question dans sa
+   bulle, de qui et quand, et à côté depuis combien de temps elle attend (une heure : dit ; un jour : en alerte) ; sur
+   sa ligne, le message source et la conversation avec cette personne. L'aide de la faculté au pied ; la pagination
+   et la bascule « Tableau » sont les siennes. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page fil-questions" data-tab="fil/questions">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="fil-q-title">
+    {{ tab.head("Elles attendent sa réponse", "fil-q-title", t.count, lede, list=t) }}
+    {% if items %}
+    <ol class="fil-q-list" role="list">
+      {% for q in items %}
+      <li class="fil-q {{ q.tone }}">
+        <p class="fil-q-wait">{% if q.wait %}<span class="fil-q-since">attend depuis</span><b class="now-num">{{ q.wait }}</b>{% else %}<span class="fil-q-since">en attente</span>{% endif %}</p>
+        <div class="fil-q-main">
+          <p class="person-bubble{{ ' fil-q-forgotten' if q.forgotten }}">{{ q.text if not q.forgotten else "(oubliée)" }}</p>
+          <p class="person-meta">{% if q.who %}{{ tab.cell(q.who) }} · {% endif %}{{ tab.cell(q.when) }}{% if q.number %} · <span class="person-number">n° {{ tab.cell(q.number) }}</span>{% endif %}</p>
+          <p class="fil-q-links">{% if q.href %}<a href="{{ q.href }}">Voir le message source →</a>{% endif %}{% if q.exchanges %}<a href="{{ q.exchanges }}">Leur conversation →</a>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="now-empty">Aucune question en attente : tout ce qu'on lui a demandé a eu sa réponse.</p>{% endif %}
+    {{ tab.pager(t) }}
+    {% if t.caption %}<p class="person-tab-note fil-q-help">{{ t.caption }}</p>{% endif %}
+  </section>
+  {% endif %}
+</div>

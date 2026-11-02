@@ -69,7 +69,7 @@ from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
-from mika.app.handmade import fiches, handles, projects, servers
+from mika.app.handmade import approval_sources, fiches, handles, projects, servers, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN
@@ -557,7 +557,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       overviews={"person": person_overview, servers.KIND: servers.ServerOverview(),
                                  handles.KIND: handles.HandleOverview(), projects.KIND: projects.ProjectFiche(),
                                  **fiches.OVERVIEWS},
-                      drawn=DRAWN,
+                      drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
                       plain_owners=frozenset({"forge"})),
         cookie_secure=web.cookie_secure)
     # les pages dessinées à la main dans le cadre de la console, qui croisent ses facultés (ADR 0121) : l'accueil ;

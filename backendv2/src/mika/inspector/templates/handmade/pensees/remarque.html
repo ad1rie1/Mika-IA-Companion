@@ -1,0 +1,101 @@
+{# Elle › Pensées › Ce qu'elle remarque (app/handmade/tabs/thoughts.py, ADR 0177) : en sous-onglets, ce qui vient de
+   se passer — ce qui attend d'être remarqué, puis ce qu'elle a remarqué ces dernières minutes, la pertinence que la
+   source annonçait et celle qu'elle a retenue sur une même barre (l'écart, c'est l'habituation), l'émotion dosée — ;
+   tout ce qu'elle a remarqué, au journal ; et comment elle remarque. Une page plus ancienne ouvre son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% macro weigh(announced, kept) -%}
+<svg class="noticed-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+  <line class="track" x1="0" x2="100" y1="3" y2="3" vector-effect="non-scaling-stroke"/>
+  {% if announced and announced.w > 0 %}<line class="announced" x1="0" x2="{{ announced.w }}" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% endif %}
+  {% if kept and kept.w > 0 %}<line class="fill" x1="0" x2="{{ kept.w }}" y1="3" y2="3" vector-effect="non-scaling-stroke"/>{% endif %}
+</svg>
+{%- endmacro %}
+{% macro emotion(e) -%}
+{% if e %}<span class="noticed-emotion sw-{{ e.key }}"><span class="now-dot"></span>{{ e.text }}{% if e.weight %} <span class="now-muted now-num">{{ e.weight }}</span>{% endif %}</span>{% else %}<span class="now-muted">rien</span>{% endif %}
+{%- endmacro %}
+{% macro pane(id) -%}
+{% if id == "noticed-now" %}
+<section id="noticed-now" data-pane aria-label="Ces dernières minutes">
+  <div class="now-stack">
+    {% if waiting %}
+    <div class="now-card">
+      {{ tab.head(waiting.title, "noticed-queue-title", waiting.count, "Ses sources le lui ont signalé ; elle le remarquera à son prochain tour.") }}
+      {% if queue %}
+      <ul class="noticed-queue" role="list">
+        {% for x in queue %}
+        <li>
+          <p class="noticed-what">{{ tab.cell(x.source) }} <span class="now-muted">{{ x.kind }}</span></p>
+          <div class="noticed-summary">{{ tab.cell(x.summary) }}</div>
+          <p class="noticed-meta">
+            {% if x.announced %}<span>annoncée <span class="now-num">{{ x.announced.text }}</span></span>{% endif %}
+            {% if x.kept %}<span>retenue si remarqué maintenant <span class="now-num">{{ x.kept.text }}</span></span>{% endif %}
+            {% if x.when %}<span class="noticed-when">signalé {{ tab.cell(x.when) }}</span>{% endif %}
+          </p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(waiting.empty) }}{% endif %}
+      {{ tab.pager(waiting) }}
+    </div>
+    {% endif %}
+    <div class="now-card">
+      {{ tab.head(recent.title, "noticed-now-title", recent.count, "La barre claire : ce que la source annonçait ; la barre pleine : ce qu’elle en a retenu. L’écart, c’est l’habituation.", list=recent) }}
+      {% if heard %}
+      <ul class="noticed-list" role="list">
+        <li class="noticed-row head" aria-hidden="true"><span>quand</span><span>source</span><span>pertinence</span><span>émotion dosée</span></li>
+        {% for x in heard %}
+        <li class="noticed-row{{ ' habituated' if x.habituated }}">
+          <span class="noticed-when">{{ tab.cell(x.when) }}</span>
+          <p class="noticed-what">{{ tab.cell(x.source) }} <span class="now-muted">{{ x.kind }}</span></p>
+          <div class="noticed-weigh">
+            {{ weigh(x.announced, x.kept) }}
+            <p class="noticed-meta">
+              {% if x.kept %}<span>retenue <span class="now-num">{{ x.kept.text }}</span></span>{% endif %}
+              {% if x.announced %}<span class="now-muted">sur <span class="now-num">{{ x.announced.text }}</span> annoncée</span>{% endif %}
+              {% if x.habituated %}<span class="noticed-habit">poids <span class="now-num">{{ x.weight.text }}</span></span>{% endif %}
+            </p>
+          </div>
+          <span>{{ emotion(x.emotion) }}</span>
+          {% if x.detail %}<details class="person-entry-detail noticed-detail"{{ ' open' if x.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(x.detail) }}</div></details>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(recent.empty) }}{% endif %}
+      {{ tab.pager(recent) }}
+    </div>
+  </div>
+</section>
+{% elif id == "noticed-history" %}
+<section id="noticed-history" data-pane aria-labelledby="noticed-history-title">
+  <div class="now-card">
+    {{ tab.head(history.title, "noticed-history-title", none, "Au journal, du plus récent au plus ancien : le poids qu’avait chaque signal (l’habituation), l’émotion qu’il lui a laissée.") }}
+    {% if past %}
+    <ul class="noticed-list" role="list">
+      <li class="noticed-row head" aria-hidden="true"><span>quand</span><span>source</span><span>poids</span><span>émotion dosée</span></li>
+      {% for x in past %}
+      <li class="noticed-row">
+        <span class="noticed-when">{{ tab.cell(x.when) }}</span>
+        <p class="noticed-what">{{ tab.cell(x.source) }} <span class="now-muted">{{ x.kind }}</span></p>
+        <div class="noticed-weigh">{% if x.weight %}{{ tab.bar(x.weight.w) }}<p class="noticed-meta"><span class="now-num">{{ x.weight.text }}</span></p>{% endif %}</div>
+        <span>{{ emotion(x.emotion) }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(history.empty) }}{% endif %}
+    {{ tab.pager(history) }}
+  </div>
+</section>
+{% elif rules %}
+<section id="noticed-rules" data-pane aria-label="Comment elle remarque">{{ tab.block(rules) }}</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page noticed" data-tab="pensees/remarque">
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ce qu'elle remarque">
+      <a href="#noticed-now"{% if queue %} class="warn"{% endif %}>Ces dernières minutes <span class="hm-count">{{ recent.count or 0 }}</span></a>
+      <a href="#noticed-history">Tout ce qu’elle a remarqué</a>
+      {% if rules %}<div class="hm-subnav-sep"></div><a href="#noticed-rules">Comment elle remarque</a>{% endif %}
+    </nav>
+    <div class="hm-subpanes">{% for id in panes %}{{ pane(id) }}{% endfor %}</div>
+  </div>
+</div>

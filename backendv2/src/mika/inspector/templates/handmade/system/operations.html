@@ -1,0 +1,36 @@
+{# Système › Actions des opérateurs (app/handmade/tabs/system.py, ADR 0177) : ce que la page montre en une ligne (qui,
+   combien, avec quelle issue) ; puis un fil jour par jour — l'heure, qui, l'action (vers son événement), sur quoi,
+   l'issue, sa clé et les événements qu'elle a écrits. Jamais un contenu. La pagination de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+<div class="now-page sys sys-ops" data-tab="systeme/operations">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="sys-ops-title">
+    {{ tab.head(t.title, "sys-ops-title", t.count, list=t) }}
+    {% if shown %}
+    <p class="sys-ops-sum">
+      <span>Sur cette page : <span class="now-num">{{ shown }}</span> action{{ 's' if shown > 1 }}{% if who %}, par {% for w in who %}<b>{{ w.name }}</b> <span class="now-muted now-num">{{ w.n }}</span>{{ ', ' if not loop.last }}{% endfor %}{% endif %}</span>
+      {% for o in outcomes %}<span class="now-tag {{ o.tone }}">{{ o.text }} · {{ o.n }}</span>{% endfor %}
+    </p>
+    <div class="sys-jr-days{{ ' many' if shown > 12 }}">
+      {% for d in days %}
+      <section class="sys-jr-day" aria-label="{{ d.name }}">
+        {{ sx.day(d) }}
+        <ol class="sys-ops-feed" role="list">
+          {% for o in d["items"] %}
+          <li class="is-{{ o.outcome.tone or 'plain' }}">
+            <span class="sys-feed-when" title="{{ o.when.exact if o.when else '' }}">{{ o.hm or tab.cell(o.when) }}</span>
+            <div class="sys-jr-body">
+              <p class="sys-jr-what"><b>{{ o.by }}</b> · {% if o.href %}<a href="{{ o.href }}">{{ o.action }}</a>{% else %}{{ o.action }}{% endif %}{% if o.on %} <span class="now-muted">sur</span> {{ tab.cell(o.on) }}{% endif %}</p>
+              <p class="sys-jr-meta"><span class="mono">{{ o.key }}</span>{% if o.events %}<span>événement{{ 's' if o.events|length > 1 }} {% for e in o.events %}<a class="now-num" href="{{ e.href }}">{{ e.n }}</a>{{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}</p>
+            </div>
+            {% if o.outcome.text %}<span class="now-tag {{ o.outcome.tone }}">{{ o.outcome.text }}</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

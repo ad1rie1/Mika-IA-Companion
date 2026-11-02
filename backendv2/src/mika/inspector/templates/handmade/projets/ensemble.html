@@ -1,0 +1,90 @@
+{# Activité › Projets › un projet › Vue d'ensemble (app/handmade/projects.py, ADR 0177) : la vue d'un objet de la
+   maquette (ADR 0176) — un seul bandeau (ce qui attend ton accord, sinon sa pause ou ce qui le retient), ce que la
+   faculté dit encore de son état en une ligne, une bande de chiffres (ses dernières exécutions en barres), son plan
+   quand il en a un, puis des tuiles qui mènent chacune à son onglet : objectifs, exécutions, décisions en vigueur ;
+   son cadre, sa prochaine exécution, son dépôt. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page prj-ov">
+  {% if banner %}
+  <p class="prj-ov-banner {{ banner.tone }}" role="status">
+    <span class="prj-ov-banner-text">{{ banner.text }}</span>
+    {% if banner.href %}<a class="btn quiet small" href="{{ banner.href }}">{{ banner.button }}</a>{% endif %}
+  </p>
+  {% endif %}
+  {% for n in notes %}<p class="prj-ov-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+
+  <ul class="prj-ov-band" role="list" aria-label="Où il en est">
+    {% for f in figures %}
+    <li class="{{ f.tone }}">
+      {% if f.href %}<a href="{{ f.href }}">{% endif %}
+      <span class="prj-ov-band-label">{{ f.label }}</span>
+      <span class="prj-ov-band-line">
+        <span class="prj-ov-band-value now-num">{% if f.href and f.value.t == 'link' %}{{ f.value.text }}{% else %}{{ tab.cell(f.value) }}{% endif %}</span>
+        {% if f.sub %}<span class="prj-ov-band-sub">{{ f.sub }}</span>{% endif %}
+        {% if f.bars %}<svg class="prj-ov-bars" viewBox="0 0 {{ f.bars|length * 8 }} 20" preserveAspectRatio="xMaxYMid meet" role="img" aria-label="Ses dernières exécutions">{% for b in f.bars %}<rect class="{{ b }}" x="{{ loop.index0 * 8 }}" y="0" width="6" height="20" rx="1.5"/>{% endfor %}</svg>{% endif %}
+      </span>
+      {% if f.href %}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if plan %}
+  <section class="now-card prj-ov-tile prj-ov-plan" aria-labelledby="prj-ov-plan">
+    <header class="prj-ov-tile-head"><h2 id="prj-ov-plan">Le plan</h2>{% if plan.state %}{{ tab.cell(plan.state) }}{% endif %}</header>
+    <p class="prj-ov-facts">{% if plan.by and plan.by.text not in ('—', '') %}<span><span class="now-muted">demandé par</span> {{ tab.cell(plan.by) }}</span>{% endif %}{% if plan.version %}<span><span class="now-muted">version</span> {{ tab.cell(plan.version) }}</span>{% endif %}</p>
+    {% for t in plan.texts %}<details class="hm-subfold"><summary>{{ t.title }}</summary><p class="prj-ov-prose">{{ t.text }}</p></details>{% endfor %}
+    {% if plan.bar %}{{ tab.block(plan.bar) }}{% endif %}
+  </section>
+  {% endif %}
+
+  <div class="prj-ov-grid">
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-obj">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-obj"><a href="{{ links.objectifs }}">Objectifs →</a></h2>{% if progress %}<span class="now-tag">{{ progress }}</span>{% endif %}</header>
+      {% if objectives %}
+      <ul class="prj-ov-list" role="list">
+        {% for o in objectives %}
+        <li>{% if o.kind %}<span class="now-tag {{ o.kind.tone }}">{{ o.kind.text }}</span>{% endif %}<span class="prj-ov-list-text">{{ tab.cell(o.text) }}</span>{% if o.state %}<span class="now-tag {{ o.state.tone }}">{{ o.state.text }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% if objectives_more %}<p class="prj-ov-more"><a href="{{ links.objectifs }}">Tous ses objectifs →</a></p>{% endif %}
+      {% else %}{{ tab.empty("Aucun objectif : ajoutes-en un dans l'onglet Objectifs") }}{% endif %}
+    </section>
+
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-runs">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-runs"><a href="{{ links.executions }}">Exécutions →</a></h2>{% if failing %}<span class="now-tag danger">{{ failing }} panne{{ 's' if failing not in ('1', 'une') }}</span>{% endif %}</header>
+      {% if runs %}
+      <ul class="prj-ov-list" role="list">
+        {% for e in runs %}
+        <li><span class="now-dot prj-ov-dot {{ e.tone or 'ok' }}" aria-hidden="true"></span><span class="prj-ov-list-text">{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</span><span class="prj-ov-when" title="{{ e.at }}">{{ e.rel }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty("Aucune exécution encore") }}{% endif %}
+    </section>
+
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-dec">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-dec"><a href="{{ links.decisions }}">Décisions en vigueur →</a></h2>{% if in_force %}<span class="now-muted now-num">{{ in_force }}</span>{% endif %}</header>
+      {% if decisions %}
+      <ul class="prj-ov-list" role="list">
+        {% for d in decisions %}
+        <li class="prj-ov-decision"><span class="prj-ov-list-text">{{ tab.cell(d.question) }}{% if d.choice %}<span class="prj-ov-choice">→ {{ tab.cell(d.choice) }}</span>{% endif %}</span><span class="prj-ov-when now-num">{{ d.n }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty("Aucune décision en vigueur") }}{% endif %}
+    </section>
+
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-cadre">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-cadre"><a href="{{ links.cadre }}">Le cadre →</a></h2></header>
+      {% if cadre %}<p class="prj-ov-prose{{ ' now-muted' if cadre.t == 'note' }}">{{ cadre.text }}</p>{% endif %}
+    </section>
+
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-next">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-next"><a href="{{ links.prochaine }}">Prochaine exécution →</a></h2></header>
+      <dl class="prj-ov-dl">{% for k, v in next_run.items() %}<div><dt>{{ k }}</dt><dd>{{ tab.cell(v) }}</dd></div>{% endfor %}</dl>
+    </section>
+
+    <section class="now-card prj-ov-tile" aria-labelledby="prj-ov-git">
+      <header class="prj-ov-tile-head"><h2 id="prj-ov-git"><a href="{{ links.depot }}">Son dépôt →</a></h2></header>
+      <dl class="prj-ov-dl">{% for k, v in depot.items() if k != "l'histoire complète" %}<div><dt>{{ k }}</dt><dd>{{ tab.cell(v) }}</dd></div>{% endfor %}</dl>
+    </section>
+  </div>
+</div>

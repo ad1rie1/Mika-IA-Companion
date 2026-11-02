@@ -431,6 +431,25 @@ def filters_ctx(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[list[di
     return out, any(values[p.name] != defaults[p.name] for p in specs if p.kind != "hidden")
 
 
+#: un filtre de petits choix — au plus tant, une valeur toujours posée (24 h ou 7 jours) — se règle d'un clic
+QUICK_CHOICES = 4
+
+
+def quick_filters(fields: Sequence[Mapping[str, Any]], keep: Sequence[tuple[str, str]]) -> list[dict[str, Any]]:
+    """Des filtres qui ne sont que de petits choix (``filters_ctx``), en boutons à choix (ADR 0176, la maquette) :
+    chacun un lien qui garde les autres filtres et l'affichage des listes, le choix en vigueur marqué ; rien si un
+    filtre demande à taper, ou s'il peut rester vide (« tous »)."""
+    shown = [f for f in fields if f["kind"] != "hidden"]
+    if not shown or not all(f["kind"] == "select" and f["value"] and 1 < len(f["choices"]) <= QUICK_CHOICES
+                            for f in shown):
+        return []
+    current = {f["name"]: f["value"] for f in fields if f["value"]}
+    return [{"label": f["label"], "choices": [
+        {"text": label, "on": value == f["value"],
+         "href": "?" + urlencode({**dict(keep), **current, f["name"]: value})} for value, label in f["choices"]]}
+        for f in shown]
+
+
 def blocks(items: Sequence[Any], env: Env, query: Mapping[str, str], namespace: str = "pg") -> list[dict[str, Any]]:
     """Des blocs rendus, leurs listes numérotées dans l'ordre (``namespace`` : le préfixe de leurs clés — une
     fiche ouverte dans une page numérote les siennes à part)."""

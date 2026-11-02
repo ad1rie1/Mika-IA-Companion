@@ -1,0 +1,34 @@
+{# Elle › Humeur et corps › Postures (app/handmade/tabs/life.py, ADR 0177) : une carte par personne — ce qu'elle
+   ressent envers elle, la chaleur que leurs échanges ont installée (de part et d'autre du milieu : vers le chaud ou
+   vers le froid), l'hostilité, l'attachement, ce qu'elle s'en dit — ; un bandeau si elle en veut à quelqu'un. Ses
+   chiffres bruts (son ancre, sa position, ses dates) restent dans le détail de chaque carte. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+<div class="now-page vie vie-postures" data-tab="vie/postures">
+  {% if grudges %}<p class="person-tab-note danger">Elle en veut à {% for w in grudges %}{{ tab.cell(w) }}{{ ", " if not loop.last }}{% endfor %} : une hostilité installée, que le temps et des excuses peuvent guérir.</p>{% endif %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="vie-stances-title">
+    {{ tab.head("Envers chacun", "vie-stances-title", t.count, lede) }}
+    {% if people %}
+    <ul class="vie-stances" role="list">
+      {% for p in people %}
+      <li class="vie-stance{{ ' grudge' if p.grudge }}">
+        <span class="now-avatar sw-{{ p.emotion }}" aria-hidden="true">{{ p.initial }}</span>
+        <div class="vie-stance-main">
+          <p class="vie-stance-head">{{ tab.cell(p.who) }}{% if p.installed %}<span class="now-tag info">installée</span>{% endif %}<span class="vie-when">{{ tab.cell(p.when) }}</span></p>
+          <p class="vie-stance-felt">{% if p.felt %}{{ tab.cell(p.felt) }} <span class="now-muted">envers cette personne, à l'instant</span>{% else %}<span class="now-muted">au repos envers cette personne</span>{% endif %}</p>
+          {% if p.says %}<q class="vie-said">{{ p.says }}</q>{% endif %}
+          <dl class="vie-gauges">
+            {% if p.warmth %}<div title="ce que ses échanges ont installé : à droite chaleureux, à gauche froid (−1…1)"><dt>Chaleur</dt><dd>{{ vie.signed(p.warmth) }}<span class="now-num">{{ p.warmth.text }}</span></dd></div>{% endif %}
+            {% if p.hostility %}<div title="un écart déplaisant et dominant, amorti par l'attachement : la rancune (0…1)"><dt>Hostilité</dt><dd>{{ tab.bar(p.hostility.w, "hostility") }}<span class="now-num {{ p.hostility.tone }}">{{ p.hostility.text }}</span></dd></div>{% endif %}
+            {% if p.bond %}<div title="ce qui l'attache à cette personne (0…1, jamais négatif)"><dt>Attachement</dt><dd>{{ tab.bar(p.bond.w, "bond") }}<span class="now-num">{{ p.bond.text }}</span></dd></div>{% endif %}
+          </dl>
+          {% if p.anchor or p.last %}<p class="vie-meta">{% if p.anchor %}<span><span class="now-muted">ancre</span> {{ tab.cell(p.anchor) }}</span>{% endif %}{% if p.last %}<span><span class="now-muted">dernière balise</span> {{ tab.cell(p.last) }}</span>{% endif %}</p>{% endif %}
+          {% if p.facts %}<details class="person-entry-detail"{{ ' open' if p.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(p.facts) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

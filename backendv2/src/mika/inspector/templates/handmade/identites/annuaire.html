@@ -1,0 +1,46 @@
+{# Relations & échanges › Identités › Moyens de communication (app/handmade/tabs/identities.py, ADR 0177) : chaque
+   moyen de communication vu, ce qu'il prouve et ce qu'il ouvre. Un bandeau si des revendications attendent, la bande
+   de chiffres de la faculté (elle mène aux revendications et aux règles), puis une ligne par moyen de communication,
+   en colonnes : par où (sa fiche, sa clé), ce que son canal prouve (la certitude), pour qui il parle (relié,
+   propriétaire, ce qu'il revendique), ce qu'il ouvre en privé et en public. Les filtres et la pagination sont ceux de
+   la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/identites/_identites.html" as ids %}
+<div class="now-page ids ids-annuaire" data-tab="identites/annuaire">
+  {% if waiting %}<p class="person-tab-note warn">{{ waiting.n }} revendication{{ 's' if waiting.n != '1' }} attend{{ 'ent' if waiting.n != '1' }} ta décision : quelqu'un dit être une personne qu'elle connaît.{% if waiting.href %} <a href="{{ waiting.href }}">Identités à confirmer →</a>{% endif %}</p>{% endif %}
+  {{ ids.band(band, "Ses moyens de communication en chiffres") }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="ids-means-title">
+    {{ tab.head("Moyens de communication", "ids-means-title", t.count, "les plus récemment vus d'abord ; un nom mène à sa fiche, où se relie, se délie ou se prouve ce qu'il est") }}
+    {% if items %}
+    <div class="ids-grid-head" aria-hidden="true"><span>Moyen de communication</span><span>Ce que le canal prouve</span><span>Parle pour</span><span>Ce qu'il ouvre</span></div>
+    <ul class="ids-means" role="list">
+      {% for m in items %}
+      <li class="ids-mean">
+        <div class="ids-cell ids-where">
+          <p class="ids-label">{{ tab.cell(m.handle) }}</p>
+          <p class="ids-sub">{{ m.channel }} · <code>{{ m.key }}</code>{% if m.first %} · vu {{ tab.cell(m.first) }}{% endif %}</p>
+        </div>
+        <div class="ids-cell">
+          <span class="ids-k">Ce que le canal prouve</span>
+          <p><span class="now-tag {{ m.tone }}">{{ m.trust }}</span>{% if m.trust_why %} <span class="ids-sub">{{ m.trust_why }}</span>{% endif %}</p>
+          {% if m.certainty %}<p class="ids-sub">certitude {{ m.certainty }}</p>{% endif %}
+        </div>
+        <div class="ids-cell">
+          <span class="ids-k">Parle pour</span>
+          <p>{{ tab.cell(m.who) }}{% if m.linked %} <span class="now-tag info" title="relié à cette personne : sa mémoire, ses liens et son fil s'y attachent">relié</span>{% endif %}{% if m.owner %} <span class="now-tag owner">propriétaire</span>{% endif %}</p>
+          {% if m.claim %}<p><span class="now-tag warn">se présente comme {{ m.claim }}</span></p>{% endif %}
+        </div>
+        <div class="ids-cell">
+          <span class="ids-k">Ce qu'il ouvre</span>
+          <dl class="ids-opens">
+            <div><dt>en privé</dt><dd>{{ m.private or "—" }}</dd></div>
+            <div><dt>en public</dt><dd>{{ m.public or "—" }}</dd></div>
+          </dl>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

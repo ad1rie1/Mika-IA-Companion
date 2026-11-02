@@ -77,6 +77,9 @@ STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dan
 STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
                c.DROPPED: "muted"}
 ORIGIN_FR = {c.TOLD: "on le lui a dit", c.OBSERVED: "elle l'a vu", c.INFERRED: "elle le déduit"}
+#: comment un moment a tourné (ADR 0086), et son ton
+OUTCOME_FR = {c.HAPPENED: ("a eu lieu", "ok"), c.CANCELLED: ("annulé", ""), c.MOVED: ("reporté", "warn"),
+              c.UNKNOWN: ("sans nouvelles", "")}
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): "",
@@ -308,7 +311,23 @@ def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams,
     when = occurrence(ev, frame.now, frame.env.tz_of(frame.root), p).when if ev is not None and yearly else it.due
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
             When(when) if when else "—", Badge("chaque année", "info") if yearly else None,
+            _lasting(ev), _outcome(ev), Badge("se fête", "info") if ev is not None and ev.festive else None,
             _status(it, frame, p), When(it.born_at))
+
+
+def _lasting(ev: c.LifeEvent | None) -> Badge | None:
+    """Une situation qui dure (depuis « quand »), ou finie de la bouche de la personne ; rien pour un moment daté."""
+    if ev is None or not ev.ongoing:
+        return None
+    return Badge("finie", "muted") if ev.ended_at else Badge("dure encore", "info")
+
+
+def _outcome(ev: c.LifeEvent | None) -> Badge | None:
+    """Comment un moment a tourné (ADR 0086), lu dans l'archive : il le dit encore une fois sorti de la tranche."""
+    if ev is None or not ev.outcome:
+        return None
+    word, tone = OUTCOME_FR.get(ev.outcome, (ev.outcome, ""))
+    return Badge(word, tone)
 
 
 def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
@@ -339,12 +358,18 @@ EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore 
                  (N, Column("moment", role="body"), Column("de qui"), Column("sensibilité", "fit", role="badge"), Column("quand", "fit"),
                   Column("chaque année", "fit", hint="une date qui revient chaque année (un anniversaire, la date "
                                                      "d'un deuil) : « quand » est sa prochaine occurrence"),
+                  Column("situation", "fit", role="badge", hint="une situation qui dure, depuis « quand » ; finie "
+                                                                 "quand la personne l'a dit"),
+                  Column("issue", "fit", role="badge", hint="comment il a tourné : a eu lieu, annulé, reporté, ou "
+                                                             "sans nouvelles bien après sa date"),
+                  Column("se fête", "fit", role="badge", hint="un moment qu'elle souhaite le jour même"),
                   Column("statut", "fit", role="badge"), Column("noté", "fit", detail=True)), _event)
 LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES, EVENTS)}
 
 
 def _events_of(s: MemoryState) -> Listing:
-    """La liste des moments, avec ce que la tranche sait de plus que la projection : ce qui revient chaque année."""
+    """La liste des moments, lus dans l'archive, qui garde tout (l'issue d'un moment passé depuis longtemps
+    comprise) ; la tranche ne sert qu'au moment que l'archive n'a pas encore."""
     return replace(EVENTS, cells=lambda k, frame, names, p: _event(k, frame, names, p, s))
 
 

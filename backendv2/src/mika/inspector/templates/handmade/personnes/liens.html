@@ -1,0 +1,51 @@
+{# Relations & échanges › Personnes › Liens (app/handmade/tabs/people.py, ADR 0177) : où elle en est avec chacun. Un
+   bandeau si quelqu'un lui manque, la bande de chiffres de la faculté, puis les liens rangés par proximité — chacun
+   avec son échelon (déclaré par un opérateur ou né de leur histoire), le rythme de leurs échanges, le silence rapporté
+   à ce rythme (à la moitié de la jauge, elle lui manque), son dernier message, ce qu'elle en sait. Une entrée mène à
+   l'onglet « Lien » de sa fiche ; les filtres et la pagination sont ceux de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/personnes/_personnes.html" as pers %}
+<div class="now-page pers pers-liens" data-tab="personnes/liens">
+  {% if missed %}<p class="person-tab-note warn">Qui lui manque : {{ missed }} — un silence plus long que leur rythme habituel.</p>{% endif %}
+  {{ pers.band(band, "Ses liens en chiffres") }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="pers-bonds-title">
+    {{ tab.head("Ses liens", "pers-bonds-title", t.count, "du plus proche au plus lointain ; dans chaque groupe, qui lui a écrit le plus récemment d'abord") }}
+    {% for g in groups %}
+    <section class="pers-group" aria-labelledby="pers-g-{{ g.key }}">
+      <h3 id="pers-g-{{ g.key }}">{{ g.title }} <span class="hm-count">{{ g["items"]|length }}</span></h3>
+      <ul class="pers-bonds" role="list">
+        {% for b in g["items"] %}
+        <li class="pers-bond{{ ' missed' if b.silence and b.silence.missed }}">
+          {{ pers.avatar(b) }}
+          <div class="pers-bond-main">
+            <p class="pers-head">{{ pers.name(b, closeness=False) }}
+              <span class="pers-rungs r{{ b.rung }}" title="proximité : {{ b.word }}" aria-label="proximité : {{ b.word }}">{% for i in range(1, 4) %}<i class="{{ 'on' if i <= b.rung }}"></i>{% endfor %}</span>
+              <span class="pers-level">{{ b.word }}</span>
+              {% if b.last and b.last.t == "when" %}<span class="pers-when">lui a écrit {{ tab.cell(b.last) }}</span>{% endif %}
+            </p>
+            <p class="pers-meta">
+              {% if b.origin %}<span>{{ b.origin }}</span>{% endif %}
+              {% if b.every %}<span>écrit {{ b.every }}{% if not b.measured %} <span class="now-muted">(supposé : pas encore mesuré)</span>{% endif %}</span>{% endif %}
+              {% if b.unanswered %}<span class="warn">{{ b.unanswered }} initiative{{ 's' if b.unanswered != '1' }} d'elle sans réponse</span>{% endif %}
+            </p>
+            <div class="pers-bond-foot">
+              {% if b.silence %}
+              <p class="pers-silence" title="son silence rapporté à son rythme habituel : au-delà de la moitié de la jauge, elle lui manque">
+                <span class="now-muted">silence</span>
+                <svg class="pers-gauge" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% if b.silence.w > 0 %}<line class="fill" x1="0" x2="{{ b.silence.w }}" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% endif %}<line class="mid" x1="50" x2="50" y1="0" y2="10" vector-effect="non-scaling-stroke"/></svg>
+                <span class="now-num{{ ' warn' if b.silence.missed }}">{{ b.silence.text }} son rythme</span>
+                {% if b.silence.missed %}<span class="now-tag warn">lui manque</span>{% endif %}
+              </p>
+              {% elif b.quiet %}<p class="pers-meta now-muted">{{ b.quiet }}</p>{% endif %}
+              {% if b.href %}<a class="pers-more" href="{{ b.href }}">Leur lien →</a>{% endif %}
+            </div>
+            {% if b.summary %}<p class="pers-summary">{{ b.summary }}</p>{% else %}<p class="pers-meta now-muted" title="elle n'en sait pas encore assez pour s'en faire une idée">Pas encore de profil.</p>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% else %}{{ tab.empty(t.empty) }}{% endfor %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

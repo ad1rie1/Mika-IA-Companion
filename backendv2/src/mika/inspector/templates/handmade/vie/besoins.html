@@ -1,0 +1,52 @@
+{# Elle › Humeur et corps › Besoins (app/handmade/tabs/life.py, ADR 0177) : ses trois besoins en tuiles — la tension
+   et son sens sur la dernière heure, le plus fort, le temps de sa remontée, ce qui le comble — ; ce que son prompt en
+   dit (ou rien de pressant) ; leur courbe sur la période ; ce qui se passe en ce moment ; ses règles repliées. Demandée
+   en « Tableau », la liste revient à la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+<div class="now-page vie vie-besoins" data-tab="vie/needs">
+  {% if said %}
+  <blockquote class="now-voice vie-voice warn"><p>{{ said | join(" ") }}</p><footer>ce que son prompt lui en dit</footer></blockquote>
+  {% elif calm %}
+  <p class="hm-calm"><span class="hm-calm-dot" aria-hidden="true"></span><span>{{ calm }}</span></p>
+  {% endif %}
+
+  {% if t.layout %}
+  <section id="{{ t.id }}" class="vie-needs-block" aria-labelledby="vie-needs-title">
+    {{ tab.head("Ses besoins", "vie-needs-title", none, "ils montent vers 100 % avec le temps, et retombent quand ils sont comblés", t) }}
+    <ul class="vie-needs" role="list">
+      {% for n in needs %}
+      <li class="now-card vie-need{{ ' dominant' if n.dominant }}{{ ' ' ~ n.tension.tone if n.tension and n.tension.tone }}">
+        <p class="vie-need-head"><span class="vie-need-name">{{ n.name }}</span>{% if n.dominant %}<span class="now-tag">le plus fort</span>{% endif %}</p>
+        {% if n.tension %}
+        <p class="vie-need-value"><span class="now-num">{{ n.tension.text }}</span>{% if n.trend %} <span class="vie-trend {{ n.trend }}" title="sur la dernière heure">{{ {'monte': '↗ monte', 'baisse': '↘ baisse', 'stable': '→ stable'}[n.trend] }}</span>{% endif %}</p>
+        {{ tab.bar(n.tension.w, "n-" ~ n.key) }}
+        {% endif %}
+        <p class="vie-need-relief"><span class="now-muted">ce qui le comble :</span> {{ n.relief }}</p>
+        <p class="vie-meta">{% if n.horizon %}<span title="le temps caractéristique de sa remontée"><span class="now-muted">remonte en</span> <span class="now-num">{{ n.horizon }}</span></span>{% endif %}{% if n.when %}<span><span class="now-muted">relevé</span> {{ tab.cell(n.when) }}</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {{ tab.pager(t) }}
+  </section>
+  {% else %}{{ tab.table(t) }}{% endif %}
+
+  <div class="vie-two wide-left">
+    <section class="now-card" aria-labelledby="vie-needs-curve">
+      <header class="now-card-head"><h2 id="vie-needs-curve">Ses besoins dans le temps</h2><p>une mesure toutes les dix minutes</p></header>
+      {{ vie.curve(chart) }}
+    </section>
+    <section class="now-card" aria-labelledby="vie-needs-now">
+      <header class="now-card-head"><h2 id="vie-needs-now">En ce moment</h2></header>
+      {{ vie.facts(now, "vie-facts") }}
+    </section>
+  </div>
+
+  {% if rules %}
+  <details class="now-card person-fold vie-fold">
+    <summary>Ses règles</summary>
+    <p class="now-muted vie-fold-lede">Quand le vide se ressent, comment il se creuse, quand un besoin la pousse à parler.</p>
+    {{ vie.facts(rules) }}
+  </details>
+  {% endif %}
+</div>

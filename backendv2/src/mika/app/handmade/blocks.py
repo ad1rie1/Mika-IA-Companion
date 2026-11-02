@@ -17,7 +17,7 @@ from markupsafe import Markup
 
 from mika.app.handmade.lists import shaped
 from mika.inspector import render
-from mika.inspector.ui import UI, env
+from mika.inspector.ui import UI, Drawn, env
 
 
 def shape(d: dict[str, Any], name: str = "") -> dict[str, Any]:
@@ -67,3 +67,21 @@ def lift(items: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[di
     (ADR 0176) —, et les autres blocs."""
     bar = next((d for d in items if d.get("t") == "toolbar"), None)
     return (list(bar["items"]) if bar else []), [d for d in items if d is not bar]
+
+
+class Blocks(Drawn):
+    """Un onglet dessiné bloc par bloc : des tuiles, des faits, des listes, un fil, ses formulaires (ceux que la
+    console a préparés, avec leur jeton). Aucun onglet d'une destination n'en reste là (ADR 0177 : chacun a sa
+    forme, ``tabs/``) ; il sert le temps d'en dessiner un.
+    ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation) ; ``styles`` :
+    la feuille de son panneau, s'il en a un."""
+
+    def __init__(self, tables: str = "cards", *styles: str) -> None:
+        self.tables = tables
+        self.styles = styles
+
+    def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
+               forms: Mapping[str, Any] | None = None) -> Any:
+        drawn = page(ui, items, query, tables=self.tables, forms=forms)
+        # rien à dessiner, mais un panneau qui a sa feuille : dessiné quand même, pour la charger
+        return Markup("") if drawn is None and self.styles else drawn

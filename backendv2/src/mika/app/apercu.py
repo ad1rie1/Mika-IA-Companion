@@ -98,6 +98,29 @@ async def _approvals(kernel) -> None:
         rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", approval=True,
             args_json=json.dumps({"draft": "brouillon-demo-supprime", "account": "perso"}),
             summary=Content.of("Relire une demande dont le brouillon a été supprimé"), context="user_1"),
+        # une file comme on en voit une après une journée de travail : des sortes différentes, à décider l'une après
+        # l'autre (la page des validations se lit comme un courrier)
+        *(rt.EFFECT_PROPOSED.draft(capability=capability, owner=owner, approval=True,
+                                   args_json=json.dumps(args, ensure_ascii=False), summary=Content.of(summary),
+                                   context=context)
+          for capability, owner, args, summary, context in (
+              ("teams.send", "teams", {"conversation": "19:projet", "text": "Je regarde ça demain matin."},
+               "Répondre sur Teams à Léa (« Projet vitrine »), à ta place : « Je regarde ça demain matin. »", "teams"),
+              ("mcp.call", "mcp", {"server": "agenda", "tool": "create_event", "title": "Concert de Béa"},
+               "Appeler « create_event » (agenda) : ajouter le concert de Béa, samedi à 20 h", "mcp:agenda"),
+              ("projects.networked", "projects", {"argv": ["pip", "install", "requests"]},
+               "Lancer « pip install requests » avec le réseau, pour le labo de trading", "project:61"),
+              ("projects.push", "projects", {"remote": "origin", "branch": "main"},
+               "Pousser trois commits vers le dépôt distant du labo de trading", "project:61"),
+              ("email.send", "email", {"draft": "relance-libraire", "account": "perso"},
+               "Relancer le libraire au sujet de la commande de carnets", "user_1"),
+              ("forge.install", "forge", {"app": "meteo", "packages": ["httpx"]},
+               "Installer « httpx » pour l'app Météo, qu'elle a forgée", "forge:meteo"),
+              ("mcp.call", "mcp", {"server": "notion", "tool": "append_page", "page": "Lectures"},
+               "Appeler « append_page » (notion) : noter le livre que Béa a conseillé", "mcp:notion"),
+              ("projects.networked", "projects", {"argv": ["curl", "-sS", "https://api.ecb.europa.eu"]},
+               "Lire les taux de la BCE avec le réseau, pour le labo de trading", "project:61"),
+          )),
     ], emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-validations")
 
 
@@ -209,6 +232,10 @@ def export(out: Path) -> list[str]:
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
                         urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors if v.section == d.key]
+                        if d.dynamic:  # ses onglets connus au démarrage (la file « À valider ») : ceux de sa barre
+                            page = client.get(base, follow_redirects=True).text
+                            found = re.findall(rf'class="tab[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
+                            urls += [u for u in dict.fromkeys(found) if u not in urls]
                     elif d.layout == "menu":  # chacune de ses pages (les réglages : leur annuaire)
                         page = client.get(f"{base}/apercu" if d.key == "reglages" else base, follow_redirects=True).text
                         found = re.findall(rf'href="({re.escape(base)}/[\w-]+)"', page)
@@ -261,6 +288,10 @@ def export(out: Path) -> list[str]:
                 select(JournalEvent.seq).order_by(JournalEvent.seq)))
             urls += [f"/inspecteur/evenement/{seq}" for seq, in event_ids]
             urls.append("/inspecteur/decisions/envers?personne=adrien")
+            # chaque demande en attente, ouverte (la file des validations, ADR 0177)
+            urls += [f"/inspecteur/approbations/en_attente?demande={p.proposal}"
+                     for p in live.kernel.mind.frame().get(rt.PENDING_EFFECTS)]
+            urls += ["/inspecteur/approbations/en_attente?sorte=projects.networked"]
             urls.append("/inspecteur/maintenant")  # elle, en ce moment : la page qui croise ses facultés
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/projets?vue_pg1=table", "/inspecteur/personnes?vue_pg1=table",

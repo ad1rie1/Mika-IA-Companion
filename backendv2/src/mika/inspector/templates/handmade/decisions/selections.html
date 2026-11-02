@@ -1,0 +1,45 @@
+{# Activité › Décisions › Ses choix (app/handmade/tabs/decisions.py, ADR 0177) : une entrée par initiative décidée,
+   la plus récente d'abord — ce qu'elle a choisi, le tirage qui l'a acceptée (les mots de la console), la roue des
+   lignes en lice (chacune à proportion de son taux, la choisie en couleur ; celles qu'un veto bloquait, nommées) ;
+   chaque ligne au moment du choix, repliée ; l'événement du choix. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/decisions/macros.html" as dec with context %}
+<div class="now-page arb sel" data-tab="decisions/selections">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="sel-title">
+    {{ tab.head(t.title, "sel-title", t.count, "Quand l’arbitre accepte une occurrence, il choisit une ligne au prorata de son taux : la roue montre la part de chacune.") }}
+    {% if items %}
+    <ol class="sel-list" role="list">
+      {% for c in items %}
+      <li class="sel-item">
+        <p class="sel-when">{{ tab.cell(c.when) }}</p>
+        <div class="sel-body">
+          <p class="sel-what">Elle a choisi :
+            {% for x in c.chosen %}<b>{{ x.kind }}</b>{% if x.who %} {{ tab.cell(x.who) }}{% endif %}{{ ", " if not loop.last }}{% else %}<b>une ligne qui n’est plus dans le relevé</b>{% endfor %}</p>
+          {% if c.note %}<p class="sel-draw">{{ c.note.text }}</p>
+          {% else %}<p class="sel-draw">Tirage {{ c.draw }} · {{ c.count }} ligne{{ 's' if c.count not in ('0', '1') }} en lice.</p>{% endif %}
+          {% if c.wheel %}
+          <svg class="sel-wheel" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="La part de chaque ligne dans le tirage">
+            {% for w in c.wheel %}<rect class="{{ 'on' if w.chosen else 'off' }}" x="{{ w.x }}" y="1" width="{{ w.w }}" height="8"/>{% endfor %}
+          </svg>
+          <ul class="sel-legend" role="list">
+            {% for w in c.wheel %}<li class="{{ 'on' if w.chosen }}"><span class="arb-dot {{ 'push' if w.chosen else 'off' }}" aria-hidden="true"></span>{{ w.label }} <span class="now-num">{{ w.share }}</span></li>{% endfor %}
+            {% for x in c.blocked %}<li class="sel-blocked"><span class="arb-dot hold" aria-hidden="true"></span>{{ x.label }} <span class="now-muted">bloquée : {{ x.vetoes|join(", ") }}</span></li>{% endfor %}
+          </ul>
+          {% endif %}
+          <div class="sel-foot">
+            {% if c.href %}<a href="{{ c.href }}">L’événement du choix →</a>{% endif %}
+            {% if c.rows %}
+            <details class="person-entry-detail sel-rows"{{ ' open' if c.open }}>
+              <summary>{% if c.rows|length > 1 %}Les {{ c.rows|length }} lignes{% else %}La ligne{% endif %} au moment du choix</summary>
+              <ul class="arb-lines one" role="list">{% for x in c.rows %}{{ dec.line(x, True) }}{% endfor %}</ul>
+            </details>
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

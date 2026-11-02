@@ -155,18 +155,63 @@ def test_last_thought_and_night_history_pages_keep_the_return_path(world):  # no
         assert "Plus récents" in body, view
 
 
-def test_pending_approvals_are_paged_and_each_card_keeps_its_proposal(world, tmp_path):  # noqa: F811
+def test_pending_approvals_read_like_a_mailbox(world, tmp_path):  # noqa: F811
+    """À valider › Actions à autoriser : la file à gauche, une ligne par demande (50 par page), une seule demande
+    ouverte à droite — sa place dans la file, ses voisines ; des puces par sorte ; après une décision, la suivante
+    s'ouvre (dans la même sorte)."""
     client, live, _ = world
     bootstrap(client)
-    append(client, live.kernel, [rt.EFFECT_PROPOSED.draft(capability="review.fictive", owner="review",
-        args_json="{}", summary=Content.of(f"Proposition de revue {n:02}"), context="test") for n in range(23)])
-    body = page(client, "/inspecteur/approbations/en_attente", tmp_path / "review")
-    assert body.count('class="approve-form"') == 20
-    tail = page(client, "/inspecteur/approbations/en_attente?page=2", tmp_path / "review")
-    assert tail.count('class="approve-form"') == 3 and "Précédente" in tail
+    kinds = ["review.fictive"] * 40 + ["review.other"] * 15
+    append(client, live.kernel, [rt.EFFECT_PROPOSED.draft(capability=k, owner="review", args_json="{}",
+        summary=Content.of(f"Proposition de revue {n:02}"), context="test") for n, k in enumerate(kinds)])
+    pending = [p.proposal for p in live.kernel.mind.frame().get(rt.PENDING_EFFECTS)]
+
     def ids(s):
-        return set(re.findall(r'name="proposal" value="(\d+)"', s))
-    assert len(ids(body) | ids(tail)) == 23 and not ids(body) & ids(tail)
+        return re.findall(r'<li><a href="\?(?:[^"]*&)?demande=(\d+)"', s)
+    body = page(client, "/inspecteur/approbations/en_attente", tmp_path / "review")
+    assert len(ids(body)) == 50 and body.count('class="approve-form"') == 1  # une ligne chacune, une seule ouverte
+    assert f'name="proposal" value="{pending[0]}"' in body and "<b class=\"now-num\">1</b> sur <span class=\"now-num\">55" in body
+    tail = page(client, "/inspecteur/approbations/en_attente?page=2", tmp_path / "review")
+    assert len(ids(tail)) == 5 and "Précédente" in tail and "?page=2&demande=" in tail  # la page se garde
+    assert set(map(int, ids(body) + ids(tail))) == set(pending)
+    # des puces par sorte, qui filtrent la file ; la place dans la file suit le filtre
+    chips = body.split('class="hm-chips apv-kinds"', 1)[1].split("</nav>", 1)[0]
+    assert 'Toutes <span class="hm-count">55' in chips and '<span class="hm-count">40' in chips and \
+        '<span class="hm-count">15' in chips
+    other = page(client, "/inspecteur/approbations/en_attente?sorte=review.other")
+    assert len(re.findall(r'<li><a href="\?sorte=review.other&demande=', other)) == 15
+    assert "<b class=\"now-num\">1</b> sur <span class=\"now-num\">15" in other
+    # ouvrir la troisième : ses voisines ; la refuser ouvre la quatrième
+    third = page(client, f"/inspecteur/approbations/en_attente?demande={pending[2]}")
+    assert "<b class=\"now-num\">3</b> sur" in third and "← Précédente" in third and "Suivante →" in third
+    assert f'name="suivante" value="{pending[3]}"' in third
+    csrf = client.cookies.get("csrftoken")
+    done = client.post("/inspecteur/approbations", data={"csrf": csrf, "proposal": str(pending[2]),
+                                                         "decision": "reject", "suivante": str(pending[3])},
+                       follow_redirects=False)
+    assert done.status_code == 303 and f"demande={pending[3]}" in done.headers["location"]
+    after = page(client, done.headers["location"])
+    assert "Refusé." in after and f'name="proposal" value="{pending[3]}"' in after
+    # son historique : la décision d'avant, du même genre
+    history = after.split('class="apv-history"', 1)[1].split("</section>", 1)[0]
+    assert "Proposée" in history and "refusée" in history and f"n° {pending[2]}" in history
+    assert 'href="/inspecteur/approbations/historique">Tout l\'historique' in history
+
+
+def test_a_request_links_to_its_source(world):  # noqa: F811
+    """La demande ouverte dit d'où elle vient, en liens : le brouillon et la boîte d'un mail, la fiche de la personne
+    et leur conversation."""
+    client, live, _ = world
+    bootstrap(client)
+    client.portal.call(connect, live.kernel, "user_1", "Adrien")
+    append(client, live.kernel, [rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email",
+        args_json='{"draft": "d-1", "account": "perso"}', summary=Content.of("Répondre au libraire"),
+        context="user_1")])
+    body = page(client, "/inspecteur/approbations/en_attente")
+    sources = body.split('class="apv-sources"', 1)[1].split("</p>", 1)[0]
+    assert '/inspecteur/fiche/brouillon/d-1">Le brouillon' in sources
+    assert '/inspecteur/courrier/reception?compte=perso">La boîte « perso »' in sources
+    assert ">La fiche de Adrien<" in sources and "/inspecteur/fil/messages?handle=user_1" in sources
 
 
 def test_large_episode_keeps_its_outcome_and_every_event_accessible(world, tmp_path):  # noqa: F811
@@ -214,6 +259,7 @@ def test_activity_keeps_open_work_pending_question_and_recent_failure_separate(w
     assert 'Toutes les questions sans réponse' in body and 'Service momentanément indisponible' in body
     assert client.portal.call(lambda: kernel.mind.head) == before
     history = page(client, '/inspecteur/decisions/episodes?issue=failed')
-    assert 'person-list' in history and 'Service momentanément indisponible' in history  # dessinée (ADR 0121)
+    # dans sa forme (ADR 0177) : le fil des épisodes jour par jour ; en tableau, la liste de la console
+    assert 'class="eps-feed"' in history and 'Service momentanément indisponible' in history
     table = page(client, '/inspecteur/decisions/episodes?issue=failed&vue_pg1=table')
-    assert 'person-list' not in table and 'Service momentanément indisponible' in table
+    assert 'eps-feed' not in table and 'Service momentanément indisponible' in table

@@ -1,0 +1,35 @@
+{# Elle › Mémoire › Souvenirs (app/handmade/tabs/memory.py, ADR 0177) : une entrée par souvenir — son texte, la
+   couleur de son émotion, à qui il se rapporte, ce qu'il en reste —, le détail replié ; la pagination et la bascule
+   « Tableau » de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+<div class="now-page memories" data-tab="memoire/souvenirs">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="memories-title">
+    {{ tab.head(t.title, "memories-title", t.count, list=t) }}
+    {% if items %}
+    <ul class="memories-list" role="list">
+      {% for m in items %}
+      <li class="memories-item{{ ' faded' if m.faded }}">
+        <div class="memories-top">
+          {% if m.emotion %}<span class="now-dot sw-{{ m.emotion.key }}" title="{{ m.emotion.text }}" aria-hidden="true"></span>{% endif %}
+          <div class="memories-text">{{ tab.cell(m.text) }}</div>
+        </div>
+        <p class="memories-meta">
+          {{ mem.tags(m.tags) }}
+          {% if m.about %}<span>{{ tab.cell(m.about) }}</span>{% endif %}
+          {% if m.emotion %}<span class="now-muted">{{ m.emotion.text }}</span>{% endif %}
+          {% if m.born %}<span class="memories-when">né {{ tab.cell(m.born) }}</span>{% endif %}
+        </p>
+        {% if m.left %}<p class="memories-left" title="Ce qu'il en reste : son importance, estompée depuis la dernière fois qu'il a été touché">{{ tab.bar(m.left.w) }}<span>il en reste <span class="now-num">{{ m.left.text }}</span></span></p>{% endif %}
+        {{ mem.foot(m, t) }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </section>
+  {% endif %}
+</div>

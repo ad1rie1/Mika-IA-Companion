@@ -1,0 +1,15 @@
+{# Ce que partagent les onglets des Connexions extérieures dans leur forme (app/handmade/tabs/senses.py, ADR 0177) :
+   la phrase d'état de la vue, une pertinence en chiffre et en jauge, le lien vers un événement du journal. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+
+{% macro state(s) -%}
+{% if s %}<p class="sens-state {{ s.tone or 'muted' }}"><span class="sens-state-dot" aria-hidden="true"></span><span>{{ s.text }}</span></p>{% endif %}
+{%- endmacro %}
+
+{% macro score(g, label="pertinence") -%}
+{% if g %}<span class="sens-score{{ ' ' ~ g.tone if g.tone }}" title="{{ label }} : {{ g.text }}">{{ tab.bar(g.w, 'sens-score-bar') }}<span class="now-num">{{ g.text }}</span></span>{% endif %}
+{%- endmacro %}
+
+{% macro event(c) -%}
+{% if c and c.t == "link" %}<a class="sens-event" href="{{ c.href }}">{{ c.text }}</a>{% endif %}
+{%- endmacro %}

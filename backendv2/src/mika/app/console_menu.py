@@ -2,9 +2,9 @@
 
 Les routes et les fiches gardent leurs adresses. Le menu et les onglets disent la même chose (ADR 0121) : dans une
 rubrique, une destination a soit un seul lien (la page entière : Mémoire, Personnes, Courrier…), soit un lien par
-onglet — tous ses onglets, dans leur ordre et sous leur nom (test_console_navigation.py). Deux rubriques font
-exception : « À valider », des raccourcis nommés par la tâche vers ce qui attend une décision, et « Réglages », une
-sélection d'entrées dans un annuaire d'une cinquantaine de pages (le sien).
+onglet — tous ses onglets, dans leur ordre et sous leur nom (test_console_navigation.py) ; « À valider » aussi, une
+seule file dont chaque lien est un onglet (ADR 0177). Une rubrique fait exception : « Réglages », une sélection
+d'entrées dans un annuaire d'une cinquantaine de pages (le sien).
 
 Les rubriques sont dans la barre du haut (ADR 0176) : chacune y a son nom court, et son menu commence par la question
 à laquelle elle répond ; chaque lien y dit en quelques mots ce qu'on trouve derrière.
@@ -13,16 +13,17 @@ Les rubriques sont dans la barre du haut (ADR 0176) : chacune y a son nom court,
 from mika.inspector.catalog import MenuGroup, MenuLink
 
 #: les rubriques dont les liens ne suivent pas les onglets de leurs destinations (voir plus haut)
-SHORTCUT_GROUPS = ("À valider", "Réglages")
+SHORTCUT_GROUPS = ("Réglages",)
 
 MENU = (
     MenuGroup("", "home", (MenuLink("Accueil", ""),)),
+    # une seule file, une seule page (ADR 0177) : chaque lien en est un onglet
     MenuGroup("À valider", "check", (
-        MenuLink("Actions à autoriser", "approbations/en_attente", hint="Ce qu'elle attend de toi avant d'agir"),
-        MenuLink("Brouillons de courrier", "courrier/brouillons", hint="Ses réponses, prêtes à partir"),
-        MenuLink("Réponses Teams", "teams/reponses", hint="Ce qu'elle poserait dans Teams"),
-        MenuLink("Identités à confirmer", "identites/revendications", hint="Qui est qui, à valider"),
-        MenuLink("Noms à relier", "identites/noms", hint="Un nom dont on lui a parlé, une personne"),
+        MenuLink("Tout ce qui attend", "approbations/en_attente", hint="Toutes les décisions qui t'attendent"),
+        MenuLink("Courriers à envoyer", "approbations/courriers", hint="Ses mails, prêts à partir"),
+        MenuLink("Réponses Teams", "approbations/teams", hint="Ce qu'elle poserait dans Teams"),
+        MenuLink("Identités à confirmer", "approbations/identites", hint="Qui est qui, à valider"),
+        MenuLink("Noms à relier", "approbations/noms", hint="Un nom dont on lui a parlé, une personne"),
         MenuLink("Historique des autorisations", "approbations/historique", hint="Ce que tu as permis ou refusé"),
     ), question="Qu'est-ce qui attend ta décision ?"),
     MenuGroup("Elle", "heart", (

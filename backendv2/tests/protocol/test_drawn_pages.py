@@ -9,6 +9,8 @@ import html
 import pytest
 
 from mika.app.handmade import pages
+from mika.app.handmade.blocks import Blocks
+from mika.app.handmade.tabs import Tab
 from mika.contracts import self_
 from mika.kernel.events import Content, VoiceProvenance
 from tests.fixtures.console_html import ConsoleHTML
@@ -38,7 +40,7 @@ def test_conversations_are_drawn(world):  # noqa: F811
     judged = drawn(client, "/inspecteur/fil/jugees")
     assert 'class="now-page person-tab"' in judged and "aucune réponse jugée" in judged
     questions = drawn(client, "/inspecteur/fil/questions")
-    assert 'class="now-page person-tab"' in questions
+    assert 'class="now-page fil-questions" data-tab="fil/questions"' in questions  # sa forme (tabs/threads.py)
 
 
 @pytest.mark.parametrize("where", sorted(pages.DRAWN))
@@ -50,6 +52,13 @@ def test_every_drawn_tab_opens(world, where):  # noqa: F811
     assert page.status_code == 200, where
     ConsoleHTML(page.text).check()
     assert 'class="now-page' in page.text, where  # le dessin, pas le repli sur les blocs
+    if isinstance(pages.DRAWN[where], Tab):
+        assert f'data-tab="{where}"' in page.text, where  # sa forme à lui, même vide
+
+
+def test_no_tab_is_left_block_by_block():
+    """ADR 0177 : chaque onglet d'une destination a sa forme ; aucun n'est plus dessiné bloc par bloc."""
+    assert sorted(k for k, v in pages.DRAWN.items() if isinstance(v, Blocks)) == []
 
 
 def test_processes_put_what_fails_first_with_its_error(world):  # noqa: F811

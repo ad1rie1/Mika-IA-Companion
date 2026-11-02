@@ -1,0 +1,35 @@
+{# Relations & échanges › Teams › Extension (app/handmade/tabs/teams.py, ADR 0177) : l'extension de navigateur qui
+   lui apporte Teams. Où elle en est (branchée ou pas, en un bandeau seulement si elle ne l'est pas), une bande de
+   chiffres (son dernier envoi, ce qu'elle a apporté, ce qui attend ta décision : chacun mène à son onglet), puis côte
+   à côte ton compte Teams et ce qui va avec, et comment la brancher, pas à pas ; comment ça marche, dit par le
+   plugin. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/teams/_teams.html" as tm %}
+<div class="now-page teams-tab teams-ext" data-tab="teams/extension">
+  {% if band %}
+  {% if not plugged %}<p class="person-tab-note warn">L'extension n'a encore rien apporté : branche-la (ci-dessous) pour qu'elle lise Teams avec toi.</p>{% endif %}
+  <section class="person-tiles teams-band" aria-label="L'extension en chiffres">
+    <ul class="person-tiles-list">{% for x in band %}
+      <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="person-tile-label">{{ x.label }}</span><span class="person-tile-value">{{ tab.cell(x.value) }}</span>{% if x.sub %}<span class="person-tile-sub">{{ x.sub }}</span>{% endif %}{% if x.href %}</a>{% endif %}</li>
+    {% endfor %}</ul>
+  </section>
+  <div class="now-grid two">
+    <section class="now-card" aria-labelledby="teams-you-title">
+      {{ tab.head("Ton compte Teams", "teams-you-title", none, "tel que l'extension l'a vu dans ton navigateur") }}
+      <dl class="teams-facts">
+        <div><dt>Ton nom dans Teams</dt><dd>{{ tab.cell(facts.get("ton nom dans Teams")) }}</dd></div>
+        <div><dt>Ton identifiant</dt><dd>{{ tab.cell(facts.get("ton identifiant Teams")) }}</dd></div>
+        <div><dt>Sa clé, ta signature</dt><dd>{{ tab.cell(facts.get("clé, signature")) }}</dd></div>
+        <div><dt>Ce qu'elle prépare, comment ça part</dt><dd>{{ tab.cell(facts.get("ce qu'elle prépare, comment ça part")) }}</dd></div>
+      </dl>
+      {% if how %}<p class="teams-how">{{ how }}</p>{% endif %}
+    </section>
+    <section class="now-card" aria-labelledby="teams-plug-steps">
+      {{ tab.head("La brancher", "teams-plug-steps", none, "une fois pour toutes, dans le navigateur où tu ouvres Teams" if not plugged else "pour la rebrancher, ou dans un autre navigateur") }}
+      {{ tm.steps("teams-plug-steps") }}
+    </section>
+  </div>
+  {% else %}
+  {{ tm.unplugged(notes, False) }}
+  {% endif %}
+</div>

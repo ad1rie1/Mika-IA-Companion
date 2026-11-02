@@ -53,8 +53,12 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     order=("tous", "serveurs", "expose"), subjects=("serveur",)),
     )),
     NavGroup("À valider", (
-        Destination("approbations", "À valider", "Ce qu'elle voudrait faire sortir de la machine, et ce "
-                    "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
+        # une seule file : ce qui attend une décision, quelle qu'en soit la sorte ; ses onglets (courriers, Teams,
+        # identités, noms) sont déclarés par la composition (``app/handmade/waiting.py``, ADR 0177)
+        Destination("approbations", "À valider", "Ce qui attend ta décision — ce qu'elle voudrait faire sortir de "
+                    "la machine, les identités à confirmer, les noms à relier — et ce qui en a été décidé.",
+                    builtin=("approbations.en_attente", "approbations.historique"), dynamic=True,
+                    order=("en_attente", "courriers", "teams", "identites", "noms", "historique")),
     )),
     NavGroup("Relations & échanges", (
         Destination("courrier", "Courrier", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",

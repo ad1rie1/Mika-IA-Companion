@@ -128,6 +128,14 @@ def _can_link(s: IdentityState, frame: Frame, key: str) -> bool:
     return h is not None and is_identifiable(key) and not h.authenticated
 
 
+def _link_initial(s: IdentityState, frame: Frame, key: str) -> dict[str, str]:
+    """Relier un moyen de communication qui revendique quelqu'un : la personne qu'il vise, à confirmer d'un coup
+    d'œil (rien quand plusieurs personnes portent le nom revendiqué)."""
+    h = _handle(s, key)
+    target = h.claim.target if h is not None and h.claim is not None else None
+    return {"person": target} if target and target != key else {}
+
+
 @IDENTITY.action("relier", title="Relier à une personne", args=LinkArgs, emits=[c.LINKED], subject="handle",
                  description="Ce moyen de communication parlera pour la personne choisie (certitude « liée ») : sa "
                              "mémoire, ses liens, sa fiche et son fil s'y attachent — et, sur un compte extérieur, les "
@@ -135,7 +143,7 @@ def _can_link(s: IdentityState, frame: Frame, key: str) -> bool:
                              "écrit.",
                  confirm="Relier ce moyen de communication ? Il recevra tout ce que la personne choisie lui a "
                          "confié.",
-                 available=_can_link, order=10)
+                 available=_can_link, initial=_link_initial, order=10)
 def _link(s: IdentityState, frame: Frame, args: LinkArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
@@ -311,12 +319,22 @@ def _heavy(s: IdentityState, before: Handle, after: Handle, handle: str) -> str:
     return ""
 
 
+def _evidence_initial(s: IdentityState, frame: Frame, key: str) -> dict[str, str]:
+    """Le nom qu'un démenti viserait : celui que ce moyen de communication revendique, sinon celui qu'elle lui prête
+    (il ne compte que pour un démenti)."""
+    h = _handle(s, key)
+    if h is None:
+        return {}
+    name = h.claim.name if h.claim is not None else h.name
+    return {"name": name} if name else {}
+
+
 @IDENTITY.action("preuve", title="Verser une preuve", args=EvidenceArgs, emits=[c.EVIDENCE], subject="handle",
                  description="Une raison de croire ou de ne plus croire, pesée comme les autres : un opérateur "
                              "ne fait pas monter la confiance au-delà du plafond du canal.",
                  confirm="Verser cette preuve ? Elle peut relier ce moyen de communication à quelqu'un, ou l'en "
                          "délier.",
-                 available=_can_testify, order=30)
+                 available=_can_testify, initial=_evidence_initial, order=30)
 def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)

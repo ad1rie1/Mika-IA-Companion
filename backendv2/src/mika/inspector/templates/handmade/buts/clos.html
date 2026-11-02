@@ -1,0 +1,38 @@
+{# Activité › Buts › Clos (app/handmade/tabs/goals.py, ADR 0177) : ce qu'il en est sur la page (tant d'aboutis, de
+   bloqués…), puis une entrée par but clos — son issue en marque (✓ abouti, ! bloqué ou en échec, ✕ abandonné ou
+   annulé), ce qu'il a donné ou pourquoi il s'est arrêté, cité ; quand, pour qui ; en deux colonnes sur un grand
+   écran ; la note de la faculté (un but clos depuis plus de sept jours n'a plus de fiche) en pied. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/buts/macros.html" as gl with context %}
+<div class="now-page gl" data-tab="buts/clos">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="gl-closed-title">
+    {{ tab.head(t.title, "gl-closed-title", t.count) }}
+    {% if tally %}<p class="gl-tally">{% for x in tally %}<span class="gl-tally-item {{ x.tone }}"><span class="now-num">{{ x.n }}</span> {{ x.text }}</span>{% endfor %}<span class="now-muted">sur cette page</span></p>{% endif %}
+    {% if items %}
+    <ul class="gl-list gl-closed" role="list">
+      {% for g in items %}
+      <li class="gl-item gl-done m-{{ g.mark }}">
+        <span class="gl-mark" aria-hidden="true"></span>
+        <div class="gl-main">
+          <div class="gl-top">
+            <p class="gl-title">{% if g.href %}<a href="{{ g.href }}">{{ g.title.text }}</a>{% else %}{{ g.title.text }}{% endif %}</p>
+            {% if g.issue %}<span class="now-tag {{ g.issue.tone }}">{{ g.issue.text }}</span>{% endif %}
+          </div>
+          {% if g.result %}<blockquote class="gl-result"><p>{{ tab.cell(g.result) }}</p></blockquote>{% endif %}
+          <p class="gl-meta">
+            {% if g.kind %}<span class="gl-kind">{{ g.kind }}</span>{% endif %}
+            {% if g.authority %}<span>{{ "à elle" if g.authority == "à elle" else "confié" if g.authority == "confié" else g.authority }}</span>{% endif %}
+            {% if g.owner %}<span>pour {{ tab.cell(g.owner) }}</span>{% endif %}
+            {% if g.when %}<span class="gl-when-closed">clos {{ tab.cell(g.when) }}</span>{% endif %}
+          </p>
+          {% if g.detail %}<details class="person-entry-detail"><summary>Le détail</summary><div class="stack">{{ tab.inner(g.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {% if t.caption %}<p class="person-tab-note">{{ t.caption }}</p>{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+  {{ gl.notes(notes) }}
+</div>

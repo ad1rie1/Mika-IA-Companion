@@ -1,0 +1,21 @@
+{# Ce que partagent les onglets « Identités et moyens de communication » (app/handmade/tabs/identities.py, ADR 0177) :
+   une bande de chiffres, une jauge vers une barre. Aucun style en ligne (CSP) : les longueurs sont des attributs
+   SVG. #}
+{% from "_cells.html" import cell %}
+
+{# un libellé de la faculté, sa première lettre en capitale #}
+{% macro cap(s) -%}{{ (s|string)[:1]|upper }}{{ (s|string)[1:] }}{%- endmacro %}
+
+{# la bande de chiffres : un libellé, une valeur (une cellule rendue), une phrase ; un lien mène à son sujet #}
+{% macro band(items, label) -%}
+<section class="person-tiles ids-band" aria-label="{{ label }}">
+  <ul class="person-tiles-list">{% for x in items %}
+    <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="person-tile-label">{{ cap(x.label) }}</span><span class="person-tile-value">{{ cell(x.value) }}</span>{% if x.sub %}<span class="person-tile-sub">{{ x.sub }}</span>{% endif %}{% if x.href %}</a>{% endif %}</li>
+  {% endfor %}</ul>
+</section>
+{%- endmacro %}
+
+{# une jauge vers une barre : w (0–100), la barre au bout #}
+{% macro toward(w, cls="") -%}
+<svg class="ids-toward {{ cls }}" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% if w > 0 %}<line class="fill" x1="0" x2="{{ w }}" y1="5" y2="5" vector-effect="non-scaling-stroke"/>{% endif %}<line class="end" x1="100" x2="100" y1="0" y2="10" vector-effect="non-scaling-stroke"/></svg>
+{%- endmacro %}

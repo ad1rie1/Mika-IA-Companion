@@ -1,0 +1,51 @@
+{# Activité › Décisions › Épisodes (app/handmade/tabs/decisions.py, ADR 0177) : ses dernières 24 heures par issue et
+   ses quatorze jours en barres (avec les filtres en cours), puis le fil des épisodes jour par jour — l'heure, la
+   sorte, vers qui, l'issue, le détail en mots —, chacun vers sa page ; la pagination et la bascule « Tableau » de la
+   console. Le même vocabulaire que « En cours » (ce qu'elle vient de faire). #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/decisions/macros.html" as dec with context %}
+<div class="now-page eps" data-tab="decisions/episodes">
+  {{ dec.notes(notes) }}
+  {% if counts or bars %}
+  <section class="now-card eps-activity" aria-labelledby="eps-activity-title">
+    <div class="eps-day">
+      <p class="now-eyebrow" id="eps-activity-title">Ces dernières 24 heures</p>
+      {% if counts %}
+      <ul class="eps-counts" role="list">
+        {% for s in counts %}<li class="{{ s.tone }}"><span class="eps-count-n now-num">{{ tab.cell(s.value) }}</span><span class="eps-count-label">{{ s.label }}</span></li>{% endfor %}
+      </ul>
+      {% else %}<p class="now-empty">Aucun épisode terminé ces dernières 24 heures.</p>{% endif %}
+    </div>
+    {% if bars %}
+    <div class="eps-weeks">
+      <p class="now-eyebrow">Ses quatorze jours</p>
+      <svg class="eps-bars" viewBox="0 0 140 40" preserveAspectRatio="none" role="img" aria-label="Ses épisodes par jour, sur quatorze jours (au plus {{ bars.top }} un jour)">
+        {% for b in bars.bars %}<rect class="{{ 'today' if b.today }}" x="{{ b.x }}" y="{{ b.y }}" width="8" height="{{ b.h if b.h > 0 else 0.6 }}"><title>{{ b.day }} : {{ b.n }}</title></rect>{% endfor %}
+      </svg>
+      <p class="eps-bars-legend"><span>il y a 14 jours</span><span>au plus <span class="now-num">{{ bars.top }}</span> par jour</span><span>aujourd’hui</span></p>
+    </div>
+    {% endif %}
+    {% for n in sampled %}<p class="eps-sampled">{{ n.text }}</p>{% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="eps-title">
+    {{ tab.head(t.title, "eps-title", t.count, list=t) }}
+    {% if days %}
+    {% for d in days %}
+    <h3 class="eps-day-name">{{ d.name }}</h3>
+    <ol class="eps-feed" role="list">
+      {% for e in d["items"] %}
+      <li class="{{ 'failed' if e.failed }}">
+        <span class="eps-hm" title="{{ e.when.exact if e.when else '' }}">{{ e.hm or tab.cell(e.when) }}</span>
+        <span class="eps-what"><b>{{ e.kind|capitalize }}</b>{% if e.who %} · {{ tab.cell(e.who) }}{% endif %}{% if e.detail %}<span class="eps-detail"> — {{ e.detail }}</span>{% endif %}</span>
+        {% if e.outcome %}<span class="now-tag {{ e.outcome.tone }}">{{ e.outcome.text }}</span>{% else %}<span></span>{% endif %}
+        {% if e.href %}<a class="eps-open" href="{{ e.href }}">{{ t.link_label or 'Comprendre' }} →</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endfor %}
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

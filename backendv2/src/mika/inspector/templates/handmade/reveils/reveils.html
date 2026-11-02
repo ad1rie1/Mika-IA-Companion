@@ -1,0 +1,53 @@
+{# Connexions extérieures › Réveils par API (app/handmade/tabs/wakeups.py, ADR 0177) : ses réveils en tuiles — à quoi
+   chacun sert, actif ou non, sa clé, ce qui attend, son dernier appel ; puis ses derniers appels en fil — ce qu'ils
+   apportaient (une donnée venue d'ailleurs, jamais une consigne), où ils en sont, pourquoi ils attendent, leur compte
+   rendu, l'épisode qui les a traités, le reste replié. « Déclarer un réveil » est dans la barre de titre. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/sens/_sens.html" as sx with context %}
+<div class="now-page sens-page wk" data-tab="reveils/reveils">
+  {{ sx.state(state) }}
+  {% if endpoints %}
+  <section class="now-card" id="{{ endpoints.id }}" aria-labelledby="wk-endpoints-title">
+    {{ tab.head("Ses réveils", "wk-endpoints-title", endpoints.count, "Ce que des systèmes extérieurs peuvent lui envoyer (POST /api/wake/<nom>). Ouvre un réveil pour sa clé, ses consignes et tous ses appels.") }}
+    {% if items %}
+    <ul class="wk-tiles" role="list">
+      {% for e in items %}
+      <li class="{{ 'off' if not e.on }}{{ ' keyless' if e.keyless }}">
+        <p class="wk-name">{{ tab.cell(e.name) }}</p>
+        {% if e.label %}<p class="wk-label">{{ e.label }}</p>{% endif %}
+        <p class="sens-meta wk-tags">{{ tab.cell(e.state) }}{{ tab.cell(e.key) }}</p>
+        <p class="sens-meta wk-foot">
+          {% if e.waiting %}<span class="wk-waiting"><b class="now-num">{{ e.waiting }}</b> en attente</span>{% endif %}
+          <span class="sens-when">{% if e.last %}dernier appel {{ tab.cell(e.last) }}{% else %}jamais appelé{% endif %}</span>
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="now-empty">Aucun réveil déclaré.{% if add %} <a href="{{ add }}">Déclarer un réveil</a>{% endif %}</p>
+    {% endif %}
+    {{ tab.pager(endpoints) }}
+    {% if endpoints.caption and items %}<p class="person-tab-note wk-help">{{ endpoints.caption }}</p>{% endif %}
+  </section>
+  {% endif %}
+  <section class="now-card" id="{{ calls.id }}" aria-labelledby="wk-calls-title">
+    {{ tab.head(calls.title, "wk-calls-title", calls.count, calls.caption) }}
+    {% if call_items %}
+    <ol class="sens-list sens-feed" role="list">
+      {% for c in call_items %}
+      <li class="sens-item wk-call{{ ' failed' if c.failed }}">
+        <span class="sens-feed-when">{{ tab.cell(c.when) }}</span>
+        <div class="sens-feed-body">
+          <p class="sens-meta">{% if c.endpoint and not name %}<b>{{ tab.cell(c.endpoint) }}</b>{% endif %}{{ tab.cell(c.state) }}{% if c.episode %}<a class="sens-event" href="{{ c.episode.href }}">Relire l'épisode →</a>{% endif %}</p>
+          <p class="wk-brought">{{ tab.cell(c.text) }}</p>
+          {% if c.why %}<p class="wk-why">{{ c.why }}</p>{% endif %}
+          {% if c.report %}<p class="wk-report"><span class="now-eyebrow">Son compte rendu</span>{{ c.report }}</p>{% endif %}
+          {% if c.detail %}<details class="person-entry-detail"{{ ' open' if c.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(c.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(calls.empty) }}{% endif %}
+    {{ tab.pager(calls) }}
+  </section>
+</div>

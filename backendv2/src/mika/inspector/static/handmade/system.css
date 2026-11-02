@@ -153,3 +153,293 @@
   .sys-out-recent-list li { grid-template-columns: 1fr auto; }
   .sys-out-when { grid-column: 1 / -1; }
 }
+
+/* ── Les onglets de Système dans leur forme (app/handmade/tabs/system.py, ADR 0177) ───────────────────────────────
+   Le vocabulaire qu'ils partagent : un bandeau (ce qui ne va pas, en une phrase), des colonnes de cartes, des lignes
+   serrées à filets, un fil daté. Les couleurs d'état ne servent qu'à l'état, toujours avec ses mots. */
+.sys .tone-info { --st: var(--info); }
+.sys-band { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; padding: 11px 16px;
+  border-radius: var(--radius); font-size: 14px; }
+.sys-band.tone-ok { background: var(--ok-bg); color: var(--ok); }
+.sys-band.tone-warn { background: var(--warn-bg); color: var(--warn); }
+.sys-band.tone-danger { background: var(--danger-bg); color: var(--danger); }
+.sys-band.tone-info { background: var(--info-bg); color: var(--info); }
+.sys-band .sys-dot { align-self: center; margin-right: 0; }
+.sys-band-text { flex: 1 1 220px; min-width: 0; max-width: 110ch; }
+.sys-band a { color: inherit; font-weight: 600; white-space: nowrap; }
+.sys-lede { margin: 0; color: var(--text-2); font-size: 13.5px; }
+.sys-lede .now-num { color: var(--text); font-weight: 600; }
+.sys-foot { margin-top: 12px; }
+.sys-ok-text { color: var(--ok); }
+.sys-cols { display: grid; gap: var(--now-gap); align-items: start; }
+.sys-cols.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sys-day { margin: 0 0 4px; padding-top: 2px; color: var(--muted); font: 600 11.5px var(--font); letter-spacing: .07em;
+  text-transform: uppercase; }
+.sys-kv { margin-left: 10px; font-size: 12px; overflow-wrap: anywhere; }
+.sys-chip { max-width: 100%; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; white-space: normal;
+  overflow-wrap: anywhere; }
+.sys-chip.mono { font-family: var(--mono); font-size: 11.5px; }
+a.sys-chip { color: var(--accent); }
+
+/* des lignes serrées, à filets : son nom et son état en haut, ses détails dessous */
+.sys-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-rows > li { display: grid; gap: 5px; padding: 10px 0; border-top: 1px solid var(--border); }
+.sys-rows > li:first-child { padding-top: 2px; border-top: 0; }
+.sys-rows > li.is-warn { padding-left: 12px; box-shadow: inset 3px 0 0 var(--warn); }
+.sys-rows > li.gone { color: var(--muted); }
+.sys-row-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.sys-row-name { margin: 0; min-width: 0; font-size: 13.5px; }
+.sys-row-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; color: var(--text-2);
+  font-size: 12.5px; }
+.sys-row-meta .k { color: var(--muted); }
+
+/* un fil daté : l'heure à gauche, ce qui s'est passé à droite */
+.sys-feed, .sys-jr-feed, .sys-ops-feed { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-feed > li, .sys-jr-feed > li, .sys-ops-feed > li { display: grid; grid-template-columns: 64px minmax(0, 1fr);
+  align-items: baseline; gap: 2px 12px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.sys-feed > li:first-child, .sys-jr-feed > li:first-child, .sys-ops-feed > li:first-child { border-top: 0; }
+.sys-feed > li.is-warn { box-shadow: inset 3px 0 0 var(--warn); padding-left: 10px; }
+.sys-feed-when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sys-feed-body p { margin: 0; }
+
+/* Anomalies */
+.sys-an-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-an-list > li { display: grid; gap: 4px; padding: 10px 0 10px 12px; border-top: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--warn); }
+.sys-an-list > li:first-child { border-top: 0; }
+.sys-an-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: 13.5px; }
+.sys-an-ev { margin-left: auto; font-size: 12.5px; }
+.sys-an-said { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.sys-an-raw { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+
+/* Journal d'événements, Actions des opérateurs : jour par jour, en deux colonnes sur un grand écran */
+.sys-jr-families { margin: 0 0 12px; }
+.sys-jr-days.many { columns: 2 520px; column-gap: 36px; }
+.sys-jr-day { margin-bottom: 14px; }
+.sys-jr-day .sys-day { break-after: avoid; }
+.sys-jr-feed > li, .sys-ops-feed > li { break-inside: avoid; }
+/* un événement sur une ligne : l'heure, ce qui s'est passé, son type, son numéro, ses données ; le lien de son
+   épisode sous le premier de ses événements */
+.sys-jr-feed > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; padding: 5px 0; }
+.sys-jr-feed > li.same { border-top-color: transparent; padding-top: 1px; }
+.sys-jr-feed .sys-feed-when { flex: none; width: 60px; }
+.sys-jr-what { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.sys-jr-what a { color: var(--text); font-weight: 500; }
+.sys-jr-what a:hover { color: var(--accent); }
+.sys-jr-type { flex: 0 1 auto; min-width: 0; max-width: 42%; overflow: hidden; color: var(--muted); font-size: 11.5px;
+  text-overflow: ellipsis; white-space: nowrap; }
+.sys-jr-seq { flex: none; color: var(--muted); font-size: 12px; }
+.sys-jr-link { flex-basis: 100%; padding-left: 70px; color: var(--muted); font-size: 12px; }
+.sys-jr-data { flex: none; }
+.sys-jr-data > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.sys-jr-data[open] { flex-basis: 100%; order: 9; padding-left: 70px; }
+.sys-jr-data[open] > summary { margin-bottom: 6px; }
+.sys-jr-data .hm-code-block h3 { display: none; }
+.sys-jr-body { display: grid; gap: 2px; min-width: 0; }
+.sys-jr-body p { margin: 0; }
+.sys-jr-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; color: var(--muted); font-size: 12px; }
+.sys-jr-meta .mono { font-size: 11.5px; overflow-wrap: anywhere; }
+.sys-ops-feed > li { grid-template-columns: 52px minmax(0, 1fr) auto; }
+.sys-ops-feed > li.is-danger { box-shadow: inset 3px 0 0 var(--danger); padding-left: 10px; }
+.sys-ops-feed > li.is-warn { box-shadow: inset 3px 0 0 var(--warn); padding-left: 10px; }
+.sys-ops-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0 0 12px; color: var(--text-2);
+  font-size: 13px; }
+.sys-ops-sum > span:first-child { margin-right: auto; }
+
+/* Écrans du monde */
+.sys-wd-session.host { padding-left: 12px; box-shadow: inset 3px 0 0 var(--ok); }
+.sys-wd-lacks { display: grid; gap: 4px; margin: 0; }
+.sys-wd-lacks > div { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1fr); gap: 2px 10px; font-size: 12.5px; }
+.sys-wd-lacks dt { color: var(--muted); }
+.sys-wd-lacks dd { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.sys-wd-lacks .now-tag { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 500; }
+
+/* Contributions et Diagnostic avancé : une faculté par sous-onglet */
+.sys-ct-scroll { overflow-x: auto; }
+.sys-ct-matrix { display: grid; min-width: 860px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sys-ct-matrix > li { display: grid; grid-template-columns: minmax(210px, 2fr) repeat(11, minmax(0, 1fr)); align-items: baseline;
+  gap: 0 6px; padding: 3px 0; border-top: 1px solid var(--border); }
+.sys-ct-matrix > li:first-child { border-top: 0; }
+.sys-ct-matrix > li > span { text-align: right; }
+.sys-ct-matrix .none { color: var(--border-strong); }
+.sys-ct-head { color: var(--muted); font-size: 11px; font-weight: 600; }
+.sys-ct-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-ct-head > span:first-child { text-align: left; }
+.sys-ct-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px 28px; }
+.sys-ct-kind { min-width: 0; }
+.sys-ct-kind.wide { grid-column: 1 / -1; }
+.sys-ct-kind h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.sys-ct-what { margin: 1px 0 6px; font-size: 12px; }
+.sys-ct-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.sys-ct-facts { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sys-ct-facts .mono { font-size: 12px; }
+.sys-ct-kind.wide .sys-ct-facts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); column-gap: 28px; }
+.sys-ct-to { color: var(--text-2); }
+
+/* Simulations : la liste à gauche, la liseuse à droite */
+.sys-sim-client { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: var(--now-gap); align-items: start; }
+.sys-sim-files { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-sim-files > li { display: grid; gap: 2px; padding: 8px 10px; border-top: 1px solid var(--border); }
+.sys-sim-files > li:first-child { border-top: 0; }
+.sys-sim-files > li.on { border-radius: var(--radius); background: var(--accent-soft); }
+.sys-sim-files a { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; color: var(--text); font-weight: 500; }
+.sys-sim-files li.on a { color: var(--accent); }
+.sys-sim-files a .mono { order: -1; font-size: 11.5px; font-weight: 400; }
+.sys-sim-meta { color: var(--muted); font-size: 12px; }
+.sys-sim-text { margin: 0; max-height: 70vh; overflow: auto; font: 13px/1.6 var(--mono); white-space: pre-wrap;
+  overflow-wrap: anywhere; }
+
+/* Moteur des modèles */
+.sys-gw-slots { display: flex; align-items: center; gap: 3px; margin: 0; font-size: 12.5px; }
+.sys-gw-slots .now-num { margin-left: 6px; }
+.sys-slot { width: 12px; height: 12px; border: 1.5px solid var(--border-strong); border-radius: var(--radius-xs); }
+.sys-slot.busy { border-color: var(--accent); background: var(--accent); }
+.sys-gw-quota { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sys-gw-quota li { display: grid; grid-template-columns: 70px minmax(0, 1fr) 48px; align-items: center; gap: 10px; }
+.sys-gw-quota li > span:first-child { color: var(--muted); }
+.sys-gw-quota .now-num { text-align: right; }
+.now-bar.sys-gw-q .fill { stroke: var(--ok); }
+.now-bar.sys-gw-q.warn .fill { stroke: var(--warn); }
+.now-bar.sys-gw-q.danger .fill { stroke: var(--danger); }
+.sys-gw-group { padding: 10px 0; border-top: 1px solid var(--border); }
+.sys-gw-group:first-of-type { padding-top: 0; border-top: 0; }
+.sys-gw-group h3 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; }
+.sys-gw-group.none h3 { color: var(--danger); }
+
+/* Appels et coûts : quatorze jours, où va le coût, tous les appels */
+.sys-calls-legend { display: flex; gap: 14px; margin: 0 0 0 auto; padding: 0; list-style: none; color: var(--muted); font-size: 12px; }
+.sys-calls-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
+.sys-calls-legend i.cost { background: var(--accent); }
+.sys-calls-legend i.calls { background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sys-calls-legend i.fail { background: var(--danger); }
+.sys-calls-chart { display: grid; gap: 4px; }
+.sys-calls-axis { display: flex; justify-content: space-between; margin: 0; color: var(--muted); font-size: 11.5px; }
+.sys-calls-svg { display: block; width: 100%; height: 90px; }
+.sys-calls-svg.with-cost { height: 150px; }
+.sys-calls-svg .cost { fill: var(--accent); }
+.sys-calls-svg .calls { fill: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sys-calls-svg .fail { fill: var(--danger); }
+.sys-calls-svg .today .cost { fill: var(--accent-2); }
+.sys-calls-split-line { stroke: var(--border); stroke-width: 1px; }
+.sys-calls-days-axis { display: grid; grid-template-columns: repeat(15, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none;
+  color: var(--muted); font-size: 11px; text-align: center; }
+.sys-calls-days-axis.n14 { grid-template-columns: repeat(14, minmax(0, 1fr)); }
+.sys-calls-days-axis li { display: grid; }
+.sys-calls-days-axis li.monday span { color: var(--text-2); font-weight: 600; }
+.sys-calls-days-axis li.today span { color: var(--accent); font-weight: 700; }
+.sys-calls-splits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 32px; }
+.sys-calls-split { min-width: 0; }
+.sys-calls-split h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.sys-calls-bars { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-calls-bars > li { display: grid; gap: 3px; padding: 7px 0; border-top: 1px solid var(--border); }
+.sys-calls-bars > li:first-child { border-top: 0; padding-top: 0; }
+.sys-calls-bars p { margin: 0; }
+.sys-calls-name { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.sys-calls-bar { display: block; width: 100%; height: 12px; }
+.sys-calls-bar .track { fill: var(--track); }
+.sys-calls-bar .cost { fill: var(--accent); }
+.sys-calls-bar .calls { fill: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sys-calls-bar .fail { fill: var(--danger); }
+.sys-calls-figs { color: var(--text-2); font-size: 12px; }
+.sys-calls-figs b { color: var(--text); margin-right: 4px; }
+.sys-calls-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-calls-list > li { display: grid; grid-template-columns: 96px minmax(150px, 1.4fr) minmax(150px, 1.6fr) 56px 120px 76px 90px 72px;
+  grid-template-areas: "when role model took tokens cost out go"; align-items: baseline; gap: 2px 12px; padding: 6px 0 6px 10px; border-top: 1px solid var(--border); font-size: 13px; }
+.sys-calls-list > li:first-child { border-top: 0; }
+.sys-calls-list > li.failed { box-shadow: inset 3px 0 0 var(--danger); }
+.sys-calls-list .sys-feed-when { grid-area: when; } .sys-calls-role { grid-area: role; } .sys-calls-took { grid-area: took; }
+.sys-calls-tokens { grid-area: tokens; } .sys-calls-cost { grid-area: cost; } .sys-calls-out { grid-area: out; }
+.sys-calls-go { grid-area: go; }
+.sys-calls-model { grid-area: model; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-calls-n { text-align: right; white-space: nowrap; }
+.sys-calls-out { font-size: 12px; }
+.sys-calls-go { font-size: 12px; text-align: right; }
+
+/* Stockage et sauvegardes */
+.sys-store-tables { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-store-tables > li { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) 64px; align-items: center;
+  gap: 4px 14px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.sys-store-tables > li:first-child { border-top: 0; padding-top: 0; }
+.sys-store-tables > li > .now-num { text-align: right; font-weight: 600; }
+.sys-store-name { display: grid; margin: 0; }
+.sys-store-name .now-muted { font-size: 12px; }
+.sys-store-saves { display: grid; margin: 0; }
+.sys-store-saves > div { display: grid; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); gap: 2px 14px; padding: 8px 0;
+  border-top: 1px solid var(--border); font-size: 13px; }
+.sys-store-saves > div:first-child { border-top: 0; padding-top: 0; }
+.sys-store-saves dt { color: var(--muted); }
+.sys-store-saves dd { display: grid; gap: 1px; margin: 0; }
+.sys-store-saves dd .now-muted { font-size: 12px; }
+.sys-store-saves > div.is-ok dd b { color: var(--ok); }
+.sys-store-saves > div.is-warn dd b { color: var(--warn); }
+.sys-store-saves > div.is-danger dd b { color: var(--danger); }
+.sys-store-last { margin-top: 10px; }
+.sys-store-archives > li { grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; column-gap: 14px; font-size: 12.5px; }
+
+/* Toutes les vues */
+.sys-views-groups { columns: 3 250px; column-gap: 32px; }
+.sys-views-group { break-inside: avoid; margin-bottom: 16px; }
+.sys-views-group h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+.sys-views-group h3 a { color: var(--text); }
+.sys-views-group h3 a:hover { color: var(--accent); }
+.sys-views-group ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-views-group li { padding: 3px 0; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); font-size: 13px; }
+.sys-views-group li:first-child { border-top: 0; }
+.sys-views-group li .now-muted { font-size: 12px; }
+
+/* Diagnostic avancé */
+.sys-state-slices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); column-gap: 32px;
+  margin: 12px 0 0; padding: 0; list-style: none; }
+.sys-state-slices > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; padding: 7px 0;
+  border-top: 1px solid var(--border); font-size: 13px; }
+.sys-state-slices > li > a { color: var(--text); }
+.sys-state-slices > li > a:hover { color: var(--accent); }
+.sys-state-slices > li > span:nth-child(2) { grid-column: 1; font-size: 12px; }
+.sys-state-slices > li > span:last-child { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; }
+.sys-state-slices > li.is-danger { padding-left: 10px; box-shadow: inset 3px 0 0 var(--danger); }
+.sys-state-facts { display: grid; margin: 0; padding: 0; list-style: none; }
+.sys-state-facts > li { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid var(--border); }
+.sys-state-facts > li:first-child { border-top: 0; padding-top: 0; }
+.sys-state-facts > li.error { padding-left: 10px; box-shadow: inset 3px 0 0 var(--danger); }
+.sys-state-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; font-size: 13px; }
+.sys-state-name .mono { font-weight: 600; }
+.sys-state-name .now-muted { font-size: 12px; }
+.sys-state-value { display: block; color: var(--text-2); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sys-state-facts > li.error .sys-state-value { color: var(--danger); }
+.sys-state-more > summary { cursor: pointer; list-style: none; }
+.sys-state-more > summary::after { content: "tout lire"; color: var(--accent); font-size: 12px; }
+.sys-state-more[open] > summary { display: none; }
+.sys-state-families { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; line-height: 1.7; }
+.now-card-head + .sys-state-families { margin-top: 0; padding-top: 0; border-top: 0; }
+.sys-state-json { margin-top: 14px; }
+.sys-state-json .hm-code { max-height: 60vh; font-size: 11.5px; }
+
+@media (max-width: 1100px) {
+  .sys-calls-splits { grid-template-columns: minmax(0, 1fr); }
+  .sys-calls-list > li { grid-template-columns: 90px minmax(0, 1fr) auto auto auto;
+    grid-template-areas: "when role took cost out" "when model tokens go go"; }
+  .sys-calls-go { text-align: right; }
+}
+@media (max-width: 900px) {
+  .sys-cols.two, .sys-sim-client { grid-template-columns: minmax(0, 1fr); }
+  /* beaucoup de sous-onglets : une bande qui défile de côté, plutôt qu'un mur de puces */
+  .sys-many > .hm-subnav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .sys-many > .hm-subnav a { flex: none; }
+  .sys-many > .hm-subnav .hm-subnav-title { display: none; }
+}
+@media (max-width: 600px) {
+  .sys .person-tiles-list > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .sys-feed > li { grid-template-columns: 58px minmax(0, 1fr); gap: 2px 8px; }
+  .sys-jr-what { flex-basis: calc(100% - 80px); }
+  .sys-jr-type { max-width: calc(100% - 140px); margin-left: 70px; }
+  .sys-ops-feed > li { grid-template-columns: 44px minmax(0, 1fr); }
+  .sys-ops-feed > li > .now-tag { grid-column: 2; justify-self: start; }
+  .sys-calls-list > li { grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "when out" "role cost" "model took" "go go"; }
+  .sys-calls-tokens { display: none; }
+  .sys-calls-go { text-align: left; }
+  .sys-calls-go:empty { display: none; }
+  .sys-wd-lacks > div, .sys-store-saves > div { grid-template-columns: minmax(0, 1fr); }
+  .sys-store-tables > li { grid-template-columns: minmax(0, 1fr) 56px; }
+  .sys-store-tables > li > .now-bar { grid-column: 1 / -1; grid-row: 2; }
+}

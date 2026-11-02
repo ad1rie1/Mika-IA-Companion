@@ -1,0 +1,77 @@
+{# Activité › Décisions › Initiatives (app/handmade/tabs/decisions.py, ADR 0177) : son budget du jour en cases (une
+   case par initiative ordinaire permise, pleine quand elle est prise), sa période de recul, les initiatives restées
+   sans réponse d'affilée, ce qui retient ses initiatives ordinaires ; puis ce qu'elle a dit d'elle-même, chaque
+   prise de parole avec sa réponse (ou son attente) au premier coup d'œil ; ses règles et les initiatives comptées
+   sur le côté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/decisions/macros.html" as dec with context %}
+{% set ordinary = b["initiatives ordinaires"] %}{% set refractory = b["période réfractaire"] %}{% set ignored = b["ignorées d'affilée"] %}
+<div class="now-page ini" data-tab="decisions/initiatives">
+  <section class="ini-band" aria-label="Son budget">
+    <div class="ini-cell ini-today{{ ' warn' if b["aujourd'hui"] and b["aujourd'hui"].tone == 'warn' }}">
+      <p class="ini-label">Aujourd’hui</p>
+      <p class="ini-value"><span class="now-num">{{ today.text or '—' }}</span></p>
+      {% if today.slots %}<p class="ini-slots" aria-hidden="true">{% for on in today.slots %}<span class="ini-slot{{ ' on' if on }}"></span>{% endfor %}</p>{% endif %}
+      {% if b["aujourd'hui"] %}<p class="ini-sub">{{ b["aujourd'hui"].sub }}</p>{% endif %}
+    </div>
+    <div class="ini-cell">
+      <p class="ini-label">Période de recul</p>
+      <p class="ini-value">{{ tab.cell(refractory.value) if refractory else '—' }}</p>
+      {% if refractory and refractory.sub %}<p class="ini-sub">{{ refractory.sub }}</p>{% endif %}
+    </div>
+    <div class="ini-cell{{ ' warn' if ignored and ignored.tone == 'warn' }}">
+      <p class="ini-label">Restées sans réponse d’affilée</p>
+      <p class="ini-value">{{ tab.cell(ignored.value) if ignored else '—' }}</p>
+      {% if ignored and ignored.sub %}<p class="ini-sub">{{ ignored.sub }}</p>{% endif %}
+    </div>
+    <div class="ini-cell ini-mood">
+      <p class="ini-label">Ses initiatives ordinaires</p>
+      <p class="ini-value ini-words">{{ tab.cell(ordinary.value) if ordinary else '—' }}</p>
+      {% if ordinary and ordinary.sub %}<p class="ini-sub">{{ ordinary.sub }}</p>{% endif %}
+    </div>
+  </section>
+
+  <div class="ini-grid">
+    <section class="now-card" aria-labelledby="ini-said-title">
+      <header class="now-card-head">
+        <h2 id="ini-said-title">{{ said.title }}</h2>
+        {% if entries %}<p>{% if answered %}<span class="ok">{{ answered }} répondue{{ 's' if answered > 1 }}</span>{% endif %}{% if answered and waiting %} · {% endif %}{% if waiting %}<span class="warn">{{ waiting }} sans réponse</span>{% endif %}{% if answered or waiting %} sur cette page{% endif %}</p>{% endif %}
+      </header>
+      {% if entries %}
+      <ol class="ini-said" role="list">
+        {% for e in entries %}
+        <li class="t-{{ e.tone or 'plain' }}">
+          <time class="ini-said-when" title="{{ e.at }}">{{ e.rel }}</time>
+          <div class="ini-said-body">
+            <p class="ini-said-who">{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}
+              <span class="ini-said-state {{ e.tone }}">{{ e.meta }}</span></p>
+            <blockquote class="ini-said-text"><p>{{ e.text }}</p></blockquote>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}{{ tab.empty(said.empty) }}{% endif %}
+      {{ tab.pager(said) }}
+    </section>
+
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="ini-rules-title">
+        {{ tab.head("Ses règles", "ini-rules-title", none, "Après une initiative, elle recule un temps ; ignorée, elle recule plus longtemps.") }}
+        <dl class="ini-facts">
+          {% for label, v in detail.items() %}<div><dt>{{ label|capitalize }}</dt><dd>{{ tab.cell(v) }}</dd></div>{% endfor %}
+        </dl>
+      </section>
+      {% if counted %}
+      <section class="now-card" id="{{ counted.id }}" aria-labelledby="ini-counted-title">
+        {{ tab.head("Comptées ces 24 heures", "ini-counted-title", counted.count) }}
+        {% if counted_items %}
+        <ul class="ini-counted" role="list">
+          {% for c in counted_items %}<li><span>{{ tab.cell(c.when) }}</span>{% if c.today %}<span class="now-tag info">aujourd’hui</span>{% else %}<span class="now-muted">hier</span>{% endif %}</li>{% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(counted.empty) }}{% endif %}
+        {{ tab.pager(counted) }}
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</div>

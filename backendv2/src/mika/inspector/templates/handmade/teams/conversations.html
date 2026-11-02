@@ -1,0 +1,36 @@
+{# Relations & échanges › Teams › Conversations (app/handmade/tabs/teams.py, ADR 0177) : comme une messagerie. Une
+   ligne par conversation que l'extension a apportée, la plus récente d'abord — sa marque (tête-à-tête, groupe, canal,
+   réunion), son nom, son dernier message et qui l'a écrit, l'heure, combien de messages ; les questions qui attendent
+   une réponse et une réponse d'elle en chemin, dites. Une ligne s'ouvre sur le fil de la conversation (sa fiche).
+   Sans extension branchée : ce que dit le plugin, et comment la brancher. La pagination et la bascule « Tableau »
+   sont celles du plugin. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/teams/_teams.html" as tm %}
+<div class="now-page teams-tab teams-convs" data-tab="teams/conversations">
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="teams-convs-title">
+    {{ tab.head("Ses conversations", "teams-convs-title", t.count, lede, list=t) }}
+    {% if items %}
+    <ul class="teams-inbox" role="list">
+      {% for c in items %}
+      <li class="teams-conv{{ ' asks' if c.questions }}">
+        <span class="teams-mark {{ c.mark }}" aria-hidden="true">{{ c.initial }}</span>
+        <div class="teams-conv-main">
+          <p class="teams-conv-head"><a class="teams-conv-title" href="{{ c.href }}">{{ c.title }}</a><span class="now-muted">{{ c.kind }}</span>{% if c.when %}<span class="teams-when">{{ tab.cell(c.when) }}</span>{% endif %}</p>
+          {% if c.last %}<p class="teams-last"><span class="teams-last-who">{{ c.last.who }} :</span> {{ c.last.text }}</p>{% endif %}
+          <p class="teams-conv-foot">
+            {% if c.questions %}{{ tab.cell(c.questions) }}{% endif %}
+            {% if c.under_way %}<span class="now-tag info">une réponse d'elle en chemin</span>{% endif %}
+            <span class="now-muted">{{ c.count }} message{{ 's' if c.count not in ('0', '1') }}</span>
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+  {% else %}
+  {{ tm.unplugged(notes, plugged) }}
+  {% endif %}
+</div>

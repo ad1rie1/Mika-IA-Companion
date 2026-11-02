@@ -1,0 +1,69 @@
+{# Elle › Humeur et corps › Sommeil et rythme (app/handmade/tabs/life.py, ADR 0177) : une bande de chiffres (son
+   sommeil, son énergie, sa pression de sommeil, sa prochaine transition) ; ce que son prompt dit de l'heure et sa
+   journée sur 24 heures — ses phases et leur teinte, sa nuit, maintenant — à côté de l'énergie et de la pression de
+   sommeil des dernières 24 heures ; ses nuits à côté de ses transitions ; le détail replié. Aucun style en ligne : la
+   journée est un SVG placé en pourcentages. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+<div class="now-page vie vie-rythme" data-tab="vie/rythme">
+  {{ vie.band(band, "Son corps en chiffres") }}
+
+  <div class="vie-two">
+    <section class="now-card" aria-labelledby="vie-day-title">
+      <header class="now-card-head"><h2 id="vie-day-title">Sa journée</h2><p>ses phases, la teinte qu'elles donnent à son humeur, sa nuit</p></header>
+      {{ vie.voice(voice, "ce que son prompt lui dit de l'heure") }}
+      {% if flags %}<ul class="now-chips vie-flags">{% for f in flags %}<li class="{{ f.tone }}">{{ f.text }}</li>{% endfor %}</ul>{% endif %}
+      {% if day %}
+      <figure class="vie-day">
+        <svg class="vie-day-svg" width="100%" height="76" role="img" aria-label="Sa journée sur 24 heures : {% for p in day.phases %}{{ p.name }} dès {{ p.start }}{{ ', ' if not loop.last }}{% endfor %}{% if day.night %} ; sa nuit {{ day.night }}{% endif %} ; il est {{ day.now_label }}">
+          {% for p in day.phases %}{% for r in p.rects %}<rect class="vie-phase sw-{{ p.key }}" x="{{ r.x }}%" y="18" width="{{ r.w }}%" height="34"/>{% endfor %}{% endfor %}
+          {% for r in day.sleep %}<rect class="vie-sleep" x="{{ r.x }}%" y="54" width="{{ r.w }}%" height="5"/>{% endfor %}
+          {% for t in day.ticks %}<line class="vie-tick{{ ' major' if t.major }}" x1="{{ t.x }}%" x2="{{ t.x }}%" y1="18" y2="{{ 59 if t.major else 52 }}"/>{% endfor %}
+          {% for p in day.phases %}<text class="vie-phase-name" x="{{ p.mid }}%" y="39" text-anchor="middle">{{ p.name }}</text>{% endfor %}
+          {% for t in day.ticks if t.major %}<text class="vie-hour" x="{{ t.x }}%" y="72" text-anchor="{{ t.anchor }}">{{ t.label }}</text>{% endfor %}
+          <line class="vie-now" x1="{{ day.now }}%" x2="{{ day.now }}%" y1="14" y2="59"/>
+          <text class="vie-now-label" x="{{ day.now }}%" y="10" text-anchor="{{ day.now_anchor }}">maintenant · {{ day.now_label }}</text>
+        </svg>
+        <figcaption>
+          <ul class="vie-phases">
+            {% for p in day.phases %}<li><span class="now-dot sw-{{ p.key }}" aria-hidden="true"></span><b>{{ p.name }}</b> <span class="now-muted">dès {{ p.start }}</span>{% if p.tint %} · {{ p.tint.text }}{% endif %}</li>{% endfor %}
+            {% if day.night %}<li><span class="vie-sleep-key" aria-hidden="true"></span><b>sa nuit</b> <span class="now-muted">{{ day.night }}</span></li>{% endif %}
+          </ul>
+        </figcaption>
+      </figure>
+      {% endif %}
+    </section>
+
+    <section class="now-card" aria-labelledby="vie-energy-title">
+      <header class="now-card-head"><h2 id="vie-energy-title">Ses dernières 24 heures</h2><p>son énergie et sa pression de sommeil, une mesure toutes les dix minutes</p></header>
+      {{ vie.curve(chart) }}
+    </section>
+  </div>
+
+  <div class="vie-two">
+    {% set tn = t_nights or {} %}
+    <section class="now-card"{% if tn.id %} id="{{ tn.id }}"{% endif %} aria-labelledby="vie-nights-title">
+      {{ tab.head("Ses dernières nuits", "vie-nights-title", nights | length if nights else none, "une semaine au plus, la plus récente d'abord") }}
+      {% if nights %}
+      <ol class="vie-nights" role="list">
+        {% for n in nights %}
+        <li>
+          <p class="vie-night-head"><span class="vie-night-slept now-num">{{ n.slept or '—' }}</span><span class="now-muted">nuit du {{ n.day }}</span></p>
+          <p class="vie-meta"><span>{{ n.from }} → {{ n.to or 'elle dort encore' }}</span>{% if n.late %}<span class="now-tag warn">veillé tard</span>{% endif %}{% if n.told %}<span class="now-tag info" title="ce qu'elle en sait ce matin">{{ n.told }}</span>{% endif %}</p>
+          {% if n.rousings %}<p class="vie-night-roused"><span class="now-muted">tirée du sommeil :</span> {{ n.rousings }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      {% if tn.caption %}<p class="person-tab-note">{{ tn.caption }}</p>{% endif %}
+      {% else %}{{ tab.empty(tn.empty or "aucune nuit encore") }}{% endif %}
+    </section>
+    {% if timeline %}{{ tab.block(timeline) }}{% endif %}
+  </div>
+
+  {% if detail %}
+  <details class="now-card person-fold vie-fold">
+    <summary>En détail</summary>
+    {{ vie.facts(detail) }}
+  </details>
+  {% endif %}
+</div>

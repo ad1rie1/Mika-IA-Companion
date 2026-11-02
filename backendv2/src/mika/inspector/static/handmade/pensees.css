@@ -1,0 +1,92 @@
+/* Elle › Pensées (app/handmade/tabs/thoughts.py, ADR 0177) : ses pensées, ce qu'elle remarque, ses attentes — une bande
+   de chiffres, puis des sous-onglets ; des listes à filets, pas de carte dans la carte. La couleur d'une émotion vient
+   de sa classe (sw-<émotion>), les longueurs d'attributs SVG. Journal et rêves a sa feuille (nights.css). */
+
+/* ── Ce qui lui trotte dans la tête : un trait de la couleur de son émotion, ce qu'il en reste ── */
+.thoughts-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1180px) { .thoughts-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.thought-item { display: grid; align-content: start; gap: 6px; padding: 12px 0 12px 14px; border-top: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sw, var(--muted)) 70%, transparent); }
+.thought-item.faint { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sw, var(--muted)) 25%, transparent); }
+.thought-item.faint .thought-text, .thought-item.faded .thought-text { color: var(--muted); }
+.thought-item:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
+.thought-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 12.5px; }
+.thought-emotion { color: color-mix(in srgb, var(--sw, var(--muted)) 80%, var(--text)); font-weight: 600; }
+.thought-text { min-width: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.thought-strength { display: grid; grid-template-columns: minmax(0, 200px) auto; align-items: center; gap: 8px; margin: 0;
+  color: var(--text-2); font-size: 12px; }
+.thought-strength .now-bar { width: 100%; margin: 0; }
+.thought-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.thought-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 13px; }
+.thought-foot .person-entry-detail[open] { flex: 1 1 100%; }
+
+/* ── Un fil (toutes ses pensées, ses relectures, ses attentes closes) : quand, à gauche ; un point de couleur ── */
+.thoughts-feed, .waits-feed { display: grid; margin: 0; padding: 0; list-style: none; }
+.thoughts-feed > li, .waits-feed > li { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 18px; padding: 10px 0;
+  border-top: 1px solid var(--border); }
+.thoughts-feed > li:first-child, .waits-feed > li:first-child { padding-top: 2px; border-top: 0; }
+.thoughts-feed-when, .waits-feed-when { padding-top: 1px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.thoughts-feed-body, .waits-feed-body { position: relative; display: grid; gap: 4px; min-width: 0; padding-left: 16px; }
+.thoughts-feed-body::before, .waits-feed-body::before { content: ""; position: absolute; top: 6px; left: 0; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--sw, var(--muted)); }
+.thoughts-feed > li.out .thoughts-feed-body::before { border: 1.5px solid var(--sw, var(--muted)); background: transparent; }
+.thoughts-feed > li.out .thought-text { color: var(--text-2); }
+.waits-feed-body p { margin: 0; }
+.waits-feed > li.met .waits-feed-body::before { background: var(--ok); }
+.waits-feed > li.missed .waits-feed-body::before { background: var(--danger); }
+
+/* ── Ce qu'elle remarque : une rangée par signal, la pertinence annoncée sous celle qu'elle retient ── */
+.noticed-list, .noticed-queue { display: grid; margin: 0; padding: 0; list-style: none; }
+.noticed-row { display: grid; grid-template-columns: 110px minmax(140px, 1fr) minmax(180px, 1.4fr) minmax(130px, .8fr);
+  align-items: center; gap: 6px 20px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.noticed-row.head { padding: 0 0 8px; border-top: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; }
+.noticed-when { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.noticed-what { min-width: 0; margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.noticed-what .now-muted { font-weight: 400; }
+.noticed-weigh { display: grid; gap: 4px; min-width: 0; }
+.noticed-weigh .now-bar { width: 100%; margin: 0; }
+.noticed-bar { display: block; width: calc(100% - 6px); height: 6px; margin: 0 3px; overflow: visible; }
+.noticed-bar line { stroke-width: 6px; stroke-linecap: round; }
+.noticed-bar .track { stroke: var(--track); }
+.noticed-bar .announced { stroke: color-mix(in srgb, var(--accent) 28%, var(--track)); }
+.noticed-bar .fill { stroke: var(--accent); }
+.noticed-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 12px; }
+.noticed-habit { color: var(--warn); }
+.noticed-emotion { display: inline-flex; align-items: baseline; gap: 4px; }
+.noticed-emotion .now-dot { margin-right: 2px; }
+.noticed-detail { grid-column: 1 / -1; font-size: 12.5px; }
+.noticed-queue > li { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--border); }
+.noticed-queue > li:first-child { padding-top: 2px; border-top: 0; }
+.noticed-summary { color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
+.noticed-queue .noticed-when { margin-left: auto; }
+
+/* ── Ses attentes : de qui, la jauge du temps qui passe, son état ── */
+.waits-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.wait-item { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) auto; align-items: center; gap: 6px 22px;
+  padding: 12px 0; border-top: 1px solid var(--border); }
+.wait-item:first-child { padding-top: 2px; border-top: 0; }
+.wait-what { min-width: 0; margin: 0; font-size: 14px; }
+.wait-kind { font-weight: 600; }
+.wait-clock { display: grid; gap: 4px; min-width: 0; }
+.wait-clock .now-bar { width: 100%; margin: 0; }
+.now-bar.wait .fill { stroke: var(--info); }
+.wait-item.late .now-bar.wait .fill, .wait-item.warn .now-bar.wait .fill { stroke: var(--warn); }
+.wait-item.danger .now-bar.wait .fill { stroke: var(--danger); }
+.wait-item.ok .now-bar.wait .fill { stroke: var(--ok); }
+.wait-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.wait-item.late .wait-due { color: var(--warn); font-weight: 600; }
+
+/* ── Écrans étroits ── */
+@media (max-width: 900px) {
+  .noticed-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .noticed-row.head { display: none; }
+  .noticed-row .noticed-when { grid-column: 2; grid-row: 1; text-align: right; }
+  .noticed-row .noticed-what { grid-column: 1; grid-row: 1; }
+  .noticed-row .noticed-weigh { grid-column: 1 / -1; }
+  .wait-item { grid-template-columns: minmax(0, 1fr); }
+  .wait-item > .now-tag { justify-self: start; white-space: normal; }
+}
+@media (max-width: 700px) {
+  .thoughts-feed > li, .waits-feed > li { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,81 @@
+{# Elle › Humeur et corps › Humeur (app/handmade/tabs/life.py, ADR 0177) : son humeur en grand, comme « En ce moment »
+   la dit — le mot, le mélange de ce qu'elle ressent, ce que son prompt lui en dit, le plan plaisir × éveil et sa trace
+   sur la période choisie — ; une bande de chiffres (ce qui déborde, son fond, son visage, sa dernière balise) ; sa
+   valence à côté de ses dernières balises, chacune avec ce qu'elle a dit ; les chiffres bruts repliés. Le filtre
+   « Période » reste celui de la console, au-dessus. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+{% from "handmade/shared/macros.html" import people, qualifier, facets %}
+<div class="now-page vie vie-humeur" data-tab="vie/humeur">
+  <section class="now-hero sw-{{ m.emotion }}" aria-labelledby="vie-mood-title">
+    <div class="now-hero-text">
+      <h2 class="now-eyebrow" id="vie-mood-title">Son humeur</h2>
+      <p class="now-word">{{ m.word }}</p>
+      {{ qualifier(m) }}
+      {{ facets(m) }}
+      {{ vie.voice(voice) }}
+      {% if m.because or m.residue or m.overflow %}
+      <ul class="now-chips">
+        {% if m.because %}<li>{{ m.because.text }} {{ people(m.because.who) }}</li>{% endif %}
+        {% if m.residue %}<li>{{ m.residue }}</li>{% endif %}
+        {% if m.overflow %}<li class="warn" title="au-delà de {{ m.overflow_floor }}, ce qu'elle ressent la pousse à parler">ça déborde ({{ m.overflow_pct }}) : elle pourrait écrire d'elle-même</li>{% endif %}
+      </ul>
+      {% endif %}
+    </div>
+    {% set P = m.plane %}
+    <figure class="now-plane">
+      <svg viewBox="0 0 {{ P.size }} {{ P.size }}" role="img" aria-label="Plan plaisir et éveil — {{ P.label }}">
+        <rect class="plane-bg" x="{{ P.pad }}" y="{{ P.pad }}" width="{{ P.far - P.pad }}" height="{{ P.far - P.pad }}" rx="16"/>
+        <line class="plane-axis" x1="{{ P.pad }}" x2="{{ P.far }}" y1="{{ P.mid }}" y2="{{ P.mid }}"/>
+        <line class="plane-axis" x1="{{ P.mid }}" x2="{{ P.mid }}" y1="{{ P.pad }}" y2="{{ P.far }}"/>
+        <text class="plane-word" x="{{ P.far - 6 }}" y="{{ P.mid - 6 }}" text-anchor="end">plaisant</text>
+        <text class="plane-word" x="{{ P.pad + 6 }}" y="{{ P.mid - 6 }}">déplaisant</text>
+        <text class="plane-word" x="{{ P.mid + 6 }}" y="{{ P.pad + 14 }}">agitée</text>
+        <text class="plane-word" x="{{ P.mid + 6 }}" y="{{ P.far - 7 }}">calme</text>
+        {% for l in P.landmarks %}<g class="plane-landmark sw-{{ l.emotion }}"><circle cx="{{ l.x }}" cy="{{ l.y }}" r="2.2"/><text x="{{ l.x }}" y="{{ l.y - 6 }}" text-anchor="middle">{{ l.word }}</text></g>{% endfor %}
+        {% for t in P.trail %}<path class="plane-trail t{{ t.step }}" d="{{ t.d }}"/>{% endfor %}
+        <line class="plane-vector" x1="{{ P.home.x }}" y1="{{ P.home.y }}" x2="{{ P.now.x }}" y2="{{ P.now.y }}"/>
+        <circle class="plane-home" cx="{{ P.home.x }}" cy="{{ P.home.y }}" r="5.5"><title>son repos à cette heure</title></circle>
+        <circle class="plane-halo" cx="{{ P.now.x }}" cy="{{ P.now.y }}" r="15"/>
+        <circle class="plane-now" cx="{{ P.now.x }}" cy="{{ P.now.y }}" r="7"><title>maintenant : {{ m.word }}</title></circle>
+      </svg>
+      <figcaption><span class="plane-key now-key-now"></span>maintenant <span class="plane-key now-key-home"></span>son repos <span class="plane-key now-key-trail"></span>sa trace sur {{ period }}</figcaption>
+    </figure>
+  </section>
+
+  {{ vie.band(band, "Son humeur en chiffres") }}
+
+  <div class="vie-two">
+    <section class="now-card" aria-labelledby="vie-valence-title">
+      <header class="now-card-head"><h2 id="vie-valence-title">Sa valence</h2><p>sur {{ period }} · au-dessus de zéro, plus agréable que neutre</p></header>
+      {{ vie.curve(chart) }}
+    </section>
+
+    <section class="now-card" id="{{ t.id }}" aria-labelledby="vie-tags-title">
+      {{ tab.head("Ses dernières balises", "vie-tags-title", t.count, "l'émotion qu'elle a déclarée en écrivant, et ce qu'elle a dit") }}
+      {% if tags %}
+      <ol class="vie-tags" role="list">
+        {% for x in tags %}
+        <li{% if x.emotion %} class="sw-{{ x.emotion.key }}"{% endif %}>
+          <p class="vie-tag-head">
+            {% if x.emotion %}{{ tab.cell(x.emotion) }}{% else %}<span class="now-muted">{{ x.word }}</span>{% endif %}
+            <span class="now-muted">{{ x.how }}{% if x.who %} · {{ tab.cell(x.who) }}{% endif %}</span>
+            <span class="vie-when">{{ tab.cell(x.when) }}</span>
+          </p>
+          {% if x.said %}<q class="vie-said">{{ x.said }}</q>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}{{ tab.empty(t.empty) }}{% endif %}
+      {{ tab.pager(t) }}
+    </section>
+  </div>
+
+  {% if raw %}
+  <details class="now-card person-fold vie-fold">
+    <summary>Les chiffres bruts</summary>
+    <p class="now-muted vie-fold-lede">Sa position et son repos sur les trois axes (plaisir, éveil, dominance), ce qui déborde, ce que lit son visage.</p>
+    {{ vie.facts(raw) }}
+  </details>
+  {% endif %}
+</div>

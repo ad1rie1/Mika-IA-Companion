@@ -1,0 +1,39 @@
+{# Activité › Projets › Exécutions (app/handmade/tabs/projects.py, ADR 0177) : ce qui tourne en ce moment (la note
+   de la faculté), puis le fil de ses exécutions jour par jour — l'heure, le projet et l'objectif visé, le verdict et
+   sa preuve, le compte rendu cité, le commit laissé dans l'atelier, l'épisode (prompt, outils, appels) ; le mode et
+   les outils utilisés, repliés ; la pagination de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page prj" data-tab="projets/toutes_executions">
+  {% for n in live %}<p class="prj-live"><span class="prj-live-dot" aria-hidden="true"></span>{{ n.text }}</p>{% endfor %}
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-runs-title">
+    {{ tab.head(t.title, "prj-runs-title", t.count, "Chaque exécution vise un objectif ; « fait » ne compte que s’il a laissé une preuve (un commit, un brouillon, une app).") }}
+    {% if days %}
+    {% for d in days %}
+    <h3 class="prj-day">{{ d.name }}</h3>
+    <ol class="prj-runs" role="list">
+      {% for r in d["items"] %}
+      <li class="{{ 'blocked' if r.blocked }}">
+        <span class="prj-hm" title="{{ r.when.exact if r.when else '' }}">{{ r.hm or tab.cell(r.when) }}</span>
+        <div class="prj-run">
+          <div class="prj-run-top">
+            <p class="prj-run-what"><b>{{ tab.cell(r.project) }}</b>{% if r.objective %}<span class="prj-run-goal"> · objectif {{ tab.cell(r.objective) }}</span>{% endif %}</p>
+            <span class="prj-tags">{% if r.verdict %}<span class="now-tag {{ r.verdict.tone }}">{{ r.verdict.text }}</span>{% endif %}{% if r.proof %}<span class="now-tag {{ r.proof.tone }}">{{ r.proof.text }}</span>{% endif %}</span>
+          </div>
+          {% if r.summary %}<blockquote class="prj-summary"><p>{{ tab.cell(r.summary) }}</p></blockquote>{% endif %}
+          <p class="prj-run-foot">
+            {% if r.commit %}<span class="prj-commit">commit {{ tab.cell(r.commit) }}</span>{% endif %}
+            {% if r.tools %}<span class="now-muted">{{ r.tools }}</span>{% endif %}
+            {% if r.mode %}<span class="now-muted">mode {{ r.mode }}</span>{% endif %}
+            {% if r.href %}<a href="{{ r.href }}">L’épisode : prompt, outils, appels →</a>{% endif %}
+          </p>
+          {% if r.detail %}<details class="person-entry-detail"><summary>Le détail</summary><div class="stack">{{ tab.inner(r.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endfor %}
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

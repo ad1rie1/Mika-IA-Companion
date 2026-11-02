@@ -1,0 +1,24 @@
+{# Ce que partagent les onglets de Teams (app/handmade/tabs/teams.py, ADR 0177) : ce que dit le plugin quand il n'a
+   rien à montrer, et comment brancher l'extension, pas à pas (frontend/Extension/README.md). #}
+{% from "_cells.html" import cell %}
+
+{# un libellé, sa première lettre en capitale #}
+{% macro cap(s) -%}{{ (s|string)[:1]|upper }}{{ (s|string)[1:] }}{%- endmacro %}
+
+{# brancher l'extension, pas à pas #}
+{% macro steps(heading) -%}
+<ol class="teams-steps" aria-labelledby="{{ heading }}">
+  <li><span><b>L'installer</b> dans le navigateur où tu ouvres Teams : <code>chrome://extensions</code>, le mode développeur, puis « Charger l'extension non empaquetée » (le dossier <code>frontend/Extension</code>).</span></li>
+  <li><span><b>Lui donner sa clé</b> : crée-la dans <a href="{{ PREFIX }}/reglages/teams">Réglages › Plugins › Teams</a>, puis colle l'URL de Mika et la clé dans la fenêtre de l'extension — « Enregistrer », « Tester ».</span></li>
+  <li><span><b>Ouvrir Teams</b> dans ce navigateur (le recharger s'il l'était déjà) : ce que Teams reçoit arrive ici.</span></li>
+</ol>
+{%- endmacro %}
+
+{# rien à montrer : ce que dit le plugin ; brancher l'extension, si le plugin est là #}
+{% macro unplugged(notes, plugged) -%}
+<section class="now-card teams-unplugged" aria-labelledby="teams-plug-title">
+  <header class="now-card-head"><h2 id="teams-plug-title">{{ "Brancher l'extension" if plugged else "Teams" }}</h2></header>
+  {% for n in notes %}<p class="teams-said">{{ n.text }}</p>{% endfor %}
+  {% if plugged %}{{ steps("teams-plug-title") }}{% endif %}
+</section>
+{%- endmacro %}

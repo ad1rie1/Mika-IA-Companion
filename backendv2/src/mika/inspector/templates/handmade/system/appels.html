@@ -1,0 +1,98 @@
+{# Système › Appels et coûts (app/handmade/tabs/system.py, ADR 0177) : un bandeau (des appels qui ont échoué, et quels
+   rôles surtout), la bande de chiffres ; quatorze jours en barres — le coût en haut, les appels en bas, leurs échecs en
+   rouge ; puis en sous-onglets où va le coût (par rôle, par modèle, par fournisseur : une barre chacun, ses appels, ses
+   échecs, sa part de cache), tous les appels (la pagination de la console) et le détail jour par jour. Sans registre
+   des appels : sa note. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/system/tab_macros.html" as sx %}
+{% macro usage(g) -%}
+<section class="sys-calls-split" aria-labelledby="{{ g.id }}">
+  <h3 id="{{ g.id }}">{{ g.title }} <span class="now-muted">· 7 jours</span></h3>
+  {% if g.rows %}
+  <ul class="sys-calls-bars" role="list">
+    {% for r in g.rows %}
+    <li class="{{ 'failing' if r.failures }}" title="{{ r.tech }} · {{ r.tokens }} jetons · durée moyenne {{ r.latency }} s">
+      <p class="sys-calls-name">{{ r.name }}</p>
+      <svg class="sys-calls-bar" viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true">{% if g.cost %}<rect class="track" width="100" height="6"/><rect class="cost" width="{{ r.w }}" height="6"/>{% endif %}<rect class="calls" y="{{ 8 if g.cost else 3 }}" width="{{ r.cw }}" height="4"/>{% if r.failures %}<rect class="fail" x="{{ r.cw - r.fw }}" y="{{ 8 if g.cost else 3 }}" width="{{ r.fw }}" height="4"/>{% endif %}</svg>
+      <p class="sys-calls-figs"><b class="now-num">{{ r.cost }}</b> <span class="now-num">{{ r.calls }}</span> appel{{ 's' if r.calls != 1 }}{% if r.failures %} · <span class="danger"><span class="now-num">{{ r.failures }}</span> échec{{ 's' if r.failures > 1 }}</span>{% endif %} · cache {{ r.cache }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="now-empty">Aucun appel ces sept jours.</p>{% endif %}
+</section>
+{%- endmacro %}
+{% macro pane(id) -%}
+{% if id == "calls-split" %}
+<section id="calls-split" data-pane aria-label="Où va le coût">
+  <div class="now-card sys-calls-splits">{% for g in split %}{{ usage(g) }}{% endfor %}</div>
+</section>
+{% elif id == "calls-all" %}
+<section id="calls-all" data-pane aria-labelledby="calls-all-title">
+  <div class="now-card" id="{{ all_t.id }}">
+    {{ tab.head(all_t.title, "calls-all-title", all_t.count, "Chaque appel : quand, pour quel rôle, chez qui, combien de temps, ce qu'il a coûté. Un appel d'un épisode mène à sa page.") }}
+    {% if calls %}
+    <ol class="sys-calls-list" role="list">
+      {% for c in calls %}
+      <li class="{{ 'failed' if c.failed }}">
+        <span class="sys-feed-when">{{ tab.cell(c.when) }}</span>
+        <span class="sys-calls-role">{{ c.role }}</span>
+        <span class="sys-calls-model"><span class="mono">{{ c.backend }}</span>{% if c.model and c.model != '—' %} <span class="mono now-muted">· {{ c.model }}</span>{% endif %}</span>
+        <span class="sys-calls-n sys-calls-took now-num" title="attente {{ c.wait }}">{{ c.took }}</span>
+        <span class="sys-calls-n sys-calls-tokens now-num now-muted" title="jetons : entrée → sortie">{{ c.tokens }}</span>
+        <span class="sys-calls-n sys-calls-cost now-num">{{ c.cost }}</span>
+        <span class="sys-calls-out">{% if c.failed %}<span class="now-tag danger">{{ c.outcome.text }}</span>{% else %}<span class="now-muted">réussi</span>{% endif %}</span>
+        <span class="sys-calls-go">{% if c.href %}<a href="{{ c.href }}">épisode →</a>{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(all_t.empty) }}{% endif %}
+    {{ tab.pager(all_t) }}
+  </div>
+</section>
+{% else %}
+<section id="calls-days" data-pane aria-label="Jour par jour">
+  {% if days_t %}{{ tab.table(days_t) }}{% else %}<p class="now-empty">Aucun appel ces quatorze jours.</p>{% endif %}
+</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page sys sys-calls" data-tab="systeme/appels">
+  {% if off %}
+  {% for n in off %}{{ sx.band({"tone": "info" if n.tone == "muted" else n.tone, "text": n.text}) }}{% endfor %}
+  {% else %}
+  {{ sx.band(band) }}
+  {{ tab.block(stats) }}
+  <section class="now-card sys-calls-days" aria-labelledby="sys-calls-days-title">
+    <header class="now-card-head">
+      <h2 id="sys-calls-days-title">Ses quatorze jours</h2>
+      <p>{% if chart.has_cost %}{{ chart.total }} en tout · {% endif %}<span class="now-num">{{ chart.calls }}</span> appel{{ 's' if chart.calls != 1 }}{% if chart.failures %} · <span class="danger"><span class="now-num">{{ chart.failures }}</span> échec{{ 's' if chart.failures > 1 }}</span>{% endif %}</p>
+      <ul class="sys-calls-legend" aria-hidden="true">{% if chart.has_cost %}<li><i class="cost"></i>coût</li>{% endif %}<li><i class="calls"></i>appels</li><li><i class="fail"></i>échecs</li></ul>
+    </header>
+    <div class="sys-calls-chart">
+      <p class="sys-calls-axis">{% if chart.has_cost %}<span>au plus {{ chart.cost_top }} un jour</span>{% endif %}<span>au plus <span class="now-num">{{ chart.calls_top }}</span> appels</span></p>
+      <svg class="sys-calls-svg{{ ' with-cost' if chart.has_cost }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" preserveAspectRatio="none" role="img" aria-label="Le coût et les appels de ses quatorze derniers jours">
+        {% if chart.has_cost %}<line class="sys-calls-split-line" x1="0" x2="{{ chart.width }}" y1="{{ chart.split }}" y2="{{ chart.split }}" vector-effect="non-scaling-stroke"/>{% endif %}
+        {% for b in chart.bars %}
+        <g class="{{ 'today' if b.today }}"><title>{{ b.day }} : {{ b.cost }}, {{ b.n }} appel{{ 's' if b.n != 1 }}{% if b.failed %}, {{ b.failed }} échec{{ 's' if b.failed > 1 }}{% endif %}</title>
+          {% if chart.has_cost %}<rect class="cost" x="{{ b.x }}" y="{{ b.cost_y }}" width="7" height="{{ b.cost_h if b.cost_h > 0 else 0.4 }}"/>{% endif %}
+          <rect class="calls" x="{{ b.x }}" y="{{ b.calls_y }}" width="7" height="{{ b.calls_h if b.calls_h > 0 else 0.4 }}"/>
+          {% if b.failed %}<rect class="fail" x="{{ b.x }}" y="{{ b.fail_y }}" width="7" height="{{ b.fail_h }}"/>{% endif %}
+        </g>
+        {% endfor %}
+      </svg>
+      <ol class="sys-calls-days-axis n{{ chart.bars|length }}" role="list">
+        {% for b in chart.bars %}<li class="{{ 'today' if b.today }}{{ ' monday' if b.monday }}" title="{{ b.day }}"><span>{{ b.label }}</span>{% if b.failed %}<b class="danger now-num">{{ b.failed }}</b>{% endif %}</li>{% endfor %}
+      </ol>
+    </div>
+  </section>
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Les appels">
+      <a href="#calls-split">Où va le coût</a>
+      <a href="#calls-all"{% if chart.failures %} class="danger"{% endif %}>Tous les appels <span class="hm-count">{{ all_t.count or 0 }}</span></a>
+      <a href="#calls-days">Jour par jour</a>
+    </nav>
+    <div class="hm-subpanes">
+      {% for id in panes %}{{ pane(id) }}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>

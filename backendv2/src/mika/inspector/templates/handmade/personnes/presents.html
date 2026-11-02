@@ -1,0 +1,38 @@
+{# Relations & échanges › Personnes › Présents (app/handmade/tabs/people.py, ADR 0177) : qui est là en ce moment. Ses
+   chiffres (connexions vivantes, moyens de communication présents) en tête de la liste, puis une entrée par
+   personne — dite comme sur la vue d'ensemble, en ligne depuis quand, en train d'écrire — et sous elle chacune de ses
+   connexions : par où, le moyen de communication (vers sa fiche), l'audience (privée ou publique), depuis quand. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/personnes/_personnes.html" as pers %}
+<div class="now-page pers pers-presents" data-tab="personnes/presents">
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="pers-here-title">
+    {{ tab.head("En ce moment", "pers-here-title", people|length, (counts|join(" · ")) ~ " · la plus récemment arrivée d'abord") }}
+    {% if people %}
+    <ul class="pers-here" role="list">
+      {% for p in people %}
+      <li class="pers-here-item">
+        {{ pers.avatar(p) }}
+        <div class="pers-here-main">
+          <p class="pers-head">{{ pers.name(p) }}
+            {% if p.composing %}<span class="now-tag live">écrit…</span>{% endif %}
+            <span class="pers-when">{% if p.since %}en ligne depuis {{ p.since }}{% else %}en ligne{% endif %}</span>
+          </p>
+          <ul class="pers-links-list" role="list" aria-label="Ses connexions">
+            {% for c in p.links %}
+            <li>
+              <span class="pers-channel">{{ c.channel }}</span>
+              {% if c.handle %}<span>{{ tab.cell(c.handle) }}</span>{% endif %}
+              {% if c.audience %}{{ tab.cell(c.audience) }}{% endif %}
+              <code class="pers-conn" title="la connexion">{{ c.connection }}</code>
+              {% if c.since and c.since.t == "when" %}<span class="now-muted">depuis {{ tab.cell(c.since) }}</span>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">Personne n'est connecté en ce moment : quand quelqu'un ouvre le chat, l'application ou un canal extérieur, il apparaît ici.</p>{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

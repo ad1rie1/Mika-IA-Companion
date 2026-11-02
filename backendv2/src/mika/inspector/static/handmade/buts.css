@@ -1,0 +1,71 @@
+/* Activité › Buts (app/handmade/tabs/goals.py, ADR 0177) : ses explorations et ses rappels côte à côte, ses buts clos ;
+   le vocabulaire de la fiche d'un but (fiches.css : goal-). Préfixe gl- ; couleurs : les jetons ; longueurs : des
+   attributs SVG. */
+
+.gl-columns { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 8px 40px; align-items: start; }
+.gl-columns.single { grid-template-columns: minmax(0, 1fr); }
+.gl-group { min-width: 0; }
+.gl-group-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font: 600 13.5px/1.3 var(--display); }
+.gl-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.gl-item { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.gl-item.paused { padding-left: 10px; box-shadow: inset 3px 0 var(--warn); }
+.gl-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.gl-title { flex: 1 1 260px; min-width: 0; margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.gl-title a { color: var(--text); }
+.gl-title a:hover { color: var(--accent); }
+.gl-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.gl-kind { color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
+.gl-next { color: var(--muted); }
+.gl-gauges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; max-width: 560px; }
+.gl-gauge { display: grid; grid-template-columns: 56px minmax(60px, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; }
+.gl-gauge-label { color: var(--muted); }
+.gl-gauge .now-bar { width: 100%; margin: 0; }
+.now-bar.gl-wish .fill { stroke: var(--accent); }
+.now-bar.gl-wish.warn .fill { stroke: var(--warn); }
+.gl-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 12.5px; }
+.gl-foot .person-entry-detail[open] { flex: 1 1 100%; }
+
+/* ── Un rappel : sa date en pavé de calendrier ── */
+.gl-item.gl-reminder { grid-template-columns: 54px minmax(0, 1fr); column-gap: 14px; }
+.gl-main { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.gl-cal { display: grid; justify-items: center; align-content: start; gap: 1px; margin: 0; padding: 5px 0 6px;
+  border: 1px solid var(--border); border-radius: var(--radius); font-variant-numeric: tabular-nums; }
+.gl-cal-d { font: 650 19px/1.1 var(--display); }
+.gl-cal-m { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.gl-cal-h { color: var(--muted); font-size: 11px; }
+.gl-cal.none .gl-cal-m { color: var(--muted); text-transform: none; text-align: center; }
+.gl-reminder.late .gl-cal { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
+.gl-reminder.late .gl-cal-m { color: var(--warn); }
+.gl-when { color: var(--text); font-weight: 600; }
+
+/* ── Clos : l'issue en marque, ce qu'il a donné cité ── */
+.gl-tally { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: -4px 0 8px; font-size: 13px; }
+.gl-tally-item .now-num { font-weight: 650; }
+.gl-tally-item.ok { color: var(--ok); }
+.gl-tally-item.danger { color: var(--danger); }
+.gl-tally-item.muted { color: var(--muted); }
+.gl-closed { grid-template-columns: minmax(0, 1fr); column-gap: 36px; }
+@media (min-width: 1180px) { .gl-closed { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.gl-done { grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; }
+.gl-done:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
+.gl-mark { padding-top: 1px; font-size: 14px; font-weight: 700; line-height: 1.45; }
+.gl-done.m-done .gl-mark::before { content: "✓"; color: var(--ok); }
+.gl-done.m-stuck .gl-mark::before { content: "!"; color: var(--danger); }
+.gl-done.m-dropped .gl-mark::before { content: "✕"; color: var(--muted); }
+.gl-done.m-dropped .gl-title a, .gl-done.m-dropped .gl-title { color: var(--text-2); }
+.gl-result { margin: 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--text-2); font-size: 13.5px;
+  line-height: 1.5; overflow-wrap: anywhere; }
+.gl-result p { margin: 0; }
+.gl-done.m-done .gl-result { border-left-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+.gl-done.m-stuck .gl-result { border-left-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.gl-when-closed { margin-left: auto; color: var(--muted); white-space: nowrap; }
+
+/* ── Écrans étroits ── */
+@media (max-width: 1000px) {
+  .gl-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .gl-gauges { grid-template-columns: minmax(0, 1fr); }
+  .gl .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .gl-when-closed { margin-left: 0; }
+}

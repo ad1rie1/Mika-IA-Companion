@@ -1,0 +1,79 @@
+{# Elle › Pensées › Pensées (app/handmade/tabs/thoughts.py, ADR 0177) : la bande de chiffres de la faculté, puis en
+   sous-onglets ce qui lui trotte dans la tête — la plus forte d'abord, chacune de la couleur de son émotion, ce qu'il
+   en reste en jauge, d'où elle est née, qui elle concerne —, toutes ses pensées en fil (vivantes ou éteintes), et
+   comment elles vivent. Une page plus ancienne du fil ouvre son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% macro pane(id) -%}
+{% if id == "thoughts-now" %}
+<section id="thoughts-now" data-pane aria-labelledby="thoughts-now-title">
+  <div class="now-card">
+    {{ tab.head(live.title, "thoughts-now-title", live.count, "La plus forte d’abord : ce qu’il en reste maintenant, d’où elle est née, qui elle concerne.", list=live) }}
+    {% if thoughts %}
+    <ul class="thoughts-list" role="list">
+      {% for m in thoughts %}
+      <li class="thought-item{{ ' sw-' ~ m.emotion.key if m.emotion }}{{ ' faint' if m.faint }}{{ ' faded' if m.faded }}">
+        <p class="thought-head">
+          {% if m.emotion %}<span class="thought-emotion">{{ m.emotion.text }}</span>{% endif %}
+          {% if m.origin %}<span class="now-muted">{{ m.origin }}</span>{% endif %}
+        </p>
+        <div class="thought-text">{{ tab.cell(m.text) }}</div>
+        {% if m.strength %}<p class="thought-strength" title="Ce qu’il en reste maintenant (demi-vie)">{{ tab.bar(m.strength.w, 'thought') }}<span class="now-num">{{ m.strength.text }}</span></p>{% endif %}
+        <p class="thought-meta">
+          {% if m.about %}<span>sur {{ tab.cell(m.about) }}</span>{% endif %}
+          {% if m.born %}<span>née {{ tab.cell(m.born) }}</span>{% endif %}
+          {% if m.touched %}<span>ravivée {{ tab.cell(m.touched) }}</span>{% endif %}
+        </p>
+        <div class="thought-foot">
+          {% if m.href %}<a href="{{ m.href }}">{{ live.link_label or 'Voir sa naissance' }} →</a>{% endif %}
+          {% if m.detail %}<details class="person-entry-detail"{{ ' open' if m.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(m.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(live.empty) }}{% endif %}
+    {{ tab.pager(live) }}
+    {% if live.caption and thoughts %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ live.caption }}</p></details>{% endif %}
+  </div>
+</section>
+{% elif id == "thoughts-history" %}
+<section id="thoughts-history" data-pane aria-labelledby="thoughts-history-title">
+  <div class="now-card">
+    {{ tab.head("Toutes ses pensées", "thoughts-history-title", none, "De la plus récente à la plus ancienne, avec la couleur qu’elle avait en naissant.", list=history) }}
+    {% if past %}
+    <ol class="thoughts-feed" role="list">
+      {% for m in past %}
+      <li class="{{ 'sw-' ~ m.emotion.key if m.emotion }}{{ ' out' if not m.alive }}">
+        <span class="thoughts-feed-when">{{ tab.cell(m.born) }}</span>
+        <div class="thoughts-feed-body">
+          <div class="thought-text">{{ tab.cell(m.text) }}</div>
+          <p class="thought-meta">
+            {% if m.now %}<span class="now-tag {{ m.now.tone }}">{{ m.now.text }}</span>{% endif %}
+            {% if m.emotion %}<span>{{ m.emotion.text }}</span>{% endif %}
+            {% if m.origin %}<span class="now-muted">{{ m.origin }}</span>{% endif %}
+            {% if m.about %}<span>sur {{ tab.cell(m.about) }}</span>{% endif %}
+            {% if m.href %}<a href="{{ m.href }}">{{ history.link_label or 'Voir sa naissance' }} →</a>{% endif %}
+          </p>
+          {% if m.detail %}<details class="person-entry-detail"{{ ' open' if m.open }}><summary>Le détail</summary><div class="stack">{{ tab.inner(m.detail) }}</div></details>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(history.empty) }}{% endif %}
+    {{ tab.pager(history) }}
+  </div>
+</section>
+{% elif rules %}
+<section id="thoughts-rules" data-pane aria-label="Comment elles vivent">{{ tab.block(rules) }}</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page thoughts" data-tab="pensees/pensees">
+  {% if band %}{{ tab.block(band) }}{% endif %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ses pensées">
+      <a href="#thoughts-now">Ce qui lui trotte <span class="hm-count">{{ live.count or 0 }}</span></a>
+      <a href="#thoughts-history">Toutes ses pensées</a>
+      {% if rules %}<div class="hm-subnav-sep"></div><a href="#thoughts-rules">Comment elles vivent</a>{% endif %}
+    </nav>
+    <div class="hm-subpanes">{% for id in panes %}{{ pane(id) }}{% endfor %}</div>
+  </div>
+</div>

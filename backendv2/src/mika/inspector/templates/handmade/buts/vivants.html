@@ -1,0 +1,73 @@
+{# Activité › Buts › Buts vivants (app/handmade/tabs/goals.py, ADR 0177) : ce qu'elle a entrepris en une bande de
+   chiffres ; puis, côte à côte, ses explorations — chacune avec ses séances sur son plafond et son envie qui s'use,
+   la prochaine séance — et ses rappels, chacun à sa date en pavé de calendrier, le plus proche d'abord ; le même
+   vocabulaire que la fiche d'un but. Une liste vide de son côté se tait quand un filtre l'écarte. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/buts/macros.html" as gl with context %}
+{% from "handmade/shared/macros.html" import bar %}
+<div class="now-page gl" data-tab="buts/vivants">
+  {{ gl.notes(notes) }}
+  {{ tab.block(band) }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="gl-live-title">
+    {{ tab.head(t.title, "gl-live-title", t.count, "Ce qu’elle se propose de faire ensuite. Ses projets ont leur menu à eux.") }}
+    {% if explorations or reminders %}
+    <div class="gl-columns{{ ' single' if not (explorations and reminders) }}">
+      {% if explorations or not filtered %}
+      <section class="gl-group" aria-labelledby="gl-explore-title">
+        <h3 class="gl-group-head" id="gl-explore-title">Ce qu’elle explore <span class="hm-count">{{ explorations|length }}</span></h3>
+        {% if explorations %}
+        <ul class="gl-list" role="list">
+          {% for g in explorations %}
+          <li class="gl-item{{ ' paused' if g.paused }}">
+            <div class="gl-top">
+              <p class="gl-title"><a href="{{ g.href }}">{{ g.title.text }}</a></p>
+              {% if not g.quiet %}<span class="now-tag {{ g.status.tone }}">{{ g.status.text }}</span>{% endif %}
+            </div>
+            <p class="gl-meta">
+              <span class="gl-kind">{{ g.kind }}</span>
+              <span>{{ "à elle" if g.authority == "à elle" else "confiée" if g.authority == "confié" else g.authority }}</span>
+              {% if g.owner %}<span>pour {{ tab.cell(g.owner) }}</span>{% endif %}
+              {% if g.next %}<span class="gl-next">prochaine séance {{ tab.cell(g.next) }}</span>{% endif %}
+            </p>
+            <div class="gl-gauges">
+              {% if g.steps %}<div class="gl-gauge"><span class="gl-gauge-label">Séances</span>{{ bar(g.steps.w, "goal") }}<span class="now-num">{{ g.steps.done }} / {{ g.steps.cap }}</span></div>{% endif %}
+              {% if g.wish %}<div class="gl-gauge"><span class="gl-gauge-label">Envie</span>{{ bar(g.wish.w, "gl-wish " ~ g.wish.tone) }}<span class="now-num">{{ g.wish.text }}</span></div>{% endif %}
+            </div>
+            {{ gl.foot(g) }}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="now-empty">Aucune exploration en cours : elle en ouvre d’elle-même quand quelque chose l’intrigue.</p>{% endif %}
+      </section>
+      {% endif %}
+      {% if reminders or not filtered %}
+      <section class="gl-group" aria-labelledby="gl-remind-title">
+        <h3 class="gl-group-head" id="gl-remind-title">Ses rappels <span class="hm-count">{{ reminders|length }}</span></h3>
+        {% if reminders %}
+        <ul class="gl-list" role="list">
+          {% for g in reminders %}
+          <li class="gl-item gl-reminder{{ ' paused' if g.paused }}{{ ' late' if g.late }}">
+            {% if g.cal %}<p class="gl-cal" aria-hidden="true"><span class="gl-cal-d">{{ g.cal.d }}</span><span class="gl-cal-m">{{ g.cal.m }}</span><span class="gl-cal-h">{{ g.cal.hm }}</span></p>
+            {% else %}<p class="gl-cal none" aria-hidden="true"><span class="gl-cal-m">sans date</span></p>{% endif %}
+            <div class="gl-main">
+              <div class="gl-top">
+                <p class="gl-title"><a href="{{ g.href }}">{{ g.title.text }}</a></p>
+                {% if not g.quiet %}<span class="now-tag {{ g.status.tone }}">{{ g.status.text }}</span>{% endif %}
+              </div>
+              <p class="gl-meta">
+                {% if g.day %}<span class="gl-when{{ ' warn' if g.late }}">{{ g.day|capitalize }}{% if g.due %} · {{ tab.cell(g.due) }}{% endif %}</span>{% endif %}
+                {% if g.owner %}<span>pour {{ tab.cell(g.owner) }}</span>{% endif %}
+              </p>
+              {{ gl.foot(g) }}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="now-empty">Aucun rappel : on lui en confie en conversation (« rappelle-moi… »).</p>{% endif %}
+      </section>
+      {% endif %}
+    </div>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

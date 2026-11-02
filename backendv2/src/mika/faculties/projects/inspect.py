@@ -290,22 +290,22 @@ def _head(s: ProjectsState, frame: Frame, ctx: InspectContext, key: str) -> Head
     if p is None:
         return None
     texts = _texts(ctx, (p.title_ref,))
-    whose = "à elle" if p.authority == c.SELF else f"confié · pour {_who(frame, p.owner) if p.owner else 'toi'}"
-    badges = [_mode(p), _state(p), Badge(AUTHORITY_FR.get(p.authority, p.authority))]
+    # la vue d'un objet (ADR 0176, la maquette) : son état à côté de son nom, puis ses faits sur une ligne — son
+    # avancement, sa prochaine exécution et son dépôt sont dans sa vue d'ensemble
+    badges = [_state(p)]
     if p.priority != c.NORMAL:
         badges.append(_priority(p))
     if busy(s, p.id):
         badges.append(Badge("au travail", "info"))
     facts: list[tuple[str, Any]] = [
-        ("objectifs", _progress(p)),
-        ("prochaine exécution", _next_words(p, s, frame, ctx)),
+        ("mode", MODE_FR.get(p.mode, p.mode)),
+        ("", "à elle") if p.authority == c.SELF else ("pour", _person(frame, p.owner) if p.owner else "toi"),
         ("dernière exécution", ctx.when(p.last_run_at) if p.last_run_at else "aucune encore"),
-        ("dépôt distant", _host(p.remote) or "aucun"),
+        ("plage", window_words(p)),
     ]
     if p.tried_at > p.last_run_at:  # une tentative depuis, qui n'a pas eu lieu (panne, délai, préemption)
         facts.insert(3, ("dernière tentative", f"{ctx.when(p.tried_at)}, sans suite (crédit rendu)"))
-    return Head(str(p.id), _text(texts, p.title_ref, "(sans titre)"),
-                subtitle=f"Projet n° {p.id} — mode {MODE_FR.get(p.mode, p.mode)}, {whose}", badges=tuple(badges),
+    return Head(str(p.id), _text(texts, p.title_ref, "(sans titre)"), badges=tuple(badges),
                 facts=tuple(facts), default_tab="apercu")
 
 

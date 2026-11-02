@@ -1,0 +1,54 @@
+{# Le vocabulaire des onglets dans leur forme (app/handmade/tabs, ADR 0177). À importer « with context » (les macros
+   des pages dessinées lisent ``forms`` et ``tables`` du gabarit qui les appelle, que ``Got.draw`` pose) :
+     {% import "handmade/shared/tab.html" as tab with context %}
+   - ``tab.head(titre, id, count, lede, list)`` : l'en-tête d'une carte (son titre, son compte, la bascule « Tableau »
+     d'une liste, une phrase) ;
+   - ``tab.pager(liste)`` : la pagination d'une liste qui a plus d'une page ;
+   - ``tab.empty(texte)`` : ce que dit une carte vide ;
+   - ``tab.table(liste)`` : une liste en tableau sobre, dans sa carte, avec sa pagination (la console exige qu'un
+     tableau ait la sienne) ;
+   - ``tab.cards(liste)`` : une liste en cartes (``Got.card``), une entrée par élément ;
+   - ``tab.block(bloc)`` : un bloc rendu dans le vocabulaire des pages dessinées ; ``tab.inner(blocs)`` : le détail
+     d'une ligne (un repli, ses formulaires compris) ;
+   - ``tab.cell(cellule)`` : une cellule, comme la console la rend (un lien, une date relative, une jauge…) ;
+   - ``tab.bar(w)`` : une jauge (0–100) ; ``tab.figures(chiffres)`` : une bande de chiffres. #}
+{% from "_cells.html" import cell as base_cell %}
+{% from "_navigation.html" import pager as pages %}
+{% from "handmade/shared/drawn.html" import one, inner as drawn_inner with context %}
+{% from "handmade/shared/list_macros.html" import entries %}
+{% from "handmade/shared/macros.html" import bar as base_bar, figures as base_figures %}
+
+{% macro modes(t) -%}
+{% if t and t.modes %}<nav class="hm-modes" aria-label="Affichage : {{ t.title or 'liste' }}">{% for m in t.modes %}<a href="{{ m.href }}"{{ ' aria-current=page' if m.on }}>{{ m.label }}</a>{% endfor %}</nav>{% endif %}
+{%- endmacro %}
+
+{% macro head(title, id="", count=none, lede="", list=none) -%}
+<header class="now-card-head">
+  <h2{% if id %} id="{{ id }}"{% endif %}>{{ title }}</h2>
+  {% if count is not none %}<span class="person-count now-num">{{ count }}</span>{% endif %}
+  {{ modes(list) }}
+  {% if lede %}<p>{{ lede }}</p>{% endif %}
+</header>
+{%- endmacro %}
+
+{% macro pager(t) -%}
+{% set p = (t or {}).pager or {} %}{% if p.prev or p.next or p.older or p.newer %}<div class="hm-pager">{{ pages(p) }}</div>{% endif %}
+{%- endmacro %}
+
+{% macro empty(text) -%}
+<p class="now-empty">{{ text }}{{ '' if (text|string)[-1:] in '.!?…' else '.' }}</p>
+{%- endmacro %}
+
+{% macro table(t) -%}{{ one(t, 0, False, True) }}{%- endmacro %}
+
+{% macro cards(t, empty_text="") -%}{{ entries(t, empty_text, drawn_inner) }}{%- endmacro %}
+
+{% macro block(b) -%}{{ one(b) }}{%- endmacro %}
+
+{% macro inner(items) -%}{{ drawn_inner(items) }}{%- endmacro %}
+
+{% macro cell(c) -%}{{ base_cell(c) }}{%- endmacro %}
+
+{% macro bar(w, cls="") -%}{{ base_bar(w, cls) }}{%- endmacro %}
+
+{% macro figures(items) -%}{{ base_figures(items) }}{%- endmacro %}

@@ -43,3 +43,103 @@
 @media (max-width: 640px) {
   .senses-said li { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* ── Flux RSS, Caméra, Dessins, Appareils, dans leur forme (app/handmade/tabs/senses.py, ADR 0177) : la phrase d'état
+   de la vue, des listes à filets (pas de carte dans la carte), deux colonnes sur un grand écran. ── */
+.sens-page { gap: 16px; }
+.sens-state { display: flex; align-items: baseline; gap: 9px; margin: 0; max-width: 110ch; color: var(--text-2); font-size: 14px; }
+.sens-state-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); transform: translateY(-1px); }
+.sens-state.ok .sens-state-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.sens-state.info .sens-state-dot { background: var(--info); }
+.sens-state.warn .sens-state-dot { background: var(--warn); }
+.sens-state.danger .sens-state-dot { background: var(--danger); }
+.sens-state.muted { color: var(--muted); }
+.sens-alert a { margin-left: 4px; color: inherit; font-weight: 600; text-decoration: underline; }
+
+/* une liste à filets ; en deux colonnes sur un grand écran */
+.sens-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1180px) { .sens-list.sens-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sens-item { display: grid; align-content: start; gap: 5px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.sens-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.sens-meta b { color: var(--text); font-weight: 600; }
+.sens-when { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.sens-event { color: var(--muted); font-size: 12px; }
+.sens-event:hover { color: var(--accent); }
+/* une pertinence : son chiffre et sa jauge, à droite */
+.sens-score { display: inline-grid; grid-template-columns: 54px auto; align-items: center; gap: 6px; color: var(--muted);
+  font-size: 12px; white-space: nowrap; }
+.sens-score .now-bar.sens-score-bar { width: 48px; }
+.sens-score.muted .now-bar.sens-score-bar .fill { stroke: var(--border-strong); }
+
+/* un fil : l'heure à gauche, ce qui s'est passé à droite */
+.sens-feed > .sens-item { grid-template-columns: 128px minmax(0, 1fr); gap: 4px 16px; }
+.sens-feed-when { padding-top: 2px; color: var(--muted); font-size: 12.5px; }
+.sens-feed-body { display: grid; gap: 4px; min-width: 0; }
+.sens-feed-title, .sens-feed-text { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.sens-feed-title { font-weight: 600; }
+.sens-feed > .sens-item.warn .sens-feed-title a { color: var(--warn); }
+
+/* deux sujets côte à côte : le principal, plus large, puis ce qui l'accompagne (``side`` : l'inverse) */
+.sens-split { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: var(--now-gap); align-items: start; }
+.sens-split.side { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); }
+
+/* Flux RSS */
+.flux-article-top, .flux-feed-top { display: flex; align-items: baseline; gap: 6px 14px; }
+.flux-article-title { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.flux-article-title a { color: var(--text); }
+.flux-article-title a:hover { color: var(--accent); }
+.flux-article:not(.noticed) .flux-article-title, .flux-article:not(.noticed) .flux-article-title a { color: var(--text-2); font-weight: 500; }
+.flux-article-summary { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); font-size: 13px; line-height: 1.5;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.flux-feed-top { flex-wrap: wrap; align-items: center; }
+.flux-feed-name { margin: 0; font-size: 14px; font-weight: 600; }
+.flux-feed-error { margin: 0; color: var(--danger); font-family: var(--mono); font-size: 12.5px; }
+.flux-feed.broken { box-shadow: inset 2px 0 var(--danger); padding-left: 12px; }
+.flux-feed-counts { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.flux-feed-counts b { color: var(--text); font-weight: 600; }
+.flux-chart { margin: 0 0 8px; }
+.flux-kept { margin: 0; font-size: 14px; }
+.flux-words { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.flux-words li { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-2); font-size: 13px; }
+
+/* Caméra */
+.cam-device { font-size: 13.5px; }
+.cam-seen { margin: 0; padding-left: 12px; border-left: 2px solid var(--border); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.cam-seen.old { color: var(--text-2); }
+.cam-view.notable .cam-seen { border-left-color: var(--warn); }
+.cam-dev-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 14px; }
+.cam-dev-top .now-tag { margin-left: auto; }
+.cam-dev .sens-state-dot { transform: none; }
+.cam-dev.live .sens-state-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.cam-digest { color: var(--muted); font-size: 11.5px; }
+
+/* Dessins */
+.drw-prompt { margin: 2px 0 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.drw-said { display: grid; gap: 2px; margin: 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--text-2);
+  font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.drw-said .now-eyebrow { font-size: 10.5px; }
+.drw-said.failed { border-left-color: var(--danger); }
+.drw-facts { color: var(--muted); }
+
+/* Appareils */
+.dev-list > .sens-item { gap: 2px; padding: 9px 10px; border-top: 0; border-radius: var(--radius-sm); }
+.dev-list > .sens-item + .sens-item { border-top: 1px solid var(--border); border-radius: 0; }
+.dev-one.on { background: var(--accent-soft); border-radius: var(--radius-sm); }
+.dev-one.on + .sens-item { border-top-color: transparent; }
+.dev-name { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0; font-size: 14px; font-weight: 600; }
+.dev-name a { color: var(--text); }
+.dev-name a:hover, .dev-one.on .dev-name a { color: var(--accent); }
+.dev-count { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.dev-all a { font-size: 13px; }
+
+@media (max-width: 1000px) {
+  .sens-split, .sens-split.side { grid-template-columns: minmax(0, 1fr); }
+}
+/* une bande de chiffres impaire sur deux colonnes : la dernière case prend la rangée, sans case vide */
+@media (max-width: 560px) {
+  .sens-page .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .sens-feed > .sens-item { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .sens-when { margin-left: 0; }
+}

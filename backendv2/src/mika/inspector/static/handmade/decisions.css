@@ -35,3 +35,242 @@
   .running-recent li { grid-template-columns: 1fr auto; }
   .running-recent .running-ago, .running-recent .running-what { grid-column: 1 / -1; }
 }
+
+/* ── Les autres onglets de Décisions (app/handmade/tabs/decisions.py, ADR 0177) ─────────────────────────────────
+   Une ligne de l'arbitre (arb-) : ce qui pousse face à ce qui retient sur une même barre, l'équilibre au milieu ;
+   ses initiatives (ini-), ses choix (sel-), ses épisodes (eps-), ses échéances (due-). Couleurs : les jetons ;
+   longueurs : des attributs SVG. */
+
+/* ── Une ligne de l'arbitre ── */
+.arb-lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 36px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1180px) { .arb-lines:not(.one) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.arb-line { display: grid; align-content: start; gap: 9px; padding: 14px 0; border-top: 1px solid var(--border); min-width: 0; }
+.arb-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.arb-title { margin: 0; font: 600 15px/1.3 var(--display); }
+.arb-who { font-weight: 500; }
+.arb-rate { display: flex; align-items: center; gap: 7px; margin: 0 0 0 auto; text-align: left; }
+.arb-rate-n { font: 650 22px/1 var(--display); letter-spacing: -.02em; }
+.arb-rate-u { color: var(--text-2); font-size: 11.5px; line-height: 1.25; }
+.s-likely .arb-rate-n { color: var(--ok); }
+.s-blocked .arb-rate-n, .s-still .arb-rate-n { color: var(--muted); }
+.arb-say { margin: 0; max-width: 78ch; color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
+.arb-tug { display: block; width: 100%; height: 14px; overflow: visible; }
+.arb-tug rect.push { fill: var(--ok); }
+.arb-tug rect.hold { fill: var(--danger); }
+.arb-tug rect.limit { fill: color-mix(in srgb, var(--muted) 45%, var(--surface)); }
+.arb-tug .mid { stroke: var(--text); stroke-width: 2px; }
+.arb-tug.vetoed rect { opacity: .4; }
+.arb-vetoes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.arb-vetoes-label { margin-right: 2px; color: var(--danger); font-size: 12.5px; font-weight: 600; }
+.arb-vetoes .now-tag { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; white-space: normal; }
+.arb-tug-legend { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; margin: -4px 0 0; color: var(--muted);
+  font-size: 11.5px; }
+.arb-tug-legend > span:first-child .now-num { color: var(--ok); }
+.arb-tug-legend > span:last-child { text-align: right; }
+.arb-tug-legend > span:last-child .now-num { color: var(--danger); }
+.arb-tug-score { color: var(--text-2); font-weight: 600; }
+.arb-tug-score .now-num { color: var(--text); }
+.arb-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; }
+.arb-side-head { margin: 0 0 4px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; }
+.arb-items { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.arb-items li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: 13px; }
+.arb-item-label { min-width: 0; overflow-wrap: anywhere; }
+.arb-item-value { color: var(--text-2); }
+.arb-none { margin: 0; color: var(--muted); font-size: 12.5px; font-style: italic; }
+.arb-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--muted); }
+.arb-dot.push { background: var(--ok); }
+.arb-dot.hold { background: var(--danger); }
+.arb-dot.limit { background: color-mix(in srgb, var(--muted) 45%, var(--surface)); }
+.arb-dot.off { background: color-mix(in srgb, var(--muted) 40%, var(--surface)); }
+.arb-idle { margin: 0; font-size: 12.5px; }
+.arb-calc > summary { font-size: 12.5px; }
+.arb-steps { display: grid; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.arb-steps li { display: grid; grid-template-columns: 82px minmax(0, 1fr) 62px 62px; gap: 10px; padding: 5px 0;
+  border-top: 1px solid var(--border); }
+.arb-step-what { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.arb-step-value, .arb-step-total { text-align: right; }
+.arb-step-total { color: var(--text-2); }
+.arb-step-score { font-weight: 600; }
+.arb-step-score .arb-step-total { color: var(--text); }
+.arb-calc-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.arb-line.compact { gap: 7px; padding: 12px 0; }
+.arb-line.compact .arb-title { font-size: 14px; }
+.arb-line.compact .arb-rate-n { font-size: 18px; }
+.arb-line.chosen .arb-title { color: var(--accent); }
+
+/* ── Table de l'arbitre : la phrase, les lignes, les règles du jeu ── */
+.arb-outlook { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 24px; }
+.arb-outlook .now-eyebrow { grid-column: 1 / -1; }
+.arb-outlook-say { margin: 0; font: 650 20px/1.3 var(--display); letter-spacing: -.01em; }
+.arb-outlook-say b { color: var(--ok); }
+.arb-outlook-sub { grid-column: 1; margin: 0; color: var(--text-2); font-size: 13.5px; }
+.arb-counts { grid-column: 2; grid-row: 2 / span 2; display: flex; gap: 18px; margin: 0; padding: 0; list-style: none;
+  color: var(--muted); font-size: 12.5px; }
+.arb-counts li { display: grid; justify-items: end; gap: 1px; }
+.arb-counts .now-num { color: var(--text); font: 650 20px/1.1 var(--display); }
+.arb-counts li.ok .now-num { color: var(--ok); }
+.arb-counts li.danger .now-num { color: var(--danger); }
+.arb-rules { grid-column: 1 / -1; margin-top: 4px; }
+.arb-rules > summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 500; }
+.arb-rules[open] > summary { margin-bottom: 12px; }
+.arb-rules-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px 36px; align-items: start; }
+.arb-rules-how { display: grid; gap: 8px; margin: 0; padding: 0 0 0 18px; color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
+.arb-rules-how b { color: var(--text); }
+.arb-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0 20px; margin: 0; }
+.arb-kinds > div { padding: 7px 0; border-top: 1px solid var(--border); }
+.arb-kinds dt { font-size: 13px; font-weight: 600; }
+.arb-kinds dd { margin: 0; color: var(--muted); font-size: 12.5px; }
+.arb-rules-note { margin: 12px 0 0; max-width: 90ch; color: var(--muted); font-size: 12.5px; }
+
+/* ── Que ferait-elle ? : le verdict en grand, ses lignes, ce qui vise n'importe qui ── */
+.arb-verdict { display: grid; gap: 6px; border-left: 3px solid var(--border-strong); }
+.arb-verdict.ok { border-left-color: var(--ok); }
+.arb-verdict.warn { border-left-color: var(--warn); }
+.arb-verdict-say { margin: 0; max-width: 80ch; font: 600 18px/1.4 var(--display); letter-spacing: -.005em; }
+.arb-verdict.warn .arb-verdict-say { color: var(--warn); }
+.arb-verdict-sub { margin: 0; color: var(--muted); font-size: 12.5px; }
+.arb-shared { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.arb-shared > summary { cursor: pointer; font: 600 13.5px/1.3 var(--display); }
+.arb-shared-lede { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+.arb-pick { display: grid; gap: 10px; }
+.arb-pick .now-card-head { margin-bottom: 0; }
+.arb-pick-say { margin: 0; max-width: 80ch; color: var(--text-2); }
+.arb-pick .hm-chips-title { margin: 4px 0 0; }
+.arb-people { margin: 0; padding: 0; list-style: none; }
+
+/* ── Initiatives : son budget en cases, ce qu'elle a dit d'elle-même ── */
+.ini-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--border); }
+.ini-cell { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 13px 16px; background: var(--surface); }
+.ini-cell.warn { box-shadow: inset 2px 0 var(--warn); }
+.ini-label { margin: 0; color: var(--muted); font-size: 12px; }
+.ini-value { margin: 0; font: 650 1.3rem/1.25 var(--display); letter-spacing: -.015em; overflow-wrap: anywhere; }
+.ini-value .badge, .ini-value .meter { font: 500 13px var(--font); }
+.ini-words { font-size: 1.05rem; }
+.ini-sub { margin: 0; color: var(--muted); font-size: 12px; }
+.ini-slots { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.ini-slot { width: 16px; height: 16px; border: 1px solid var(--border-strong); border-radius: 4px; }
+.ini-slot.on { border-color: var(--accent); background: var(--accent); }
+.ini-today.warn .ini-slot.on { border-color: var(--warn); background: var(--warn); }
+.ini-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr); gap: var(--now-gap); align-items: start; }
+.ini-said { display: grid; margin: 0; padding: 0; list-style: none; }
+.ini-said > li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 4px 16px; padding: 12px 0;
+  border-top: 1px solid var(--border); }
+.ini-said > li:first-child { padding-top: 2px; border-top: 0; }
+.ini-said-when { padding-top: 2px; color: var(--muted); font-size: 12.5px; }
+.ini-said-body { display: grid; gap: 6px; min-width: 0; }
+.ini-said-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; font-weight: 600; }
+.ini-said-state { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.ini-said-state.ok { color: var(--ok); }
+.ini-said-state.ok::before { content: "✓ "; }
+.ini-said-state.warn { color: var(--warn); }
+.ini-said-text { margin: 0; padding-left: 12px; border-left: 2px solid var(--border); color: var(--text-2); font-size: 14px;
+  line-height: 1.5; overflow-wrap: anywhere; }
+.ini-said-text p { margin: 0; }
+.ini-said > li.t-warn .ini-said-text { border-left-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.ini-said > li.t-ok .ini-said-text { border-left-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.ini-facts { display: grid; margin: 0; }
+.ini-facts > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px;
+  padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ini-facts > div:first-child { padding-top: 0; border-top: 0; }
+.ini-facts dt { color: var(--muted); }
+.ini-facts dd { margin: 0 0 0 auto; text-align: right; }
+.ini-counted { display: grid; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.ini-counted li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0;
+  border-top: 1px solid var(--border); }
+.ini-counted li:first-child { border-top: 0; }
+
+/* ── Ses choix : la roue des lignes en lice ── */
+.sel-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.sel-item { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 18px; padding: 14px 0;
+  border-top: 1px solid var(--border); }
+.sel-item:first-child { padding-top: 2px; border-top: 0; }
+.sel-when { margin: 0; padding-top: 2px; color: var(--muted); font-size: 12.5px; }
+.sel-body { display: grid; gap: 8px; min-width: 0; }
+.sel-what { margin: 0; font-size: 15px; }
+.sel-draw { margin: 0; max-width: 90ch; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.sel-wheel { display: block; width: 100%; max-width: 760px; height: 14px; }
+.sel-wheel rect.on { fill: var(--accent); }
+.sel-wheel rect.off { fill: color-mix(in srgb, var(--muted) 40%, var(--surface)); }
+.sel-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.sel-legend li { display: inline-flex; align-items: baseline; gap: 6px; }
+.sel-legend li.on { font-weight: 600; }
+.sel-legend .arb-dot.push { background: var(--accent); }
+.sel-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: 13px; }
+.sel-foot .person-entry-detail[open] { flex: 1 1 100%; }
+
+/* ── Épisodes : 24 heures, quatorze jours, puis le fil jour par jour ── */
+.eps-activity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 440px); align-items: start; gap: 12px 36px; }
+.eps-day, .eps-weeks { display: grid; gap: 8px; min-width: 0; }
+.eps-counts { display: flex; flex-wrap: wrap; gap: 8px 26px; margin: 0; padding: 0; list-style: none; }
+.eps-counts li { display: grid; gap: 1px; }
+.eps-count-n { font: 650 1.4rem/1.1 var(--display); }
+.eps-count-label { color: var(--muted); font-size: 12px; }
+.eps-counts li.ok .eps-count-n { color: var(--ok); }
+.eps-counts li.warn .eps-count-n { color: var(--warn); }
+.eps-counts li.danger .eps-count-n { color: var(--danger); }
+.eps-counts li.muted .eps-count-n { color: var(--muted); }
+.eps-bars { display: block; width: 100%; height: 52px; }
+.eps-bars rect { fill: color-mix(in srgb, var(--accent) 38%, var(--surface)); }
+.eps-bars rect.today { fill: var(--accent); }
+.eps-bars-legend { display: grid; grid-template-columns: 1fr auto 1fr; margin: 0; color: var(--muted); font-size: 11px; }
+.eps-bars-legend span:last-child { text-align: right; }
+.eps-sampled { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+.eps-day-name { margin: 14px 0 2px; color: var(--muted); font: 600 11.5px/1.3 var(--font); letter-spacing: .07em;
+  text-transform: uppercase; }
+.now-card-head + .eps-day-name { margin-top: 0; }
+.eps-feed { display: grid; margin: 0; padding: 0; list-style: none; }
+.eps-feed li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-size: 13.5px; }
+.eps-feed li:last-child { border-bottom: 0; }
+.eps-hm { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.eps-what { min-width: 0; overflow-wrap: anywhere; }
+.eps-detail { color: var(--muted); }
+.eps-feed li.failed .eps-what b { color: var(--danger); }
+.eps-open { font-size: 12.5px; white-space: nowrap; }
+
+/* ── Échéances : par horizon ── */
+.due-lede { margin: 0; color: var(--text-2); font-size: 14px; }
+.due-group + .due-group { margin-top: 16px; }
+.due-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 4px;
+  font: 600 13.5px/1.3 var(--display); }
+.due-group-lede { color: var(--muted); font: 400 12.5px var(--font); }
+.due-list { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 36px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1100px) { .due-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.due-list li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 8px 0;
+  border-top: 1px solid var(--border); }
+.due-when { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.due-when .when { font-weight: 500; }
+.due-name { display: grid; gap: 1px; min-width: 0; font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere; }
+.due-meta { color: var(--muted); font-size: 12px; font-weight: 400; }
+.due-list li.danger { padding-left: 10px; box-shadow: inset 3px 0 var(--danger); }
+.due-list li.danger .due-name { color: var(--danger); }
+.h-never .due-when, .h-never .due-name { color: var(--muted); }
+details.due-group > summary { cursor: pointer; list-style: none; }
+details.due-group > summary::-webkit-details-marker { display: none; }
+details.due-group > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+details.due-group[open] > summary::before { content: "▾"; }
+details.due-group[open] > summary { margin-bottom: 4px; }
+.h-soon .due-when { color: var(--accent); }
+.due-failing .due-list { grid-template-columns: minmax(0, 1fr); }
+
+/* ── Écrans étroits ── */
+@media (max-width: 1000px) {
+  .ini-grid, .arb-rules-body, .eps-activity { grid-template-columns: minmax(0, 1fr); }
+  .ini-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .arb-outlook { grid-template-columns: minmax(0, 1fr); }
+  .arb-counts { grid-column: 1; grid-row: auto; }
+  .arb-counts li { justify-items: start; }
+  .arb-sides { grid-template-columns: minmax(0, 1fr); }
+  .arb-steps li { grid-template-columns: minmax(0, 1fr) 56px 56px; }
+  .arb-step-what { grid-column: 1 / -1; }
+  .ini-said > li, .sel-item { grid-template-columns: minmax(0, 1fr); }
+  .eps-feed li { grid-template-columns: 46px minmax(0, 1fr) auto; }
+  .eps-feed .eps-open { grid-column: 2 / -1; }
+  .due-list li { grid-template-columns: 54px minmax(0, 1fr); }
+  .due-list li .now-tag { grid-column: 2; justify-self: start; }
+}

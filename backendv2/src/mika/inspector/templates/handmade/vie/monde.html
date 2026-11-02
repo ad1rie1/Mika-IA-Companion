@@ -1,0 +1,69 @@
+{# Elle › Humeur et corps › Monde et corps (app/handmade/tabs/life.py, ADR 0177) : une bande de chiffres (où elle est,
+   ce qu'elle fait, ce qu'elle tient, son monde) ; ce qui est en route, pas à pas ; les choses rangées par où elles
+   sont ; ce qu'elle a remarqué des éditions de son monde à côté des éditions elles-mêmes. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/vie/_vie.html" as vie %}
+<div class="now-page vie vie-monde" data-tab="vie/monde">
+  {{ vie.band(band, "Son corps dans son monde") }}
+
+  <section class="now-card" id="{{ t_intents.id }}" aria-labelledby="vie-intents-title">
+    {{ tab.head("Ce qui est en route", "vie-intents-title", t_intents.count if intents else none, "ce qu'elle ou quelqu'un a décidé de faire dans son monde, pas à pas") }}
+    {% if intents %}
+    <ul class="vie-intents" role="list">
+      {% for i in intents %}
+      <li>
+        <p class="vie-intent-who"><b>{{ tab.cell(i.actor) }}</b> <span class="now-muted">· décidé par {{ i.by }}</span></p>
+        <ol class="vie-steps">{% for s in i.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+        <p class="vie-meta">{% if i.eta %}<span><span class="now-muted">fin prévue</span> {{ tab.cell(i.eta) }}</span>{% endif %}{% if i.deadline %}<span title="sans moteur pour la jouer, l'action se termine là, comme prévue"><span class="now-muted">échéance</span> {{ tab.cell(i.deadline) }}</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t_intents.empty) }}{% endif %}
+    {{ tab.pager(t_intents) }}
+  </section>
+
+  <section class="now-card" id="{{ t_things.id }}" aria-labelledby="vie-things-title">
+    {{ tab.head("Où sont les choses", "vie-things-title", t_things.count, ("dans " ~ room ~ ", " if room else "") ~ "rangées par où elles sont ; leur identifiant à côté, pour éditer son monde") }}
+    {% if places %}
+    <div class="vie-places">
+      {% for g in places %}
+      <section class="vie-place" aria-label="{{ g.where }}">
+        <h3>{{ g.where }}</h3>
+        <ul role="list">
+          {% for x in g.things %}<li><span class="vie-thing">{{ tab.cell(x.name) }}</span>{% if x.state %} <span class="now-tag">{{ tab.cell(x.state) }}</span>{% endif %} <code class="vie-id">{{ x.id }}</code></li>{% endfor %}
+        </ul>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}{{ tab.empty(t_things.empty or "rien dans son monde") }}{% endif %}
+    {{ tab.pager(t_things) }}
+  </section>
+
+  <div class="vie-two">
+    <section class="now-card" id="{{ t_remarks.id }}" aria-labelledby="vie-remarks-title">
+      {{ tab.head("Ce qu'elle en a remarqué", "vie-remarks-title", t_remarks.count, "ce qui a changé chez elle et s'est vu ; endormie, elle le remarquera à son réveil") }}
+      {% if remarks %}
+      <ol class="vie-feed" role="list">
+        {% for r in remarks %}
+        <li><p>{{ tab.cell(r.what) }}</p><p class="vie-meta"><span>{{ tab.cell(r.when) }}</span><span class="now-tag">{{ r.state }}</span>{% if r.weight %}<span title="ce qu'elle en retient : une pensée dès le seuil de l'attention"><span class="now-muted">pertinence</span> <span class="now-num">{{ r.weight }}</span></span>{% endif %}</p></li>
+        {% endfor %}
+      </ol>
+      {% else %}{{ tab.empty(t_remarks.empty) }}{% endif %}
+      {{ tab.pager(t_remarks) }}
+    </section>
+
+    <section class="now-card" id="{{ t_edits.id }}" aria-labelledby="vie-edits-title">
+      {{ tab.head("Les dernières éditions", "vie-edits-title", t_edits.count, "ce qu'une opératrice a changé de son monde") }}
+      {% if edits %}
+      <ol class="vie-feed" role="list">
+        {% for e in edits %}
+        <li><p class="vie-meta"><span>{{ tab.cell(e.when) }}</span><span><span class="now-muted">par</span> <code>{{ e.by }}</code></span><span><span class="now-muted">révision</span> <span class="now-num">{{ e.rev }}</span></span></p><p><code class="vie-changes">{{ e.changes }}</code></p></li>
+        {% endfor %}
+      </ol>
+      {% else %}{{ tab.empty(t_edits.empty) }}{% endif %}
+      {{ tab.pager(t_edits) }}
+    </section>
+  </div>
+
+  {% for n in notes %}<p class="person-tab-note">{{ n.text }}</p>{% endfor %}
+</div>

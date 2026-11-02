@@ -1,0 +1,37 @@
+{# Activité › Projets › Décisions techniques (app/handmade/tabs/projects.py, ADR 0177) : rangées par projet (son nom
+   mène à l'onglet Décisions de sa fiche), chacune comme une décision d'architecture — son numéro, la question, ce qui
+   est choisi, pourquoi (en clair : c'est ce qu'elle relit à chaque exécution), qui l'a posée et quand ; une décision
+   remplacée ou retirée s'estompe. Les filtres et la pagination de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page prj" data-tab="projets/toutes_decisions">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-dec-title">
+    {{ tab.head(t.title, "prj-dec-title", t.count) }}
+    {% if groups %}
+    <div class="prj-dec-groups">
+      {% for g in groups %}
+      <section class="prj-dec-group" aria-label="{{ g.name }}">
+        <h3 class="prj-dec-project">{% if g.href %}<a href="{{ g.href }}">{{ g.name }}</a>{% else %}{{ g.name }}{% endif %} <span class="hm-count">{{ g["items"]|length }}</span></h3>
+        <ol class="prj-dec-list" role="list">
+          {% for d in g["items"] %}
+          <li class="{{ 'faded' if not d.live }}">
+            <span class="prj-dec-n now-num">{{ d.n }}</span>
+            <div class="prj-dec-body">
+              <div class="prj-dec-top">
+                <p class="prj-dec-q">{{ tab.cell(d.question) }}</p>
+                {% if d.status %}<span class="now-tag {{ d.status.tone }}">{{ d.status.text }}</span>{% endif %}
+              </div>
+              {% if d.choice %}<p class="prj-dec-choice"><span class="prj-dec-arrow" aria-hidden="true">→</span> {{ tab.cell(d.choice) }}</p>{% endif %}
+              {% if d.why %}<p class="prj-dec-why"><span class="prj-dec-label">Pourquoi</span> {{ tab.cell(d.why) }}</p>{% endif %}
+              <p class="prj-dec-meta">posée par {{ d.by }}{% if d.when %} · {{ tab.cell(d.when) }}{% endif %}</p>
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

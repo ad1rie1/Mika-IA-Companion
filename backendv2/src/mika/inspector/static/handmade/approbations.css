@@ -1,0 +1,79 @@
+/* À valider › Historique des autorisations (app/handmade/tabs/approvals.py, ADR 0177) : une entrée par demande, à
+   filets ; un trait à gauche dit où elle en est (exécutée, refusée, en échec), comme le trait des demandes en attente
+   (.hm-approval). Couleurs : les jetons. */
+.hist-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.hist-item { display: grid; grid-template-columns: 3px minmax(0, 1fr); gap: 14px; padding: 14px 0; border-top: 1px solid var(--border); }
+.hist-mark { border-radius: 2px; background: var(--info); }
+.hist-item.m-ok .hist-mark { background: var(--ok); }
+.hist-item.m-refused .hist-mark { background: var(--border-strong); }
+.hist-item.m-danger .hist-mark { background: var(--danger); }
+.hist-main { display: grid; gap: 6px; min-width: 0; }
+.hist-eyebrow { display: flex; flex-wrap: wrap; gap: 0 4px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.hist-eyebrow a { color: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); }
+.hist-summary { margin: 0; font: 600 15px/1.4 var(--display); overflow-wrap: anywhere; }
+.hist-item.m-refused .hist-summary { color: var(--text-2); }
+.hist-steps { display: grid; gap: 4px; margin: 2px 0 0; padding: 0; list-style: none; }
+.hist-steps > li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; font-size: 13.5px; }
+.hist-steps .now-tag { justify-self: start; }
+.hist-step-text { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.hist-when { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.hist-when a { color: inherit; }
+.hist-when a:hover { color: var(--accent); }
+.hist-key { margin: 0; }
+.hist-key code { color: var(--muted); font-size: 11.5px; }
+@media (max-width: 640px) {
+  .hist-steps > li { grid-template-columns: auto minmax(0, 1fr); }
+  .hist-when { grid-column: 2; }
+}
+
+/* À valider › Actions à autoriser (pages/approvals.py) : le gabarit « client », comme le courrier — la file à gauche,
+   une ligne par demande, qui défile dans son cadre sur un grand écran ; la demande ouverte à droite. Sur un écran
+   étroit, la file puis la demande ; la demande d'abord quand on vient de la choisir (.reading). */
+.apv-kinds { margin: 0; }
+.apv-space { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 1000px) {
+  .apv-space { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); }
+  .apv-queue { position: sticky; top: 72px; max-height: calc(100vh - 96px); overflow-y: auto; }
+}
+@media (max-width: 999px) { .apv.reading .apv-reader { order: -1; } }
+.apv-queue { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--raised); }
+.apv-queue-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; }
+.apv-queue-head h2 { font-size: 14px; }
+.apv-list { margin: 0; padding: 0; list-style: none; }
+.apv-list a { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--text); }
+.apv-list a:hover { background: var(--hover); text-decoration: none; }
+.apv-list a[aria-current] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.apv-row-top { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--muted); }
+.apv-kind { min-width: 0; overflow: hidden; color: var(--text-2); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.apv-ago { flex: none; margin-left: auto; white-space: nowrap; }
+.apv-row-text { display: -webkit-box; overflow: hidden; font-size: 13.5px; line-height: 1.4; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.apv-row-ctx { font-size: 12px; color: var(--muted); }
+.apv-pager { padding: 8px 14px 4px; border-top: 1px solid var(--border); }
+.apv-reader { min-width: 0; }
+.apv-pos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+.apv-steps { display: flex; gap: 14px; margin-left: auto; }
+
+/* sa source : des liens, sur une ligne */
+.apv-sources { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: -4px 0 0; font-size: 13px; }
+/* son historique : sous la décision, des lignes à filets */
+.apv-history { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.apv-history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12.5px; }
+.apv-history-sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.apv-history-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.apv-history-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 0;
+  border-top: 1px solid var(--border); font-size: 13px; }
+.apv-history-list li:first-child { border-top: 0; }
+.apv-history-list li.refused .now-tag { color: var(--danger); background: var(--danger-bg); }
+.apv-history-what { font-weight: 550; }
+.apv-history-note { flex-basis: 100%; color: var(--text-2); font-style: italic; }
+.apv-history-ran { font-size: 12px; }
+.apv-history-ran.ok { color: var(--ok); } .apv-history-ran.danger { color: var(--danger); }
+
+/* un élément qui n'est pas une demande d'envoi (une identité, un nom) : ses faits, ses actions, sa règle */
+.apv-facts { display: grid; gap: 6px; margin: 0; font-size: 13.5px; }
+.apv-facts div { display: grid; grid-template-columns: minmax(130px, 32%) minmax(0, 1fr); gap: 12px; }
+.apv-facts dt { color: var(--muted); }
+.apv-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.apv-do { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.apv-rule { margin: 0; color: var(--muted); font-size: 12.5px; }

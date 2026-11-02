@@ -1,0 +1,61 @@
+{# Elle › Pensées › Attentes (app/handmade/tabs/thoughts.py, ADR 0177) : la bande de chiffres de la faculté, puis en
+   sous-onglets ce qu'elle attend de qui — le temps écoulé vers l'échéance en jauge, une attente échue le dit — et les
+   attentes closes, en fil, comblées ou déçues. Une page plus ancienne du fil ouvre son sous-onglet. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% macro pane(id) -%}
+{% if id == "waits-now" %}
+<section id="waits-now" data-pane aria-labelledby="waits-now-title">
+  <div class="now-card">
+    {{ tab.head(open.title, "waits-now-title", open.count, "La jauge : le temps passé depuis qu’elle attend, jusqu’à l’échéance.", list=open) }}
+    {% if waits %}
+    <ul class="waits-list" role="list">
+      {% for w in waits %}
+      <li class="wait-item{{ ' late' if w.late }}{{ ' ' ~ w.tone if w.tone }}">
+        <p class="wait-what"><span class="wait-kind">{{ w.what|capitalize }}</span>{% if w.who %} <span class="now-muted">de</span> {{ tab.cell(w.who) }}{% endif %}</p>
+        <div class="wait-clock">
+          {% if w.progress is not none %}{{ tab.bar(w.progress, 'wait') }}{% endif %}
+          <p class="wait-meta">
+            {% if w.since %}<span>depuis {{ tab.cell(w.since) }}</span>{% endif %}
+            {% if w.due %}<span class="wait-due">échéance {{ tab.cell(w.due) }}</span>{% else %}<span class="now-muted">sans échéance</span>{% endif %}
+          </p>
+        </div>
+        {% if w.state and w.state.text %}<span class="now-tag {{ w.state.tone }}">{{ w.state.text }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(open.empty) }}{% endif %}
+    {{ tab.pager(open) }}
+  </div>
+</section>
+{% else %}
+<section id="waits-closed" data-pane aria-labelledby="waits-closed-title">
+  <div class="now-card">
+    {{ tab.head(closed.title, "waits-closed-title", none, "Comblées ou déçues, de la plus récente à la plus ancienne.", list=closed) }}
+    {% if done %}
+    <ol class="waits-feed" role="list">
+      {% for d in done %}
+      <li class="{{ 'met' if d.met else 'missed' }}">
+        <span class="waits-feed-when">{{ tab.cell(d.when) }}</span>
+        <div class="waits-feed-body">
+          <p><span class="wait-kind">{{ d.what|capitalize }}</span>{% if d.who %} <span class="now-muted">de</span> {{ tab.cell(d.who) }}{% endif %} {% if d.outcome %}<span class="now-tag {{ d.outcome.tone }}">{{ d.outcome.text }}</span>{% endif %}</p>
+          <p class="wait-meta">{% if d.since %}<span>attendue depuis {{ tab.cell(d.since) }}</span>{% endif %}{% if d.event %}<span>{{ tab.cell(d.event) }}</span>{% endif %}</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}{{ tab.empty(closed.empty) }}{% endif %}
+    {{ tab.pager(closed) }}
+  </div>
+</section>
+{% endif %}
+{%- endmacro %}
+<div class="now-page waits" data-tab="pensees/attentes">
+  {% if band %}{{ tab.block(band) }}{% endif %}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ses attentes">
+      <a href="#waits-now"{% if waits|selectattr('late')|list %} class="warn"{% endif %}>Ce qu’elle attend <span class="hm-count">{{ open.count or 0 }}</span></a>
+      <a href="#waits-closed">Attentes closes</a>
+    </nav>
+    <div class="hm-subpanes">{% for id in panes %}{{ pane(id) }}{% endfor %}</div>
+  </div>
+</div>

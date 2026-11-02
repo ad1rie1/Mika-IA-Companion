@@ -35,3 +35,131 @@
 @media (max-width: 640px) {
   .handle-facts > div, .handle-why > div { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* ── Les onglets de la destination (app/handmade/tabs/identities.py, ADR 0177) : les moyens de communication, les
+   identités à confirmer, les noms à relier, les règles de divulgation. Classes ids-… ; fond blanc et filets, pas de
+   carte dans une carte ; une longueur par un attribut SVG. ── */
+.ids-sub { margin: 0; color: var(--muted); font-size: 12.5px; }
+.ids-band .person-tile-value { font-size: 1.2rem; }
+
+/* une ligne par moyen de communication, en colonnes (un en-tête discret au-dessus) */
+.ids-grid-head, .ids-mean { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 6px 24px; }
+.ids-grid-head { padding: 0 0 8px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11.5px;
+  font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.ids-means { display: grid; margin: 0; padding: 0; list-style: none; }
+.ids-mean { padding: 12px 0; border-top: 1px solid var(--border); }
+.ids-mean:first-child { border-top: 0; }
+.ids-cell { display: grid; align-content: start; gap: 4px; min-width: 0; font-size: 13px; }
+.ids-cell p { margin: 0; overflow-wrap: anywhere; }
+.ids-cell code { font-size: 11.5px; }
+.ids-k { display: none; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.ids-label { font-weight: 600; font-size: 14px; }
+.ids-label a { color: var(--text); }
+.ids-label a:hover { color: var(--accent); }
+.ids-opens { display: grid; gap: 3px; margin: 0; }
+.ids-opens > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; }
+.ids-opens dt { color: var(--muted); }
+.ids-opens dd { margin: 0; }
+
+/* une file à valider : une entrée par demande, ses actions sur sa ligne */
+.ids-queue { display: grid; margin: 0; padding: 0; list-style: none; }
+.ids-claim { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px 28px;
+  padding: 14px 0 14px 14px; border-top: 1px solid var(--border); box-shadow: inset 2px 0 var(--warn); }
+.ids-claim:first-child { border-top: 0; }
+.ids-claim-main { display: grid; gap: 6px; min-width: 0; }
+.ids-claim-main .ids-sub { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.ids-claim-who { margin: 0; font-size: 14.5px; }
+.ids-claim-who a { font-weight: 600; }
+.ids-says { color: var(--muted); }
+.ids-claimed { font: 600 15px var(--display); }
+.ids-toward-line { display: grid; grid-template-columns: auto minmax(80px, 220px) auto; align-items: center; gap: 10px;
+  justify-content: start; margin: 0; font-size: 12.5px; }
+.ids-toward { display: block; width: 100%; height: 10px; overflow: visible; }
+.ids-toward line { stroke-linecap: round; }
+.ids-toward .track { stroke: color-mix(in srgb, var(--border-strong) 45%, var(--sunken)); stroke-width: 6px; }
+.ids-toward .fill { stroke: var(--warn); stroke-width: 6px; }
+.ids-toward .end { stroke: var(--text-2); stroke-width: 1.5px; stroke-linecap: butt; }
+.ids-do { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.ids-do form { margin: 0; }
+.ids-warn { margin: 0; color: var(--warn); font-size: 12.5px; }
+.ids-rule { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+
+/* ── Règles de divulgation ── */
+.ids-scale { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) minmax(190px, 310px);
+  align-items: center; gap: 10px 22px; }
+.ids-scale-corner { align-self: end; padding-bottom: 2px; font-size: 11.5px; }
+.ids-axis { display: block; overflow: visible; }
+.ids-axis-line { stroke: var(--border-strong); stroke-width: 1; }
+.ids-tick { stroke: var(--border-strong); stroke-width: 1; }
+.ids-tick.over { stroke: var(--ok); }
+.ids-degree { fill: var(--text-2); font: 11.5px var(--font); }
+.ids-scale-label { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.ids-scale-label .badge { justify-self: start; }
+.ids-range { display: block; overflow: visible; }
+.ids-range .track { stroke: color-mix(in srgb, var(--border-strong) 40%, var(--sunken)); stroke-width: 4px; stroke-linecap: round; }
+.ids-range line.range { stroke: var(--accent); stroke-width: 6px; stroke-linecap: round; }
+.ids-range circle.range { fill: var(--accent); }
+.ids-range circle.floor { fill: var(--surface); stroke: var(--accent); stroke-width: 2px; }
+.ids-bar-line { stroke: var(--warn); stroke-width: 1.5px; stroke-dasharray: 3 3; }
+.ids-conf-line { stroke: var(--ok); stroke-width: 1.5px; stroke-dasharray: 1 3; }
+.ids-scale-num { display: grid; gap: 2px; font-size: 13px; }
+.ids-legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border);
+  list-style: none; color: var(--text-2); font-size: 12.5px; }
+.ids-legend li { display: inline-flex; align-items: center; gap: 8px; }
+.ids-key { flex: none; display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--accent); }
+.ids-key.range { border-top-width: 5px; border-radius: 3px; }
+.ids-key.bar { width: 0; height: 14px; border-top: 0; border-left: 2px dashed var(--warn); }
+.ids-key.conf { width: 0; height: 14px; border-top: 0; border-left: 2px dotted var(--ok); }
+.ids-degrees { display: none; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.ids-degrees li.over { color: var(--ok); }
+.ids-calibrated { margin: 10px 0 0; color: var(--ok); font-size: 12.5px; }
+.ids-calibrated::before { content: "✓\00a0"; font-weight: 700; }
+.ids-weights { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+.ids-weights-side h3 { margin: 0 0 6px; font: 600 13px/1.3 var(--display); }
+.ids-weights-side.pour h3 { color: var(--ok); }
+.ids-weights-side.contre h3 { color: var(--danger); }
+.ids-weights-side ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.ids-weights-side li { display: grid; grid-template-columns: minmax(0, 1fr) 64px 44px; align-items: center; gap: 2px 10px;
+  padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.ids-weights-side li .now-bar { width: 100%; margin: 0; }
+.ids-weights-side li .now-num { text-align: right; }
+.ids-w-name code { display: block; margin-top: 1px; color: var(--muted); font-size: 11px; }
+.now-bar.ids-w.pour .fill { stroke: var(--ok); }
+.now-bar.ids-w.contre .fill { stroke: var(--danger); }
+.ids-ranks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.ids-ranks li { display: grid; justify-items: start; gap: 4px; padding-top: 10px; border-top: 3px solid color-mix(in srgb, var(--ok) 25%, var(--border));
+  font-size: 13px; }
+.ids-ranks li:nth-child(2) { border-top-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.ids-ranks li:nth-child(3) { border-top-color: color-mix(in srgb, var(--ok) 70%, var(--border)); }
+.ids-ranks li:nth-child(4) { border-top-color: var(--ok); }
+.ids-rank { font: 650 1.2rem/1 var(--display); }
+.ids-ranks code { color: var(--muted); font-size: 11px; }
+.ids-facts { display: grid; gap: 8px; margin: 0; }
+.ids-facts > div { display: grid; grid-template-columns: minmax(140px, 46%) minmax(0, 1fr); gap: 12px; font-size: 13.5px; }
+.ids-facts dt { color: var(--muted); }
+.ids-facts dd { margin: 0; }
+
+@media (max-width: 900px) {
+  .ids-grid-head { display: none; }
+  .ids-mean { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 18px; }
+  .ids-k { display: block; }
+  .ids-claim { grid-template-columns: minmax(0, 1fr); }
+  .ids-do { justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+  .ids-mean { grid-template-columns: minmax(0, 1fr); }
+  .ids-scale { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .ids-scale-corner, .ids-axis { display: none; }
+  .ids-scale-label { margin-top: 10px; }
+  .ids-degrees { display: flex; }
+  .ids-weights { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .ids-ranks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ids-facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+
+/* une bande de chiffres sur un écran étroit : deux par rangée, le dernier seul sur toute la largeur (pas de case vide) */
+@media (max-width: 640px) {
+  .ids-band .person-tiles-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ids-band .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}

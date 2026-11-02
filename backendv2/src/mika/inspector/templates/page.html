@@ -13,35 +13,50 @@
 {% for s in (fiche_styles or [])|list + (panel_styles or [])|list %}<link rel="stylesheet" href="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}">
 {% endfor %}{% for s in fiche_scripts or [] %}<script src="{{ PREFIX }}/static/{{ s }}?v={{ ASSET_VERSION }}" defer></script>
 {% endfor %}{% endblock %}
-{# Les actions de la page (ADR 0176) : à droite du titre, la première en avant — celles que la page dessine
-   (``head_links`` : des liens ; ``head_extra`` : le HTML d'un onglet dessiné), puis les actions automatiques ;
-   les dangereuses sous « Autres actions ». La roue des paramètres (ADR 0173) ferme la barre. #}
+{# Les actions de la page (ADR 0176, la maquette) : à droite du titre, deux en vue au plus, la principale (la
+   première déclarée) à droite des autres — celles que la page dessine (``head_links`` : des liens ; ``head_extra`` :
+   le HTML d'un onglet dessiné), puis les actions automatiques ; le reste et les dangereuses sous « ⋯ ». La roue des
+   paramètres (ADR 0173) ferme la barre. #}
 {% macro head_side() %}
 {% set own = head_links or head_extra %}
+{% set calm = (head_actions or [])|rejectattr('danger')|list %}
+{% set seen = calm[:2] %}
+{% set more = calm[2:] + (head_actions or [])|selectattr('danger')|list %}
 {% if head_actions or own %}
 <div class="action-bar" role="group" aria-label="Actions">
-  {% for text, href in head_links or [] %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}
+  {% for text, href in (head_links or [])|reverse %}<a class="btn{{ ' quiet' if not loop.last }}" href="{{ href }}">{{ text }}</a>{% endfor %}
   {{ head_extra or '' }}
-  {% for a in head_actions if not a.danger %}
-  {{ action_button(a, loop.first and not own) }}
+  {% for a in seen|reverse %}
+  {{ action_button(a, loop.last and not own) }}
   {% endfor %}
-  {% if head_actions|selectattr('danger')|list %}<details class="action-overflow"><summary class="btn quiet">Autres actions</summary><div class="toolbar action-overflow-panel">{% for a in head_actions if a.danger %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
+  {% if more %}<details class="action-overflow"><summary class="btn quiet icon" title="Autres actions" aria-label="Autres actions"><span aria-hidden="true">⋯</span></summary><div class="toolbar action-overflow-panel">{% for a in more %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
 </div>
 {% endif %}
 {% if gear and gear|length == 1 %}{% set g = gear[0] %}<a class="btn quiet gear-link{{ ' on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ icon('settings') }}{{ g.title }}</a>
 {% elif gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
 {% endmacro %}
+{# Des filtres de petits choix (``quick`` : la période d'Humeur, 24 h ou 7 jours) : des boutons à choix au bout de la
+   barre d'onglets, appliqués d'un clic (ADR 0176, la maquette). #}
+{% macro quick_tail() %}
+{% if quick %}<div class="tabs-tail">{% for q in quick %}<nav class="seg" aria-label="{{ q.label }}">{% for c in q.choices %}<a href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.text }}</a>{% endfor %}</nav>{% endfor %}</div>{% endif %}
+{% endmacro %}
 {% macro head_and_body() %}
-{% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}
+{# le fil d'Ariane : sur une destination, sa rubrique d'abord (« Mika / Humeur et corps », ADR 0176) #}
+{% set rub = ((nav or [])|selectattr('active')|first) if rubric else none %}
+{# une rubrique qui porte le nom de sa destination (« À valider ») ne se dit qu'une fois #}
+{% set rub = none if rub and crumbs and rub.short == crumbs[0][0] else rub %}
+{% set trail = ([(rub.short, '')] if rub else []) + (crumbs or [])|list %}
+{% if trail %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in trail %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">/</span>{% endif %}{% endfor %}</nav>{% endif %}
 {% if fiche_head %}
 <div class="page-head fiche-head">{{ fiche_head }}<div class="fiche-head-side">{{ head_side() }}</div></div>
 {% else %}
 <div class="page-head">
   <div class="page-title">
     {% if eyebrow %}<span class="eyebrow">{{ eyebrow }}</span>{% endif %}
-    <h1>{{ heading or title }}</h1>
+    {# la vue d'un objet (la maquette) : son état en étiquettes, à côté de son nom #}
+    {% if head_badges %}<div class="page-title-row"><h1>{{ heading or title }}</h1>{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>
+    {% else %}<h1>{{ heading or title }}</h1>{% endif %}
     {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
-    {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
     {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
   </div>
 {% set side = head_side() %}{% if side|trim %}<div class="page-head-side">{{ side }}</div>{% endif %}
@@ -53,10 +68,12 @@
 {# des onglets rangés au bout de la barre (ce qu'une vue d'ensemble résume) : hors de la barre qui défile #}
 {% set folded_on = tabs_more|selectattr('on')|list %}
 <div class="tabs-row">
-<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>
+<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>
 <details class="tabs-more{{ ' on' if folded_on }}"><summary class="tab{{ ' on' if folded_on }}">{{ tabs_more_title }}{% if folded_on %} · {{ folded_on[0].title }}{% endif %} <span aria-hidden="true">▾</span></summary><nav class="tabs-more-panel" aria-label="{{ tabs_more_title }}">{% for t in tabs_more %}<a class="{{ 'on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}</a>{% endfor %}</nav></details>
+{{ quick_tail() }}
 </div>
-{% elif tabs and tabs|length > 1 %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
+{% elif tabs and tabs|length > 1 %}{% if quick %}<div class="tabs-row">{% endif %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% elif t.count %}<span class="tab-n now-num">{{ t.count }}</span>{% endif %}</a>{% endfor %}</nav>{% if quick %}{{ quick_tail() }}</div>{% endif %}
+{% elif quick %}<div class="quick-filters">{{ quick_tail() }}</div>{% endif %}
 {{ filters_form(filters or [], keep or [], filtered, reset) }}
 {% if panel and not panel_after and not panel_after_blocks %}{% include panel %}{% endif %}
 <div class="stack">

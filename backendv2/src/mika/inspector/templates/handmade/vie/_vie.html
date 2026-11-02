@@ -1,0 +1,38 @@
+{# Ce que partagent les onglets « Humeur et corps » (app/handmade/tabs/life.py, ADR 0177) : une bande de chiffres, ce
+   que son prompt dit (une citation), une courbe de la faculté dans sa carte, une jauge signée (de part et d'autre de
+   son milieu), une liste de faits. Aucun style en ligne (CSP) : les longueurs sont des attributs SVG. #}
+{% from "_cells.html" import cell %}
+{% from "_blocks.html" import render %}
+
+{# la bande de chiffres : un libellé, une valeur (une cellule rendue), une phrase ; un lien mène à son sujet #}
+{% macro band(items, label) -%}
+<section class="person-tiles vie-band" aria-label="{{ label }}">
+  <ul class="person-tiles-list">{% for x in items %}
+    <li class="{{ x.tone }}">{% if x.href %}<a href="{{ x.href }}">{% endif %}<span class="person-tile-label">{{ cap(x.label) }}</span><span class="person-tile-value">{{ cell(x.value) }}</span>{% if x.sub %}<span class="person-tile-sub">{{ x.sub }}</span>{% endif %}{% if x.href %}</a>{% endif %}</li>
+  {% endfor %}</ul>
+</section>
+{%- endmacro %}
+
+{# un libellé de la faculté, sa première lettre en capitale (le reste tel quel : « ADR 0139 » ne devient pas « Adr 0139 ») #}
+{% macro cap(s) -%}{{ (s|string)[:1]|upper }}{{ (s|string)[1:] }}{%- endmacro %}
+
+{# ce que son prompt lui dit, cité #}
+{% macro voice(text, source="ce que son prompt lui en dit") -%}
+{% if text %}<blockquote class="now-voice vie-voice"><p>{{ text }}</p><footer>{{ source }}</footer></blockquote>{% endif %}
+{%- endmacro %}
+
+{# une courbe de la faculté (son dessin, ses valeurs repliées), ou ce qu'elle dit quand il n'y a pas encore de mesure #}
+{% macro curve(chart) -%}
+{% if chart and chart.has %}<div class="vie-chart">{{ chart.svg }}</div>{% if chart.table %}<details class="chart-values"><summary>Voir les valeurs</summary>{{ render([chart.table]) }}</details>{% endif %}
+{% else %}<p class="now-empty">{{ chart.empty if chart else "pas encore de mesure" }}.</p>{% endif %}
+{%- endmacro %}
+
+{# une jauge signée : x1 → x2 sur 0–100, le milieu marqué ; side : warm | cold #}
+{% macro signed(g, cls="") -%}
+<svg class="vie-signed {{ g.side }} {{ cls }}" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><line class="track" x1="0" x2="100" y1="4" y2="4" vector-effect="non-scaling-stroke"/>{% if g.x2 > g.x1 %}<line class="fill" x1="{{ g.x1 }}" x2="{{ g.x2 }}" y1="4" y2="4" vector-effect="non-scaling-stroke"/>{% endif %}<line class="mid" x1="50" x2="50" y1="0" y2="8" vector-effect="non-scaling-stroke"/></svg>
+{%- endmacro %}
+
+{# des faits (libellé, cellule rendue), en colonnes #}
+{% macro facts(items, cls="") -%}
+<dl class="person-fields {{ cls }}">{% for p in items %}<div><dt{% if p.hint %} title="{{ p.hint }}"{% endif %}>{{ cap(p.label) }}</dt><dd>{{ cell(p.value) }}</dd></div>{% endfor %}</dl>
+{%- endmacro %}

@@ -45,7 +45,7 @@ def tabs_of(page, destination):
 def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
     """Le menu et la barre d'onglets ne se contredisent pas : dans une rubrique, une destination a un seul lien (la
     page entière), ou un lien par onglet — tous ses onglets, dans leur ordre, sous leur nom (le lien vers la
-    destination elle-même : son premier onglet). Sauf les raccourcis d'« À valider » et l'annuaire des réglages."""
+    destination elle-même : son premier onglet). Sauf l'annuaire des réglages ; « À valider » suit la règle (ADR 0177)."""
     client, _, _ = world
     bootstrap(client)
     for group in MENU:
@@ -72,13 +72,16 @@ def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
     ('sens/camera', 'Connexions extérieures', 'Caméra'),
     ('outils/expose', 'Outils', 'Prêter à un agent'),
     ('outils/tous?outil=email_read', 'Outils', 'Ce qu'),
-    ('courrier/brouillons', 'À valider', 'Brouillons de courrier'),
+    ('courrier/brouillons', 'Relations & échanges', 'Courrier'),
+    # « À valider » est une seule file (ADR 0177) : chacun de ses onglets allume son lien
+    ('approbations/courriers', 'À valider', 'Courriers à envoyer'),
+    ('approbations/noms', 'À valider', 'Noms à relier'),
     ('courrier/reception', 'Relations & échanges', 'Courrier'),
     ('vie/rythme', 'Mika', 'Sommeil et rythme'),
     ('reglages/comportement-memory', 'Réglages', 'Paramètres avancés'),
     ('fiche/person/user_1', 'Relations & échanges', 'Personnes'),
     # une fiche ouverte depuis une liste allume cette liste, pas seulement la rubrique de la fiche
-    ('fiche/person/user_1?retour=/inspecteur/identites/noms', 'À valider', 'Noms à relier'),
+    ('fiche/person/user_1?retour=/inspecteur/approbations/noms', 'À valider', 'Noms à relier'),
 ])
 def test_page_and_subject_keep_the_correct_menu_open(world, path, group, label):  # noqa: F811
     client, _, _ = world
@@ -123,8 +126,8 @@ def test_people_view_switch_keeps_filter_and_subject_links(world):  # noqa: F811
         assert response.status_code == 200
         ConsoleHTML(response.text).check()
         assert 'href="/inspecteur/fiche/person/user_1"' in response.text
-    assert 'class="now-card person-list' in cards.text  # l'onglet est dessiné (ADR 0121)
-    assert 'class="now-card person-list' not in table.text
+    assert 'data-tab="personnes/personnes"' in cards.text  # l'onglet est dessiné dans sa forme (ADR 0177)
+    assert 'data-tab="personnes/personnes"' not in table.text
     assert 'name="vue_pg1" value="table"' in table.text
     assert '?q=adrien' in table.text
     empty = client.get('/inspecteur/personnes/personnes?q=personne-inconnue')

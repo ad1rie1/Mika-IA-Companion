@@ -1,0 +1,81 @@
+/* Relations & échanges › Personnes (app/handmade/tabs/people.py, ADR 0177) : l'annuaire, les liens, les présents —
+   une personne dite comme sur la vue d'ensemble (people.css : son avatar, ses étiquettes), sur le vocabulaire commun
+   (base.css). Fond blanc et filets, pas de carte dans une carte ; une émotion se porte par sa classe (sw-<émotion>
+   pose --sw), une longueur par un attribut SVG. */
+
+/* ── ce que partagent les onglets ─────────────────────────────────────── */
+.pers .now-avatar { flex: none; width: 40px; height: 40px; font-size: 17px; }
+.pers-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; min-width: 0; }
+.pers-name { margin-right: 2px; font: 600 15px/1.3 var(--display); letter-spacing: -.005em; overflow-wrap: anywhere; }
+.pers-name a { color: var(--text); }
+.pers-name a:hover { color: var(--accent); text-decoration: none; }
+.pers-when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pers-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 14px; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.pers-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12.5px; }
+.pers-band .person-tile-value { font-size: 1.2rem; }
+
+/* une liste à filets : deux colonnes sur un grand écran */
+.pers-dir, .pers-bonds, .pers-here { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 36px; margin: 0;
+  padding: 0; list-style: none; }
+@media (min-width: 1100px) {
+  .pers-dir, .pers-bonds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.pers-dir-item, .pers-bond, .pers-here-item { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px;
+  align-content: start; padding: 14px 0; border-top: 1px solid var(--border); }
+.pers-dir-main, .pers-bond-main, .pers-here-main { display: grid; gap: 7px; min-width: 0; }
+
+/* ── Annuaire : ses moyens de communication ───────────────────────────── */
+.pers-handles { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.pers-handles li { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.pers-handles a { color: var(--text); overflow-wrap: anywhere; }
+.pers-handles a:hover { color: var(--accent); }
+.pers-handles .now-tag { font-size: 11px; }
+.pers-handles .now-muted { font-size: 11.5px; }
+
+/* ── Liens : un groupe par proximité, l'échelon, le silence ───────────── */
+.pers-group + .pers-group { margin-top: 18px; }
+.pers-group h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font: 600 13.5px/1.3 var(--display); }
+.pers-rungs { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.pers-rungs i { display: block; width: 4px; border-radius: 1px; background: var(--sunken); }
+.pers-rungs i:nth-child(1) { height: 6px; }
+.pers-rungs i:nth-child(2) { height: 9px; }
+.pers-rungs i:nth-child(3) { height: 12px; }
+.pers-rungs i.on { background: var(--ok); }
+.pers-level { color: var(--text-2); font-size: 12.5px; }
+.pers-silence { display: grid; grid-template-columns: auto minmax(60px, 180px) auto auto; align-items: center; gap: 8px;
+  justify-content: start; margin: 0; font-size: 12.5px; }
+.pers-bond-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; }
+.pers-more { font-size: 12.5px; white-space: nowrap; }
+.pers-gauge { display: block; width: 100%; height: 10px; overflow: visible; }
+.pers-gauge line { stroke-linecap: round; }
+.pers-gauge .track { stroke: color-mix(in srgb, var(--border-strong) 45%, var(--sunken)); stroke-width: 6px; }
+.pers-gauge .fill { stroke: var(--muted); stroke-width: 6px; }
+.pers-bond.missed .pers-gauge .fill { stroke: var(--warn); }
+.pers-gauge .mid { stroke: var(--border-strong); stroke-width: 1.5px; stroke-linecap: butt; }
+.pers-bond.missed .now-avatar { border-color: var(--warn); }
+.pers-summary { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 13.5px; font-style: italic; line-height: 1.5; }
+.pers-summary::before { content: "«\00a0"; }
+.pers-summary::after { content: "\00a0»"; }
+
+/* ── Présents : ses connexions sous elle ──────────────────────────────── */
+.pers-here-item:first-child { border-top: 0; padding-top: 2px; }
+.pers-links-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.pers-links-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.pers-channel { color: var(--text-2); font-weight: 600; }
+.pers-conn { color: var(--muted); font-size: 11.5px; }
+
+/* ── Écrans étroits ───────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .pers-dir-item, .pers-bond, .pers-here-item { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; }
+  .pers .now-avatar { width: 34px; height: 34px; font-size: 15px; }
+  .pers-when { margin-left: 0; flex-basis: 100%; }
+  .pers-silence { grid-template-columns: auto minmax(60px, 1fr) auto; }
+  .pers-silence .now-tag { grid-column: 1 / -1; justify-self: start; }
+}
+
+/* une bande de chiffres sur un écran étroit : deux par rangée, le dernier seul sur toute la largeur (pas de case vide) */
+@media (max-width: 640px) {
+  .pers-band .person-tiles-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pers-band .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}

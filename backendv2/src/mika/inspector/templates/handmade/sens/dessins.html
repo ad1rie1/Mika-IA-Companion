@@ -1,0 +1,31 @@
+{# Connexions extérieures › Dessins (app/handmade/tabs/senses.py, ADR 0177) : ses dessins en chiffres, puis une entrée
+   par dessin — où il en est, pour qui, ce qu'elle a demandé au fournisseur, ce qu'elle y voit ou pourquoi il a raté ;
+   deux colonnes sur un grand écran. Jamais l'image elle-même : elle se télécharge depuis l'application de la
+   personne. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/sens/_sens.html" as sx with context %}
+<div class="now-page sens-page drw" data-tab="sens/dessins">
+  {% if state %}{{ sx.state(state) }}{% elif quality %}<p class="sens-state ok"><span class="sens-state-dot" aria-hidden="true"></span><span>Un fournisseur d'images est branché ; elle dessine en qualité « {{ quality }} » quand on ne lui en demande pas d'autre.</span></p>{% endif %}
+  {{ tab.block(band) }}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="drw-title">
+    {{ tab.head("Ses dessins", "drw-title", t.count, "Le plus récent d'abord." ~ (" Qualité par défaut : " ~ quality ~ "." if quality and state else ""), list=t) }}
+    {% if items %}
+    <ul class="sens-list sens-cols" role="list">
+      {% for d in items %}
+      <li class="sens-item drw-item{{ ' failed' if d.failed }}">
+        <p class="sens-meta">
+          {{ tab.cell(d.status) }}
+          <span>pour {% if d.for.href %}<a href="{{ d.for.href }}">{{ d.for.name }}</a>{% else %}{{ d.for.name }}{% endif %}</span>
+          {% if d.when %}<span class="sens-when">{{ tab.cell(d.when) }}</span>{% endif %}
+        </p>
+        <p class="drw-prompt">{{ tab.cell(d.prompt) }}</p>
+        {% if d.said %}<p class="drw-said{{ ' failed' if d.failed }}"><span class="now-eyebrow">{{ 'Pourquoi il a raté' if d.failed else "Ce qu'elle y voit" }}</span>{{ tab.cell(d.said) }}</p>{% endif %}
+        <p class="sens-meta drw-facts"><span>qualité {{ d.quality }}</span>{% if d.backend %}<span>{{ d.backend }}</span>{% endif %}{% if d.seconds %}<span>{{ d.seconds }}</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {% if t.caption and items %}<details class="person-list-help"><summary>Comprendre cette liste</summary><p>{{ t.caption }}</p></details>{% endif %}
+  </section>
+</div>

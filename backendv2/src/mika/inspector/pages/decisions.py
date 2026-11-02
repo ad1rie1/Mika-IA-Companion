@@ -57,8 +57,9 @@ def _signed(value: float) -> str:
 
 
 def _rate(hazard: float) -> str:
-    """Un taux d'arbitre (par seconde) en « fois par heure »."""
-    return num_fr(hazard * 3600, 2)
+    """Un taux d'arbitre (par seconde) en « fois par heure », à trois chiffres significatifs : un taux très faible se
+    lit encore (« 0,00417 »), au lieu de s'arrondir à zéro."""
+    return num_fr(hazard * 3600)
 
 
 def evidence_text(ui: Any, r: Any) -> str:
@@ -95,8 +96,8 @@ def waterfall(ui: Any, r: Any, *, title: str = "Du signal au score") -> Table:
                          Text(_signed(total), "num"))))
     rows.append(Row((Badge("score", "ok" if r.score > 0 else "warn"), "le score final de la ligne",
                      "", Text(_signed(r.score), "num", "ok" if r.score > 0 else "")), tone="muted"))
-    if r.vetoes:
-        rows.append(Row((Badge("veto", "danger"), vetoes_text(ui, r), "", "—"), tone="danger"))
+    for owner, code in r.vetoes:  # un veto par étape : chacun se lit seul
+        rows.append(Row((Badge("veto", "danger"), ui.names.veto(owner, code), "", "—"), tone="danger"))
     drift = r.score - total
     caption = (f"Le score devient un taux : {_rate(r.hazard)} fois par heure au plus"
                + (" (zéro : un veto l'en empêche)" if r.vetoes else "")
@@ -106,18 +107,24 @@ def waterfall(ui: Any, r: Any, *, title: str = "Du signal au score") -> Table:
 
 
 def arbiter_rows(ui: Any, rows: Any, *, fired: frozenset[str] = frozenset()) -> tuple[Row, ...]:
-    """Les lignes de l'arbitre en table : sorte et cible nommées, preuves en mots, détail pas à pas."""
+    """Les lignes de l'arbitre en table : sorte et cible nommées, preuves en mots, détail pas à pas ; repliés, la
+    sorte, la cible et le rythme maximal de la sorte (ce que la page dessinée met en barres, ADR 0177)."""
+    top = ui.kernel.registry.arbitration.max_rates or {}
     return tuple(
         Row((ui.names.arbiter_row(r.kind, r.target), Text(evidence_text(ui, r), "text"), Text(_signed(r.score), "num",
              "ok" if r.score > 0 else ""), _rate(r.hazard),
-             Badge(vetoes_text(ui, r), "danger") if r.vetoes else "—"),
+             Badge(vetoes_text(ui, r), "danger") if r.vetoes else "—",
+             names.kind(r.kind), ui.names.who_cell(r.target) if r.target not in ("", "none") else None,
+             _rate(top[r.kind]) if r.kind in top else None),
             tone="ok" if f"{r.kind}:{r.target}" in fired or (not fired and r.hazard > 0 and not r.vetoes) else "",
             detail=(waterfall(ui, r),)) for r in rows)
 
 
 ARBITER_COLUMNS = ("ligne", Column("ce qui pousse", hint="les preuves, en points (log-odds) par raison"),
                    Column("score", "num"), Column("fois / h", "num", hint="le taux qui sort du score"),
-                   "ce qui l'empêche")
+                   "ce qui l'empêche", Column("sorte", detail=True), Column("vers", detail=True),
+                   Column("au plus (fois / h)", "num", detail=True,
+                          hint="le rythme maximal de cette sorte d'épisode : le taux quand le score est très haut"))
 
 
 def _possible(r: Any | None) -> str:
@@ -276,9 +283,11 @@ async def towards(ui: Any, request: Request) -> Any:
     if live_:
         top = max(live_, key=lambda r: r.hazard)
         mean_s = 1 / total if total > 0 else math.inf
+        strongest = max(top.parts, key=lambda p: p[2], default=None)  # la preuve qui pousse le plus, pas la première
         verdict = (f"Elle pourrait {_verb(top.kind)} {who} : à ce rythme, en moyenne dans "
-                   f"{_delay(mean_s)} (si rien ne change d'ici là). La ligne la plus forte : "
-                   f"{evidence_text(ui, top).splitlines()[0] if top.parts else names.kind(top.kind)}.")
+                   f"{_delay(mean_s)} (si rien ne change d'ici là). Ce qui pousse le plus : "
+                   f"{ui.names.reason(strongest[0], strongest[1]) if strongest and strongest[2] > 0 else names.kind(top.kind)}"
+                   f"{f' ({_signed(strongest[2])})' if strongest and strongest[2] > 0 else ''}.")
         tone = "ok"
     elif best is not None and best.vetoes:
         verdict = f"Rien pour l'instant : {vetoes_text(ui, best).lower()} (veto)."

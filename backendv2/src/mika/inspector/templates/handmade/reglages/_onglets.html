@@ -1,0 +1,6 @@
+{# Ce que partagent les onglets des Réglages dans leur forme (app/handmade/tabs/settings.py, ADR 0177) : d'où vient la
+   valeur d'un paramètre — les quatre sources, dans l'ordre où elles se recouvrent, avec les étiquettes que reprend
+   chaque paramètre d'une faculté. #}
+{% macro sources(list, lead="D'où vient une valeur") -%}
+<p class="regx-sources"><span class="regx-sources-lead">{{ lead }} :</span>{% for s in list %}<span class="regx-source"><span class="now-tag {{ s.tone }}">{{ s.word }}</span><span class="regx-source-text">{{ s.text }}</span></span>{% if not loop.last %}<span class="regx-then" aria-hidden="true">→</span>{% endif %}{% endfor %}</p>
+{%- endmacro %}

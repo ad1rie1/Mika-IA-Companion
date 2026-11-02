@@ -196,7 +196,7 @@ def test_an_operator_approves_from_the_inspector(world):  # noqa: F811
     page = html_of(client.get("/inspecteur/approbations"))
     assert "alice@exemple.fr" in page and "Approuver" in page  # ce qui partira, tel quel
     r = post(client, "/inspecteur/approbations", proposal=str(proposal), decision="approve", note="ok")
-    assert r.status_code == 200 and "Approuvé" in html_of(r) and "Rien n'attend ton accord" in html_of(r)
+    assert r.status_code == 200 and "Approuvé" in html_of(r) and "Rien n'attend ta décision" in html_of(r)
     resolved = client.portal.call(lambda: kernel.mind.store.latest([rt.EFFECT_RESOLVED.name], 5))
     assert resolved and json.loads(resolved[0].data)["by"] == "user_1"
     again = post(client, "/inspecteur/approbations", proposal=str(proposal), decision="reject")

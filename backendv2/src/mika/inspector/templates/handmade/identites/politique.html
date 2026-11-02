@@ -1,0 +1,73 @@
+{# Relations & échanges › Identités › Règles de divulgation (app/handmade/tabs/identities.py, ADR 0177) : une page de
+   règles, lues dans la politique de la faculté. Ses quatre barres en chiffres ; ce que chaque canal peut prouver, sur
+   une même échelle de certitude (de 0 à 1) où se lisent ses degrés, la barre de divulgation et celle des
+   confidences — le plancher et le plafond de chaque canal en un trait ; le poids des preuves, pour et contre ; les
+   rangs de proximité ; les propriétaires. La calibration ne prend un bandeau que si elle est fausse. Les longueurs
+   sont des attributs SVG (en pourcentages : le texte garde sa taille). #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/identites/_identites.html" as ids %}
+<div class="now-page ids ids-policy" data-tab="identites/politique">
+  {% if calibration and calibration.tone != "ok" %}<p class="person-tab-note danger"><b>{{ calibration.title }}</b> {{ calibration.text }}</p>{% endif %}
+  {{ ids.band(bars, "Les barres") }}
+
+  <section class="now-card" aria-labelledby="ids-scale-title">
+    {{ tab.head("Ce que chaque canal peut prouver", "ids-scale-title", none, channels_help) }}
+    <div class="ids-scale">
+      <span class="ids-scale-corner now-muted">certitude</span>
+      <svg class="ids-axis" width="100%" height="40" role="img" aria-label="Les degrés de certitude, de 0 à 1 : {% for m in scale.marks %}{{ m.name }} {{ m.value }}{{ ', ' if not loop.last }}{% endfor %}">
+        <line class="ids-axis-line" x1="0%" x2="100%" y1="36" y2="36"/>
+        {% for m in scale.marks %}<line class="ids-tick{{ ' over' if m.over }}" x1="{{ m.x }}%" x2="{{ m.x }}%" y1="{{ 32 if m.row else 17 }}" y2="40"/><text class="ids-degree" x="{{ m.x }}%" y="{{ 28 if m.row else 13 }}" text-anchor="{{ m.anchor }}" dx="{{ 4 if m.anchor == 'start' else -4 if m.anchor == 'end' else 0 }}">{{ m.name }}</text>{% endfor %}
+      </svg>
+      <span></span>
+      {% for c in channels %}
+      <div class="ids-scale-label">{{ tab.cell(c.trust) }}<span class="ids-sub">{{ c.why }}</span></div>
+      <svg class="ids-range" width="100%" height="22" role="img" aria-label="de {{ c.floor }} à {{ c.ceiling }}">
+        <line class="track" x1="0%" x2="100%" y1="11" y2="11"/>
+        <line class="ids-bar-line" x1="{{ scale.bar }}%" x2="{{ scale.bar }}%" y1="0" y2="22"/>
+        <line class="ids-conf-line" x1="{{ scale.confidence }}%" x2="{{ scale.confidence }}%" y1="0" y2="22"/>
+        {% if c.point %}<circle class="range" cx="{{ c.x1 }}%" cy="11" r="5"/>{% else %}<line class="range" x1="{{ c.x1 }}%" x2="{{ c.x2 }}%" y1="11" y2="11"/><circle class="floor" cx="{{ c.x1 }}%" cy="11" r="4"/><circle class="range" cx="{{ c.x2 }}%" cy="11" r="5"/>{% endif %}
+      </svg>
+      <div class="ids-scale-num"><span class="now-num">{{ c.floor }} → {{ c.ceiling }}</span><span class="ids-sub">au mieux : {{ c.best }}</span></div>
+      {% endfor %}
+    </div>
+    <ul class="ids-legend" role="list">
+      <li><span class="ids-key range" aria-hidden="true"></span>du plancher (ce qu'un canal prouve d'emblée) au plafond (ce qu'aucune conversation ne dépasse)</li>
+      <li><span class="ids-key bar" aria-hidden="true"></span>la barre de divulgation ({{ scale.bar_text }}) : la certitude qu'il faut pour qu'elle dise du personnel sur autrui, ou ouvre sa fiche à qui écrit</li>
+      <li><span class="ids-key conf" aria-hidden="true"></span>les confidences ({{ scale.confidence_text }}) : celle qu'il faut, avec une proche et en privé, pour aller jusqu'aux confidences</li>
+    </ul>
+    <ul class="ids-degrees" role="list" aria-label="Les degrés de certitude">
+      {% for m in scale.marks %}<li class="{{ 'over' if m.over }}">{{ m.name }} <span class="now-num">{{ m.value }}</span></li>{% endfor %}
+    </ul>
+    {% if calibration and calibration.tone == "ok" %}<p class="ids-calibrated">{{ calibration.text }}</p>{% endif %}
+  </section>
+
+  <div class="now-grid two ids-policy-grid">
+    <section class="now-card" aria-labelledby="ids-weights-title">
+      {{ tab.head("Le poids des preuves", "ids-weights-title", none, weights_help) }}
+      <div class="ids-weights">
+        {% for side, title in (("pour", "Ce qui la fait croire"), ("contre", "Ce qui la fait douter")) %}
+        <section class="ids-weights-side {{ side }}" aria-labelledby="ids-w-{{ side }}">
+          <h3 id="ids-w-{{ side }}">{{ title }}</h3>
+          <ul role="list">
+            {% for w in weights.get(side, []) %}
+            <li><span class="ids-w-name">{{ w.name }} <code>{{ w.key }}</code></span>{{ tab.bar(w.w, "ids-w " ~ side) }}<span class="now-num">{{ w.weight }}</span></li>
+            {% else %}<li class="now-muted">aucune</li>{% endfor %}
+          </ul>
+        </section>
+        {% endfor %}
+      </div>
+    </section>
+    <div class="now-stack">
+      <section class="now-card" aria-labelledby="ids-ranks-title">
+        {{ tab.head("Les rangs de proximité", "ids-ranks-title", none, "du plus lointain au plus proche : ce qu'elle confie grandit avec le rang") }}
+        <ol class="ids-ranks" role="list">
+          {% for r in ranks %}<li><span class="ids-rank">{{ r.rank }}</span><span>{{ r.name }}</span><code>{{ r.key }}</code></li>{% endfor %}
+        </ol>
+      </section>
+      <section class="now-card" aria-labelledby="ids-owners-title">
+        {{ tab.head("Propriétaires", "ids-owners-title") }}
+        <dl class="ids-facts">{% for p in owners %}<div><dt>{{ ids.cap(p.label) }}</dt><dd>{{ tab.cell(p.value) }}</dd></div>{% endfor %}</dl>
+      </section>
+    </div>
+  </div>
+</div>

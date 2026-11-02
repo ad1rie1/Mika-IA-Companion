@@ -1,0 +1,45 @@
+{# Activité › Décisions › Échéances (app/handmade/tabs/decisions.py, ADR 0177) : combien de processus, lesquels
+   tournent ; ce qui échoue d'affilée, en tête ; puis ce qui tournera, rangé par horizon — dans l'heure, plus tard
+   aujourd'hui, plus tard, rien de prévu —, chaque processus sur une ligne (l'heure à gauche, sa faculté et sa voie,
+   la dernière fois et ses passages), en colonnes sur un grand écran ; ce qui n'a rien de prévu, replié s'il y a
+   autre chose à voir ; la pagination de la console. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page due" data-tab="decisions/echeances">
+  <p class="due-lede">
+    <span class="now-num">{{ total or '0' }}</span> processus ·
+    {% if running and running.value and running.value.text not in ('0', '—') %}<b class="now-num">{{ tab.cell(running.value) }}</b> en cours{% if running.sub %} : {{ running.sub }}{% endif %}{% else %}aucun ne tourne en ce moment{% endif %}
+    · <a href="{{ processes }}">Leur santé, leurs erreurs →</a>
+  </p>
+  {% if failing %}
+  <section class="now-card due-failing" aria-labelledby="due-failing-title">
+    <header class="now-card-head"><h2 id="due-failing-title">Échouent d’affilée</h2><p>Au-delà d’un certain nombre d’échecs, la santé le signale.</p></header>
+    <ul class="due-list" role="list">
+      {% for x in failing %}<li class="danger"><span class="due-when">{{ x.hm or (tab.cell(x.next) if x.next else '—') }}</span><span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }} · voie {{ x.lane }}</span></span>{% if x.failing %}<span class="now-tag danger">{{ x.failing.text }}</span>{% endif %}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="due-title">
+    {{ tab.head(t.title, "due-title", t.count, "Quand chacun tournera la prochaine fois, du plus proche au plus lointain.") }}
+    {% if groups %}
+    {% for g in groups %}
+    {% set many = groups|length > 1 %}
+    {% if g.id == "never" and many %}<details class="due-group h-never">
+      <summary class="due-group-head">{{ g.title }} <span class="hm-count">{{ g["items"]|length }}</span>{% if g.lede %}<span class="due-group-lede">{{ g.lede }}</span>{% endif %}</summary>
+    {% else %}<div class="due-group h-{{ g.id }}">
+      <h3 class="due-group-head">{{ g.title }} <span class="hm-count">{{ g["items"]|length }}</span>{% if g.lede %}<span class="due-group-lede">{{ g.lede }}</span>{% endif %}</h3>
+    {% endif %}
+      <ul class="due-list" role="list">
+        {% for x in g["items"] %}
+        <li class="{{ 'danger' if x.danger }}" title="{{ x.key }}">
+          <span class="due-when">{% if x.hm %}{{ x.hm }}{% elif x.next %}{{ tab.cell(x.next) }}{% else %}—{% endif %}</span>
+          <span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }} · voie {{ x.lane }}{% if x.last %} · dernière fois {{ tab.cell(x.last) }}{% endif %} · <span class="now-num">{{ x.runs }}</span> passage{{ 's' if x.runs not in ('0', '1') }}</span></span>
+          {% if x.failing %}<span class="now-tag danger">{{ x.failing.text }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    {% if g.id == "never" and many %}</details>{% else %}</div>{% endif %}
+    {% endfor %}
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+</div>

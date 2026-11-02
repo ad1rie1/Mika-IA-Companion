@@ -126,7 +126,9 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
     assert "aucune exécution avec ces filtres" in flat(alive["runs_filtered"])
     head = alive["head"]
     assert isinstance(head, Head) and head.key == str(pid) and head.title == "Outils réseau"
-    assert [b.text for b in head.badges][:3] == ["impersonnel", "actif", "confié"] and head.default_tab == "apercu"
+    # la vue d'un objet (la maquette) : son état en étiquette, son mode et à qui il est en faits
+    assert [b.text for b in head.badges][:1] == ["actif"] and head.default_tab == "apercu"
+    assert dict((k, getattr(v, "text", v)) for k, v in head.facts)["mode"] == "impersonnel"
     assert [f.key for f in alive["by_title"]] == [str(pid)] == [f.key for f in alive["by_number"]]
     assert "Outils réseau" in flat(alive["person"])
     # avant d'oublier quelqu'un, sa fiche dit ce que l'oubli n'atteint pas : l'atelier de ses projets (PRJ-9)
@@ -194,7 +196,8 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
 
     tabs, head, pid = live(tmp_path, scenario, atelier=atelier)
     # en tête : ce qui vaut pour tout le projet (les formulaires des onglets, et les lignes, n'y sont pas)
-    assert head == ["projects.lancer", "projects.pause", "projects.consigne", "projects.archiver"]
+    # la principale, puis la consigne ; la pause et le reste sous « ⋯ » (la maquette)
+    assert head == ["projects.lancer", "projects.consigne", "projects.pause", "projects.archiver"]
     overview = tabs["apercu"]
     assert "À décider (1)" in flat(overview) and "installer requests" in flat(overview)
     # une bande de chiffres, puis des tuiles (ADR 0176)

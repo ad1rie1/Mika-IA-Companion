@@ -1,0 +1,63 @@
+{# Réglages › Paramètres avancés › Vue d'ensemble (app/handmade/tabs/settings.py, ADR 0177) : ses paramètres en chiffres,
+   d'où vient une valeur (les quatre sources) ; puis en sous-onglets les facultés rangées par famille — chacune, ce que
+   le tempérament en dérive, ce qui est surchargé, réglé ailleurs ou refusé — et ce que pilote chaque curseur du
+   tempérament. Ouvrir une faculté mène à ses paramètres. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/reglages/_onglets.html" as regx %}
+<div class="now-page regx regx-overview" data-tab="reglages/comportement">
+  {{ tab.block(band) }}
+  {{ regx.sources(sources) }}
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Paramètres avancés">
+      <a href="#regx-faculties">Les facultés <span class="hm-count">{{ count }}</span></a>
+      <a href="#regx-sliders">Ce que pilote le tempérament <span class="hm-count">{{ sliders|length }}</span></a>
+    </nav>
+    <div class="hm-subpanes">
+      <section id="regx-faculties" data-pane aria-labelledby="regx-faculties-title" class="now-card">
+        {{ tab.head("Les facultés", "regx-faculties-title", count, "Rangées par famille. Ouvre une faculté pour lire et changer ses paramètres.") }}
+        {% if families %}
+        <div class="regx-families">
+          {% for fam in families %}
+          <section class="regx-family" aria-label="{{ fam.title }}">
+            <h3 class="now-subhead first">{{ fam.title }}</h3>
+            <ul class="regx-facs" role="list">
+              {% for f in fam["items"] %}
+              <li class="regx-fac{{ ' has-override' if f.overrides }}{{ ' has-refused' if f.refused }}">
+                <p class="regx-fac-top"><a href="{{ f.href }}">{{ f.label }}</a><span class="regx-fac-n now-num" title="paramètres">{{ f.params }}</span></p>
+                <p class="regx-fac-tags">
+                  <code>{{ f.name }}</code>
+                  {% if f.derived %}<span class="now-tag info" title="dérivés du tempérament">{{ f.derived }} tempérament</span>{% endif %}
+                  {% if f.overrides %}<span class="now-tag warn" title="surchargés par un opérateur">{{ f.overrides }} surcharge{{ 's' if f.overrides > 1 }}</span>{% endif %}
+                  {% if f.elsewhere %}<span class="now-tag ok" title="réglés ailleurs (sa persona, ses boîtes…)">{{ f.elsewhere }} réglage{{ 's' if f.elsewhere > 1 }}</span>{% endif %}
+                  {% if f.refused %}<span class="now-tag danger">{{ f.refused }} refusée{{ 's' if f.refused > 1 }}</span>{% endif %}
+                  {% if not f.journaled %}<span class="regx-fac-plain">valeurs par défaut</span>{% endif %}
+                </p>
+              </li>
+              {% endfor %}
+            </ul>
+          </section>
+          {% endfor %}
+        </div>
+        {% else %}{{ tab.empty("aucune faculté n'a de paramètres") }}{% endif %}
+      </section>
+      <section id="regx-sliders" data-pane aria-labelledby="regx-sliders-title" class="now-card">
+        {{ tab.head("Ce que pilote chaque curseur du tempérament", "regx-sliders-title", none, "Chaque curseur déplace des paramètres, de leur valeur à 0 à leur valeur à 1. Le tempérament se règle dans Personnage › Tempérament.") }}
+        <p class="regx-to-temper"><a href="{{ PREFIX }}/reglages/temperament">Régler le tempérament →</a></p>
+        {% if sliders %}
+        <ul class="regx-sliders" role="list">
+          {% for s in sliders %}
+          <li class="regx-slider">
+            <h3 class="regx-slider-name">{{ s.name }}</h3>
+            {% if s.moves %}
+            <ul class="regx-moves" role="list">
+              {% for m in s.moves %}<li><a href="{{ m.href }}">{{ m.faculty }}</a> <code>{{ m.path }}</code> <span class="regx-range now-num">{{ m.lo }} → {{ m.hi }}</span></li>{% endfor %}
+            </ul>
+            {% else %}<p class="now-empty">rien encore (non branché)</p>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty("aucun curseur") }}{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

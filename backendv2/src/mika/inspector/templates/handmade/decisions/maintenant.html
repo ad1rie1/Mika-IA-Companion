@@ -1,0 +1,53 @@
+{# Activité › Décisions › Table de l'arbitre (app/handmade/tabs/decisions.py, ADR 0177) : d'abord une phrase — elle
+   agirait en moyenne dans tant, sur telle ligne ; ou rien ne la fera agir, et pourquoi —, puis une entrée par ligne
+   de l'arbitre, la plus probable d'abord (ce qui pousse face à ce qui retient, ce qui l'en empêche, ce qui en sort) ;
+   les règles du jeu (comment un score devient un taux, le seuil et le rythme maximal de chaque sorte),
+   repliées sous la phrase. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/decisions/macros.html" as dec with context %}
+<div class="now-page arb" data-tab="decisions/maintenant">
+  {{ dec.notes(notes) }}
+  <section class="now-card arb-outlook" aria-labelledby="arb-outlook-title">
+    <p class="now-eyebrow" id="arb-outlook-title">À cet instant</p>
+    {% if outlook.live %}
+    <p class="arb-outlook-say">Elle agirait d’elle-même en moyenne dans <b>{{ outlook.wait }}</b>, si rien ne change.</p>
+    <p class="arb-outlook-sub">Le plus probable : {{ outlook.top }}{% if outlook.live > 1 %} ({{ outlook.share }} % des chances){% endif %}. En tout, {{ outlook.rate }} fois par heure.</p>
+    {% elif outlook.lines %}
+    <p class="arb-outlook-say">Rien ne la fera agir d’elle-même pour l’instant.</p>
+    <p class="arb-outlook-sub">{% if outlook.blocked == outlook.lines %}Chaque ligne est bloquée par un veto{% elif outlook.blocked %}{{ outlook.blocked }} ligne{{ 's' if outlook.blocked > 1 }} sur {{ outlook.lines }} bloquée{{ 's' if outlook.blocked > 1 }} par un veto, les autres sans rythme{% else %}Ses lignes n’ont pas de rythme{% endif %}.</p>
+    {% else %}
+    <p class="arb-outlook-say">Rien ne la pousse à agir.</p>
+    <p class="arb-outlook-sub">Personne de présent, rien qui lui donne une raison de parler ou de se mettre au travail.</p>
+    {% endif %}
+    <ul class="arb-counts" role="list">
+      <li><span class="now-num">{{ outlook.lines }}</span> ligne{{ 's' if outlook.lines != 1 }}</li>
+      <li class="{{ 'ok' if outlook.live }}"><span class="now-num">{{ outlook.live }}</span> possible{{ 's' if outlook.live > 1 }}</li>
+      <li class="{{ 'danger' if outlook.blocked }}"><span class="now-num">{{ outlook.blocked }}</span> bloquée{{ 's' if outlook.blocked > 1 }}</li>
+    </ul>
+    <details class="arb-rules">
+      <summary>Comment elle décide</summary>
+      <div class="arb-rules-body">
+        <ol class="arb-rules-how" role="list">
+          <li><b>Des preuves.</b> Chaque faculté apporte ses raisons d’agir (ou de se retenir), en points ; elles s’additionnent par sorte d’épisode et par personne.</li>
+          <li><b>Un seuil.</b> Chaque sorte a le sien, retiré de la somme : ce qui reste est le score. À zéro, ce qui pousse et ce qui retient se valent.</li>
+          <li><b>Un tirage.</b> Le score devient un taux (la moitié de son rythme maximal à un score nul) ; un tirage au hasard décide quand, à ce rythme. Un veto le met à zéro.</li>
+        </ol>
+        {% if kinds %}
+        <dl class="arb-kinds">
+          {% for k in kinds %}<div><dt>{{ k.kind }}</dt><dd>seuil <span class="now-num">{{ k.threshold }}</span> · au plus <span class="now-num">{{ k.top }}</span>&nbsp;fois&nbsp;/&nbsp;h</dd></div>{% endfor %}
+        </dl>
+        {% endif %}
+      </div>
+      {% if t.caption %}<p class="arb-rules-note">{{ t.caption }}</p>{% endif %}
+    </details>
+  </section>
+
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="arb-lines-title">
+    {{ tab.head(t.title, "arb-lines-title", t.count, "Chaque ligne : une sorte d’épisode envers quelqu’un. Ce qui pousse face à ce qui retient ; le trait du milieu, c’est l’équilibre.") }}
+    {% if items %}
+    <ul class="arb-lines" role="list">{% for x in items %}{{ dec.line(x) }}{% endfor %}</ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+
+</div>

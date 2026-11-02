@@ -1,0 +1,44 @@
+{# Connexions extérieures › Appareils (app/handmade/tabs/senses.py, ADR 0177) : ses appareils à gauche — combien de
+   signaux, le dernier ; chacun filtre la page —, ce qu'ils lui ont signalé à droite (ce que ça pourrait lui faire, sa
+   pertinence, l'événement au journal). Aucun appareil : ce que dit la vue. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/sens/_sens.html" as sx with context %}
+<div class="now-page sens-page dev" data-tab="sens/appareils">
+  {% if empty %}
+  <section class="now-card"><p class="now-empty">{{ empty }}</p></section>
+  {% else %}
+  <div class="sens-split side">
+    <section class="now-card" id="{{ devices.id if devices else 'dev-devices' }}" aria-labelledby="dev-devices-title">
+      {{ tab.head("Ses appareils", "dev-devices-title", total) }}
+      <ul class="sens-list dev-list" role="list">
+        {% if chosen %}<li class="sens-item dev-all"><a href="{{ PREFIX }}/sens/appareils">← Tous les appareils</a></li>{% endif %}
+        {% for d in device_items %}
+        <li class="sens-item dev-one{{ ' on' if d.on }}">
+          <p class="dev-name">{% if d.href %}<a href="{{ d.href }}"{% if d.on %} aria-current="page"{% endif %}>{{ d.name }}</a>{% else %}{{ d.name }}{% endif %}
+            <span class="dev-count now-num" title="signaux reçus">{{ d.count }}</span></p>
+          <p class="sens-meta"><span>le dernier {{ tab.cell(d.last) }}</span></p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if devices %}{{ tab.pager(devices) }}{% endif %}
+    </section>
+    <section class="now-card" id="{{ signals.id }}" aria-labelledby="dev-signals-title">
+      {{ tab.head(signals.title, "dev-signals-title", none, "Ce qu'un appareil lui signale est une donnée venue d'ailleurs : elle le remarque, comme un mail ou un titre de flux.") }}
+      {% if signal_items %}
+      <ol class="sens-list sens-feed" role="list">
+        {% for s in signal_items %}
+        <li class="sens-item">
+          <span class="sens-feed-when">{{ tab.cell(s.when) }}</span>
+          <div class="sens-feed-body">
+            <p class="sens-feed-text">{% if s.emotion %}<span class="now-dot sw-{{ s.emotion.key }}" title="{{ s.emotion.text }}" aria-hidden="true"></span>{% endif %}{{ tab.cell(s.text) }}</p>
+            <p class="sens-meta"><b>{{ s.device }}</b>{% if s.emotion %}<span class="now-muted">{{ s.emotion.text }}</span>{% endif %}{{ sx.score(s.score) }}{{ sx.event(s.event) }}</p>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}{{ tab.empty(signals.empty) }}{% endif %}
+      {{ tab.pager(signals) }}
+    </section>
+  </div>
+  {% endif %}
+</div>

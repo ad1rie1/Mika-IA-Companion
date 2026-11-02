@@ -165,10 +165,14 @@ def test_enter_never_fires_a_secondary_or_destructive_button(world):  # noqa: F8
     client, live, _ = world
     bootstrap(client)
     # approuver : Entrée dans la note ne décide rien, « Approuver » se confirme
+    opened = {"proposal": 3, "capability": "Envoyer un mail", "capability_key": "email.send", "summary": "Un mail",
+              "context": "", "args": "{}", "when": "maintenant", "ago": "à l'instant", "event": "", "preview": "",
+              "seen": "", "blocked": "", "position": 1, "total": 1, "previous": "", "next": "", "follow": "",
+              "kind": "", "effect": True, "tab": ""}
     page = templates.get_template("handmade/approbations/attente.html").render(
-        items=[{"proposal": 3, "capability": "Envoyer un mail", "capability_key": "email.send", "summary": "Un mail",
-                "context": "", "args": "{}", "when": "maintenant", "preview": "", "seen": "", "blocked": ""}],
-        csrf="x", PREFIX=BASE, pending_pager=None)
+        items=[{"proposal": 3, "capability": "Envoyer un mail", "context": "", "summary": "Un mail", "ago": "",
+                "exact": "", "href": "?demande=3", "on": True}], opened=opened, total=1, shown=1, kinds=[],
+        kind="", all_href="?", explicit=False, csrf="x", PREFIX=BASE, pending_pager=None)
     default = _first_submit(page)
     assert "disabled" in default and 'value="approve"' not in default
     assert re.search(r'value="approve" data-confirm="Approuver', page)

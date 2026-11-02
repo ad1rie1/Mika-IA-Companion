@@ -1,0 +1,162 @@
+/* Elle › Mémoire (app/handmade/tabs/memory.py, ADR 0177) : ses souvenirs, croyances, promesses et moments en listes à
+   filets, deux colonnes sur un grand écran ; ses pièces reçues, leur place, ce qu'elle voit venir, la relecture. Les
+   couleurs viennent des jetons (une émotion : sa classe sw-<émotion>), les longueurs d'attributs SVG — jamais d'un
+   style en ligne. */
+
+/* ── Une liste d'éléments retenus : des filets entre eux, pas de carte dans la carte ── */
+.memories-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 32px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 1180px) { .memories-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.memories-item { display: grid; align-content: start; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.memories-item.faded { color: var(--muted); }
+.memories-top { display: flex; align-items: baseline; gap: 4px; }
+.memories-text { min-width: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.memories-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 12.5px; }
+.memories-when { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.memories-left { display: grid; grid-template-columns: minmax(0, 160px) auto; align-items: center; gap: 8px; margin: 0;
+  color: var(--muted); font-size: 12px; }
+.memories-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0; font-size: 13px; }
+.memories-foot .person-entry-detail[open] { flex: 1 1 100%; }
+.memories-item:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
+
+/* ── Croyances : la confiance à gauche, en chiffre et en jauge ; l'origine en étiquette ── */
+.memories-item.belief { grid-template-columns: 64px minmax(0, 1fr); column-gap: 16px; }
+.belief-trust { display: grid; align-content: start; gap: 5px; padding-top: 1px; }
+.belief-trust-value { font: 650 19px/1.1 var(--display); letter-spacing: -.01em; }
+.belief-trust .now-bar { width: 100%; margin: 0; }
+.belief-trust-label { color: var(--muted); font-size: 11px; }
+.belief-main { display: grid; gap: 6px; min-width: 0; }
+.belief.faded .belief-trust-value { color: var(--muted); }
+.belief.faded .now-bar.confidence .fill { stroke: var(--border-strong); }
+.belief-origin { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; }
+.belief-origin::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.belief-origin.o-told::before { background: var(--info); }
+.belief-origin.o-observed::before { background: var(--ok); }
+.belief-origin.o-inferred::before { border: 1.5px solid var(--muted); background: transparent; }
+.belief-replaces { color: var(--muted); }
+
+/* ── Promesses : l'échéance à gauche ; tenues et abandonnées côte à côte ── */
+.promises-group-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; font: 600 13.5px/1.3 var(--display); }
+.memories-item.promise { grid-template-columns: 112px minmax(0, 1fr); column-gap: 16px; }
+.promise-main { display: grid; gap: 6px; min-width: 0; }
+.promise-due { display: grid; align-content: start; gap: 2px; padding-top: 2px; }
+.promise-due-word { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.promise-due-when { font-size: 13.5px; font-weight: 600; }
+.promise.late { box-shadow: inset 3px 0 var(--warn); padding-left: 12px; }
+.promise.late .promise-due-word, .promise.late .promise-due-when { color: var(--warn); }
+.promises-done { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 32px; margin-top: 18px; }
+@media (min-width: 900px) { .promises-done { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.promises-closed { display: grid; margin: 0; padding: 0; list-style: none; }
+.promises-closed .memories-item.promise { grid-template-columns: 18px minmax(0, 1fr); column-gap: 10px; }
+.promise-mark { padding-top: 1px; font-size: 14px; font-weight: 700; line-height: 1.5; }
+.promise.kept .promise-mark::before { content: "✓"; color: var(--ok); }
+.promise.dropped .promise-mark::before { content: "✕"; color: var(--muted); }
+.promise.dropped .memories-text { color: var(--text-2); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+
+/* ── La vie des autres : un agenda, chaque moment à sa date en pavé de calendrier ── */
+.moments-group + .moments-group { margin-top: 20px; }
+.moments-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 6px; }
+.moments-group-head h3 { font: 600 13.5px/1.3 var(--display); }
+.moments-group-head p { flex: 1 1 240px; margin: 0; color: var(--muted); font-size: 12.5px; }
+.memories-item.moment { grid-template-columns: 50px minmax(0, 1fr); column-gap: 14px; }
+.moment-main { display: grid; gap: 6px; min-width: 0; }
+.moment-day { display: grid; align-self: start; justify-items: center; align-content: start; gap: 1px; padding: 5px 0 6px; border: 1px solid var(--border);
+  border-radius: var(--radius); font-variant-numeric: tabular-nums; }
+.moment-day-n { font: 650 19px/1.1 var(--display); }
+.moment-day-m { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.moment-day-w { color: var(--muted); font-size: 11px; }
+.moment-day.none .moment-day-m { color: var(--muted); text-transform: none; text-align: center; }
+.moments-group.current .moment-day { border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.moments-group.current .moment-day-m { color: var(--ok); }
+.moments-group.past .moment-day-m, .moment.faded .moment-day-m { color: var(--muted); }
+.moments-group.past .moment-day-n { color: var(--text-2); }
+
+/* ── Pièces reçues : une icône par sorte, ce qu'elle y a lu en citation ── */
+.memories-item.piece { grid-template-columns: 40px minmax(0, 1fr); column-gap: 14px; }
+.piece-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius);
+  color: var(--s3); background: color-mix(in srgb, var(--s3) 11%, var(--surface)); }
+.piece.k-image .piece-icon { color: var(--s1); background: color-mix(in srgb, var(--s1) 11%, var(--surface)); }
+.piece.k-audio .piece-icon { color: var(--s2); background: color-mix(in srgb, var(--s2) 11%, var(--surface)); }
+.piece.faded .piece-icon { color: var(--muted); background: none; border: 1px dashed var(--border-strong); }
+.piece-icon-svg { width: 22px; height: 22px; stroke: currentColor; }
+.piece-main { display: grid; gap: 6px; min-width: 0; }
+.piece-name { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.piece-name a { color: var(--text); }
+.piece-name a:hover { color: var(--accent); }
+.piece.faded .piece-name a { color: var(--muted); }
+.piece-seen { padding-left: 10px; border-left: 2px solid var(--border); color: var(--text-2); font-size: 13.5px; line-height: 1.5;
+  overflow-wrap: anywhere; }
+.piece-seen .now-eyebrow { display: block; margin-bottom: 2px; font-size: 10.5px; }
+.piece-seen.none { margin: 0; color: var(--muted); font-style: italic; }
+.piece-download { padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-2); }
+.piece-download:hover { border-color: var(--border-strong); color: var(--text); text-decoration: none; }
+
+/* ── Place des pièces : une jauge par personne ── */
+.place-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.place-row { display: grid; grid-template-columns: minmax(120px, 220px) minmax(120px, 1fr) 52px minmax(150px, max-content);
+  align-items: center; gap: 6px 18px; padding: 11px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.place-row:first-child { border-top: 0; padding-top: 2px; }
+.place-who { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.place-who a { color: var(--text); }
+.place-who a:hover { color: var(--accent); }
+.place-bar .now-bar { width: 100%; margin: 0; }
+.place-share { text-align: right; font-weight: 600; }
+.place-row.warn .now-bar .fill { stroke: var(--warn); }
+.place-row.warn .place-share { color: var(--warn); }
+.place-row.danger .now-bar .fill { stroke: var(--danger); }
+.place-row.danger .place-share { color: var(--danger); }
+
+/* ── Voir venir : ses attentes sur une échelle, qui tient ce qu'il annonce ── */
+.ahead-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--now-gap); align-items: start; }
+.ahead-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.ahead-row { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.ahead-row:first-child { padding-top: 2px; border-top: 0; }
+.ahead-name { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 0;
+  font-size: 14px; font-weight: 600; }
+.ahead-name .now-muted { font-size: 12.5px; font-weight: 400; }
+.ahead-scale, .ahead-split { display: block; width: calc(100% - 6px); margin: 0 3px; overflow: visible; }
+.ahead-scale { height: 14px; }
+.ahead-split { height: 6px; }
+.ahead-scale line, .ahead-split line { stroke-width: 6px; stroke-linecap: round; }
+.ahead-scale .track { stroke: var(--track); }
+.ahead-scale .fill { stroke: var(--ok); }
+.ahead-scale.warn .fill { stroke: var(--warn); }
+.ahead-scale.danger .fill { stroke: var(--danger); }
+.ahead-scale .coin { stroke: var(--text-2); stroke-width: 1.5px; stroke-linecap: butt; stroke-dasharray: 2 2; }
+.ahead-scale-legend { display: grid; grid-template-columns: 1fr auto 1fr; margin: 0; color: var(--muted); font-size: 11px; }
+.ahead-split .missed { stroke: color-mix(in srgb, var(--warn) 65%, var(--track)); }
+.ahead-split .kept { stroke: var(--ok); }
+.ahead-help { margin: 8px 0 0; max-width: 70ch; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+@media (max-width: 1000px) { .ahead-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Consolidation : une phrase, des chiffres, puis la relecture en sous-onglets ── */
+.consol-lede { margin: 0; color: var(--text-2); font-size: 14px; }
+.consol-queue, .consol-feed { display: grid; margin: 0; padding: 0; list-style: none; }
+.consol-passage { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
+.consol-passage:first-child, .consol-feed > li:first-child { padding-top: 2px; border-top: 0; }
+.person-tab-note + .consol-queue { margin-top: 12px; }
+.consol-passage-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.consol-passage-title { margin: 0; font-weight: 600; }
+.consol-passage-acts > * { margin: 0; }
+.consol-passage-cause { margin: 0; font-size: 14px; }
+.consol-feed > li { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 4px 16px; padding: 10px 0;
+  border-top: 1px solid var(--border); }
+.consol-feed-when { padding-top: 1px; color: var(--muted); font-size: 12.5px; }
+.consol-feed-body { display: grid; gap: 4px; min-width: 0; }
+.consol-feed-body p { margin: 0; }
+.consol-feed > li.failed .consol-feed-body > p:first-child { color: var(--danger); }
+.consol-model { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+/* ── Écrans étroits ── */
+/* une bande de chiffres impaire sur deux colonnes : la dernière case prend la rangée, sans case vide */
+@media (max-width: 560px) {
+  .consol .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .memories-item.promise { grid-template-columns: minmax(0, 1fr); }
+  .promise-due { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .place-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .place-bar { grid-column: 1 / -1; grid-row: 2; }
+  .place-used { grid-column: 1 / -1; }
+  .consol-feed > li { grid-template-columns: minmax(0, 1fr); }
+  .memories-when { margin-left: 0; }
+}

@@ -1,0 +1,80 @@
+{# Ce que partagent les onglets de Décisions (app/handmade/tabs/decisions.py, ADR 0177) : une ligne de l'arbitre, lue
+   partout de la même façon — sa sorte et vers qui, ce qui en sort (combien de fois par heure), une phrase ; puis ce
+   qui pousse et ce qui retient sur une même barre, de part et d'autre de l'équilibre (le trait du milieu : le vert
+   qui le passe l'emporte) ; ce qui l'en empêche ; le calcul pas à pas, replié. Les notes de la console. À importer
+   « with context ». Aucun style en ligne (CSP) : une longueur est un attribut SVG. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+
+{% macro notes(list) -%}
+{% for n in list %}<p class="person-tab-note {{ n.tone }}">{% if n.title %}<b>{{ n.title }}</b> {% endif %}{{ n.text }}</p>{% endfor %}
+{%- endmacro %}
+
+{% macro tug(x) -%}
+<svg class="arb-tug{{ ' vetoed' if x.vetoes }}" viewBox="0 0 100 10" preserveAspectRatio="none" role="img"
+     aria-label="Ce qui pousse {{ x.push }} face à ce qui retient {{ x.hold }}">
+  {% for s in x.segments %}<rect class="{{ s.cls }}" x="{{ s.x }}" y="1" width="{{ s.w }}" height="8"/>{% endfor %}
+  <line class="mid" x1="50" x2="50" y1="0" y2="10" vector-effect="non-scaling-stroke"/>
+</svg>
+{%- endmacro %}
+
+{% macro side(items, title, cls) -%}
+<div class="arb-side {{ cls }}">
+  <p class="arb-side-head">{{ title }}</p>
+  {% if items %}
+  <ul class="arb-items" role="list">
+    {% for i in items %}<li{% if i.hint %} title="{{ i.hint }}"{% endif %}><span class="arb-dot {{ i.cls }}" aria-hidden="true"></span><span class="arb-item-label">{{ i.label }}</span><span class="arb-item-value now-num">{{ i.text }}</span></li>{% endfor %}
+  </ul>
+  {% else %}<p class="arb-none">rien</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro say(x) -%}
+<p class="arb-say">
+  {%- if x.state == "blocked" -%}
+  Elle ne le fera pas tant que ce qui l’en empêche tient{% if x.score[:1] == '+' %} — sans cela, ce qui pousse l’emporterait de {{ x.gap }}{% endif %}.
+  {%- elif x.state == "likely" -%}
+  Ce qui pousse l’emporte de {{ x.gap }} : elle le ferait environ {{ x.rate }} fois par heure, en moyenne dans {{ x.wait }}.
+  {%- elif x.state == "under" -%}
+  Il lui manque {{ x.gap }} pour l’emporter : à ce rythme, en moyenne dans {{ x.wait }}, si rien ne change.
+  {%- else -%}
+  Cette sorte d’épisode n’a pas de rythme : elle ne part jamais d’elle-même.
+  {%- endif -%}
+</p>
+{%- endmacro %}
+
+{% macro line(x, compact=False) -%}
+<li class="arb-line s-{{ x.state or 'missing' }}{{ ' chosen' if x.chosen }}{{ ' compact' if compact }}">
+  {% if x.missing %}
+  <p class="arb-title">{{ x.label }}</p>
+  <p class="arb-say now-muted">Cette ligne a changé depuis la lecture de la table : actualise la page.</p>
+  {% else %}
+  <div class="arb-top">
+    <p class="arb-title">{{ x.kind|capitalize }}{% if x.who %}<span class="arb-who"> · {{ tab.cell(x.who) }}</span>{% endif %}</p>
+    <span class="now-tag {{ x.tone }}">{{ x.tag }}</span>
+    {% if x.chosen %}<span class="now-tag live">choisie</span>{% endif %}
+    <p class="arb-rate" title="Le taux qui sort du score : un tirage au hasard décide, à ce rythme">
+      <span class="arb-rate-n now-num">{{ x.rate if x.state != 'blocked' else '0' }}</span>
+      <span class="arb-rate-u">fois / h{% if x.top %}<br><span class="now-muted">au plus {{ x.top }}</span>{% endif %}</span>
+    </p>
+  </div>
+  {{ say(x) }}
+  {% if x.segments %}{{ tug(x) }}<p class="arb-tug-legend"><span>pousse <span class="now-num">+{{ x.push }}</span></span><span class="arb-tug-score">score <span class="now-num">{{ x.score }}</span></span><span>retient <span class="now-num">−{{ x.hold }}</span></span></p>{% endif %}
+  {% if x.vetoes %}<p class="arb-vetoes"><span class="arb-vetoes-label">Ce qui l’en empêche</span>{% for v in x.vetoes %}<span class="now-tag danger">{{ v }}</span>{% endfor %}</p>{% endif %}
+  {% if not compact %}
+  <div class="arb-sides">
+    {{ side(x.pushes, "Ce qui pousse", "push") }}
+    {{ side(x.holds, "Ce qui retient", "hold") }}
+  </div>
+  {% if x.idle %}<p class="arb-idle"><span class="now-muted">Là, mais sans poids :</span> {{ x.idle|join(", ") }}</p>{% endif %}
+  {% endif %}
+  <details class="person-entry-detail arb-calc">
+    <summary>{{ "Ce qui pousse, ce qui retient, pas à pas" if compact else "Le calcul pas à pas" }}</summary>
+    <ol class="arb-steps" role="list">
+      {% for s in x.steps %}<li><span class="arb-step-what">{{ s.what }}</span><span class="arb-step-label">{{ s.label }}</span><span class="arb-step-value now-num {{ s.tone }}">{{ s.text }}</span><span class="arb-step-total now-num">{{ s.total }}</span></li>{% endfor %}
+      <li class="arb-step-score"><span class="arb-step-what">score</span><span class="arb-step-label">ce qui reste, une fois le seuil retiré</span><span class="arb-step-value"></span><span class="arb-step-total now-num">{{ x.score }}</span></li>
+    </ol>
+    <p class="arb-calc-note">Le score devient un taux : {{ x.rate }} fois par heure{% if x.top %}, sur {{ x.top }} au plus pour cette sorte (à un score nul, la moitié){% endif %}{% if x.vetoes %} — zéro tant qu’un veto tient{% endif %}.</p>
+  </details>
+  {% endif %}
+</li>
+{%- endmacro %}
