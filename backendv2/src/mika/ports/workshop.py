@@ -21,6 +21,10 @@ Le dépôt git de l'atelier se lit (historique, un commit, l'état) et peut
 **pousser** vers un dépôt distant ou en **récupérer** l'histoire : ces deux-là
 ont besoin du réseau et d'un jeton, que l'adaptateur tient lui-même (jamais
 l'appelant, jamais le modèle).
+
+L'**hôte** d'un dépôt distant (GitHub, ``RepoHost``) se lit à part, pour la
+console seulement : la tête de la branche, ses derniers commits, les issues et
+pull requests ouvertes (ADR 0183). Il ne lui écrit rien.
 """
 
 from __future__ import annotations
@@ -154,6 +158,15 @@ class Workshop(Protocol):
         """Le commit courant (son identifiant complet), ou ``""``."""
         ...
 
+    async def branch(self, project: int) -> str:
+        """La branche courante de l'atelier (``main`` d'ordinaire), ou ``""``."""
+        ...
+
+    async def compare(self, project: int, sha: str) -> tuple[int, int] | None:
+        """L'atelier face à un commit (la tête du distant) : (ses enregistrements que ce commit n'a pas, ceux de ce
+        commit qu'il n'a pas) ; ``None`` s'il ne connaît pas ce commit."""
+        ...
+
     async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
         """Pousser ce commit (``sha`` : celui qu'on a approuvé ; vide : le courant) vers un dépôt distant https ;
         le jeton est celui de l'adaptateur, et seulement pour les hôtes qu'il autorise."""
@@ -161,4 +174,69 @@ class Workshop(Protocol):
 
     async def pull(self, project: int, url: str, branch: str) -> RunResult:
         """Récupérer l'histoire d'un dépôt distant : en ligne droite seulement ; un atelier vierge la prend."""
+        ...
+
+
+# ── L'hôte du dépôt distant (ADR 0183) ──
+
+
+@dataclass(frozen=True, slots=True)
+class Ticket:
+    """Une issue ou une pull request ouverte chez l'hôte du dépôt distant."""
+
+    number: int
+    title: str
+    #: sa page chez l'hôte (composée par l'adaptateur, jamais reprise de la réponse)
+    url: str
+    author: str = ""
+    #: sa dernière mise à jour (µs)
+    at: int = 0
+    labels: tuple[str, ...] = ()
+    comments: int = 0
+    #: une pull request : sa branche, celle où elle veut entrer, et si c'est un brouillon
+    head: str = ""
+    base: str = ""
+    draft: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Hosted:
+    """Ce que l'hôte dit d'un dépôt, lu à un instant (``read_at``, µs). ``error`` non vide : il n'a pas répondu, ou
+    il refuse — le reste est vide. ``head`` vide sans erreur : la branche n'existe pas encore chez lui."""
+
+    #: « compte/depot », et sa page
+    name: str
+    url: str
+    branch: str
+    host: str = "GitHub"
+    about: str = ""
+    private: bool = False
+    #: le commit au bout de la branche (son identifiant complet), et ses derniers commits, du plus récent
+    head: str = ""
+    commits: tuple[Commit, ...] = ()
+    issues: tuple[Ticket, ...] = ()
+    pulls: tuple[Ticket, ...] = ()
+    #: combien sont ouvertes (au moins : ``more_*`` vrai, l'hôte en a plus que la page lue)
+    open_issues: int = 0
+    open_pulls: int = 0
+    more_issues: bool = False
+    more_pulls: bool = False
+    read_at: int = 0
+    error: str = ""
+
+
+class RepoHost(Protocol):
+    """L'hôte des dépôts distants (GitHub), en lecture seule et pour la console : la branche, ses derniers commits, les
+    issues et pull requests ouvertes. Une lecture se garde un moment ; ``fresh`` la refait, ``since`` (µs) aussi
+    quand elle est plus ancienne (un envoi, une récupération depuis). Pousser et récupérer restent à l'atelier."""
+
+    def handles(self, url: str) -> bool:
+        """Cet hôte sait lire ce dépôt (``https://github.com/compte/depot``)."""
+        ...
+
+    async def read(self, url: str, branch: str, *, fresh: bool = False, since: int = 0) -> Hosted: ...
+
+    async def compare(self, url: str, base: str, head: str) -> tuple[int, int] | None:
+        """``base`` (un commit de l'atelier) face à ``head`` (la tête du distant) : (les commits de ``base`` que
+        ``head`` n'a pas, ceux de ``head`` que ``base`` n'a pas) ; ``None`` si l'hôte ne connaît pas ``base``."""
         ...

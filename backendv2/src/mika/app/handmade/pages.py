@@ -56,7 +56,6 @@ DRAWN: dict[str, Drawn] = {
     **people.TABS,
     **identities.TABS,
     **teams.TABS,
-    "fil/messages": Shaped(conversations.messages),
     "fil/jugees": Shaped(conversations.judged),
     **threads.TABS,
     "courrier/reception": Shaped(mail.box, "handmade/mail.css", forms=True),

@@ -1,4 +1,4 @@
-"""Un atelier en mémoire : le port ``Workshop`` sans bubblewrap ni git.
+"""Un atelier en mémoire : le port ``Workshop`` sans bubblewrap ni git ; et un hôte de dépôt distant (``Host``).
 
 Des fichiers par projet, un historique à la git (un commit d'amorce, puis un par
 enregistrement qui a changé quelque chose, titré comme l'adaptateur le forme),
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from mika.ports.workshop import Commit, OutsideWorkshop, RunResult
+from mika.ports.workshop import Commit, Hosted, OutsideWorkshop, RunResult
 
 #: l'instant d'un commit en mémoire (il n'a pas d'horloge : il compte)
 STAMP = 1_790_000_000_000_000
@@ -101,6 +101,14 @@ class Atelier:
         commits = self.commits_.get(project, [])
         return commits[-1][0] if commits else ""
 
+    async def branch(self, project: int) -> str:
+        return "main" if project in self.commits_ else ""
+
+    async def compare(self, project: int, sha: str) -> tuple[int, int] | None:
+        """Une histoire en ligne droite : un commit connu est derrière la tête d'autant de commits."""
+        shas = [s for s, _ in self.commits_.get(project, [])]
+        return (len(shas) - 1 - shas.index(sha), 0) if sha in shas else None
+
     async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
         if not self.token:
             return RunResult(("git", "push"), None, refused="pas d'envoi : aucun jeton : règle-le dans "
@@ -114,3 +122,20 @@ class Atelier:
         self.files.setdefault(project, {})["README.md"] = "# Récupéré\n"
         self.commits_.setdefault(project, [("a000000", "atelier ouvert")]).append(("r000001", "depuis le distant"))
         return RunResult(("git", "pull", url, branch), 0, stdout="Fast-forward\n")
+
+
+class Host:
+    """Un hôte de dépôt distant en mémoire (le port ``RepoHost``) : ce qu'il rend, et ce qu'on lui a demandé."""
+
+    def __init__(self, hosted: Hosted, gap: tuple[int, int] | None = None) -> None:
+        self.hosted, self.gap, self.asked = hosted, gap, []
+
+    def handles(self, url: str) -> bool:
+        return url.startswith("https://github.com/")
+
+    async def read(self, url: str, branch: str, *, fresh: bool = False, since: int = 0) -> Hosted:
+        self.asked.append((url, branch, fresh, since))
+        return self.hosted
+
+    async def compare(self, url: str, base: str, head: str) -> tuple[int, int] | None:
+        return self.gap

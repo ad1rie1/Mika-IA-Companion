@@ -56,7 +56,8 @@ class Inspection:
         return next((v for v in self.registry.inspectors if v.owner == owner and v.name == name), None)
 
     def in_section(self, section: str) -> list[InspectSpec]:
-        return sorted((v for v in self.registry.inspectors if v.section == section),
+        """Les onglets d'une destination : ses vues, sans celles hors de la navigation (``hidden``)."""
+        return sorted((v for v in self.registry.inspectors if v.section == section and not v.hidden),
                       key=lambda v: (v.order, v.title))
 
     def tabs(self, kind: str, key: str = "") -> list[InspectSpec]:

@@ -1,7 +1,7 @@
-"""Ses échanges, dessinés (ADR 0121) : l'onglet Échanges de la fiche d'une personne, une conversation jour par jour —
-la personne à gauche, elle à droite, de la couleur de ce qu'elle ressentait en écrivant. Sans personne (``key`` vide),
-toutes ses conversations (Conversations › Messages) ou celles d'un moyen de communication (l'onglet Fil de sa fiche),
-chaque message avec qui l'a écrit ou à qui elle répondait.
+"""Ses échanges, dessinés (ADR 0121) : l'onglet Échanges de la fiche d'une personne, une conversation jour par jour,
+les plus récents en premier (ADR 0181) — la personne à gauche, elle à droite, de la couleur de ce qu'elle ressentait en
+écrivant. Sans personne (``key`` vide), celles d'un moyen de communication (l'onglet Fil de sa fiche), chaque message
+avec qui l'a écrit ou à qui elle répondait.
 
 Les données restent celles de la faculté du fil (``transcript``, son onglet ``echanges``) : ses lignes disent déjà,
 pour chaque message reçu, s'il a eu sa réponse, s'il attend, ou pourquoi il est resté sans réponse ; pour chacune de
@@ -41,13 +41,13 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
         return None
     look = Look.of(ui, DAY)
     shown = render.Env(when=ui.when_long, now=look.now)
-    # qui parle : sur la fiche d'une personne, utile seulement si elle a plusieurs adresses ; sur la page de toutes
-    # les conversations (``key`` vide), toujours
+    # qui parle : sur la fiche d'une personne, utile seulement si elle a plusieurs adresses ; sur la fiche d'un moyen
+    # de communication (``key`` vide), toujours
     several = not key or len(look.frame.get(identity_c.HANDLES(key)) or ()) > 1
 
     cell = reader(table)
     messages: list[dict[str, Any]] = []
-    for raw in reversed(table.rows):  # la page va du plus récent au plus ancien : on la lit dans l'ordre
+    for raw in table.rows:  # du plus récent au plus ancien, comme la page de la faculté (ADR 0181)
         row = raw if isinstance(raw, Row) else Row(tuple(raw))
         speaker = cell(row, "qui parle")
         mine = isinstance(speaker, Badge) and speaker.text == "elle"

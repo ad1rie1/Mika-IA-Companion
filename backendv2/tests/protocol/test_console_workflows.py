@@ -82,17 +82,24 @@ def test_reading_pages_show_content_keep_details_and_search_names(world, tmp_pat
     out = tmp_path / "review"
     out.mkdir()
     shutil.copytree(STATIC, out / "static")
-    messages = page(client, "/inspecteur/fil/messages?handle=Alice", out)
+    # Conversations : une ligne par personne, le filtre par nom (ADR 0181) ; l'ancienne adresse y mène, filtre gardé
+    found = page(client, "/inspecteur/fil/conversations?handle=Alice", out)
+    assert found.count('<li class="fil-conv') == 1 and "Suite du message 60" in found
+    moved = client.get("/inspecteur/fil/messages?handle=Alice", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"] == "/inspecteur/fil/conversations?handle=Alice"
+    messages = page(client, "/inspecteur/fiche/person/alice?onglet=echanges", out)
     assert "alice : un message" in messages and "bob : un message" not in messages
-    # la conversation est dessinée (ADR 0121) : le message entier, son numéro, et la même liste en tableau à un clic
+    # la conversation est dessinée (ADR 0121) : le message entier, son numéro, et la même liste en tableau à un clic ;
+    # les plus récents en premier (ADR 0181)
     assert 'class="now-card person-chat"' in messages and "Suite du message" in messages and "n° " in messages
-    assert 'href="?handle=Alice&amp;vue_pg1=table"' in messages or 'href="?handle=Alice&vue_pg1=table"' in messages
-    table = page(client, "/inspecteur/fil/messages?handle=Alice&vue_pg1=table", out)
+    assert messages.index("Suite du message 60") < messages.index("Suite du message 59")
+    as_table = html.unescape(re.search(r'<a class="person-as-table" href="([^"]+)"', messages).group(1))
+    table = page(client, "/inspecteur/fiche/person/alice" + as_table, out)
     assert "épisode" not in headers(table) and "texte" in headers(table)
     assert "alice : un message" in table and "bob : un message" not in table
     assert "Informations complémentaires" in table
     next_url = html.unescape(re.search(r'<a href="([^"]+)" rel="next">', messages).group(1))
-    tail = page(client, "/inspecteur/fil/messages" + next_url, out)
+    tail = page(client, "/inspecteur/fiche/person/alice" + next_url, out)
     assert "Plus récents" in tail and "alice : un message" in tail
     memories = page(client, "/inspecteur/memoire/souvenirs?person=Alice&page=2", out)
     assert "Souvenir 0 : Alice" in memories and "importance" not in headers(memories)
@@ -102,7 +109,7 @@ def test_reading_pages_show_content_keep_details_and_search_names(world, tmp_pat
     for url in ("personnes/personnes", "identites/annuaire", "pensees/pensees", "buts/projets",
                 "buts/vivants", "buts/clos", "vie/humeur", "vie/postures", "vie/needs", "vie/rythme", "vie/soi",
                 "pensees/remarque", "pensees/attentes", "pensees/nuits", "memoire/croyances", "memoire/promesses",
-                "memoire/consolidation", "personnes/liens", "personnes/presents", "identites/revendications",
+                "memoire/consolidation", "personnes/liens", "personnes/presents", "approbations/identites",
                 "identites/politique", "fil/questions", "decisions/maintenant", "decisions/en_cours",
                 "decisions/initiatives", "decisions/selections", "decisions/episodes", "decisions/echeances",
                 "sens/flux", "sens/camera", "sens/appareils", "apps", "systeme/sante", "systeme/processus",
@@ -211,7 +218,7 @@ def test_a_request_links_to_its_source(world):  # noqa: F811
     sources = body.split('class="apv-sources"', 1)[1].split("</p>", 1)[0]
     assert '/inspecteur/fiche/brouillon/d-1">Le brouillon' in sources
     assert '/inspecteur/courrier/reception?compte=perso">La boîte « perso »' in sources
-    assert ">La fiche de Adrien<" in sources and "/inspecteur/fil/messages?handle=user_1" in sources
+    assert ">La fiche de Adrien<" in sources and "/inspecteur/fiche/person/user_1?onglet=echanges" in sources
 
 
 def test_large_episode_keeps_its_outcome_and_every_event_accessible(world, tmp_path):  # noqa: F811

@@ -1,0 +1,220 @@
+{# Activité › Projets › un projet › Dépôt git (app/handmade/project_git.py, ADR 0183) : un seul bandeau ; l'atelier
+   et le distant face à face, l'écart entre eux au milieu avec « Pousser », « Récupérer » et « Relire » (le geste qui
+   comble l'écart en avant) ; puis, en sous-onglets, l'historique de l'atelier (un commit ouvert en diff au-dessus),
+   ce qui n'est pas enregistré, l'histoire du distant, ses issues et pull requests, les échanges et les réglages. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "_forms.html" import action_button %}
+<div class="now-page prj-git" data-tab="project/git">
+  {% if banner %}
+  <p class="prj-ov-banner {{ banner.tone }}" role="status">
+    <span class="prj-ov-banner-text">{{ banner.text }}</span>
+    {% if banner.href %}<a class="btn quiet small" href="{{ banner.href }}">{{ banner.button }}</a>{% endif %}
+  </p>
+  {% endif %}
+
+  <section class="prj-git-sync" aria-label="L'atelier et son dépôt distant">
+    <article class="now-card prj-git-side" aria-labelledby="prj-git-local">
+      <header class="prj-git-side-head">
+        <span class="prj-git-kind">Local</span>
+        <h2 id="prj-git-local">L’atelier</h2>
+        {% if local.branch %}<span class="now-tag prj-git-branch">{{ local.branch }}</span>{% endif %}
+      </header>
+      {% if local.sha %}
+      <p class="prj-git-tip">
+        {% if local.href %}<a class="prj-git-sha" href="{{ local.href }}">{{ local.sha }}</a>{% else %}<span class="prj-git-sha">{{ local.sha }}</span>{% endif %}
+        <span class="prj-git-tip-title">{{ local.title or "son dernier enregistrement" }}</span>
+      </p>
+      <p class="prj-git-facts">
+        <span>{{ tab.cell(local.when) }}</span>
+        <span>{{ local.count }} enregistrement{{ 's' if local.count not in ('0', '1') }}</span>
+        {% if local.pending %}<span class="{{ local.pending.tone }}">{% if local.pending.tone %}{{ tab.cell(local.pending.value) }} non enregistré{% else %}tout est enregistré{% endif %}</span>{% endif %}
+      </p>
+      {% else %}
+      <p class="prj-git-empty">{{ local.none or "Pas encore de dépôt." }}</p>
+      {% endif %}
+    </article>
+
+    <div class="prj-git-flow{{ ' ' ~ gap.tone if gap and gap.tone }}" aria-label="L'écart entre l'atelier et le distant">
+      {% if distant %}
+      {% if not gap or gap.tone == 'muted' %}
+      {# l'écart ne se sait pas (l'hôte n'a pas répondu, un hôte qu'on ne lit pas) : pas de chiffres inventés #}
+      <p class="prj-git-state"><span class="now-tag muted">écart inconnu</span><span class="prj-git-why">{{ 'lis le distant pour le savoir' if distant.readable else 'seul GitHub se lit ici' }}</span></p>
+      {% else %}
+      <p class="prj-git-arrows">
+        <span class="prj-git-arrow{{ ' on' if ahead }}"><span aria-hidden="true">→</span> {{ ahead }} à pousser</span>
+        <span class="prj-git-arrow back{{ ' on' if behind }}"><span aria-hidden="true">←</span> {{ behind }} à récupérer</span>
+      </p>
+      {% if gap.tone == 'ok' %}<p class="prj-git-state"><span class="now-tag ok">à jour</span></p>
+      {% elif gap.tone == 'danger' %}<p class="prj-git-state"><span class="now-tag danger">divergé</span></p>
+      {% elif gap.sub %}<p class="prj-git-state"><span class="prj-git-why">{{ gap.sub }}</span></p>{% endif %}
+      {% endif %}
+      <div class="toolbar prj-git-buttons" role="group" aria-label="Pousser, récupérer">
+        {% if push %}{{ action_button(forms.get(push.slot), ahead > 0 and not behind) }}{% endif %}
+        {% if pull %}{{ action_button(forms.get(pull.slot), behind > 0 and not ahead) }}{% endif %}
+        {% if distant.fresh %}<a class="btn quiet" href="{{ distant.fresh }}" title="Relire {{ distant.host }} maintenant">Relire</a>{% endif %}
+      </div>
+      {% else %}
+      <p class="prj-git-arrows"><span class="prj-git-arrow">aucun dépôt distant</span></p>
+      <div class="toolbar prj-git-buttons"><a class="btn quiet" href="#git-reglages">Brancher un dépôt distant</a></div>
+      {% endif %}
+    </div>
+
+    <article class="now-card prj-git-side" aria-labelledby="prj-git-remote">
+      <header class="prj-git-side-head">
+        <span class="prj-git-kind">Distant</span>
+        {% if distant %}
+        <h2 id="prj-git-remote"><a href="{{ distant.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ distant.host }}<span class="prj-git-name"> · {{ distant.name }}</span></a></h2>
+        <span class="now-tag prj-git-branch">{{ distant.branch }}</span>
+        {% if distant.visibility %}<span class="now-tag muted">{{ distant.visibility }}</span>{% endif %}
+        {% else %}<h2 id="prj-git-remote">Aucun</h2>{% endif %}
+      </header>
+      {% if distant and distant.read %}
+      <p class="prj-git-tip">
+        {% if distant.sha %}<a class="prj-git-sha" href="{{ distant.tip.href }}" rel="noopener noreferrer nofollow" target="_blank">{{ distant.sha }}</a><span class="prj-git-tip-title">{{ distant.said }}</span>
+        {% else %}<span class="prj-git-tip-title now-muted">{{ tab.cell(distant.tip) }}</span>{% endif %}
+      </p>
+      <p class="prj-git-facts">
+        {% if distant.issues %}<a href="#git-issues">{{ distant.issues.text }} issue{{ 's' if distant.issues.text not in ('0', '1') }}</a>{% endif %}
+        {% if distant.pulls %}<a href="#git-pr">{{ distant.pulls.text }} pull request{{ 's' if distant.pulls.text not in ('0', '1') }}</a>{% endif %}
+        {% if distant.seen %}<span>lu {{ tab.cell(distant.seen) }}</span>{% endif %}
+      </p>
+      {% elif distant %}
+      <p class="prj-git-empty">{% if distant.error %}{{ distant.host }} ne se lit pas pour l’instant.{% elif not distant.readable %}Ses commits, issues et pull requests ne se lisent que sur GitHub ; pousser et récupérer marchent quand même.{% else %}Pas encore lu.{% endif %}</p>
+      {% if distant.last %}<p class="prj-git-facts"><span>dernier échange : {{ tab.cell(distant.last) }}</span></p>{% endif %}
+      {% else %}
+      <p class="prj-git-empty">Rien ne part de la machine. Un dépôt distant (GitHub ou un autre hôte https) reçoit son travail quand tu pousses, ou après chaque exécution.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  {% if opened %}
+  <section class="now-card prj-git-opened" aria-labelledby="prj-git-opened">
+    <header class="now-card-head"><h2 id="prj-git-opened">{{ opened.title }}</h2></header>
+    {% for b in opened["items"] %}{{ tab.block(b) }}{% endfor %}
+  </section>
+  {% endif %}
+
+  {# pas de barre à un seul onglet (ADR 0176) : sans dépôt ni distant, seuls les réglages restent, sans elle #}
+  <div{% if panes|length > 1 %} class="hm-subtabs" data-subtabs{% endif %}>
+    {% if panes|length > 1 %}
+    <nav class="hm-subnav" aria-label="Le dépôt">
+      {% for p in panes %}<a href="#{{ p.id }}"{% if p.warn %} class="warn"{% endif %}>{{ p.label }}{% if p.count %} <span class="hm-count">{{ p.count }}</span>{% endif %}</a>{% endfor %}
+    </nav>
+    {% endif %}
+    <div class="hm-subpanes">
+      {% if history %}
+      <section id="git-historique" class="now-card" data-pane aria-labelledby="git-historique-t">
+        {{ tab.head("L’historique de l’atelier", "git-historique-t", none, "", history) }}
+        {% if commits %}
+        <ol class="prj-git-log" role="list">
+          {% for k in commits %}
+          <li class="prj-git-commit{{ ' out' if k.mark }}{{ ' seed' if k.seed }}">
+            <span class="prj-git-dot" aria-hidden="true"></span>
+            <a class="prj-git-sha" href="{{ k.href }}" title="Ouvrir ce commit en diff">{{ k.sha }}</a>
+            <span class="prj-git-msg">{{ k.title }}</span>
+            <span class="prj-git-tags">
+              {%- if k.mark %}<span class="now-tag warn">à pousser</span>{% endif -%}
+              {%- if k.run %}<a class="now-tag info" href="{{ k.run.href }}">exécution</a>{% elif k.seed %}<span class="now-tag muted">amorce</span>{% endif -%}
+            </span>
+            <span class="prj-git-meta">{% if k.author %}<span>{{ k.author }}</span>{% endif %}{% if k.lines %}<span class="prj-git-lines">{{ k.lines }}</span>{% endif %}{% if k.files and k.files != '0' %}<span>{{ k.files }} fichier{{ 's' if k.files != '1' }}</span>{% endif %}<span>{{ tab.cell(k.when) }}</span></span>
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}{{ tab.empty(history.empty) }}{% endif %}
+        {{ tab.pager(history) }}
+        {% if history.caption %}<p class="prj-git-help">{{ history.caption }}</p>{% endif %}
+      </section>
+
+      <section id="git-encours" class="now-card" data-pane aria-labelledby="git-encours-t">
+        {{ tab.head("Ce qui n’est pas encore enregistré", "git-encours-t") }}
+        {% if pending %}{% for b in pending["items"] %}{{ tab.block(b) }}{% endfor %}
+        {% else %}{{ tab.empty("Tout est enregistré : rien de changé depuis le dernier commit") }}{% endif %}
+        <p class="prj-git-help">Chaque exécution enregistre ce qu’elle a changé ; pousser n’envoie que ce qui est enregistré.</p>
+      </section>
+      {% endif %}
+
+      {% if remote_table is not none %}
+      <section id="git-distant" class="now-card" data-pane aria-labelledby="git-distant-t">
+        {{ tab.head("Sur le distant", "git-distant-t", none, remote_table.caption) }}
+        {% if remote_commits %}
+        <ol class="prj-git-log" role="list">
+          {% for k in remote_commits %}
+          <li class="prj-git-commit{{ ' in' if k.mark }}">
+            <span class="prj-git-dot" aria-hidden="true"></span>
+            <a class="prj-git-sha" href="{{ k.href }}" rel="noopener noreferrer nofollow" target="_blank">{{ k.sha }}</a>
+            <span class="prj-git-msg">{{ k.title }}</span>
+            <span class="prj-git-tags">{% if k.mark %}<span class="now-tag info">à récupérer</span>{% endif %}</span>
+            <span class="prj-git-meta">{% if k.author %}<span>{{ k.author }}</span>{% endif %}<span>{{ tab.cell(k.when) }}</span></span>
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}{{ tab.empty(remote_table.empty) }}{% endif %}
+      </section>
+      {% endif %}
+
+      {% if issues is not none %}
+      <section id="git-issues" class="now-card" data-pane aria-labelledby="git-issues-t">
+        {{ tab.head("Issues ouvertes", "git-issues-t", none, issues.caption) }}
+        {% if issue_items %}
+        <ul class="prj-git-tickets" role="list">
+          {% for t in issue_items %}
+          <li class="prj-git-ticket">
+            <span class="prj-git-num">{{ t.n }}</span>
+            <a class="prj-git-ticket-title" href="{{ t.href }}" rel="noopener noreferrer nofollow" target="_blank">{{ t.title }}</a>
+            <span class="prj-git-tags">{% for l in t.labels %}<span class="now-tag">{{ l }}</span>{% endfor %}</span>
+            <span class="prj-git-meta"><span>{{ t.author }}</span>{% if t.comments and t.comments != '0' %}<span>{{ t.comments }} commentaire{{ 's' if t.comments != '1' }}</span>{% endif %}<span>{{ tab.cell(t.when) }}</span></span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(issues.empty) }}{% endif %}
+        {% if distant %}<p class="prj-git-help"><a href="{{ distant.url }}/issues" rel="noopener noreferrer nofollow" target="_blank">Toutes ses issues sur {{ distant.host }} →</a></p>{% endif %}
+      </section>
+      {% endif %}
+
+      {% if pulls is not none %}
+      <section id="git-pr" class="now-card" data-pane aria-labelledby="git-pr-t">
+        {{ tab.head("Pull requests ouvertes", "git-pr-t", none, pulls.caption) }}
+        {% if pull_items %}
+        <ul class="prj-git-tickets" role="list">
+          {% for t in pull_items %}
+          <li class="prj-git-ticket">
+            <span class="prj-git-num">{{ t.n }}</span>
+            <a class="prj-git-ticket-title" href="{{ t.href }}" rel="noopener noreferrer nofollow" target="_blank">{{ t.title }}</a>
+            <span class="prj-git-tags">{% if t.state %}<span class="now-tag {{ t.state.tone }}">{{ t.state.text }}</span>{% endif %}</span>
+            <span class="prj-git-meta">{% if t.branches %}<span class="prj-git-branches">{{ t.branches }}</span>{% endif %}<span>{{ t.author }}</span><span>{{ tab.cell(t.when) }}</span></span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(pulls.empty) }}{% endif %}
+        {% if distant %}<p class="prj-git-help"><a href="{{ distant.url }}/pulls" rel="noopener noreferrer nofollow" target="_blank">Toutes ses pull requests sur {{ distant.host }} →</a></p>{% endif %}
+      </section>
+      {% endif %}
+
+      {% if exchanged is not none %}
+      <section id="git-echanges" class="now-card" data-pane aria-labelledby="git-echanges-t">
+        {{ tab.head("Échanges avec le distant", "git-echanges-t", none, exchanged.caption) }}
+        {% if exchanges %}
+        <ul class="prj-git-exchanges" role="list">
+          {% for x in exchanges %}
+          <li class="prj-git-exchange{{ ' waiting' if x.waiting }}">
+            <span class="prj-git-when">{{ tab.cell(x.when) }}</span>
+            <span class="prj-git-what">{{ x.what }}</span>
+            <span class="now-muted">accord {{ x.approval }}</span>
+            {% if x.state %}<span class="now-tag {{ x.state.tone }}">{{ x.state.text }}</span>{% endif %}
+            {% if x.detail %}<details class="prj-git-said"><summary>ce que git a répondu</summary>{{ tab.inner(x.detail) }}</details>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}{{ tab.empty(exchanged.empty) }}{% endif %}
+      </section>
+      {% endif %}
+
+      <section id="git-reglages" class="now-card" data-pane aria-labelledby="git-reglages-t">
+        {{ tab.head("Son dépôt distant", "git-reglages-t", none, remote_help) }}
+        <dl class="prj-ov-dl prj-git-dl">{% for k, v in settings %}<div><dt>{{ k }}</dt><dd>{{ tab.cell(v) }}</dd></div>{% endfor %}</dl>
+        {% if settle %}{% for b in settle["items"] %}{{ tab.block(b) }}{% endfor %}{% endif %}
+        {% if token_note %}<p class="prj-git-help">{{ token_note }}</p>{% endif %}
+      </section>
+    </div>
+  </div>
+</div>

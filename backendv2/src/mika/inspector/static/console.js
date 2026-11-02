@@ -123,14 +123,15 @@
     var input = document.querySelector("#q-global");
     if (!form || !input) return;
     var fold = function (t) { return t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); };
-    var pages = Array.from(document.querySelectorAll("#navigation a.nav-item")).map(function (a) {
+    // les pages du menu, et les onglets de ses groupes de pages (ADR 0178), leur page en guise d'explication
+    var pages = Array.from(document.querySelectorAll("#navigation a.nav-item, #navigation a.nav-tab")).map(function (a) {
       var group = a.closest(".nav-group");
-      var label = a.querySelector(".nav-item-label");
-      var hint = a.querySelector(".nav-item-hint");
+      var label = a.querySelector(".nav-item-label") || a.querySelector("span");
+      var hint = a.getAttribute("data-page") || (a.querySelector(".nav-item-hint") || {}).textContent || "";
       var name = label ? label.firstChild.textContent.trim() : a.textContent.trim();
       var section = group ? group.getAttribute("data-nav-group") : "";
-      return { href: a.getAttribute("href"), name: name, hint: hint ? hint.textContent.trim() : "", section: section,
-               key: fold(name + " " + (hint ? hint.textContent : "") + " " + section) };
+      return { href: a.getAttribute("href"), name: name, hint: hint.trim(), section: section,
+               key: fold(name + " " + hint + " " + section) };
     });
     var list = document.createElement("div");
     list.className = "goto-list";

@@ -26,7 +26,9 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import OBJECTIVE_ADDED
 from mika.kernel.events import Content, Origin
+from mika.ports.workshop import Commit, Hosted, Ticket
 from mika.runtime.effects import with_content
+from tests.fixtures.atelier import Host
 from tests.protocol.test_web import WS, bootstrap, csrf, recv_until, world  # noqa: F401 — fixture
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
@@ -255,3 +257,45 @@ def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
         assert r.status_code == 200 and "a échoué" not in r.text, tab
     carnet = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=carnet").text)
     assert "archivé" in carnet and "restauré" in carnet and "objectif n° 1 : fait" in carnet
+
+
+@needs_bwrap
+def test_the_git_tab_faces_the_workshop_with_github_and_offers_its_gestures(world):  # noqa: F811
+    """ADR 0183 : la page dessinée — l'atelier et le distant face à face, l'écart et ses boutons, puis les
+    sous-onglets ; ce que GitHub dit s'échappe, et ses liens mènent chez lui."""
+    client, live, _ = world
+    bootstrap(client)
+    done = _create(client, client.cookies.get("csrftoken"), "g1", title="Outils", objectives="Écrire l'outil",
+                   remote="https://github.com/moi/outils.git")
+    assert done.status_code == 303, done.text[:500]
+    pid = int(done.headers["location"].split("/fiche/project/", 1)[1].split("?", 1)[0])
+    port = live.kernel.ports["workshop"]
+
+    async def work() -> list[str]:
+        for n in range(2):
+            await port.write(pid, "a.py", f"x = {n}\n")
+            await port.commit(pid, f"pas {n}")
+        return [k.sha for k in await port.commits(pid, 5)]
+
+    shas = client.portal.call(work)  # pas 1, pas 0, l'amorce
+    page = "https://github.com/moi/outils"
+    live.kernel.ports["repo_host"] = Host(Hosted(
+        "moi/outils", page, "main", head=shas[1], commits=(Commit(shas[1], 0, "pas 0", "adrien"),),
+        issues=(Ticket(7, "Un bogue <b>gras</b>", f"{page}/issues/7", "bea", 0, ("bug",), 2),),
+        pulls=(Ticket(8, "Une PR", f"{page}/pull/8", "bea", 0, head="essai", base="main", draft=True),),
+        open_issues=1, open_pulls=1))
+    got = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git")
+    assert got.status_code == 200 and 'data-tab="project/git"' in got.text
+    shown = html.unescape(got.text)
+    assert "L’atelier" in shown and "GitHub" in shown and "moi/outils" in shown
+    assert "1 à pousser" in shown and "0 à récupérer" in shown and "pas 1" in shown
+    assert "/inspecteur/action/projects.pousser" in got.text and "/inspecteur/action/projects.recuperer" in got.text
+    assert "frais=1" in got.text  # « Relire »
+    for pane in ("git-historique", "git-encours", "git-distant", "git-issues", "git-pr", "git-echanges",
+                 "git-reglages"):
+        assert f'id="{pane}"' in got.text, pane
+    assert "Un bogue &lt;b&gt;gras&lt;/b&gt;" in got.text  # ce que GitHub dit est une donnée
+    assert f'href="{page}/issues/7"' in got.text and "essai → main" in shown and "brouillon" in shown
+    sha = re.search(r"commit=([0-9a-f]{7,40})", got.text).group(1)
+    opened = client.get(f"/inspecteur/fiche/project/{pid}?onglet=git&commit={sha}").text
+    assert 'class="hm-code diff"' in opened and "L'enregistrement" in html.unescape(opened)

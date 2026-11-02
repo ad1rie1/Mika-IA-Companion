@@ -182,10 +182,10 @@ test('projets : fiches et tableau montrent les mêmes projets, sans JavaScript',
 });
 
 test('fil : lecture directe, détails et explication accessibles au clavier', async t => {
-  const page = await open(t, { file: 'fil_messages.html' });
-  // le fil dessiné (ADR 0121) : chaque message en bulle, lisible sans rien ouvrir ; ses détails sont
-  // la fiche de l'événement (« n° … ») et l'explication la page « pourquoi ? »
-  const thread = page.getByRole('region', { name: 'Ses messages', exact: true });
+  const page = await open(t, { file: 'fiche_person_user_1_onglet_echanges.html' });
+  // leur conversation dessinée (ADR 0121, 0181) : chaque message en bulle, lisible sans rien ouvrir ; ses détails
+  // sont la fiche de l'événement (« n° … ») et l'explication la page « pourquoi ? »
+  const thread = page.getByRole('region', { name: /^La conversation avec / });
   const first = thread.locator('.person-thread > li.mine').filter({ has: page.getByRole('link', { name: 'pourquoi ?', exact: true }) }).first();
   const bubble = first.locator('.person-bubble');
   assert.equal(await bubble.isVisible(), true);
@@ -447,10 +447,12 @@ test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et l
     return f.contentDocument && f.style.height === f.contentDocument.documentElement.scrollHeight + 'px';
   });
   assert.equal(await page.getByRole('link', { name: 'maquettes.pdf', exact: true }).isVisible(), true);
-  // sa rubrique est marquée dans la barre (ADR 0176), le courrier comme page courante
+  // sa rubrique est marquée dans la barre (ADR 0176), le courrier allumé et sa réception comme page courante
+  // (ADR 0178 : le menu montre les onglets de chaque destination)
   const group = page.locator('[data-nav-group="Relations & échanges"]');
   assert.equal(await group.evaluate(el => el.classList.contains('active')), true);
-  assert.equal(await group.locator('a[aria-current=page]').getAttribute('href'), '/inspecteur/courrier');
+  assert.equal(await group.locator('a.nav-item.on').getAttribute('href'), '/inspecteur/courrier');
+  assert.equal(await group.locator('a[aria-current=page]').getAttribute('href'), '/inspecteur/courrier/reception');
 });
 
 test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', async t => {

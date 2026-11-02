@@ -1,17 +1,17 @@
 """Relations & échanges › Identités et moyens de communication, chaque onglet dans sa forme
 (``app/handmade/tabs/identities.py``, ADR 0177), à travers le vrai serveur : une ligne par moyen de communication et
-un bandeau quand une revendication attend ; deux files à valider dont les actions sont sur chaque ligne ; des règles
-qui se lisent sur une échelle, pas en tableaux."""
+un bandeau quand une revendication attend, qui mène à la file « À valider » ; des règles qui se lisent sur une
+échelle, pas en tableaux. Les identités à confirmer et les noms à relier n'ont plus de page ici (ADR 0180) : ils se
+décident dans la file (``test_tabs_approvals.py``)."""
 
 from __future__ import annotations
 
 import html
-from urllib.parse import parse_qs, urlsplit
+import re
 
 from mika.app.handmade.tabs import identities
 from mika.contracts import identity as identity_c
-from mika.contracts import memory as memory_c
-from mika.kernel.events import Content, Origin
+from mika.kernel.events import Origin
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_tabs_people import emit, stranger
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -44,7 +44,7 @@ def test_one_line_per_means_of_communication_and_a_banner_while_a_claim_waits(wo
     claim(client, live)
     page = drawn(client, "/inspecteur/identites/annuaire")
     banner = _between(page, 'class="person-tab-note warn"', "</p>")
-    assert "1 revendication attend ta décision" in banner and 'href="/inspecteur/facultes/identity/revendications"' in banner
+    assert "1 revendication attend ta décision" in banner and 'href="/inspecteur/approbations/identites"' in banner
     assert page.count('class="person-tab-note warn"') == 1 and page.index(banner) < page.index('class="ids-means"')
     head = _between(page, 'class="ids-grid-head"', "</div>")
     assert head.index("Moyen de communication") < head.index("Ce que le canal prouve") < head.index("Parle pour") \
@@ -55,33 +55,17 @@ def test_one_line_per_means_of_communication_and_a_banner_while_a_claim_waits(wo
     assert "<table" not in _between(page, 'class="ids-means"', "</section>")
 
 
-def test_a_claim_waits_with_its_actions_on_its_line(world):  # noqa: F811
-    client, live, _ = world
+def test_what_waits_a_decision_has_no_page_here_but_the_queue(world):  # noqa: F811
+    """Identités à confirmer et Noms à relier ne se décident que dans la file « À valider » (ADR 0180) : la barre
+    d'Identités n'en a plus d'onglet, et leurs anciennes adresses y mènent, la requête avec elles."""
+    client, _, _ = world
     bootstrap(client)
-    assert "Aucune revendication en attente" in drawn(client, "/inspecteur/identites/revendications")
-    claim(client, live)
-    page = drawn(client, "/inspecteur/identites/revendications")
-    entry = _between(page, 'class="ids-claim"', "</li>")
-    assert "se présente comme" in entry and "« Adrien »" in entry and "vise" in entry
-    assert 'class="ids-toward' in entry and "0,45 / 0,70" in entry  # vers la barre
-    actions = _between(entry, 'class="ids-do"', "</div>")
-    assert 'href="/inspecteur/fiche/handle/ext_9?onglet=revendication">Examiner et décider' in actions
-    links = {html.unescape(a.split(">", 1)[1].split("<", 1)[0]): html.unescape(a.split('"', 1)[0])
-             for a in actions.split('href="')[1:]}
-    for label, key in (("S'en porter garant", "identity.preuve"), ("La démentir", "identity.preuve"),
-                       ("Relier à une personne", "identity.relier")):
-        # les actions de la fiche, sur leur page, ramènent à la file
-        got = parse_qs(urlsplit(links[label]).query)
-        assert urlsplit(links[label]).path == f"/inspecteur/action/{key}"
-        assert got["sujet"] == ["ext_9"] and got["retour"] == ["/inspecteur/identites/revendications"]
-    # chacune arrive orientée : la preuve choisie par l'adresse, le nom démenti et la personne visée par la faculté
-    vouch = html.unescape(client.get(links["S'en porter garant"]).text)
-    assert '<option value="vouched" selected' in vouch
-    deny = html.unescape(client.get(links["La démentir"]).text)
-    assert '<option value="denied" selected' in deny and 'value="Adrien"' in deny
-    link = html.unescape(client.get(links["Relier à une personne"]).text)
-    assert '<option value="user_1" selected' in link
-    assert "Une affirmation seule ne franchit jamais la barre" in page  # la règle de la faculté, au pied
+    page = drawn(client, "/inspecteur/identites/annuaire")
+    bar = _between(page, '<nav class="tabs"', "</nav>")
+    assert re.findall(r'href="/inspecteur/identites/(\w+)"', bar) == ["annuaire", "politique"]
+    for old, new in (("revendications", "identites"), ("noms", "noms")):
+        moved = client.get(f"/inspecteur/identites/{old}?page=2", follow_redirects=False)
+        assert moved.status_code == 301 and moved.headers["location"] == f"/inspecteur/approbations/{new}?page=2"
 
 
 def test_an_action_page_takes_only_safe_values_from_its_address(world):  # noqa: F811
@@ -97,23 +81,6 @@ def test_an_action_page_takes_only_safe_values_from_its_address(world):  # noqa:
     assert '<option value="vouched" selected' in forced  # le choix inconnu est ignoré : le défaut
     confirm = forced.split('name="confirmed"', 1)[1].split(">", 1)[0]
     assert "checked" not in confirm
-
-
-def test_a_name_waits_for_someone_with_both_answers_on_its_line(world):  # noqa: F811
-    client, live, _ = world
-    bootstrap(client)
-    assert "Aucun nom n'attend" in drawn(client, "/inspecteur/identites/noms")
-    emit(client, live, "memory", [memory_c.BELIEVED.draft(
-        text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
-        source="user_1", told_by=("user_1",))])
-    stranger(client, live, "ext_7", "Léa Martin")
-    page = drawn(client, "/inspecteur/identites/noms")
-    entry = _between(page, 'class="ids-claim ids-name', "</li>")
-    assert "« Lea »" in entry and "Léa Martin" in entry and "on lui en a parlé" in entry
-    actions = _between(entry, 'class="ids-do"', "</li>")
-    assert "C'est elle : relier" in actions and "onglet=synthese" in actions  # la fiche, le formulaire pré-rempli
-    assert "/inspecteur/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions  # son bouton
-    assert "1 nom dont on lui a parlé" in page
 
 
 def test_the_rules_read_on_one_scale_not_in_tables(world):  # noqa: F811

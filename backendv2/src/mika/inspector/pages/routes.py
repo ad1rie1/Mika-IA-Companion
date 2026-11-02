@@ -16,7 +16,7 @@ from starlette.routing import Route
 
 from mika.adapters.web.accounts import password_problems
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
+from mika.inspector.catalog import Builtin, Panel, destinations
 from mika.inspector.formview import action_view, prefilled, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.canals import canals_post
@@ -69,7 +69,13 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               ("outils", "qui"): "outils/tous", ("outils", "texte"): "outils/tous",
               ("outils", "outils_apps"): "outils/serveurs",
               # un profil n'est qu'un préréglage du tempérament : il se choisit en haut de sa page
-              ("reglages", "profil"): "reglages/temperament"}
+              ("reglages", "profil"): "reglages/temperament",
+              # ce qui attend ta décision ne se décide que dans la file (ADR 0180)
+              ("identites", "revendications"): "approbations/identites", ("identites", "noms"): "approbations/noms",
+              # le fil de tous les messages : Conversations s'ouvre sur les personnes, leur filtre gardé (ADR 0181)
+              ("fil", "messages"): "fil/conversations",
+              # la place de chacun se lit avec les pièces, en sous-onglet (une ancre : « #… », après la requête)
+              ("memoire", "place"): "memoire/recues#pieces-place"}
 
 
 #: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
@@ -106,18 +112,6 @@ class Pages:
         self.dests = destinations(ui.deps.navigation)
 
     # ── utilitaires ──
-    def tabs_of(self, d: Destination) -> list[tuple[str, str, Builtin | InspectSpec]]:
-        out: list[tuple[str, str, Builtin | InspectSpec]] = []
-        for key in builtin_keys(d, self.ui.builtins):
-            b = self.ui.builtins[key]
-            out.append((b.slug, b.title, b))
-        for v in self.ui.inspection.in_section(d.key):
-            out.append((v.name, v.title, v))
-        if d.order:
-            rank = {name: i for i, name in enumerate(d.order)}
-            out.sort(key=lambda t: rank.get(t[0], len(rank)))
-        return out
-
     def tab_badge(self, item: Builtin | InspectSpec) -> int:
         if isinstance(item, Builtin):
             return int(item.badge(self.ui) or 0) if item.badge else 0
@@ -266,7 +260,8 @@ class Pages:
                 moved_tab = f"reglages/comportement-{owner}"
             if moved_tab == "reglages/fournisseurs" and query.get("section") not in (None, "modeles"):
                 query.pop("section", None)
-            target = f"{PREFIX}/{moved_tab}" + ("?" + urlencode(query) if query else "")
+            path, _, anchor = moved_tab.partition("#")
+            target = f"{PREFIX}/{path}" + ("?" + urlencode(query) if query else "") + (f"#{anchor}" if anchor else "")
             return RedirectResponse(target, status_code=301)
         if key in MOVED and "tab" not in request.path_params and not tab:
             return RedirectResponse(f"{PREFIX}/{MOVED[key]}", status_code=301)
@@ -279,7 +274,7 @@ class Pages:
         if d is None:
             return self.render_page(request, title="Page inconnue", active="", status=404,
                                     blocks=[Note("Cette page n'existe pas.", "warn")])
-        tabs = self.tabs_of(d)
+        tabs = self.ui.tabs_of(d)
         # l'onglet par défaut : le premier de la barre (pas un de ceux rangés derrière le bouton du haut)
         first = next((t[0] for t in tabs if t[0] not in d.gear), tabs[0][0] if tabs else "")
         slug = tab or request.path_params.get("tab", "") or first

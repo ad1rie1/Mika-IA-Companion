@@ -28,12 +28,20 @@
     {% for g in nav %}
       {% if g.label %}<details class="nav-group{{ ' active' if g.active }}" data-nav-group="{{ g.label }}">
         <summary class="nav-group-label"><span>{{ g.short or g.label }}</span>{% if g.badge %}<span class="nav-attention" role="img" aria-label="Des éléments demandent ton attention" title="Des éléments demandent ton attention"></span>{% endif %}{{ icon('chevron') }}</summary>
-        <div class="nav-menu">
+        <div class="nav-menu{{ ' wide' if g.columns }}">
           <div class="nav-menu-head"><b>{{ g.label }}</b>{% if g.question %}<span>{{ g.question }}</span>{% endif %}</div>
-          <div class="nav-menu-items">
+          {# une rubrique à groupes de pages (ADR 0178) : une colonne par destination, son nom puis ses onglets #}
+          {% if g.columns %}<div class="nav-menu-items nav-columns">
+          {% for col in g.columns %}<div class="nav-col">
+            {% for it in col %}<a class="nav-item{{ ' on' if it.on }}{{ ' nav-head' if it.tabs }}" href="{{ it.href }}"{% if it.current %} aria-current="page"{% endif %}><span class="nav-item-label">{{ it.label }}{% if it.badge and not it.tabs %}<span class="count" title="demande ton attention">{{ it.badge }}</span>{% endif %}</span>{% if it.hint %}<span class="nav-item-hint">{{ it.hint }}</span>{% endif %}</a>
+            {% if it.tabs %}<ul class="nav-tabs" aria-label="Onglets de {{ it.label }}">{% for t in it.tabs %}<li><a class="nav-tab{{ ' on' if t.on }}" href="{{ t.href }}" data-page="{{ it.label }}"{% if t.on %} aria-current="page"{% endif %}><span>{{ t.label }}</span>{% if t.badge %}<span class="count" title="demande ton attention">{{ t.badge }}</span>{% endif %}</a></li>{% endfor %}</ul>{% endif %}
+            {% endfor %}
+          </div>{% endfor %}
+          </div>
+          {% else %}<div class="nav-menu-items">
           {% for it in g["items"] %}<a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}"{% if it.on %} aria-current="page"{% endif %}><span class="nav-item-label">{{ it.label }}{% if it.badge %}<span class="count" title="demande ton attention">{{ it.badge }}</span>{% endif %}</span>{% if it.hint %}<span class="nav-item-hint">{{ it.hint }}</span>{% endif %}</a>
           {% endfor %}
-          </div>
+          </div>{% endif %}
         </div>
       </details>
       {% else %}{% for it in g["items"] %}<a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}" data-top{% if it.on %} aria-current="page"{% endif %}><span class="nav-item-label">{{ it.label }}</span></a>{% endfor %}{% endif %}

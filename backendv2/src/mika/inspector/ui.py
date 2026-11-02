@@ -28,17 +28,20 @@ from mika.contracts import self_ as self_c
 from mika.inspector import render
 from mika.inspector.catalog import (
     Builtin,
+    Destination,
     Labels,
     MenuGroup,
     NavGroup,
     SettingsSection,
     SettingsTab,
     builtin_keys,
+    destinations,
 )
 from mika.inspector.framed import Documents
 from mika.inspector.names import Names
 from mika.kernel import forms
 from mika.kernel.clock import US
+from mika.kernel.faculty import InspectSpec
 from mika.kernel.inspect import Vital
 from mika.runtime import health
 from mika.runtime.bootstrap import Kernel
@@ -50,7 +53,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "42"
+ASSET_VERSION = "51"
 
 log = logging.getLogger("mika.console")
 
@@ -228,6 +231,10 @@ class Overview:
     folded_title = "Le détail"
     #: les onglets des facultés qu'elle dessine (``render_tab``) : leurs données restent celles de la faculté
     tabs: tuple[str, ...] = ()
+    #: des onglets des facultés réunis sous un autre : son nom → ceux qu'il porte. Ils quittent la barre, et leur
+    #: adresse mène au sien, ouvert sur leur section (``#<nom>``). La console exécute chacun et passe leurs blocs à
+    #: ``render_tab`` dans une ``Section`` par onglet, à son titre, le sien d'abord ; les filtres restent les siens
+    joined: Mapping[str, tuple[str, ...]] = {}
 
     def render(self, ui: UI, key: str) -> Any:
         raise NotImplementedError
@@ -359,6 +366,28 @@ class UI:
         return f"{PREFIX}/document/{self.documents.keep(html, images, remote=remote)}"
 
     # ── navigation ──
+    def tabs_of(self, d: Destination) -> list[tuple[str, str, Builtin | InspectSpec]]:
+        """Les onglets d'une destination, dans leur ordre : ``(slug, titre, ce qui le produit)``."""
+        out: list[tuple[str, str, Builtin | InspectSpec]] = []
+        for key in builtin_keys(d, self.builtins):
+            b = self.builtins[key]
+            out.append((b.slug, b.title, b))
+        for v in self.inspection.in_section(d.key):
+            out.append((v.name, v.title, v))
+        if d.order:
+            rank = {name: i for i, name in enumerate(d.order)}
+            out.sort(key=lambda t: rank.get(t[0], len(rank)))
+        return out
+
+    def tab_bar(self, d: Destination) -> list[tuple[str, str]]:
+        """La barre d'onglets d'une destination telle que sa page la montre, ``(adresse, titre)`` : sans ce qui est
+        rangé derrière sa roue (``gear``), sa page dessinée à part en premier (``lead``). Vide s'il n'y en a qu'un."""
+        base = f"{PREFIX}/{d.key}"
+        bar = [(f"{base}/{slug}", title) for slug, title, _ in self.tabs_of(d) if slug not in d.gear]
+        if d.lead:
+            bar.insert(0, (base, d.lead))
+        return bar if len(bar) > 1 else []
+
     def attention_items(self, *, distinct: bool = False) -> list[dict[str, Any]]:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
         (l'accueil en fait des cadres qui mènent à la bonne page). ``distinct`` : chaque chose une fois (l'accueil) —
@@ -392,11 +421,13 @@ class UI:
                                     "hint": got[1] if len(got) > 1 else "", "href": f"{base}/{v.name}"})
         return out
 
-    def nav(self, active: str, path: str) -> list[dict[str, Any]]:
+    def nav(self, active: str, path: str, *, tab: bool = True) -> list[dict[str, Any]]:
         """Le menu de l'opératrice : résout la rubrique la plus précise, y compris sur les fiches.
 
-        Les nombres restent sur les entrées : deux vues peuvent montrer une
-        même demande. Le groupe signale sa présence sans additionner ces nombres.
+        Un lien vers une destination porte ses onglets, ceux de sa barre (ADR 0178) : la rubrique les montre en
+        colonnes, et l'onglet de la page courante s'y allume (``tab`` : pas sur une fiche, qui n'est pas un onglet).
+        Les nombres restent sur les entrées et leurs onglets :
+        deux vues peuvent montrer une même demande. Le groupe signale sa présence sans additionner ces nombres.
         """
         links = [(gi, li, link) for gi, group in enumerate(self.deps.menu)
                  for li, link in enumerate(group.items)]
@@ -411,27 +442,56 @@ class UI:
             _, gi, li = max(matches)
             return gi, li
 
-        current = locate(path.split("?", 1)[0].removeprefix(PREFIX).strip("/"))
+        here = path.split("?", 1)[0].rstrip("/")
+        current = locate(here.removeprefix(PREFIX).strip("/"))
         if current is None and active:
             current = locate("" if active == "accueil" else active)
         if current is None and active:
             current = next(((gi, li) for gi, li, link in links if link.target.split("/")[0] == active), None)
         badges: dict[tuple[int, int], int] = {}
+        counts: dict[str, int] = {}
         for item in self.attention_items():
+            counts[item["href"]] = counts.get(item["href"], 0) + item["count"]
             key = locate(item["href"].removeprefix(PREFIX).strip("/"))
             if key is not None:
                 badges[key] = badges.get(key, 0) + item["count"]
+        dests = destinations(self.deps.navigation)
         groups = []
         for gi, group in enumerate(self.deps.menu):
-            items = [{"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon, "hint": link.hint,
-                      "on": current == (gi, li), "badge": badges.get((gi, li), 0)}
-                     for li, link in enumerate(group.items)]
+            items = []
+            for li, link in enumerate(group.items):
+                on = current == (gi, li)
+                d = dests.get(link.target)
+                bar = self.tab_bar(d) if d is not None else []
+                tabs = [{"label": title, "href": href, "on": False, "badge": counts.get(href, 0)} for href, title in bar]
+                if on and tab and tabs:
+                    lit = next((t for t in tabs if t["href"] == here), None)
+                    if lit is None and here == f"{PREFIX}/{link.target}":
+                        lit = tabs[0]  # la destination s'ouvre sur son premier onglet
+                    if lit is not None:
+                        lit["on"] = True
+                items.append({"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon,
+                              "hint": link.hint, "on": on, "badge": badges.get((gi, li), 0), "tabs": tabs,
+                              "current": on and not any(t["on"] for t in tabs)})
             label = self.her_name() if group.her else group.label
             groups.append({"label": label, "short": label if group.her else (group.short or group.label),
                            "question": group.question, "icon": group.icon, "items": items,
+                           "columns": self._columns(items) if any(i["tabs"] for i in items) else [],
                            "active": current is not None and current[0] == gi,
                            "badge": any(i["badge"] for i in items)})
         return groups
+
+    @staticmethod
+    def _columns(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Les colonnes d'une rubrique à groupes de pages : une par destination à onglets ; les pages seules qui se
+        suivent partagent la leur."""
+        columns: list[list[dict[str, Any]]] = []
+        for it in items:
+            if not it["tabs"] and columns and not columns[-1][-1]["tabs"]:
+                columns[-1].append(it)
+            else:
+                columns.append([it])
+        return columns
 
     def her_name(self) -> str:
         """Son nom, celui de sa persona en vigueur : la console ne l'écrit jamais en dur (ADR 0070)."""
@@ -482,8 +542,9 @@ class UI:
         account = self.operator(request)
         # ``menu_path`` : la page que le menu allume, quand ce n'est pas celle-ci (une fiche ouverte depuis une liste)
         menu_path = ctx.pop("menu_path", "") or request.url.path
+        menu_tab = ctx.pop("menu_tab", True)
         html = env.get_template(name).render(
-            title=title, csrf=token, nav=self.nav(active, menu_path), vitals=self.vitals(), her=self.her_name(), posted=request.method == "POST",
+            title=title, csrf=token, nav=self.nav(active, menu_path, tab=menu_tab), vitals=self.vitals(), her=self.her_name(), posted=request.method == "POST",
             who=account.display_name if account else "", **ctx)
         response = HTMLResponse(html, status_code=status)
         if not request.cookies.get(CSRF_COOKIE):

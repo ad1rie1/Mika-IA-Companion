@@ -283,7 +283,7 @@ def test_the_console_answers_what_an_operator_asks(tmp_path):
             assert [f for f in until(ws, "speech") if f["type"] == "speech"][-1]["text"]
             ws.send_json({"type": "chat", "message": "bon, à plus", "client_msg_id": "c2"})
             assert not [f for f in until(ws, "speech") if f["type"] == "speech"][-1]["text"]  # elle s'est tue
-        messages = html.unescape(client.get("/inspecteur/fil/messages").text)
+        messages = html.unescape(client.get("/inspecteur/fiche/person/user_1?onglet=echanges").text)
         assert "répondue → n°" in messages and "sans réponse" in messages
         client.portal.call(lambda: live.settings.save_llm(LLMConfig(backends={"local": OLLAMA})))
         providers = html.unescape(client.get("/inspecteur/reglages/fournisseurs").text)
@@ -291,7 +291,7 @@ def test_the_console_answers_what_an_operator_asks(tmp_path):
         processes = html.unescape(client.get("/inspecteur/systeme/processus").text)
         assert "arbitre · arbitre" not in processes and "Décider d'agir" in processes
         search = html.unescape(client.get("/inspecteur/recherche?q=salut").text)
-        assert "« salut » dans messages" in search and "q=salut" in search
+        assert "« salut » dans par personne" in search and "transcript/conversations?q=salut" in search
 
 
 def test_the_veto_after_her_answer_says_she_is_the_one_waiting(tmp_path):

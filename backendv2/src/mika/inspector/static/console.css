@@ -218,6 +218,24 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .nav-item.on { background: var(--accent-soft); }
 .nav-item.on .nav-item-label { color: var(--accent); }
 .nav-item .count { margin-left: auto; }
+/* Une rubrique à groupes de pages (ADR 0178) : une colonne par destination, son nom puis ses onglets ; les pages
+   seules qui se suivent partagent une colonne */
+.nav-menu.wide { width: max-content; max-width: calc(100vw - 32px); }
+.nav-columns { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(150px, 184px); gap: 0; }
+.nav-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 4px 2px; }
+.nav-col + .nav-col { border-left: 1px solid var(--border); }
+.nav-col > .nav-item + .nav-item { margin-top: 4px; }
+.nav-item.nav-head .nav-item-label { font-weight: 600; }
+.nav-item.nav-head .nav-item-hint { min-height: 2.7em; }
+.nav-item.nav-head.on { background: none; }
+.nav-tabs { list-style: none; margin: 2px 0 0 10px; padding: 0 0 0 4px; display: grid; gap: 1px; border-left: 1px solid var(--border); }
+.nav-tab { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 5px 8px; border-radius: var(--radius); color: var(--text-2);
+  font-size: 13px; line-height: 1.3; }
+.nav-tab:hover { background: var(--hover); color: var(--text); text-decoration: none; }
+.nav-tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 550; }
+.nav-tab .count { margin-left: auto; }
+/* moins large : des colonnes plus étroites, pour que le menu tienne sous sa rubrique jusqu'au panneau */
+@media (max-width: 1320px) { .nav-columns { grid-auto-columns: 150px; } }
 .menu-icon { flex: 0 0 16px; width: 16px; height: 16px; }
 
 .topbar-side { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; padding-left: 12px; }
@@ -731,6 +749,12 @@ form.inline { display: inline; }
   .nav-menu-head { display: none; }
   .nav-menu-items { grid-template-columns: minmax(0, 1fr); }
   .nav-item { min-height: 44px; display: flex; flex-direction: column; justify-content: center; }
+  .nav-menu.wide { width: auto; max-width: none; }
+  .nav-columns { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); }
+  .nav-col, .nav-col + .nav-col { padding: 0; border-left: 0; }
+  .nav-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 6px 10px; }
+  .nav-tab { min-height: 44px; }
+  .nav-item.nav-head .nav-item-hint { min-height: 0; }
   .topbar-side { flex: 1; min-width: 0; justify-content: flex-end; gap: 6px; }
   .search { flex: 1 1 140px; width: auto; min-width: 0; max-width: 320px; }
   .search input { width: 100%; }

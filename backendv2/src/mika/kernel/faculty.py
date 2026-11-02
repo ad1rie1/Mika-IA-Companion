@@ -301,7 +301,7 @@ class InspectSpec:
     #: les reçoit en lecture (ce qu'il compte vit hors de la tranche : le magasin)
     badge: Callable[..., Any] | None = None
     description: str = ""
-    #: hors de la navigation (joignable par lien seulement)
+    #: hors de la navigation (joignable par lien seulement) : sa destination n'en fait pas un onglet
     hidden: bool = False
     #: un onglet de fiche qui ne se montre que pour les objets dont il a quelque chose à dire :
     #: ``shown(tranche, clé) -> bool`` (vide : toujours)

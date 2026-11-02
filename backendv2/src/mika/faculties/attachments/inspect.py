@@ -1,4 +1,4 @@
-"""La console des pièces reçues (ADR 0106) : leur liste (Mémoire › Pièces reçues), la place que chacun occupe, un
+"""La console des pièces reçues (ADR 0106) : leur liste et la place que chacun occupe (Mémoire › Pièces reçues), un
 onglet « Pièces reçues » sur la fiche d'une personne, et la fiche d'une pièce — ce qu'elle y a lu, les messages qui
 l'ont portée, ce qu'elle sait qui y est relié —, d'où un opérateur peut la télécharger. L'opérateur voit tout : les
 règles de ce qu'elle peut rouvrir devant qui sont celles de ses outils, pas de la console."""
@@ -124,7 +124,8 @@ _KINDS = (("", "toutes"), (c.IMAGE, "photos"), (c.FILE, "documents"), (c.AUDIO, 
                              Param("sorte", "sorte", kind="select", choices=_KINDS)),
                      description="Ce qu'on lui a envoyé dans les conversations — photos, documents, vocaux — : gardé, "
                                  "lu de près, relié à ce qu'elle sait. Ses outils la laissent les retrouver et les "
-                                 "rouvrir ; devant qui, c'est la règle de sa mémoire.")
+                                 "rouvrir ; devant qui, c'est la règle de sa mémoire. Et ce que les pièces de chacun "
+                                 "occupent, face à sa place.")
 def _pieces(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     store = ctx.store
     if store is None:
@@ -143,7 +144,7 @@ def _pieces(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                         caption="« liens » : les souvenirs, croyances et moments qui s'appuient sur la pièce — en "
                                 "plus de leurs messages sources. « gardée, pas lue » : ses octets sont là, mais "
                                 "rien n'a pu en être lu (un format illisible, pas de modèle qui voit)."))
-    return blocks
+    return blocks + _place(frame, store, ctx)
 
 
 def _people_usage(frame: Frame, store: Any) -> list[tuple[str, int, int]]:
@@ -157,17 +158,13 @@ def _people_usage(frame: Frame, store: Any) -> list[tuple[str, int, int]]:
     return sorted(((p, n, size) for p, (n, size) in per.items()), key=lambda x: (-x[2], x[0]))
 
 
-@ATTACHMENTS.inspect("place", title="Place des pièces", section="memoire", order=26,
-                     description="Ce que les pièces de chacun occupent (tous ses moyens de communication réunis), "
-                                 "face à sa place : au-delà, les plus anciennes sont retirées — leurs octets "
-                                 "s'effacent, ce qu'elle en avait lu reste.")
-def _place(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    store = ctx.store
-    if store is None:
-        return [Note("Le magasin n'est pas disponible.", tone="muted")]
+def _place(frame: Frame, store: Any, ctx: InspectContext) -> list[Block]:
+    """Ce que les pièces de chacun occupent (tous ses moyens de communication réunis), face à sa place : au-delà, les
+    plus anciennes sont retirées — leurs octets s'effacent, ce qu'elle en avait lu reste. Sa propre page : la liste
+    se lit à côté de celle des pièces."""
     budget = params_of(frame).per_person_mb * MIB
     people = _people_usage(frame, store)
-    pager = ctx.pager(size=PAGE, total=len(people))
+    pager = ctx.pager("page_personnes", size=PAGE, total=len(people))
     rows_ = []
     for person, n, size in people[pager.offset:pager.offset + pager.size]:
         ratio = size / budget if budget else 0.0
@@ -193,7 +190,8 @@ def _person_tab(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[
         return [Note("Le magasin n'est pas disponible.", tone="muted")]
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     total = count(store, handles=handles)
-    pager = ctx.pager(size=PAGE, total=total)
+    # sa propre page : l'onglet se lit aussi à côté d'un autre (les fichiers envoyés, sur la fiche)
+    pager = ctx.pager("page_recues", size=PAGE, total=total)
     found = recent(store, handles=handles, limit=pager.offset + pager.size)[pager.offset:]
     used = sum(size for h, (_n, size) in usage(store).items() if h in handles)
     budget = params_of(frame).per_person_mb * MIB

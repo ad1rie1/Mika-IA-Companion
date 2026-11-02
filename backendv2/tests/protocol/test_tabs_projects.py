@@ -1,7 +1,8 @@
 """Activité › Projets, chaque onglet dans sa forme (``app/handmade/tabs/projects.py``, ADR 0177), à travers le vrai
-serveur : une entrée par projet (où il en est, ses objectifs, sa prochaine exécution ; « Créer un projet » dans la
+serveur : une rangée par projet (où il en est, ses objectifs, sa prochaine exécution ; « Créer un projet » dans la
 barre de titre), ses exécutions jour par jour (verdict, preuve, compte rendu, commit), ses décisions techniques
-rangées par projet (ce qui est choisi, pourquoi) — et ce qu'ils disent, vides."""
+rangées par projet (ce qui est choisi, pourquoi), les objectifs d'un projet (en clair, leurs boutons sur leur ligne)
+— et ce qu'ils disent, vides."""
 
 from __future__ import annotations
 
@@ -51,9 +52,31 @@ def test_each_project_says_where_it_stands_and_creating_one_stays_in_the_title_b
     assert "Le squelette est posé." in item.split('class="prj-where"')[1]  # où il en est
     assert "0 / 2 ponctuel(s)" in item and 'class="now-bar goal' in item  # ses objectifs en jauge
     assert "Prochaine exécution" in item and "Son rythme, ses outils, son dépôt" in item  # le reste, replié
-    assert "Plage de travail" in item.split("Son rythme, ses outils, son dépôt")[1]
+    assert "Plage de travail" in item.split("Son rythme, ses outils, son dépôt")[-1]  # replié sous la rangée
     table = drawn(client, "/inspecteur/projets/tous?vue_pg1=table")  # en tableau : la liste de la console
     assert 'class="hm-table"' in table and "prj-item" not in table and "Outils réseau" in table
+
+
+def test_each_objective_reads_in_clear_with_its_buttons_on_its_line(world):  # noqa: F811
+    client, live, _ = world
+    kernel = _life(client, live)
+    pid = _create(client, kernel, "Carnet du ciel", "Recouper les dates\nÉcrire novembre")
+    said = "Dates recoupées entre deux sources. " * 20  # assez long pour se replier en quatre lignes
+    append(client, kernel, [c.RUN_REPORTED.draft(project=pid, objective=1, verdict=c.CONTINUE,
+                                                 summary=Content.of(said, level=0))], "projects")
+    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=objectifs")
+    assert 'data-tab="project/objectifs"' in page and "Ponctuels faits" in page  # dessiné, ses chiffres en tête
+    items = page.split('class="prj-obj-item')[1:]
+    assert len(items) == 3 and "Garder les tests verts" in items[0]  # le constant d'abord, comme la faculté les range
+    item = next(x.split("</li>")[0] for x in items if "Recouper les dates" in x)
+    assert "ponctuel" in item and "ouvert" in item and "posé par toi" in item
+    assert 'class="prj-obj-quote long"' in item and said.strip() in item and "lire la suite" in item  # en clair
+    actions = item.split('class="toolbar prj-obj-actions"')[1]
+    seen, more = actions.split('class="action-overflow"')
+    assert "Lancer maintenant" in seen and "Marquer fait" in seen and "Modifier l'objectif" in seen
+    assert "Retirer" in more and "Retirer" not in seen  # le reste sous « ⋯ »
+    add = page.split('class="now-card prj-obj-add"')[1]
+    assert "Ajouter un objectif" in add and 'name="text"' in add  # le formulaire, à côté de la liste
 
 
 def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noqa: F811

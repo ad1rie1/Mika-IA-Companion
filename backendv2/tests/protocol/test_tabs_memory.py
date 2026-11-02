@@ -117,6 +117,8 @@ def test_a_moment_long_past_still_says_how_it_turned_out(world):  # noqa: F811
 
 
 def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F811
+    """Les pièces et la place de chacun sur une même page, en sous-onglets (ADR 0182) ; l'ancienne adresse de la
+    place y mène, ouverte sur elle."""
     client, live, _ = world
     kernel, now = _life(client, live)
     message = append(client, kernel, [rt.PERCEPTION_RECEIVED.draft(handle="alice", channel="web", addressed=True,
@@ -138,10 +140,13 @@ def test_received_pieces_show_what_she_read_and_their_place(world):  # noqa: F81
     voice = _between(page, "vocal.ogg", "</li>")
     assert "gardée, pas lue" in voice and "Rien n’a pu en être lu" in voice
     assert 'class="memories-item piece k-image' in page and 'class="memories-item piece k-audio' in page
-    place = drawn(client, "/inspecteur/memoire/place")
+    assert 'class="hm-subtabs" data-subtabs' in page and 'href="#pieces-list"' in page and 'href="#pieces-place"' in page
+    place = _between(page, 'id="pieces-place"')
     row = _between(place, 'class="place-row', "</li>")
     assert "Alice" in row and "now-bar place" in row and "2 pièces" in row and "onglet=pieces" in row
-    assert "Place de chacun" in place and "2,00 Go" in place
+    assert "Place de chacun" in page and "2,00 Go" in page
+    moved = client.get("/inspecteur/memoire/place", follow_redirects=False)
+    assert moved.status_code == 301 and moved.headers["location"] == "/inspecteur/memoire/recues#pieces-place"
 
 
 def test_seeing_ahead_scales_her_expectations_and_who_keeps_their_word(world):  # noqa: F811
@@ -190,7 +195,7 @@ def test_a_new_memory_says_each_tab_is_empty(world):  # noqa: F811
     _life(client, live)
     for tab, says in (("croyances", "pas encore de croyance."), ("promesses", "pas encore de promesse."),
                       ("moments", "pas encore de moment noté."), ("recues", "aucune pièce reçue."),
-                      ("place", "aucune pièce gardée."), ("voir-venir", "aucun moment constaté encore."),
+                      ("recues", "aucune pièce gardée."), ("voir-venir", "aucun moment constaté encore."),
                       ("consolidation", "pas encore de relecture.")):
         page = drawn(client, f"/inspecteur/memoire/{tab}")
         assert f'data-tab="memoire/{tab}"' in page and says in page, tab

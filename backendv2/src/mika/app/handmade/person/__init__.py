@@ -50,6 +50,7 @@ from mika.app.handmade import (
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn
+from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memoire import memory
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
@@ -480,7 +481,8 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "echanges": exchanges,
     "memoire": memory,
     "adresses": drawn(Roles(title="moyen de communication", badges=("confiance",), tiles=True), "adresses"),
-    "fichiers": drawn(Roles(title="nom", badges=("état",), time="quand", tiles=True), "fichiers"),
+    # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``) ; les pièces seules, sans l'autre
+    "fichiers": files,
     "pieces": drawn(Roles(title="nom", badges=("sorte", "état"), body=("ce qu'elle y a lu",), time="reçue",
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
@@ -511,6 +513,8 @@ class PersonOverview(Overview):
     folded = ("synthese", "lien", "devine", "affect", "pensees_personne")
     #: les onglets des facultés qu'elle dessine (``TABS``)
     tabs = tuple(TABS)
+    #: Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179)
+    joined = {"fichiers": ("pieces",)}
 
     def __init__(self) -> None:
         #: la console, posée quand ses routes le sont (la fiche, elle, passe la sienne à ``render``)

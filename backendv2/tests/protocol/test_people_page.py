@@ -28,7 +28,7 @@ def test_a_card_per_person(world):  # noqa: F811
     assert page.status_code == 200
     ConsoleHTML(page.text).check()
     text = html.unescape(page.text)
-    assert "<h1>Personnes</h1>" in text and re.search(r'<a class="nav-item on" href="/inspecteur/personnes"', text)
+    assert "<h1>Personnes</h1>" in text and re.search(r'<a class="nav-item on nav-head" href="/inspecteur/personnes"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     card = re.search(r'<li class="people-card.*?</li>\s*</ul>', text, re.S).group()
     assert '<a href="/inspecteur/fiche/person/user_1">adrien</a>' in card

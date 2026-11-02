@@ -81,7 +81,8 @@ def _files_tab(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     t = table()
     total = int(store.query_mind(select(func.count()).select_from(t).where(t.c.person.in_(handles)))[0][0])
-    pager = ctx.pager(size=PAGE, total=total)
+    # sa propre page : l'onglet se lit aussi à côté d'un autre (les pièces reçues, sur la fiche)
+    pager = ctx.pager("page_envoyes", size=PAGE, total=total)
     found = of_people(store, handles, pager.offset + pager.size)[pager.offset:]
     rows = tuple(Row((
         When(r.at), Ref.subject(KIND, r.id, r.name or "(sans nom)"), Text(size_words(r.size)),

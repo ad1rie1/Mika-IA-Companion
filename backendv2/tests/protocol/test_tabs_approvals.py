@@ -6,14 +6,21 @@ vide."""
 from __future__ import annotations
 
 import re
+from urllib.parse import parse_qs, urlsplit
 
+from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_console_workflows import append
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_tabs_identities import claim
+from tests.protocol.test_tabs_people import emit, stranger
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
+
+
+def _reader(page: str) -> str:
+    return page.split('class="now-card hm-approval apv-reader', 1)[1].split("</article>", 1)[0]
 
 
 def _entry(page: str, text: str) -> str:
@@ -77,3 +84,43 @@ def test_everything_to_decide_is_one_queue_with_one_tab_bar(world):  # noqa: F81
     home = drawn(client, "/inspecteur/")
     assert "À valider › Tout ce qui attend" in home
     assert "À valider › Courriers à envoyer" not in home and "Identités › Identités à confirmer" not in home
+
+
+def test_a_claim_is_decided_in_the_queue_its_actions_already_oriented(world):  # noqa: F811
+    """Une identité à confirmer ne se décide que dans la file (ADR 0180) : où elle en est vers la barre, puis les
+    actions de la fiche du moyen de communication, sur leur page et déjà orientées — la preuve choisie par l'adresse,
+    le nom démenti et la personne visée posés par la faculté ; la règle de la faculté au pied."""
+    client, live, _ = world
+    bootstrap(client)
+    claim(client, live)
+    reader = _reader(drawn(client, "/inspecteur/approbations/identites"))
+    assert "0,45 / 0,70" in reader  # vers la barre
+    links = {t: h for h, t in re.findall(r'class="btn[^"]*" href="([^"]+)">([^<]+)<', reader)}
+    for label, key in (("S'en porter garant", "identity.preuve"), ("La démentir", "identity.preuve"),
+                       ("Relier à une personne", "identity.relier")):
+        assert urlsplit(links[label]).path == f"/inspecteur/action/{key}"
+        assert parse_qs(urlsplit(links[label]).query)["sujet"] == ["ext_9"]
+    assert '<option value="vouched" selected' in drawn(client, links["S'en porter garant"])
+    deny = drawn(client, links["La démentir"])
+    assert '<option value="denied" selected' in deny and 'value="Adrien"' in deny
+    assert '<option value="user_1" selected' in drawn(client, links["Relier à une personne"])
+    assert "Une affirmation seule ne franchit jamais la barre" in reader
+
+
+def test_a_name_is_decided_in_the_queue_with_both_answers(world):  # noqa: F811
+    """Un nom à relier ne se décide que dans la file (ADR 0180) : qui lui en a parlé, la personne qui le porte, et
+    ses deux réponses — « C'est elle » (la fiche, le formulaire pré-rempli) et « Ce n'est pas elle » (le bouton de la
+    faculté)."""
+    client, live, _ = world
+    bootstrap(client)
+    assert "Aucun nom dont on lui a parlé n'attend quelqu'un." in drawn(client, "/inspecteur/approbations/noms")
+    emit(client, live, "memory", [memory_c.BELIEVED.draft(
+        text=Content.of("Léa, la sœur d'Adrien, prépare un concours."), about=("name:lea",), sensitivity=1,
+        source="user_1", told_by=("user_1",))])
+    stranger(client, live, "ext_7", "Léa Martin")
+    reader = _reader(drawn(client, "/inspecteur/approbations/noms"))
+    assert "On lui a parlé de « Lea »" in reader and "porté par Léa Martin" in reader
+    assert "<dt>qui lui en a parlé</dt>" in reader
+    actions = reader.split('class="apv-do"', 1)[1]
+    assert "C'est elle : relier" in actions and "onglet=synthese" in actions
+    assert "/inspecteur/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions

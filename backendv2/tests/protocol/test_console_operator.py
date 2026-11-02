@@ -53,7 +53,7 @@ def test_why_did_she_say_that_is_one_click_from_the_thread(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     converse(client, f"salut {HOSTILE}")
-    thread = client.get(f"{BASE}/fil/messages").text
+    thread = client.get(f"{BASE}/fiche/person/user_1?onglet=echanges").text
     # un lien « pourquoi ? » sous chacune de ses bulles (la conversation est dessinée, ADR 0121)
     links = re.findall(r'href="(/inspecteur/parole/(\d+))"', thread)
     assert links, "chaque parole d'elle mène à son « pourquoi »"
@@ -214,7 +214,7 @@ def test_an_invented_time_zone_is_refused_and_could_not_break_the_console(world)
     report = client.portal.call(health.report, kernel)
     config = next(c for c in report.checks if c.name == "config")
     assert config.state == health.DEGRADED and "Pas/UnFuseau" in config.summary
-    for url in (f"{BASE}/", f"{BASE}/decisions/episodes", f"{BASE}/systeme/sante", f"{BASE}/fil/messages"):
+    for url in (f"{BASE}/", f"{BASE}/decisions/episodes", f"{BASE}/systeme/sante", f"{BASE}/fil"):
         assert client.get(url).status_code == 200, url
     assert "Configuration lisible" in html_of(client.get(f"{BASE}/systeme/sante"))
     converse(client)  # la conversation aussi
@@ -427,7 +427,8 @@ def test_giant_cursors_never_break_a_page(world):  # noqa: F811
     for url in (f"{BASE}/?avant={huge}", f"{BASE}/systeme/chronologie?avant={huge}", f"{BASE}/evenement/{huge}",
                 f"{BASE}/decisions/selections?avant={huge}", f"{BASE}/systeme/operations?avant={huge}",
                 f"{BASE}/reglages/journal?avant={huge}", f"{BASE}/systeme/appels?page={huge}",
-                f"{BASE}/fil/messages?avant={huge}", f"{BASE}/approbations/historique?avant=-4"):
+                f"{BASE}/fiche/person/user_1?onglet=echanges&avant={huge}", f"{BASE}/fil/conversations?page={huge}",
+                f"{BASE}/approbations/historique?avant=-4"):
         assert client.get(url).status_code < 500, url
 
 

@@ -42,12 +42,35 @@ def tabs_of(page, destination):
     return tabs
 
 
+def bar_of(page):
+    """La barre d'onglets d'une page, ``(adresse, titre)`` : son titre sans son compteur."""
+    nav = re.search(r'<nav class="tabs"[^>]*>(.*?)</nav>', html.unescape(page), re.S)
+    if nav is None:
+        return []
+    bar = []
+    for href, title in re.findall(r'<a class="tab[^"]*" href="([^"]+)"[^>]*>(.*?)</a>', nav.group(1), re.S):
+        title = re.sub(r'<span class="(?:count|tab-n)[^"]*">.*?</span>', '', title, flags=re.S)
+        bar.append((href.split('?', 1)[0], re.sub(r"<[^>]+>", "", title).strip()))
+    return bar
+
+
+def menu_columns(page):
+    """Les groupes de pages du menu : l'adresse de chaque page à onglets, et ses onglets ``(adresse, titre)``."""
+    out = {}
+    for href, tabs in re.findall(r'<a class="nav-item(?: on)? nav-head" href="([^"]+)".*?<ul class="nav-tabs"[^>]*>(.*?)</ul>',
+                                 primary_nav(page), re.S):
+        out[href] = [(h, t.strip()) for h, t in re.findall(r'<a class="nav-tab[^"]*" href="([^"]+)"[^>]*><span>(.*?)</span>', tabs)]
+    return out
+
+
 def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
-    """Le menu et la barre d'onglets ne se contredisent pas : dans une rubrique, une destination a un seul lien (la
-    page entière), ou un lien par onglet — tous ses onglets, dans leur ordre, sous leur nom (le lien vers la
-    destination elle-même : son premier onglet). Sauf l'annuaire des réglages ; « À valider » suit la règle (ADR 0177)."""
+    """Le menu et la barre d'onglets ne se contredisent pas (ADR 0178) : un lien vers une destination à onglets montre
+    ses onglets, ceux de sa barre, dans leur ordre et sous leur nom ; une rubrique qui nomme les onglets d'une destination
+    un à un (« À valider ») les nomme tous, dans leur ordre. Sauf l'annuaire des réglages."""
     client, _, _ = world
     bootstrap(client)
+    columns = menu_columns(client.get('/inspecteur/').text)
+    grouped = 0
     for group in MENU:
         if group.label in SHORTCUT_GROUPS:
             continue
@@ -56,34 +79,54 @@ def test_the_menu_and_the_tabs_say_the_same_thing(world):  # noqa: F811
             destination, _, slug = link.target.partition('/')
             by_destination.setdefault(destination, []).append((slug, link.label))
         for destination, links in by_destination.items():
-            if len(links) < 2:
+            bar = bar_of(client.get(f'/inspecteur/{destination}').text)
+            if links == [('', links[0][1])]:  # un lien vers la destination : sa colonne, si elle a des onglets
+                assert columns.get(f'/inspecteur/{destination}', []) == bar, (group.label, destination)
+                grouped += bool(bar)
                 continue
-            tabs = tabs_of(client.get(f'/inspecteur/{destination}').text, destination)
-            if not tabs:
-                # une destination sans barre d'onglets (Système) : le menu de gauche est sa seule liste de pages,
+            if not bar:
+                # une destination sans barre d'onglets (Système) : le menu est sa seule liste de pages,
                 # rien ne peut le contredire
                 continue
-            shown = [(slug or tabs[0][0], label) for slug, label in links]
-            assert shown == tabs, (group.label, destination, shown, tabs)
+            shown = [(f'/inspecteur/{destination}/{slug or bar[0][0].rsplit("/", 1)[1]}', label) for slug, label in links]
+            assert shown == bar, (group.label, destination, shown, bar)
+    # les groupes de pages de sa rubrique, des échanges, de l'activité, des outils et des connexions
+    assert grouped >= 12 and len(columns) == grouped
 
 
-@pytest.mark.parametrize(('path', 'group', 'label'), [
-    ('sens/dessins', 'Connexions extérieures', 'Dessins'),
-    ('sens/camera', 'Connexions extérieures', 'Caméra'),
-    ('outils/expose', 'Outils', 'Prêter à un agent'),
-    ('outils/tous?outil=email_read', 'Outils', 'Ce qu'),
-    ('courrier/brouillons', 'Relations & échanges', 'Courrier'),
+def test_a_menu_tab_leads_to_its_page_and_lights_up(world):  # noqa: F811
+    """Chaque onglet d'un groupe de pages mène à une page qui répond, et s'allume dans le menu quand on y est ; la
+    destination ouverte à sa propre adresse allume son premier onglet."""
+    client, _, _ = world
+    bootstrap(client)
+    columns = menu_columns(client.get('/inspecteur/').text)
+    for head, tabs in columns.items():
+        for href, title in tabs:
+            page = client.get(href)
+            assert page.status_code == 200, (href, page.status_code)
+            lit = re.findall(r'<a class="nav-tab on" href="([^"]+)"', primary_nav(page.text))
+            assert lit == [href], (href, lit)
+        lit = re.findall(r'<a class="nav-tab on" href="([^"]+)"', primary_nav(client.get(head).text))
+        assert lit == [tabs[0][0]], (head, lit)
+
+
+@pytest.mark.parametrize(('path', 'group', 'label', 'tab'), [
+    ('sens/dessins', 'Connexions extérieures', 'Ses sens', 'Dessins'),
+    ('sens/camera', 'Connexions extérieures', 'Ses sens', 'Caméra'),
+    ('outils/expose', 'Outils', 'Ses outils', 'Prêter à un agent'),
+    ('outils/tous?outil=email_read', 'Outils', 'Ses outils', 'Ce qu'),
+    ('courrier/brouillons', 'Relations & échanges', 'Courrier', 'Brouillons'),
     # « À valider » est une seule file (ADR 0177) : chacun de ses onglets allume son lien
-    ('approbations/courriers', 'À valider', 'Courriers à envoyer'),
-    ('approbations/noms', 'À valider', 'Noms à relier'),
-    ('courrier/reception', 'Relations & échanges', 'Courrier'),
-    ('vie/rythme', 'Mika', 'Sommeil et rythme'),
-    ('reglages/comportement-memory', 'Réglages', 'Paramètres avancés'),
-    ('fiche/person/user_1', 'Relations & échanges', 'Personnes'),
+    ('approbations/courriers', 'À valider', 'Courriers à envoyer', None),
+    ('approbations/noms', 'À valider', 'Noms à relier', None),
+    ('courrier/reception', 'Relations & échanges', 'Courrier', 'Réception'),
+    ('vie/rythme', 'Mika', 'Humeur et corps', 'Sommeil et rythme'),
+    ('reglages/comportement-memory', 'Réglages', 'Paramètres avancés', None),
+    ('fiche/person/user_1', 'Relations & échanges', 'Personnes', None),
     # une fiche ouverte depuis une liste allume cette liste, pas seulement la rubrique de la fiche
-    ('fiche/person/user_1?retour=/inspecteur/approbations/noms', 'À valider', 'Noms à relier'),
+    ('fiche/person/user_1?retour=/inspecteur/approbations/noms', 'À valider', 'Noms à relier', None),
 ])
-def test_page_and_subject_keep_the_correct_menu_open(world, path, group, label):  # noqa: F811
+def test_page_and_subject_keep_the_correct_menu_open(world, path, group, label, tab):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     page = client.get('/inspecteur/' + path)
@@ -92,8 +135,15 @@ def test_page_and_subject_keep_the_correct_menu_open(world, path, group, label):
     # la rubrique de la page est marquée dans la barre du haut (ADR 0176) : son menu reste fermé jusqu'au clic
     assert f'<details class="nav-group active" data-nav-group="{group}">' in menu
     assert menu.count('class="nav-group active"') == 1
-    current = re.findall(r'<a class="nav-item on"[^>]*>(.*?)</a>', menu, re.S)
+    current = re.findall(r'<a class="nav-item on[^"]*"[^>]*>(.*?)</a>', menu, re.S)
     assert len(current) == 1 and label in current[0]
+    # dans un groupe de pages, l'onglet de la page s'allume aussi, et lui seul porte « page courante » (ADR 0178)
+    lit = re.findall(r'<a class="nav-tab on"[^>]*><span>(.*?)</span>', menu)
+    if tab is None:
+        assert not lit
+    else:
+        assert len(lit) == 1 and tab in lit[0]
+    assert menu.count('aria-current="page"') == 1
 
 
 def test_her_menu_section_bears_the_name_of_her_persona(world):  # noqa: F811

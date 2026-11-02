@@ -75,6 +75,8 @@ MAX_LEDGER = 50
 PAGE = 50
 #: la page d'un tableau d'adresses (une fiche n'en montre qu'un)
 HANDLES_PAGE = "page_adresses"
+#: les revendications en attente se décident dans la file « À valider » (ADR 0180), pas dans une page à elles
+CLAIMS_QUEUE = Ref("local", "/inspecteur/approbations/identites", "les identités à confirmer")
 #: Une personne connue seulement de nom (``name:alice``) : pas d'adresse.
 NAMED = "name:"
 
@@ -1056,8 +1058,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     return [
         Stats((Stat("moyens de communication connus", len(s.handles)),
                Stat("liées à une autre personne", sum(1 for h in s.handles.values() if h.person)),
-               Stat("revendications en attente", len(pending_claims(s, frame.now)),
-                    href=Ref.view("identity", "revendications", "revendications")),
+               Stat("revendications en attente", len(pending_claims(s, frame.now)), href=CLAIMS_QUEUE),
                Stat("propriétaires", owners),
                Stat("barre de divulgation", number(privacy.POLICY.private_threshold),
                     href=Ref.view("identity", "politique", "politique")))),
@@ -1080,7 +1081,9 @@ def _claims_badge(s: IdentityState, frame: Frame) -> int:
     return len(pending_claims(s, frame.now))
 
 
-@IDENTITY.inspect("revendications", title="Identités à confirmer", section="identites", order=20, badge=_claims_badge,
+# hors de la navigation : la file « À valider » la lit, et c'est là seulement qu'on en décide (ADR 0180)
+@IDENTITY.inspect("revendications", title="Identités à confirmer", section="identites", hidden=True,
+                  badge=_claims_badge,
                   description="Qui dit être quelqu'un d'autre, sans preuve encore : à confirmer, garantir ou "
                               "démentir depuis la fiche du moyen de communication.")
 def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -1115,7 +1118,8 @@ def _names_badge(s: IdentityState, frame: Frame, ports: Mapping[str, Any]) -> tu
     return len(waiting_names(s, store)), "nom(s) dont on lui a parlé que porte quelqu'un qu'elle connaît"
 
 
-@IDENTITY.inspect("noms", title="Noms à relier", section="identites", order=25, badge=_names_badge,
+# hors de la navigation : la file « À valider » la lit, et c'est là seulement qu'on en décide (ADR 0180)
+@IDENTITY.inspect("noms", title="Noms à relier", section="identites", hidden=True, badge=_names_badge,
                   description="On lui a parlé de quelqu'un avant de le connaître, et une personne qu'elle connaît "
                               "porte ce nom : à relier ou à écarter depuis la fiche de la personne. Rien n'est relié "
                               "d'une ressemblance de nom.")

@@ -63,6 +63,7 @@ OWN_VIEWS = {
     ("identity", "personne"): ("Un moyen de communication (ancienne page)", ("handle",), ""),
     ("social", "liens"): ("Liens", ("q", "proximite", "person"), "personnes"),
     ("presence", "presents"): ("Présents", (), "personnes"),
+    ("transcript", "conversations"): ("Par personne", ("handle", "q"), "fil"),
     ("transcript", "messages"): ("Messages", ("handle", "q", "role"), "fil"),
     ("transcript", "questions"): ("Questions sans réponse", (), "fil"),
 }

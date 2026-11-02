@@ -17,7 +17,7 @@ from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
-from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
+from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Section, Table, Text, is_page_param
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
 
@@ -129,11 +129,27 @@ class Subjects:
         drawn = call(overview.head, self.ui, key, label=f"en-tête {kind}") if overview is not None else None
         if isinstance(drawn, Failed):  # l'en-tête de la faculté, alors
             drawn = None
+        # des onglets réunis sous un autre (``Overview.joined``) : hors de la barre, leur adresse mène au sien
+        by_name = {t.name: t for t in tabs}
+        joined = {host: [by_name[g] for g in guests if g in by_name and g != host]
+                  for host, guests in (overview.joined.items() if overview is not None else ()) if host in by_name}
+        host_of = {g.name: host for host, guests in joined.items() for g in guests}
+        if asked in host_of:
+            query = urlencode({**dict(request.query_params), "onglet": host_of[asked]})
+            return RedirectResponse(f"{fiche_url(kind, key)}?{query}#{quote(asked, safe='')}", status_code=303)
+        tabs = [t for t in tabs if t.name not in host_of]
         slug = asked or (head.default_tab if isinstance(head, Head) else "") or (tabs[0].name if tabs else "")
         current = None if shown is not None else next((t for t in tabs if t.name == slug), tabs[0] if tabs else None)
         blocks: list[Any] = [head] if isinstance(head, Note) else []
+        guests = joined.get(current.name, []) if current is not None else []
         if current is not None:
-            blocks += await self.ui.inspection.arun(current, request.query_params, self.ui.when_long, subject=key)
+            got = await self.ui.inspection.arun(current, request.query_params, self.ui.when_long, subject=key)
+            if guests:  # ses onglets réunis : une section par onglet, à son titre, la sienne d'abord
+                got = [Section(current.title, tuple(got), current.description)]
+                for g in guests:
+                    got.append(Section(g.title, tuple(await self.ui.inspection.arun(
+                        g, request.query_params, self.ui.when_long, subject=key)), g.description))
+            blocks += got
         # un onglet que la vue d'ensemble dessine : les mêmes données, une autre forme (ses blocs sinon)
         if overview is not None and current is not None and current.name in overview.tabs \
                 and not wants_table(request.query_params):
@@ -186,7 +202,8 @@ class Subjects:
         if isinstance(head, Head) and head.back:
             crumbs, rubric = [(head.back.text or "Retour", render.href(head.back))], False
         back = request.query_params.get("retour", "")
-        if back.startswith(PREFIX + "/") and "//" not in back and "\\" not in back and len(back) < 2000:
+        from_list = back.startswith(PREFIX + "/") and "//" not in back and "\\" not in back and len(back) < 2000
+        if from_list:
             crumbs, rubric = [("Retour à la liste", back)], False
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
@@ -201,8 +218,11 @@ class Subjects:
             crumbs=crumbs, rubric=rubric, tabs=tab_list, gear=gear, blocks=blocks,
             # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
             menu_path=crumbs[0][1] if crumbs else "",
+            # l'onglet du menu ne s'allume que pour la liste d'où l'on vient, pas pour la destination de la fiche
+            menu_tab=from_list,
             view_description=overview.description if shown is not None and current is None else
-            "" if shown is not None else current.description if current is not None else "",
+            "" if shown is not None else " ".join(filter(None, (current.description, *(g.description for g in guests))))
+            if current is not None else "",
             overview=shown, fiche_head=drawn,
             fiche_styles=overview.styles if overview is not None and (shown or drawn) else (),
             fiche_scripts=overview.scripts if overview is not None and shown is not None and current is None else (),
@@ -263,7 +283,8 @@ class Subjects:
             blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
         # les vues qui cherchent dans leurs textes (un filtre « q » : les messages) — la recherche ne lit pas les
         # messages elle-même, elle y mène
-        texts = [v for v in self.ui.inspection.views() if q and not v.subject and any(p == "q" for p, _l in v.params)]
+        texts = [v for v in self.ui.inspection.views()
+                 if q and not v.subject and not v.hidden and any(p == "q" for p, _l in v.params)]
         if texts:
             blocks.insert(0, Table(("chercher dans", "faculté"), tuple(
                 (Ref.view(v.owner, v.name, f"« {q} » dans {v.title.lower()}", q=q),
@@ -294,7 +315,7 @@ class Subjects:
                     base = f"{PREFIX}/{dest.key}"
                     if needle in search_text(dest.label):
                         matches.append((Ref("local", base, dest.label), rubric.get(dest.key, group.label)))
-                    for slug, title, spec in self.pages.tabs_of(dest):
+                    for slug, title, spec in self.ui.tabs_of(dest):
                         family = spec.group if isinstance(spec, Builtin) else ""
                         if needle in search_text(f"{dest.label} {family} {title}"):
                             matches.append((Ref("local", f"{base}/{slug}", title), " › ".join(filter(None, (dest.label, family)))))

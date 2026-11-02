@@ -63,6 +63,7 @@ from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
+from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, embeddings, reglages, schema, system_mcp
 from mika.app import persona as persona_file
@@ -389,6 +390,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                  images=settings),
              "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
+             # l'hôte GitHub d'un dépôt distant, lu par la console seulement (ADR 0183)
+             "repo_host": GitHubRepos(settings.git),
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")

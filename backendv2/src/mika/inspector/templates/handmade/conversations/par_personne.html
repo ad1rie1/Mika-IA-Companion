@@ -1,0 +1,33 @@
+{# Relations & échanges › Conversations › Par personne (app/handmade/tabs/threads.py, ADR 0181) : comme une
+   messagerie. Une ligne par personne avec qui elle parle, tous ses moyens de communication réunis, la plus récente
+   d'abord — son avatar à la couleur de ce qu'elle ressent envers elle et sa présence (comme sur Personnes), son nom,
+   ce qu'elle est pour elle, par où, l'heure ; le dernier message et s'il est d'elle ; les questions qui attendent sa
+   réponse et combien de messages. Une ligne s'ouvre sur leur conversation (l'onglet Échanges de sa fiche). Le filtre,
+   la pagination et la bascule « Tableau » sont ceux de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+<div class="now-page fil-convs" data-tab="fil/conversations">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  {% if t %}
+  <section class="now-card" id="{{ t.id }}" aria-labelledby="fil-convs-title">
+    {{ tab.head("Avec qui elle parle", "fil-convs-title", t.count, lede, list=t) }}
+    {% if items %}
+    <ul class="fil-inbox" role="list">
+      {% for p in items %}
+      <li class="fil-conv{{ ' asks' if p.questions }}">
+        <span class="now-avatar sw-{{ p.emotion }}" aria-hidden="true">{{ p.initial }}{% if p.online %}<span class="now-presence{{ ' typing' if p.composing }}"></span>{% endif %}</span>
+        <div class="fil-conv-main">
+          <p class="fil-conv-head"><a class="fil-conv-name" href="{{ p.href }}">{{ p.name }}</a>{% if p.closeness %}<span class="now-muted">{{ p.closeness }}</span>{% endif %}{% if p.composing %}<span class="now-tag live">écrit…</span>{% endif %}{% if p.when %}<span class="fil-conv-when">{{ tab.cell(p.when) }}</span>{% endif %}</p>
+          {% if p.last %}<p class="fil-conv-last">{% if p.mine %}<span class="fil-conv-who">elle :</span> {% endif %}{{ p.last }}</p>{% endif %}
+          <p class="fil-conv-foot">
+            {% if p.questions %}{{ tab.cell(p.questions) }}{% endif %}
+            <span class="now-muted">{{ p.count }} message{{ 's' if p.count not in ('0', '1') }}{% if p.by %} · par {{ p.by }}{% endif %}</span>
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+  </section>
+  {% endif %}
+</div>

@@ -1,6 +1,11 @@
-"""Relations & échanges › Conversations : ses onglets dans leur forme (ADR 0177). Ses messages et ses réponses jugées
-sont dessinés à part (``conversations.py``) ; ici, ce qui attend.
+"""Relations & échanges › Conversations : ses onglets dans leur forme (ADR 0177). Ses réponses jugées sont dessinées
+à part (``conversations.py``) ; ici, avec qui elle parle et ce qui attend.
 
+- **Par personne** (ADR 0181) : comme une messagerie — une ligne par personne, tous ses moyens de communication réunis,
+  la conversation la plus récente d'abord : son avatar à la couleur de ce qu'elle ressent envers elle (et sa présence,
+  comme sur Personnes), son nom, par où, l'heure ; le dernier message et s'il est d'elle ; les questions qui attendent
+  sa réponse et combien de messages. Une ligne s'ouvre sur leur conversation ; le filtre par nom, la pagination et la
+  bascule « Tableau » sont ceux de la faculté.
 - **Questions sans réponse** : une file, comme le fil des messages la dirait — chaque question dans sa bulle, de qui,
   quand, et depuis combien de temps elle attend (en avant, une attente longue dite) ; sur sa ligne, le message source
   et la conversation avec cette personne. L'aide de la faculté au pied ; la pagination et la bascule « Tableau »
@@ -16,8 +21,8 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import span
-from mika.app.handmade.tabs import Got, Line, Tab, paged
+from mika.app.handmade import Look, person_card, presences, span
+from mika.app.handmade.tabs import Got, Line, Tab, blank, paged, text
 from mika.app.handmade.tabs.people import person_of
 from mika.inspector.pages.subjects import fiche_url
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -26,6 +31,46 @@ from mika.vocab.people import is_identifiable
 
 STYLES = ("handmade/fil.css",)
 
+
+# ── Par personne ──────────────────────────────────────────────────────────
+
+
+def _person(line: Line, look: Look, online: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    who = line.get("avec")
+    person = person_of(who)
+    face = person_card(look, person, online.get(person)) if person else None
+    name = text(who) or "quelqu'un"
+    last = line.text("dernier message")
+    return {
+        "name": name, "initial": name[:1].upper(), "href": line.href or str((who or {}).get("href") or ""),
+        "emotion": face["felt"]["emotion"] if face and face["felt"] else "neutral",
+        "online": bool(face and face["online"]), "composing": bool(face and face["composing"]),
+        "closeness": face["closeness"] if face else "", "by": "" if blank(line.get("par")) else line.text("par"),
+        "when": line.get("le dernier"), "last": "" if last in ("", "—") else last,
+        "mine": line.text("de") == "elle", "count": line.text("messages"),
+        "questions": None if blank(line.get("questions")) else line.get("questions"),
+    }
+
+
+def conversations(got: Got) -> Markup | None:
+    """Conversations › Par personne : une ligne par personne, son dernier message, ce qui attend sa réponse."""
+    table = got.table("Ses conversations")
+    if table is None:
+        notes = got.notes()
+        return got.draw("handmade/conversations/par_personne.html", t=None, items=[], notes=notes) if notes else None
+    look = Look.of(got.ui, DAY)
+    online = presences(look)
+    items = [_person(x, look, online) for x in got.lines("Ses conversations")]
+    waiting = sum(1 for x in items if x["questions"])
+    where = " sur cette page" if paged(table) else ""
+    said = str(got.query.get("q") or "").strip()
+    lede = (f"{waiting} avec une question sans réponse{where} · " if waiting else "") \
+        + (f"le dernier message où « {said} » a été dit" if said else "la plus récente d'abord") \
+        + " ; une ligne s'ouvre sur leur conversation"
+    return got.draw("handmade/conversations/par_personne.html", t=table, items=items, notes=[], lede=lede)
+
+
+# ── Questions sans réponse ────────────────────────────────────────────────
 
 
 def _instants(got: Got, title: str, label: str) -> list[int]:
@@ -81,5 +126,6 @@ def questions(got: Got) -> Markup | None:
 
 
 TABS: dict[str, Any] = {
+    "fil/conversations": Tab(conversations, *STYLES),
     "fil/questions": Tab(questions, *STYLES),
 }

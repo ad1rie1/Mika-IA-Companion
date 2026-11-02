@@ -1289,7 +1289,9 @@ QUERY = Param("q", "texte", placeholder="un mot…")
 ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
 
 
-@TRANSCRIPT.inspect("messages", title="Messages", section="fil", order=10, params=[HANDLE, QUERY, ROLE],
+# hors de la console (ADR 0181) : Conversations s'ouvre sur les personnes, chaque conversation est sur sa fiche ; la
+# console en MCP la sert encore par son nom, et son ancienne adresse mène à Par personne
+@TRANSCRIPT.inspect("messages", title="Messages", section="fil", order=10, params=[HANDLE, QUERY, ROLE], hidden=True,
                     description="Tout ce qui a été dit, du plus récent au plus ancien.")
 def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     store = ctx.store

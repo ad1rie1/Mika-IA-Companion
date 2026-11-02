@@ -4,10 +4,12 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 
+import httpx
 import pytest
 
 import mika.sim.world as sim_world
 from mika.adapters.store_sql import SqlStore
+from mika.adapters.workshop.github import GitHubRepos
 from mika.kernel.clock import US, ManualClock
 from mika.kernel.faculty import Faculty
 from mika.kernel.ids import SeededIdGen
@@ -64,6 +66,17 @@ def _mariadb_lane(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
     yield
     backend.drop_made()
     backend.drop_session_prefix(os.environ.get("MIKA_DATABASE_PREFIX", ""))
+
+
+# ── GitHub hors ligne ─────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _github_offline(monkeypatch: pytest.MonkeyPatch):
+    """Aucun test ne lit GitHub (ADR 0183) : un ``GitHubRepos`` sans client injecté (celui du serveur réel, pour un
+    projet au dépôt distant GitHub) reçoit un 503, sans réseau. Ses tests à lui injectent leur GitHub simulé."""
+    offline = httpx.MockTransport(lambda request: httpx.Response(503))
+    monkeypatch.setattr(GitHubRepos, "_open", lambda self: self._client or httpx.AsyncClient(transport=offline))
 
 
 def _targeted(config: pytest.Config) -> set[Path]:

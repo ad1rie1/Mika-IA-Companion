@@ -1,9 +1,9 @@
-"""Conversations, dessinées (ADR 0121) : ses messages en conversation (le rendu de l'onglet Échanges d'une fiche, pour
-toutes les personnes), ses réponses que l'opératrice a jugées — le message, sa réponse, l'avis et ce qu'elle aurait dû
-dire. Les questions qui attendent se dessinent bloc par bloc (``pages.py``).
+"""Conversations › Ses réponses jugées, dessinées (ADR 0121) : le message, sa réponse, l'avis de l'opératrice et ce
+qu'elle aurait dû dire. Les conversations par personne et les questions qui attendent ont leur forme dans
+``tabs/threads.py`` (ADR 0181).
 
-Les données restent celles de la faculté du fil (``transcript`` : ses onglets ``messages``, ``jugees``,
-``questions``, leurs filtres et leur pagination) ; une forme qu'un onglet ne reconnaît pas rend la main à ses blocs.
+Les données restent celles de la faculté du fil (``transcript`` : son onglet ``jugees``, son filtre et sa pagination) ;
+une forme que l'onglet ne reconnaît pas rend la main à ses blocs.
 """
 
 from __future__ import annotations
@@ -14,16 +14,10 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade import Look, columns, reader
-from mika.app.handmade.exchanges import exchanges
 from mika.inspector import render
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import Badge, Row, Table, Text, When
-
-
-def messages(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
-    """Conversations › Messages : toutes ses conversations, jour par jour, chaque message avec qui."""
-    return exchanges(ui, "", blocks, query)
 
 
 def judged(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:

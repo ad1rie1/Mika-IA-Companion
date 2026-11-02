@@ -141,6 +141,24 @@ def test_git_seals_its_start_then_commits_only_what_changed(tmp_path):
     assert not go(ws.log(1, 1, offset=3)).strip()
 
 
+@needs_bwrap
+def test_the_workshop_measures_its_gap_to_a_commit_it_knows(tmp_path):
+    """L'écart avec la tête du distant (ADR 0183) : compté par l'atelier quand il connaît ce commit, ``None`` sinon."""
+    ws = BwrapWorkshop(tmp_path)
+    assert go(ws.branch(1)) == "" and go(ws.compare(1, "a" * 40)) is None  # pas encore de dépôt
+    go(ws.write(1, "a.py", "x = 1\n"))
+    go(ws.commit(1, "premier"))
+    pushed = go(ws.head(1))
+    for n in (2, 3):
+        go(ws.write(1, "a.py", f"x = {n}\n"))
+        go(ws.commit(1, f"pas {n}"))
+    assert go(ws.branch(1)) == "main"
+    assert go(ws.compare(1, pushed)) == (2, 0)  # deux enregistrements que le distant n'a pas
+    assert go(ws.compare(1, go(ws.head(1)))) == (0, 0)
+    assert go(ws.compare(1, "b" * 40)) is None  # un commit qu'il ne connaît pas
+    assert go(ws.compare(1, "HEAD~1")) is None  # seulement un identifiant de commit, jamais une expression
+
+
 # ── Le dépôt distant : ce qui porte le jeton ne lit que ce que l'atelier a posé ────
 
 

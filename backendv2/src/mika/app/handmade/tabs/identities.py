@@ -1,25 +1,21 @@
 """Relations & échanges › Identités et moyens de communication : ses onglets, chacun dans sa forme (ADR 0177).
 
-- **Moyens de communication** : un bandeau si des revendications attendent, une bande de chiffres (qui mène aux
-  revendications et aux règles), puis une ligne par moyen de communication, en colonnes — par où et sa clé, ce que
-  son canal prouve et la certitude, pour qui il parle (relié, propriétaire, ce qu'il revendique), ce qu'il ouvre en
-  privé et en public.
-- **Identités à confirmer** : une file à valider, une entrée par revendication — qui se présente comme qui, qui
-  elle vise, où elle en est vers la barre, ses preuves, quand elle s'éteint — et sur sa ligne ce qu'on peut en faire :
-  l'examiner sur sa fiche, s'en porter garant (une personne connue), la démentir (le nom revendiqué), relier ce moyen
-  de communication (à la personne visée).
-- **Noms à relier** : une file à valider, une entrée par nom dont on lui a parlé — qui lui en a parlé, ce qui attend,
-  la personne qui le porte (un homonyme dit) — et sur sa ligne « C'est elle » (la fiche, le formulaire pré-rempli) et
-  « Ce n'est pas elle » (le bouton de la faculté).
+- **Moyens de communication** : un bandeau si des revendications attendent (il mène à la file « À valider »), une
+  bande de chiffres (qui mène à la file et aux règles), puis une ligne par moyen de communication, en colonnes — par
+  où et sa clé, ce que son canal prouve et la certitude, pour qui il parle (relié, propriétaire, ce qu'il revendique),
+  ce qu'il ouvre en privé et en public.
 - **Règles de divulgation** : une page de règles, pas un mur de tableaux — les quatre barres en chiffres ; ce que
   chaque canal peut prouver, sur une même échelle de certitude où se lisent les degrés et la barre ; le poids des
   preuves, pour et contre ; les rangs de proximité ; les propriétaires. La calibration ne se dit en bandeau que si
   elle est fausse.
 
-Les données restent celles de la faculté ``identity`` : ses filtres, sa pagination et ses formulaires aussi ; les
-actions d'une revendication sont celles de la fiche du moyen de communication, sur leur propre page (``/action/…``),
-proposées seulement quand la faculté les offre ; elles arrivent déjà orientées — la faculté pré-remplit la personne
-visée et le nom démenti, l'adresse choisit la preuve (``?valeur.kind=``).
+Les identités à confirmer et les noms à relier n'ont plus de page ici : ils ne se décident que dans la file
+« À valider » (ADR 0180), qui lit les vues de la faculté et met chaque ligne en forme par ``claim_entry`` et
+``name_entry``. Les actions d'une revendication sont celles de la fiche du moyen de communication, sur leur propre
+page (``/action/…``), proposées seulement quand la faculté les offre ; elles arrivent déjà orientées — la faculté
+pré-remplit la personne visée et le nom démenti, l'adresse choisit la preuve (``?valeur.kind=``).
+
+Les données restent celles de la faculté ``identity`` : ses filtres, sa pagination et ses formulaires aussi.
 """
 
 from __future__ import annotations
@@ -41,8 +37,8 @@ from mika.runtime.operations import offered
 STYLES = ("handmade/identites.css",)
 #: la fiche d'un moyen de communication, telle qu'un lien de la faculté y mène
 HANDLE_LINK = f"{PREFIX}/fiche/handle/"
-#: d'où reviennent les actions ouvertes depuis une file
-CLAIMS = f"{PREFIX}/identites/revendications"
+#: d'où reviennent les actions ouvertes depuis la file (ADR 0180)
+CLAIMS = f"{PREFIX}/approbations/identites"
 #: verser une preuve sur un moyen de communication (s'en porter garant, démentir un nom)
 EVIDENCE = "identity.preuve"
 
@@ -114,7 +110,7 @@ def moyens(got: Got) -> Markup | None:
                     items=[_means(x) for x in got.lines("Moyens de communication")])
 
 
-# ── Identités à confirmer ─────────────────────────────────────────────────
+# ── Identités à confirmer et noms à relier, pour la file « À valider » ─────
 
 
 def _action(got: Got, key: str, handle: str, label: str, back: str, **values: str) -> dict[str, str] | None:
@@ -131,7 +127,6 @@ def _action(got: Got, key: str, handle: str, label: str, back: str, **values: st
 def claim_entry(got: Got, line: Line) -> dict[str, Any]:
     handle = line.get("moyen de communication")
     key = handle_of(handle)
-    meter = line.get("vers la barre") or {}
     target = line.get("vise")
     known = bool(target and target.get("t") == "link")
     # se porter garant n'a de sens que pour une personne connue ; relier arrive sur elle (la faculté la pré-remplit),
@@ -141,24 +136,9 @@ def claim_entry(got: Got, line: Line) -> dict[str, Any]:
                _action(got, "identity.relier", key, "Relier à une personne", CLAIMS)]
     return {
         "handle": handle, "name": line.text("nom revendiqué"), "target": target,
-        "known": known, "channel": line.get("canal"),
-        "toward": {"w": _pct(float(meter["ratio"])), "text": meter["text"]} if meter.get("t") == "meter" else None,
-        "evidence": line.text("preuves comptées"), "since": line.get("depuis"), "ends": line.get("s'éteint"),
-        "href": line.href, "actions": [a for a in actions if a],
+        "known": known, "channel": line.get("canal"), "evidence": line.text("preuves comptées"),
+        "since": line.get("depuis"), "ends": line.get("s'éteint"), "actions": [a for a in actions if a],
     }
-
-
-def revendications(got: Got) -> Markup | None:
-    """Identités › Identités à confirmer : une entrée par revendication, ses actions sur sa ligne."""
-    table = got.table("Revendications en attente")
-    if table is None:
-        return None
-    return got.draw("handmade/identites/revendications.html", t=table,
-                    claims=[claim_entry(got, x) for x in got.lines("Revendications en attente")],
-                    rule=next((n["text"] for n in got.notes()), ""))
-
-
-# ── Noms à relier ─────────────────────────────────────────────────────────
 
 
 def name_entry(line: Line) -> dict[str, Any]:
@@ -169,33 +149,10 @@ def name_entry(line: Line) -> dict[str, Any]:
     homonyms = next((d["text"] for d in line.detail if d.get("t") == "note"), "")
     return {
         "name": line.text("nom dont on lui a parlé"), "told": line.get("qui lui en a parlé"),
-        "what": line.text("ce qui attend"), "sensitivity": line.text("sensibilité"),
-        "person": line.get("personne qui le porte"), "where": line.text("par où"),
+        "what": line.text("ce qui attend"), "person": line.get("personne qui le porte"), "where": line.text("par où"),
         "first": None if blank(line.get("vue pour la première fois")) else line.get("vue pour la première fois"),
-        "homonyms": homonyms, "href": line.href, "dismiss": dismiss, "question": (toolbar or {}).get("title", ""),
+        "homonyms": homonyms, "href": line.href, "dismiss": dismiss,
     }
-
-
-def noms(got: Got) -> Markup | None:
-    """Identités › Noms à relier : une entrée par nom, « C'est elle » et « Ce n'est pas elle » sur sa ligne."""
-    table = got.table("Noms qui attendent")
-    if table is None:
-        return _store_missing(got)
-    s = tiles(got.stats())
-    names, twins = (text(s.get(k, {}).get("value")) for k in ("noms qui attendent", "avec un homonyme"))
-    lede = f"{names} nom{'s' if names != '1' else ''} dont on lui a parlé" if names not in ("", "0") else ""
-    if twins and twins != "0":
-        lede += f" · {twins} avec un homonyme"
-    return got.draw("handmade/identites/noms.html", t=table, items=[name_entry(x) for x in got.lines("Noms qui")],
-                    lede=lede, help=next((n["text"] for n in got.notes()), ""), notes=[])
-
-
-def _store_missing(got: Got) -> Markup | None:
-    """La faculté n'a pas pu relire sa mémoire (pas de magasin) : sa note, dans la forme de la page."""
-    notes = got.notes()
-    if not notes:
-        return None
-    return got.draw("handmade/identites/noms.html", t=None, items=[], lede="", help="", notes=notes)
 
 
 # ── Règles de divulgation ─────────────────────────────────────────────────
@@ -268,7 +225,5 @@ def politique(got: Got) -> Markup | None:
 
 TABS: dict[str, Any] = {
     "identites/annuaire": Tab(moyens, *STYLES),
-    "identites/revendications": Tab(revendications, *STYLES),
-    "identites/noms": Tab(noms, *STYLES),
     "identites/politique": Tab(politique, *STYLES),
 }

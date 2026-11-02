@@ -2,7 +2,8 @@
 onglets (``TABS`` : les courriers à envoyer, les réponses Teams, les identités à confirmer, les noms à relier — « Tout »
 et l'historique sont ceux de la console) et ce qui n'est pas une demande d'envoi (``Waiting.items``) : les identités à
 confirmer et les noms à relier, lus dans les vues de la faculté d'identité, avec leurs faits, leur source et leurs
-actions déjà orientées (``tabs/identities.py``). L'inspecteur dessine la file sans nommer ni plugin ni faculté.
+actions déjà orientées (``tabs/identities.py``). Ces deux vues n'ont plus de destination : la file est le seul
+endroit où l'on en décide (ADR 0180). L'inspecteur dessine la file sans nommer ni plugin ni faculté.
 """
 
 from __future__ import annotations
@@ -86,8 +87,7 @@ class Waiting:
     tabs: Sequence[QueueTab] = TABS
     #: les vues qui montrent les mêmes demandes que la file, dans leur destination : l'accueil ne les compte pas une
     #: seconde fois (``UI.attention_items(distinct=True)``)
-    covers: Sequence[str] = ("courrier/brouillons", "teams/reponses", "identites/revendications", "identites/noms",
-                             "projets/tous")
+    covers: Sequence[str] = ("courrier/brouillons", "teams/reponses", "projets/tous")
 
     def count(self, ui: UI, kinds: Sequence[str] | None) -> int:
         """Combien d'éléments de ces sortes attendent (toutes : ``kinds`` vide) — les compteurs de leurs vues."""

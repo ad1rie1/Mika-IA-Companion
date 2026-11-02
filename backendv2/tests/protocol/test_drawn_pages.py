@@ -30,13 +30,14 @@ def test_conversations_are_drawn(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     chat(client, "salut ! je reviens d'un concert")
-    messages = drawn(client, "/inspecteur/fil/messages")
+    # l'onglet par défaut de la destination : avec qui elle parle, une ligne par personne (ADR 0181)
+    people = drawn(client, "/inspecteur/fil")
+    assert 'data-tab="fil/conversations"' in people and "/static/handmade/base.css" in people
+    assert '<table class="tbl">' not in people
+    messages = drawn(client, "/inspecteur/fiche/person/user_1?onglet=echanges")  # leur conversation
     assert 'class="now-card person-chat"' in messages and "salut ! je reviens d'un concert" in messages
-    assert "/static/handmade/base.css" in messages and '<table class="tbl">' not in messages
-    assert "/inspecteur/fil" in messages  # l'onglet par défaut de la destination, dessiné aussi
-    assert 'class="now-card person-chat"' in drawn(client, "/inspecteur/fil")
-    table = drawn(client, "/inspecteur/fil/messages?vue_pg1=table")
-    assert '<table class="hm-table">' in table and "person-chat" not in table
+    table = drawn(client, "/inspecteur/fil/conversations?vue_pg1=table")
+    assert '<table class="hm-table">' in table and "fil-inbox" not in table
     judged = drawn(client, "/inspecteur/fil/jugees")
     assert 'class="now-page person-tab"' in judged and "aucune réponse jugée" in judged
     questions = drawn(client, "/inspecteur/fil/questions")
@@ -87,9 +88,9 @@ def test_a_failing_drawing_gives_back_the_blocks(world, monkeypatch):  # noqa: F
     def broken(ui, items, query):
         raise RuntimeError("dessin cassé")
 
-    monkeypatch.setattr(pages.DRAWN["fil/messages"], "draw", broken)
-    page = drawn(client, "/inspecteur/fil/messages")
-    assert "person-chat" not in page and 'class="now-card person-list' in page  # la liste de la faculté
+    monkeypatch.setattr(pages.DRAWN["fil/jugees"], "draw", broken)
+    page = drawn(client, "/inspecteur/fil/jugees")
+    assert "judged-list" not in page and 'class="now-card person-list' in page  # la liste de la faculté
 
 
 def test_nights_read_the_journal_then_one_card_per_night(world):  # noqa: F811

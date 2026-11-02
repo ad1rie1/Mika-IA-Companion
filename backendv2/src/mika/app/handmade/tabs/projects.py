@@ -1,10 +1,11 @@
 """Activité › Projets : ses onglets, chacun dans sa forme (ADR 0177). « Créer un projet », l'action de la destination,
 reste dans la barre de titre, à droite, sur chacun d'eux (``head_actions``).
 
-- Ses projets : ses projets en chiffres (ce qui attend ton accord en tête quand il y en a), puis une entrée par
-  projet, en deux colonnes sur un grand écran — son mode et son état, où il en est, ses objectifs en jauge, sa
-  prochaine exécution et la dernière, pour qui ; le reste (priorité, plage, agenda, outils, dépôt, ce qui sort)
-  replié. La bascule « Fiches / Tableau » et la pagination restent celles de la console.
+- Ses projets : ses projets en chiffres (ce qui attend ton accord en tête quand il y en a), puis une liste, une
+  rangée par projet sous des colonnes nommées — son nom et où il en est (une ligne), son mode et son état, ses
+  objectifs en jauge, sa prochaine exécution et la dernière, pour qui ; le reste (priorité, plage, agenda, outils,
+  dépôt, ce qui sort) replié sous la rangée. La bascule « Fiches / Tableau » et la pagination restent celles de la
+  console.
 - Exécutions : ce qui tourne en ce moment, puis le fil de ses exécutions jour par jour — le projet et l'objectif
   visé, le verdict et sa preuve, le compte rendu cité, le commit laissé dans l'atelier, l'épisode (prompt, outils,
   appels).
@@ -38,18 +39,18 @@ def _cell(c: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
 
 
 def _project(line: Line) -> dict[str, Any]:
-    state = line.get("état")
+    state, where = line.get("état"), line.get("où il en est")
     return {"title": line["projet"], "href": line.href, "mode": line.get("mode"), "state": state,
             "waiting": line.tone == "warn", "archived": line.tone == "muted",
             "who": _cell(line.get("pour qui")), "goals": gauge(line.get("objectifs")),
             "goals_text": line.text("objectifs"), "next": _cell(line.get("prochaine exécution")),
-            "last": _cell(line.get("dernière")), "where": _cell(line.get("où il en est")),
+            "last": _cell(line.get("dernière")), "where": "" if blank(where) else text(where),
             "facts": [{"label": label, "value": line.get(label)} for label in SHOWN if not blank(line.get(label))],
             "detail": rest(line, SHOWN), "open": line.open}
 
 
 def tous(got: Got) -> Markup | None:
-    """Projets › Ses projets : ses chiffres, puis une entrée par projet."""
+    """Projets › Ses projets : ses chiffres, puis une rangée par projet."""
     t = got.table("Projets")
     if t is None:
         return None

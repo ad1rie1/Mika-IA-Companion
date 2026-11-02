@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -42,10 +43,11 @@ from mika.kernel.inspect import (
     Table,
     Toolbar,
 )
+from mika.ports.workshop import Commit, Hosted, Ticket
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import initial_values, offered, perform
 from mika.sim.llm.persona import _section
-from tests.fixtures.atelier import Atelier
+from tests.fixtures.atelier import STAMP, Atelier, Host
 from tests.unit.test_goals_console import field, flat, nested
 from tests.unit.test_projects import create, events, form, live, wait
 
@@ -498,6 +500,57 @@ def test_pushing_and_pulling_from_the_git_tab(tmp_path):
     assert "ghp_secret" not in out["journal"]  # le jeton ne passe jamais par le journal
     git = out["git"]
     assert "depuis le distant" in flat(git) and "pousser vers le dépôt distant" in flat(git)
+
+
+def test_the_git_tab_faces_the_workshop_with_its_github_remote(tmp_path):
+    """ADR 0183 : l'écart entre l'atelier et le distant (compté par l'atelier, sinon par l'hôte), l'histoire du
+    distant, ses issues et pull requests ; un hôte qui ne répond pas se dit, sans chiffres inventés."""
+    atelier = Atelier()
+
+    async def scenario(kernel, llm):
+        pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil", start="3:00", end="4:00",
+                           remote="https://github.com/moi/outils.git")
+        for n in range(3):
+            await atelier.write(pid, "a.py", f"x = {n}")
+            await atelier.commit(pid, f"pas {n}")
+        pushed = atelier.commits_[pid][1][0]  # le distant s'est arrêté à « pas 0 »
+        page = "https://github.com/moi/outils"
+        hosted = Hosted("moi/outils", page, "main", head=pushed, commits=(Commit(pushed, STAMP, "pas 0", "adrien"),),
+                        issues=(Ticket(7, "Un bogue", f"{page}/issues/7", "bea", STAMP, ("bug",), 2),),
+                        pulls=(Ticket(8, "Une PR", f"{page}/pull/8", "bea", STAMP, head="f", base="main", draft=True),),
+                        open_issues=1, open_pulls=1, read_at=STAMP)
+        host = kernel.ports["repo_host"] = Host(hosted)
+        out = {"ahead": await tab(kernel, "git", str(pid), frais="1")}
+        host.hosted, host.gap = replace(hosted, head="f" * 40, commits=(Commit("f" * 40, STAMP, "d'ailleurs"),)), (2, 1)
+        out["diverged"] = await tab(kernel, "git", str(pid))
+        host.hosted = replace(hosted, error="GitHub ne répond pas", head="", commits=(), issues=(), pulls=())
+        out["down"] = await tab(kernel, "git", str(pid))
+        out["asked"] = host.asked
+        return out
+
+    out = live(tmp_path, scenario, atelier=atelier)
+    assert out["asked"][0] == ("https://github.com/moi/outils.git", "main", True, 0)  # « relire » : une lecture neuve
+    ahead = out["ahead"]
+    gap = {st.label: st for st in next(b for b in ahead if isinstance(b, Stats)).items}["Avec le distant"]
+    assert (gap.value, gap.tone) == ("2 à pousser", "warn")  # l'atelier connaît la tête du distant : il compte
+    history = tables(ahead)["Historique"]
+    assert [r.cells[7].text for r in history.rows] == ["à pousser", "à pousser", "sur le distant", "sur le distant"]
+    remote = tables(ahead)["Sur le distant"]
+    assert remote.rows[0].cells[0].key.startswith("https://github.com/moi/outils/commit/")  # vers l'hôte
+    assert remote.rows[0].cells[4].text == "dans l'atelier"
+    assert tables(ahead)["Issues ouvertes"].rows[0].cells[0].key == "https://github.com/moi/outils/issues/7"
+    assert tables(ahead)["Pull requests ouvertes"].rows[0].cells[3].text == "brouillon"
+    assert "au bout de la branche" in flat(ahead) and "issues ouvertes" in flat(ahead)
+    diverged = out["diverged"]
+    gap = {st.label: st for st in next(b for b in diverged if isinstance(b, Stats)).items}["Avec le distant"]
+    assert (gap.value, gap.sub, gap.tone) == ("2 à pousser · 1 à récupérer", "les deux histoires ont divergé", "danger")
+    assert tables(diverged)["Sur le distant"].rows[0].cells[4].text == "à récupérer"  # l'hôte a compté
+    down = out["down"]
+    assert "Sur le distant" not in tables(down) and "Issues ouvertes" not in tables(down)
+    gap = {st.label: st for st in next(b for b in down if isinstance(b, Stats)).items}["Avec le distant"]
+    assert gap.value == "—" and gap.sub == "écart inconnu"  # pas de chiffres inventés
+    assert "GitHub ne répond pas." in flat(down)
+    assert any(isinstance(b, ActionSlot) and b.action == "projects.pousser" for b in nested(down))  # pousser reste
 
 
 # ── Pause, archive, panne ─────────────────────────────────────────────────

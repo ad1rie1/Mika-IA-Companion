@@ -72,7 +72,7 @@ def test_the_page_crosses_what_she_lives_with_a_person(world):  # noqa: F811
     assert 'class="person-head' in text and 'class="person-avatar"' in text
     assert "1 moyen de communication · web, vérifiée" in text and "Que ferait-elle envers adrien maintenant ?" in text
     assert "canal principal" not in text and "vue pour la première fois" not in text
-    assert re.search(r'<a class="nav-item on" href="/inspecteur/personnes"', text)
+    assert re.search(r'<a class="nav-item on nav-head" href="/inspecteur/personnes"', text)
     assert " style=" not in text and not re.search(r"<script(?![^>]*\bsrc=)", text)
     assert "/static/handmade/person.css" in text
     assert f'data-now-live="{person.FRAGMENT}/user_1"' in text
@@ -169,9 +169,9 @@ def test_exchanges_are_a_conversation(world):  # noqa: F811
     assert 'class="now-card person-chat"' in text and 'class="person-day"' in text
     theirs = text.index('<li class="theirs')
     mine = text.index('<li class="mine')
-    assert theirs < mine  # dans l'ordre : son message, puis sa réponse
-    assert "salut ! je reviens d'un concert" in text[theirs:mine] and "répondue → n°" in text[theirs:mine]
-    assert re.search(r'href="/inspecteur/parole/\d+">pourquoi \?</a>', text[mine:])
+    assert mine < theirs  # les plus récents en premier (ADR 0181) : sa réponse, puis son message
+    assert "salut ! je reviens d'un concert" in text[theirs:] and "répondue → n°" in text[theirs:]
+    assert re.search(r'href="/inspecteur/parole/\d+">pourquoi \?</a>', text[mine:theirs])
     # rien de la table d'origine : la même donnée, une autre forme
     assert '<table class="tbl">' not in text
 
@@ -197,13 +197,12 @@ def test_memory_is_four_cards(world):  # noqa: F811
 
 
 def test_every_list_tab_is_drawn(world):  # noqa: F811
-    """Adresses, Fichiers, Pièces reçues, Buts, Projets : des cartes, plus de tableau — les données de leur faculté,
-    vides comprises (leur phrase d'absence)."""
+    """Adresses, Fichiers, Buts, Projets : des cartes, plus de tableau — les données de leur faculté, vides comprises
+    (leur phrase d'absence)."""
     client, live, _ = world
     bootstrap(client)
     chat(client)
     for tab, expected in (("adresses", "Ses moyens de communication"), ("fichiers", "elle ne lui a encore envoyé aucun fichier"),
-                          ("pieces", "elle ne lui a encore rien envoyé"),
                           ("buts", "rien d'entrepris pour cette personne ni à son sujet"),
                           ("projets", "aucun projet pour cette personne ni à son sujet")):
         page = client.get(f"{PAGE}?onglet={tab}")
@@ -215,6 +214,27 @@ def test_every_list_tab_is_drawn(world):  # noqa: F811
     # une adresse : son nom mène à sa fiche, sa confiance est une étiquette
     addresses = html.unescape(client.get(f"{PAGE}?onglet=adresses").text)
     assert re.search(r'<p class="person-entry-title"><a href="/inspecteur/fiche/handle/user_1">', addresses)
+
+
+def test_files_tab_carries_what_she_received_and_what_she_sent(world):  # noqa: F811
+    """Fichiers réunit les pièces reçues (``attachments``) et les fichiers envoyés (``shares``), en deux sous-onglets,
+    les reçues d'abord (ADR 0179) : « Pièces reçues » quitte la barre, son adresse mène à Fichiers, ouvert sur elles ;
+    chaque liste a sa propre pagination."""
+    client, live, _ = world
+    bootstrap(client)
+    chat(client)
+    page = client.get(f"{PAGE}?onglet=fichiers")
+    assert page.status_code == 200
+    ConsoleHTML(page.text).check()
+    text = html.unescape(page.text)
+    assert "onglet=pieces" not in text and '<table class="tbl">' not in text
+    assert 'class="hm-subtabs" data-subtabs' in text
+    received, sent = text.index('<section id="pieces"'), text.index('<section id="fichiers"')
+    assert received < sent and "elle ne lui a encore rien envoyé" in text[received:sent] and "Sa place" in text[received:sent]
+    assert "elle ne lui a encore envoyé aucun fichier" in text[sent:]
+    old = client.get(f"{PAGE}?onglet=pieces&page_recues=2", follow_redirects=False)
+    assert old.status_code == 303
+    assert old.headers["location"] == f"{PAGE}?onglet=fichiers&page_recues=2#pieces"
 
 
 def test_folded_tabs_are_drawn_and_keep_their_forms(world):  # noqa: F811

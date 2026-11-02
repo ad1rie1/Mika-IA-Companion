@@ -5,6 +5,10 @@
   dernière exécution en barres), puis des tuiles qui mènent à leurs onglets — objectifs, exécutions, décisions en
   vigueur, son cadre, sa prochaine exécution, son dépôt —, et son plan avec sa réponse quand il en a un. Les données
   sont celles de l'onglet « Vue d'ensemble » de la faculté (``Got``) : ses blocs servent la console en MCP et le repli.
+- Objectifs : ses chiffres, puis une entrée par objectif — son numéro, ce qu'il vise en clair, sa sorte et son état,
+  son rythme, qui l'a posé, son dernier compte rendu (long, il tient en quatre lignes que « lire la suite » déplie)
+  et ce qu'elle en a tiré ; ses boutons sur sa ligne, pas sous un détail (deux en vue, « Modifier l'objectif », le
+  reste sous « ⋯ »). « Ajouter un objectif » est une colonne à côté de la liste, sur un grand écran.
 - Ses onglets disent combien ils en comptent (objectifs, exécutions, décisions) ; les plus rares (Accès, Carnet) sont
   rangés sous « Plus ».
 - Accès : qui peut le voir, le piloter, se servir de ses apps, et quand — un tableau de lignes lues de haut en bas,
@@ -20,7 +24,8 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
-from mika.app.handmade.tabs import Got, lines, pairs, text
+from mika.app.handmade.project_git import git_page
+from mika.app.handmade.tabs import Got, Line, blank, lines, pairs, text
 from mika.contracts import projects as c
 from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.actions import pending_of
@@ -134,14 +139,51 @@ def overview(got: Got, key: str) -> Markup | None:
         links={name: _tab(key, tab) for name, tab in TILE_TABS.items()})
 
 
+#: l'état d'un objectif → la classe de son entrée
+OBJECTIVE_STATES = {"fait": "done", "bloqué": "blocked", "retiré": "dropped"}
+#: au-delà (en caractères), un compte rendu tient en quatre lignes et « lire la suite » le déplie : en deçà, il se lit
+#: en entier (replié plus court, il ne cacherait parfois rien, parfois presque tout, selon la largeur)
+LONG_REPORT = 600
+
+
+def _objective(line: Line) -> dict[str, Any]:
+    """Un objectif : ce qu'il vise, sa sorte et son état, ses faits en une ligne, son dernier compte rendu et ce
+    qu'elle en a tiré ; ses boutons sur sa ligne, comme la barre de titre les range — deux en vue (le lancer, le
+    premier statut), « Modifier l'objectif » en panneau, le reste sous « ⋯ »."""
+    state, report = line.get("état"), line.get("dernier compte rendu")
+    rhythm, runs, by = line.text("rythme"), line.text("exécutions"), line.text("posé par")
+    facts = [f for f in rhythm.split(" · ") if f]  # « il y a 2 h · revient tous les 2 jours » : deux faits
+    if runs not in ("", "0") and "exécution" not in rhythm:  # le rythme d'un ponctuel les compte déjà
+        facts.append(f"{runs} exécution{'s' if runs != '1' else ''}")
+    if by and not blank(line.get("posé par")):
+        facts.append(f"posé par {by}")
+    bar = next((d for d in line.detail if d.get("t") == "toolbar"), None)
+    buttons = [x for x in (bar or {}).get("items", []) if x.get("t") == "action"]
+    return {"n": line.text("n°"), "text": line.text("objectif"), "kind": line.get("sorte"), "state": state,
+            "cls": OBJECTIVE_STATES.get(text(state), ""), "facts": facts,
+            "report": "" if blank(report) else text(report), "long": len(text(report)) > LONG_REPORT,
+            "result": next((d.get("text") or "" for d in line.detail if d.get("t") == "prose"), ""),
+            "seen": buttons[:2], "more": buttons[2:],
+            "edit": next((d for d in line.detail if d.get("t") == "disclosure"), None)}
+
+
+def objectives(got: Got) -> Markup | None:
+    """Projet › Objectifs : ses chiffres, une entrée par objectif, et « Ajouter un objectif » à côté."""
+    t = got.table("Ses objectifs")
+    if t is None:
+        return None
+    return got.draw("handmade/projets/objectifs.html", t=t, band=got.stats(), notes=got.notes(),
+                    items=[_objective(x) for x in lines(t)], add=got.first("section", "Ajouter un objectif"))
+
+
 class ProjectFiche(Overview):
-    """La fiche d'un projet : sa vue d'ensemble et « Accès » dessinés ici, ses autres onglets restent ceux de la
-    faculté ; Accès et Carnet sous « Plus »."""
+    """La fiche d'un projet : sa vue d'ensemble, ses objectifs et « Accès » dessinés ici, son dépôt git dans
+    ``project_git`` ; ses autres onglets restent ceux de la faculté ; Accès et Carnet sous « Plus »."""
 
     slug = ""
     title = "Vue d'ensemble"
-    styles = ("handmade/tools.css", "handmade/projets.css")
-    tabs = ("apercu", "acces")
+    styles = ("handmade/tools.css", "handmade/projets.css", "handmade/projet-git.css")
+    tabs = ("apercu", "objectifs", "git", "acces")
     folded = ("acces", "carnet")
     folded_title = "Plus"
 
@@ -158,6 +200,10 @@ class ProjectFiche(Overview):
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Any, query: Any, forms: Any = None) -> Any:
         if tab == "apercu":
             return overview(Got(ui, list(blocks), query, forms or {}), key)
+        if tab == "objectifs":
+            return objectives(Got(ui, list(blocks), query, forms or {}))
+        if tab == "git":
+            return git_page(Got(ui, list(blocks), query, forms or {}), key)
         if tab != "acces":
             return None
         frame = ui.kernel.mind.frame()

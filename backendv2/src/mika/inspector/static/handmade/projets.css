@@ -1,37 +1,68 @@
-/* Activité › Projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en entrées à filets (deux colonnes sur un
-   grand écran), ses exécutions jour par jour, ses décisions techniques rangées par projet. Préfixe prj- ; couleurs :
-   les jetons ; longueurs : des attributs SVG. */
+/* Activité › Projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en liste (une rangée par projet sous des
+   colonnes nommées), ses exécutions jour par jour, ses décisions techniques rangées par projet. Préfixe prj- ;
+   couleurs : les jetons ; longueurs : des attributs SVG. */
 
-/* ── Ses projets ── */
-.prj-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 36px; margin: 0; padding: 0; list-style: none; }
-@media (min-width: 1180px) { .prj-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.prj-item { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 14px 0; border-top: 1px solid var(--border); }
-.prj-item.waiting { padding-left: 12px; box-shadow: inset 3px 0 var(--warn); }
+/* ── Ses projets : une rangée par projet ; l'en-tête et les rangées partagent les mêmes colonnes ── */
+.prj { --prj-cols: minmax(0, 2.2fr) minmax(150px, .9fr) minmax(170px, 1.3fr) minmax(170px, 1.2fr) minmax(110px, .7fr)
+  minmax(100px, .7fr) 32px; }
+.prj-head, .prj-item { display: grid; grid-template-columns: var(--prj-cols); column-gap: 20px; }
+.prj-head { padding: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; }
+.prj-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-item { position: relative; align-items: start; padding: 12px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.prj-item.waiting::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: -11px; width: 3px;
+  border-radius: var(--radius-sm); background: var(--warn); }
 .prj-item.archived { color: var(--muted); }
-.prj-item:has(.person-entry-detail[open]) { grid-column: 1 / -1; }
-.prj-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.prj-title { flex: 1 1 240px; min-width: 0; margin: 0; font: 600 15.5px/1.35 var(--display); overflow-wrap: anywhere; }
+.prj-name { display: grid; gap: 3px; min-width: 0; }
+.prj-title { margin: 0; font: 600 14.5px/1.35 var(--display); overflow-wrap: anywhere; }
 .prj-title a { color: var(--text); }
 .prj-title a:hover { color: var(--accent); }
 .prj-item.archived .prj-title a { color: var(--muted); }
+.prj-where { margin: 0; overflow: hidden; color: var(--text-2); font-size: 12.5px; line-height: 1.45; text-overflow: ellipsis;
+  white-space: nowrap; }
 .prj-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.prj-where { margin: 0; max-width: 80ch; color: var(--text-2); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
-.prj-goals { display: grid; grid-template-columns: 70px minmax(80px, 220px) auto; align-items: center; gap: 10px; margin: 0;
-  font-size: 12.5px; }
-.prj-goals-label { color: var(--muted); }
+.prj-item .prj-tags { display: flex; margin: 0; padding-top: 2px; }
+.prj-facts { display: contents; }
+.prj-goals { display: grid; gap: 5px; min-width: 0; padding-top: 4px; }
 .prj-goals .now-bar { width: 100%; margin: 0; }
 .prj-goals .now-bar.warn .fill { stroke: var(--warn); }
-.prj-goals-text { color: var(--text-2); }
-.prj-facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; font-size: 12.5px; }
-.prj-facts > div { display: flex; gap: 6px; }
-.prj-facts dt { color: var(--muted); }
-.prj-facts dd { margin: 0; }
-.prj-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: 13px; }
-.prj-foot .person-entry-detail[open] { flex: 1 1 100%; }
-.prj-more { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 24px; margin: 10px 0 0; }
+.prj-goals-text { color: var(--text-2); font-size: 12px; }
+.prj-cell { min-width: 0; margin: 0; padding-top: 2px; overflow-wrap: anywhere; }
+/* le nom de chaque valeur : lu à voix haute, montré seulement quand la rangée s'empile */
+.prj-k, .prj-detail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; }
+.prj-detail { grid-column: 1 / -1; }
+.prj-detail > summary { position: absolute; top: 8px; right: 0; display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; list-style: none; }
+.prj-detail > summary::-webkit-details-marker { display: none; }
+.prj-detail > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
+.prj-detail[open] > summary::before { transform: translateY(2px) rotate(-135deg); }
+.prj-detail > summary:hover, .prj-detail[open] > summary { color: var(--text); background: var(--hover); }
+.prj-more { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 24px; margin: 12px 0 0;
+  padding-top: 12px; border-top: 1px dashed var(--border); }
 .prj-more > div { display: grid; gap: 1px; }
 .prj-more dt { color: var(--muted); font-size: 12px; }
 .prj-more dd { margin: 0; font-size: 13px; }
+.prj-detail .stack { margin-top: 10px; }
+
+/* moins large : la rangée s'empile — son nom et ses étiquettes, puis ses valeurs nommées sur une ligne */
+@media (max-width: 1080px) {
+  .prj-head { display: none; }
+  .prj-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; }
+  .prj-facts { display: flex; flex-wrap: wrap; align-items: baseline; grid-column: 1 / -1; gap: 4px 20px; font-size: 12.5px; }
+  .prj-facts .prj-k { position: static; width: auto; height: auto; overflow: visible; clip-path: none; margin-right: 6px;
+    color: var(--muted); }
+  .prj-goals { display: flex; flex: 1 1 100%; align-items: center; gap: 8px; padding: 0; }
+  .prj-goals .now-bar { flex: none; width: 140px; }
+  .prj-cell { padding: 0; }
+  .prj-detail > summary { position: static; display: inline-flex; gap: 8px; width: auto; height: auto; padding: 4px 0;
+    background: none; font-size: 12.5px; }
+  .prj-detail > summary:hover, .prj-detail[open] > summary { background: none; }
+  .prj-detail-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .prj-detail > summary::before { order: 1; }
+}
+@media (max-width: 560px) { .prj-item { grid-template-columns: minmax(0, 1fr); } }
 
 /* ── Exécutions : jour par jour ── */
 .prj-live { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 14px;
@@ -82,9 +113,8 @@
 
 /* ── Écrans étroits ── */
 @media (max-width: 560px) {
-  .prj .person-tiles-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .prj-goals { grid-template-columns: 64px minmax(0, 1fr); }
-  .prj-goals-text { grid-column: 1 / -1; }
+  .prj .person-tiles-list li:last-child:nth-child(odd), .prj-obj .person-tiles-list li:last-child:nth-child(odd) {
+    grid-column: 1 / -1; }
   .prj-runs > li { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -145,3 +175,43 @@
 .prj-ov-dl div { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 10px; }
 .prj-ov-dl dt { color: var(--muted); }
 .prj-ov-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* Un projet › Objectifs (app/handmade/projects.py, ADR 0177) : une entrée par objectif — son numéro, ce qu'il vise,
+   ses étiquettes, ses faits en une ligne, son dernier compte rendu en citation (long, quatre lignes que « lire la
+   suite » déplie sans script), ses boutons sur sa ligne ; « Ajouter un objectif » en colonne à côté sur un grand
+   écran. */
+.prj-obj-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .prj-obj-layout.with-add { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); } }
+.prj-obj-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-obj-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 14px; padding: 16px 0;
+  border-top: 1px solid var(--border); }
+.prj-obj-item:first-child { padding-top: 4px; border-top: 0; }
+.prj-obj-n { align-self: start; margin-top: 1px; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--accent); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; text-align: center; }
+.prj-obj-body { display: grid; gap: 8px; min-width: 0; }
+.prj-obj-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.prj-obj-text { flex: 1 1 320px; min-width: 0; margin: 0; font: 600 15px/1.4 var(--display); overflow-wrap: anywhere; }
+.prj-obj-facts { display: flex; flex-wrap: wrap; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.prj-obj-facts > span:not(:last-child)::after { content: "·"; margin: 0 8px; color: var(--muted); }
+.prj-obj-said { display: grid; justify-items: start; gap: 3px; max-width: 110ch; padding-left: 12px;
+  border-left: 2px solid var(--border); }
+.prj-obj-said.result { border-left-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+.prj-obj-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.prj-obj-quote { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
+.prj-obj-quote.long { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.prj-obj-said:has(> .prj-obj-all[open]) .prj-obj-quote.long { display: block; -webkit-line-clamp: unset; }
+.prj-obj-all > summary { color: var(--accent); cursor: pointer; font-size: 12.5px; list-style: none; }
+.prj-obj-all > summary::-webkit-details-marker { display: none; }
+.prj-obj-all .less, .prj-obj-all[open] .more { display: none; }
+.prj-obj-all[open] .less { display: inline; }
+.prj-obj-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
+.prj-obj-foot .prj-obj-facts { flex: 1 1 260px; }
+.prj-obj-actions { align-items: center; gap: 6px; }
+.prj-obj-actions .action-overflow-panel { display: grid; justify-items: stretch; width: max-content; padding: 8px; }
+.prj-obj-actions .action-overflow-panel .btn { width: 100%; justify-content: flex-start; }
+.prj-obj-item.done .prj-obj-text, .prj-obj-item.dropped .prj-obj-text { color: var(--text-2); }
+.prj-obj-item.dropped .prj-obj-text { text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.prj-obj-item.done .prj-obj-n, .prj-obj-item.dropped .prj-obj-n { color: var(--muted); }
+.prj-obj-item.blocked .prj-obj-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.prj-obj-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.prj-obj-add .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }

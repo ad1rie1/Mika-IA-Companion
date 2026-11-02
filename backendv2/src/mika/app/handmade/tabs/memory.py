@@ -4,10 +4,9 @@
   ce qu'il en reste —, en deux colonnes sur un grand écran ; le détail (qui l'a confié, d'où il vient) replié.
 - Croyances : la même liste, chaque croyance avec sa confiance en avant (un chiffre et sa jauge) et son origine
   (on le lui a dit, elle l'a vu, elle le déduit) ; une croyance remplacée s'estompe, celle qui la remplace le dit.
-- Pièces reçues : une entrée par pièce — sa sorte en icône, son nom vers sa fiche, qui l'a envoyée, ce qu'elle y a
-  lu, ce qui s'y relie, la télécharger.
-- Place des pièces : la place de chacun en chiffres, puis une jauge par personne, de la plus chargée à la moins
-  chargée.
+- Pièces reçues : la place en chiffres, puis en sous-onglets les pièces — une entrée chacune : sa sorte en icône, son
+  nom vers sa fiche, qui l'a envoyée, ce qu'elle y a lu, ce qui s'y relie, la télécharger — et la place de chacun,
+  une jauge par personne, de la plus chargée à la moins chargée (ADR 0182).
 - Promesses : celles qui l'engagent encore d'abord, leur échéance à gauche (en retard : dit) ; puis, côte à côte,
   celles qu'elle a tenues et celles qu'elle a abandonnées.
 - La vie des autres : un agenda — ce qui dure en ce moment, ce qui vient (le plus proche d'abord), ce qui est passé
@@ -36,6 +35,7 @@ from mika.app.handmade.tabs import (
     Got,
     Line,
     Tab,
+    anchored,
     blank,
     gauge,
     instant,
@@ -222,19 +222,12 @@ def _piece(line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def recues(got: Got) -> Markup | None:
-    """Mémoire › Pièces reçues : une entrée par pièce, ce qu'elle y a lu en avant."""
-    table = got.table("Pièces reçues")
-    if table is None:
+    """Mémoire › Pièces reçues : la place en chiffres ; en sous-onglets, une entrée par pièce (ce qu'elle y a lu en
+    avant), puis la place de chacun, une jauge par personne. Une page plus loin d'une liste rouvre son sous-onglet."""
+    table, by_person, facts = got.table("Pièces reçues"), got.table("Par personne"), got.fields("Place")
+    if table is None or by_person is None or facts is None:
         return _empty_or_none(got, "handmade/memoire/recues.html")
     items = [_piece(x, r) for x, r in zip(got.lines("Pièces reçues"), raw_lines(got, table), strict=False)]
-    return got.draw("handmade/memoire/recues.html", t=table, items=items, notes=got.notes())
-
-
-def place(got: Got) -> Markup | None:
-    """Mémoire › Place des pièces : la place de chacun, une jauge par personne."""
-    table, facts = got.table("Par personne"), got.fields("Place")
-    if table is None or facts is None:
-        return _empty_or_none(got, "handmade/memoire/place.html")
     f = pairs(facts)
     people = [{"who": x["personne"], "href": x.href, "n": x.text("pièces"), "used": x.text("occupé"),
                "share": gauge(x.get("de sa place"))} for x in got.lines("Par personne")]
@@ -243,8 +236,9 @@ def place(got: Got) -> Markup | None:
          "sub": "tous ses moyens de communication réunis"},
         {"label": "En tout", "value": f.get("en tout") or {"t": "text", "text": "—"},
          "sub": f"pour {text(f.get('personnes'))} personne(s)" if number(f.get("personnes")) else "rien de gardé"}]}
-    return got.draw("handmade/memoire/place.html", t=table, band=band, budget=text(f.get("place par personne")),
-                    people=people, notes=got.notes())
+    return got.draw("handmade/memoire/recues.html", t=anchored(table, "pieces-list"),
+                    p=anchored(by_person, "pieces-place"), band=band, budget=text(f.get("place par personne")),
+                    items=items, people=people, notes=got.notes())
 
 
 # ── Voir venir ────────────────────────────────────────────────────────────
@@ -342,7 +336,6 @@ TABS: dict[str, Any] = {
     "memoire/souvenirs": Tab(souvenirs, *STYLES),
     "memoire/croyances": Tab(croyances, *STYLES),
     "memoire/recues": Tab(recues, *STYLES),
-    "memoire/place": Tab(place, *STYLES),
     "memoire/promesses": Tab(promesses, *STYLES),
     "memoire/moments": Tab(moments, *STYLES),
     "memoire/voir-venir": Tab(voir_venir, *STYLES),

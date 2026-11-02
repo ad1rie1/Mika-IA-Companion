@@ -53,5 +53,5 @@ def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> l
     elif context and is_identifiable(person := ui.names.person_of(context)):
         name = ui.names.name_of(context) or ui.names.who(context)
         out.append((f"La fiche de {name}", person_href(person)))
-        out.append(("Leur conversation", f"{PREFIX}/fil/messages?" + urlencode({"handle": context})))
+        out.append(("Leur conversation", fiche_url("person", person, "echanges")))
     return out

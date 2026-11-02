@@ -1,8 +1,10 @@
 {# Activité › Projets › Ses projets (app/handmade/tabs/projects.py, ADR 0177) : ses projets en chiffres (ce qui attend
-   ton accord en tête quand il y en a), puis une entrée par projet, en deux colonnes sur un grand écran — son mode,
-   son état, où il en est, ses objectifs en jauge, sa prochaine exécution et la dernière, pour qui ; le reste
-   (priorité, plage de travail, agenda, outils, dépôt distant, ce qui sort) replié. La bascule « Fiches / Tableau »
-   et la pagination de la console ; « Créer un projet » est dans la barre de titre. #}
+   ton accord en tête quand il y en a), puis une liste, une rangée par projet sous des colonnes nommées — son nom et
+   où il en est (une ligne, le texte entier au survol), son mode et son état, ses objectifs en jauge, sa prochaine
+   exécution, la dernière, pour qui ; le reste (priorité, plage de travail, agenda, outils, dépôt distant, ce qui
+   sort) se déplie sous la rangée, par la flèche à son bout. Sur un écran étroit, chaque rangée s'empile et nomme ses
+   valeurs. La bascule « Fiches / Tableau » et la pagination de la console ; « Créer un projet » est dans la barre de
+   titre. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% from "handmade/shared/macros.html" import bar %}
 <div class="now-page prj" data-tab="projets/tous">
@@ -11,36 +13,35 @@
   <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-title">
     {{ tab.head(t.title, "prj-title", t.count, list=t) }}
     {% if items %}
+    <div class="prj-head" aria-hidden="true"><span>Projet</span><span>Mode · état</span><span>Objectifs</span><span>Prochaine exécution</span><span>Dernière</span><span>Pour</span></div>
     <ul class="prj-list" role="list">
       {% for p in items %}
       <li class="prj-item{{ ' waiting' if p.waiting }}{{ ' archived' if p.archived }}">
-        <div class="prj-top">
+        <div class="prj-name">
           <p class="prj-title">{% if p.title.t == "link" %}<a href="{{ p.title.href }}">{{ p.title.text }}</a>{% else %}{{ tab.cell(p.title) }}{% endif %}</p>
-          <span class="prj-tags">
-            {% if p.waiting %}<span class="now-tag warn">attend ton accord</span>{% endif %}
-            {% if p.mode %}<span class="now-tag {{ p.mode.tone }}">{{ p.mode.text }}</span>{% endif %}
-            {% if p.state %}<span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif %}
-          </span>
+          {% if p.where %}<p class="prj-where" title="{{ p.where }}">{{ p.where }}</p>{% endif %}
         </div>
-        {% if p.where %}<p class="prj-where">{{ tab.cell(p.where) }}</p>{% endif %}
-        {% if p.goals %}
-        <div class="prj-goals"><span class="prj-goals-label">Objectifs</span>{{ bar(p.goals.w, "goal " ~ p.goals.tone) }}<span class="prj-goals-text">{{ p.goals.text }}</span></div>
-        {% elif p.goals_text %}<p class="prj-goals"><span class="prj-goals-label">Objectifs</span><span class="prj-goals-text">{{ p.goals_text }}</span></p>{% endif %}
-        <dl class="prj-facts">
-          {% if p.next %}<div><dt>Prochaine exécution</dt><dd>{{ tab.cell(p.next) }}</dd></div>{% endif %}
-          <div><dt>Dernière</dt><dd>{{ tab.cell(p.last) if p.last else 'aucune encore' }}</dd></div>
-          {% if p.who %}<div><dt>Pour</dt><dd>{{ tab.cell(p.who) }}</dd></div>{% endif %}
-        </dl>
-        <div class="prj-foot">
-          {% if p.href %}<a href="{{ p.href }}">{{ t.link_label or 'Ouvrir l’espace de travail' }} →</a>{% endif %}
-          {% if p.facts or p.detail %}
-          <details class="person-entry-detail"{{ ' open' if p.open }}>
-            <summary>Son rythme, ses outils, son dépôt</summary>
-            {% if p.facts %}<dl class="prj-more">{% for f in p.facts %}<div><dt>{{ f.label|capitalize }}</dt><dd>{{ tab.cell(f.value) }}</dd></div>{% endfor %}</dl>{% endif %}
-            {% if p.detail %}<div class="stack">{{ tab.inner(p.detail) }}</div>{% endif %}
-          </details>
-          {% endif %}
+        <p class="prj-tags"><span class="prj-k">Mode et état</span>
+          {%- if p.waiting %}<span class="now-tag warn">attend ton accord</span>{% endif -%}
+          {%- if p.mode %}<span class="now-tag {{ p.mode.tone }}">{{ p.mode.text }}</span>{% endif -%}
+          {%- if p.state %}<span class="now-tag {{ p.state.tone }}">{{ p.state.text }}</span>{% endif -%}
+        </p>
+        <div class="prj-facts">
+          <div class="prj-goals"><span class="prj-k">Objectifs</span>
+            {%- if p.goals %}{{ bar(p.goals.w, "goal " ~ p.goals.tone) }}<span class="prj-goals-text">{{ p.goals.text }}</span>
+            {%- else %}<span class="prj-goals-text">{{ p.goals_text or '—' }}</span>{% endif -%}
+          </div>
+          <p class="prj-cell"><span class="prj-k">Prochaine exécution</span>{{ tab.cell(p.next) if p.next else '—' }}</p>
+          <p class="prj-cell"><span class="prj-k">Dernière</span>{{ tab.cell(p.last) if p.last else 'aucune encore' }}</p>
+          <p class="prj-cell"><span class="prj-k">Pour</span>{{ tab.cell(p.who) if p.who else '—' }}</p>
         </div>
+        {% if p.facts or p.detail %}
+        <details class="prj-detail"{{ ' open' if p.open }}>
+          <summary title="Son rythme, ses outils, son dépôt"><span class="prj-detail-label">Son rythme, ses outils, son dépôt</span></summary>
+          {% if p.facts %}<dl class="prj-more">{% for f in p.facts %}<div><dt>{{ f.label|capitalize }}</dt><dd>{{ tab.cell(f.value) }}</dd></div>{% endfor %}</dl>{% endif %}
+          {% if p.detail %}<div class="stack">{{ tab.inner(p.detail) }}</div>{% endif %}
+        </details>
+        {% endif %}
       </li>
       {% endfor %}
     </ul>
