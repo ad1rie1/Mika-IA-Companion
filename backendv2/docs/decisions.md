@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187 |
@@ -1318,6 +1318,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* ce qu'on lui montre sans cesse, elle le raconte à tout bout de champ ; elle regarde donc quand il le faut, et cela se voit.
 
+*Révisée par 0193 (la position se voit sur une carte, servie par le serveur).*
+
 ### 0120 — Les messages de ton téléphone : elle les lit, s'en souvient, et t'aide à y répondre
 
 - L'application Android lit les notifications des seules applis cochées (WhatsApp, Messages), si la personne l'a permis (coupé par défaut, groupes à part) ; jamais de connexion à WhatsApp depuis le serveur.
@@ -1506,6 +1508,17 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* « chacun pour soi, ça crée un service MCP qui n'a que les droits avec la personne, dans inspection on peut voir tous les mcp, s'il veut partager son mcp, ça ajoute une règle d'accès … les mcp disponibles sont calculés en fonction des droits ».
 
 *Révise 0128 (en partie : un service a un propriétaire), 0131 (en partie).*
+
+### 0193 — La carte de sa position passe par le serveur
+
+- Téléphone › Position montre une vraie carte : ses tuiles, ses polices et ses icônes viennent du serveur de Mika (`/api/moi/phone/map/…`, à qui est connecté), jamais d'une adresse du dehors que le navigateur joindrait — elle dirait où la personne se trouve.
+- D'où viennent les tuiles se règle dans la console (Réglages › Canaux › Carte de sa position) : rien (le plan dessiné, par défaut), un fichier PMTiles du dossier de données sous `cartes/`, ou un serveur de carte (une archive PMTiles lue par plages, ou des tuiles `{z}/{x}/{y}`) que le serveur joint seul, sans rien de la personne.
+- Le fichier est une extraction de la carte Protomaps de la planète (OpenStreetMap), refaite à la demande par `mika carte extraire` (la France par défaut, jusqu'au zoom 15) ; ses polices et icônes, par `mika carte polices`. Rien d'autre à installer : ni base, ni serveur de rendu. `cartes/` n'entre dans aucune sauvegarde (il se réextrait).
+- Le navigateur la dessine (MapLibre, chargé seulement sur cet onglet), claire ou sombre selon le thème, la mention OpenStreetMap toujours affichée ; hors de la zone couverte, sans carte ou sans WebGL, la position garde son plan dessiné et son lien vers OpenStreetMap.
+
+*Pourquoi :* « peut-être un fournisseur gratuit ? … ou alors sur le pc portable héberger son propre openstreetmap ? » ; « ma carte se charge depuis le backend, et depuis le backend on doit pouvoir configurer le serveur de carte ».
+
+*Révise 0119 (en partie : la position se voit sur une carte).*
 
 ## Les fournisseurs de modèles
 

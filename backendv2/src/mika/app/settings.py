@@ -32,6 +32,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mail.oauth import Grant
+from mika.adapters.maps import MapConfig
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
@@ -61,6 +62,8 @@ MAIL_GRANTS_KEY = "mail_oauth"
 MAIL_IMAGES_KEY = "mail_images"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
+#: d'où vient la carte de sa position (ADR 0193)
+MAP_KEY = "carte"
 #: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
 GIT_KEY = "git"
 #: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
@@ -437,6 +440,18 @@ class Settings:
     async def save_stt(self, base_url: str, api_key: str, model: str = "whisper-1") -> None:
         await self._put(STT_KEY, {"base_url": base_url.strip(), "model": model,
                                   "api_key_sealed": self.box.seal(api_key.strip())})
+
+    # ── La carte de sa position (ADR 0193) ──
+    def map_config(self) -> MapConfig:
+        """D'où viennent ses tuiles ; un réglage illisible (gardé avant une règle plus stricte) : aucune carte, le
+        plan dessiné."""
+        try:
+            return MapConfig.model_validate(self._get(MAP_KEY) or {})
+        except ValueError:
+            return MapConfig()
+
+    async def save_map_config(self, cfg: MapConfig) -> None:
+        await self._put(MAP_KEY, cfg.model_dump(mode="json"))
 
     # ── Notifications du téléphone (Firebase, ADR 0077) ──
     def push(self) -> str:

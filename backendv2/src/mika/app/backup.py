@@ -50,7 +50,7 @@ l'archive y est préparée (``.restauration-…``), l'ancien contenu y est mis d
 côté (``.avant-restauration-…``), puis chaque entrée prend sa place — en
 service, l'utilisateur ``mika`` ne peut écrire que dans ``/var/lib/mika``, pas
 dans ``/var/lib``. Ces dossiers cachés n'entrent dans aucune archive, et ce que
-la sauvegarde ne prend pas (``SKIPPED_DIRS`` : le modèle de plongements) reste
+la sauvegarde ne prend pas (``SKIPPED_DIRS`` : le modèle de plongements, la carte) reste
 en place. Restaurer prend le verrou du dossier
 (``datadir``) : sous un serveur en marche, c'est refusé — il écrirait encore,
 par ses descripteurs ouverts, dans le dossier mis de côté.
@@ -99,8 +99,9 @@ SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.js
                      datadir.LOCK_NAME})
 #: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
 #: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR ; ``cache`` (``HF_HOME`` de l'unité : le modèle
-#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109)
-SKIPPED_DIRS = frozenset({"claude-code", "cache"})
+#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109) ; ``cartes`` (la carte de sa position, ADR 0193 :
+#: quelques Go qui se réextraient)
+SKIPPED_DIRS = frozenset({"claude-code", "cache", "cartes"})
 #: dans le dossier de données, ce qu'une restauration prépare et ce qu'elle met de côté (cachés : aucune archive ne
 #: les prend, une restauration suivante ne les remplace pas)
 STAGING, ASIDE, KEPT = ".restauration-", ".avant-restauration-", ".avant-bases-"

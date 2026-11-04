@@ -107,5 +107,8 @@ def test_cli_call_folders_are_never_archived(tmp_path: Path):
     model = data / "cache" / "huggingface" / "hub" / "models--Qwen--Qwen3-Embedding-0.6B"
     model.mkdir(parents=True)
     (model / "model.safetensors").write_bytes(b"\0" * 64)
+    # la carte de sa position (ADR 0193) : quelques Go qui se réextraient, jamais dans une archive
+    (data / "cartes").mkdir()
+    (data / "cartes" / "france.pmtiles").write_bytes(b"PMTiles\x03")
     members = [p.as_posix() for p in backup._members(data)]
-    assert "forge/app.py" in members and not [m for m in members if m.startswith(("claude-code", "cache"))]
+    assert "forge/app.py" in members and not [m for m in members if m.startswith(("claude-code", "cache", "cartes"))]

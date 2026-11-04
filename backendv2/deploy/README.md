@@ -374,6 +374,29 @@ sudo install -o mika -g mika -m 640 app-release.apk /var/lib/mika/telephone/mika
 
 Sans ce fichier, la page dit qu'elle n'est pas encore déposée (`GET /api/moi/phone/apk` : 404).
 
+## La carte de sa position (ADR 0193)
+
+Téléphone › Position montre une vraie carte, dont les tuiles passent toujours par ce serveur : le navigateur ne joint
+aucune adresse du dehors. Sans réglage, la position garde son plan dessiné. Pour une carte servie depuis la machine
+(rien ne sort de la maison), on extrait une zone de la carte Protomaps de la planète (OpenStreetMap, refaite chaque
+jour) — seule la zone se télécharge, puis ses polices et icônes :
+
+```bash
+df -h /var/lib/mika                                # la France jusqu'au zoom 15 : quelques Go
+mika carte extraire --zone france --zoom 15        # → cartes/france.pmtiles
+mika carte polices                                  # → cartes/assets (fonts/, sprites/v4/)
+```
+
+Serveur en marche, sans risque : l'archive neuve ne remplace l'ancienne qu'entière, et le serveur la rouvre de
+lui-même. Une autre zone : `--zone ouest,sud,est,nord` (en degrés) et `--sortie cartes/<nom>.pmtiles` ; chaque zoom de
+moins divise la taille par quatre environ. Puis, dans la console, Réglages › Canaux › Carte de sa position : « Un
+fichier PMTiles sur ce serveur », `cartes/france.pmtiles` ; la page dit sa taille, ses zooms et sa zone. Pour la
+mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde.
+
+Un serveur de carte à part (un `pmtiles serve`, une archive sur un stockage, un serveur `{z}/{x}/{y}` au schéma
+Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sans rien de la personne, et en relaie
+les tuiles.
+
 ## Surveiller
 
 `GET /health` est public et ne dit que des noms et des états :

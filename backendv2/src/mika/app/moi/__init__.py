@@ -243,7 +243,7 @@ class MeApi:
 
     def __init__(self, kernel: Kernel, accounts: Accounts, *, origins: Iterable[str] = (),
                  apk: Path | None = None, settings: Any = None,
-                 reconfigure: Callable[[], Awaitable[list[str]]] | None = None) -> None:
+                 reconfigure: Callable[[], Awaitable[list[str]]] | None = None, maps: Any = None) -> None:
         self.kernel = kernel
         self.accounts = accounts
         #: les réglages du serveur (ses boîtes, ses comptes Teams), et de quoi rejournaliser ce qui en dérive
@@ -261,6 +261,8 @@ class MeApi:
         #: l'application du téléphone qu'on y dépose (ADR 0190), servie à qui est connecté (sa session, ou un jeton
         #: de son compte)
         self.apk = apk
+        #: la carte de sa position (ADR 0193 : ``adapters.maps.MapTiles``) ; ``None`` : pas de carte, le plan dessiné
+        self.maps = maps
 
     def account(self, request: Request) -> Account | None:
         token = native_token(request.headers)

@@ -487,6 +487,7 @@ rôle par rôle (`CallLog.profile`).
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Dépôts git | le jeton de ses dépôts distants (aussi : Connexions extérieures › Dépôts Git) |
 | | Notifications du téléphone | la clé Firebase (collée ici ou posée en fichier), d'où elle vient, les téléphones notifiables, ce qui est parti, le dernier échec (ADR 0077) |
+| | Carte de sa position | d'où viennent les tuiles de Téléphone › Position (aucune, un fichier PMTiles de `cartes/`, un serveur de carte relayé), la taille, les zooms et la zone du fichier, ses polices et icônes, la dernière erreur (ADR 0193) |
 | Plugins (menu : Configuration des plugins) | Vue d'ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d'utilisation ; les réglages des apps restent dans la Forge |
 | | Courrier | ses boîtes et ses paramètres généraux vivent dans Courrier › Paramètres, en haut à droite du courrier (ADR 0173) ; ce qu'elle prépare d'elle-même : le tableau de chaque boîte, Réglages › Canaux |
 | | Teams | « Actif », puis ses comptes en cartes (ADR 0186) — à qui, actif ou non (décoché : son extension est refusée), son nom, son ton, sa signature ; la clé de chacun se crée dans Teams › Extension (comment ses réponses partent : le tableau du compte, Réglages › Canaux) ; supprimer un compte efface ce que son extension avait apporté |

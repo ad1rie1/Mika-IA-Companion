@@ -35,6 +35,8 @@ ALLOWED = {
                                                                  "flux (User-Agent) : le programme, pas elle",
     ("adapters/forge/__init__.py", "Mika-Forge/3"): "l'identifiant du logiciel auprès des sites que ses apps lisent "
                                                     "(User-Agent) : le programme, pas elle",
+    ("adapters/maps/tiles.py", "Mika/2 (carte de sa position)"): "l'identifiant du logiciel auprès des serveurs de "
+                                                                 "carte (User-Agent, ADR 0193) : le programme, pas elle",
 }
 
 

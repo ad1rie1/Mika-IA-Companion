@@ -15,8 +15,10 @@ from typing import Any
 from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
+from mika.adapters.maps import NONE as NO_MAP
+from mika.adapters.maps import MapUnavailable
 from mika.adapters.web.accounts import CLIENT_MOBILE
-from mika.app.moi import Call, Denied, MeApi, missing
+from mika.app.moi import PREFIX, Call, Denied, MeApi, missing
 from mika.contracts import phone as phone_c
 from mika.plugins import location as location_p
 from mika.plugins import phone as phone_p
@@ -157,6 +159,72 @@ async def apk(call: Call) -> Response:
                         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
+# ── la carte de sa position (ADR 0193) ──
+MAP = "/phone/map"
+#: ce que le navigateur garde d'une tuile, d'une police ou d'une planche d'icônes : pour lui seul, un jour
+MAP_CACHE = "private, max-age=86400"
+
+
+def _maps(call: Call) -> Any:
+    maps = call.api.maps
+    if maps is None or maps.config().source == NO_MAP:
+        raise Denied(404, "Aucune carte n'est réglée : le plan dessiné.")
+    return maps
+
+
+async def map_info(call: Call) -> dict[str, Any]:
+    """Ce que le client sait de la carte : prête ou non (et pourquoi), ses tuiles, sa zone, ses polices et ses icônes
+    — toutes servies par ce serveur, jamais une adresse du dehors."""
+    maps = call.api.maps
+    if maps is None:
+        return {"ready": False, "reason": "La carte n'est pas branchée sur ce serveur."}
+    got = await maps.info()
+    base = PREFIX + MAP
+    return {"ready": got.ready, "reason": got.reason, "kind": got.kind, "minzoom": got.minzoom,
+            "maxzoom": got.maxzoom, "bounds": list(got.bounds) if got.bounds is not None else None,
+            "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}",
+            "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf" if got.fonts else None,
+            "sprite": f"{base}/sprites/v4" if got.sprites else None}
+
+
+async def map_tile(call: Call) -> Response:
+    """Une tuile, telle que l'archive la garde (compressée : le navigateur l'ouvre) ; aucune là : 204, une tuile
+    vide."""
+    p = call.request.path_params
+    try:
+        tile = await _maps(call).tile(p["z"], p["x"], p["y"])
+    except MapUnavailable as exc:
+        raise Denied(503, str(exc)) from None
+    if tile is None:
+        return Response(status_code=204, headers={"Cache-Control": MAP_CACHE})
+    headers = {"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"}
+    if tile.encoding:
+        headers["Content-Encoding"] = tile.encoding
+    return Response(tile.data, media_type=tile.media, headers=headers)
+
+
+def _asset(path: Any, media: str) -> Response:
+    if path is None:
+        raise missing()
+    return FileResponse(path, media_type=media, headers={"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"})
+
+
+async def map_font(call: Call) -> Response:
+    """Une plage de glyphes d'une police de la carte : la première de la pile qui est là."""
+    p = call.request.path_params
+    maps = _maps(call)
+    found = next((got for font in str(p["fontstack"]).split(",")[:4]
+                  if (got := maps.asset("fonts", f"{font.strip()}/{p['range']}")) is not None), None)
+    return _asset(found, "application/x-protobuf")
+
+
+async def map_sprite(call: Call) -> Response:
+    """Une planche d'icônes de la carte (son image, ou ce qu'elle range où)."""
+    rel = str(call.request.path_params["path"])
+    media = "application/json" if rel.endswith(".json") else "image/png" if rel.endswith(".png") else ""
+    return _asset(_maps(call).asset("sprites", rel) if media else None, media)
+
+
 # ── ses téléphones ──
 
 
@@ -183,4 +251,7 @@ def count(call: Call) -> int:
 def routes(api: MeApi) -> list[Route]:
     r = api.route
     return [r("/phone/conversations", conversations), r("/phone/thread", thread), r("/phone/phones", phones),
-            r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True)]
+            r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True),
+            r(MAP, map_info), r(MAP + "/tiles/{z:int}/{x:int}/{y:int}", map_tile, raw=True),
+            r(MAP + "/fonts/{fontstack}/{range}", map_font, raw=True),
+            r(MAP + "/sprites/{path:path}", map_sprite, raw=True)]

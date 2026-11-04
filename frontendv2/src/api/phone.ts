@@ -96,6 +96,32 @@ export function fetchPosition(): Promise<PhonePosition> {
   return getJson(`${MOI}/phone/position`);
 }
 
+/**
+ * La carte de sa position (ADR 0193), servie par le serveur seul : ses tuiles, ses polices et ses icônes sont des
+ * chemins de l'API (jamais une adresse du dehors, qui dirait où tu es). `ready` faux : le plan dessiné, `reason` dit
+ * pourquoi.
+ */
+export interface MapInfo {
+  ready: boolean;
+  reason: string;
+  kind?: "vecteur" | "image";
+  minzoom?: number;
+  maxzoom?: number;
+  /** Ouest, sud, est, nord ; `null` : partout. */
+  bounds?: [number, number, number, number] | null;
+  attribution?: string;
+  /** `…/tiles/{z}/{x}/{y}` */
+  tiles?: string;
+  /** `…/fonts/{fontstack}/{range}.pbf` ; `null` : pas de polices (une carte sans noms). */
+  glyphs?: string | null;
+  /** `…/sprites/v4` (la planche suit : `/light`, `/dark`) ; `null` : pas d'icônes. */
+  sprite?: string | null;
+}
+
+export function fetchMap(): Promise<MapInfo> {
+  return getJson(`${MOI}/phone/map`);
+}
+
 export function fetchPhones(): Promise<Phones> {
   return getJson(`${MOI}/phone/phones`);
 }

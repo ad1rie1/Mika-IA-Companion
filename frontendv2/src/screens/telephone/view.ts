@@ -273,7 +273,11 @@ export function mapMarkup(accuracy: number, label: string): string {
   </svg>`;
 }
 
-export function positionMarkup(p: PhonePosition, phone: Phone | null, now: number): string {
+/**
+ * La position : sa carte (`live` : la vraie, servie par ce serveur et dessinée par MapLibre dans `[data-map]`), sinon
+ * le plan dessiné ; à côté, ce qu'on en sait.
+ */
+export function positionMarkup(p: PhonePosition, phone: Phone | null, now: number, live = false): string {
   if (!p.known) {
     return `<div class="fill-scroll"><div class="empty">${ico("pin")}<b>Mika ne sait pas où tu es</b>
       <p>Ton téléphone ne lui a pas donné ta position, ou elle a été effacée. Sur le téléphone, « Lui dire où je suis » est coupé par défaut.</p>
@@ -288,8 +292,10 @@ export function positionMarkup(p: PhonePosition, phone: Phone | null, now: numbe
     ? `<a class="btn sm" href="${h(osmUrl(coords.lat, coords.lon))}" target="_blank" rel="noopener">${ico("external", "sm")}Ouvrir dans OpenStreetMap</a>`
     : "";
   return `<div class="split pos-split">
-    <section class="pane map-pane">${mapMarkup(p.accuracy_m, label)}<div class="map-legend">${ico("pin", "sm")}<b>${h(label || "Ta position")}</b>${legend ? `<span class="muted">${h(legend)}</span>` : ""}</div>
-      <p class="map-note small muted">Un plan dessiné, pas une carte : ${coords ? "le lien ouvre la vraie, sur OpenStreetMap." : "le serveur n'a pas ses coordonnées."}</p></section>
+    <section class="pane map-pane">${live
+      ? `<div class="map-live" data-map role="region" aria-label="Carte autour de ${h(label || "ta position")}"></div>`
+      : mapMarkup(p.accuracy_m, label)}<div class="map-legend">${ico("pin", "sm")}<b>${h(label || "Ta position")}</b>${legend ? `<span class="muted">${h(legend)}</span>` : ""}</div>
+      ${live ? "" : `<p class="map-note small muted">Un plan dessiné, pas une carte : ${coords ? "le lien ouvre la vraie, sur OpenStreetMap." : "le serveur n'a pas ses coordonnées."}</p>`}</section>
     <aside class="pane"><div class="pane-scroll pos-side">
       <h2 class="section-title">Ta dernière position</h2>
       <dl class="kv"><dt>Lieu</dt><dd><b>${h(label || "—")}</b></dd>

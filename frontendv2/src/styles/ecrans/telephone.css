@@ -66,6 +66,17 @@ a.notif:hover { background: var(--tint); text-decoration: none; }
 .pos-split { grid-template-columns: minmax(0, 1fr) 380px; }
 .map-pane { position: relative; overflow: hidden; }
 .map { width: 100%; height: 100%; display: block; }
+/* la vraie carte (ADR 0193), servie par le serveur : la légende et les commandes par-dessus */
+/* deux classes : la feuille de MapLibre, chargée après, pose « position: relative » sur son cadre */
+.map-pane .map-live { position: absolute; inset: 0; }
+.map-pane .map-legend { z-index: 2; }
+.map-pane .map-live .maplibregl-ctrl.maplibregl-ctrl-attrib { font-size: 11px; color: var(--muted);
+  background: color-mix(in srgb, var(--raised) 88%, transparent); }
+.map-pane .map-live .maplibregl-ctrl-attrib a { color: inherit; }
+.map-pane .map-live .maplibregl-ctrl-group { border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-float);
+  background: var(--raised); }
+.map-pane .map-live .maplibregl-ctrl-group button + button { border-top-color: var(--border); }
+:root[data-theme="dark"] .map-pane .map-live .maplibregl-ctrl-icon { filter: invert(1); }
 .m-bg { fill: #f4f3f9; } .m-block { fill: #e9e7f2; } .m-park { fill: #ddf0e3; } .m-water { fill: none; stroke: #c9dcf7; stroke-width: 26; stroke-linecap: round; }
 .m-road { fill: none; stroke: #ffffff; stroke-width: 12; stroke-linecap: round; } .m-road.big { stroke-width: 20; }
 .m-label { font: 600 13px var(--font); fill: #6b6a80; } .m-label.water { fill: #6a8fc7; } .m-label.park { fill: #5e9a72; }

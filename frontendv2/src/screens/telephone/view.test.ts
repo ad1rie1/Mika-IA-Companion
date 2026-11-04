@@ -147,6 +147,15 @@ describe("la position et le sélecteur", () => {
     expect(html).toContain("à 12 m près · aujourd&#39;hui à 14:10");
     expect(html).toContain('href="https://www.openstreetmap.org/?mlat=50.636500&amp;mlon=3.063500#map=17/50.636500/3.063500" target="_blank" rel="noopener"');
     expect(html).toContain("Android · samsung SM-S931B, application ouverte");
+    expect(html).toContain('class="map"');  // sans carte servie : le plan dessiné
+  });
+
+  it("la vraie carte, servie par le serveur, prend la place du plan", () => {
+    const html = positionMarkup({ known: true, coords: { lat: 50.6365, lon: 3.0635 }, label: "rue Nationale, Lille", accuracy_m: 12, at: at(4, 14, 10) }, phone(1), NOW, true);
+    expect(html).toContain('class="map-live" data-map');
+    expect(html).not.toContain('class="map"');
+    expect(html).not.toContain("Un plan dessiné");
+    expect(html).toContain("rue Nationale, Lille");  // la légende reste
   });
 
   it("le sélecteur nomme tous les téléphones, ou celui choisi", () => {

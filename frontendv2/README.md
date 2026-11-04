@@ -53,7 +53,7 @@ Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (
 | `screens/chat/` | le chat : `chat.ts` (les trames, l'état, les gestes), `markup.ts` (le balisage de la maquette, pur) |
 | `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
 | `screens/teams/` | Teams : `index.ts`, `teams.ts` (l'état, les gestes), `markup.ts`, `format.ts` (états, modes, jours, mentions) |
-| `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur) |
+| `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur) ; sa carte (ADR 0193) : `mapgeo.ts` (ce qu'elle couvre, le cercle de la précision, le zoom), `mapstyle.ts` (le style Protomaps, clair ou sombre, pur), `livemap.ts` (MapLibre, chargé à part) |
 | `screens/outils/` | Outils : `index.ts`, `matrix.ts` (la matrice des droits, pure) |
 | `screens/parametres/` | Paramètres : `index.ts` (routes, gestes délégués, sous-onglets), `page.ts` (ce qu'une page et son hôte se doivent), `form.ts` (lignes et barre d'enregistrement), `kit.ts` (lectures en cache, erreurs, dates, copier, confirmer), `store.ts` (les lectures partagées), `words.ts` (les mots des niveaux et des états), une page par sous-onglet (`account`, `mail`, `teams`, `phones`, `shares`, `mcp`) |
 | `api/` | `moi.ts` (`getJson`, `sendJson`, `apiUrl`), `me.ts` (`GET /api/moi`), et un client typé par domaine : `mail`, `teams`, `phone`, `rights`, `settings`, `shares`, `mcp` |
@@ -83,7 +83,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   brouillons », ton message par l'extension du compte, sous le nom de qui y est connecté dans Teams (ADR 0189),
   « Préremplir avec Mika ».
 - **Téléphone** : ses téléphones, les conversations que l'application a lues, leurs fils, ses propositions et leur
-  sort, sa dernière position. Répondre d'ici et « Préremplir » (ADR 0189, 0191) n'ont pas encore de route dans l'API
+  sort, sa dernière position — sur une vraie carte quand le serveur en sert une qui la couvre (ADR 0193 : ses tuiles,
+  polices et icônes viennent du serveur seul, `GET /api/moi/phone/map` ; MapLibre se charge avec l'onglet), sinon sur
+  le plan dessiné. Répondre d'ici et « Préremplir » (ADR 0189, 0191) n'ont pas encore de route dans l'API
   (et l'application Android devra envoyer sans redemander le geste) : le champ le dit.
 - **Outils** : la matrice de ses droits, ressource par ressource — chaque outil, par chaque canal et à chaque moment,
   la décision même de la porte d'offre, et pourquoi ; ses comptes avec leur règle d'envoi ; ses services.

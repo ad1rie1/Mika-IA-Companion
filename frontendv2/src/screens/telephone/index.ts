@@ -6,7 +6,10 @@
  * Ce que l'API ne sait pas encore, l'écran le dit au lieu de le feindre : répondre d'ici et « Préremplir avec Mika »
  * (ADR 0189, 0191), quel téléphone a reçu quel message, les apps autres que les messageries.
  */
-import { fetchConversations, fetchPosition, fetchThread, type Phone, type PhoneThread } from "../../api/phone";
+import { fetchConversations, fetchMap, fetchPosition, fetchThread, type MapInfo, type Phone, type PhoneThread } from "../../api/phone";
+import { isDark, onTheme } from "../../shell/theme";
+import type { At, LiveMap } from "./livemap";
+import { covers } from "./mapgeo";
 import { countOf } from "../../shell/counts";
 import { $, h, isMobile, on } from "../../shell/dom";
 import { openMenu, type MenuItem } from "../../shell/float";
@@ -24,6 +27,7 @@ import {
   notificationsMarkup,
   onlyPhone,
   phoneSwitch,
+  mapMarkup,
   positionMarkup,
   shortPhone,
   SWITCH_NOTE,
@@ -39,6 +43,13 @@ class TelephoneScreen {
   private readonly conversations = new Cached(() => fetchConversations(), 10_000);
   private readonly phones = store.phones;
   private readonly position = new Cached(() => fetchPosition(), 15_000);
+  /** La carte réglée sur le serveur (ADR 0193) : relue toutes les cinq minutes. */
+  private readonly mapInfo = new Cached(() => fetchMap(), 5 * 60_000);
+  /** La vraie carte, dessinée : elle survit aux redessins de l'onglet, retirée quand on le quitte. */
+  private live: LiveMap | null = null;
+  private liveAt: At | null = null;
+  /** Le dernier montage demandé (MapLibre se charge à part : seul le plus récent se pose). */
+  private mapToken = 0;
   private readonly threads = new CachedMap<PhoneThread>((key) => fetchThread(key), 10_000);
   private readonly tabs: ScreenTab[] = [
     { id: "messages", title: "Messages" },
@@ -57,6 +68,9 @@ class TelephoneScreen {
   constructor(private readonly shell: Shell) {
     // la palette (Ctrl K) cherche aussi ses conversations : une lecture, un peu après le démarrage
     window.setTimeout(() => void this.conversations.load(), 2500);
+    onTheme((dark) => {
+      if (this.live && this.liveAt) this.live.show(this.liveAt, dark);
+    });
   }
 
   def(): ScreenDef {
@@ -84,14 +98,15 @@ class TelephoneScreen {
   private stamp(): string {
     const key = this.selectedKey();
     const thread = key ? this.threads.get(key).version : 0;
-    return [this.ctx?.tab, key, this.conversations.version, this.phones.version, this.position.version, thread].join("|");
+    return [this.ctx?.tab, key, this.conversations.version, this.phones.version, this.position.version,
+      this.mapInfo.version, thread].join("|");
   }
 
   /** Lire ce que l'onglet montre ; redessiner si ça a changé et qu'on y est encore. */
   private async ensure(force = false): Promise<void> {
     const tab = this.ctx?.tab;
     const reads: Promise<unknown>[] = [this.conversations.load(force), this.phones.load(force)];
-    if (tab === "position") reads.push(this.position.load(force));
+    if (tab === "position") reads.push(this.position.load(force), this.mapInfo.load());
     await Promise.all(reads);
     if (tab === "messages") {
       const key = this.selectedKey();
@@ -111,6 +126,7 @@ class TelephoneScreen {
     this.timer = window.setInterval(() => {
       if (!this.open()) {
         window.clearInterval(this.timer);
+        this.dropMap();
         return;
       }
       if (document.visibilityState === "visible") void this.ensure(true);
@@ -142,12 +158,10 @@ class TelephoneScreen {
     this.painted = this.stamp();
     const now = Date.now();
     if (ctx.tab === "position") {
-      const p = this.position;
-      body.innerHTML = p.value
-        ? positionMarkup(p.value, this.phoneOfAll(), now)
-        : p.error ? errorBlock(p.error, "Impossible de lire ta position") : loadingBlock();
+      this.paintPosition(body, now);
       return;
     }
+    this.dropMap();
     const convs = this.conversations;
     if (!convs.value) {
       body.innerHTML = convs.error ? errorBlock(convs.error, "Impossible de lire ton téléphone") : loadingBlock();
@@ -158,6 +172,66 @@ class TelephoneScreen {
       return;
     }
     this.paintMessages(body, now);
+  }
+
+  /** La position : la vraie carte si le serveur en sert une qui la couvre (gardée d'un redessin à l'autre). */
+  private paintPosition(body: HTMLElement, now: number): void {
+    const p = this.position.value;
+    if (!p) {
+      this.dropMap();
+      body.innerHTML = this.position.error ? errorBlock(this.position.error, "Impossible de lire ta position") : loadingBlock();
+      return;
+    }
+    const info = this.mapInfo.value;
+    const at: At | null = p.known && p.coords ? { lat: p.coords.lat, lon: p.coords.lon, accuracy: p.accuracy_m } : null;
+    const live = !!at && covers(info, at.lat, at.lon);
+    body.innerHTML = positionMarkup(p, this.phoneOfAll(), now, live);
+    if (!live || !at || !info) {
+      this.dropMap();
+      return;
+    }
+    this.liveAt = at;
+    const slot = $<HTMLElement>("[data-map]", body);
+    if (!slot) return;
+    if (this.live) {
+      slot.replaceWith(this.live.host);
+      this.live.resize();
+      this.live.show(at, isDark());
+      return;
+    }
+    void this.startMap(info);
+  }
+
+  private async startMap(info: MapInfo): Promise<void> {
+    const token = ++this.mapToken;
+    let mod: typeof import("./livemap");
+    try {
+      mod = await import("./livemap");
+    } catch {
+      this.drawnInstead();
+      return;
+    }
+    if (token !== this.mapToken || this.live || !this.open() || this.ctx?.tab !== "position") return;
+    const slot = this.body ? $<HTMLElement>("[data-map]", this.body) : null;
+    if (!slot || !this.liveAt) return;
+    try {
+      this.live = mod.mountMap(slot, info, this.liveAt, isDark());
+    } catch {
+      this.drawnInstead(); // pas de WebGL : le plan dessiné
+    }
+  }
+
+  /** La carte ne se dessine pas ici : le plan dessiné reprend sa place. */
+  private drawnInstead(): void {
+    const p = this.position.value;
+    const slot = this.body ? $<HTMLElement>("[data-map]", this.body) : null;
+    if (slot && p?.known) slot.outerHTML = mapMarkup(p.accuracy_m, p.label.trim());
+  }
+
+  private dropMap(): void {
+    this.mapToken += 1;
+    this.live?.remove();
+    this.live = null;
   }
 
   private paintMessages(body: HTMLElement, now: number): void {

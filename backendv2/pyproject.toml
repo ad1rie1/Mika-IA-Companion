@@ -21,6 +21,8 @@ dependencies = [
     # le schéma déclaré et ses migrations : SQLite (tests, simulateur) et MariaDB (sa vie), ADR 0101
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    # la carte de sa position, lue dans un fichier PMTiles ou relayée d'un serveur (ADR 0193)
+    "pmtiles>=3.8,<4",
 ]
 
 [project.optional-dependencies]

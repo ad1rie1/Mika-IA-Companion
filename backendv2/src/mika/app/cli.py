@@ -48,6 +48,9 @@ from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
+from mika.adapters.maps import FILE as MAP_FILE
+from mika.adapters.maps import MapConfig
+from mika.adapters.maps import extract as maps_extract
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.shares import DiskShares
@@ -593,6 +596,39 @@ async def claude_code_check(data: Path, name: str | None) -> dict[str, object]:
             "messagerie_entre_sessions": "ouverte" if socket else "fermée"}
 
 
+def _said(text: str) -> None:
+    print(text, flush=True)  # au fil de l'eau, même dans un fichier
+
+
+def carte(data: Path, args: argparse.Namespace) -> int:
+    """La carte de sa position (ADR 0193), serveur en marche sans risque : l'archive neuve ne remplace l'ancienne
+    qu'entière, et le serveur la rouvre de lui-même."""
+    async def run() -> dict[str, object]:
+        async with maps_extract.client() as client:
+            if args.carte_cmd == "polices":
+                folder = data / "cartes" / "assets"
+                count = await maps_extract.assets(client, folder, say=_said)
+                return {"ok": True, "fichiers": count, "dossier": str(folder)}
+            rel = MapConfig(source=MAP_FILE, file=args.sortie).file  # sous cartes/, comme le réglage le veut
+            out = data / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            url = args.depuis or await maps_extract.latest_build(client)
+            print(f"depuis {url}")
+            got = await maps_extract.extract(maps_extract.ranges(client, url), out, maps_extract.zone(args.zone),
+                                             args.zoom, say=_said)
+            return {"ok": True, "fichier": str(got.path), "tuiles": got.tiles, "octets": got.size,
+                    "zooms": [got.minzoom, got.maxzoom], "zone": [round(v, 4) for v in got.bounds],
+                    "ensuite": f"Réglages › Canaux › Carte de sa position : « Un fichier », {rel}"}
+
+    try:
+        out = asyncio.run(run())
+    except (maps_extract.ExtractFailed, ValidationError) as exc:
+        print(json.dumps({"ok": False, "erreur": str(exc).splitlines()[-1]}, ensure_ascii=False))
+        return 1
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def claude_code_login(data: Path, name: str | None) -> int:
     """Ouvre la CLI en interactif dans son dossier dédié : l'utilisateur s'y connecte lui-même
     (``/login``) ; Mika ne voit rien passer."""
@@ -921,6 +957,16 @@ def _run(argv: list[str] | None) -> int:
     csub = co.add_subparsers(dest="console_cmd", required=True)
     cap = csub.add_parser("apercu", help="exporter chaque page (clair et sombre) d'une vie neuve, sans serveur")
     cap.add_argument("--out", type=Path, required=True)
+    ca = sub.add_parser("carte", help="la carte de sa position (ADR 0193) : une zone extraite, ses polices")
+    casub = ca.add_subparsers(dest="carte_cmd", required=True)
+    cx = casub.add_parser("extraire", help="extraire une zone de la carte Protomaps de la planète, sous cartes/")
+    cx.add_argument("--depuis", default="", help="une archive PMTiles servie par plages (défaut : la dernière carte "
+                                                  "de la planète de Protomaps)")
+    cx.add_argument("--zone", default="france", help="france, ou ouest,sud,est,nord en degrés")
+    cx.add_argument("--zoom", type=int, default=15, help="le zoom le plus fin (15 : la rue ; chaque zoom de moins "
+                                                         "divise la taille par quatre environ)")
+    cx.add_argument("--sortie", default="cartes/france.pmtiles", help="sous cartes/ du dossier de données")
+    casub.add_parser("polices", help="ses polices et ses icônes (protomaps/basemaps-assets), sous cartes/assets")
     fo = sub.add_parser("forge", help="ce qu'un opérateur décide de ses apps (serveur arrêté)")
     fsub = fo.add_subparsers(dest="forge_cmd", required=True)
     for name in ("promote", "demote"):
@@ -967,6 +1013,8 @@ def _run(argv: list[str] | None) -> int:
         out = sim_selftest()
         print(json.dumps(out, ensure_ascii=False))
         return 0 if all(out.values()) else 1
+    if args.cmd == "carte":
+        return carte(args.data, args)
     if args.cmd == "console":
         from mika.app import apercu  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
 

@@ -25,6 +25,7 @@ from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpe
 from mika.adapters.llm.models import ListingFailed, list_models, settle_limits
 from mika.adapters.mail import MailConfig
 from mika.adapters.mail.config import MailAccount
+from mika.adapters.maps import MapConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
@@ -636,6 +637,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_git(cfg.token, cfg.user, list(cfg.hosts))
         return []
 
+    # ── la carte de sa position (ADR 0193) ──
+    async def save_map(cfg: MapConfig, by: str) -> list[str]:
+        await settings.save_map_config(cfg)
+        return []
+
+    def map_facts() -> list[tuple[str, str]]:
+        return live.maps.describe() if live.maps is not None else [("Source", "la carte n'est pas branchée")]
+
     # ── notifications du téléphone (ADR 0077) ──
     async def save_push(cfg: PushSettings, by: str) -> list[str]:
         await settings.save_push(cfg.service_account)
@@ -904,6 +913,19 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "compte de service de ce projet : collée ici, ou posée dans le dossier de données sous "
                             "le nom firebase-service-account.json (droits 600) — collée ici, elle prime. Sans elle, "
                             "l'application ne reçoit que ce qu'elle trouve en s'ouvrant.")),)),
+        SettingsSection("carte", "Carte de sa position", "canaux", MapConfig, settings.map_config, save_map,
+                        order=25, facts=map_facts,
+                        description="D'où viennent les tuiles de la carte de Téléphone › Position (ADR 0193) : un "
+                                    "fichier PMTiles du dossier de données, ou un serveur de carte que ce serveur "
+                                    "relaie. Le navigateur ne parle qu'à ce serveur.",
+                        pages=(SettingsPage("carte", "Carte de sa position", description=(
+                            "La carte où chacun voit sa dernière position (frontendv2, Téléphone › Position). Ses "
+                            "tuiles passent toujours par ce serveur : le navigateur ne joint aucune adresse du "
+                            "dehors, qui dirait où la personne se trouve. Un fichier PMTiles posé sous cartes/ du "
+                            "dossier de données (une extraction de la carte Protomaps, jamais sauvegardée : elle se "
+                            "réextrait) ne parle à personne ; un serveur de carte est joint par ce serveur seul, sans "
+                            "rien de la personne. Hors de la zone couverte, ou sans carte, la position garde son "
+                            "plan dessiné.")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

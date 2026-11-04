@@ -45,6 +45,7 @@ from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mail.oauth import MicrosoftSignIn
+from mika.adapters.maps import MapTiles
 from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
@@ -241,6 +242,8 @@ class Live:
     wakeups: WakeupDesk | None = None
     #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
     teams: TeamsDesk | None = None
+    #: la carte de sa position (ADR 0193) : ses tuiles, lues ou relayées par ce serveur
+    maps: MapTiles | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -482,7 +485,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
-                wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits)
+                wakeups=wakeups, teams=teams, read_limits=None if fixed else model_limits,
+                maps=MapTiles(data, settings.map_config))
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -559,6 +563,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await gateway.aclose()
                 await imaging.aclose()
                 await push_sender.aclose()
+                if live.maps is not None:
+                    await live.maps.close()
                 await live.calls.flush()
 
             await kernel.stop(release)
@@ -594,7 +600,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     lent = Mount(LENT_PREFIX, app=lending.app())
     # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, settings=live.settings,
-                reconfigure=live.reconfigure)
+                reconfigure=live.reconfigure, maps=live.maps)
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),

@@ -27,7 +27,7 @@ la console, celle des opérateurs, voit tout et ne passe pas par ici.
   elle ne revient pas (404).
 - Qui n'est pas opératrice branche au plus dix ressources de chaque sorte (boîtes, comptes Teams, services : 409
   au-delà). Elle teste une boîte ou un service, ou relève ses boîtes, au plus trente fois par minute (429 au-delà).
-- Toute réponse est `Cache-Control: no-store`. Les instants sont en **millisecondes** depuis l'époque (0 : jamais).
+- Toute réponse est `Cache-Control: no-store`, sauf les tuiles, polices et icônes de la carte (§ 5). Les instants sont en **millisecondes** depuis l'époque (0 : jamais).
 
 Les erreurs sont `{"error": "…"}` en français, plus `fields` (un message par champ) quand un formulaire est refusé :
 
@@ -230,6 +230,23 @@ répond quand on lui en parle dans le chat, et le téléphone demande le geste.
 
 **`GET /api/moi/phone/position`** — sa dernière position : `{"known": false}`, ou `known`, `coords`
 (`{"lat", "lon"}`), `label`, `accuracy_m`, `at`.
+
+**La carte de sa position** (ADR 0193) — servie par ce serveur seul, à qui est connecté (elle n'est à personne) ;
+d'où viennent ses tuiles se règle dans la console (Réglages › Canaux › Carte de sa position). Ces routes sont les
+seules dont le navigateur garde les réponses (`Cache-Control: private, max-age=86400`).
+
+- **`GET /api/moi/phone/map`** — `ready` (sinon `reason`, en mots : aucune carte réglée, un fichier absent, un
+  serveur injoignable — le client garde son plan dessiné), `kind` (`vecteur` : au schéma Protomaps ; `image`),
+  `minzoom`, `maxzoom`, `bounds` (ouest, sud, est, nord ; `null` : partout), `attribution`, et les chemins de l'API
+  à poser sur l'adresse du serveur : `tiles` (`…/tiles/{z}/{x}/{y}`), `glyphs` (`…/fonts/{fontstack}/{range}.pbf`,
+  `null` sans polices : une carte sans noms), `sprite` (`…/sprites/v4`, la planche suit : `/light`, `/dark` ;
+  `null` sans icônes).
+- **`GET /api/moi/phone/map/tiles/{z}/{x}/{y}`** — une tuile, telle que l'archive la garde (`Content-Encoding: gzip`
+  pour Protomaps : le navigateur l'ouvre) ; aucune là (hors de la zone, hors des zooms) : 204, une tuile vide ;
+  aucune carte réglée : 404 ; la carte ne se lit pas : 503.
+- **`GET /api/moi/phone/map/fonts/{pile}/{plage}.pbf`** — une plage de glyphes, de la première police de la pile qui
+  est là ; **`GET /api/moi/phone/map/sprites/v4/{planche}.json|.png`** (`@2x` compris) — les icônes. Rien en dehors
+  de leur dossier : 404.
 
 **`GET /api/moi/phone/phones`** — ses téléphones (les jetons `mobile` de son compte, révoqués compris, jamais leur
 secret) : `id`, `label` (« Android · fabricant modèle », composé par l'application), `created_at`, `last_used`,
