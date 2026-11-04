@@ -25,6 +25,8 @@ from mika.vocab.access import MOMENTS as MOMENTS
 from mika.vocab.access import OWNER as OWNER
 from mika.vocab.access import PERSON as PERSON
 from mika.vocab.access import POLICIES as POLICIES
+from mika.vocab.access import SELF as SELF
+from mika.vocab.access import alone as _alone
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
 NATURES = (("lecture", "lecture — elle lit, rien ne change ailleurs"),
@@ -64,8 +66,9 @@ class Access:
 
     @property
     def alone(self) -> bool:
-        """Une ligne d'elle seule : sans personne, par le seul canal « elle seule »."""
-        return not self.who and self.canal == (INTERNAL,)
+        """Une ligne d'elle seule : elle, et personne d'autre (ADR 0184) — ou, réglée avant, sans personne par le
+        seul canal « elle seule »."""
+        return _alone(self.who, self.canal)
 
 
 #: la ligne par défaut d'un service qu'on branche : fermé, comme un pare-feu

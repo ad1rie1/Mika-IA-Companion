@@ -1,12 +1,16 @@
-"""Teams (ADR 0069), côté application : la clé de l'extension et la porte de ``/api/teams/…``.
+"""Teams (ADR 0069, 0186), côté application : les clés de l'extension, une par compte, et la porte de
+``/api/teams/…``.
 
-- *La clé* : générée ici (``mtk_…``), montrée une seule fois ; seule son empreinte est gardée (``Settings``). Une
-  clé neuve rend l'ancienne inutile ; la retirer ferme la porte.
-- *La porte* : ce que le transport web appelle. Elle vérifie la clé (en temps constant : une clé absente et une
-  mauvaise clé se répondent pareil), l'état de Teams, la forme et les tailles du lot, ses plafonds — **avant** que
-  rien ne soit rangé ni journalisé. Un lot admis est rangé par l'adaptateur (hors du journal) ; le journal n'en garde
-  que ``teams.received`` (combien de messages neufs, où la personne a écrit) et, pour chaque réponse que les messages
-  de la personne ont réglée, ``teams.settled``.
+- *Une clé par compte* : générée ici (``mtk_…``), montrée une seule fois ; seule son empreinte est gardée
+  (``Settings.teams_keys``). Une clé neuve rend l'ancienne de ce compte inutile ; la retirer ferme la porte à ce
+  compte. Ce guichet est aussi le port ``teams_keys`` (la console crée et retire une clé, compte par compte).
+- *La porte* : ce que le transport web appelle. Elle reconnaît le compte à sa clé (chaque clé comparée en temps
+  constant, toutes à chaque requête : une clé absente et une mauvaise clé se répondent pareil, et rien ne dit
+  combien de comptes il y a), vérifie l'état de Teams, la forme et les tailles du lot, les plafonds du compte —
+  **avant** que rien ne soit rangé ni journalisé. Ce que l'extension pousse, relève ou accuse ne concerne que ce
+  compte. Un lot admis est rangé par l'adaptateur (hors du journal) ; le journal n'en garde que ``teams.received``
+  (son compte, combien de messages neufs, où la personne a écrit) et, pour chaque réponse que les messages de la
+  personne ont réglée, ``teams.settled``.
 """
 
 from __future__ import annotations
@@ -164,52 +168,69 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
 
 
 class TeamsDesk:
-    """La clé de l'extension et la porte de ``/api/teams/…``. ``port`` (le ``KernelPort``) est relié après la
-    construction du noyau ; ``store`` est l'adaptateur (le port ``teams``)."""
+    """Les clés de l'extension (une par compte, le port ``teams_keys``) et la porte de ``/api/teams/…``. ``port``
+    (le ``KernelPort``) est relié après la construction du noyau ; ``store`` est l'adaptateur (le port ``teams``)."""
 
     def __init__(self, settings: Any, clock: Any, store: Any) -> None:
         self.settings = settings
         self.clock = clock
         self.store = store
         self.port: Any = None
-        self._minute: deque[float] = deque()
+        #: les requêtes de la minute, par compte (une extension bavarde ne prive pas les autres)
+        self._minute: dict[str, deque[float]] = {}
         #: un lot se range et se journalise d'un tenant : deux lots simultanés ne s'entremêlent pas
         self._lock = asyncio.Lock()
 
-    # ── la clé ──
-    def key_state(self) -> KeyState | None:
-        k = self.settings.teams_key()
+    # ── les clés ──
+    def key_state(self, account: str) -> KeyState | None:
+        k = self.settings.teams_keys().get(account) or {}
         return KeyState(str(k.get("hint") or ""), int(k.get("created_at") or 0), str(k.get("by") or "")) \
             if k.get("digest") else None
 
-    async def new_key(self, by: str) -> str:
+    async def new_key(self, account: str, by: str) -> str:
+        if self.settings.teams().account(account) is None:
+            raise ValueError(f"Compte Teams inconnu : « {account[:40]} » — déclare-le d'abord dans Réglages › Plugins "
+                             "› Teams.")
         key = new_key()
-        await self.settings.save_teams_key(digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by)
+        await self.settings.save_teams_key(account, digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by)
         return key
 
-    async def revoke_key(self, by: str) -> bool:
-        return await self.settings.revoke_teams_key()
+    async def revoke_key(self, account: str, by: str) -> bool:
+        return await self.settings.revoke_teams_key(account)
 
     # ── la porte ──
-    def _admit(self, key: str) -> GateResult | None:
-        """La clé, l'état, la cadence : un refus, ou rien (admis)."""
-        stored = str(self.settings.teams_key().get("digest") or "")
+    def _recognized(self, key: str) -> str:
+        """Le compte de cette clé (vide : aucun). Chaque clé rangée est comparée, toujours toutes et au moins une, du
+        même coût : rien ne dit laquelle a répondu, ni s'il y en a."""
         given = digest(key) if key.startswith(KEY_PREFIX) and len(key) <= 200 else _NOTHING
-        # toujours une comparaison, du même coût
-        if not hmac.compare_digest(given, stored or _NOTHING) or not stored:
-            return GateResult(UNKNOWN, "Clé refusée.")
-        if not self.settings.teams().enabled:
-            return GateResult(DISABLED, "Teams est désactivé dans ses réglages.")
+        stored = [(name, str(k.get("digest") or "")) for name, k in sorted(self.settings.teams_keys().items())]
+        found = ""
+        for name, wanted in stored or [("", "")]:
+            if hmac.compare_digest(given, wanted or _NOTHING) and wanted and not found:
+                found = name
+        return found
+
+    def _admit(self, key: str) -> tuple[str, GateResult | None]:
+        """La clé, l'état, la cadence : (le compte, un refus ou rien — admis)."""
+        account = self._recognized(key)
+        cfg = self.settings.teams()
+        if not account or cfg.account(account) is None:  # une clé d'un compte retiré depuis ne vaut plus
+            return "", GateResult(UNKNOWN, "Clé refusée.")
+        if not cfg.enabled:
+            return account, GateResult(DISABLED, "Teams est désactivé dans ses réglages.")
+        if account in cfg.accounts and not cfg.accounts[account].enabled:
+            return account, GateResult(DISABLED, "Ce compte Teams est désactivé dans ses réglages.")
         now = time.monotonic()
-        while self._minute and now - self._minute[0] >= 60:
-            self._minute.popleft()
-        if len(self._minute) >= PER_MINUTE:
-            return GateResult(BUSY, "Trop de requêtes.", retry_after=max(1, int(60 - (now - self._minute[0]))))
-        self._minute.append(now)
-        return None
+        window = self._minute.setdefault(account, deque())
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= PER_MINUTE:
+            return account, GateResult(BUSY, "Trop de requêtes.", retry_after=max(1, int(60 - (now - window[0]))))
+        window.append(now)
+        return account, None
 
     async def inbox(self, key: str, data: Any) -> GateResult:
-        refused = self._admit(key)
+        account, refused = self._admit(key)
         if refused is not None:
             return refused
         if self.port is None:
@@ -220,28 +241,28 @@ class TeamsDesk:
         except ValueError as exc:
             return GateResult(INVALID, str(exc))
         async with self._lock:
-            stored = self.store.store_batch(batch, now)
+            stored = self.store.store_batch(account, batch, now)
             drafts = [SETTLED.draft(draft=s.draft, state=s.state, edited=s.edited, reason=s.reason,
                                     dedupe_key=f"teams-regle:{s.draft}:{s.state}") for s in stored.settled]
             if stored.new or stored.replied:
-                drafts.insert(0, RECEIVED.draft(new=stored.new, replied=stored.replied))
+                drafts.insert(0, RECEIVED.draft(new=stored.new, replied=stored.replied, account=account))
             if drafts:
                 await self.port.kernel.mind.append(drafts, emitter="teams", correlation="teams:inbox",
                                                    origin=Origin.EXTERNAL)
         return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known, "dropped": dropped})
 
     async def outbox(self, key: str) -> GateResult:
-        refused = self._admit(key)
+        account, refused = self._admit(key)
         if refused is not None:
             return refused
-        items = self.store.outbox(self.clock())
+        items = self.store.outbox(account, self.clock())
         return GateResult(ACCEPTED, "", data={"items": [
             {"id": i.id, "conversation": i.conversation, "title": i.title, "kind": i.kind, "mode": i.mode,
              "status": i.status, "text": i.text, "created_at": i.created_at, "expires_at": i.expires_at}
             for i in items]})
 
     async def ack(self, key: str, item: str, data: Any) -> GateResult:
-        refused = self._admit(key)
+        account, refused = self._admit(key)
         if refused is not None:
             return refused
         if self.port is None:
@@ -254,7 +275,8 @@ class TeamsDesk:
         text = _clean(str(data.get("text") or "")[:8000])
         reason = _flat(str(data.get("reason") or ""), 200)
         async with self._lock:
-            outcome, done = self.store.settle(item, result, now=self.clock(), text=text, reason=reason)
+            outcome, done = self.store.settle(item, result, now=self.clock(), text=text, reason=reason,
+                                              account=account)
             if done is not None:
                 # la raison que donne l'extension reste dans le cache (la console la montre) : au journal, une
                 # raison écrite par le code, jamais un texte venu d'ailleurs

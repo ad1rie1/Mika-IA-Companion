@@ -35,6 +35,7 @@ from mika.app.handmade import authors as drawn_authors
 from mika.app.handmade import temperament as temper
 from mika.app.settings import PUSH_KEY_FILE, push_key_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
+from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import self_ as self_c
 from mika.contracts import wakeup as wakeup_c
@@ -51,6 +52,7 @@ from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.runtime.params import Parameters
+from mika.vocab.access import PERSON, SELF
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 from mika.vocab.temperament import (
     Temperament,
@@ -520,7 +522,29 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                                                   "ce qu'il pilote (à 0 → à 1)"), rows),))]
 
     # ── sens ──
+    def mail_owners() -> list[tuple[str, str]]:
+        """À qui une boîte peut être (ADR 0185) : toi (ses propriétaires), elle par son nom, ou une personne qui a un
+        compte actif — jamais un opérateur, que « toi » désigne déjà (comme dans les tableaux de droits)."""
+        frame = live.kernel.mind.frame()
+        her = self_c.name_of(frame.get(self_c.PERSONA)) or "Elle"
+        people: dict[str, str] = {}
+        for a in live.accounts.all():
+            if not a.active or getattr(a, "operator", False):
+                continue
+            person = str(frame.get(identity_c.PERSON(a.handle)) or a.handle)
+            people.setdefault(PERSON + person, a.display_name or person)
+        return [("", "Toi (ses propriétaires)"), (SELF, her),
+                *sorted(people.items(), key=lambda kv: kv[1].casefold())]
+
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
+        """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
+        compte fermé depuis reste affiché, pour qu'on le corrige)."""
+        before, known = settings.email().accounts, {v for v, _ in mail_owners()}
+        problems = [f"« {name} » : elle est à toi, à elle, ou à une personne qui a un compte."
+                    for name, a in cfg.accounts.items()
+                    if a.owner not in known and (name not in before or before[name].owner != a.owner)]
+        if problems:
+            return problems
         await settings.save_email(cfg)
         # ce que ses proposeurs lisent (les comptes où elle prépare des réponses) est un réglage journalisé
         problems = await live.reconfigure()
@@ -556,6 +580,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         else:
             tags = [("prête", "ok")]
         tags.append((f"elle y écrit {VOICE_LABEL.get(account.voice, account.voice)}", "info"))
+        if account.owner:  # à qui elle est, quand ce n'est pas à toi (ADR 0185)
+            tags.append((f"à {dict(mail_owners()).get(account.owner, account.owner)}", "owner"))
         if account.microsoft:
             tags.append(("compte Microsoft", ""))
         reads = f"{account.imap_host} · {account.user}" if account.imap_host else "pas de serveur IMAP"
@@ -639,35 +665,63 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 
-    # ── Teams (ADR 0069) ──
+    # ── Teams (ADR 0069, 0186) ──
+    #: à qui un compte Teams peut être : les mêmes qu'une boîte (toi, elle, une personne qui a un compte)
+    teams_owners = mail_owners
+
     async def save_teams(cfg: TeamsConfig, by: str) -> list[str]:
+        """Un compte Teams est à toi, à elle ou à une personne qui a un compte (ADR 0186) — sauf ce qui était déjà là
+        (un compte fermé depuis reste affiché, pour qu'on le corrige)."""
+        before, known = settings.teams().accounts, {v for v, _ in teams_owners()}
+        problems = [f"« {name} » : il est à toi, à elle, ou à une personne qui a un compte."
+                    for name, a in cfg.accounts.items()
+                    if a.owner not in known and (name not in before or before[name].owner != a.owner)]
+        if problems:
+            return problems
         await settings.save_teams(cfg)
-        # actif ou non est lu par ses proposeurs : un réglage journalisé
+        # un compte supprimé : ce que son extension avait apporté s'efface avec lui (ADR 0186)
+        store = live.kernel.ports.get("teams") if live.kernel is not None else None
+        for gone in sorted(set(before) - set(cfg.accounts)):
+            if store is not None:
+                store.drop_account(gone)
+        # actif ou non, et à qui est chaque compte, sont lus par ses proposeurs et ses outils : un réglage journalisé
         problems = await live.reconfigure()
         if problems:
             log.warning("teams enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
         return []
 
     def teams_facts() -> list[tuple[str, str]]:
-        key = live.teams.key_state() if live.teams is not None else None
+        accounts, keys = settings.teams().accounts, settings.teams_keys()
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
-        seen = "jamais" if store is None or not store.configured() else "oui"
-        return [("Clé de l'extension", f"définie ({key.hint}…)" if key is not None else "aucune"),
-                ("Reçu de l'extension", seen),
+        plugged = sum(1 for k in accounts if store is not None and store.configured(k))
+        keyed = sum(1 for k in accounts if k in keys)
+        return [("Comptes", f"{len(accounts)} ({keyed} avec une clé, {plugged} branché(s))"),
+                ("Clés de l'extension", "une par compte : Relations & échanges › Teams › Extension"),
                 ("Conversations et réponses", "Relations & échanges › Teams"),
-                ("Ce qu'elle prépare, comment ça part", "Réglages › Canaux (le tableau de Teams)")]
+                ("Ce qu'elle prépare, comment ça part", "Réglages › Canaux (le tableau de Teams, ou celui d'un compte)")]
 
-    async def new_teams_key(by: str) -> tuple[str, str]:
-        if live.teams is None:
-            return "warn", "Teams n'est pas branché."
-        key = await live.teams.new_key(by)
-        return "ok", (f"Clé neuve (l'ancienne ne vaut plus ; montrée une seule fois) — colle-la dans l'extension : "
-                      f"{key}")
-
-    async def revoke_teams_key(by: str) -> tuple[str, str]:
-        if live.teams is None or not await live.teams.revoke_key(by):
-            return "warn", "Il n'y avait pas de clé."
-        return "ok", "Clé retirée : l'extension est refusée jusqu'à une clé neuve."
+    def describe_teams_account(key: str, account: Any) -> dict[str, Any]:
+        """La carte d'un compte Teams (ADR 0186) : à qui il est, sa clé, ce que son extension a apporté — et où la
+        brancher."""
+        store = live.kernel.ports.get("teams") if live.kernel is not None else None
+        info = store.account(key) if store is not None else None
+        has_key = key in settings.teams_keys()
+        plugged = info is not None and bool(info.last_batch)
+        tags = [("branché", "ok")] if plugged else [("clé créée", "info")] if has_key else [("sans clé", "warn")]
+        if not account.enabled:  # décoché : son extension est refusée
+            tags.insert(0, ("inactif", ""))
+        tags.append((f"à {dict(teams_owners()).get(account.owner, account.owner)}" if account.owner else "à toi",
+                     "owner" if account.owner else ""))
+        if account.sign:
+            tags.append(("signé", ""))
+        now = live.kernel.mind.clock.now() if live.kernel is not None else 0
+        activity = f"Son extension a poussé {ago(now, info.last_batch)}" if plugged else \
+            "Son extension n'a encore rien apporté : sa clé se crée dans Relations & échanges › Teams › Extension."
+        return {"title": account.label or key, "tags": tags, "lead_label": "Elle y écrit à la place de",
+                "lead": account.display_name or (info.self_name if info is not None and info.self_name else "") or
+                "la personne du compte (le nom que Teams donne)", "lead_plain": True,
+                "facts": [("Ton", account.tone or "—"), ("Consignes", "oui" if account.instructions.strip() else "aucune")],
+                "activity": activity, "activity_tone": "" if plugged else "warn"}
 
     # ── réveils par API (ADR 0068) ──
     def wake_tools() -> list[str]:
@@ -725,8 +779,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
              "imaging", "sens/dessins"),
             ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
-            ("Teams", "La clé de l'extension, ce qu'elle fait de ses réponses (brouillon, accord, autonome), sa "
-             "signature", "teams", "teams", "teams/conversations"),
+            ("Teams", "Ses comptes (à qui, sa façon d'y écrire, sa signature) ; la clé de chaque extension dans "
+             "Teams › Extension", "teams", "teams", "teams/conversations"),
             ("Réveils par API", "Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur "
              "sa fiche", "reveils", "wakeup", "reveils"),
             ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
@@ -863,6 +917,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
                         facts=mail_facts, fixed_names=("accounts",), describe={"accounts": describe_mailbox},
                         loaders={"folders": mail_folders}, named_loaders=("folders",),
+                        choices={"accounts.owner": mail_owners},
                         # ses paramètres vivent dans le Courrier, en haut à droite : ses boîtes et ses paramètres
                         # généraux (relevé, ce qu'elle en dit, ses brouillons), sur une seule page (ADR 0173)
                         pages=(SettingsPage("boites", "Paramètres", ("accounts",), description=(
@@ -906,20 +961,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
                             "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu.")),)),
         SettingsSection("teams", "Teams", "sens", TeamsConfig, settings.teams, save_teams, order=12,
-                        description="Les conversations Teams que l'extension de navigateur lui apporte (ADR 0069), "
-                                    "et ce qu'elle fait des réponses qu'elle prépare à ta place.",
-                        facts=teams_facts,
-                        commands=(Command("cle", "Nouvelle clé", new_teams_key,
-                                          confirm="L'ancienne clé ne vaudra plus rien : l'extension devra recevoir "
-                                                  "la nouvelle."),
-                                  Command("retirer", "Retirer la clé", revoke_teams_key, danger=True,
-                                          confirm="L'extension sera refusée jusqu'à une clé neuve.")),
-                        pages=(SettingsPage("teams", "Teams", commands=True, description=(
-                            "L'extension (frontend/Extension) lit ce que Teams web reçoit dans ton navigateur et "
-                            "l'apporte ici, avec cette clé (montrée une seule fois). Ce qu'elle fait de ses "
-                            "réponses : un brouillon posé dans Teams (tu l'envoies), un envoi après ton accord, ou "
-                            "un envoi sans te demander — toujours sous ton nom. Les conversations et les réponses "
-                            "se lisent dans Relations & échanges › Teams.")),)),
+                        description="Les conversations Teams que l'extension de navigateur de chaque compte lui "
+                                    "apporte (ADR 0069, 0186), et ce qu'elle fait des réponses qu'elle y prépare.",
+                        facts=teams_facts, fixed_names=("accounts",), describe={"accounts": describe_teams_account},
+                        choices={"accounts.owner": teams_owners},
+                        pages=(SettingsPage("teams", "Teams", description=(
+                            "Chaque compte Teams — le tien, le sien, celui d'une personne qui a un compte — a son "
+                            "extension (frontend/Extension), qui lit ce que Teams web reçoit dans le navigateur où il "
+                            "est ouvert et l'apporte ici, avec la clé de ce compte (créée dans Relations & échanges › "
+                            "Teams › Extension, montrée une seule fois). Elle y écrit à la place de la personne du "
+                            "compte : un brouillon posé dans Teams, un envoi après accord, ou un envoi sans demander — "
+                            "toujours de ce compte, sous son nom. Les conversations et les réponses se lisent dans "
+                            "Relations & échanges › Teams.")),)),
         SettingsSection("appareils", "Appareils", "sens", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
                         facts=lambda: [("Jeton", "défini" if settings.sensors_digest() else "aucun")],

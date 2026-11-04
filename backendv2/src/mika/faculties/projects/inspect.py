@@ -918,7 +918,7 @@ def _decisions_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[
         out.append(Section("Consigner une décision", (ActionSlot("projects.decision_ajouter",
                                                                  title="Consigner une décision", compact=True),),
                            description="La question tranchée, ce qui est choisi et pourquoi. Pour revenir sur une "
-                                       "décision, déplie-la et remplace-la : l'ancienne reste lisible, remplacée."))
+                                       "décision, « Remplacer cette décision » : l'ancienne reste lisible, remplacée."))
     return out
 
 

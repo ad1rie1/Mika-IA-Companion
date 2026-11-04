@@ -1,6 +1,8 @@
 {# Un tableau de droits (ADR 0134), le même dessin pour un canal (Réglages › Canaux) et une famille de ses outils
    (Outils › Ses propres outils) : des lignes lues de haut en bas — qui, par où, quand, ses colonnes, ses outils —, puis
    le comportement par défaut, obligatoire. Chaque bouton envoie tout le tableau (``t.action``, ``cle`` : sa clé).
+   Elle se coche dans « qui » par son nom, comme une personne (ADR 0184) : une ligne d'elle seule n'a plus de « qui »
+   caché, seulement des moments qui ne comptent pas.
    ``status`` : ce qu'on en dit à côté de son titre (réglé, minimum vital), quand rien d'autre ne le dit ; ``heading``
    : son titre, quand celui de sa ressource est déjà au-dessus. #}
 {% from "_navigation.html" import pager as pages %}
@@ -35,13 +37,12 @@
             <td class="access-n">{{ r.n }}</td>
             <td>
               <input type="hidden" name="ligne.{{ r.n }}" value="{{ r.n }}">
-              {% if r.alone %}<span class="now-muted" title="Elle seule : personne en face">—</span>{% else %}
               <details class="access-tools access-who" data-exclusive data-none="Personne">
                 <summary>{{ r.who.said }}</summary>
                 <div class="access-tools-list">
                   {% for c in r.who.boxes %}<label class="access-tool"><input type="checkbox" name="qui.{{ r.n }}|{{ c.value }}"{{ ' checked' if c.on }}{{ ' disabled' if locked }} data-word="{{ c.word }}"> {{ c.label }}</label>{% endfor %}
                 </div>
-              </details>{% endif %}
+              </details>
             </td>
             {% if t.show_canal %}
             <td>

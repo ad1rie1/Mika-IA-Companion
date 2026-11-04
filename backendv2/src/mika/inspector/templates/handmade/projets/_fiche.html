@@ -1,0 +1,36 @@
+{# Ce que partagent les onglets dessinés de la fiche d'un projet (Objectifs, Décisions ; app/handmade/projects.py) :
+   - ``split`` : la liste, et le formulaire d'ajout en colonne à côté sur un grand écran (dessous sinon) ;
+   - ``actions`` : les boutons d'une entrée, sur sa ligne, rangés comme ceux de la barre de titre — deux en vue, son
+     panneau (« Modifier l'objectif », « Remplacer cette décision »), le reste sous « ⋯ » ;
+   - ``said`` : un texte cité (un compte rendu, un pourquoi), replié en quatre lignes quand il est long : « lire la
+     suite » le déplie, sans script. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% from "_forms.html" import action_button %}
+
+{% macro actions(e, label) -%}
+{% if e.seen or e.edit or e.more %}
+<div class="toolbar prj-entry-actions" role="group" aria-label="{{ label }}">
+  {% for a in e.seen %}{{ action_button(forms.get(a.slot)) }}{% endfor %}
+  {% if e.edit %}<details class="action-pop" data-exclusive><summary class="btn quiet">{{ e.edit.title }}</summary><div class="action-panel">{% for y in e.edit["items"] %}{{ tab.block(y) }}{% endfor %}</div></details>{% endif %}
+  {% if e.more %}<details class="action-overflow"><summary class="btn quiet icon" title="Autres actions" aria-label="Autres actions : {{ label }}"><span aria-hidden="true">⋯</span></summary><div class="toolbar action-overflow-panel">{% for a in e.more %}{{ action_button(forms.get(a.slot)) }}{% endfor %}</div></details>{% endif %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro said(label, text, long=False, cls="") -%}
+<div class="prj-said{{ ' ' ~ cls if cls }}">
+  <span class="prj-said-label">{{ label }}</span>
+  <p class="prj-said-text{{ ' long' if long }}">{{ text }}</p>
+  {% if long %}<details class="prj-said-all"><summary><span class="more">lire la suite</span><span class="less">réduire</span></summary></details>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro side(add) -%}
+{% if add %}
+<section class="now-card prj-side" aria-labelledby="prj-side-title">
+  <header class="now-card-head"><h2 id="prj-side-title">{{ add.title }}</h2></header>
+  {% if add.description %}<p class="prj-side-help">{{ add.description }}</p>{% endif %}
+  {% for x in add["items"] %}{{ tab.block(x) }}{% endfor %}
+</section>
+{% endif %}
+{%- endmacro %}

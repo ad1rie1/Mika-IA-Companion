@@ -113,7 +113,7 @@
 
 /* ── Écrans étroits ── */
 @media (max-width: 560px) {
-  .prj .person-tiles-list li:last-child:nth-child(odd), .prj-obj .person-tiles-list li:last-child:nth-child(odd) {
+  .prj .person-tiles-list li:last-child:nth-child(odd), .prj-fiche .person-tiles-list li:last-child:nth-child(odd) {
     grid-column: 1 / -1; }
   .prj-runs > li { grid-template-columns: minmax(0, 1fr); }
 }
@@ -176,42 +176,48 @@
 .prj-ov-dl dt { color: var(--muted); }
 .prj-ov-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
-/* Un projet › Objectifs (app/handmade/projects.py, ADR 0177) : une entrée par objectif — son numéro, ce qu'il vise,
-   ses étiquettes, ses faits en une ligne, son dernier compte rendu en citation (long, quatre lignes que « lire la
-   suite » déplie sans script), ses boutons sur sa ligne ; « Ajouter un objectif » en colonne à côté sur un grand
-   écran. */
-.prj-obj-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (min-width: 1100px) { .prj-obj-layout.with-add { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); } }
-.prj-obj-list { display: grid; margin: 0; padding: 0; list-style: none; }
-.prj-obj-item { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 14px; padding: 16px 0;
+/* Un projet › Objectifs, Décisions (app/handmade/projects.py, gabarits fiche_*.html et _fiche.html, ADR 0177) : une
+   entrée par objectif ou par décision — son numéro, son titre, ses étiquettes, ses faits en une ligne, ses boutons à
+   leur droite ; un texte cité (compte rendu, pourquoi : long, quatre lignes que « lire la suite » déplie sans
+   script) ; le formulaire d'ajout en colonne à côté sur un grand écran. Une décision remplacée ou retirée s'estompe. */
+.prj-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .prj-split.with-side { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); } }
+.prj-entries { display: grid; margin: 0; padding: 0; list-style: none; }
+.prj-entry { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 4px 14px; padding: 16px 0;
   border-top: 1px solid var(--border); }
-.prj-obj-item:first-child { padding-top: 4px; border-top: 0; }
-.prj-obj-n { align-self: start; margin-top: 1px; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
+.prj-entry:first-child { padding-top: 4px; border-top: 0; }
+.prj-entry-n { align-self: start; margin-top: 1px; padding: 2px 0; border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: var(--accent); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; text-align: center; }
-.prj-obj-body { display: grid; gap: 8px; min-width: 0; }
-.prj-obj-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-.prj-obj-text { flex: 1 1 320px; min-width: 0; margin: 0; font: 600 15px/1.4 var(--display); overflow-wrap: anywhere; }
-.prj-obj-facts { display: flex; flex-wrap: wrap; margin: 0; color: var(--text-2); font-size: 12.5px; }
-.prj-obj-facts > span:not(:last-child)::after { content: "·"; margin: 0 8px; color: var(--muted); }
-.prj-obj-said { display: grid; justify-items: start; gap: 3px; max-width: 110ch; padding-left: 12px;
+.prj-entry-body { display: grid; gap: 8px; min-width: 0; }
+.prj-entry-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.prj-entry-title { flex: 1 1 320px; min-width: 0; margin: 0; font: 600 15px/1.4 var(--display); overflow-wrap: anywhere; }
+.prj-entry-choice { margin: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.prj-entry-facts { display: flex; flex-wrap: wrap; margin: 0; color: var(--text-2); font-size: 12.5px; }
+.prj-entry-facts > span:not(:last-child)::after { content: "·"; margin: 0 8px; color: var(--muted); }
+.prj-entry-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
+.prj-entry-foot .prj-entry-facts { flex: 1 1 260px; }
+.prj-entry-actions { align-items: center; gap: 6px; }
+.prj-entry-actions .action-overflow-panel { display: grid; justify-items: stretch; width: max-content; padding: 8px; }
+.prj-entry-actions .action-overflow-panel .btn { width: 100%; justify-content: flex-start; }
+.prj-entry-more { max-width: 110ch; }
+.prj-entry-more > .prj-said { margin-top: 8px; }
+.prj-said { display: grid; justify-items: start; gap: 3px; max-width: 110ch; padding-left: 12px;
   border-left: 2px solid var(--border); }
-.prj-obj-said.result { border-left-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
-.prj-obj-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
-.prj-obj-quote { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
-.prj-obj-quote.long { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
-.prj-obj-said:has(> .prj-obj-all[open]) .prj-obj-quote.long { display: block; -webkit-line-clamp: unset; }
-.prj-obj-all > summary { color: var(--accent); cursor: pointer; font-size: 12.5px; list-style: none; }
-.prj-obj-all > summary::-webkit-details-marker { display: none; }
-.prj-obj-all .less, .prj-obj-all[open] .more { display: none; }
-.prj-obj-all[open] .less { display: inline; }
-.prj-obj-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
-.prj-obj-foot .prj-obj-facts { flex: 1 1 260px; }
-.prj-obj-actions { align-items: center; gap: 6px; }
-.prj-obj-actions .action-overflow-panel { display: grid; justify-items: stretch; width: max-content; padding: 8px; }
-.prj-obj-actions .action-overflow-panel .btn { width: 100%; justify-content: flex-start; }
-.prj-obj-item.done .prj-obj-text, .prj-obj-item.dropped .prj-obj-text { color: var(--text-2); }
-.prj-obj-item.dropped .prj-obj-text { text-decoration: line-through; text-decoration-color: var(--border-strong); }
-.prj-obj-item.done .prj-obj-n, .prj-obj-item.dropped .prj-obj-n { color: var(--muted); }
-.prj-obj-item.blocked .prj-obj-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
-.prj-obj-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
-.prj-obj-add .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }
+.prj-said.result { border-left-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+.prj-said-label { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.prj-said-text { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
+.prj-said-text.long { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.prj-said:has(> .prj-said-all[open]) .prj-said-text.long { display: block; -webkit-line-clamp: unset; }
+.prj-said-all > summary { color: var(--accent); cursor: pointer; font-size: 12.5px; list-style: none; }
+.prj-said-all > summary::-webkit-details-marker { display: none; }
+.prj-said-all .less, .prj-said-all[open] .more { display: none; }
+.prj-said-all[open] .less { display: inline; }
+/* l'état d'une entrée : un objectif fait ou retiré, une décision remplacée ou retirée s'estompent ; bloqué, en rouge */
+.prj-entry.done .prj-entry-title, .prj-entry.dropped .prj-entry-title { color: var(--text-2); }
+.prj-entry.faded .prj-entry-title, .prj-entry.faded .prj-entry-choice, .prj-entry.faded .prj-dec-arrow,
+.prj-entry.faded .prj-said-text { color: var(--muted); }
+.prj-entry.dropped .prj-entry-title { text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.prj-entry.done .prj-entry-n, .prj-entry.dropped .prj-entry-n, .prj-entry.faded .prj-entry-n { color: var(--muted); }
+.prj-entry.blocked .prj-entry-n { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
+.prj-side-help { margin: -4px 0 14px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.prj-side .form > p.muted { margin: 0 0 4px; font-size: 12.5px; }

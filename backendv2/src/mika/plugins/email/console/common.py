@@ -9,10 +9,12 @@ adresse, sinon une empreinte stable.
 from __future__ import annotations
 
 import unicodedata
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
 from mika.contracts import email as c
+from mika.contracts import self_ as self_c
 from mika.kernel.clock import MINUTE, instant
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -43,8 +45,12 @@ from mika.plugins.email import (
     Seen,
     operator_label,
     params_of,
+    person_name,
 )
-from mika.ports.mail import Mail, reference_key, split_ref
+from mika.plugins.email.boxes import Boxes
+from mika.ports.mail import Mail, MailQuery, reference_key, split_ref
+from mika.ports.paging import Page
+from mika.vocab.access import PERSON, SELF
 
 SECTION = "courrier"
 BOX = f"/inspecteur/{SECTION}/reception"
@@ -225,9 +231,72 @@ def add_account(back: str = ACCOUNTS) -> Ref:
                 ("retour", back)))
 
 
-def box_link(text: str, *, account: str = "", folder: str = "") -> Ref:
-    params = tuple((k, v) for k, v in (("compte", account), ("dossier", folder)) if v)
+def box_link(text: str, *, account: str = "", folder: str = "", whose: str = "") -> Ref:
+    params = tuple((k, v) for k, v in (("compte", account), ("dossier", folder), (WHOSE, whose)) if v)
     return Ref("local", BOX, text, params)
+
+
+# ── à qui sont les boîtes montrées (ADR 0185) ──
+
+#: le paramètre qui choisit à qui sont les boîtes montrées : vide, tout le monde ; « toi » (ses propriétaires) ;
+#: « elle » ; « personne:<clé> »
+WHOSE, YOURS = "qui", "toi"
+
+
+class Scope(Boxes):
+    """La console réduite aux boîtes de qui on a choisi : un affichage, pas un droit — le reste du port passe tel
+    quel (ses outils, eux, ont ``Boxes``, sans rien qui passe à côté)."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.port, name)
+
+    def outgoing_page(self, query: MailQuery, page: int = 1, size: int = 25) -> Any:
+        if query.account and not self._mine(query.account):
+            return Page.of([], page, size)
+        return self.port.outgoing_page(replace(query, accounts=self.keys), page, size)
+
+
+def whose(ctx: InspectContext) -> str:
+    """À qui sont les boîtes qu'on a choisi de voir (``?qui=``) ; vide : tout le monde."""
+    return ctx.param(WHOSE)
+
+
+def scoped(port: Any, ctx: InspectContext) -> Any:
+    """Le port, réduit aux boîtes de qui on a choisi ; tel quel pour tout le monde."""
+    chosen = whose(ctx)
+    if port is None or not chosen:
+        return port
+    owner = "" if chosen == YOURS else chosen
+    return Scope(port, [a.key for a in port.accounts() if a.owner == owner])
+
+
+def kept(ctx: InspectContext) -> tuple[tuple[str, str], ...]:
+    """Ce qu'un lien de l'espace courrier garde du choix de qui : ``?qui=``, s'il y en a un."""
+    return ((WHOSE, whose(ctx)),) if whose(ctx) else ()
+
+
+def owner_name(frame: Frame | None, owner: str) -> str:
+    """Le propriétaire d'une boîte en mots : « Toi », son nom à elle, le nom d'une personne."""
+    if not owner:
+        return "Toi"
+    if owner == SELF:
+        return (self_c.name_of(frame.get(self_c.PERSONA)) if frame is not None else "") or "Elle"
+    key = owner[len(PERSON):]
+    return (person_name(frame, key) if frame is not None else "") or key
+
+
+def _owners(port: Any, ctx: InspectContext, base: str, frame: Frame | None) -> Nav:
+    """« Les boîtes de » : tout le monde, toi, elle (toujours : une personne comme les autres, ADR 0184), puis chaque
+    personne qui a une boîte, par son nom."""
+    every = port.port.accounts() if isinstance(port, Scope) else port.accounts() if port is not None else []
+    people = sorted({a.owner for a in every if a.owner.startswith(PERSON)}, key=lambda o: owner_name(frame, o).casefold())
+    chosen = whose(ctx)
+    items = [NavItem("Tout le monde", Ref("local", base, ""), active=not chosen)]
+    for owner in ("", SELF, *people):  # sans chiffre : à côté, les chiffres disent des non-lus
+        value = YOURS if not owner else owner
+        items.append(NavItem(owner_name(frame, owner), Ref("local", base, "", ((WHOSE, value),)),
+                             active=chosen == value))
+    return Nav(tuple(items), title="Les boîtes de")
 
 
 def fresh_important(s: EmailState, frame: Frame) -> tuple[int, str]:
@@ -260,7 +329,7 @@ def answered(port: Any, ref: str) -> bool:
 def _views(port: Any, ctx: InspectContext, s: EmailState | None, view: str, account: str) -> Nav:
     """Ce qu'on lit (ADR 0175) : la réception, ce qui attend une réponse, les suivis, ses brouillons à décider, les
     envoyés, les contacts — à la place des onglets, dans le compte choisi."""
-    keep = (("compte", ctx.param("compte")),) if ctx.param("compte") else ()
+    keep = ((("compte", ctx.param("compte")),) if ctx.param("compte") else ()) + kept(ctx)
     state = ctx.param("etat") if view == "reception" else ""
     folder = ctx.param("dossier") or INBOX
     mine = [(k, m) for k, m in (s.mails.items() if s is not None else ()) if not account or m.account == account]
@@ -285,18 +354,21 @@ def _views(port: Any, ctx: InspectContext, s: EmailState | None, view: str, acco
 
 
 def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str = "reception",
-              filters: tuple[Param, ...] = (), folders: bool = False, state: EmailState | None = None) -> Workspace:
-    """Le même espace courrier pour réception, brouillons, envoyés et contacts : à côté, ce qu'on lit, les comptes et
-    les dossiers du compte choisi ; au-dessus, écrire et actualiser, puis la recherche. ``folders`` : cette vue
-    montre un dossier (la réception)."""
+              filters: tuple[Param, ...] = (), folders: bool = False, state: EmailState | None = None,
+              frame: Frame | None = None) -> Workspace:
+    """Le même espace courrier pour réception, brouillons, envoyés et contacts : à côté, à qui sont les boîtes
+    montrées (``?qui=``, ADR 0185), ce qu'on lit, les comptes et les dossiers du compte choisi ; au-dessus, écrire et
+    actualiser, puis la recherche. ``folders`` : cette vue montre un dossier (la réception) ; ``port`` : déjà réduit
+    (``scoped``) aux boîtes de qui on a choisi."""
     accounts = port.accounts() if port is not None else []
     account = account_scope(port, ctx)
     base = f"/inspecteur/{SECTION}/{view}"
-    side: list[Block] = [_views(port, ctx, state, view, account)] if accounts else []
-    nav = [NavItem("Toutes les boîtes", Ref("local", base, ""), active=not ctx.param("compte"))]
+    side: list[Block] = [_owners(port, ctx, base, frame)] if port is not None and (accounts or whose(ctx)) else []
+    side += [_views(port, ctx, state, view, account)] if accounts else []
+    nav = [NavItem("Toutes les boîtes", Ref("local", base, "", kept(ctx)), active=not ctx.param("compte"))]
     for a in accounts:
         inbox = next((f for f in port.folders(a.key) if f.role == "inbox"), None)
-        nav.append(NavItem(a.name, Ref("local", base, "", (("compte", a.key),)),
+        nav.append(NavItem(a.name, Ref("local", base, "", (("compte", a.key), *kept(ctx))),
                            count=inbox.unseen if inbox else None, active=ctx.param("compte") == a.key,
                            tone="" if a.ready else "warn"))
     side.append(Nav(tuple(nav), title="Comptes"))
@@ -308,9 +380,11 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
         folder = ctx.param("dossier") or INBOX
         # la réception est en tête de ce qu'on lit : les dossiers disent les autres
         known = [f for f in port.folders(account) if f.role != "inbox" and f.name != INBOX] if chosen else []
-        entries = [NavItem(f.label + " (serveur)" if f.role == "drafts" else f.label, box_link(f.label, account=account, folder=f.name),
+        entries = [NavItem(f.label + " (serveur)" if f.role == "drafts" else f.label,
+                           box_link(f.label, account=account, folder=f.name, whose=whose(ctx)),
                            count=f.unseen or None, active=listed and folder == f.name) for f in known]
-        entries.append(NavItem("Tous les dossiers", box_link("Tous les dossiers", account=account, folder="*"),
+        entries.append(NavItem("Tous les dossiers", box_link("Tous les dossiers", account=account, folder="*",
+                                                             whose=whose(ctx)),
                                active=listed and folder == "*"))
         side.append(Nav(tuple(entries), title="Dossiers"))
     actions: list[Block] = []
@@ -324,7 +398,8 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
         actions.append(ActionSlot("email.relever", title="Actualiser les boîtes", presentation="button"))
     content: list[Block] = [Toolbar(tuple(actions))] if actions else []
     if filters:
-        keep = tuple((k, v) for k, v in (("compte", account), ("dossier", ctx.param("dossier") if folders else "")) if v)
+        keep = tuple((k, v) for k, v in (("compte", account), ("dossier", ctx.param("dossier") if folders else ""),
+                                          (WHOSE, whose(ctx))) if v)
         keep += tuple((k, v) for k, v in ctx.params.items() if is_table_choice(k, v))
         content.append(Filters(filters, tuple(ctx.params.items()), keep=keep, title="Rechercher"))
     if chosen:

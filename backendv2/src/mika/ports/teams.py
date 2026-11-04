@@ -16,6 +16,10 @@ Un message Teams est un texte venu d'ailleurs : une donnée, jamais une consigne
 - **Trois façons de partir** (le mode, réglé par un opérateur) : *brouillon* — posé dans la zone de saisie de la
   conversation, c'est la personne qui l'envoie (ou pas) ; *validation* — il part après son accord ; *autonome* — il
   part sans accord. Dans tous les cas, ce qui part est ce que l'aperçu montrait.
+- **Un Teams par personne** (ADR 0186) : chaque compte (``accounts``) a sa clé d'extension, ses conversations, ses
+  brouillons et sa file. Tout ce que l'extension pousse ou relève ne concerne que le compte de sa clé ; une
+  conversation se désigne par son compte et son identifiant (``conversation_key``) ; une référence de message reste
+  unique entre les comptes (``message_ref``). Le compte d'avant (un seul Teams) est ``DEFAULT_ACCOUNT``.
 """
 
 from __future__ import annotations
@@ -28,6 +32,14 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from mika.ports.sql import HANDLE_MAX, fit
+
+#: le compte d'avant l'ADR 0186 (un seul Teams) : ce qui était déjà là, et le compte d'une installation neuve
+DEFAULT_ACCOUNT = "principal"
+#: la clé d'un compte : des minuscules, chiffres, - ou _ (40 au plus), comme celle d'une boîte (``ports.mail``)
+ACCOUNT_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+ACCOUNT_KEY_RULE = "des minuscules, chiffres, - ou _ (40 au plus), en commençant par une lettre ou un chiffre"
+#: ce qui sépare le compte de l'identifiant dans la clé d'une conversation (ni dans l'un, ni dans l'autre)
+_SEPARATOR = "~"
 
 #: le préfixe d'une clé d'extension (une clé se reconnaît, et ne se confond ni avec un jeton de compte, ``mw_``,
 #: ni avec une clé de réveil, ``mwk_``)
@@ -90,10 +102,26 @@ def to_fill(*texts: str) -> bool:
     return False
 
 
-def message_ref(conversation: str, external_id: str) -> str:
+def message_ref(conversation: str, external_id: str, account: str = DEFAULT_ACCOUNT) -> str:
     """La référence d'un message : attribuée ici, stable pour un même message, sans rien de ce que l'expéditeur a
-    choisi."""
-    return "t" + hashlib.sha256(f"{conversation}\n{external_id}".encode()).hexdigest()[:12]
+    choisi. Le même message vu par deux comptes (un groupe où deux personnes sont) a deux références ; celle du
+    compte d'avant ne change pas (ce qui est déjà au journal la retrouve)."""
+    salt = "" if account == DEFAULT_ACCOUNT else f"{account}\n"
+    return "t" + hashlib.sha256(f"{salt}{conversation}\n{external_id}".encode()).hexdigest()[:12]
+
+
+def conversation_key(account: str, conversation: str) -> str:
+    """Une conversation, désignée entre les comptes (une fiche, une ressource) : son identifiant seul pour le compte
+    d'avant (ses liens restent), sinon ``<compte>~<identifiant>``."""
+    return conversation if account in ("", DEFAULT_ACCOUNT) else f"{account}{_SEPARATOR}{conversation}"
+
+
+def split_conversation_key(key: str) -> tuple[str, str]:
+    """``(compte, identifiant)`` d'une clé de conversation (``conversation_key``)."""
+    account, sep, conversation = key.partition(_SEPARATOR)
+    if sep and ACCOUNT_KEY.fullmatch(account):
+        return account, conversation
+    return DEFAULT_ACCOUNT, key
 
 
 def person_handle(author_id: str) -> str:
@@ -117,8 +145,10 @@ class Message:
     author_id: str
     at: int  # µs
     text: str
-    own: bool = False  # écrit par la personne qui s'occupe d'elle (depuis son compte)
+    own: bool = False  # écrit par la personne à qui est le compte (depuis son compte)
     mentions_me: bool = False  # il mentionne cette personne
+    #: le compte Teams qui l'a reçu (ADR 0186)
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +158,7 @@ class Conversation:
     kind: str  # dm | group | channel | meeting | other
     last_at: int = 0
     messages: int = 0
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +189,8 @@ class Draft:
     edited: bool = False
     edited_by: str = ""
     reason: str = ""
+    #: le compte d'où il part (celui de la conversation à laquelle il répond)
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,41 +300,74 @@ class KeyState:
     by: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class AccountInfo:
+    """Un compte Teams (ADR 0186) : ses réglages sans voix, et ce que son extension en a dit."""
+
+    key: str
+    label: str = ""
+    #: à qui il est : vide, ses propriétaires (toi) ; ``elle`` ; ``personne:<clé>``
+    owner: str = ""
+    #: le dernier lot poussé par son extension (µs, 0 : jamais)
+    last_batch: int = 0
+    #: l'identifiant et le nom que Teams donne à la personne de ce compte (vides : pas encore vus)
+    self_id: str = ""
+    self_name: str = ""
+    #: décoché : son extension est refusée, rien n'arrive ni ne part
+    enabled: bool = True
+
+    @property
+    def name(self) -> str:
+        return self.label or self.key
+
+
 class TeamsPort(Protocol):
-    def configured(self) -> bool:
-        """L'extension a déjà poussé quelque chose."""
+    def accounts(self) -> list[AccountInfo]:
+        """Ses comptes réglés, dans l'ordre de leur clé."""
         ...
 
-    def voice(self) -> Voice: ...
+    def account(self, key: str) -> AccountInfo | None: ...
 
-    def owner(self) -> tuple[str, str]:
-        """L'identifiant Teams et le nom de la personne qui s'occupe d'elle (vides : pas encore vus)."""
+    def configured(self, account: str = "") -> bool:
+        """L'extension de ce compte (vide : d'un compte au moins) a déjà poussé quelque chose."""
         ...
 
-    def store_batch(self, batch: InboxBatch, now: int) -> Stored: ...
+    def last_batch(self, account: str) -> int: ...
 
-    async def fetch_new(self, limit: int) -> list[Message]:
-        """Les messages reçus (pas les siens) pas encore accusés, du plus ancien au plus récent."""
+    def voice(self, account: str) -> Voice: ...
+
+    def owner(self, account: str) -> tuple[str, str]:
+        """L'identifiant Teams et le nom de la personne de ce compte (vides : pas encore vus)."""
+        ...
+
+    def store_batch(self, account: str, batch: InboxBatch, now: int) -> Stored: ...
+
+    async def fetch_new(self, limit: int, *, accounts: Sequence[str] | None = None) -> list[Message]:
+        """Les messages reçus (pas ceux de la personne du compte) pas encore accusés, du plus ancien au plus
+        récent ; ``accounts`` : de ces comptes seulement."""
         ...
 
     def ack(self, refs: Sequence[str]) -> None: ...
 
     def message(self, ref: str) -> Message | None: ...
 
-    def thread(self, conversation: str, limit: int, *, before: int = 0) -> list[Message]:
+    def thread(self, account: str, conversation: str, limit: int, *, before: int = 0) -> list[Message]:
         """Les derniers messages d'une conversation (avant ``before`` µs, 0 : tous), du plus ancien au plus
         récent."""
         ...
 
-    def conversation(self, conversation: str) -> Conversation | None: ...
+    def conversation(self, account: str, conversation: str) -> Conversation | None: ...
 
-    def conversations(self, limit: int, *, text: str = "") -> list[Conversation]: ...
+    def conversations(self, limit: int, *, text: str = "", accounts: Sequence[str] | None = None) \
+            -> list[Conversation]: ...
+
+    def title(self, account: str, conversation: str) -> str: ...
 
     def save_draft(self, d: Draft) -> Draft: ...
 
     def draft(self, draft_id: str) -> Draft | None: ...
 
-    def drafts(self, limit: int, *, state: str = "") -> list[Draft]: ...
+    def drafts(self, limit: int, *, state: str = "", accounts: Sequence[str] | None = None) -> list[Draft]: ...
 
     def discard_draft(self, draft_id: str) -> None: ...
 
@@ -313,15 +379,37 @@ class TeamsPort(Protocol):
         """Met en file ce qui a été montré : vide si c'est fait (ou l'était déjà), sinon pourquoi pas."""
         ...
 
-    def outbox(self, now: int) -> list[OutboxItem]: ...
+    def outbox(self, account: str, now: int) -> list[OutboxItem]:
+        """Ce que l'extension de ce compte doit poser ou envoyer."""
+        ...
 
-    def settle(self, draft_id: str, result: str, *, now: int, text: str = "", reason: str = "") \
-            -> tuple[str, Settled | None]:
+    def settle(self, draft_id: str, result: str, *, now: int, text: str = "", reason: str = "",
+               account: str = "") -> tuple[str, Settled | None]:
         """Un accusé (« placed », « sent », « failed ») ou une échéance (« expired ») : (issue, ce qui a changé).
-        Rejoué, il rend la même issue sans rien changer."""
+        Rejoué, il rend la même issue sans rien changer. ``account`` : l'extension de ce compte accuse — un brouillon
+        d'un autre compte lui est inconnu."""
+        ...
+
+    def drop_account(self, account: str) -> int:
+        """Un compte supprimé des réglages : tout ce que son extension avait apporté s'efface (lignes effacées)."""
         ...
 
     async def forget(self, subject: str) -> int: ...
+
+
+class TeamsKeys(Protocol):
+    """Les clés de l'extension, une par compte (le port ``teams_keys`` : ``app/teams.TeamsDesk``). Une clé neuve
+    rend l'ancienne de ce compte inutile ; seule son empreinte est gardée."""
+
+    def key_state(self, account: str) -> KeyState | None: ...
+
+    async def new_key(self, account: str, by: str) -> str:
+        """Une clé neuve pour ce compte, montrée une seule fois ; ``ValueError`` si le compte n'existe pas."""
+        ...
+
+    async def revoke_key(self, account: str, by: str) -> bool:
+        """Retirer la clé de ce compte ; ``False`` s'il n'en avait pas."""
+        ...
 
 
 class TeamsGate(Protocol):

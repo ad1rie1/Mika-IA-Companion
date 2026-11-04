@@ -40,6 +40,7 @@ from mika.inspector import mcp as console_mcp
 from mika.kernel.rights import Rights
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
+from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
 from mika.vocab.access import Table, ToolRule
@@ -91,7 +92,8 @@ SYSTEM_ACCESS_FIELDS = ("access", "default_read", "default_act", "default_keep")
 #: les réveils par API (ADR 0068) ; leurs clés à part, dont seule l'empreinte est gardée
 WAKEUP_KEY = "wakeup"
 WAKEUP_KEYS_KEY = "wakeup_keys"
-#: Teams (ADR 0069) : ce qu'un opérateur règle ; la clé de l'extension à part, dont seule l'empreinte est gardée
+#: Teams (ADR 0069, 0186) : ce qu'un opérateur règle, ses comptes compris ; la clé de l'extension de chaque compte
+#: à part (``TEAMS_KEYS_KEY``), dont seule l'empreinte est gardée
 TEAMS_KEY = "teams"
 #: ses droits (ADR 0134) : les tableaux de ses canaux, de ses familles d'outils, et l'offre réglée de ses outils
 CANALS_KEY = "canaux"
@@ -565,7 +567,8 @@ class Settings:
         self._rights = Rights(canals=self._rights.canals, families=self._rights.families, in_hand=kept)
 
     def teams(self) -> TeamsConfig:
-        """Ce qu'un opérateur a réglé de Teams ; illisible, les valeurs par défaut (jamais bloquant)."""
+        """Ce qu'un opérateur a réglé de Teams, ses comptes compris (ADR 0186 : une configuration d'avant devient le
+        compte ``principal``) ; illisible, les valeurs par défaut (jamais bloquant)."""
         try:
             return TeamsConfig.model_validate(dict(self._get(TEAMS_KEY) or {}))
         except ValueError:
@@ -573,22 +576,37 @@ class Settings:
             return TeamsConfig()
 
     async def save_teams(self, cfg: TeamsConfig) -> TeamsConfig:
+        """Enregistre Teams ; la clé d'un compte retiré part avec lui (un compte recréé sous ce nom n'en a pas)."""
         cfg = TeamsConfig.model_validate(cfg.model_dump())
         await self._put(TEAMS_KEY, cfg.model_dump(mode="json"))
+        keys = self.teams_keys()
+        kept = {k: v for k, v in keys.items() if k in cfg.accounts}
+        if kept != keys:
+            await self._put(TEAMS_KEYS_KEY, kept)
         return cfg
 
-    def teams_key(self) -> dict[str, Any]:
-        """``{digest, hint, created_at, by}`` de la clé de l'extension : jamais la clé elle-même (vide : aucune)."""
+    def teams_keys(self) -> dict[str, dict[str, Any]]:
+        """Compte → ``{digest, hint, created_at, by}`` de la clé de son extension : jamais la clé elle-même (un compte
+        absent : aucune). La clé unique d'avant l'ADR 0186 (``{digest, …}`` au premier niveau) est celle du compte
+        ``principal``."""
         got = self._get(TEAMS_KEYS_KEY)
-        return dict(got) if isinstance(got, dict) else {}
+        if not isinstance(got, dict):
+            return {}
+        if "digest" in got:  # la forme d'avant : une seule clé
+            return {DEFAULT_TEAMS_ACCOUNT: dict(got)} if got.get("digest") else {}
+        return {str(k): dict(v) for k, v in got.items() if isinstance(v, dict) and v.get("digest")}
 
-    async def save_teams_key(self, digest: str, hint: str, created_at: int, by: str) -> None:
-        await self._put(TEAMS_KEYS_KEY, {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]})
+    async def save_teams_key(self, account: str, digest: str, hint: str, created_at: int, by: str) -> None:
+        keys = self.teams_keys()
+        keys[account] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
+        await self._put(TEAMS_KEYS_KEY, keys)
 
-    async def revoke_teams_key(self) -> bool:
-        if not self.teams_key():
+    async def revoke_teams_key(self, account: str) -> bool:
+        keys = self.teams_keys()
+        if account not in keys:
             return False
-        await self._put(TEAMS_KEYS_KEY, {})
+        del keys[account]
+        await self._put(TEAMS_KEYS_KEY, keys)
         return True
 
     # ── Les jetons gardés en empreinte (appareils, console MCP) ──

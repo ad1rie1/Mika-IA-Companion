@@ -25,7 +25,7 @@ from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.plugins.teams import APPROVED, EXPIRED, EXPIRER, GONE, REFUSED, WAITING, her, latest, under_way
 from mika.plugins.teams.console import KIND_LABEL, MODE_LABEL, STATE_LABEL
-from mika.ports.teams import to_fill
+from mika.ports.teams import conversation_key, split_conversation_key, to_fill
 
 CONVERSATION = "conversation_teams"
 REPLY = "reponse_teams"
@@ -104,36 +104,42 @@ class ConversationFiche(Overview):
 
     def head(self, ui: UI, key: str) -> Markup | None:
         port = _port(ui)
-        found = port.conversation(key) if port is not None else None
+        account, conversation = split_conversation_key(key)
+        found = port.conversation(account, conversation) if port is not None else None
         if found is None:
             return None
         look = Look.of(ui, DAY)
         s = _state(ui)
         tags = []
-        asking = sum(1 for m in s.messages.values() if m.conversation == key and m.needs_reply and not m.answered) \
-            if s is not None else 0
+        asking = sum(1 for m in s.messages.values() if m.account == account and m.conversation == conversation
+                     and m.needs_reply and not m.answered) if s is not None else 0
         if asking:
             tags.append(tag(f"{asking} question{'s' if asking > 1 else ''} sans réponse", "warn"))
-        if s is not None and under_way(s, key):
+        if s is not None and under_way(s, account, conversation):
             tags.append(tag("une réponse en chemin", "info"))
         facts = [fact("messages", str(found.messages))]
         if found.last_at:
             facts.append(fact("le dernier", look.ago(found.last_at)))
+        info = port.account(account)
+        if info is not None and len(port.accounts()) > 1:  # plusieurs comptes : de quel Teams
+            facts.append(fact("compte", info.name))
         kind = KIND_LABEL.get(found.kind, "")
         return draw("tete.html", kicker="Conversation Teams" + (f" · {kind}" if kind and kind != "—" else ""),
-                    title=port.title(key) or "Une conversation", lede="", tags=tags, facts=facts)
+                    title=port.title(account, conversation) or "Une conversation", lede="", tags=tags, facts=facts)
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab != "fil":
             return None
         port = _port(ui)
-        if port is None or port.conversation(key) is None:
+        account, conversation = split_conversation_key(key)
+        if port is None or port.conversation(account, conversation) is None:
             return None
         look = Look.of(ui, DAY)
         s = _state(ui)
-        thread = list(port.thread(key, THREAD))
-        drafts = sorted((d for d in (s.drafts.values() if s is not None else ()) if d.conversation == key),
+        thread = list(port.thread(account, conversation, THREAD))
+        drafts = sorted((d for d in (s.drafts.values() if s is not None else ())
+                         if d.account == account and d.conversation == conversation),
                         key=lambda d: -d.proposal)[:DRAFTS_SHOWN]
         mine = []
         for d in drafts:
@@ -143,7 +149,7 @@ class ConversationFiche(Overview):
                          "href": fiche_url(REPLY, d.draft) if d.draft else ""})
         items = rendered(ui, blocks, query)
         return draw("teams_fil.html", forms=forms or {}, tables="cards", days=_days(look, thread, s),
-                    count=len(thread), drafts=mine, under_way=s is not None and under_way(s, key),
+                    count=len(thread), drafts=mine, under_way=s is not None and under_way(s, account, conversation),
                     ask=[shaped(d) for d in items if d["t"] in ("disclosure", "action")])
 
 
@@ -165,7 +171,7 @@ class ReplyFiche(Overview):
         if got is None and seen is None:
             return None
         look = Look.of(ui, DAY)
-        title = port.title(got.conversation) if got is not None and port is not None else ""
+        title = port.title(got.account, got.conversation) if got is not None and port is not None else ""
         tags = [_state_tag(seen.state)] if seen is not None else []
         if got is not None and to_fill(got.body):
             tags.append(tag("à compléter", "warn"))
@@ -176,7 +182,8 @@ class ReplyFiche(Overview):
             facts.append(fact("proposée", look.ago(seen.at)))
             facts.append(fact("mode", MODE_LABEL.get(seen.mode, seen.mode).split(" — ")[0] or "—"))
         if got is not None:
-            facts.append(fact("conversation", title or "ouvrir", fiche_url(CONVERSATION, got.conversation)))
+            facts.append(fact("conversation", title or "ouvrir",
+                              fiche_url(CONVERSATION, conversation_key(got.account, got.conversation))))
         why = "demandée" if seen is not None and seen.asked else "d'elle-même"
         return draw("tete.html", kicker=f"Réponse Teams · {why}", title=f"Réponse dans « {title or 'une conversation'} »",
                     lede="", tags=tags, facts=facts)
@@ -205,6 +212,6 @@ class ReplyFiche(Overview):
             reason=got.reason, gone=seen is not None and seen.state == GONE,
             steps=_journey(ui, look, seen) if seen is not None else [],
             mode=MODE_LABEL.get(seen.mode, seen.mode) if seen is not None else "",
-            conversation=fiche_url(CONVERSATION, got.conversation),
+            conversation=fiche_url(CONVERSATION, conversation_key(got.account, got.conversation)),
             actions=[shaped(d) for d in items if d["t"] in ("action", "disclosure")],
             notes=[d for d in items if d["t"] == "note" and not waiting])

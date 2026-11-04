@@ -35,6 +35,7 @@ from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app import schema
 from mika.app.apercu_activity import activity
+from mika.app.apercu_git import repository
 from mika.app.apercu_inner import inner
 from mika.app.apercu_mail import mailbox
 from mika.app.console import NAVIGATION
@@ -231,7 +232,8 @@ def export(out: Path) -> list[str]:
                     urls.append(base)
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
-                        urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors if v.section == d.key]
+                        urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors
+                                 if v.section == d.key and not v.hidden]
                         if d.dynamic:  # ses onglets connus au démarrage (la file « À valider ») : ceux de sa barre
                             page = client.get(base, follow_redirects=True).text
                             found = re.findall(rf'class="tab[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
@@ -247,6 +249,7 @@ def export(out: Path) -> list[str]:
                     urls.append(base)
                     urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
             project = client.portal.call(lambda: _project(live.kernel))  # un projet, et chaque onglet de sa fiche
+            client.portal.call(lambda: repository(live.kernel, project, clock.now()))  # son dépôt, son distant
             second = client.portal.call(lambda: _project(live.kernel, title="Préparer le prochain stream",
                 description="Un programme clair, des supports prêts et un moment pour les questions du chat.",
                 objectives="Choisir les sujets\nPréparer les supports\nRelire le programme", nonce="apercu-stream"))
@@ -295,8 +298,8 @@ def export(out: Path) -> list[str]:
             urls.append("/inspecteur/maintenant")  # elle, en ce moment : la page qui croise ses facultés
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/projets?vue_pg1=table", "/inspecteur/personnes?vue_pg1=table",
-                     "/inspecteur/fil/messages?vue_pg1=table", "/inspecteur/projets?etat=archive",
-                     "/inspecteur/personnes?q=personne-inconnue", "/inspecteur/fil/messages?handle=user_1",
+                     "/inspecteur/fil/conversations?vue_pg1=table", "/inspecteur/projets?etat=archive",
+                     "/inspecteur/personnes?q=personne-inconnue", "/inspecteur/fil/conversations?handle=user_1",
                      "/inspecteur/courrier/reception?compte=atelier",
                      "/inspecteur/courrier/reception?compte=atelier&vue_pg1=table",
                      # un message ouvert dans la liseuse, et une vue de la barre de côté (ADR 0175)

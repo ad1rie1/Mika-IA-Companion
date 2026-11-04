@@ -1,5 +1,5 @@
-"""Trier ce que l'extension a poussé : chaque message reçu devient un signal ; ceux qui posent une question à la
-personne, à laquelle elle peut aider, appellent une réponse préparée."""
+"""Trier ce que l'extension de chaque compte a poussé : chaque message reçu devient un signal ; ceux qui posent une
+question à la personne du compte, à laquelle elle peut aider, appellent une réponse préparée."""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from mika.contracts import teams as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
-from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, params_of
+from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.preprocess import inert
 from mika.ports.teams import person_handle
+from mika.vocab.access import SELF
 from mika.vocab.affect import Emotion, named_feeling
 from mika.vocab.canals import CanalRule, teams_rule
 from mika.vocab.phrasebook import family, phrase
@@ -29,11 +30,16 @@ ADDRESSED = frozenset({"dm", "group"})
 CONTEXT = 3
 
 
-def triage_system(owner: str, name: str, persona: str) -> str:
-    """La consigne du tri : les messages de ``owner``, qu'elle lit pour l'aider (``name``, le nom de sa persona) ;
-    les émotions qu'un message peut lui faire sont celles de son vocabulaire (ADR 0147), et ce qu'il lui fait se
-    juge à qui elle est (``persona``, sa persona rendue : ``self.portrayed``, ADR 0153)."""
-    return phrase("teams.triage.system", owner=owner, name=name,
+def triage_system(owner: str, name: str, persona: str, *, own: bool = False) -> str:
+    """La consigne du tri : les messages de ``owner``, qu'elle lit pour l'aider (``name``, le nom de sa persona) —
+    ou les siens, sur son propre compte (``own``, ADR 0186) ; les émotions qu'un message peut lui faire sont celles de
+    son vocabulaire (ADR 0147), et ce qu'il lui fait se juge à qui elle est (``persona``, sa persona rendue :
+    ``self.portrayed``, ADR 0153)."""
+    owner = name if own else owner
+    intro = phrase("teams.triage.intro_own", name=name) if own else \
+        phrase("teams.triage.intro", owner=owner, name=name)
+    return phrase("teams.triage.system", intro=intro, owner=owner, name=name,
+                  reading="" if own else phrase("teams.triage.reading", owner=owner),
                   names=", ".join(e.value for e in Emotion if e is not Emotion.NEUTRAL)) + "\n\n" + phrase(
         "self.portrayed.intro", name=name, persona=persona)
 
@@ -73,20 +79,21 @@ def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
             "emotion": emotion, "intensite": intensity}
 
 
-def where_of(port: Any, conversation: str) -> tuple[str, str]:
+def where_of(port: Any, account: str, conversation: str) -> tuple[str, str]:
     """La nature d'une conversation et son nom (vide pour un tête-à-tête : c'est l'autre personne)."""
-    found = port.conversation(conversation)
+    found = port.conversation(account, conversation)
     kind = found.kind if found is not None else "other"
     if conversation.startswith("48:"):
         kind = "system"  # les notifications de Teams : pas une conversation
     return kind, (found.title if found is not None and kind != "dm" else "")
 
 
-def rule_of(p: TeamsParams, port: Any, conversation: str, author: str) -> CanalRule:
-    """La ligne de Teams pour un message (ADR 0132, 0134) : par un morceau de l'identifiant de sa conversation, de
-    son nom ou du nom de qui écrit — la même au tri et quand elle écrit, qui la relit telle qu'elle est maintenant."""
-    _kind, title = where_of(port, conversation)
-    return teams_rule(p.canaux, "", conversation, title, author)
+def rule_of(p: TeamsParams, port: Any, account: str, conversation: str, author: str) -> CanalRule:
+    """La ligne de Teams pour un message (ADR 0132, 0134) : le tableau de son compte (``teams:<clé>``), sinon celui de
+    Teams ; par un morceau de l'identifiant de sa conversation, de son nom ou du nom de qui écrit — la même au tri et
+    quand elle écrit, qui la relit telle qu'elle est maintenant."""
+    _kind, title = where_of(port, account, conversation)
+    return teams_rule(p.canaux, account, conversation, title, author)
 
 
 @TEAMS.process("teams.triage", wake_on=[*body_c.ALL, RECEIVED], lane="background", catch_up=CatchUp.ONCE,
@@ -117,27 +124,33 @@ class Triage:
             return False
         p = params_of(ctx.frame)
         known = ctx.state.messages
-        fetched = await port.fetch_new(p.per_run)
+        fetched = await port.fetch_new(p.per_run, accounts=[a.key for a in port.accounts()])
         name = her(ctx.frame)
-        owner = port.voice().display_name or phrase("teams.triage.caretaker", name=name)
-        system = triage_system(inert(owner, 60), name, ctx.frame.get(self_c.PORTRAYED("compact")))
+        persona = ctx.frame.get(self_c.PORTRAYED("compact"))
+        #: la consigne du tri, par compte : les messages de la personne de ce compte
+        systems: dict[str, str] = {}
         drafts: list[Any] = []
         asked = 0
         for m in fetched:
             if m.ref in known:
                 continue
-            kind, title = where_of(port, m.conversation)
+            if m.account not in systems:
+                owner = port.voice(m.account).display_name or phrase("teams.triage.caretaker", name=name)
+                systems[m.account] = triage_system(inert(owner, 60), name, persona,
+                                                   own=owner_of(ctx.frame, m.account) == SELF)
+            system = systems[m.account]
+            kind, title = where_of(port, m.account, m.conversation)
             if kind == "system":
                 continue
             addressed = kind in ADDRESSED or m.mentions_me
             # sa règle d'envoi (ADR 0132), gardée pour ce qui ne connaît pas le nom de la conversation (ses tâches,
             # sa voix) : préparer d'elle-même, comment ça partirait — l'envoi, lui, la relit (``rule_of``)
-            rule = rule_of(p, port, m.conversation, m.author)
+            rule = rule_of(p, port, m.account, m.conversation, m.author)
             place = place_of(kind, title)
             triage = guess = heuristic(m.text, addressed, kind)
             if addressed and asked < p.triage_per_run:
                 asked += 1
-                before = [x for x in port.thread(m.conversation, CONTEXT + 1, before=m.at) if x.ref != m.ref]
+                before = [x for x in port.thread(m.account, m.conversation, CONTEXT + 1, before=m.at) if x.ref != m.ref]
                 lines = [phrase("teams.triage.line", who=phrase("teams.triage.own") if x.own else inert(x.author, 60),
                                 text=inert(x.text, 300)) for x in before[-CONTEXT:]]
                 body = "\n".join([phrase("teams.triage.place", place=place),
@@ -160,7 +173,7 @@ class Triage:
                 author=inert(m.author, 120), author_id=m.author_id[:200], sent_at=m.at, where=kind,
                 importance=triage["importance"],
                 needs_reply=bool(addressed and triage["question"] and triage["aide"]),
-                mentions_me=m.mentions_me, prepare=rule.prepare, send=rule.reply,
+                mentions_me=m.mentions_me, prepare=rule.prepare, send=rule.reply, account=m.account,
                 about=tuple(h for h in (person_handle(m.author_id),) if h), dedupe_key=f"teams:{m.ref}"))
         if drafts:
             await ctx.emit(*drafts)

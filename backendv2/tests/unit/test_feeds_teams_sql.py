@@ -32,6 +32,7 @@ from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.adapters.teams.models import AUTHOR_MAX, CONVERSATION_MAX, MessageRow
 from mika.adapters.teams.models import fit as teams_fit
 from mika.ports.sql import FEEDS, TEAMS, Key
+from mika.ports.teams import DEFAULT_ACCOUNT as P
 from mika.ports.teams import Draft, InboxBatch, InboxConversation, InboxMessage, message_ref
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika" / "adapters"
@@ -112,19 +113,19 @@ def test_an_overlong_teams_id_is_kept_by_its_digest_and_found_by_the_whole_id(tm
     author = "8:orgid:" + "X" * 300
     store = TeamsStore(lambda: TeamsConfig(), tmp_path / "teams.db", now=lambda: NOW)
     try:
-        stored = store.store_batch(batch(
+        stored = store.store_batch(P, batch(
             InboxMessage("1", long_a, "Bob", author, NOW // 1000, "salut A"),
             InboxMessage("2", long_b, "Chloé", "8:c", NOW // 1000, "salut B"),
             conversations=(InboxConversation(long_a, "Projet A", "group"),
                            InboxConversation(long_b, "Projet B", "group"))), NOW)
         assert stored.new == 2
-        a, b = store.conversation(long_a), store.conversation(long_b)
+        a, b = store.conversation(P, long_a), store.conversation(P, long_b)
         assert a is not None and b is not None and a.id != b.id and len(a.id) == CONVERSATION_MAX
-        assert (a.title, a.messages, store.title(long_b)) == ("Projet A", 1, "Projet B")
-        assert [m.text for m in store.thread(long_a, 10)] == ["salut A"]
+        assert (a.title, a.messages, store.title(P, long_b)) == ("Projet A", 1, "Projet B")
+        assert [m.text for m in store.thread(P, long_a, 10)] == ["salut A"]
         assert store.message(message_ref(long_a, "1")).conversation == a.id
         # le même lot rejoué : chaque message retrouve sa ligne
-        again = store.store_batch(batch(InboxMessage("1", long_a, "Bob", author, NOW // 1000, "salut A")), NOW)
+        again = store.store_batch(P, batch(InboxMessage("1", long_a, "Bob", author, NOW // 1000, "salut A")), NOW)
         assert (again.new, again.known) == (0, 1)
         draft = store.save_draft(Draft(id="", conversation=long_a, body="Bonjour"))
         assert store.draft(draft.id).conversation == a.id
@@ -169,7 +170,7 @@ def test_teams_conversation_search_ignores_case_and_accents_and_takes_wildcards_
               "19:trois@thread.v2": "l'equipe support", "19:quatre@thread.v2": "Autre",
               "19:cinq@thread.v2": "Prêt à 100%", "19:six@thread.v2": "module a_b"}
     try:
-        store.store_batch(batch(
+        store.store_batch(P, batch(
             *[InboxMessage(str(i), conv, "Bob", "8:b", NOW // 1000 - i, "message") for i, conv in enumerate(titled)],
             conversations=tuple(InboxConversation(conv, title, "group") for conv, title in titled.items())), NOW)
         for q in ("équipe", "EQUIPE", "Équipe", "eQuIpE"):
@@ -254,7 +255,7 @@ def _length(column) -> int:
 def test_keys_and_indexes_are_bounded_varchars_under_mariadb_limits():
     dialect = MariaDBDialect()
     assert set(FEEDS.tables) == {"entries", "feeds"}
-    assert set(TEAMS.tables) == {"meta", "conversations", "messages", "drafts"}
+    assert set(TEAMS.tables) == {"accounts", "conversations", "messages", "drafts"}  # ``meta`` : avant l'ADR 0186
     for metadata in (FEEDS, TEAMS):
         for table in metadata.sorted_tables:
             CreateTable(table).compile(dialect=dialect)

@@ -36,6 +36,7 @@ from mika.vocab.access import (
     POLICY_WORDS,
     REPLIES,
     REPLY_WORDS,
+    SELF,
     STEER_WORDS,
     STEERS,
     TALKING,
@@ -47,7 +48,7 @@ from mika.vocab.canals import CanalRule, Canals, CanalTable, vital
 
 BASE = f"{PREFIX}/reglages/canaux"
 MAX_ROWS = 40
-#: la ligne qu'on ajoute : tout le monde, toujours, fermée
+#: la ligne qu'on ajoute : tout le monde, toujours, fermée (elle, pour le canal « elle seule »)
 NEW_ROW = CanalRule(who=(EVERYONE,))
 #: ce qu'aucune ligne d'un canal n'ouvre
 FLOORS = ("une inconnue n'obtient au plus que des outils qui lisent, jamais une action, une garde « rien »",
@@ -79,11 +80,12 @@ class CanalArgs(TableArgs):
 
 def canal_rows(args: CanalArgs, key: str) -> list[CanalRule]:
     """Les lignes du tableau envoyé pour ce canal (``vocab.access.rows_sent``) : le canal d'une ligne est celui du
-    tableau (pas de colonne « par où ») ; pour « elle seule », personne en face."""
+    tableau (pas de colonne « par où ») ; pour « elle seule », elle et personne d'autre (ADR 0184)."""
     kind = canal_key(key)[0]
     ligne = dict(args.ligne)
     canal = {f"{n}|{key}": True for n in ligne}
-    args = args.model_copy(update={"canal": canal, "qui": {} if kind == INTERNAL else args.qui})
+    qui = {f"{n}|{SELF}": True for n in ligne} if kind == INTERNAL else args.qui
+    args = args.model_copy(update={"canal": canal, "qui": qui})
     sent = args.rows(reply=args.repondre, prepare=args.preparer, read=args.lecture, act=args.action,
                      steer=args.projets, files=args.fichiers, keep=args.garde)
     return [CanalRule(who=r["who"], canal=(key,), when=r["when"], reply=r["reply"] or "non",
@@ -206,8 +208,9 @@ async def canals_post(ui: Any, request: Request) -> Response:
                 await settings.save_canal(key, None)
                 said = "Revenu au minimum vital."
             else:
-                rows, said = moved(canal_rows(args, key), args.faire.strip(), NEW_ROW.model_copy(update={"canal": (key,)}),
-                                   MAX_ROWS)
+                new = NEW_ROW.model_copy(update={"canal": (key,), **({"who": (SELF,)} if canal_key(key)[0] == INTERNAL
+                                                                      else {})})
+                rows, said = moved(canal_rows(args, key), args.faire.strip(), new, MAX_ROWS)
                 default = CanalRule(canal=(key,), reply=args.defaut_repondre, prepare=args.defaut_preparer,
                                     read=args.defaut_lecture, act=args.defaut_action, steer=args.defaut_projets,
                                     files=args.defaut_fichiers, keep=args.defaut_garde)

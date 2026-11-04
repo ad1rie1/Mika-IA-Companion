@@ -136,6 +136,7 @@ class FakeMail:
 
     def messages_page(self, query: MailQuery, page=1, size=25):
         kept = [m for m in self.inbox if (not query.account or m.account == query.account)
+                and (query.accounts is None or m.account in query.accounts)
                 and (not query.folder or m.folder == query.folder)
                 and (query.seen is None or m.seen == query.seen)
                 and (query.flagged is None or m.flagged == query.flagged)
@@ -161,6 +162,7 @@ class FakeMail:
     def outgoing_page(self, query: MailQuery, page=1, size=25):
         rows = [(m, local) for m, local, sent in self._letters().values() if sent
                 and (not query.account or m.account == query.account)
+                and (query.accounts is None or m.account in query.accounts)
                 and has_words(f"{m.subject} {m.to} {m.body}", query.text)]
         return Page.of(sorted(rows, key=lambda item: (-item[0].date, item[0].ref)), page, size)
 

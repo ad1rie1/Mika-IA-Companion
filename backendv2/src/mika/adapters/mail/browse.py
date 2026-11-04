@@ -79,6 +79,8 @@ def conditions(query: MailQuery) -> list[Any]:
     where: list[Any] = []
     if query.account:
         where.append(M.account == fit(query.account, ACCOUNT))
+    if query.accounts is not None:
+        where.append(M.account.in_([fit(a, ACCOUNT) for a in query.accounts]))
     if query.folder:
         where.append(M.folder == fit(query.folder, FOLDER))
     for col, value in ((M.seen, query.seen), (M.flagged, query.flagged)):
@@ -119,6 +121,8 @@ class Browse:
         where = [letters.c.sent == 1]
         if query.account:
             where.append(letters.c.account == fit(query.account, ACCOUNT))
+        if query.accounts is not None:
+            where.append(letters.c.account.in_([fit(a, ACCOUNT) for a in query.accounts]))
         if query.text:
             where.append(_contains(_text_of(letters, lambda: M.fold_subject + " " + M.fold_dest + " " + M.fold_body,
                                             lambda: S.fold_subject + " " + S.fold_dest + " " + S.fold_body),

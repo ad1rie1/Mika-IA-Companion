@@ -183,7 +183,7 @@ def test_a_teams_reply_shows_what_will_leave_and_its_decisions(world):  # noqa: 
     key = new_key(client, live)
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 202
     store = live.kernel.ports["teams"]
-    [message] = client.portal.call(store.thread, DM, 10)
+    [message] = client.portal.call(store.thread, "principal", DM, 10)
     draft = client.portal.call(store.save_draft, TeamsDraft(id="", conversation=DM, body="Oui, 14 h me va.",
                                                             reply_to=message.ref))
     append(client, live, [rt.EFFECT_PROPOSED.draft(

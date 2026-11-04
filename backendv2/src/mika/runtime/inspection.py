@@ -71,7 +71,12 @@ class Inspection:
         def shown(v: InspectSpec) -> bool:
             if v.shown is None:
                 return True
-            got = call(v.shown, frame.state(v.owner), key, label=f"onglet {v.owner}/{v.name}")
+            try:
+                wants_frame = "frame" in pyinspect.signature(v.shown).parameters
+            except (TypeError, ValueError):
+                wants_frame = False
+            fn = functools.partial(v.shown, frame=frame) if wants_frame else v.shown
+            got = call(fn, frame.state(v.owner), key, label=f"onglet {v.owner}/{v.name}")
             return isinstance(got, Failed) or bool(got)
         return [v for v in views if shown(v)]
 

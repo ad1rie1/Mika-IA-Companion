@@ -123,7 +123,7 @@ def _teams_reply(tmp_path, authors):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM, kind="dm")])
         await sleep(30 * MINUTE)
-        return store.outbox(clock.now()), [c for c in llm.calls if c.role == "polish"]
+        return store.outbox("principal", clock.now()), [c for c in llm.calls if c.role == "polish"]
 
     return live(tmp_path, Authored(), scenario, cfg=TeamsConfig(display_name="Adrien"), polish=True, authors=authors)
 

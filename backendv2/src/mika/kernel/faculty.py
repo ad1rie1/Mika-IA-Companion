@@ -227,6 +227,10 @@ class ToolSpec:
     #: le port sans lequel il ne fait rien (« imaging ») : pas offert tant que ce port n'est pas configuré — un
     #: outil qui répondrait « je ne peux pas » ferait croire qu'elle sait le faire (ADR 0160)
     needs: str = ""
+    #: une ressource de l'outil appartient à qui est en face (``fn(audience, kind, frame) -> bool`` : une boîte, un
+    #: compte, ADR 0185) : il lui est offert même quand sa famille ne l'ouvre pas — le gestionnaire ne lui montre que
+    #: ce qui est à elle ; ``frame`` peut manquer (une console qui juge sans lui : rien n'est à personne)
+    owned: Callable[[Any, str, Any], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +308,8 @@ class InspectSpec:
     #: hors de la navigation (joignable par lien seulement) : sa destination n'en fait pas un onglet
     hidden: bool = False
     #: un onglet de fiche qui ne se montre que pour les objets dont il a quelque chose à dire :
-    #: ``shown(tranche, clé) -> bool`` (vide : toujours)
+    #: ``shown(tranche, clé) -> bool`` (vide : toujours) ; s'il déclare ``frame``, il reçoit ce qu'elle vit (ses
+    #: paramètres : les boîtes d'une personne, ADR 0185)
     shown: Callable[..., Any] | None = None
 
 
@@ -669,13 +674,14 @@ class Faculty(Generic[S, Pm]):
         acts: bool = False,
         deferrable: bool = False,
         needs: str = "",
+        owned: Callable[[Any, str, Any], bool] | None = None,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs,
+                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs, owned=owned,
                 )
             )
             return fn

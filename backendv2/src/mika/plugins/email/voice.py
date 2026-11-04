@@ -55,10 +55,10 @@ from mika.plugins.email import (
     EmailState,
     SentSeen,
     announced,
-    for_owner,
+    approver_name,
+    boxes_here,
     keeper,
     keeper_name,
-    keepers,
     name_of,
     params_of,
     task_mail,
@@ -177,14 +177,18 @@ def _thread(port: Any, mail: Mail) -> list[Mail]:
 
 @EMAIL.enricher("mail", episodes=ALL, deadline_ms=500)
 async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Ce que ses sections lisent du courrier, réduit aux boîtes dont elle peut se servir ici (``boxes``, ADR 0185) :
+    ce qui est dans une autre n'est ni lu ni montré."""
     store, port = ports.get("store"), ports.get("mail")
-    if store is None or not for_owner(frame):
+    boxes = boxes_here(frame, [a.key for a in port.accounts()]) if port is not None else ()
+    if store is None or not boxes:
         return None
-    out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None, "edits": [], "refused": []}
-    refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref]
-    refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref]
-    refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref]
-    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref]
+    out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None, "edits": [], "refused": [],
+                           "boxes": boxes}
+    refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref and m.account in boxes]
+    refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref and m.account in boxes]
+    refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref and m.account in boxes]
+    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref and d.account in boxes]
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
     if ask is not None and ask.instruction_ref:
@@ -195,7 +199,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
         refs += [d.note_ref for d in out["refused"] if d.note_ref]
     out["texts"] = store.content(refs) if refs else {}
     if port is not None:
-        out["accounts"] = {a.key: a for a in port.accounts()}
+        out["accounts"] = {a.key: a for a in port.accounts() if a.key in boxes}
         for d in [*_outcomes(s, frame), *out["refused"]]:
             got = port.draft(d.draft) if d.draft else None
             if got is not None:
@@ -224,8 +228,9 @@ def _mention_section(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> 
     """Le mail qu'elle va annoncer à sa propriétaire : l'objet de l'initiative (cité). Sa provenance
     (``mail:<référence>``) dit, une fois l'énoncé écrit, ce qu'elle a annoncé : c'est cela, et cela seul, qui
     sera signalé."""
-    mails = _announced_unread(frame)
-    if not mails or not for_owner(frame):
+    boxes = set((enrich.get("mail") or {}).get("boxes") or ())
+    mails = [m for m in _announced_unread(frame) if m.account in boxes]
+    if not mails:
         return None
     texts = (enrich.get("mail") or {}).get("texts") or {}
     lines = [f"[{m.mail}] "
@@ -240,7 +245,7 @@ def _mention_section(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> 
 def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     texts, accounts = got.get("texts") or {}, got.get("accounts") or {}
-    if not texts or not for_owner(frame):
+    if not texts or not got.get("boxes"):
         return None
     several = len(accounts) > 1
     lines = []
@@ -269,15 +274,15 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                untrusted=True)
 def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
-    known, texts = got.get("drafts") or {}, got.get("texts") or {}
-    if not for_owner(frame):
+    known, texts, boxes = got.get("drafts") or {}, got.get("texts") or {}, set(got.get("boxes") or ())
+    if not boxes:
         return None
     lines = []
-    for d in _outcomes(s, frame):
+    for d in (d for d in _outcomes(s, frame) if d.account in boxes):
         to, subject = known.get(d.draft, ("?", "?"))
         what = phrase("email.drafts.what", to=inert(to, 120), subject=inert(subject, 160))
         if d.state == WAITING:
-            lines.append(phrase("email.drafts.waiting", what=what, who=keepers(frame)))
+            lines.append(phrase("email.drafts.waiting", what=what, who=approver_name(frame, d.account)))
         elif d.state == GONE:
             lines.append(phrase("email.drafts.gone", what=what))
         elif d.state == REFUSED:
@@ -298,7 +303,7 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
 def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     accounts: dict[str, AccountInfo] = got.get("accounts") or {}
-    if not accounts or not for_owner(frame):
+    if not accounts:
         return None
     mail = task_mail(frame)
     if mail:
@@ -391,7 +396,7 @@ def _edits(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     qu'une retouche a retirées et ajoutées avant l'envoi, la raison d'un refus. Un brouillon parti tel quel
     n'y figure pas ; une autre boîte ne la change pas."""
     got = enrich.get("mail") or {}
-    if not task_mail(frame) or not for_owner(frame):
+    if not task_mail(frame) or not got.get("boxes"):
         return None
     known, texts = got.get("drafts") or {}, got.get("texts") or {}
     lines: list[str] = []

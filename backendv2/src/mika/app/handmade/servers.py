@@ -348,7 +348,8 @@ class ServerOverview(Overview):
         for n, a in enumerate(st.access, start=1):
             chosen = set(a.tools)
             rows.append({
-                "n": n, "who": who_choices(a.who, people, lambda person: who_label((PERSON + person,), frame)),
+                "n": n, "who": who_choices(a.who, people, lambda person: who_label((PERSON + person,), frame),
+                                           ui.her_name(), a.canal),
                 "canal": canal_choices(a.canal, instances), "always": not a.when,
                 "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
                 "read": a.read, "act": a.act, "keep": a.keep, "all": not a.tools,

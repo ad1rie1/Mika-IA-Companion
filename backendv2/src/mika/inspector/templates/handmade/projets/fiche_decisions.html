@@ -1,0 +1,47 @@
+{# Activité › Projets › un projet › Décisions (app/handmade/projects.py, ADR 0177) : une entrée par décision, comme une
+   décision d'architecture — son numéro, la question tranchée et son statut, ce qui est choisi, pourquoi (cité : c'est
+   ce qu'elle relit à chaque exécution), le contexte et les options envisagées repliés ; puis qui l'a posée, quand, ce
+   qu'elle remplace, pendant quel objectif, et ses boutons à leur droite (``_fiche.actions`` : la retirer ou la
+   remettre en vigueur, « Remplacer cette décision » en panneau). Une décision remplacée ou retirée s'estompe.
+   « Consigner une décision » est une colonne à côté de la liste sur un grand écran, dessous sinon. Le filtre (en
+   vigueur, remplacées, retirées, toutes) est celui de la console, au bout de la barre d'onglets. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/projets/_fiche.html" as fiche with context %}
+<div class="now-page prj-fiche" data-tab="project/decisions">
+  {% for n in notes %}<p class="person-tab-note {{ n.tone }}">{{ n.text }}</p>{% endfor %}
+  <div class="prj-split{{ ' with-side' if add }}">
+    <section class="now-card" id="{{ t.id }}" aria-labelledby="prj-dec-title">
+      {{ tab.head(t.title, "prj-dec-title", t.count, "Elle relit celles en vigueur à chaque exécution.", list=t) }}
+      {% if items %}
+      <ul class="prj-entries" role="list">
+        {% for d in items %}
+        <li class="prj-entry{{ ' faded' if not d.live }}">
+          <span class="prj-entry-n" aria-hidden="true">{{ d.n }}</span>
+          <div class="prj-entry-body">
+            <div class="prj-entry-top">
+              <p class="prj-entry-title"><span class="prj-k">Décision {{ d.n }} : </span>{{ d.question }}</p>
+              {% if d.status %}<span class="prj-tags"><span class="now-tag {{ d.status.tone }}">{{ d.status.text }}</span></span>{% endif %}
+            </div>
+            {% if d.choice %}<p class="prj-entry-choice"><span class="prj-dec-arrow" aria-hidden="true">→</span> {{ d.choice }}</p>{% endif %}
+            {% if d.why %}{{ fiche.said("Pourquoi", d.why, d.why_long) }}{% endif %}
+            {% if d.context or d.options %}
+            <details class="hm-subfold prj-entry-more">
+              <summary>{{ "Le contexte et les options envisagées" if d.context and d.options else "Le contexte" if d.context else "Les options envisagées" }}</summary>
+              {% if d.context %}{{ fiche.said("Le contexte", d.context) }}{% endif %}
+              {% if d.options %}{{ fiche.said("Les options envisagées", d.options) }}{% endif %}
+            </details>
+            {% endif %}
+            <div class="prj-entry-foot">
+              <p class="prj-entry-facts"><span>posée par {{ d.by }}</span>{% if d.when %}<span>{{ tab.cell(d.when) }}</span>{% endif %}{% for f in d.facts %}<span>{{ f }}</span>{% endfor %}</p>
+              {{ fiche.actions(d, "Décision " ~ d.n) }}
+            </div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(t.empty) }}{% endif %}
+      {{ tab.pager(t) }}
+    </section>
+    {{ fiche.side(add) }}
+  </div>
+</div>

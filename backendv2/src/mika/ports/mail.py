@@ -207,6 +207,8 @@ class Mail:
 @dataclass(frozen=True, slots=True)
 class MailQuery:
     account: str = ""
+    #: les boîtes où chercher (``None`` : toutes) — celles dont elle peut se servir ici (ADR 0185)
+    accounts: tuple[str, ...] | None = None
     folder: str = ""
     text: str = ""
     sender: str = ""
@@ -288,6 +290,8 @@ class AccountInfo:
     enabled: bool = True
     #: ses réglages sans secret, pour les montrer (« lire » : « imap.x.fr:993, SSL, utilisateur u »)
     details: tuple[tuple[str, str], ...] = ()
+    #: à qui est cette boîte (ADR 0185) : vide, ses propriétaires (toi) ; ``elle`` ; ``personne:<clé>``
+    owner: str = ""
 
     @property
     def name(self) -> str:

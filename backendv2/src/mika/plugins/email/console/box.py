@@ -35,6 +35,8 @@ from mika.plugins.email.console.common import (
     BOX_PAGE,
     SECTION,
     VIEWS,
+    WHOSE,
+    YOURS,
     account_scope,
     add_account,
     answered,
@@ -43,9 +45,12 @@ from mika.plugins.email.console.common import (
     her_badge,
     important,
     mail_key,
+    owner_name,
+    scoped,
     state_badge,
     to_answer,
     unread,
+    whose,
     workspace,
 )
 from mika.ports.mail import MailQuery
@@ -83,7 +88,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
     page = [(m, s.mails.get(m.ref)) for m in result.items]
     pager = Pager(number=result.number, size=result.size, total=result.total)
     context_values = {k: v for k, v in ctx.params.items()
-                      if k in ("compte", "dossier", "etat", "de", "q", "page", "taille")}
+                      if k in ("compte", "dossier", "etat", "de", "q", "page", "taille", WHOSE)}
     context_values.update((k, v) for k, v in ctx.params.items() if is_table_choice(k, v))
     if "page" in context_values:
         context_values["page"] = str(pager.number)
@@ -125,11 +130,16 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
                        Param("de", "Expéditeur", placeholder="nom ou adresse"),
                        Param("q", "Recherche", placeholder="objet, expéditeur, texte")])
 def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("mail")
+    port = scoped(ctx.ports.get("mail"), ctx)
     p = params_of(frame)
     filters = (Param("etat", "Afficher", kind="select", choices=STATES),
                Param("de", "Expéditeur", placeholder="nom ou adresse"),
                Param("q", "Recherche", placeholder="objet ou contenu du message"))
+    if port is not None and not port.accounts() and whose(ctx):  # personne : rien de ses boîtes, le sélecteur reste
+        name = owner_name(frame, "" if whose(ctx) == YOURS else whose(ctx))
+        return [workspace(port, ctx, [Note(f"Aucune boîte n'est à {name}. Dans Courrier › Paramètres, une boîte se "
+                                           "donne à quelqu'un par « À qui ».", title="Aucune boîte"),
+                                      Nav((NavItem("Ajouter un compte", add_account()),))], state=s, frame=frame)]
     if port is None or not port.accounts():
         return [workspace(port, ctx, [Note("Ajoute une boîte aux lettres dans Courrier › Paramètres (en haut "
                                            "à droite) pour recevoir et envoyer des messages.",
@@ -138,7 +148,7 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     account = account_scope(port, ctx)
     if account and port.account(account) is None:
         return [workspace(port, ctx, [Note("Ce compte n'existe plus. Choisis une boîte dans la liste.", tone="warn")],
-                          state=s)]
+                          state=s, frame=frame)]
     folder = ctx.param("dossier") or INBOX
     total = _in_box(port, [account] if account else [a.key for a in port.accounts()], folder)
     table, _ = _list(s, ctx, p, port, account, folder, not account and len(port.accounts()) > 1, total)
@@ -149,4 +159,4 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if chosen is not None and chosen.ready and folder != "*" and ctx.value("etat") not in VIEWS:
         items.append(ActionSlot("email.historique", (("compte", account), ("dossier", folder)),
                                 title="Charger des messages plus anciens", presentation="button"))
-    return [workspace(port, ctx, items, filters=filters, folders=True, state=s)]
+    return [workspace(port, ctx, items, filters=filters, folders=True, state=s, frame=frame)]

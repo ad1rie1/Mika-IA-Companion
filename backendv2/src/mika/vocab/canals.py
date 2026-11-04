@@ -34,6 +34,7 @@ from mika.vocab.access import (
     OWNER,
     POLICIES,
     REPLIES,
+    SELF,
     STEER_EDIT,
     STEER_NO,
     STEER_READ,
@@ -91,7 +92,7 @@ class CanalTable(Table[CanalRule]):
 VITAL: Mapping[str, CanalTable] = {
     WEB: CanalTable(lines=(WIDE,)),
     MOBILE: CanalTable(lines=(WIDE,)),
-    INTERNAL: CanalTable(lines=(CanalRule(canal=(INTERNAL,), reply="seule", read=ALONE, act=ALONE,
+    INTERNAL: CanalTable(lines=(CanalRule(who=(SELF,), canal=(INTERNAL,), reply="seule", read=ALONE, act=ALONE,
                                           steer=STEER_EDIT, files=True, keep="public"),)),
     INTERNET: CanalTable(lines=(YOURS, CanalRule(who=(EVERYONE,), reply="seule", read=ALONE, steer=STEER_READ))),
     MAIL: CanalTable(lines=(CanalRule(who=(EVERYONE,), reply="accord"),)),

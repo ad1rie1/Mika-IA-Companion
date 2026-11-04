@@ -1,10 +1,11 @@
 """Le menu opérateur, indépendant des sections techniques des facultés.
 
-Les routes et les fiches gardent leurs adresses. Le menu et les onglets disent la même chose (ADR 0121) : dans une
-rubrique, une destination a soit un seul lien (la page entière : Mémoire, Personnes, Courrier…), soit un lien par
-onglet — tous ses onglets, dans leur ordre et sous leur nom (test_console_navigation.py) ; « À valider » aussi, une
-seule file dont chaque lien est un onglet (ADR 0177). Une rubrique fait exception : « Réglages », une sélection
-d'entrées dans un annuaire d'une cinquantaine de pages (le sien).
+Les routes et les fiches gardent leurs adresses. Le menu montre les groupes de pages (ADR 0178) : un lien vers une
+destination (« vie », « memoire ») y est une colonne, son nom puis ses onglets, lus dans sa barre d'onglets même — on ne
+les recopie pas ici ; une page sans onglets (En ce moment, Apps forgées) n'a que son nom. Une rubrique qui n'est
+qu'une destination (« À valider », une seule file, ADR 0177 ; « Système ») nomme ses pages une à une, dans l'ordre et
+sous le nom de leurs onglets (test_console_navigation.py). « Réglages » fait exception : une sélection d'entrées dans
+un annuaire d'une cinquantaine de pages (le sien).
 
 Les rubriques sont dans la barre du haut (ADR 0176) : chacune y a son nom court, et son menu commence par la question
 à laquelle elle répond ; chaque lien y dit en quelques mots ce qu'on trouve derrière.
@@ -28,51 +29,29 @@ MENU = (
     ), question="Qu'est-ce qui attend ta décision ?"),
     MenuGroup("Elle", "heart", (
         MenuLink("En ce moment", "maintenant", hint="Son état et ses dernières 24 heures"),
-        MenuLink("Humeur", "vie", hint="Ce qu'elle ressent, et pourquoi"),
-        MenuLink("Postures", "vie/postures", hint="Son attitude envers chacun"),
-        MenuLink("Besoins", "vie/needs", hint="Compagnie, s'exprimer, apprendre"),
-        MenuLink("Sommeil et rythme", "vie/rythme", hint="Ses nuits, son énergie"),
-        MenuLink("Monde et corps", "vie/monde", hint="Où elle est, ce qu'elle fait"),
-        MenuLink("Estime et récit", "vie/soi", hint="Ce qu'elle pense d'elle-même"),
-        MenuLink("Qui elle devient", "vie/devenir", hint="Ce qui change en elle"),
-        MenuLink("Pensées", "pensees", hint="Ce qui lui trotte dans la tête"),
-        MenuLink("Ce qu'elle remarque", "pensees/remarque", hint="Ce qui l'a frappée"),
-        MenuLink("Attentes", "pensees/attentes", hint="Ce qu'elle espère ou redoute"),
-        MenuLink("Journal et rêves", "pensees/nuits", hint="Ses nuits, en récits"),
-        MenuLink("Mémoire", "memoire", hint="Souvenirs, croyances, promesses"),
+        MenuLink("Humeur et corps", "vie", hint="Ce qu'elle ressent, son corps, qui elle devient"),
+        MenuLink("Pensées et nuits", "pensees", hint="Ce qui lui trotte dans la tête, ses nuits"),
+        MenuLink("Mémoire", "memoire", hint="Ce qu'elle retient, et de qui"),
         MenuLink("Constellation", "constellation", hint="Sa mémoire en points, en direct"),
     ), her=True, question="Comment va-t-elle, à quoi pense-t-elle, que retient-elle ?"),
     MenuGroup("Relations & échanges", "people", (
         MenuLink("Personnes", "personnes", hint="Les gens qu'elle connaît"),
-        MenuLink("Conversations", "fil", hint="Ce qui s'est dit, jour par jour"),
+        MenuLink("Conversations", "fil", hint="Avec qui elle parle, ce qui s'est dit"),
         MenuLink("Courrier", "courrier", hint="Ses boîtes aux lettres"),
         MenuLink("Teams", "teams", ("reglages/teams",), hint="Ce qu'elle lit et pose dans Teams"),
-        MenuLink("Identités et moyens de communication", "identites", hint="Par où chacun lui parle"),
+        MenuLink("Identités", "identites", hint="Par où chacun lui parle, qui est qui"),
     ), short="Échanges", question="Qui connaît-elle, qu'a-t-on dit ?"),
     MenuGroup("Activité", "activity", (
         MenuLink("Projets", "projets", hint="Ce qu'elle mène, pas à pas"),
         MenuLink("Buts et rappels", "buts", hint="Ce qu'elle veut faire, et quand"),
-        MenuLink("Table de l'arbitre", "decisions", hint="Comment elle choisit quoi faire"),
-        MenuLink("Que ferait-elle ?", "decisions/envers", hint="Envers une personne : ce qui la pousse, la retient"),
-        MenuLink("En cours", "decisions/en_cours", hint="Ce qu'elle fait en ce moment"),
-        MenuLink("Initiatives", "decisions/initiatives", hint="Ce qu'elle fait d'elle-même"),
-        MenuLink("Ses choix", "decisions/selections", hint="Ce qu'elle a choisi, et pourquoi"),
-        MenuLink("Épisodes", "decisions/episodes", hint="Ses moments, du début à la fin"),
-        MenuLink("Échéances", "decisions/echeances", hint="Ce qui arrive bientôt"),
+        MenuLink("Décisions", "decisions", hint="Pourquoi elle parle ou se tait"),
     ), question="Que fait-elle, pourquoi parle-t-elle ou se tait-elle ?"),
     MenuGroup("Outils", "tools", (
-        MenuLink("Ce qu'elle peut faire", "outils", hint="Ses outils, et qui peut quoi"),
-        MenuLink("Venus d'ailleurs", "outils/serveurs", ("reglages/serveurs-mcp",), hint="Les services MCP branchés"),
-        MenuLink("Prêter à un agent", "outils/expose", hint="Ses outils, pour un autre agent"),
+        MenuLink("Ses outils", "outils", ("reglages/serveurs-mcp",), hint="Ce qu'elle peut faire, d'où ça vient"),
         MenuLink("Apps forgées", "apps", hint="Ce qu'elle a construit"),
     ), question="Que peut-elle faire, et pour qui ?"),
     MenuGroup("Connexions extérieures", "plug", (
-        MenuLink("Flux RSS", "sens/flux", ("reglages/flux",), hint="Ce qu'elle lit chaque jour"),
-        MenuLink("Caméra", "sens/camera", hint="Ce qu'elle voit"),
-        MenuLink("Dessins", "sens/dessins", hint="Ce qu'on lui montre"),
-        MenuLink("Appareils", "sens/appareils", ("reglages/appareils",), hint="Les objets reliés"),
-        MenuLink("Localisation", "sens/positions", hint="Ce que les téléphones lui disent"),
-        MenuLink("Messages du téléphone", "sens/messages", hint="WhatsApp et SMS, lus pour toi"),
+        MenuLink("Ses sens", "sens", ("reglages/flux", "reglages/appareils"), hint="Ce qu'elle lit, voit et reçoit"),
         MenuLink("Réveils par API", "reveils", ("reglages/reveils",), hint="Ce qui peut la réveiller"),
         MenuLink("Dépôts Git", "reglages/depots", hint="Le jeton de ses dépôts distants"),
     ), short="Connexions", question="Que perçoit-elle du dehors, qui la fait agir ?"),

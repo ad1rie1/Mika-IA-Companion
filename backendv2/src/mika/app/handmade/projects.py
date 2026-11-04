@@ -1,4 +1,5 @@
-"""La fiche d'un projet : sa vue d'ensemble et son onglet « Accès » dessinés (ADR 0121, 0133, 0177).
+"""La fiche d'un projet : sa vue d'ensemble, ses onglets Objectifs, Décisions et « Accès » dessinés (ADR 0121, 0133,
+0177).
 
 - La vue d'ensemble suit la vue d'un objet de la maquette (ADR 0176) : un seul bandeau (ce qui attend ton accord —
   « Les décider » ouvre la file des validations —, sinon sa pause ou ce qui le retient), une bande de chiffres (la
@@ -9,6 +10,10 @@
   son rythme, qui l'a posé, son dernier compte rendu (long, il tient en quatre lignes que « lire la suite » déplie)
   et ce qu'elle en a tiré ; ses boutons sur sa ligne, pas sous un détail (deux en vue, « Modifier l'objectif », le
   reste sous « ⋯ »). « Ajouter un objectif » est une colonne à côté de la liste, sur un grand écran.
+- Décisions : une entrée par décision, comme une décision d'architecture — la question tranchée et son statut, ce
+  qui est choisi, pourquoi (cité), le contexte et les options repliés, qui l'a posée et quand, ce qu'elle remplace ;
+  ses boutons sur sa ligne (la retirer ou la remettre en vigueur, « Remplacer cette décision »). « Consigner une
+  décision » est une colonne à côté, comme « Ajouter un objectif ».
 - Ses onglets disent combien ils en comptent (objectifs, exécutions, décisions) ; les plus rares (Accès, Carnet) sont
   rangés sous « Plus ».
 - Accès : qui peut le voir, le piloter, se servir de ses apps, et quand — un tableau de lignes lues de haut en bas,
@@ -141,15 +146,24 @@ def overview(got: Got, key: str) -> Markup | None:
 
 #: l'état d'un objectif → la classe de son entrée
 OBJECTIVE_STATES = {"fait": "done", "bloqué": "blocked", "retiré": "dropped"}
-#: au-delà (en caractères), un compte rendu tient en quatre lignes et « lire la suite » le déplie : en deçà, il se lit
-#: en entier (replié plus court, il ne cacherait parfois rien, parfois presque tout, selon la largeur)
-LONG_REPORT = 600
+#: au-delà (en caractères), un texte cité (un compte rendu, un pourquoi) tient en quatre lignes et « lire la suite » le
+#: déplie : en deçà, il se lit en entier (replié plus court, il ne cacherait parfois rien, parfois presque tout, selon
+#: la largeur)
+LONG_TEXT = 600
+
+
+def _buttons(line: Line) -> dict[str, Any]:
+    """Les boutons d'une entrée, sur sa ligne, rangés comme ceux de la barre de titre : deux en vue, le reste sous
+    « ⋯ », et son panneau à part (« Modifier l'objectif », « Remplacer cette décision »)."""
+    bar = next((d for d in line.detail if d.get("t") == "toolbar"), None)
+    buttons = [x for x in (bar or {}).get("items", []) if x.get("t") == "action"]
+    return {"seen": buttons[:2], "more": buttons[2:],
+            "edit": next((d for d in line.detail if d.get("t") == "disclosure"), None)}
 
 
 def _objective(line: Line) -> dict[str, Any]:
     """Un objectif : ce qu'il vise, sa sorte et son état, ses faits en une ligne, son dernier compte rendu et ce
-    qu'elle en a tiré ; ses boutons sur sa ligne, comme la barre de titre les range — deux en vue (le lancer, le
-    premier statut), « Modifier l'objectif » en panneau, le reste sous « ⋯ »."""
+    qu'elle en a tiré ; ses boutons sur sa ligne (``_buttons``)."""
     state, report = line.get("état"), line.get("dernier compte rendu")
     rhythm, runs, by = line.text("rythme"), line.text("exécutions"), line.text("posé par")
     facts = [f for f in rhythm.split(" · ") if f]  # « il y a 2 h · revient tous les 2 jours » : deux faits
@@ -157,14 +171,11 @@ def _objective(line: Line) -> dict[str, Any]:
         facts.append(f"{runs} exécution{'s' if runs != '1' else ''}")
     if by and not blank(line.get("posé par")):
         facts.append(f"posé par {by}")
-    bar = next((d for d in line.detail if d.get("t") == "toolbar"), None)
-    buttons = [x for x in (bar or {}).get("items", []) if x.get("t") == "action"]
     return {"n": line.text("n°"), "text": line.text("objectif"), "kind": line.get("sorte"), "state": state,
             "cls": OBJECTIVE_STATES.get(text(state), ""), "facts": facts,
-            "report": "" if blank(report) else text(report), "long": len(text(report)) > LONG_REPORT,
+            "report": "" if blank(report) else text(report), "long": len(text(report)) > LONG_TEXT,
             "result": next((d.get("text") or "" for d in line.detail if d.get("t") == "prose"), ""),
-            "seen": buttons[:2], "more": buttons[2:],
-            "edit": next((d for d in line.detail if d.get("t") == "disclosure"), None)}
+            **_buttons(line)}
 
 
 def objectives(got: Got) -> Markup | None:
@@ -172,18 +183,45 @@ def objectives(got: Got) -> Markup | None:
     t = got.table("Ses objectifs")
     if t is None:
         return None
-    return got.draw("handmade/projets/objectifs.html", t=t, band=got.stats(), notes=got.notes(),
+    return got.draw("handmade/projets/fiche_objectifs.html", t=t, band=got.stats(), notes=got.notes(),
                     items=[_objective(x) for x in lines(t)], add=got.first("section", "Ajouter un objectif"))
 
 
+def _said(c: dict[str, Any] | None) -> str:
+    return "" if blank(c) else text(c)
+
+
+def _decision(line: Line) -> dict[str, Any]:
+    """Une décision : la question tranchée, son statut, ce qui est choisi, pourquoi, le contexte et les options ; qui
+    l'a posée et quand, ce qu'elle remplace, pendant quel objectif ; ses boutons sur sa ligne (``_buttons``)."""
+    status = line.get("statut")
+    told = pairs(next((d for d in line.rest if d.get("t") == "fields"), None))
+    why, replaces, during = (_said(told.get(k)) for k in ("pourquoi", "remplace", "pendant l'objectif"))
+    facts = [f"remplace {replaces}" if replaces else "", f"pendant l'objectif {during}" if during else ""]
+    return {"n": line.text("n°"), "question": line.text("la question"), "choice": _said(line.get("ce qui est choisi")),
+            "status": status, "live": text(status) == "en vigueur", "by": line.text("posée par"),
+            "when": line.get("quand"), "why": why, "why_long": len(why) > LONG_TEXT,
+            "context": _said(told.get("le contexte")), "options": _said(told.get("les options envisagées")),
+            "facts": [f for f in facts if f], **_buttons(line)}
+
+
+def decisions(got: Got) -> Markup | None:
+    """Projet › Décisions : une entrée par décision, et « Consigner une décision » à côté."""
+    t = got.table("Ses décisions")
+    if t is None:
+        return None
+    return got.draw("handmade/projets/fiche_decisions.html", t=t, notes=got.notes(),
+                    items=[_decision(x) for x in lines(t)], add=got.first("section", "Consigner une décision"))
+
+
 class ProjectFiche(Overview):
-    """La fiche d'un projet : sa vue d'ensemble, ses objectifs et « Accès » dessinés ici, son dépôt git dans
-    ``project_git`` ; ses autres onglets restent ceux de la faculté ; Accès et Carnet sous « Plus »."""
+    """La fiche d'un projet : sa vue d'ensemble, ses objectifs, ses décisions et « Accès » dessinés ici, son dépôt
+    git dans ``project_git`` ; ses autres onglets restent ceux de la faculté ; Accès et Carnet sous « Plus »."""
 
     slug = ""
     title = "Vue d'ensemble"
     styles = ("handmade/tools.css", "handmade/projets.css", "handmade/projet-git.css")
-    tabs = ("apercu", "objectifs", "git", "acces")
+    tabs = ("apercu", "objectifs", "decisions", "git", "acces")
     folded = ("acces", "carnet")
     folded_title = "Plus"
 
@@ -202,6 +240,8 @@ class ProjectFiche(Overview):
             return overview(Got(ui, list(blocks), query, forms or {}), key)
         if tab == "objectifs":
             return objectives(Got(ui, list(blocks), query, forms or {}))
+        if tab == "decisions":
+            return decisions(Got(ui, list(blocks), query, forms or {}))
         if tab == "git":
             return git_page(Got(ui, list(blocks), query, forms or {}), key)
         if tab != "acces":
@@ -220,7 +260,8 @@ class ProjectFiche(Overview):
         rows = []
         for n, a in enumerate(lines, start=1):
             rows.append({
-                "n": n, "who": who_choices(a.who, people, lambda person: who_named(frame, (PERSON + person,))),
+                "n": n, "who": who_choices(a.who, people, lambda person: who_named(frame, (PERSON + person,)),
+                                           ui.her_name(), a.canal),
                 "canal": canal_choices(a.canal, instances),
                 "always": not a.when,
                 "when_said": "Toujours" if not a.when else (when_words(a.when).capitalize() if len(a.when) == 1

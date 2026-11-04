@@ -6,6 +6,7 @@
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/teams/_teams.html" as tm %}
 <div class="now-page teams-tab teams-replies" data-tab="teams/reponses">
+  {% for n in navs %}{{ tab.block(n) }}{% endfor %}
   {% if t %}
   <section class="now-card" id="{{ t.id }}" aria-labelledby="teams-wait-title">
     {% if waiting or done %}

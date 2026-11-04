@@ -15,16 +15,18 @@ from mika.kernel.inspect import Pager
 from mika.vocab.access import (
     ANY,
     CANALS,
-    INTERNAL,
     MAIL,
     MOMENTS,
     PERSON,
     PRIVATE,
+    SELF,
     SOURCE_WORDS,
     SOURCES,
+    TEAMS,
     TOGETHER,
     WEB,
     TableArgs,
+    alone,
     canal_key,
     canal_words,
     when_words,
@@ -50,13 +52,18 @@ def people(ui: UI) -> list[dict[str, str]]:
     return sorted({p["key"]: p for p in out}.values(), key=lambda p: p["name"].casefold())
 
 
-def who_choices(who: Sequence[str], people_: Sequence[dict[str, str]], name: Callable[[str], str]) -> dict[str, Any]:
-    """Les cases « qui » d'une ligne : ses sources, puis les personnes qui ont un compte ; une personne qu'elle coche
-    et qui n'a plus de compte, une adresse (un canal de messagerie), restent là, cochées, pour qu'on puisse les
-    décocher."""
+def who_choices(who: Sequence[str], people_: Sequence[dict[str, str]], name: Callable[[str], str],
+                her: str = "", canal: Sequence[str] = ()) -> dict[str, Any]:
+    """Les cases « qui » d'une ligne : ses sources, elle par son nom (``her``, une personne comme les autres, ADR
+    0184), puis les personnes qui ont un compte ; une personne qu'elle coche et qui n'a plus de compte, une adresse
+    (un canal de messagerie), restent là, cochées, pour qu'on puisse les décocher. Une ligne d'elle seule réglée
+    avant (sans personne, par le seul canal « elle seule » : ``canal``) la montre cochée."""
+    if alone(who, canal):
+        who = (SELF,)
     got = set(who)
     boxes = [{"value": k, "label": label, "word": SOURCE_WORDS[k], "on": k in got} for k, label in SOURCES]
-    listed = {PERSON + p["key"] for p in people_}
+    boxes.append({"value": SELF, "label": her or "Elle", "word": her or SOURCE_WORDS[SELF], "on": SELF in got})
+    listed = {PERSON + p["key"] for p in people_} | {SELF}
     boxes += [{"value": PERSON + p["key"], "label": p["name"], "word": p["name"], "on": PERSON + p["key"] in got}
               for p in people_]
     for w in sorted(got):
@@ -64,12 +71,12 @@ def who_choices(who: Sequence[str], people_: Sequence[dict[str, str]], name: Cal
             continue
         label = name(w[len(PERSON):]) if w.startswith(PERSON) else w.partition(":")[2]
         boxes.append({"value": w, "label": label, "word": label, "on": True})
-    return {"boxes": boxes, "said": who_words(who, name) if who else "Personne"}
+    return {"boxes": boxes, "said": who_words(who, name, her) if who else "Personne"}
 
 
 def canal_instances(ui: UI) -> Instances:
-    """Les instances de chaque type de canal : le chat web (en privé, en salon), chaque boîte de courrier, et celles
-    qu'un tableau réglé nomme déjà."""
+    """Les instances de chaque type de canal : le chat web (en privé, en salon), chaque boîte de courrier, chaque
+    compte Teams, et celles qu'un tableau réglé nomme déjà."""
     out: Instances = {WEB: [(f"{WEB}:{PRIVATE}", "en privé"), (f"{WEB}:{TOGETHER}", "en salon")]}
     settings = ui.deps.settings
     try:
@@ -77,6 +84,11 @@ def canal_instances(ui: UI) -> Instances:
     except Exception:  # noqa: BLE001 — des boîtes illisibles : aucune instance, le type reste
         accounts = {}
     out[MAIL] = [(f"{MAIL}:{key}", a.label or key) for key, a in sorted(accounts.items())]
+    try:  # chaque compte Teams (ADR 0186) : son tableau, comme une boîte
+        teams = settings.teams().accounts if settings is not None else {}
+    except Exception:  # noqa: BLE001 — des comptes illisibles : aucune instance, le type reste
+        teams = {}
+    out[TEAMS] = [(f"{TEAMS}:{key}", getattr(a, "label", "") or key) for key, a in sorted(teams.items())]
     try:
         keys = sorted(settings.canals().tables) if settings is not None else []
     except Exception:  # noqa: BLE001 — des tableaux illisibles : les minimums vitaux, aucune instance de plus
@@ -134,8 +146,8 @@ def rows_of(ui: UI, lines: Sequence[Any], values: Callable[[Any], dict[str, Any]
     for n, a in enumerate(lines, start=1):
         chosen = set(a.tools) if hasattr(a, "tools") else set()
         out.append({
-            "n": n, "alone": not a.who and tuple(a.canal) == (INTERNAL,),
-            "who": who_choices(a.who, known, ui.names.name_of),
+            "n": n, "alone": alone(a.who, a.canal),
+            "who": who_choices(a.who, known, ui.names.name_of, ui.her_name(), a.canal),
             "canal": canal_choices(a.canal, instances) if show_canal else None,
             "always": not a.when, "when_said": when_words(a.when).capitalize() if a.when else "Toujours",
             "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],

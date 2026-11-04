@@ -36,6 +36,7 @@ from mika.kernel.events import Origin
 from mika.plugins.teams import RECEIVED
 from mika.plugins.teams.triage import heuristic, place_of, read_triage, triage_system
 from mika.ports.llm import LLMResponse, ToolCall
+from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
@@ -56,17 +57,17 @@ QUESTION = "Tu peux me rappeler la différence entre TCP et UDP ?"
 
 
 class Settings:
-    """Ce que la porte lit des réglages : la clé (son empreinte) et ce qu'un opérateur a réglé."""
+    """Ce que la porte lit des réglages : la clé de chaque compte (son empreinte) et ce qu'un opérateur a réglé."""
 
     def __init__(self, cfg: TeamsConfig) -> None:
         self.cfg = cfg
-        self.key = {"digest": digest(KEY), "hint": KEY[:8], "created_at": 0, "by": "test"}
+        self.keys = {PRINCIPAL: {"digest": digest(KEY), "hint": KEY[:8], "created_at": 0, "by": "test"}}
 
     def teams(self) -> TeamsConfig:
         return self.cfg
 
-    def teams_key(self) -> dict:
-        return self.key
+    def teams_keys(self) -> dict:
+        return self.keys
 
 
 class Model:
@@ -166,11 +167,11 @@ def test_a_question_she_can_help_with_becomes_a_reply_posted_in_teams_in_her_pla
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM, kind="dm")])
         await sleep(30 * MINUTE)
         out = {"noticed": events(kernel, teams_c.NOTICED), "proposed": events(kernel, rt.EFFECT_PROPOSED),
-               "tasks": [c for c in llm.calls if c.role == "step"], "outbox": store.outbox(clock.now())}
+               "tasks": [c for c in llm.calls if c.role == "step"], "outbox": store.outbox(PRINCIPAL, clock.now())}
         [item] = out["outbox"]
         out["placed"] = await desk.ack(KEY, item.id, {"result": "placed"})
         out["placed again"] = await desk.ack(KEY, item.id, {"result": "placed"})
-        out["after placed"] = store.outbox(clock.now())
+        out["after placed"] = store.outbox(PRINCIPAL, clock.now())
         # la personne l'envoie, en retouchant la fin : son message arrive par l'extension
         await push(desk, msg(clock, 2, item.text.replace("sans garantie.", "sans garantie, mais plus rapide !"),
                              author="Adrien Dupont", author_id=SELF, own=True))
@@ -196,7 +197,8 @@ def test_a_question_she_can_help_with_becomes_a_reply_posted_in_teams_in_her_pla
     # une proposition sans corps : l'identifiant et le condensé, jamais le texte ; partie sans accord (posée)
     [proposal] = out["proposed"]
     args = json.loads(proposal.data.args_json)
-    assert set(args) == {"draft", "conversation", "message", "mode", "_apercu"} and args["mode"] == "brouillon"
+    assert set(args) == {"draft", "conversation", "message", "mode", "_apercu", "account"} and args["mode"] == "brouillon"
+    assert args["account"] == PRINCIPAL  # elle part du compte de la conversation (ADR 0186)
     assert not proposal.data.approval and args["message"] == ref
     assert "garantit l'ordre" not in out["journal"]
     # la file : à poser, puis posée (rejoué, rien ne change)
@@ -217,7 +219,7 @@ def test_the_owner_writing_something_else_means_the_reply_was_not_used(tmp_path)
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(30 * MINUTE)
-        [item] = store.outbox(clock.now())
+        [item] = store.outbox(PRINCIPAL, clock.now())
         await desk.ack(KEY, item.id, {"result": "placed"})
         await push(desk, msg(clock, 2, "Je regarde ça demain, promis.", author="Adrien", author_id=SELF, own=True))
         await sleep(MINUTE)
@@ -236,12 +238,12 @@ def test_in_validation_mode_a_card_goes_to_her_and_nothing_leaves_without_it(tmp
         await connect(kernel, "user_1", "Adrien", operator=True)
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(30 * MINUTE)
-        out = {"proposed": events(kernel, rt.EFFECT_PROPOSED), "before": store.outbox(clock.now())}
+        out = {"proposed": events(kernel, rt.EFFECT_PROPOSED), "before": store.outbox(PRINCIPAL, clock.now())}
         out["cards"] = await KernelPort(kernel).approval_cards("user_1")
         [card] = out["cards"]
         out["decided"] = await KernelPort(kernel).decide_card("user_1", card["id"], True, card["digest"])
         await sleep(MINUTE)
-        out["after"] = store.outbox(clock.now())
+        out["after"] = store.outbox(PRINCIPAL, clock.now())
         return out
 
     out = live(tmp_path, Model(), scenario, mode="validation")
@@ -261,7 +263,7 @@ def test_without_an_answer_in_time_the_reply_does_not_leave(tmp_path):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(3 * HOUR)
-        return (events(kernel, rt.EFFECT_RESOLVED), events(kernel, rt.EFFECT_EXECUTED), store.outbox(clock.now()),
+        return (events(kernel, rt.EFFECT_RESOLVED), events(kernel, rt.EFFECT_EXECUTED), store.outbox(PRINCIPAL, clock.now()),
                 kernel.mind.frame().state("teams"))
 
     resolved, executed, outbox, state = live(tmp_path, Model(), scenario, mode="validation")
@@ -278,7 +280,7 @@ def test_autonomous_replies_are_sent_without_asking(tmp_path):
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(30 * MINUTE)
-        return events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
+        return events(kernel, rt.EFFECT_PROPOSED), store.outbox(PRINCIPAL, clock.now())
 
     proposed, outbox = live(tmp_path, Model(), scenario, mode="autonome")
     [proposal] = proposed
@@ -293,7 +295,7 @@ def test_a_blank_never_leaves_alone_but_can_be_posted_for_the_owner_to_fill(tmp_
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, "C'est prévu pour quand ?"), conversations=[conv(DM)])
         await sleep(HOUR)
-        return events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
+        return events(kernel, rt.EFFECT_PROPOSED), store.outbox(PRINCIPAL, clock.now())
 
     proposed, outbox = live(tmp_path / "seule", blank, scenario, mode="autonome")
     assert proposed == [] and outbox == []
@@ -342,7 +344,7 @@ def test_without_initiative_she_only_drafts_when_asked(tmp_path):
                               by="user_1", subject=DM, nonce="a1")
         await sleep(30 * MINUTE)
         task = [c for c in llm.calls if c.role == "step" and "teams_draft" in prompt_text(c)]
-        return before, asked, task, store.outbox(clock.now())
+        return before, asked, task, store.outbox(PRINCIPAL, clock.now())
 
     before, asked, task, outbox = live(tmp_path, Model(), scenario, autodraft=False)
     assert before == [] and asked.ok
@@ -368,7 +370,7 @@ def test_a_rule_tightened_after_the_triage_holds_for_what_she_writes(tmp_path):
                                                         "_fixes": ["message"], "message": [ref]},
                               by="user_1", subject=DM, nonce="a1")
         await sleep(30 * MINUTE)
-        return noticed, asked, events(kernel, rt.EFFECT_PROPOSED), store.outbox(clock.now())
+        return noticed, asked, events(kernel, rt.EFFECT_PROPOSED), store.outbox(PRINCIPAL, clock.now())
 
     noticed, asked, proposed, outbox = live(tmp_path, Model(), scenario, mode="autonome", autodraft=False)
     assert noticed.data.send == "seule" and asked.ok  # au tri, elle l'aurait envoyée seule
@@ -402,7 +404,7 @@ def test_the_signature_is_added_by_the_server_never_written_by_her(tmp_path):
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(30 * MINUTE)
-        return [c for c in llm.calls if c.role == "step"][0], store.outbox(clock.now())
+        return [c for c in llm.calls if c.role == "step"][0], store.outbox(PRINCIPAL, clock.now())
 
     task, outbox = live(tmp_path, Model(), scenario, cfg=TeamsConfig(sign=True))
     [item] = outbox
@@ -417,9 +419,9 @@ def test_a_reply_nobody_sends_in_time_does_not_leave_later(tmp_path):
     async def scenario(kernel, llm, desk, store, clock):
         await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
         await sleep(30 * MINUTE)
-        [item] = store.outbox(clock.now())
+        [item] = store.outbox(PRINCIPAL, clock.now())
         await sleep(9 * HOUR)
-        return item, store.draft(item.id), store.outbox(clock.now()), kernel.mind.frame().state("teams")
+        return item, store.draft(item.id), store.outbox(PRINCIPAL, clock.now()), kernel.mind.frame().state("teams")
 
     item, draft, outbox, state = live(tmp_path, Model(), scenario)
     assert draft.state == "inutilise" and outbox == []
@@ -434,7 +436,7 @@ def test_forgetting_a_colleague_reaches_the_journal_and_the_cache(tmp_path):
         before = kernel.mind.store.content([noticed.data.summary.ref])
         out = await kernel.forget("teams:8:orgid:alice")
         after = kernel.mind.store.content([noticed.data.summary.ref])
-        return before, after, out, store.message(noticed.data.message), store.conversation(DM), store.drafts(10)
+        return before, after, out, store.message(noticed.data.message), store.conversation(PRINCIPAL, DM), store.drafts(10)
 
     before, after, out, message, conversation, drafts = live(tmp_path, Model(), scenario)
     assert "TCP" in next(iter(before.values()))
@@ -508,7 +510,7 @@ def test_disabled_teams_proposes_nothing(tmp_path):
     async def scenario(kernel, llm, desk, store, clock):
         batch, _ = batch_of({"self": {}, "conversations": [conv(DM)], "messages": [msg(clock, 1, QUESTION)]},
                             clock.now() // 1000)
-        store.store_batch(batch, clock.now())
+        store.store_batch(PRINCIPAL, batch, clock.now())
         await kernel.mind.append([RECEIVED.draft(new=1)], emitter="teams", correlation="t", origin=Origin.EXTERNAL)
         await sleep(HOUR)
         tasks = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]

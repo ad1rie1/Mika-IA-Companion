@@ -21,14 +21,14 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151 |
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -564,7 +564,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
 
-*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148.*
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185.*
 
 ### 0148 — Ce qu'un outil exige de qui est en face, il le déclare
 
@@ -576,6 +576,42 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* les outils du téléphone et de la position refusaient dans leur gestionnaire ce que l'offre et la page « Droits » disaient permis dès qu'une ligne les ouvrait : un outil qui lit passe le plafond d'un salon et d'une inconnue (audit des garde-fous du 2026-10-27).
 
 *Révise 0133 (en partie : ce que la page « Droits » montre d'un outil réservé), 0134 (en partie : une condition qui dit plus que le plafond reste, même sur un outil qui agit).*
+
+### 0184 — Elle est une personne : dans « qui », par son nom
+
+- Dans un tableau de droits, elle se coche dans « qui » comme une personne, sous son nom (`vocab.access.SELF`, « elle » dans le journal, son nom de persona dans la console : `ui.her_name`). Une ligne d'elle seule est **elle, par le canal « elle seule »** : la colonne « qui » n'y est plus cachée (« — »), seule la colonne « quand » se tait (au travail, les moments ne comptent pas).
+- Elle ne désigne qu'elle seule, au travail (`designates` : la situation `travail`) ; une ligne peut la cocher avec d'autres (« toi et elle »). Le formulaire refuse une ligne sans « qui », une ligne « elle seule » qui coche quelqu'un d'autre qu'elle, et une ligne qui la coche sur un canal par où elle n'arrive jamais.
+- Les minimums vitaux l'écrivent ainsi (`vital_family`, les canaux, les services, les projets, la Forge). Une ligne réglée avant, sans personne par le seul canal « elle seule », vaut toujours pour elle (`alone`) et s'affiche elle cochée : enregistrée, elle s'écrit comme les nouvelles.
+
+*Pourquoi :* « il faudrait que l'IA soit considérée comme une personne (on reprend son nom dans le sélecteur) » — la colonne « qui » restait invisible quand on voulait lui donner des droits à elle.
+
+*Révise 0134 (en partie : elle est de nouveau un « qui », par le canal « elle seule »).*
+
+### 0185 — À qui est une boîte : elle sert à son propriétaire
+
+- Une boîte aux lettres est **à toi** (ses propriétaires, par défaut), **à elle**, ou **à une personne qui a un compte** (`MailAccount.owner` : vide, `elle`, `personne:<clé>` ; « À qui », dans Courrier › Paramètres, vérifié à l'enregistrement). Ce qui en dérive est journalisé avec ses autres paramètres (`EmailParams.owners`).
+- **Elle s'en sert avec son propriétaire** (`plugins/email.boxes_here`) : les tiennes là où sa famille d'outils le permet, comme avant (toi en privé, elle quand elle travaille, qui une ligne de la famille ouvre) ; les siennes quand elle travaille ; celles d'une personne seulement avec elle, reconnue, en tête-à-tête ; une tâche de rédaction, la boîte de son mail. Ouvrir les tiennes à d'autres reste l'affaire du tableau de la famille Courrier (Outils › Ce qu'elle peut faire) ; la boîte d'une autre personne ne s'ouvre à personne d'autre.
+- **Ses outils de courrier sont offerts à qui a une boîte à son nom** (`ToolSpec.owned`, `runtime.tools.owns` : une ressource de l'outil est à qui est en face), même quand sa famille ne l'ouvre pas ; son gestionnaire ne lui montre que ses boîtes (`plugins/email/boxes.Boxes`, le port réduit) — ni les mails, ni les dossiers, ni les brouillons, ni les envois d'une autre. Ses sections de prompt filtrent de même.
+- Elle n'annonce un mail important (une initiative envers sa propriétaire) que d'une de tes boîtes ; elle ne prépare d'elle-même une réponse que dans les tiennes et les siennes. Comment ça part reste le tableau du canal de la boîte (Réglages › Canaux), un accord par défaut ; **l'accord est au propriétaire** : pour la boîte d'une personne, la carte va dans son chat à elle (`approver_of` : une de ses adresses présente, sinon une où l'on peut lui écrire), et elle sait que c'est cette personne qui approuve (`approver_name`) ; pour les tiennes et les siennes, toi, comme avant. Un opérateur décide toujours aussi dans la console (À valider).
+- **La console** : la fiche d'une personne a l'onglet « Comptes » quand une boîte est à elle (la vue `boites` du courrier ; ses propriétaires : les boîtes sans propriétaire nommé — un onglet de fiche peut lire ce qu'elle vit : `InspectSpec.shown(tranche, clé, frame=…)`) ; Courrier (réception, brouillons, envoyés, contacts) se lit par propriétaire, « Les boîtes de » (`?qui=` : tout le monde, toi, elle par son nom, chaque personne qui a une boîte).
+
+*Pourquoi :* « on peut lui associer à elle des comptes en toute autonomie comme pour les autres » — une boîte avait une voix (« elle écrit en son nom, en assistante, à ta place ») mais pas de propriétaire ; et une personne ne pouvait pas avoir la sienne sans que tu la lises.
+
+*Révise 0134 (en partie : une ressource à quelqu'un est offerte à son propriétaire), 0173 (en partie : « À qui » dans la fiche d'une boîte). Révisée par 0186.*
+
+### 0186 — Un Teams par personne : un compte sert à son propriétaire
+
+- Plusieurs comptes Teams (`TeamsConfig.accounts`, une clé en minuscules ; « Actif » reste commun à tous). Chacun a son nom, **son propriétaire** (vide : toi ; `elle` ; `personne:<clé>`, vérifié comme une boîte, 0185) et sa voix (nom, ton, consignes, signature).
+- **Une clé d'extension par compte** (`Settings.teams_keys`), créée et retirée dans Teams › Extension, sur le compte (`teams.cle`, `teams.retirer_cle`), ou par `mika teams key|revoke --compte <clé>`. La porte reconnaît le compte à sa clé, toutes les clés comparées en temps constant ; son plafond par minute est par compte. Ce que l'extension pousse, relève et accuse ne concerne que son compte ; une réponse part du compte de sa conversation, sous le nom de sa personne. Le protocole de l'extension ne change pas.
+- Chaque ligne de `teams.db` porte son compte (une table `accounts` remplace `meta`) ; une conversation se désigne par (compte, identifiant) — `<compte>~<id>` dans la console ; une référence de message est unique entre les comptes. **La reprise** : ce qui existait devient le compte `principal`, à toi, l'ancienne clé unique est la sienne et la configuration d'avant sa voix ; une référence déjà au journal reste valable.
+- **Elle s'en sert avec son propriétaire** (`plugins/teams.accounts_here`, la règle de 0185) : les tiens là où sa famille d'outils le permet ; les siens quand elle travaille ; celui d'une personne avec elle seule, reconnue, en tête-à-tête ; une tâche, le compte de son message. Ses outils réservés sont offerts au propriétaire d'un compte (`owned`) et ne voient que les comptes visibles (`plugins/teams/accounts.Accounts`) ; ses sections de prompt filtrent de même.
+- Elle remarque les messages de tous les comptes (des signaux comme les autres) ; d'elle-même, elle ne prépare une réponse que dans les tiens et les siens. Dans son propre compte, elle écrit **en son nom** (`teams.voice.own`), pas à la place de quelqu'un, et le tri lit ses messages comme les siens (`teams.triage.intro_own`). Pour le compte d'une personne, la carte d'accord va à cette personne : c'est sous son nom que le message part ; un opérateur décide toujours aussi dans la console (comme le courrier, 0185). Le tableau du canal du compte (`teams:<clé>`) s'applique, et Réglages › Canaux le propose comme une boîte.
+- **Un compte se décoche** (« Actif », `TeamsAccount.enabled`, journalisé : `TeamsParams.accounts_off`) : la porte refuse son extension, rien n'arrive ni ne part, elle n'y prépare ni n'y propose rien ; ses conversations, ses réglages et sa clé restent. **Un compte supprimé** des réglages emporte ce que son extension avait apporté (`TeamsPort.drop_account` : ses conversations, ses messages, ses brouillons).
+- **La console** : chaque onglet de Teams commence par « Les comptes de » (`?qui=` : tout le monde, toi, elle par son nom, chaque personne qui a un compte Teams), puis le compte (`?compte=`) quand il y en a plusieurs ; Extension, un compte par ligne, ou le compte choisi avec sa clé et le pas-à-pas ; Réglages › Teams, « Actif » puis les comptes en cartes (à qui, clé, dernier envoi). La fiche d'une personne réunit ses comptes Teams à ses boîtes sous « Comptes » (sans boîte, « Teams » est un onglet à lui).
+
+*Pourquoi :* « un onglet Ses comptes email, son plugin Teams » ; « on puisse sélectionner l'utilisateur pour voir ses comptes » — et le choix d'un Teams par personne, chacune avec sa clé, plutôt qu'un seul Teams attribué.
+
+*Révise 0069 (en partie : un compte par personne), 0185 (Teams suit la même règle).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -1233,7 +1269,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* lire et répondre dans Teams sans les API de Microsoft, que l'organisation ne consentira pas.
 
-*Révisée par 0132.*
+*Révisée par 0132, 0186.*
 
 ### 0106 — Ce qu'on lui envoie : gardé, lu de près, relié à ce qu'elle sait
 
@@ -1995,7 +2031,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les blocs génériques rendaient tout pareil, et aucune page ne répondait à « comment va-t-elle, et pourquoi ? ».
 
-*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123, 0176, 0177.*
+*Révise 0025 (en partie), 0029 (en partie). Révisée par 0123, 0176, 0177, 0178, 0181.*
 
 ### 0122 — Régler ses outils, et ce qu'elle expose en MCP
 
@@ -2066,7 +2102,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* les réglages du courrier étaient loin du courrier, sous une autre mise en page et sans ses paramètres généraux ; ceux d'une boîte s'étalaient en grille de trois colonnes.
 
-*Révise 0029 (en partie). Révisée par 0174, 0175.*
+*Révise 0029 (en partie). Révisée par 0174, 0175, 0185.*
 
 ### 0174 — Le formulaire d'une boîte ne montre que ce qui sert, et suit ce qu'on tape
 
@@ -2120,7 +2156,72 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* la plupart des onglets restaient des blocs génériques (63 sur 79) : tous se ressemblaient, et aucun ne suivait les gabarits de l'ADR 0176.
 
-*Révise 0121 (en partie), 0176 (en partie).*
+*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180.*
+
+### 0178 — Le menu montre les groupes de pages
+
+- Le menu d'une rubrique montre ses groupes de pages : une destination à onglets y est une colonne, son nom et sa ligne d'explication, puis ses onglets ; une page sans onglets n'a que son nom, et les pages seules qui se suivent partagent une colonne. Le menu ne nomme plus, à plat, les onglets d'une destination à côté d'une autre destination donnée en un seul lien.
+- Les onglets d'une colonne sont ceux de la barre de sa page, lus au même endroit (`UI.tab_bar`) : `app/console_menu.py` ne nomme que la destination, et une vue ajoutée par une faculté y paraît d'elle-même. Une rubrique qui n'est qu'une destination (« À valider », « Système ») nomme ses pages une à une ; « Réglages » reste un choix de raccourcis.
+- La page courante allume sa destination et son onglet ; une fiche n'allume un onglet que si l'on vient d'une liste. Les compteurs sont sur les onglets. « Aller à… » trouve chaque onglet, sous le nom de sa page.
+- Moins de 1320 px de large : trois colonnes par rangée ; dans le panneau d'un écran étroit, les colonnes l'une sous l'autre, les onglets deux par rangée.
+
+*Pourquoi :* le menu de sa rubrique mettait sur le même rang les sept onglets d'« Humeur et corps », les quatre de « Pensées et nuits » et « Mémoire » seule, qui en a huit : on ne voyait ni quelles pages vont ensemble, ni qu'il y avait d'autres onglets derrière une entrée.
+
+*Révise 0121 (en partie), 0177 (en partie).*
+
+### 0179 — La fiche d'une personne réunit ses fichiers : reçus et envoyés
+
+- L'onglet **Fichiers** de la fiche d'une personne montre ce qu'on lui a envoyé et ce qu'elle a envoyé, en deux sous-onglets : les pièces reçues d'abord (leur place, puis chaque pièce et ce qu'elle y a lu, ADR 0106), les fichiers envoyés ensuite (ADR 0062). L'onglet « Pièces reçues » quitte la barre ; son adresse (`?onglet=pieces`) mène à Fichiers, ouvert sur elles (`#pieces`). Mémoire › Pièces reçues et Place des pièces ne changent pas.
+- Les deux restent des vues de leur faculté (`shares`, `attachments`), qui ne se connaissent pas : c'est la composition qui les réunit (`Overview.joined`, un onglet → ceux qu'il porte). La console exécute chaque vue et les passe à l'onglet dessiné en une `Section` chacune, la sienne d'abord ; leurs filtres restent ceux de l'onglet qui porte, et une forme qui ne se reconnaît pas retombe sur ces sections.
+- Deux listes sur une page ont chacune leur pagination (`page_recues`, `page_envoyes`) ; une page plus loin rouvre son sous-onglet.
+
+*Pourquoi :* deux onglets voisins pour une seule question (« quels fichiers entre elles ? »), l'un lu de son côté, l'autre du sien.
+
+*Révisée par 0182.*
+
+### 0180 — Les identités à confirmer et les noms à relier ne se décident que dans « À valider »
+
+- Identités perd ses onglets **Identités à confirmer** et **Noms à relier** : il garde Moyens de communication et Règles de divulgation. Ces deux demandes ne se décident plus que dans la file « À valider », sous ses onglets du même nom.
+- Les anciennes adresses (`/inspecteur/identites/revendications`, `/inspecteur/identites/noms`) mènent à la file (`approbations/identites`, `approbations/noms`), la requête avec elles. Le bandeau et la bande de chiffres de Moyens de communication y mènent aussi, et les actions d'une revendication y ramènent.
+- Les deux vues de la faculté restent : la file les lit (ses entrées, son compte), la console en MCP les sert par leur nom. Elles sont hors de la navigation (`hidden`), et une destination ne fait plus d'onglet d'une vue cachée (`Inspection.in_section`) ; leur badge garde sa place, la destination d'Identités.
+
+*Pourquoi :* la même demande se lisait à deux endroits, sous deux formes (une liste dans Identités, la liseuse de la file), et l'opératrice se demandait lequel faisait foi.
+
+*Révise 0177 (en partie : Identités ne montre plus ses files).*
+
+### 0181 — Conversations s'ouvre sur les personnes, et chaque conversation est sur sa fiche
+
+- Le premier onglet de Conversations est **Par personne** (`transcript`, vue `conversations`) : une ligne par personne avec qui elle parle, ses moyens de communication réunis (`identity.PERSON`), la conversation la plus récente d'abord. Elle dit par où, le dernier message et s'il est d'elle, combien de messages, les questions qui attendent sa réponse ; elle mène à l'onglet Échanges de sa fiche, ou au fil du moyen de communication d'une inconnue de passage. La vue se pagine elle-même (vingt-cinq par page), se filtre par nom ou moyen de communication (`handle`, un moyen nommé tel quel d'abord) et laisse de côté ses adresses internes. Un mot cherché (`q`) ne garde que les conversations où il a été dit, chacune montrant le dernier message qui le contient : c'est là que mène la recherche de la console (« Dans les textes »), qui ne propose plus une vue cachée.
+- Dessinée comme Teams › Conversations : l'avatar prend la couleur de ce qu'elle ressent envers la personne et dit sa présence, comme sur Personnes.
+- Le fil de tous les messages, toutes personnes mêlées, n'est plus une page de la console. La vue `messages` reste cachée (`hidden`) pour la console en MCP. Son adresse (`fil/messages`) mène à Par personne, son filtre gardé, et « Leur conversation » d'une demande à valider mène à la fiche de la personne.
+- L'onglet Échanges d'une fiche (et le fil d'un moyen de communication) se lit les plus récents en premier, comme les pages de la faculté : la journée la plus récente en haut, et dans la journée le dernier message d'abord.
+
+*Pourquoi :* toutes les conversations entremêlées dans un seul fil ne se suivaient plus dès qu'il y avait du monde. Une réponse tombait entre les messages de deux autres personnes, une page ne couvrait plus que quelques heures, et rien ne disait avec qui elle parle ni qui attend.
+
+*Révise 0121 (en partie : la page d'entrée de Conversations, l'ordre des échanges).*
+
+### 0182 — Mémoire › Pièces reçues dit aussi la place de chacun
+
+- Pièces reçues et Place des pièces ne font plus qu'un onglet de la Mémoire : la place en chiffres en tête (celle de chacun, en tout), puis deux sous-onglets, les pièces et la place par personne (une jauge chacune, vers ses pièces). L'onglet « Place des pièces » disparaît ; son adresse (`/inspecteur/memoire/place`) mène à Pièces reçues, ouvert sur la place (`#pieces-place`).
+- Une seule faculté (`attachments`) : sa vue `recues` rend les deux listes, chacune avec sa pagination (`page`, `page_personnes`) ; une page plus loin rouvre son sous-onglet. Ses filtres (chercher, la sorte) ne portent que sur les pièces.
+- Une ancienne adresse d'onglet peut mener à un sous-onglet : sa cible (`MOVED_TABS`) porte une ancre, posée après la requête.
+
+*Pourquoi :* la place que prennent les pièces ne se lit qu'avec elles ; deux onglets voisins pour une même chose, comme les fichiers de la fiche d'une personne (ADR 0179).
+
+*Révise 0179 (en partie : Mémoire › Pièces reçues et Place des pièces changent).*
+
+### 0183 — Le dépôt git d'un projet face à son distant, issues et pull requests comprises
+
+- L'onglet Dépôt git d'un projet est dessiné (`app/handmade/project_git.py`) : l'atelier et son dépôt distant face à face, l'écart entre eux (à pousser, à récupérer) et les gestes qui le comblent — « Pousser maintenant », « Récupérer » (les actions d'avant, avec leur accord) et « Relire » (une lecture neuve du distant) ; puis, en sous-onglets, l'historique de l'atelier (ceux qui restent à pousser marqués), ce qui n'est pas enregistré, l'histoire du distant (ceux à récupérer marqués), ses issues et pull requests ouvertes, les échanges passés et les réglages du distant.
+- Un nouveau port, `repo_host` (`ports/workshop.RepoHost`), lit l'hôte d'un dépôt distant pour la console : la tête de la branche et ses derniers commits, les issues et pull requests ouvertes. Seul GitHub se lit (`adapters/workshop/github.py`, son API) ; pour un autre hôte, pousser et récupérer marchent comme avant, et la page le dit.
+- L'écart se compte dans l'atelier quand il connaît la tête du distant (`Workshop.compare`, `git rev-list --left-right`) ; sinon l'hôte compare le dernier commit de l'atelier à sa tête. S'il ne connaît pas ce commit, ou s'il ne répond pas, l'écart est inconnu et la page ne montre pas de chiffres.
+- Le jeton est celui des dépôts git. Il ne part à `api.github.com` que si `github.com` est parmi ses hôtes autorisés ; sans lui, un dépôt public se lit quand même. Ni redirection suivie ni réponse de plus de 2 Mo ; un délai de six secondes ; les liens montrés sont composés à partir du dépôt et d'un numéro, jamais repris de la réponse.
+- Une lecture se garde deux minutes (une erreur, trente secondes). « Relire » la refait, pas plus d'une fois par dix secondes, et un envoi ou une récupération postérieurs aussi (`since`).
+- Rien de ce que GitHub dit n'entre au journal ni dans ce qu'elle lit : c'est une vue de l'opératrice, pas un fait de sa vie. La vue `git` de la faculté porte ces blocs (la console en MCP, le repli) ; l'aperçu de la console a un hôte de démonstration (`app/apercu_git.py`), et les tests un GitHub hors ligne (`tests/conftest.py`).
+
+*Pourquoi :* l'onglet ne montrait que l'atelier. Pour savoir s'il fallait pousser, si le distant avait bougé, ou ce qui attendait sur GitHub (une issue, une pull request), il fallait aller voir ailleurs.
+
+*Révise 0177 (en partie : l'onglet Dépôt git est dessiné).*
 
 ## Ce que les sondes et les audits ont fixé
 

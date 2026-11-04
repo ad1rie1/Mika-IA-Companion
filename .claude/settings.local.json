@@ -61,7 +61,8 @@
       "ClaudeInChromeDomain(192.168.1.27)",
       "ClaudeInChromeDomain(localhost:8011)",
       "mcp__claude-in-chrome__tabs_create_mcp",
-      "ClaudeInChromeDomain(127.0.0.1:8766)"
+      "ClaudeInChromeDomain(127.0.0.1:8766)",
+      "mcp__claude-in-chrome__browser_batch"
     ]
   }
 }

@@ -53,7 +53,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "51"
+ASSET_VERSION = "52"
 
 log = logging.getLogger("mika.console")
 

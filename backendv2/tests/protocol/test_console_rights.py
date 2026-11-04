@@ -51,10 +51,11 @@ def test_the_rights_page_and_a_projects_access_tab(world):  # noqa: F811
     tab = html_of(client.get(f"/inspecteur/fiche/project/{pid}", params={"onglet": "acces"}))
     assert "Accès au projet" in tab and "+ Ajouter un accès" in tab and "Jamais réglés" in tab
     assert 'name="qui.1|proprietaire" checked' in tab and 'name="canal.2|interne" checked' in tab
+    assert 'name="qui.2|elle" checked' in tab  # elle seule : elle, cochée par son nom (ADR 0184), plus un « qui » caché
     assert 'name="fichiers.1" checked' in tab and "Par où" in tab
     shown = {"qui.1|proprietaire": "on", "toujours.1": "on", "voir.1": "on", "piloter.1": "modification",
              "fichiers.1": "on", "lecture.1": "seule", "action.1": "seule", "tous.1": "on",
-             "canal.2|interne": "on", "voir.2": "on", "piloter.2": "modification", "fichiers.2": "on",
+             "qui.2|elle": "on", "canal.2|interne": "on", "voir.2": "on", "piloter.2": "modification", "fichiers.2": "on",
              "lecture.2": "seule", "action.2": "seule", "tous.2": "on",
              "defaut_piloter": "non", "defaut_lecture": "non", "defaut_action": "non"}
     added = submit(client, tab, "projects.acces", faire="ajouter", **shown)

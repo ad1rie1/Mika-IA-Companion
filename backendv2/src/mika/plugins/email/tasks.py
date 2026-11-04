@@ -19,6 +19,7 @@ from mika.kernel.clock import DAY
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.plugins.email import EMAIL, WAITING, EmailState, account_of, keeper_name, keepers, params_of
+from mika.vocab.access import SELF
 from mika.vocab.canals import mail_rule
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
@@ -58,6 +59,8 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
         if seen is None or not m.needs_reply or m.mail in s.asked or frame.now - m.at > p.draft_within_us:
             continue
         if account in p.boxes_off or not mail_rule(p.canaux, account, seen.address).prepare:
+            continue
+        if p.owners.get(account, "") not in ("", SELF):  # la boîte d'une personne : rien d'elle-même (ADR 0185)
             continue
         if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max:
             continue

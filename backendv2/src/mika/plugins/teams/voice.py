@@ -9,7 +9,10 @@
   ses réponses et ce qu'elles sont devenues ; pendant une tâche, le message et son fil. **Tout ce qui vient de Teams
   est cité** (un nom, un titre de groupe, un texte : les autres les ont choisis) — jamais dans une section de
   confiance.
-- **Pour qui** : ses propriétaires en privé, ou elle quand elle travaille ; un message Teams est personnel.
+- **Pour qui** : un compte sert à son propriétaire (ADR 0186, ``accounts_here``) — les tiens à toi en privé et à
+  elle quand elle travaille, les siens quand elle travaille, celui d'une personne à elle seule, en tête-à-tête.
+  L'enrichisseur calcule ces comptes une fois (``accounts``) ; chaque section n'en montre que ce qui leur appartient.
+  Un message Teams est personnel.
 
 Ses phrases sont dans ``persona/voix.yaml`` (``teams.voice``, ``teams.messages``, ``teams.drafts``, ``teams.task``,
 ``teams.ask``).
@@ -36,15 +39,17 @@ from mika.plugins.teams import (
     UNUSED,
     WAITING,
     TeamsState,
-    for_owner,
+    accounts_here,
     keeper_name,
-    keepers,
     mode_of,
+    owner_of,
     params_of,
     task_message,
+    writer_of,
 )
 from mika.ports.preprocess import inert
-from mika.ports.teams import Voice
+from mika.ports.teams import Voice, conversation_key
+from mika.vocab.access import SELF
 from mika.vocab.canals import teams_rule
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import family, phrase
@@ -71,12 +76,16 @@ def where_of(kind: str) -> str:
     return places.get(kind) or places["other"]
 
 
-def voice_text(voice: Voice, mode: str) -> str:
-    """Comment écrire dans Teams : à la place de la personne, son ton, ses consignes, la signature."""
+def voice_text(voice: Voice, mode: str, *, own: bool = False) -> str:
+    """Comment écrire dans Teams : à la place de la personne — ou en son nom, dans son propre compte (``own``, ADR
+    0186) —, son ton, ses consignes, la signature."""
     # le nom réglé par un opérateur, ou à défaut celui que Teams donne (apporté par l'extension) : inerte
     name = inert(voice.display_name, 60) or KEEPER
-    fill = phrase("teams.voice.fill_draft", name=name) if mode == "brouillon" else phrase("teams.voice.fill_send")
-    lines = [phrase("teams.voice.head", name=name, fill=fill)]
+    if own:
+        lines = [phrase("teams.voice.own")]
+    else:
+        fill = phrase("teams.voice.fill_draft", name=name) if mode == "brouillon" else phrase("teams.voice.fill_send")
+        lines = [phrase("teams.voice.head", name=name, fill=fill)]
     if voice.tone.strip():
         lines.append(phrase("teams.voice.tone", tone=voice.tone.strip()[:VOICE_MAX]))
     if voice.instructions.strip():
@@ -86,47 +95,57 @@ def voice_text(voice: Voice, mode: str) -> str:
     return "\n".join(lines)
 
 
-def _recent(s: TeamsState, frame: Frame) -> list[tuple[str, Any]]:
+def _recent(s: TeamsState, frame: Frame, accounts: Any = None) -> list[tuple[str, Any]]:
     """Les messages qui comptent, reçus depuis peu et sans réponse : ceux qui attendent une réponse ou qui sont
-    importants, les plus récents d'abord — en réponse comme ailleurs."""
+    importants, les plus récents d'abord — en réponse comme ailleurs ; de ces comptes (``None`` : de tous)."""
     p = params_of(frame)
     out = [(k, m) for k, m in s.messages.items() if not m.answered and frame.now - m.at <= p.shown_for_us
-           and (m.needs_reply or m.importance >= IMPORTANT)]
+           and (m.needs_reply or m.importance >= IMPORTANT) and (accounts is None or m.account in accounts)]
     return sorted(out, key=lambda kv: -kv[1].at)[:MESSAGES_SHOWN]
 
 
-def _outcomes(s: TeamsState, frame: Frame) -> list[Any]:
+def _outcomes(s: TeamsState, frame: Frame, accounts: Any = None) -> list[Any]:
     p = params_of(frame)
-    return sorted((d for d in s.drafts.values() if d.state in (WAITING, QUEUED, PLACED)
-                   or frame.now - (d.decided_at or d.at) <= p.shown_for_us), key=lambda d: -d.proposal)[:OUTCOMES_SHOWN]
+    return sorted((d for d in s.drafts.values() if (accounts is None or d.account in accounts)
+                   and (d.state in (WAITING, QUEUED, PLACED) or frame.now - (d.decided_at or d.at) <= p.shown_for_us)),
+                  key=lambda d: -d.proposal)[:OUTCOMES_SHOWN]
 
 
-def _pending_work(s: TeamsState, frame: Frame) -> bool:
-    """Elle a de quoi écrire : une demande qui n'a pas épuisé ses essais, une réponse qui attend un accord."""
+def _pending_work(s: TeamsState, frame: Frame, account: str) -> bool:
+    """Elle a de quoi écrire dans ce compte : une demande qui n'a pas épuisé ses essais, une réponse qui attend un
+    accord."""
     p = params_of(frame)
-    return any(s.attempts.get(ref, 0) < p.draft_attempts_max for ref in s.asked) \
-        or any(d.state == WAITING for d in s.drafts.values())
+    return any(a.account == account and s.attempts.get(ref, 0) < p.draft_attempts_max for ref, a in s.asked.items()) \
+        or any(d.account == account and d.state == WAITING for d in s.drafts.values())
 
 
 @TEAMS.enricher("teams", episodes=ALL, deadline_ms=500)
 async def _gather(s: TeamsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Ce que ses sections lisent de Teams, réduit aux comptes dont elle peut se servir ici (``accounts``, ADR 0186) :
+    ce qui est dans un autre n'est ni lu ni montré."""
     store, port = ports.get("store"), ports.get("teams")
-    if store is None or port is None or not for_owner(frame):
+    accounts = accounts_here(frame, [a.key for a in port.accounts()], port) if port is not None else ()
+    if store is None or port is None or not accounts:
         return None
-    refs = [m.summary_ref for _, m in _recent(s, frame) if m.summary_ref]
-    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref]
+    refs = [m.summary_ref for _, m in _recent(s, frame, accounts) if m.summary_ref]
+    refs += [d.note_ref for d in _outcomes(s, frame, accounts) if d.note_ref]
     ref = task_message(frame)
     ask = s.asked.get(ref) if ref else None
-    if ask is not None and ask.instruction_ref:
+    if ask is not None and ask.account in accounts and ask.instruction_ref:
         refs.append(ask.instruction_ref)
-    out: dict[str, Any] = {"texts": store.content(refs) if refs else {}, "voice": port.voice(), "task": None,
+    # sa voix : celle du compte de sa tâche, sinon du premier compte où elle a de quoi écrire
+    m = port.message(ref) if ref else None
+    if m is not None and m.account not in accounts:
+        m = None
+    voiced = m.account if m is not None else next((a for a in accounts if _pending_work(s, frame, a)), "")
+    out: dict[str, Any] = {"texts": store.content(refs) if refs else {}, "accounts": accounts,
+                           "voice": port.voice(voiced) if voiced else None, "voiced": voiced, "task": None,
                            "titles": {}}
-    for d in _outcomes(s, frame):
-        out["titles"][d.conversation] = port.title(d.conversation)
-    if ref:
-        m = port.message(ref)
-        if m is not None:
-            out["task"] = (m, port.thread(m.conversation, THREAD_SHOWN, before=m.at + 1), port.title(m.conversation))
+    for d in _outcomes(s, frame, accounts):
+        out["titles"][conversation_key(d.account, d.conversation)] = port.title(d.account, d.conversation)
+    if m is not None:
+        out["task"] = (m, port.thread(m.account, m.conversation, THREAD_SHOWN, before=m.at + 1),
+                       port.title(m.account, m.conversation))
     return out
 
 
@@ -134,19 +153,21 @@ async def _gather(s: TeamsState, frame: Frame, ports: Mapping[str, Any]) -> dict
                title=phrase("teams.messages.title"), untrusted=True)
 def _messages(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
-    texts = got.get("texts") or {}
-    if not texts or not for_owner(frame):
+    texts, accounts = got.get("texts") or {}, got.get("accounts") or ()
+    if not texts or not accounts:
         return None
     lines = []
-    for ref, m in _recent(s, frame):
+    for ref, m in _recent(s, frame, accounts):
         text = texts.get(m.summary_ref)
         if text:
             flag = phrase("teams.messages.needs_reply") if m.needs_reply else ""
             lines.append(f"[{ref}]{flag} {inert(text)}")
     if not lines:
         return None
+    # à qui sont ces messages : la personne de chaque compte qu'ils viennent
+    who = " et ".join(dict.fromkeys(writer_of(frame, m.account) for _, m in _recent(s, frame, accounts)))
     return SectionBody("\n".join(lines), level=LEVEL, witness=True,
-                       title=phrase("teams.messages.title_of", who=keepers(frame)))
+                       title=phrase("teams.messages.title_of", who=who))
 
 
 def _draft_line(d: Any, what: str, who: str, frame: Frame, texts: Mapping[str, str]) -> str:
@@ -177,14 +198,14 @@ def _draft_line(d: Any, what: str, who: str, frame: Frame, texts: Mapping[str, s
                untrusted=True)
 def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
-    titles, texts = got.get("titles") or {}, got.get("texts") or {}
-    if not for_owner(frame):
+    titles, texts, accounts = got.get("titles") or {}, got.get("texts") or {}, got.get("accounts") or ()
+    if not accounts:
         return None
-    who = keepers(frame)
     lines = []
-    for d in _outcomes(s, frame):
-        title = inert(titles.get(d.conversation, ""), 80) or phrase("teams.drafts.a_conversation")
-        line = _draft_line(d, phrase("teams.drafts.what", title=title), who, frame, texts)
+    for d in _outcomes(s, frame, accounts):
+        title = inert(titles.get(conversation_key(d.account, d.conversation), ""), 80) \
+            or phrase("teams.drafts.a_conversation")
+        line = _draft_line(d, phrase("teams.drafts.what", title=title), writer_of(frame, d.account), frame, texts)
         if line:
             lines.append(line)
     return SectionBody("\n".join(lines), level=LEVEL, witness=True) if lines else None
@@ -193,15 +214,15 @@ def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
 @TEAMS.section("teams_voice", zone=Zone.VOLATILE, episodes=ALL, trim_rank=60, title=phrase("teams.voice.title"))
 def _voice(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
-    voice = got.get("voice")
+    voice, account = got.get("voice"), got.get("voiced") or ""
     task = task_message(frame)
-    if voice is None or not for_owner(frame) or not (task or _pending_work(s, frame)):
+    if voice is None or not account or not (task or _pending_work(s, frame, account)):
         return None
     p = params_of(frame)
     seen = s.messages.get(task) if task else None
-    mode = mode_of(p, s, task, seen.conversation) if seen is not None else MODE_OF.get(
-        teams_rule(p.canaux, "", "").reply, "")
-    return SectionBody(voice_text(voice, mode))
+    mode = mode_of(p, s, task, seen.conversation, seen.account) if seen is not None else MODE_OF.get(
+        teams_rule(p.canaux, account, "").reply, "")
+    return SectionBody(voice_text(voice, mode, own=owner_of(frame, account) == SELF))
 
 
 @TEAMS.section("teams_task", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=90, floor_chars=TASK_FLOOR,
@@ -229,7 +250,7 @@ def _task(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
 def _ask(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     ref = task_message(frame)
     ask = s.asked.get(ref) if ref else None
-    if ask is None:
+    if ask is None or ask.account not in ((enrich.get("teams") or {}).get("accounts") or ()):
         return None
     text = ((enrich.get("teams") or {}).get("texts") or {}).get(ask.instruction_ref, "") if ask.instruction_ref \
         else ""

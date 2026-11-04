@@ -1,8 +1,8 @@
 """Activité › Projets, chaque onglet dans sa forme (``app/handmade/tabs/projects.py``, ADR 0177), à travers le vrai
 serveur : une rangée par projet (où il en est, ses objectifs, sa prochaine exécution ; « Créer un projet » dans la
 barre de titre), ses exécutions jour par jour (verdict, preuve, compte rendu, commit), ses décisions techniques
-rangées par projet (ce qui est choisi, pourquoi), les objectifs d'un projet (en clair, leurs boutons sur leur ligne)
-— et ce qu'ils disent, vides."""
+rangées par projet (ce qui est choisi, pourquoi), les objectifs et les décisions d'un projet (en clair, leurs
+boutons sur leur ligne) — et ce qu'ils disent, vides."""
 
 from __future__ import annotations
 
@@ -66,17 +66,46 @@ def test_each_objective_reads_in_clear_with_its_buttons_on_its_line(world):  # n
                                                  summary=Content.of(said, level=0))], "projects")
     page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=objectifs")
     assert 'data-tab="project/objectifs"' in page and "Ponctuels faits" in page  # dessiné, ses chiffres en tête
-    items = page.split('class="prj-obj-item')[1:]
+    items = page.split('<li class="prj-entry')[1:]
     assert len(items) == 3 and "Garder les tests verts" in items[0]  # le constant d'abord, comme la faculté les range
     item = next(x.split("</li>")[0] for x in items if "Recouper les dates" in x)
     assert "ponctuel" in item and "ouvert" in item and "posé par toi" in item
-    assert 'class="prj-obj-quote long"' in item and said.strip() in item and "lire la suite" in item  # en clair
-    actions = item.split('class="toolbar prj-obj-actions"')[1]
+    assert 'class="prj-said-text long"' in item and said.strip() in item and "lire la suite" in item  # en clair
+    actions = item.split('class="toolbar prj-entry-actions"')[1]
     seen, more = actions.split('class="action-overflow"')
     assert "Lancer maintenant" in seen and "Marquer fait" in seen and "Modifier l'objectif" in seen
     assert "Retirer" in more and "Retirer" not in seen  # le reste sous « ⋯ »
-    add = page.split('class="now-card prj-obj-add"')[1]
+    add = page.split('class="now-card prj-side"')[1]
     assert "Ajouter un objectif" in add and 'name="text"' in add  # le formulaire, à côté de la liste
+
+
+def _decide(client, kernel, pid: int, nonce: str, **values: str) -> None:
+    """Une décision consignée comme un opérateur le ferait (l'action de l'onglet)."""
+    fields = {"title": "", "choice": "", "reason": "", "context": "", "options": "", "replaces": "0", **values}
+    got = client.portal.call(lambda: perform(kernel, "projects.decision_ajouter", {
+        "_champs": list(fields), **{k: [v] for k, v in fields.items()}}, by="user_1", subject=str(pid), nonce=nonce))
+    assert got.ok, got
+
+
+def test_each_decision_reads_like_an_adr_with_its_buttons_on_its_line(world):  # noqa: F811
+    client, live, _ = world
+    kernel = _life(client, live)
+    pid = _create(client, kernel, "Carnet du ciel", "Recouper les dates")
+    _decide(client, kernel, pid, "d1", title="Les sources des dates", choice="Une seule source", reason="plus simple")
+    _decide(client, kernel, pid, "d2", title="Les sources des dates", choice="L'IMO et un magazine d'astronomie",
+            reason="Deux sources se recoupent.", context="Une date fausse dans le carnet.", replaces="1")
+    page = drawn(client, f"/inspecteur/fiche/project/{pid}?onglet=decisions&statut=toutes")
+    assert 'data-tab="project/decisions"' in page and "Elle relit celles en vigueur" in page
+    live_one, old = (x.split("</li>")[0] for x in page.split('<li class="prj-entry')[1:])
+    assert "L'IMO et un magazine d'astronomie" in live_one and "en vigueur" in live_one  # la plus récente d'abord
+    assert "Deux sources se recoupent." in live_one.split('class="prj-said-label">Pourquoi')[1]  # en clair
+    assert "Une date fausse dans le carnet." in live_one.split('class="hm-subfold prj-entry-more"')[1]  # replié
+    assert "posée par toi" in live_one and "remplace D1" in live_one
+    actions = live_one.split('class="toolbar prj-entry-actions"')[1]
+    assert "Retirer" in actions and "Remplacer cette décision" in actions  # sur sa ligne
+    assert old.startswith(' faded"') and "remplacée par D2" in old and "prj-entry-actions" not in old
+    add = page.split('class="now-card prj-side"')[1]
+    assert "Consigner une décision" in add and 'name="choice"' in add  # le formulaire, à côté de la liste
 
 
 def test_runs_read_day_by_day_with_their_verdict_proof_and_commit(world):  # noqa: F811

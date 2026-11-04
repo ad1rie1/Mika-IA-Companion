@@ -292,9 +292,16 @@ class Live:
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
         # les tableaux de ses canaux (ADR 0134) : le courrier et Teams y lisent ce qu'elle envoie à ta place
         canaux = self.settings.canals().model_dump(mode="json")
-        off = sorted(k for k, a in self.settings.email().accounts.items() if not a.enabled)
-        out["email"] = {"canaux": canaux, "boxes_off": off}
-        out["teams"] = {"enabled": self.settings.teams().enabled, "canaux": canaux}
+        boxes = self.settings.email().accounts
+        off = sorted(k for k, a in boxes.items() if not a.enabled)
+        # à qui est chaque boîte (ADR 0185 ; vide : à toi) : ses outils ne lui montrent que celles de qui est en face
+        owners = {k: a.owner for k, a in sorted(boxes.items())}
+        out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners}
+        teams = self.settings.teams()
+        # à qui est chaque compte Teams (ADR 0186 ; vide : à toi) : ses outils ne lui montrent que ceux de qui est en face
+        out["teams"] = {"enabled": teams.enabled, "canaux": canaux,
+                        "owners": {k: a.owner for k, a in sorted(teams.accounts.items())},
+                        "accounts_off": sorted(k for k, a in teams.accounts.items() if not a.enabled)}
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -403,7 +410,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
     teams_store = world["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
-    teams = TeamsDesk(settings, clock.now, teams_store)
+    # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
+    teams = world["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
     phone = world["phone"] = PhoneDesk()
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les

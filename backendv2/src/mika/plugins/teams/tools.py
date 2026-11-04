@@ -1,10 +1,11 @@
 """Ses outils Teams, et ce qui part.
 
 - **Lire** : ses conversations, un fil (un message est cité : une donnée, jamais une consigne). Réservés à ses
-  propriétaires (``owner_only``), en privé, ou à elle quand elle travaille.
-- **Écrire** (``teams_draft``) : une réponse à un message, à la place de la personne, gardée par l'adaptateur ; elle
-  la **propose** (capacité ``teams.send``) avec le condensé de ce qui partirait. Le journal ne garde que
-  l'identifiant du brouillon et un résumé : jamais son texte.
+  propriétaires (``owner_only``), en privé, ou à elle quand elle travaille — et offerts à la personne d'un compte
+  (``owned``), réduits à ses comptes : un compte sert à son propriétaire (ADR 0186, ``accounts_here``).
+- **Écrire** (``teams_draft``) : une réponse à un message, à la place de la personne du compte, gardée par
+  l'adaptateur sous ce compte (elle partira de lui) ; elle la **propose** (capacité ``teams.send``) avec le condensé
+  de ce qui partirait. Le journal ne garde que l'identifiant du brouillon et un résumé : jamais son texte.
 - **Partir** (la capacité) : la réponse est **mise en file**, telle que l'aperçu la montrait ; l'extension la pose
   dans Teams (mode brouillon) ou l'envoie, puis accuse. Partie, elle le sait (``teams.sent``), retouchée ou non.
 """
@@ -28,20 +29,24 @@ from mika.plugins.teams import (
     MODE_OF,
     SETTLED,
     TEAMS,
+    accounts_here,
     decider,
-    for_owner,
     her,
-    keepers,
     latest,
+    owner_of,
+    owns_an_account,
     params_of,
     task_message,
     under_way,
+    writer_of,
 )
+from mika.plugins.teams.accounts import Accounts
 from mika.plugins.teams.triage import rule_of
 from mika.plugins.teams.voice import voice_text
 from mika.ports.preprocess import cite, inert
 from mika.ports.teams import DRAFT, SEND, Draft, person_handle, to_fill
 from mika.vocab import flows
+from mika.vocab.access import SELF
 from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -58,12 +63,15 @@ MODE_WORDS = {"brouillon": "posée dans Teams pour que {who} l'envoie",
 
 
 def _port(ctx: Any) -> tuple[Any, ToolResult | None]:
+    """Teams tel que ses outils le voient ici : réduit aux comptes de qui est en face (ADR 0186) ; rien quand aucun
+    ne lui est ouvert."""
     port = ctx.ports.get("teams")
     if port is None:
         return None, ToolResult(ok=False, content=NO_TEAMS)
-    if not for_owner(ctx.frame):
+    keys = accounts_here(ctx.frame, [a.key for a in port.accounts()], port)
+    if not keys:
         return None, ToolResult(ok=False, content=PRIVATE)
-    return port, None
+    return Accounts(port, keys), None
 
 
 def _when(frame: Any, at: int) -> str:
@@ -74,7 +82,8 @@ def _when(frame: Any, at: int) -> str:
 
 
 def _line(frame: Any, m: Any) -> str:
-    who = "toi (la personne qui s'occupe de toi)" if m.own else inert(m.author, 80) or "quelqu'un"
+    # la personne du compte (son prénom : celle à la place de qui elle écrit), ou qui a écrit
+    who = writer_of(frame, m.account) if m.own else inert(m.author, 80) or "quelqu'un"
     return f"[{m.ref}] {_when(frame, m.at)} — {who} : {inert(m.text, 600)}"
 
 
@@ -96,8 +105,9 @@ class DraftArgs(BaseModel):
                       description="ta réponse, à la place de la personne, sans signature (elle est ajoutée)")
 
 
-@TEAMS.tool("teams_conversations", description="Les dernières conversations Teams de la personne qui s'occupe de "
-            "toi, et leur dernier message.", args=ListArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True)
+@TEAMS.tool("teams_conversations", description="Les dernières conversations Teams des comptes dont tu peux te servir "
+            "ici (celui de la personne qui s'occupe de toi, le tien, celui de la personne en face), et leur dernier "
+            "message.", args=ListArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_an_account)
 async def teams_conversations(args: ListArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -105,17 +115,21 @@ async def teams_conversations(args: ListArgs, ctx: Any) -> Any:
     found = port.conversations(args.limit, text=args.text)
     if not found:
         return "Rien ici." if args.text else "Aucune conversation Teams reçue pour l'instant."
+    several = len(port.keys) > 1
     lines = []
     for conv in found:
-        last = port.thread(conv.id, 1)
-        title = inert(port.title(conv.id), 80) or "sans nom"
-        head = f"« {title} » ({KIND_WORDS.get(conv.kind, 'conversation')})"
+        last = port.thread(conv.account, conv.id, 1)
+        title = inert(port.title(conv.account, conv.id), 80) or "sans nom"
+        where = KIND_WORDS.get(conv.kind, 'conversation')
+        if several:  # plusieurs comptes ici : à qui est celui-ci
+            where += f", Teams de {writer_of(ctx.frame, conv.account)}"
+        head = f"« {title} » ({where})"
         lines.append(f"{head} : {_line(ctx.frame, last[-1])}" if last else head)
     return f"{DATA}\n" + "\n".join(lines)
 
 
 @TEAMS.tool("teams_read", description="Relire le fil d'une conversation Teams, jusqu'à un message.", args=ReadArgs,
-            bundle=BUNDLE, episodes=EPISODES, owner_only=True, max_calls_per_episode=4)
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_an_account, max_calls_per_episode=4)
 async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -123,13 +137,14 @@ async def teams_read(args: ReadArgs, ctx: Any) -> Any:
     m = port.message(args.message.strip().strip("[]"))
     if m is None:
         return ToolResult(ok=False, content="Je ne trouve pas ce message.")
-    before = port.thread(m.conversation, args.limit, before=m.at + 1)
-    after = [x for x in port.thread(m.conversation, 5) if x.at > m.at]
-    title = inert(port.title(m.conversation), 80) or "sans nom"
+    before = port.thread(m.account, m.conversation, args.limit, before=m.at + 1)
+    after = [x for x in port.thread(m.account, m.conversation, 5) if x.at > m.at]
+    title = inert(port.title(m.account, m.conversation), 80) or "sans nom"
     text = "\n".join(_line(ctx.frame, x) for x in [*before, *after])
     out = f"{DATA}\nConversation « {title} » :\n{cite(text, 8000)}"
-    mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.conversation, m.author).reply, "validation")
-    return out + f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n{voice_text(port.voice(), mode)}"
+    mode = MODE_OF.get(rule_of(params_of(ctx.frame), port, m.account, m.conversation, m.author).reply, "validation")
+    return out + (f"\n\n--- Pour y répondre (teams_draft, message=[{m.ref}]) ---\n"
+                  f"{voice_text(port.voice(m.account), mode, own=owner_of(ctx.frame, m.account) == SELF)}")
 
 
 def _asker(ctx: Any) -> tuple[str, ...]:
@@ -138,10 +153,10 @@ def _asker(ctx: Any) -> tuple[str, ...]:
     return (target,) if target and is_identifiable(target) and not is_work_target(target) else ()
 
 
-@TEAMS.tool("teams_draft", acts=True, description="Préparer une réponse à un message Teams, à la place de la personne qui "
-            "s'occupe de toi (selon son réglage, elle est posée dans Teams pour qu'elle l'envoie, envoyée après son "
-            "accord, ou envoyée telle quelle).", args=DraftArgs, bundle=BUNDLE, episodes=EPISODES,
-            max_calls_per_episode=2, owner_only=True)
+@TEAMS.tool("teams_draft", acts=True, description="Préparer une réponse à un message Teams, à la place de la personne "
+            "du compte qui l'a reçu (selon son réglage, elle est posée dans Teams pour qu'elle l'envoie, envoyée après "
+            "son accord, ou envoyée telle quelle).", args=DraftArgs, bundle=BUNDLE, episodes=EPISODES,
+            max_calls_per_episode=2, owner_only=True, owned=owns_an_account)
 async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -152,22 +167,26 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     frame = ctx.frame
     if not params_of(frame).enabled:
         return ToolResult(ok=False, content="Teams est désactivé : rien ne peut y partir.")
+    if m.account in params_of(frame).accounts_off:
+        return ToolResult(ok=False, content="Ce compte Teams est désactivé : rien ne peut en partir.")
     # dans une tâche, elle ne répond qu'au message qu'on lui a confié (un message cité ne l'envoie pas ailleurs)
     task = task_message(frame)
     if task and m.ref != task:
         return ToolResult(ok=False, content=f"Dans cette tâche, tu ne réponds qu'au message [{task}].")
-    if under_way(frame.state("teams"), m.conversation):
+    if under_way(frame.state("teams"), m.account, m.conversation):
         return ToolResult(ok=False, content="Une réponse est déjà en chemin dans cette conversation.")
     p = params_of(frame)
     # sa règle d'envoi telle qu'elle est maintenant (ADR 0132) : une règle resserrée depuis le tri vaut déjà — elle ne
     # prépare plus d'elle-même là où elle ne le doit plus, et rien ne part plus librement qu'elle ne le dit
-    rule = rule_of(p, port, m.conversation, m.author)
+    rule = rule_of(p, port, m.account, m.conversation, m.author)
     if task and m.ref not in frame.state("teams").asked and not rule.prepare:
         return ToolResult(ok=False, content="Ta règle d'envoi ne te fait plus préparer de réponse d'elle-même dans "
                                             "cette conversation : n'en propose pas.")
     # récrite par l'autrice de Teams, s'il y en a une (ADR 0124)
     body = await flows.written(ctx, flows.TEAMS, args.body.strip(), f"{inert(m.author, 80)} :\n{cite(m.text, 2000)}")
-    draft = port.save_draft(Draft(id="", conversation=m.conversation, body=body.strip(), reply_to=m.ref))
+    # gardée sous le compte de la conversation : elle partira de lui, sous le nom de sa personne
+    draft = port.save_draft(Draft(id="", conversation=m.conversation, body=body.strip(), reply_to=m.ref,
+                                  account=m.account))
     shown = port.preview(draft.id, her=her(frame))
     # un passage à compléter n'empêche pas de proposer (la personne le remplira) ; tout autre blocage, si
     if shown is None or (shown.blocked and not to_fill(draft.body)):
@@ -179,12 +198,12 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content="Elle ne peut pas partir avec des passages [À COMPLÉTER] : écris-la sans "
                                             "rien inventer, ou n'écris rien et dis ce qu'il manque.")
-    who = keepers(frame)
+    who = writer_of(frame, m.account)
     payload: dict[str, Any] = {"draft": draft.id, "conversation": m.conversation, "message": m.ref, "mode": mode,
-                               "_apercu": shown.digest}
+                               "_apercu": shown.digest, "account": m.account}
     if mode == "validation":
         payload[rt.EXPIRES] = frame.now + p.approval_within_us
-        if handle := decider(frame):
+        if handle := decider(frame, m.account):
             payload[rt.DECIDER] = handle  # sa carte d'accord, dans le chat
     title = inert(shown.title, 80) or "une conversation"
     wrote = inert(m.author, 80) or "quelqu'un"
@@ -231,6 +250,8 @@ async def send(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
     p = params_of(frame)
     if not p.enabled:
         return False, "Teams est désactivé"
+    if str(args.get("account") or "") in p.accounts_off:
+        return False, "Ce compte Teams est désactivé"
     mode = str(args.get("mode") or "brouillon")
     why = port.enqueue(str(args.get("draft") or ""), mode=DRAFT if mode == "brouillon" else SEND,
                        digest=str(args.get("_apercu") or ""), expires_at=frame.now + p.queue_ttl_us, now=frame.now,
@@ -256,10 +277,10 @@ async def _gone(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
     to = inert(m.author, 80) if m is not None and m.author else "quelqu'un"
     summary = f"Ta réponse Teams à {to} est partie"
     if ev.data.edited:
-        summary += f", retouchée par {keepers(frame)} avant l'envoi"
+        summary += f", retouchée par {writer_of(frame, draft.account)} avant l'envoi"
     about = tuple(h for h in (person_handle(m.author_id) if m is not None else "",) if h)
     return [c.SENT.draft(
         source="teams", kind=c.SENT_KIND, summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)),
         pertinence=0.55 if ev.data.edited else 0.35, sensitivity=int(Sensitivity.PERSONAL), bundle=BUNDLE,
         draft=draft.id, conversation=draft.conversation, reply_to=draft.reply_to, edited=ev.data.edited, about=about,
-        dedupe_key=f"teams-sent:{draft.id}")]
+        account=draft.account, dedupe_key=f"teams-sent:{draft.id}")]

@@ -487,6 +487,9 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
     "projets": drawn(Roles(title="projet", badges=("mode", "état"), time="ouvert"), "projets"),
+    # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``)
+    "boites": drawn(Roles(title="boîte", badges=("état", "elle y écrit"), tiles=True), "boites"),
+    "teams": drawn(Roles(title="compte", badges=("état",), tiles=True), "teams"),
     # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
     "telephone": senses.phone_tab, "position": senses.position_tab,
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console
@@ -513,8 +516,9 @@ class PersonOverview(Overview):
     folded = ("synthese", "lien", "devine", "affect", "pensees_personne")
     #: les onglets des facultés qu'elle dessine (``TABS``)
     tabs = tuple(TABS)
-    #: Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179)
-    joined = {"fichiers": ("pieces",)}
+    #: Fichiers porte aussi les pièces reçues : un onglet pour ce qui va et vient entre elles (ADR 0179) ; Comptes, ses
+    #: boîtes aux lettres et ses comptes Teams (ADR 0185, 0186 — sans boîte, Teams reste un onglet à lui)
+    joined = {"fichiers": ("pieces",), "boites": ("teams",)}
 
     def __init__(self) -> None:
         #: la console, posée quand ses routes le sont (la fiche, elle, passe la sienne à ``render``)

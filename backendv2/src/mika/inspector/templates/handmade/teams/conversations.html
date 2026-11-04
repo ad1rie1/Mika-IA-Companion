@@ -3,10 +3,11 @@
    réunion), son nom, son dernier message et qui l'a écrit, l'heure, combien de messages ; les questions qui attendent
    une réponse et une réponse d'elle en chemin, dites. Une ligne s'ouvre sur le fil de la conversation (sa fiche).
    Sans extension branchée : ce que dit le plugin, et comment la brancher. La pagination et la bascule « Tableau »
-   sont celles du plugin. #}
+   sont celles du plugin ; en tête, « Les comptes de » et le choix d'un compte (ADR 0186). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/teams/_teams.html" as tm %}
 <div class="now-page teams-tab teams-convs" data-tab="teams/conversations">
+  {% for n in navs %}{{ tab.block(n) }}{% endfor %}
   {% if t %}
   <section class="now-card" id="{{ t.id }}" aria-labelledby="teams-convs-title">
     {{ tab.head("Ses conversations", "teams-convs-title", t.count, lede, list=t) }}
@@ -21,6 +22,7 @@
           <p class="teams-conv-foot">
             {% if c.questions %}{{ tab.cell(c.questions) }}{% endif %}
             {% if c.under_way %}<span class="now-tag info">une réponse d'elle en chemin</span>{% endif %}
+            {% if c.account and c.account != '—' %}<span class="now-muted">Teams · {{ c.account }}</span>{% endif %}
             <span class="now-muted">{{ c.count }} message{{ 's' if c.count not in ('0', '1') }}</span>
           </p>
         </div>

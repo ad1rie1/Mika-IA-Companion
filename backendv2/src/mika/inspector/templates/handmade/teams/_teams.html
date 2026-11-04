@@ -1,5 +1,6 @@
-{# Ce que partagent les onglets de Teams (app/handmade/tabs/teams.py, ADR 0177) : ce que dit le plugin quand il n'a
-   rien à montrer, et comment brancher l'extension, pas à pas (frontend/Extension/README.md). #}
+{# Ce que partagent les onglets de Teams (app/handmade/tabs/teams.py, ADR 0177) : le choix « Les comptes de » puis
+   d'un compte (ADR 0186, les puces de la faculté), ce que dit le plugin quand il n'a rien à montrer, et comment
+   brancher l'extension d'un compte, pas à pas (frontend/Extension/README.md). #}
 {% from "_cells.html" import cell %}
 
 {# un libellé, sa première lettre en capitale #}
@@ -9,8 +10,8 @@
 {% macro steps(heading) -%}
 <ol class="teams-steps" aria-labelledby="{{ heading }}">
   <li><span><b>L'installer</b> dans le navigateur où tu ouvres Teams : <code>chrome://extensions</code>, le mode développeur, puis « Charger l'extension non empaquetée » (le dossier <code>frontend/Extension</code>).</span></li>
-  <li><span><b>Lui donner sa clé</b> : crée-la dans <a href="{{ PREFIX }}/reglages/teams">Réglages › Plugins › Teams</a>, puis colle l'URL de Mika et la clé dans la fenêtre de l'extension — « Enregistrer », « Tester ».</span></li>
-  <li><span><b>Ouvrir Teams</b> dans ce navigateur (le recharger s'il l'était déjà) : ce que Teams reçoit arrive ici.</span></li>
+  <li><span><b>Lui donner sa clé</b> : chaque compte a la sienne — déclare le compte dans <a href="{{ PREFIX }}/reglages/teams">Réglages › Plugins › Teams</a>, crée sa clé dans <a href="{{ PREFIX }}/teams/extension">Teams › Extension</a> (« Nouvelle clé »), puis colle l'URL de Mika et la clé dans la fenêtre de l'extension — « Enregistrer », « Tester ».</span></li>
+  <li><span><b>Ouvrir Teams</b> dans ce navigateur, sur ce compte (le recharger s'il l'était déjà) : ce que Teams reçoit arrive ici, sous ce compte.</span></li>
 </ol>
 {%- endmacro %}
 

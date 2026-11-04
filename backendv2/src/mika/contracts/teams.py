@@ -1,5 +1,6 @@
-"""Contrat du plugin ``teams`` (ADR 0069) : ce qu'elle remarque des conversations Teams de la personne qui
-s'occupe d'elle, et ce qu'elle y écrit à sa place.
+"""Contrat du plugin ``teams`` (ADR 0069, 0186) : ce qu'elle remarque des conversations Teams de chaque compte (le
+tien, le sien, celui d'une personne), et ce qu'elle y écrit à la place de la personne du compte. Chaque événement dit
+son compte (``account`` : ``principal`` pour ce qui précède l'ADR 0186).
 
 Un message remarqué est un **signal** (``attention.Signal``) : l'attention le dose et l'habitue comme tout ce qui
 vient d'ailleurs. Son texte est cité, jamais obéi. Un message se désigne par sa **référence** (``t…``, attribuée
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
+from mika.ports.teams import DEFAULT_ACCOUNT
 from mika.ports.teams import person_handle as person_handle
 
 OWNER = "teams"
@@ -44,6 +46,8 @@ class TeamsNoticed(Signal):
     #: ``seule``). Ce qui part relit la règle d'aujourd'hui.
     prepare: bool = True
     send: str = ""
+    #: le compte qui l'a reçu
+    account: str = DEFAULT_ACCOUNT
 
 
 class TeamsSent(Signal):
@@ -55,6 +59,7 @@ class TeamsSent(Signal):
     #: le message auquel il répondait (vide : un message dans la conversation)
     reply_to: str = ""
     edited: bool = False
+    account: str = DEFAULT_ACCOUNT
 
 
 class DraftAsked(Payload):
@@ -66,6 +71,7 @@ class DraftAsked(Payload):
     by: str = ""
     instruction: Content | None = None
     about: tuple[str, ...] = ()
+    account: str = DEFAULT_ACCOUNT
 
 
 NOTICED = event_type("teams.noticed", OWNER, TeamsNoticed, public=True, content=("summary",), subjects=("about",))

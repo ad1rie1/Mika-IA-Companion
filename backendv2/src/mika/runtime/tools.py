@@ -351,10 +351,17 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
                 continue
         else:
             got = allowed(tools, spec, audience, kind, rights, close)
-            if got is None or got.level == NO:
+            if (got is None or got.level == NO) and not owns(spec, audience, kind, frame):
                 continue
         out[name] = spec
     return out
+
+
+def owns(spec: ToolSpec, audience: Audience, kind: str, frame: Any = None) -> bool:
+    """Une ressource de l'outil appartient à qui est en face (``ToolSpec.owned``, ADR 0185) : une boîte, un compte.
+    Offert alors même que sa famille ne l'ouvre pas ; son gestionnaire ne montre que ce qui est à elle."""
+    return spec.owned is not None and \
+        boundary.call(spec.owned, audience, kind, frame, label=f"offre de {spec.name} (à qui)") is True
 
 
 def ready(port: Any) -> bool:

@@ -1,8 +1,15 @@
-"""Le plugin ``teams`` (ADR 0069) : les conversations Teams de la personne qui s'occupe d'elle.
+"""Le plugin ``teams`` (ADR 0069, 0186) : les conversations Teams de chaque compte — le tien, le sien, celui d'une
+personne qui a un compte.
 
-Rien ici ne parle à Microsoft. L'extension de navigateur (``frontend/Extension``), dans l'onglet Teams de cette
-personne, pousse ce que le client reçoit (``POST /api/teams/inbox``) ; l'adaptateur le range hors du journal
-(``teams.db``) ; ce plugin en fait ce qu'elle remarque et ce qu'elle y écrit.
+Rien ici ne parle à Microsoft. L'extension de navigateur (``frontend/Extension``), dans l'onglet Teams de la personne
+d'un compte, pousse ce que le client reçoit (``POST /api/teams/inbox``, avec la clé de ce compte) ; l'adaptateur le
+range hors du journal (``teams.db``), sous ce compte ; ce plugin en fait ce qu'elle remarque et ce qu'elle y écrit.
+
+- **Un compte sert à son propriétaire** (ADR 0186, comme une boîte aux lettres : ADR 0185) : les tiens là où sa
+  famille d'outils le permet, les siens quand elle travaille, celui d'une personne avec elle seulement — reconnue, en
+  tête-à-tête (``accounts_here``) ; ses outils et ce qu'elle en voit sont réduits à ces comptes. Elle remarque les
+  messages de tous ; elle ne prépare d'elle-même une réponse que dans les tiens et les siens. Une réponse part du
+  compte de la conversation, sous le nom de sa personne.
 
 - **Remarquer** : chaque message reçu (pas les siens) est trié — un rôle utilitaire, borné par passage ; à défaut,
   une heuristique : son importance, et s'il pose une question **à laquelle elle peut aider**. Il devient un signal
@@ -24,10 +31,11 @@ personne, pousse ce que le client reçoit (``POST /api/teams/inbox``) ; l'adapta
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
@@ -40,9 +48,12 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
+from mika.ports.teams import DEFAULT_ACCOUNT, conversation_key
+from mika.vocab.access import ACCOUNT, PERSON, SELF, WORK, situation
 from mika.vocab.canals import Canals, teams_rule
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
+from mika.vocab.phrasebook import phrase
 from mika.vocab.rights import here_allowed
 
 BUNDLE = "teams"
@@ -81,6 +92,13 @@ class TeamsParams(BaseModel):
         label="Les tableaux de ses canaux", group="Écrire", readonly=True,
         help="Réglés dans Réglages › Canaux (ADR 0134) : le tableau de Teams, lu de haut en bas — qui écrit, préparer "
              "d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
+    owners: Annotated[dict[str, str], Knob(
+        label="À qui sont ses comptes Teams", group="Écrire", readonly=True,
+        help="Réglé dans Réglages › Plugins › Teams (« À qui », ADR 0186) : un compte sert à son propriétaire — elle "
+             "(« elle »), une personne (« personne:<clé> ») ; absent ou vide, à toi.")] = Field(default_factory=dict)
+    accounts_off: Annotated[tuple[str, ...], Knob(
+        label="Comptes Teams décochés", group="Écrire", readonly=True,
+        help="Réglés dans Réglages › Plugins › Teams (« Actif ») : elle n'y prépare ni n'y propose plus rien.")] = ()
     drafts_per_day: Annotated[int, Knob(
         label="Réponses d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -129,6 +147,8 @@ class Seen:
     #: ce que sa règle d'envoi en disait au tri (ADR 0132) : préparer d'elle-même, comment une réponse partirait
     prepare: bool = True
     send: str = ""
+    #: le compte qui l'a reçu (ADR 0186)
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +176,8 @@ class DraftSeen:
     #: recopiés de la proposition : refuser au nom du délai sans relire l'état du moteur
     args_json: str = ""
     context: str = ""
+    #: le compte d'où elle part (celui de la conversation)
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +190,7 @@ class AskSeen:
     by: str
     at: int
     instruction_ref: str = ""
+    account: str = DEFAULT_ACCOUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +199,8 @@ class TeamsState:
     drafts: FrozenDict[int, DraftSeen] = field(default_factory=FrozenDict)
     asked: FrozenDict[str, AskSeen] = field(default_factory=FrozenDict)
     attempts: FrozenDict[str, int] = field(default_factory=FrozenDict)
-    #: conversation → le dernier message qu'y a écrit la personne (µs)
+    #: conversation (``conversation_key`` : son compte et son identifiant) → le dernier message qu'y a écrit la
+    #: personne du compte (µs)
     replied: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: le dernier lot reçu de l'extension (µs), et combien de lots en tout : le tri a de quoi lire
     received: int = 0
@@ -184,11 +208,13 @@ class TeamsState:
 
 
 class Received(Payload):
-    """L'extension a poussé des messages : combien de neufs, et les conversations où la personne a écrit, avec
-    l'heure (Teams, µs) de son dernier message dans chacune (aucun texte : le monde reste dans l'adaptateur)."""
+    """L'extension d'un compte a poussé des messages : combien de neufs, et les conversations où la personne du
+    compte a écrit, avec l'heure (Teams, µs) de son dernier message dans chacune (aucun texte : le monde reste dans
+    l'adaptateur)."""
 
     new: int
     replied: tuple[tuple[str, int], ...] = ()
+    account: str = DEFAULT_ACCOUNT
 
 
 class Settled(Payload):
@@ -200,11 +226,12 @@ class Settled(Payload):
     reason: str = ""
 
 
-#: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``)
-TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=2)
+#: v2 : un message remarqué garde ce que sa règle d'envoi en disait (``Seen.prepare``, ``send``) ; v3 : chaque message,
+#: réponse et demande garde son compte (ADR 0186)
+TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=3)
 TEAMS.declare(*c.ALL)
-TEAMS.bundle(BUNDLE, "les conversations Teams de la personne qui s'occupe de toi : les lister, relire un fil, "
-                     "préparer une réponse à sa place")
+TEAMS.bundle(BUNDLE, "les conversations Teams de ses comptes (le tien, le sien, celui d'une personne) : les lister, "
+                     "relire un fil, préparer une réponse à la place de la personne du compte")
 RECEIVED = TEAMS.event("received", Received)
 SETTLED = TEAMS.event("settled", Settled)
 
@@ -217,13 +244,14 @@ def params(p: TeamsParams | None) -> TeamsParams:
 MODE_OF = {"brouillon": "brouillon", "accord": "validation", "seule": "autonome"}
 
 
-def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str) -> str:
+def mode_of(p: TeamsParams, s: TeamsState, ref: str, conversation: str, account: str = DEFAULT_ACCOUNT) -> str:
     """Le mode d'une réponse à ce message, là où le nom de sa conversation n'est pas connu (le brief d'une tâche, sa
-    voix) : ce que sa règle en disait au tri (un message qu'elle n'a pas en tête : la règle de son identifiant et de
-    qui écrit, ADR 0132). Ce qui part relit la règle d'aujourd'hui (``triage.rule_of``)."""
+    voix) : ce que sa règle en disait au tri (un message qu'elle n'a pas en tête : la règle de son compte, de son
+    identifiant et de qui écrit, ADR 0132). Ce qui part relit la règle d'aujourd'hui (``triage.rule_of``)."""
     seen = s.messages.get(ref)
     send = seen.send if seen is not None and seen.send else teams_rule(
-        p.canaux, "", conversation, seen.author if seen is not None else "").reply
+        p.canaux, seen.account if seen is not None else account, conversation,
+        seen.author if seen is not None else "").reply
     return MODE_OF.get(send, "validation")
 
 
@@ -256,20 +284,23 @@ def _noticed(s: TeamsState, e, cx) -> TeamsState:
     at = d.sent_at or e.at
     seen = Seen(e.seq, d.conversation, d.author, d.author_id, d.where, d.importance, d.needs_reply,
                 d.mentions_me, at, d.summary.ref or "",
-                answered="toi" if s.replied.get(d.conversation, 0) >= at else "", prepare=d.prepare, send=d.send)
+                answered="toi" if s.replied.get(conversation_key(d.account, d.conversation), 0) >= at else "",
+                prepare=d.prepare, send=d.send, account=d.account)
     return replace(s, messages=_pruned(s.messages.set(d.message, seen), KEEP, lambda kv: kv[1].seq))
 
 
 @TEAMS.reducer(RECEIVED)
 def _received(s: TeamsState, e, cx) -> TeamsState:
-    """La personne a écrit dans ces conversations : ce qui y attendait une réponse **avant son message** en a une
-    (la sienne). Les heures sont celles de Teams, comme celles des messages : un vieux message à elle qui arrive tard
-    (un rattrapage) ne répond pas à une question posée après."""
-    replied, messages = s.replied, s.messages
+    """La personne du compte a écrit dans ces conversations : ce qui y attendait une réponse **avant son message** en
+    a une (la sienne). Les heures sont celles de Teams, comme celles des messages : un vieux message à elle qui
+    arrive tard (un rattrapage) ne répond pas à une question posée après. Un autre compte dans la même conversation
+    n'y a pas répondu, lui."""
+    replied, messages, account = s.replied, s.messages, e.data.account
     for conv, at in e.data.replied:
-        replied = replied.set(conv, max(replied.get(conv, 0), at))
+        key = conversation_key(account, conv)
+        replied = replied.set(key, max(replied.get(key, 0), at))
         for ref, m in messages.items():
-            if m.conversation == conv and not m.answered and m.at <= at:
+            if m.account == account and m.conversation == conv and not m.answered and m.at <= at:
                 messages = messages.set(ref, replace(m, answered="toi"))
     if len(replied) > KEEP:
         replied = FrozenDict(sorted(replied.items(), key=lambda kv: -kv[1])[:KEEP])
@@ -280,7 +311,7 @@ def _received(s: TeamsState, e, cx) -> TeamsState:
 def _asked(s: TeamsState, e, cx) -> TeamsState:
     d = e.data
     ask = AskSeen(e.seq, d.message, d.conversation, d.by, e.at,
-                  d.instruction.ref or "" if d.instruction else "")
+                  d.instruction.ref or "" if d.instruction else "", account=d.account)
     return replace(s, asked=_pruned(s.asked.set(d.message, ask), KEEP, lambda kv: kv[1].seq),
                    attempts=s.attempts.delete(d.message))
 
@@ -312,7 +343,8 @@ def _proposed(s: TeamsState, e, cx) -> TeamsState:
     seen = DraftSeen(e.seq, str(args.get("draft") or ""), str(args.get("conversation") or ""), message, e.at,
                      str(args.get("mode") or ""), WAITING if d.approval else APPROVED,
                      asked=bool(message) and message in s.asked, expires=expires,
-                     args_json=d.args_json if d.approval else "", context=d.context)
+                     args_json=d.args_json if d.approval else "", context=d.context,
+                     account=str(args.get("account") or DEFAULT_ACCOUNT))
     drafts = _pruned(s.drafts.set(e.seq, seen), DRAFTS_KEPT, lambda kv: kv[0])
     return replace(s, drafts=drafts, asked=s.asked.delete(message) if message else s.asked)
 
@@ -362,9 +394,10 @@ def latest(s: TeamsState, draft_id: str) -> DraftSeen | None:
     return max(found, key=lambda d: d.proposal) if found else None
 
 
-def under_way(s: TeamsState, conversation: str) -> bool:
-    """Une réponse est déjà en chemin dans cette conversation (en attente d'accord, en file, posée)."""
-    return any(d.conversation == conversation and d.state in UNDER_WAY for d in s.drafts.values())
+def under_way(s: TeamsState, account: str, conversation: str) -> bool:
+    """Une réponse est déjà en chemin dans cette conversation de ce compte (en attente d'accord, en file, posée)."""
+    return any(d.account == account and d.conversation == conversation and d.state in UNDER_WAY
+               for d in s.drafts.values())
 
 
 def drafted(s: TeamsState, message: str) -> bool:
@@ -377,9 +410,60 @@ def drafted(s: TeamsState, message: str) -> bool:
 
 
 def for_owner(frame: Frame) -> bool:
-    """Ses conversations Teams : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) — toi en privé, jamais devant un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris
-    ce lot ; ses tâches à elle (une réponse à préparer)."""
+    """Tes conversations Teams : ce que ses droits en laissent (``vocab.rights.here_allowed``, ADR 0133, 0134 : le
+    minimum vital de sa famille la réserve à sa propriétaire, une ligne peut l'ouvrir) — toi en privé, jamais devant
+    un salon ; elle qui travaille, un projet ou un réveil seulement s'il a pris ce lot ; ses tâches à elle (une
+    réponse à préparer)."""
     return here_allowed(frame, BUNDLE, tasks=lambda target: (task_of(target) or ("", ""))[0] == TEAMS.name)
+
+
+def owner_of(frame: Frame, account: str) -> str:
+    """À qui est un compte Teams (ADR 0186) : vide, ses propriétaires (toi) ; ``elle`` ; ``personne:<clé>``."""
+    return params_of(frame).owners.get(account, "")
+
+
+def _facing(audience: Any, kind: str) -> str:
+    """Qui est en face, comme propriétaire possible d'un compte : ``personne:<clé>`` d'une personne reconnue en
+    tête-à-tête ; vide sinon (toi, elle seule, un salon, une inconnue)."""
+    person = getattr(audience, "person", "") or ""
+    return PERSON + person if person and situation(audience, kind) == ACCOUNT else ""
+
+
+def task_account(frame: Frame, port: Any) -> str:
+    """Le compte du message d'une tâche de rédaction en cours (vide : ce n'en est pas une, ou il n'est plus là)."""
+    ref = task_message(frame)
+    found = port.message(ref) if ref and port is not None else None
+    return found.account if found is not None else ""
+
+
+def accounts_here(frame: Frame, accounts: Iterable[str], port: Any = None) -> tuple[str, ...]:
+    """Les comptes Teams dont elle peut se servir ici (ADR 0186) : un compte sert à son propriétaire.
+
+    - les tiens (sans propriétaire nommé) : là où sa famille d'outils le permet (``for_owner``) — toi en privé,
+      elle quand elle travaille, et qui une ligne de la famille ouvre ;
+    - les siens : quand elle travaille, là où sa famille le permet ;
+    - celui d'une personne : avec elle, reconnue, en tête-à-tête — et nulle part ailleurs ;
+    - une tâche de rédaction : le compte de son message (``port`` le dit ; on la lui a demandée, ou elle l'a
+      proposée dans un compte à toi ou à elle)."""
+    kind = frame.episode.kind if frame.episode is not None else ""
+    owners, family = params_of(frame).owners, for_owner(frame)
+    alone = situation(frame.audience, kind) == WORK
+    person = _facing(frame.audience, kind)
+    task = task_account(frame, port) if alone and family else ""
+    out = []
+    for a in accounts:
+        owner = owners.get(a, "")
+        if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person) \
+                or (task and a == task):
+            out.append(a)
+    return tuple(out)
+
+
+def owns_an_account(audience: Any, kind: str, frame: Frame | None) -> bool:
+    """Qui est en face a un compte Teams à son nom (``ToolSpec.owned``) : ses outils Teams lui sont offerts, réduits
+    à ses comptes ; sans ce qu'elle vit (une console qui juge sans lui), personne."""
+    person = _facing(audience, kind)
+    return frame is not None and bool(person) and person in params_of(frame).owners.values()
 
 
 #: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)
@@ -403,11 +487,31 @@ def keepers(frame: Frame) -> str:
     return names[0] if len(names) == 1 else " ou ".join(names[:3])
 
 
-def decider(frame: Frame) -> str:
-    """À qui va la carte d'accord (mode validation) : une adresse qui parle en propriétaire — d'abord celle d'une
-    propriétaire présente (n'importe laquelle), sinon une où l'on peut écrire absente, sinon la première. Vide : la
-    console seulement."""
+def writer_of(frame: Frame, account: str) -> str:
+    """À la place de qui elle écrit dans ce compte : le prénom de ses propriétaires (« Adrien », un compte à toi ; sinon
+    « la personne qui s'occupe de toi »), le sien (un compte à elle), celui de la personne du compte (sinon « la
+    personne à qui est ce compte Teams »)."""
+    owner = owner_of(frame, account)
+    if owner == SELF:
+        return her(frame) or phrase("teams.holder")
+    if owner.startswith(PERSON):
+        return person_name(frame, owner[len(PERSON):]) or phrase("teams.holder")
+    return keepers(frame)
+
+
+def decider(frame: Frame, account: str = DEFAULT_ACCOUNT) -> str:
+    """À qui va la carte d'accord (mode validation) : pour le compte d'une personne, à elle (le message part sous son
+    nom) — une de ses adresses présente, sinon une où l'on peut lui écrire, sinon la première ; pour les autres, une
+    adresse qui parle en propriétaire — d'abord celle d'une propriétaire présente (n'importe laquelle), sinon une où
+    l'on peut écrire absente, sinon la première. Vide : la console seulement."""
     here = set(frame.get(presence_c.PRESENT))
+    owner = owner_of(frame, account)
+    if owner.startswith(PERSON):
+        person = owner[len(PERSON):]
+        handles = list(frame.get(identity_c.HANDLES(person)) or (person,))
+        reachable = set(frame.get(identity_c.REACHABLE(person)))
+        return next((h for h in handles if h in here), None) or next((h for h in handles if h in reachable), None) \
+            or (handles[0] if handles else "")
     owners = [(person, [h for h in (frame.get(identity_c.HANDLES(person)) or (person,))
                         if frame.get(identity_c.SPEAKS_AS_OWNER(h))]) for person in frame.get(identity_c.OWNERS)]
     for _, handles in owners:

@@ -53,12 +53,12 @@ def test_an_operator_rules_a_canal_and_her_mail_follows(world):  # noqa: F811
     # une ligne illisible : refusée, rien ne change
     refused = send(client, "courrier", **{"ligne.1": "1", "toujours.1": "on", "defaut_repondre": "accord"})
     assert "Ligne 1 : coche qui" in refused and client.portal.call(live.settings.canals).tables["courrier"] == got
-    # elle seule : une ligne sans personne, par le seul canal « elle seule »
+    # elle seule : elle, et personne d'autre (ADR 0184), par le seul canal « elle seule »
     assert "enregistrés" in send(client, "interne", **{"ligne.1": "1", "lecture.1": "seule", "action.1": "non",
                                                        "repondre.1": "seule", "garde.1": "perso",
                                                        "projets.1": "modification", "fichiers.1": "on"})
     alone = client.portal.call(live.settings.canals).tables["interne"].lines[0]
-    assert (alone.who, alone.canal, alone.read, alone.act) == ((), ("interne",), "seule", "non")
+    assert (alone.who, alone.canal, alone.read, alone.act) == (("elle",), ("interne",), "seule", "non")
     # revenir au minimum vital
     assert "minimum vital" in send(client, "courrier", "remettre")
     assert "courrier" not in client.portal.call(live.settings.canals).tables

@@ -150,3 +150,34 @@ def test_a_gear_names_tabs_of_its_destination(gear, refused):
         return
     with pytest.raises(CompositionError, match=refused):
         check(nav, registry, builtins)
+
+
+def test_a_mailbox_belongs_to_you_to_her_or_to_a_person(world):  # noqa: F811
+    """À qui (ADR 0185) : une boîte se donne à toi, à elle (par son nom) ou à une personne qui a un compte ; la fiche
+    d'une personne en a l'onglet « Comptes » ; le courrier se lit par propriétaire (« Les boîtes de »)."""
+    from mika.contracts import self_ as self_c
+
+    client, live, _ = world
+    bootstrap(client)
+    her = self_c.name_of(live.kernel.mind.frame().get(self_c.PERSONA))
+    form = drawn(client, f"{PAGE}?enregistrement=accounts&cle=&nouveau=1")
+    assert "À qui" in form and f">{her}</option>" in form and ">Toi (ses propriétaires)</option>" in form
+    hers = {**ACCOUNT, "_cle": "sienne", "_champs": [*ACCOUNT["_champs"], "owner"], "owner": "elle",
+            "label": "La sienne", "address": "elle@exemple.org"}
+    assert post(client, SAVE, hers).status_code == 200
+    assert post(client, SAVE, {**ACCOUNT, "_cle": "tienne", "label": "La tienne"}).status_code == 200
+    refused = post(client, SAVE, {**hers, "_cle": "autre", "owner": "personne:inconnue"})
+    assert refused.status_code == 400 and "à une personne qui a un compte" in html.unescape(refused.text)
+    saved = client.portal.call(live.settings.email).accounts
+    assert saved["sienne"].owner == "elle" and saved["tienne"].owner == "" and "autre" not in saved
+    # le journal le sait : ses outils ne lui montreront que les boîtes de qui est en face
+    from mika.plugins.email import params_of
+    assert params_of(live.kernel.mind.frame()).owners == {"sienne": "elle", "tienne": ""}
+    # ta fiche : l'onglet de tes comptes, ta boîte seulement
+    fiche = " ".join(re.sub(r"<[^>]+>", " ", drawn(client, "/inspecteur/fiche/person/user_1?onglet=boites")).split())
+    assert "La tienne" in fiche and "La sienne" not in fiche and "Courrier 1" in fiche
+    # le courrier, par propriétaire : elle a son nom dans le choix, et sa boîte seulement quand on la choisit
+    box = drawn(client, "/inspecteur/courrier/reception?qui=elle")
+    assert "Les boîtes de" in box and her in box.split("Les boîtes de", 1)[1]
+    accounts = box.split("Comptes", 1)[1].split("Dossiers", 1)[0] if "Dossiers" in box else box.split("Comptes", 1)[1]
+    assert "La sienne" in accounts and "La tienne" not in accounts

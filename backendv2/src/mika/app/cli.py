@@ -76,6 +76,7 @@ from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.journal import JournalSnapshot
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.sql import upsert
+from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 from mika.runtime import operations
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.inspection import Inspection
@@ -346,17 +347,28 @@ async def profile_command(settings: Settings, args: argparse.Namespace) -> dict[
 
 
 async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
-    """Teams (ADR 0069) hors ligne : la clé de l'extension (neuve, montrée une fois ; retirée), et l'état."""
+    """Teams (ADR 0069, 0186) hors ligne : la clé de l'extension d'un compte (neuve, montrée une fois ; retirée), et
+    l'état de chaque compte."""
     desk = TeamsDesk(settings, RealClock().now, None)
+    account = getattr(args, "compte", "") or DEFAULT_TEAMS_ACCOUNT
     if args.teams_cmd == "key":
-        return {"ok": True, "key": await desk.new_key("ligne de commande"),
-                "usage": "à coller dans l'extension de navigateur ; Authorization: Bearer <clé> sur /api/teams/…"}
+        try:
+            key = await desk.new_key(account, "ligne de commande")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "compte": account, "key": key,
+                "usage": "à coller dans l'extension de navigateur de ce compte ; Authorization: Bearer <clé> sur "
+                         "/api/teams/…"}
     if args.teams_cmd == "revoke":
-        return {"ok": await desk.revoke_key("ligne de commande")}
-    cfg, key = settings.teams(), desk.key_state()
+        return {"ok": await desk.revoke_key(account, "ligne de commande"), "compte": account}
+    cfg = settings.teams()
     teams_rules = [a.model_dump() for a in settings.canals().table("teams").lines]
-    return {"ok": True, "enabled": cfg.enabled, "sign": cfg.sign, "envoi": teams_rules,
-            "key": f"{key.hint}…" if key is not None else None}
+    accounts = {}
+    for name, a in sorted(cfg.accounts.items()):
+        key = desk.key_state(name)
+        accounts[name] = {"label": a.label, "owner": a.owner or "toi", "sign": a.sign,
+                          "key": f"{key.hint}…" if key is not None else None}
+    return {"ok": True, "enabled": cfg.enabled, "comptes": accounts, "envoi": teams_rules}
 
 
 async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
@@ -892,8 +904,11 @@ def _run(argv: list[str] | None) -> int:
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
     tm = sub.add_parser("teams", help="l'extension Teams (ADR 0069) : sa clé et l'état")
     tmsub = tm.add_subparsers(dest="teams_cmd", required=True)
-    tmsub.add_parser("key", help="une clé neuve pour l'extension (l'ancienne ne vaut plus), montrée une fois")
-    tmsub.add_parser("revoke", help="retirer la clé de l'extension (plus rien ne passe)")
+    tmk = tmsub.add_parser("key", help="une clé neuve pour l'extension d'un compte (l'ancienne ne vaut plus), montrée "
+                                       "une fois")
+    tmk.add_argument("--compte", default=DEFAULT_TEAMS_ACCOUNT, help="le compte Teams (par défaut : principal)")
+    tmr = tmsub.add_parser("revoke", help="retirer la clé de l'extension d'un compte (plus rien ne passe pour lui)")
+    tmr.add_argument("--compte", default=DEFAULT_TEAMS_ACCOUNT, help="le compte Teams (par défaut : principal)")
     tmsub.add_parser("status", help="l'état de Teams, sans secret")
     wk = sub.add_parser("wakeup", help="les réveils par API (POST /api/wake/<nom>, ADR 0068 ; serveur arrêté)")
     wksub = wk.add_subparsers(dest="wakeup_cmd", required=True)

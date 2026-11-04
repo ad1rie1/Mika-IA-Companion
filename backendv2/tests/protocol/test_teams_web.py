@@ -34,8 +34,9 @@ def batch(n: int = 1, *, conv: str = DM, text: str = "On se voit à 14 h ?") -> 
                           "time": now - i, "text": text, "own": False, "mentions_me": False} for i in range(n)]}
 
 
-def new_key(client, live) -> str:
-    return client.portal.call(live.teams.new_key, "test")
+def new_key(client, live, account: str = "principal") -> str:
+    """Une clé neuve pour l'extension d'un compte (``principal`` : celui d'avant l'ADR 0186)."""
+    return client.portal.call(live.teams.new_key, account, "test")
 
 
 def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  # noqa: F811
@@ -56,7 +57,7 @@ def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  
     newer = new_key(client, live)
     assert client.get("/api/teams/outbox", headers=headers(key)).status_code == 401
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 200
-    client.portal.call(live.teams.revoke_key, "test")
+    client.portal.call(live.teams.revoke_key, "principal", "test")
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 401
     # la clé en clair n'est gardée nulle part dans les réglages
     stored = str(client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings", ()))
@@ -76,7 +77,7 @@ def test_a_bad_batch_is_refused_before_anything_is_stored(world):  # noqa: F811
     got = client.post("/api/teams/inbox", content=json.dumps(mixed).encode(),
                       headers={**headers(key), "Content-Type": "application/json"})
     assert got.status_code == 202 and got.json()["dropped"] == 2 and got.json()["accepted"] == 1
-    [kept] = client.portal.call(store.thread, DM, 10)
+    [kept] = client.portal.call(store.thread, "principal", DM, 10)
     assert kept.text.startswith("un emoji coupé") and "\ud83d" not in kept.text
     # sans clé valable, le corps n'est même pas lu
     assert client.post("/api/teams/inbox", content=b"x" * (600 * 1024), headers=headers("rien")).status_code == 401
@@ -85,10 +86,10 @@ def test_a_bad_batch_is_refused_before_anything_is_stored(world):  # noqa: F811
     huge = client.post("/api/teams/inbox", content=b" " * (600 * 1024), headers=headers(key))
     assert huge.status_code == 413
     # Teams désactivé : refusé (403), rien de rangé
-    before = client.portal.call(store.last_batch)
+    before = client.portal.call(store.last_batch, "principal")
     client.portal.call(live.settings.save_teams, TeamsConfig(enabled=False))
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 403
-    assert client.portal.call(store.last_batch) == before
+    assert client.portal.call(store.last_batch, "principal") == before
 
 
 def test_the_outbox_gives_what_must_leave_and_acks_replay_safely(world):  # noqa: F811

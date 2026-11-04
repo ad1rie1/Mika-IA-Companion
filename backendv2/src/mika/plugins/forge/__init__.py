@@ -79,7 +79,7 @@ from mika.plugins.forge.views import (
     view_params,
 )
 from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args, ui_load
-from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, ToolRule
+from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, SELF, ToolRule
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, hearable
@@ -1958,7 +1958,7 @@ APP_EPISODES = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.TASK, *WORKING})
 #: le minimum vital d'une app sans projet, tant qu'on ne l'a pas réglée (ADR 0134) : à toi, et elle seule, sans
 #: demander, ce qu'elle rend gardé comme un souvenir ; personne d'autre
 APP_VITAL = (ToolRule(who=(OWNER,), read=ALONE, act=ALONE, keep="perso"),
-             ToolRule(canal=(INTERNAL,), read=ALONE, act=ALONE, keep="perso"))
+             ToolRule(who=(SELF,), canal=(INTERNAL,), read=ALONE, act=ALONE, keep="perso"))
 #: ce qu'un outil d'app rend porte ce qu'elle en garde (``ToolResult.floor``, ``unkept``), comme un service
 KEEP_FLOORS = {"prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -36,13 +37,16 @@ from mika.plugins.email.console.common import (
     NO_PORT,
     SETTINGS,
     VOICE_LABEL,
+    YOURS,
     add_account,
     box_link,
     edit_account,
     fold,
+    owner_name,
 )
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import SIGNED_IN, SIGNIN_PENDING, AccountInfo, SignIn
+from mika.vocab.access import PERSON
 from mika.vocab.canals import mail_rule
 
 #: où se règle le tableau d'une boîte (ADR 0134)
@@ -118,6 +122,51 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         empty="aucune boîte : ajoute un compte",
                         caption="Un clic ouvre la fiche du compte (état, dossiers, sa voix)."))
     return blocks
+
+
+# ── les boîtes d'une personne (sa fiche, ADR 0185) ─────────────────────────
+
+
+def _owner_of_person(frame: Frame, person: str) -> str:
+    """Le propriétaire qu'une personne est pour une boîte : ses propriétaires (toi) sont « à toi » (vide), une autre
+    personne ``personne:<clé>``."""
+    return "" if frame.get(identity_c.IS_OWNER(person)) else PERSON + person
+
+
+def _owns_boxes(s: EmailState, person: str, frame: Frame) -> bool:
+    """La fiche d'une personne a l'onglet de ses comptes si une boîte est à elle (ses propriétaires : une boîte sans
+    propriétaire nommé)."""
+    return _owner_of_person(frame, person) in params_of(frame).owners.values()
+
+
+@EMAIL.inspect("boites", title="Comptes", subject="person", order=64, shown=_owns_boxes,
+               description="Les boîtes aux lettres qui sont à cette personne (ADR 0185) : elle s'en sert avec elle "
+                           "seulement — en tête-à-tête, reconnue ; les tiennes, avec toi et quand elle travaille.")
+def _person_boxes(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    port = ctx.ports.get("mail")
+    if port is None:
+        return [Note(NO_PORT, tone="muted")]
+    owner = _owner_of_person(frame, ctx.subject)
+    whose = YOURS if not owner else owner
+    rows = []
+    for a in (a for a in port.accounts() if a.owner == owner):
+        status = port.status(a.key)
+        inbox = next((f for f in port.folders(a.key) if f.role == "inbox"), None)
+        rows.append(Row((Text(a.name), Text(a.address or "—", "mono"), _state(a, status.error),
+                         Badge(f"elle y écrit {VOICE_LABEL.get(a.voice, a.voice)}", "info"),
+                         Text(str(inbox.unseen), "num") if inbox is not None else "—",
+                         When(status.last_poll) if status.last_poll else "jamais",
+                         box_link("Ouvrir la boîte", account=a.key, whose=whose)),
+                        href=Ref.subject("compte", a.key, a.name),
+                        tone="danger" if status.error else ("warn" if not a.ready and a.enabled else "")))
+    return [Table((Column("boîte", role="title"), "adresse", Column("état", "fit", role="badge"),
+                   Column("elle y écrit", "fit", role="badge"), Column("non lus", "num"),
+                   Column("dernier relevé", "fit"), Column("lire", "fit")), tuple(rows),
+                  title=f"Courrier ({len(rows)})", empty="aucune boîte à son nom",
+                  caption=f"Une boîte se donne à {'toi' if not owner else owner_name(frame, owner)} dans Courrier › "
+                          "Paramètres (« À qui »)."),
+            Fields((("toutes ses boîtes", box_link("Courrier › Réception", whose=whose)),
+                    ("une boîte de plus", add_account())))]
 
 
 @EMAIL.subject("compte", label="Compte", plural="Comptes", icon="✉")

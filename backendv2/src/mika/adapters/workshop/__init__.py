@@ -749,6 +749,27 @@ class BwrapWorkshop:
         sha = r.stdout.strip()
         return sha if r.ok and _SHA.match(sha) else ""
 
+    async def branch(self, goal: int) -> str:
+        """La branche courante, ou ``""`` (pas de dépôt, ou une tête détachée)."""
+        if not (self.folder(goal) / ".git").exists():
+            return ""
+        r = await self._git(goal, "symbolic-ref", "--short", "-q", "HEAD")
+        name = r.stdout.strip()
+        return name if r.ok and _BRANCH.match(name) else ""
+
+    async def compare(self, goal: int, sha: str) -> tuple[int, int] | None:
+        """(les enregistrements de l'atelier que ``sha`` n'a pas, ceux de ``sha`` qu'il n'a pas) ; ``None`` si
+        l'atelier ne connaît pas ce commit (le distant a bougé sans lui)."""
+        if not _SHA.match(sha or "") or not (self.folder(goal) / ".git").exists():
+            return None
+        if not (await self._git(goal, "cat-file", "-e", f"{sha}^{{commit}}")).ok:
+            return None
+        r = await self._git(goal, "rev-list", "--left-right", "--count", f"HEAD...{sha}")
+        counts = r.stdout.split()
+        if not r.ok or len(counts) != 2 or not all(n.isdigit() for n in counts):
+            return None
+        return int(counts[0]), int(counts[1])
+
     async def show(self, goal: int, sha: str) -> str:
         if not _SHA.match(sha or "") or not (self.folder(goal) / ".git").exists():
             return ""

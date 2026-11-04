@@ -127,7 +127,7 @@ def test_an_operator_rules_her_tools_by_their_family(world):  # noqa: F811
         "garde.1": "rien", "prend.1|email_read": "on",
         "ligne.2": "2", "qui.2|proprietaire": "on", "toujours.2": "on", "lecture.2": "seule", "action.2": "seule",
         "garde.2": "public", "tous.2": "on",
-        "ligne.3": "3", "canal.3|interne": "on", "lecture.3": "seule", "action.3": "seule", "garde.3": "public",
+        "ligne.3": "3", "qui.3|elle": "on", "canal.3|interne": "on", "lecture.3": "seule", "action.3": "seule", "garde.3": "public",
         "tous.3": "on", "defaut_lecture": "non", "defaut_action": "non", "defaut_garde": "rien"})
     assert saved.status_code == 303 and saved.headers["location"].startswith(f"{BASE}/tous?")
     assert "email_read" not in page.offered_in(ui, owner) and "email_list" in page.offered_in(ui, owner)

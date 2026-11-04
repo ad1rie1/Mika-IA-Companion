@@ -54,7 +54,7 @@
     <label for="{{ f.id }}">{{ f.label }}{% if f.unit %} <span class="muted">({{ f.unit }})</span>{% endif %}</label>
     {% if f.kind == "select" %}
       <select name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }}{{ ' disabled' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
-        {% if not f.required %}<option value="">—</option>{% endif %}
+        {% if not f.required and '' not in f.choices|map('first')|list %}<option value="">—</option>{% endif %}
         {% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}
       </select>
     {% elif f.kind in ("textarea", "lines", "yaml") %}

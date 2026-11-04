@@ -24,6 +24,7 @@ from mika.vocab.access import (
     OWNER,
     POLICY_RANK,
     ROOM,
+    SELF,
     STEER_NO,
     STEER_RANK,
     Ceiling,
@@ -64,7 +65,7 @@ def vital_family(specs: Iterable[Any]) -> tuple[tuple[ToolRule, ...], ToolRule]:
     reserved = [s.name for s in named if getattr(s, "owner_only", False)]
     opened = [s.name for s in named if not getattr(s, "owner_only", False)]
     lines: list[ToolRule] = [ToolRule(who=(OWNER,), read=ALONE, act=ALONE, keep="public"),
-                             ToolRule(canal=(INTERNAL,), read=ALONE, act=ALONE, keep="public")]
+                             ToolRule(who=(SELF,), canal=(INTERNAL,), read=ALONE, act=ALONE, keep="public")]
     if opened:
         lines.append(ToolRule(who=(EVERYONE,), read=ALONE, act=ALONE, keep="public",
                               tools=tuple(sorted(opened)) if reserved else ()))

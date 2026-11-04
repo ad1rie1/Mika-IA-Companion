@@ -1,7 +1,8 @@
 """Le moteur des droits (ADR 0134), par ses intentions.
 
 - une ligne dit qui, par où, quand ; la première qui correspond décide, sinon la ligne par défaut ;
-- « elle seule » est un canal sans personne : seule une ligne sans qui la désigne ; « tout le monde » ne la désigne pas ;
+- « elle seule » est un canal sans personne : elle s'y coche comme une personne (ADR 0184 ; une ligne sans qui,
+  réglée avant, la désigne encore) ; « tout le monde » ne la désigne pas ;
 - les plafonds : une inconnue n'obtient au plus que des outils qui lisent, jamais une action, une garde « rien » ; à
   plusieurs, un des siens qui lit au plus, rien de ce qui vient du dehors, un projet en lecture seule au plus ; sans
   personne hors du travail, rien ;
@@ -33,6 +34,7 @@ from mika.vocab.access import (
     OWNER,
     OWNER_OK,
     PERSON,
+    SELF,
     STEER_EDIT,
     STEER_READ,
     TOGETHER,
@@ -86,7 +88,10 @@ def test_who_a_line_designates():
     # tout le monde : chacun, une inconnue et un salon compris — jamais elle seule
     assert all(designates((EVERYONE,), where, "x") for where in ("proprietaire", "compte", "inconnue", "salon"))
     assert not designates((EVERYONE,), "travail", "")
-    # elle seule : seule une ligne sans personne (et la ligne par défaut)
+    # elle seule : elle, cochée comme une personne (ADR 0184) — et une ligne sans personne réglée avant ; elle ne
+    # désigne personne d'autre
+    assert designates((SELF,), "travail", "") and designates((SELF, OWNER), "travail", "")
+    assert not any(designates((SELF,), where, "user_2") for where in ("proprietaire", "compte", "inconnue", "salon"))
     assert designates((), "travail", "") and designates((), "compte", "user_2")
     assert not designates((OWNER,), "travail", "")
     with pytest.raises(ValidationError):  # une source inconnue, un canal inconnu, un moment inconnu
@@ -173,9 +178,9 @@ def test_a_family_is_born_from_what_its_tools_declare():
     everyone = _spec("memory_search")
     mine = _spec("email_read", "email", owner_only=True)
     lines, default = vital_family([everyone])
-    assert [(a.who, a.canal) for a in lines] == [((OWNER,), ()), ((), (INTERNAL,)), ((EVERYONE,), ())]
+    assert [(a.who, a.canal) for a in lines] == [((OWNER,), ()), ((SELF,), (INTERNAL,)), ((EVERYONE,), ())]
     lines, default = vital_family([mine])
-    assert [(a.who, a.canal) for a in lines] == [((OWNER,), ()), ((), (INTERNAL,))] and default.read == NO
+    assert [(a.who, a.canal) for a in lines] == [((OWNER,), ()), ((SELF,), (INTERNAL,))] and default.read == NO
     # une famille mêlée : tout le monde n'a que ce que rien ne réserve
     lines, _ = vital_family([_spec("rss_list", "rss"), _spec("rss_read", "rss", owner_only=True)])
     assert lines[2].who == (EVERYONE,) and lines[2].tools == ("rss_list",)
@@ -231,8 +236,14 @@ def test_a_table_form_is_read_at_once_and_refuses_what_is_unreadable():
         rows_sent({"1": "1"}, {"qui": {"1|tous": True}, "canal": {}, "moments": {}, "prend": {}}, {}, {"1": True}, tools=True)
     with pytest.raises(ValueError, match="elle seule"):
         rows_sent({"1": "1"}, {"qui": {"1|tous": True}, "canal": {"1|interne": True}, "moments": {}}, {}, {"1": True})
-    alone = rows_sent({"1": "1"}, {"qui": {}, "canal": {"1|interne": True}, "moments": {}}, {})
-    assert alone[0]["who"] == () and alone[0]["canal"] == (INTERNAL,)
+    with pytest.raises(ValueError, match="Ligne 1 : coche qui"):  # « elle seule » aussi : elle s'y coche
+        rows_sent({"1": "1"}, {"qui": {}, "canal": {"1|interne": True}, "moments": {}}, {})
+    with pytest.raises(ValueError, match="elle n'arrive que par"):
+        rows_sent({"1": "1"}, {"qui": {"1|elle": True}, "canal": {"1|web": True}, "moments": {}}, {}, {"1": True})
+    alone = rows_sent({"1": "1"}, {"qui": {"1|elle": True}, "canal": {"1|interne": True}, "moments": {}}, {})
+    assert alone[0]["who"] == (SELF,) and alone[0]["canal"] == (INTERNAL,) and alone[0]["when"] == ()
+    anywhere = rows_sent({"1": "1"}, {"qui": {"1|elle": True}, "canal": {}, "moments": {}}, {})  # sans moment : le travail
+    assert anywhere[0]["who"] == (SELF,) and anywhere[0]["when"] == ()
     rows = [ToolRule(who=(OWNER,)), ToolRule(who=(EVERYONE,))]
     assert moved(rows, "monter:2", ToolRule())[0] == rows[::-1]
     assert moved(rows, "ajouter", ToolRule(who=(CLOSE,)))[0][-1].who == (CLOSE,)

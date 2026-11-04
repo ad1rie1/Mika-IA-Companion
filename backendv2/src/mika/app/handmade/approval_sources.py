@@ -18,6 +18,8 @@ from mika.contracts import email as email_c
 from mika.contracts import teams as teams_c
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import PREFIX, UI
+from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
+from mika.ports.teams import conversation_key
 from mika.vocab.episodes import project_of
 from mika.vocab.people import is_identifiable
 
@@ -42,7 +44,8 @@ def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> l
         if draft := _arg(args, "draft"):
             out.append(("La réponse préparée", fiche_url(REPLY, draft)))
         if conversation := _arg(args, "conversation"):
-            out.append(("La conversation Teams", fiche_url(CONVERSATION, conversation)))
+            key = conversation_key(_arg(args, "account") or DEFAULT_TEAMS_ACCOUNT, conversation)
+            out.append(("La conversation Teams", fiche_url(CONVERSATION, key)))
     head, _, rest = context.partition(":")
     if head == "mcp" and rest:
         out.append((f"Le service « {rest} »", fiche_url(SERVER, rest)))

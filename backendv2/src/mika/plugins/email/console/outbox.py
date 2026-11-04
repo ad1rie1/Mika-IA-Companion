@@ -28,11 +28,14 @@ from mika.plugins.email.console.common import (
     NO_PORT,
     PAGE,
     SECTION,
+    WHOSE,
     account_scope,
     author,
     clip,
     fold,
     mail_key,
+    scoped,
+    whose,
     workspace,
 )
 from mika.ports.mail import MailQuery, mail_ref, split_ref
@@ -50,7 +53,7 @@ def _pending_note(frame: Frame, account: str) -> Note | None:
                params=[Param("compte", "Boîte", kind="hidden"),
                        Param("q", "Recherche", placeholder="objet, destinataire, texte")])
 def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("mail")
+    port = scoped(ctx.ports.get("mail"), ctx)
     blocks: list[Block] = []
     account = account_scope(port, ctx)
     pending = _pending_note(frame, account)
@@ -83,14 +86,15 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         empty="aucun envoi ne correspond" if query else "rien n'est encore parti de sa boîte",
                         caption="Tous les envois conservés et les messages synchronisés du dossier Envoyés.",
                         layout="list", link_label="Lire le message"))
-    return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),), state=s)]
+    return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),),
+                      state=s, frame=frame)]
 
 
 @EMAIL.inspect("contacts", title="Contacts", section=SECTION, order=40,
                description="Les adresses de ses échanges, avec leur volume ; écrire à l'une d'elles.",
                params=[Param("compte", "Boîte", kind="hidden"), Param("q", "Recherche", placeholder="nom ou adresse")])
 def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("mail")
+    port = scoped(ctx.ports.get("mail"), ctx)
     if port is None:
         return [Note(NO_PORT, tone="muted")]
     account = account_scope(port, ctx)
@@ -102,8 +106,8 @@ def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     rows = tuple(Row((Text(clip(e["name"], 60) or "—"), Text(e["address"], "mono"), Text(str(e["received"]), "num"),
                       Text(str(e["sent"]), "num"), When(e["last"]) if e["last"] else "—"),
                      href=Ref("local", f"/inspecteur/{SECTION}/reception", "",
-                              tuple((k, v) for k, v in (("compte", account), ("dossier", "*"), ("de", e["address"]))
-                                    if v)),
+                              tuple((k, v) for k, v in (("compte", account), ("dossier", "*"), ("de", e["address"]),
+                                                        (WHOSE, whose(ctx))) if v)),
                      detail=(ActionSlot("email.ecrire", (("to", e["address"]),) + ((("account", account),) if account
                                                                                    else ()),
                                         title=f"Écrire à {e['address']}", compact=True),))
@@ -111,4 +115,5 @@ def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [workspace(port, ctx, [Table(("nom", "adresse", Column("reçus", "num"), Column("envoyés", "num"), Column("dernier échange", "fit")),
                   rows, title="Contacts", pager=pager,
                   empty="aucun contact ne correspond" if query else "aucun échange encore",
-                  caption="Comptés sur tous les messages synchronisés et les envois conservés. Un clic ouvre les échanges ; déplie une ligne pour écrire.")], view="contacts", filters=(Param("q", "Recherche", placeholder="nom ou adresse"),), state=s)]
+                  caption="Comptés sur tous les messages synchronisés et les envois conservés. Un clic ouvre les échanges ; déplie une ligne pour écrire.")], view="contacts", filters=(Param("q", "Recherche", placeholder="nom ou adresse"),), state=s,
+                      frame=frame)]

@@ -36,12 +36,13 @@ from mika.vocab.privacy import ChannelTrust, normalize_channel
 # ── qui ─────────────────────────────────────────────────────────────────────
 
 #: les sources qu'une ligne coche (plusieurs à la fois) : toi ; tes proches (un lien « proche »), reconnus ; tout le
-#: monde ; une personne par son nom (``personne:<clé>``), reconnue ; pour un canal de messagerie, une adresse ou un
-#: @domaine (``adresse:<motif>``)
-OWNER, CLOSE, EVERYONE, PERSON, ADDRESS = "proprietaire", "proches", "tous", "personne:", "adresse:"
+#: monde ; une personne par son nom (``personne:<clé>``), reconnue ; elle (``elle`` : une personne comme les autres,
+#: que la console nomme par son nom — elle seule, au travail, ADR 0184) ; pour un canal de messagerie, une adresse ou
+#: un @domaine (``adresse:<motif>``)
+OWNER, CLOSE, EVERYONE, PERSON, ADDRESS, SELF = "proprietaire", "proches", "tous", "personne:", "adresse:", "elle"
 SOURCES = ((OWNER, "Toi"), (CLOSE, "Tes proches"), (EVERYONE, "Tout le monde"))
-SOURCE = re.compile(rf"(?:{OWNER}|{CLOSE}|{EVERYONE}|{PERSON}\S{{1,200}}|{ADDRESS}\S{{1,200}})")
-SOURCE_WORDS = {OWNER: "toi", CLOSE: "tes proches", EVERYONE: "tout le monde"}
+SOURCE = re.compile(rf"(?:{OWNER}|{CLOSE}|{EVERYONE}|{SELF}|{PERSON}\S{{1,200}}|{ADDRESS}\S{{1,200}})")
+SOURCE_WORDS = {OWNER: "toi", CLOSE: "tes proches", EVERYONE: "tout le monde", SELF: "elle"}
 
 # ── par où ──────────────────────────────────────────────────────────────────
 
@@ -306,8 +307,9 @@ class Rule(BaseModel):
 
     @property
     def alone(self) -> bool:
-        """Une ligne d'elle seule : sans personne, par le seul canal « elle seule »."""
-        return not self.who and self.canal == (INTERNAL,)
+        """Une ligne d'elle seule : elle, et personne d'autre (``SELF``, ADR 0184) — ou, réglée avant, sans personne
+        par le seul canal « elle seule »."""
+        return alone(self.who, self.canal)
 
 
 class ToolRule(Rule):
@@ -367,13 +369,21 @@ def decide(lines: Iterable[L], default: L, matches: Callable[[L], bool]) -> Verd
     return Verdict(default, 0)
 
 
+def alone(who: Iterable[str], canal: Iterable[str]) -> bool:
+    """Une ligne d'elle seule : elle, et personne d'autre (``SELF``) — ou, réglée avant l'ADR 0184, sans personne par
+    le seul canal « elle seule »."""
+    who = tuple(who)
+    return who == (SELF,) or (not who and tuple(canal) == (INTERNAL,))
+
+
 def designates(who: Iterable[str], where: str, person: str, close: Callable[[str], bool] | None = None) -> bool:
-    """Une ligne désigne-t-elle qui est en face ? Sans personne (``who`` vide) : seulement elle seule, et la ligne
-    par défaut ; toi ; tes proches (``close`` : cette personne est-elle proche ?) et une personne par son nom,
-    reconnus ; tout le monde (qui est aussi le seul à désigner une inconnue, ou un salon — jamais elle seule)."""
+    """Une ligne désigne-t-elle qui est en face ? Elle (``SELF``), et une ligne sans personne réglée avant l'ADR
+    0184 : seulement elle seule ; toi ; tes proches (``close`` : cette personne est-elle proche ?) et une personne
+    par son nom, reconnus ; tout le monde (qui est aussi le seul à désigner une inconnue, ou un salon — jamais elle
+    seule)."""
     who = tuple(who)
     if where == WORK:
-        return not who
+        return not who or SELF in who
     if not who:
         return True
     if EVERYONE in who:
@@ -432,10 +442,11 @@ def families(rule: Any) -> frozenset[str]:
     """Les familles d'épisodes où une ligne peut valoir — ce qu'on offre au plus ; qui l'a vraiment se décide devant
     chaque audience. Elle seule (``WORK``) quand la ligne n'a personne ; les moments cochés (ou tous) sinon."""
     who, canal, when = tuple(getattr(rule, "who", ())), tuple(getattr(rule, "canal", ())), tuple(rule.when)
+    others = tuple(w for w in who if w != SELF)
     out: set[str] = set()
-    if not who and via(canal, Canal(INTERNAL)):
+    if (not who or SELF in who) and via(canal, Canal(INTERNAL)):
         out.add(WORK)
-    if who or not canal or any(canal_key(c)[0] != INTERNAL for c in canal):
+    if others or (not who and (not canal or any(canal_key(c)[0] != INTERNAL for c in canal))):
         out |= set(when) or {k for k, _ in MOMENTS}
     return frozenset(out)
 
@@ -470,20 +481,21 @@ def checked(boxes: Mapping[str, bool], row: str) -> list[str]:
 
 
 def in_order(who: Iterable[str]) -> tuple[str, ...]:
-    """Des sources dans l'ordre où la console les montre : les siennes, puis les personnes et les adresses."""
+    """Des sources dans l'ordre où la console les montre : les siennes, elle, puis les personnes et les adresses."""
     got = set(who)
-    return (*(k for k, _ in SOURCES if k in got), *sorted(k for k in got if k.startswith(PERSON)),
-            *sorted(k for k in got if k.startswith(ADDRESS)))
+    return (*(k for k, _ in SOURCES if k in got), *((SELF,) if SELF in got else ()),
+            *sorted(k for k in got if k.startswith(PERSON)), *sorted(k for k in got if k.startswith(ADDRESS)))
 
 
-def who_words(who: str | Iterable[str], name: Callable[[str], str]) -> str:
-    """Qui une ligne désigne, en mots : ses sources, ses personnes par leur nom (``name`` : sa clé → son nom), ses
-    adresses ; personne (elle seule) ; la ligne par défaut."""
+def who_words(who: str | Iterable[str], name: Callable[[str], str], her: str = "") -> str:
+    """Qui une ligne désigne, en mots : ses sources, elle (``her`` : son nom, sinon « elle »), ses personnes par leur
+    nom (``name`` : sa clé → son nom), ses adresses ; personne (elle seule, réglée avant) ; la ligne par défaut."""
     who = ((who,) if who else ()) if isinstance(who, str) else tuple(who)
     if not who:
         return "—"
-    parts = [SOURCE_WORDS.get(w) or (name(w[len(PERSON):]) if w.startswith(PERSON)
-                                     else w[len(ADDRESS):] if w.startswith(ADDRESS) else w) for w in who]
+    parts = [her if w == SELF and her else SOURCE_WORDS.get(w)
+             or (name(w[len(PERSON):]) if w.startswith(PERSON) else w[len(ADDRESS):] if w.startswith(ADDRESS) else w)
+             for w in who]
     said = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " et " + parts[-1]
     return said[:1].upper() + said[1:]
 
@@ -511,7 +523,8 @@ def rows_sent(ligne: Mapping[str, str], boxes: Mapping[str, Mapping[str, bool]],
     """Les lignes d'un tableau envoyé, dans leur ordre (``ligne.<n>``) : ce que chaque case à cocher
     (``boxes`` : « qui », « canal », « moments », « prend ») et chaque champ (``fields``) en disent, « toujours » et
     « tous » (les outils) à part. Refuse une ligne sans source lisible, sans moment, ou sans outil, par un
-    ``ValueError`` qui nomme la ligne."""
+    ``ValueError`` qui nomme la ligne. Elle se coche comme une personne (``SELF``, ADR 0184) : le canal « elle seule »
+    n'a qu'elle, et elle n'arrive que par lui."""
 
     def number(key: str) -> int:
         return int(key) if key.isdigit() else 10**6
@@ -524,11 +537,15 @@ def rows_sent(ligne: Mapping[str, str], boxes: Mapping[str, Mapping[str, bool]],
             canal = canals(checked(boxes.get("canal", {}), key))
         except ValueError as exc:
             raise ValueError(f"Ligne {n} : {exc}.") from None
-        if not who and canal != (INTERNAL,):
-            raise ValueError(f"Ligne {n} : coche qui (ou le seul canal « elle seule »).")
-        if who and canal == (INTERNAL,):
-            raise ValueError(f"Ligne {n} : « elle seule » n'a personne en face — décoche qui, ou choisis un autre canal.")
-        talks = canal != (INTERNAL,)
+        if not who:
+            raise ValueError(f"Ligne {n} : coche qui (elle, toi, une personne…).")
+        if canal == (INTERNAL,) and who != (SELF,):
+            raise ValueError(f"Ligne {n} : « elle seule » n'a personne en face — ne coche qu'elle, ou choisis un "
+                             "autre canal.")
+        if SELF in who and canal and not via(canal, Canal(INTERNAL)):
+            raise ValueError(f"Ligne {n} : elle n'arrive que par « elle seule » — coche ce canal (ou « tous »), ou "
+                             "décoche-la.")
+        talks = not alone(who, canal)
         when = () if always.get(key) or not talks else moments(m for m in checked(boxes.get("moments", {}), key)
                                                                   if m in WHEN_WORDS)
         if talks and not always.get(key) and not when:

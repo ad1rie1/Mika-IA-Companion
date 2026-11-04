@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mika.kernel.forms import Knob
 from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
+from mika.vocab.access import PERSON, SELF
 
 #: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
 LEGACY_ACCOUNT = "principal"
@@ -54,6 +55,12 @@ class MailAccount(BaseModel):
                                  group="La boîte", advanced=False, order=3)] = ""
     enabled: Annotated[bool, Knob(label="Actif", help="Décoché : ni relevé ni envoi, les réglages restent.",
                                   group="La boîte", advanced=False, order=12)] = True
+    owner: Annotated[str, Knob(
+        label="À qui", group="La boîte", advanced=False, order=4,
+        help="À qui est cette boîte : toi (ses propriétaires), elle, ou une personne qui a un compte. Elle s'en sert "
+             "avec son propriétaire — toi en privé et quand elle travaille, elle-même quand elle travaille, cette "
+             "personne en privé (ADR 0185). Les tiennes s'ouvrent à d'autres dans Outils › Ses propres outils › "
+             "Courrier.")] = ""
     auth: Annotated[Literal["password", "microsoft"], Knob(
         label="Connexion", group="Connexion", choices=AUTHS, advanced=False, order=15,
         help="Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.")] = \
@@ -139,6 +146,14 @@ class MailAccount(BaseModel):
         kept = tuple(dict.fromkeys(f.strip() for f in folders if f.strip()))
         return kept or ("INBOX",)
 
+    @field_validator("owner")
+    @classmethod
+    def _owner(cls, owner: str) -> str:
+        owner = owner.strip()
+        if owner and owner != SELF and not (owner.startswith(PERSON) and len(owner) > len(PERSON)):
+            raise ValueError("une boîte est à toi (vide), à elle (« elle ») ou à une personne (« personne:<clé> »)")
+        return owner
+
     @field_validator("oauth_client_id")
     @classmethod
     def _client_id(cls, client_id: str) -> str:
@@ -178,7 +193,7 @@ class MailAccount(BaseModel):
             key=key, label=self.label, address=self.from_address.lower(), display_name=self.display_name,
             voice=self.voice, sender_name=self.sender_name, tone=self.tone, instructions=self.instructions, signature=self.signature,
             folders=self.folders, ready=self.ready, can_send=self.can_send, enabled=self.enabled,
-            details=self.details())
+            details=self.details(), owner=self.owner)
 
     def details(self) -> tuple[tuple[str, str], ...]:
         """Ses réglages, sans aucun secret (le mot de passe : « défini » ou non)."""

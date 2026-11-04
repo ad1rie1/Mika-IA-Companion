@@ -9,7 +9,8 @@ from mika.sim.outside import FakeMail
 
 def mailbox(clock: Callable[[], int]) -> FakeMail:
     box = FakeMail(now=clock, boxes=[
-        AccountInfo("perso", "Personnel", "mika@example.net", ready=True, can_send=True),
+        # son adresse à elle : sa boîte (ADR 0185) ; l'atelier est à toi
+        AccountInfo("perso", "Personnel", "mika@example.net", ready=True, can_send=True, owner="elle"),
         AccountInfo("atelier", "Atelier", "atelier@example.net", ready=True, can_send=True),
     ])
     now = clock()

@@ -44,11 +44,15 @@ from mika.plugins.email import (
     READ,
     REPLIED,
     WAITING,
-    for_owner,
+    approver_name,
+    approver_of,
+    boxes_here,
     keeper_name,
     keepers,
+    owns_a_box,
     params_of,
 )
+from mika.plugins.email.boxes import Boxes
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject, to_fill
 from mika.ports.preprocess import cite, inert
@@ -79,12 +83,16 @@ def voice_word(voice: str) -> str:
 
 
 def _port(ctx: Any) -> tuple[Any, ToolResult | None]:
+    """Le courrier tel que ses outils le voient ici : réduit aux boîtes de qui est en face (ADR 0185) ; rien quand
+    aucune ne lui est ouverte."""
     port = ctx.ports.get("mail")
     if port is None:
         return None, ToolResult(ok=False, content=phrase("email.tools.no_box"))
-    if not for_owner(ctx.frame):
+    accounts = [a.key for a in port.accounts()]
+    keys = boxes_here(ctx.frame, accounts)
+    if accounts and not keys:
         return None, ToolResult(ok=False, content=phrase("email.tools.private"))
-    return port, None
+    return Boxes(port, keys), None
 
 
 def _unread_mark(ctx: Any, m: Any) -> str:
@@ -200,7 +208,7 @@ class TidyArgs(BaseModel):
     folder: str = Field(default="", max_length=300, description=phrase("email.tools.tidy.folder"))
 
 
-@EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True)
+@EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
 async def email_accounts(args: NoArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -220,7 +228,7 @@ async def email_accounts(args: NoArgs, ctx: Any) -> Any:
 
 
 @EMAIL.tool("email_list", description=phrase("email.tools.list.description"), args=ListArgs,
-            bundle=BUNDLE, episodes=EPISODES, owner_only=True)
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
 async def email_list(args: ListArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -275,7 +283,7 @@ def _twin(m: Any) -> str:
 
 
 @EMAIL.tool("email_search", description=phrase("email.tools.search.description"), args=SearchArgs,
-            bundle=BUNDLE, episodes=EPISODES, owner_only=True, max_calls_per_episode=4)
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box, max_calls_per_episode=4)
 async def email_search(args: SearchArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -294,7 +302,7 @@ async def email_search(args: SearchArgs, ctx: Any) -> Any:
 
 
 @EMAIL.tool("email_contacts", description=phrase("email.tools.contacts.description"), args=ContactsArgs,
-            bundle=BUNDLE, episodes=EPISODES, owner_only=True, max_calls_per_episode=4)
+            bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box, max_calls_per_episode=4)
 async def email_contacts(args: ContactsArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -313,7 +321,7 @@ def _quoted(text: str) -> str:
 
 
 @EMAIL.tool("email_read", description=phrase("email.tools.read.description"), args=ReadArgs, bundle=BUNDLE,
-            episodes=EPISODES, max_calls_per_episode=5, owner_only=True)
+            episodes=EPISODES, max_calls_per_episode=5, owner_only=True, owned=owns_a_box)
 async def email_read(args: ReadArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -356,7 +364,7 @@ def _asker(ctx: Any) -> tuple[str, ...]:
 
 
 @EMAIL.tool("email_draft", acts=True, description=phrase("email.tools.draft.description"), args=DraftArgs,
-            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True)
+            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True, owned=owns_a_box)
 async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -369,7 +377,8 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
         ref = parent.ref
         waiting = [d for d in ctx.frame.state("email").drafts.values() if d.mail == ref and d.state == WAITING]
         if waiting:
-            return ToolResult(ok=False, content=phrase("email.tools.draft.waiting", who=keepers(ctx.frame)))
+            return ToolResult(ok=False, content=phrase("email.tools.draft.waiting",
+                                                       who=approver_name(ctx.frame, waiting[0].account)))
     key = args.account or (parent.account if parent is not None else "")
     accounts = port.accounts()
     info = next((a for a in accounts if a.key == key), None) if key or parent is not None \
@@ -403,11 +412,13 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     what = f"Répondre à {inert(to, 200)}" if parent is not None else f"Écrire à {inert(to, 200)}"
     summary = f"{what} (boîte « {inert(info.name, 60)} », {voice_word(info.voice)}) : « {inert(subject, 200)} »"
     payload = {"draft": draft.id, "account": info.key, "mail": ref, "_apercu": shown.digest}
+    if needs_approval and (handle := approver_of(ctx.frame, info.key)):
+        payload[rt.DECIDER] = handle  # la boîte d'une personne : sa carte d'accord, dans son chat (ADR 0185)
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=needs_approval,
         context="email", about=about))
-    who = keepers(ctx.frame)
+    who = approver_name(ctx.frame, info.key)
     after = phrase("email.tools.draft.proposed", who=who) if needs_approval else \
         phrase("email.tools.draft.queued")
     if shown.blocked:
@@ -471,7 +482,7 @@ async def _gesture(port: Any, ref: str, action: str, folder: str) -> str:
 
 
 @EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"), args=TidyArgs,
-            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True)
+            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True, owned=owns_a_box)
 async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:

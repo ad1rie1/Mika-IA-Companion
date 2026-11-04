@@ -16,7 +16,7 @@ from markupsafe import Markup
 
 from mika.inspector import render
 from mika.inspector.ui import UI, env
-from mika.kernel.inspect import Fields, Note, Stats, Table, Text
+from mika.kernel.inspect import Fields, Note, Section, Stats, Table, Text
 
 
 def counts(blocks: Sequence[Any]) -> list[dict[str, str]]:
@@ -150,9 +150,12 @@ def _lift_time(row: dict[str, Any]) -> None:
 
 def drawn(roles: Roles, kind: str) -> Callable[[UI, str, Sequence[Any], Mapping[str, str]], Markup | None]:
     """Un onglet fait de listes simples, dessiné : ses chiffres, ses faits (une place occupée), ses listes en cartes,
-    ses notes. Sans liste, les blocs de la faculté."""
+    ses notes. Sans liste, les blocs de la faculté. Des onglets réunis sous un seul (``Overview.joined`` : une section
+    par onglet) se lisent bloc par bloc, comme s'ils n'en faisaient qu'un (les Comptes d'une personne : ses boîtes,
+    ses comptes Teams)."""
 
     def draw(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+        blocks = [x for b in blocks for x in (b.items if isinstance(b, Section) else (b,))]
         tables = [b for b in blocks if isinstance(b, Table)]
         if not tables:
             return None

@@ -64,6 +64,8 @@ from mika.plugins.email.console.common import (
     clip,
     draft_state,
     mail_key,
+    scoped,
+    whose,
     workspace,
 )
 from mika.plugins.email.console.mail import _document
@@ -96,14 +98,14 @@ def _seen_for(s: EmailState, draft_id: str) -> DraftSeen | None:
                description="Relis les propositions avant envoi : approuve, modifie ou refuse chaque brouillon.",
                params=[Param("compte", "Compte", kind="hidden")])
 def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("mail")
+    port = scoped(ctx.ports.get("mail"), ctx)
     if port is None:
         return [Note(NO_PORT, tone="muted")]
     labels = {a.key: a for a in port.accounts()}
     account = account_scope(port, ctx)
     waiting, done = [], []
     for d in sorted(s.drafts.values(), key=lambda d: -d.proposal):
-        if account and d.account != account:
+        if (account and d.account != account) or (whose(ctx) and d.account not in labels):
             continue
         (waiting if d.state == WAITING else done).append(d)
 
@@ -134,7 +136,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     page, pager = paginate(done, ctx.pager(size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in page), title=f"Déjà décidés ({len(done)})", pager=pager,
                         empty="aucun encore", layout="list", link_label="Voir le brouillon"))
-    return [workspace(port, ctx, blocks, view="brouillons", state=s)]
+    return [workspace(port, ctx, blocks, view="brouillons", state=s, frame=frame)]
 
 
 @EMAIL.subject("brouillon", label="Brouillon", plural="Brouillons", icon="✎")

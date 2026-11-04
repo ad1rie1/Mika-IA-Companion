@@ -33,14 +33,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import agency as agency_c
 from mika.contracts import email as c
 from mika.contracts import identity as identity_c
+from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Payload
@@ -49,6 +51,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
+from mika.vocab.access import ACCOUNT, PERSON, SELF, WORK, situation
 from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
@@ -129,6 +132,10 @@ class EmailParams(BaseModel):
         label="Boîtes décochées", group="Envoyer", readonly=True,
         help="Réglées dans Courrier › Paramètres : elle n'y prépare rien d'elle-même, quelles que "
              "soient ses règles d'envoi.")] = ()
+    owners: Annotated[dict[str, str], Knob(
+        label="À qui sont ses boîtes", group="Envoyer", readonly=True,
+        help="Réglé dans Courrier › Paramètres (« À qui », ADR 0185) : une boîte sert à son propriétaire — elle "
+             "(« elle »), une personne (« personne:<clé> ») ; absente, à toi.")] = Field(default_factory=dict)
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -330,9 +337,11 @@ def _asked(s: EmailState, e, cx) -> EmailState:
 def announceable(s: EmailState, now: int, p: EmailParams) -> tuple[str, ...]:
     """Les mails qu'elle a envie d'annoncer à sa propriétaire : non lus, importants, arrivés depuis peu, pas
     encore dits ni annoncés en vain trop souvent — les plus importants d'abord (une seule définition : la
-    preuve d'initiative et le compte des essais lisent la même)."""
+    preuve d'initiative et le compte des essais lisent la même). Seulement ceux de ses boîtes à elle, la
+    propriétaire : une boîte qui est à quelqu'un d'autre ne la regarde pas (ADR 0185)."""
     fresh = [(k, m) for k, m in s.mails.items()
-             if not m.read and not m.mentioned and m.importance >= p.mention_from
+             if not p.owners.get(m.account, "")
+             and not m.read and not m.mentioned and m.importance >= p.mention_from
              and 0 <= now - m.at <= p.mention_within_us and m.mention_attempts < p.mention_attempts]
     fresh.sort(key=lambda kv: (-kv[1].importance, -kv[1].at, kv[0]))
     return tuple(k for k, _ in fresh[:MENTION_MAX])
@@ -467,6 +476,48 @@ def for_owner(frame: Frame) -> bool:
     return here_allowed(frame, BUNDLE, tasks=lambda target: (task_of(target) or ("", ""))[0] == EMAIL.name)
 
 
+def owner_of(frame: Frame, account: str) -> str:
+    """À qui est une boîte (ADR 0185) : vide, ses propriétaires (toi) ; ``elle`` ; ``personne:<clé>``."""
+    return params_of(frame).owners.get(account, "")
+
+
+def _facing(audience: Any, kind: str) -> str:
+    """Qui est en face, comme propriétaire possible d'une boîte : ``personne:<clé>`` d'une personne reconnue en
+    tête-à-tête ; vide sinon (toi, elle seule, un salon, une inconnue)."""
+    person = getattr(audience, "person", "") or ""
+    return PERSON + person if person and situation(audience, kind) == ACCOUNT else ""
+
+
+def boxes_here(frame: Frame, accounts: Iterable[str]) -> tuple[str, ...]:
+    """Les boîtes dont elle peut se servir ici (ADR 0185) : une boîte sert à son propriétaire.
+
+    - les tiennes (sans propriétaire nommé) : là où sa famille d'outils le permet (``for_owner``) — toi en privé,
+      elle quand elle travaille, et qui une ligne de la famille ouvre ;
+    - les siennes : quand elle travaille, là où sa famille le permet ;
+    - celles d'une personne : avec elle, reconnue, en tête-à-tête — et nulle part ailleurs ;
+    - une tâche de rédaction : la boîte de son mail (on la lui a demandée, ou elle l'a proposée pour une boîte à
+      toi ou à elle)."""
+    kind = frame.episode.kind if frame.episode is not None else ""
+    owners, family = params_of(frame).owners, for_owner(frame)
+    alone = situation(frame.audience, kind) == WORK
+    person = _facing(frame.audience, kind)
+    task = split_ref(task_mail(frame))[0] if alone and family else ""
+    out = []
+    for a in accounts:
+        owner = owners.get(a, "")
+        if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person) \
+                or (task and a == task):
+            out.append(a)
+    return tuple(out)
+
+
+def owns_a_box(audience: Any, kind: str, frame: Frame | None) -> bool:
+    """Qui est en face a une boîte à son nom (``ToolSpec.owned``) : ses outils de courrier lui sont offerts, réduits à
+    ses boîtes ; sans ce qu'elle vit (une console qui juge sans lui), personne."""
+    person = _facing(audience, kind)
+    return frame is not None and bool(person) and person in params_of(frame).owners.values()
+
+
 def keeper() -> str:
     """Comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)."""
     return phrase("projects.caretaker")
@@ -491,6 +542,29 @@ def keepers(frame: Frame) -> str:
     if not names:
         return keeper()
     return names[0] if len(names) == 1 else phrase("email.keepers_or").join(names[:3])
+
+
+def approver_of(frame: Frame, account: str) -> str:
+    """À qui va la carte d'accord d'un envoi depuis cette boîte (ADR 0185) : pour la boîte d'une personne, à elle —
+    une de ses adresses présente, sinon une où l'on peut lui écrire, sinon la première ; vide pour les autres (tes
+    boîtes et les siennes : la console, comme avant). Un opérateur décide toujours aussi dans la console."""
+    owner = owner_of(frame, account)
+    if not owner.startswith(PERSON):
+        return ""
+    person = owner[len(PERSON):]
+    handles = list(frame.get(identity_c.HANDLES(person)) or (person,))
+    here, reachable = set(frame.get(presence_c.PRESENT)), set(frame.get(identity_c.REACHABLE(person)))
+    return next((h for h in handles if h in here), None) or next((h for h in handles if h in reachable), None) \
+        or (handles[0] if handles else "")
+
+
+def approver_name(frame: Frame, account: str) -> str:
+    """Qui approuve un envoi depuis cette boîte, comme elle le dirait : la personne de la boîte (son prénom, sinon « la
+    personne à qui est cette boîte »), sinon ses propriétaires (``keepers``)."""
+    owner = owner_of(frame, account)
+    if owner.startswith(PERSON):
+        return person_name(frame, owner[len(PERSON):]) or phrase("email.holder")
+    return keepers(frame)
 
 
 def operator_label(frame: Frame, handle: str) -> str:

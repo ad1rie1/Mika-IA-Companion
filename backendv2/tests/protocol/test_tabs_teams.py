@@ -54,7 +54,7 @@ def test_replies_waiting_for_you_come_first_facing_the_message(world):  # noqa: 
     bootstrap(client)
     plugged(client, live)
     store = live.kernel.ports["teams"]
-    [message] = client.portal.call(store.thread, DM, 10)
+    [message] = client.portal.call(store.thread, "principal", DM, 10)
     draft = client.portal.call(store.save_draft, TeamsDraft(id="", conversation=DM, body="Oui, 14 h me va.",
                                                             reply_to=message.ref))
     emit(client, live, "runtime", [rt.EFFECT_PROPOSED.draft(
@@ -69,6 +69,7 @@ def test_replies_waiting_for_you_come_first_facing_the_message(world):  # noqa: 
     assert 'href="/inspecteur/envoi"' in page  # « Envoyer à ta place », dit par le plugin, avec son lien
     extension = drawn(client, "/inspecteur/teams/extension")
     band = _between(extension, 'class="person-tiles teams-band"', "</section>")
-    assert "Réponses à décider" in band and 'href="/inspecteur/teams/reponses"' in band
-    assert "Adrien" in _between(extension, "Ton compte Teams", "</section>")
+    # les chiffres d'un compte mènent aux onglets de ce compte (ADR 0186)
+    assert "Réponses à décider" in band and 'href="/inspecteur/teams/reponses?compte=principal"' in band
+    assert "Adrien" in _between(extension, "Ce compte Teams", "</section>")
     assert 'class="person-tab-note warn"' not in extension  # branchée : pas de bandeau
