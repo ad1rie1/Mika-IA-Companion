@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mika.kernel.forms import Knob
 from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
-from mika.vocab.access import PERSON, SELF
+from mika.vocab.access import PERSON, SELF, Share
 
 #: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
 LEGACY_ACCOUNT = "principal"
@@ -61,6 +61,11 @@ class MailAccount(BaseModel):
              "avec son propriétaire — toi en privé et quand elle travaille, elle-même quand elle travaille, cette "
              "personne en privé (ADR 0185). Les tiennes s'ouvrent à d'autres dans Outils › Ses propres outils › "
              "Courrier.")] = ""
+    shares: Annotated[dict[str, Share], Knob(
+        label="Partagée avec", group="La boîte", readonly=True, order=5,
+        help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
+             "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne la voit sous son propre "
+             "compte.")] = Field(default_factory=dict)
     auth: Annotated[Literal["password", "microsoft"], Knob(
         label="Connexion", group="Connexion", choices=AUTHS, advanced=False, order=15,
         help="Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.")] = \
@@ -153,6 +158,14 @@ class MailAccount(BaseModel):
         if owner and owner != SELF and not (owner.startswith(PERSON) and len(owner) > len(PERSON)):
             raise ValueError("une boîte est à toi (vide), à elle (« elle ») ou à une personne (« personne:<clé> »)")
         return owner
+
+    @field_validator("shares")
+    @classmethod
+    def _shares(cls, shares: dict[str, str]) -> dict[str, str]:
+        bad = [k for k in shares if not (k.startswith(PERSON) and len(k) > len(PERSON))]
+        if bad:
+            raise ValueError(f"un partage va à une personne (« personne:<clé> »), pas à « {bad[0][:40]} »")
+        return dict(shares)
 
     @field_validator("oauth_client_id")
     @classmethod

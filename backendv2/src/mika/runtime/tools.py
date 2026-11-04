@@ -169,21 +169,23 @@ class ToolContext:
         l'écriture suppose encore vrai au moment du commit (sinon ``Superseded``, et rien n'est écrit)."""
         return await self._append(drafts, emitter=self.spec.owner, guard=guard)
 
-    async def propose(self, draft: Draft[Any]) -> Commit:
+    async def propose(self, draft: Draft[Any], *, guard: Guard | None = None) -> Commit:
         """Proposer un effet extérieur : une capacité de la faculté de l'outil.
 
         ``effect.proposed`` appartient au runtime, qui l'exécute après commit
         (ou après accord) : un outil ne peut pas l'émettre en son nom (le Mind
         refuserait l'émetteur). Le runtime l'écrit donc pour lui, corrélé à
         l'épisode comme une écriture de l'outil — et seulement pour une capacité
-        que la faculté de l'outil possède."""
+        que la faculté de l'outil possède. ``guard`` s'ajoute à la garde de
+        l'épisode, comme pour ``emit`` : ce que la proposition suppose encore
+        vrai au moment du commit (une réponse pas encore partie)."""
         if draft.type is not rt.EFFECT_PROPOSED:
             raise TypeError(f"propose attend {rt.EFFECT_PROPOSED.name}, reçu {draft.type.name}")
         owner = self.spec.owner
         if draft.data.owner != owner or not draft.data.capability.startswith(f"{owner}."):
             raise PermissionError(f"{owner} ne peut proposer que ses propres capacités "
                                   f"(pas {draft.data.capability})")
-        return await self._append((draft,), emitter=rt.OWNER)
+        return await self._append((draft,), emitter=rt.OWNER, guard=guard)
 
     async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str, guard: Guard | None = None) -> Commit:
         keyed = []
@@ -342,19 +344,53 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
     for name, spec in tools.items():
         if kind not in spec.episodes or not admitted(bundles, spec.bundle):
             continue
-        if spec.needs and ports is not None and not ready(ports.get(spec.needs)):
-            continue
-        if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {name}") is not True:
-            continue
-        if spec.fits is not None:
-            if boundary.call(spec.fits, audience, kind, frame, label=f"offre de {name}") is not True:
-                continue
-        else:
-            got = allowed(tools, spec, audience, kind, rights, close)
-            if (got is None or got.level == NO) and not owns(spec, audience, kind, frame):
-                continue
-        out[name] = spec
+        got = judge(tools, spec, audience, kind, rights, close, frame, ports)
+        if got is not None and got.offered:
+            out[name] = spec
     return out
+
+
+#: ce qui ferme un outil avant ses lignes : son service n'est pas configuré (``needs``), la condition qu'il déclare
+#: sur qui est en face (``when``), celle de la ressource d'ailleurs qui le porte (``fits`` : un service, une app)
+NEEDS, WHEN, FITS = "needs", "when", "fits"
+
+
+@dataclass(frozen=True, slots=True)
+class Judged:
+    """Ce que la porte dit d'un outil devant une audience, à un moment : offert ou non ; pour un des siens, ce qu'elle
+    en fait (``level``), ce qu'elle en garde et les lignes qui en décident (``why``) ; ``reason`` : ce qui l'a fermé
+    avant ses lignes ; ``owned`` : offert parce qu'une ressource de l'outil est à qui est en face (ADR 0185)."""
+
+    offered: bool
+    level: str = NO
+    keep: str = "rien"
+    why: str = ""
+    reason: str = ""
+    owned: bool = False
+
+
+def judge(tools: Mapping[str, ToolSpec], spec: ToolSpec, audience: Audience, kind: str, rights: Rights,
+          close: Callable[[str], bool] | None = None, frame: Any = None,
+          ports: Mapping[str, Any] | None = None) -> Judged | None:
+    """La porte d'offre pour un seul outil (``offer`` la passe pour chacun ; ce qu'une personne a, écran par écran,
+    la lit aussi — jamais une recopie) ; ``None`` : il ne sert pas à ce moment (``spec.episodes``). Un outil venu
+    d'ailleurs (``fits``) ne dit ici qu'offert ou non : ce qu'elle en fait est la ligne de son service."""
+    if kind not in spec.episodes:
+        return None
+    if spec.needs and ports is not None and not ready(ports.get(spec.needs)):
+        return Judged(False, reason=NEEDS)
+    if spec.when is not None and boundary.call(spec.when, audience, label=f"offre de {spec.name}") is not True:
+        return Judged(False, reason=WHEN)
+    if spec.fits is not None:
+        fits = boundary.call(spec.fits, audience, kind, frame, label=f"offre de {spec.name}") is True
+        return Judged(fits, reason="" if fits else FITS)
+    got = allowed(tools, spec, audience, kind, rights, close)
+    level, keep, why = (got.level, got.keep, got.why) if got is not None else (NO, "rien", "")
+    if level != NO:
+        return Judged(True, level, keep, why)
+    if owns(spec, audience, kind, frame):
+        return Judged(True, level, keep, why, owned=True)
+    return Judged(False, level, keep, why)
 
 
 def owns(spec: ToolSpec, audience: Audience, kind: str, frame: Any = None) -> bool:

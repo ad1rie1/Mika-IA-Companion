@@ -100,7 +100,9 @@ def test_her_tools_are_offered_to_whoever_owns_an_account():
     assert not owns_an_account(ROOM, Kind.REPLY, frame(ROOM))  # jamais à plusieurs
     assert not owns_an_account(NADIA, Kind.REPLY, None)  # une console qui juge sans ce qu'elle vit : personne
     reserved = [t for t in TEAMS.tools if t.owner_only]
-    assert reserved and all(t.owned is owns_an_account for t in reserved)
+    from mika.plugins.teams import owns_an_account_to_prepare
+    wanted = {"teams_draft": owns_an_account_to_prepare}  # préparer une réponse (ADR 0188) ; sinon lire
+    assert reserved and all(t.owned is wanted.get(t.name, owns_an_account) for t in reserved)
 
 
 def _config() -> TeamsConfig:

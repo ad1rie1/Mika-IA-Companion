@@ -600,6 +600,21 @@ class ImapSmtpMail:
             parent = self._cache.one(reply_to)
             if parent is not None and parent.account in accounts:
                 return parent.account
+            if parent is not None:  # gardé, mais sa boîte est retirée : jamais une autre à sa place
+                raise ValueError("la boîte du mail auquel tu réponds n'est plus configurée")
+            # une réponse part de la boîte de son mail, jamais d'une autre : le mail n'est plus (ou pas) dans le
+            # cache, sa référence dit encore sa boîte (« compte:Message-ID »)
+            owner = split_ref(reply_to)[0]
+            if owner in accounts:
+                return owner
+            if owner:
+                raise ValueError("la boîte du mail auquel tu réponds n'est plus configurée")
+            # une ancienne référence, sans sa boîte, d'un mail qui n'est plus gardé : la seule boîte qui envoie, s'il
+            # n'y en a qu'une ; sinon on ne devine pas
+            senders = [k for k, a in accounts.items() if a.can_send]
+            if len(senders) == 1:
+                return senders[0]
+            raise ValueError("le mail auquel tu réponds n'est plus gardé : on ne sait plus de quelle boîte il venait")
         chosen = next((k for k, a in sorted(accounts.items()) if a.can_send), None)
         if chosen is None:
             raise RuntimeError("aucun serveur d'envoi configuré")

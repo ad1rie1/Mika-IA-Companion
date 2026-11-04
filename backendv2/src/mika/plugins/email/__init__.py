@@ -51,7 +51,18 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
-from mika.vocab.access import ACCOUNT, PERSON, SELF, WORK, situation
+from mika.vocab.access import (
+    ACCOUNT,
+    AT_OWNER,
+    PERSON,
+    SELF,
+    SHARE_PREPARE,
+    SHARE_READ,
+    SHARE_USE,
+    WORK,
+    reaches,
+    situation,
+)
 from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
@@ -136,6 +147,11 @@ class EmailParams(BaseModel):
         label="À qui sont ses boîtes", group="Envoyer", readonly=True,
         help="Réglé dans Courrier › Paramètres (« À qui », ADR 0185) : une boîte sert à son propriétaire — elle "
              "(« elle »), une personne (« personne:<clé> ») ; absente, à toi.")] = Field(default_factory=dict)
+    shares: Annotated[dict[str, dict[str, str]], Knob(
+        label="Avec qui ses boîtes sont partagées", group="Envoyer", readonly=True,
+        help="Réglé par le propriétaire d'une boîte (Paramètres › Partages, ADR 0188) : par boîte, chaque personne "
+             "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir.")] = \
+        Field(default_factory=dict)
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "
@@ -183,6 +199,9 @@ class Seen:
     #: c'est elle qui l'a lu ou rangé (un de ses outils), pas un opérateur ni un autre client : la console le
     #: montre à part, son « non lu » étant celui de l'opérateur (ADR 0175)
     by_her: bool = False
+    #: la dernière réponse partie de sa boîte à ce mail (le ``seq`` de son ``email.sent``) ; 0 : aucune — gardée avec
+    #: lui, quand ses envois, eux, ne gardent que les plus récents (``SENT_KEPT``)
+    replied: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,9 +284,10 @@ class PollAsked(Payload):
 #: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
 #: v5 : ``Seen.by_her`` (ADR 0175)
+#: v6 : une réponse partie remplit la demande d'en écrire une, et se garde sur son mail (``Seen.replied``, ADR 0188)
 #: ``background_from`` (retiré le 2026-10-28) : les mails se taisaient en réponse quand le ton de la personne était
 #: lourd — une décision de comportement ; elle voit ce qui compte, et juge
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=5,
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=6,
                 retired_params=("background_from",))
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, phrase("email.bundle"))
@@ -317,7 +337,12 @@ def _sent(s: EmailState, e, cx) -> EmailState:
     d = e.data
     sent = s.sent.set(d.mail, SentSeen(e.seq, d.to, d.address, d.by, e.at, d.summary.ref or "", d.in_reply_to,
                                        d.account, d.draft, d.edited))
-    return replace(s, sent=_pruned(sent, SENT_KEPT, lambda kv: kv[1].seq))
+    # une réponse est partie : la demande d'en écrire une à ce mail est remplie (rien ne part deux fois, ADR 0188), et
+    # le mail le garde (ses envois s'élaguent avant lui)
+    asked = s.asked.delete(d.in_reply_to) if d.in_reply_to else s.asked
+    parent = s.mails.get(d.in_reply_to) if d.in_reply_to else None
+    mails = s.mails.set(d.in_reply_to, replace(parent, replied=e.seq)) if parent is not None else s.mails
+    return replace(s, sent=_pruned(sent, SENT_KEPT, lambda kv: kv[1].seq), asked=asked, mails=mails)
 
 
 @EMAIL.reducer(POLL_ASKED)
@@ -460,6 +485,11 @@ def _unread(s: EmailState, cx) -> tuple[c.MailView, ...]:
     return tuple(sorted(out, key=lambda v: (-v.importance, -v.at, v.mail)))
 
 
+@EMAIL.fact(c.ANSWERED)
+def _answered(s: EmailState, cx, ref: str) -> int:
+    return last_reply(s, ref)
+
+
 @EMAIL.fact(c.DRAFTS)
 def _drafts(s: EmailState, cx) -> tuple[c.DraftView, ...]:
     return tuple(c.DraftView(d.proposal, d.draft, d.account, d.mail, d.at)
@@ -488,34 +518,98 @@ def _facing(audience: Any, kind: str) -> str:
     return PERSON + person if person and situation(audience, kind) == ACCOUNT else ""
 
 
-def boxes_here(frame: Frame, accounts: Iterable[str]) -> tuple[str, ...]:
+def _shared_with(audience: Any, kind: str) -> str:
+    """Qui est en face, comme personne à qui l'on partage une boîte (ADR 0188) : ``personne:<clé>`` d'une personne
+    reconnue en tête-à-tête — une de ses propriétaires aussi, à qui l'on peut partager la boîte d'une autre ; vide
+    sinon (elle seule, un salon, une inconnue)."""
+    person = getattr(audience, "person", "") or ""
+    return PERSON + person if person and situation(audience, kind) in (ACCOUNT, AT_OWNER) else ""
+
+
+def boxes_here(frame: Frame, accounts: Iterable[str], need: str = SHARE_USE) -> tuple[str, ...]:
     """Les boîtes dont elle peut se servir ici (ADR 0185) : une boîte sert à son propriétaire.
 
     - les tiennes (sans propriétaire nommé) : là où sa famille d'outils le permet (``for_owner``) — toi en privé,
       elle quand elle travaille, et qui une ligne de la famille ouvre ;
     - les siennes : quand elle travaille, là où sa famille le permet ;
     - celles d'une personne : avec elle, reconnue, en tête-à-tête — et nulle part ailleurs ;
+    - celles qu'on lui partage (ADR 0188) : avec elle, reconnue, en tête-à-tête, si son partage atteint ce que l'outil
+      demande (``need`` : lire, préparer, s'en servir — par défaut, s'en servir) ;
     - une tâche de rédaction : la boîte de son mail (on la lui a demandée, ou elle l'a proposée pour une boîte à
       toi ou à elle)."""
+    return tuple(a for a in accounts if reach_of(frame, a, need))
+
+
+#: comment une boîte sert ici : par ce qu'elle est (à toi, à elle, à la personne en face, la boîte d'une tâche), ou
+#: seulement par un partage (ADR 0188)
+OWNED, SHARED = "proprietaire", "partage"
+
+
+def reach_of(frame: Frame, account: str, need: str = SHARE_USE) -> str:
+    """Par où cette boîte sert ici (``boxes_here``) : ``OWNED``, ``SHARED`` (un partage qui atteint ``need``), ou
+    vide (elle ne sert pas)."""
     kind = frame.episode.kind if frame.episode is not None else ""
-    owners, family = params_of(frame).owners, for_owner(frame)
+    p = params_of(frame)
+    family = for_owner(frame)
     alone = situation(frame.audience, kind) == WORK
-    person = _facing(frame.audience, kind)
-    task = split_ref(task_mail(frame))[0] if alone and family else ""
-    out = []
-    for a in accounts:
-        owner = owners.get(a, "")
-        if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person) \
-                or (task and a == task):
-            out.append(a)
-    return tuple(out)
+    person, shared = _facing(frame.audience, kind), _shared_with(frame.audience, kind)
+    owner = p.owners.get(account, "")
+    if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person):
+        return OWNED
+    if alone and family and split_ref(task_mail(frame))[0] == account:
+        return OWNED
+    if shared and reaches(p.shares.get(account, {}).get(shared, ""), need):
+        return SHARED
+    return ""
 
 
-def owns_a_box(audience: Any, kind: str, frame: Frame | None) -> bool:
-    """Qui est en face a une boîte à son nom (``ToolSpec.owned``) : ses outils de courrier lui sont offerts, réduits à
-    ses boîtes ; sans ce qu'elle vit (une console qui juge sans lui), personne."""
+def owns_a_box(audience: Any, kind: str, frame: Frame | None, need: str = SHARE_READ) -> bool:
+    """Qui est en face a une boîte à son nom, ou qu'on lui partage à ce niveau (``ToolSpec.owned``, ADR 0185, 0188) :
+    ses outils de courrier lui sont offerts, réduits à ces boîtes — un outil qui lit dès « lire », celui qui prépare
+    dès « lire et préparer », celui qui range à « s'en servir » ; sans ce qu'elle vit (une console qui juge sans
+    lui), personne."""
+    if frame is None:
+        return False
+    p = params_of(frame)
     person = _facing(audience, kind)
-    return frame is not None and bool(person) and person in params_of(frame).owners.values()
+    if person and person in p.owners.values():
+        return True
+    shared = _shared_with(audience, kind)
+    return bool(shared) and any(reaches(given.get(shared, ""), need) for given in p.shares.values())
+
+
+def owns_a_box_to_prepare(audience: Any, kind: str, frame: Frame | None) -> bool:
+    """``owns_a_box`` pour un outil qui prépare une réponse : une boîte à elle, ou partagée pour préparer."""
+    return owns_a_box(audience, kind, frame, SHARE_PREPARE)
+
+
+def owns_a_box_to_use(audience: Any, kind: str, frame: Frame | None) -> bool:
+    """``owns_a_box`` pour un outil qui agit sur la boîte (ranger) : une boîte à elle, ou partagée pour s'en servir."""
+    return owns_a_box(audience, kind, frame, SHARE_USE)
+
+
+def owner_must_approve(frame: Frame, account: str) -> bool:
+    """Ce qu'elle prépare dans cette boîte attend l'accord de son propriétaire, quoi que dise la règle de son canal
+    (ADR 0188) : la personne pour qui elle l'écrit — en tête-à-tête, ou qui lui a demandé cette réponse (une tâche) —
+    n'atteint la boîte que par un partage qui ne s'en sert pas (« lire et préparer »)."""
+    p = params_of(frame)
+    kind = frame.episode.kind if frame.episode is not None else ""
+    person = _shared_with(frame.audience, kind)
+    if not person:
+        ref = task_mail(frame)
+        ask = frame.state(EMAIL.name).asked.get(ref) if ref else None
+        if ask is not None and ask.by:
+            person = PERSON + str(frame.get(identity_c.PERSON(ask.by)) or ask.by)
+    owner = p.owners.get(account, "")
+    if not person or owner == person or (not owner and _one_of_hers(frame, person)):
+        return False  # sa boîte, ou une boîte « à toi » quand elle est une de ses propriétaires : un partage n'y retire rien
+    level = p.shares.get(account, {}).get(person, "")
+    return bool(level) and not reaches(level, SHARE_USE)
+
+
+def _one_of_hers(frame: Frame, person: str) -> bool:
+    """Cette personne (``personne:<clé>``) est-elle une de ses propriétaires ?"""
+    return person.removeprefix(PERSON) in set(frame.get(identity_c.OWNERS) or ())
 
 
 def keeper() -> str:
@@ -576,6 +670,21 @@ def name_of(sender: str) -> str:
     """Le nom d'un expéditeur, tel qu'il peut entrer dans une ligne (il l'a choisi : une donnée)."""
     name = sender.split("<", 1)[0].strip().strip('"')
     return clean_display_name(name or sender.strip("<>"), max_chars=60)
+
+
+def last_reply(s: EmailState, ref: str) -> int:
+    """La dernière réponse partie de sa boîte à ce mail, à la main ou un brouillon d'elle : le ``seq`` de son
+    ``email.sent`` (0 : aucune). Le mail la garde aussi longtemps qu'elle le garde ; un mail qu'elle n'a pas (ou plus)
+    se lit dans ses derniers envois."""
+    m = s.mails.get(ref)
+    return max(m.replied if m is not None else 0,
+               max((x.seq for x in s.sent.values() if x.in_reply_to == ref), default=0))
+
+
+def answered(s: EmailState, ref: str, after: int = 0) -> bool:
+    """Une réponse à ce mail est partie de sa boîte après l'événement ``after`` (son ``seq`` : l'ordre du journal,
+    sans égalité possible) : à la main, ou un brouillon d'elle."""
+    return last_reply(s, ref) > after
 
 
 def exhausted(s: EmailState, ref: str, p: EmailParams) -> bool:

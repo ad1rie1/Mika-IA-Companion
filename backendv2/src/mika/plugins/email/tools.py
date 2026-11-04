@@ -36,6 +36,7 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
+from mika.kernel.guards import Guard, Superseded
 from mika.kernel.operate import Preview
 from mika.plugins.email import (
     BUNDLE,
@@ -43,20 +44,27 @@ from mika.plugins.email import (
     IMPORTANT,
     READ,
     REPLIED,
+    SHARED,
     WAITING,
+    answered,
     approver_name,
     approver_of,
     boxes_here,
     keeper_name,
     keepers,
+    owner_must_approve,
     owns_a_box,
+    owns_a_box_to_prepare,
+    owns_a_box_to_use,
     params_of,
+    reach_of,
 )
 from mika.plugins.email.boxes import Boxes
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject, to_fill
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
+from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.canals import mail_rule_for_all, mail_send
 from mika.vocab.episodes import WORKING, Kind, is_work_target, task_of
 from mika.vocab.people import is_identifiable
@@ -82,14 +90,15 @@ def voice_word(voice: str) -> str:
     return family("email.voice_word").get(voice, "")
 
 
-def _port(ctx: Any) -> tuple[Any, ToolResult | None]:
-    """Le courrier tel que ses outils le voient ici : réduit aux boîtes de qui est en face (ADR 0185) ; rien quand
+def _port(ctx: Any, need: str = SHARE_READ) -> tuple[Any, ToolResult | None]:
+    """Le courrier tel que ses outils le voient ici : réduit aux boîtes de qui est en face (ADR 0185), et à celles
+    qu'on lui partage au niveau que l'outil demande (``need`` : lire, préparer, s'en servir — ADR 0188) ; rien quand
     aucune ne lui est ouverte."""
     port = ctx.ports.get("mail")
     if port is None:
         return None, ToolResult(ok=False, content=phrase("email.tools.no_box"))
     accounts = [a.key for a in port.accounts()]
-    keys = boxes_here(ctx.frame, accounts)
+    keys = boxes_here(ctx.frame, accounts, need)
     if accounts and not keys:
         return None, ToolResult(ok=False, content=phrase("email.tools.private"))
     return Boxes(port, keys), None
@@ -339,7 +348,9 @@ async def email_read(args: ReadArgs, ctx: Any) -> Any:
                           phrase("email.header.date", when=when(ctx.frame, gone.date)),
                           phrase("email.header.subject", subject=inert(gone.subject, 300)), _quoted(gone.body)))
     seen = ctx.frame.state("email").mails.get(m.ref)
-    if seen is not None and not seen.read:
+    shared = reach_of(ctx.frame, m.account, SHARE_READ) == SHARED
+    if seen is not None and not seen.read and not shared:
+        # lu pour qui on le lui partage : ce qu'elle en sait ne change pas pour son propriétaire (ADR 0188)
         await ctx.emit(READ.draft(mail=m.ref))
     lines = [phrase("email.tools.read.head"), f"[{m.ref}]{_twin(m)}", phrase("email.header.from", who=inert(m.sender, 200)),
              phrase("email.header.to", who=inert(m.to, 300))]
@@ -351,7 +362,8 @@ async def email_read(args: ReadArgs, ctx: Any) -> Any:
         lines.append(phrase("email.header.attachments", files=", ".join(inert(a.name, 80) for a in m.attachments[:10])))
     out = "\n".join([*lines, _quoted(m.body)])
     info = port.account(m.account)
-    if info is not None:  # ce qui suit n'est pas le mail : c'est ta façon d'écrire depuis cette boîte
+    # ce qui suit n'est pas le mail : c'est ta façon d'écrire depuis cette boîte — pas pour qui ne fait que la lire
+    if info is not None and reach_of(ctx.frame, m.account, SHARE_PREPARE):
         out += f"\n\n{phrase('email.tools.read.reply_how', ref=m.ref)}\n{voice_text(info)}"
     return out
 
@@ -364,21 +376,31 @@ def _asker(ctx: Any) -> tuple[str, ...]:
 
 
 @EMAIL.tool("email_draft", acts=True, description=phrase("email.tools.draft.description"), args=DraftArgs,
-            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True, owned=owns_a_box)
+            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True, owned=owns_a_box_to_prepare)
 async def email_draft(args: DraftArgs, ctx: Any) -> Any:
-    port, refused = _port(ctx)
+    port, refused = _port(ctx, SHARE_PREPARE)
     if refused is not None:
         return refused
     ref = args.mail.strip().strip("[]")
     parent = await port.get(ref) if ref else None
     if ref and parent is None:
         return ToolResult(ok=False, content=phrase("email.tools.not_found"))
+    since: int | None = None  # au travail : la demande qu'elle remplit (son seq), relue au moment de proposer
     if parent is not None:
         ref = parent.ref
-        waiting = [d for d in ctx.frame.state("email").drafts.values() if d.mail == ref and d.state == WAITING]
+        s = ctx.frame.state("email")
+        waiting = [d for d in s.drafts.values() if d.mail == ref and d.state == WAITING]
         if waiting:
             return ToolResult(ok=False, content=phrase("email.tools.draft.waiting",
                                                        who=approver_name(ctx.frame, waiting[0].account)))
+        # au travail, une réponse partie entre-temps (à la main, pendant qu'elle écrivait) rend la sienne sans objet ;
+        # une nouvelle demande d'après la rouvre. En conversation, la personne demande elle-même : elle décide.
+        ask = s.asked.get(ref)
+        episode = ctx.frame.episode
+        if episode is not None and episode.kind == Kind.TASK:
+            since = ask.seq if ask is not None else 0
+            if answered(s, ref, since):
+                return ToolResult(ok=False, content=phrase("email.tools.draft.answered"))
     key = args.account or (parent.account if parent is not None else "")
     accounts = port.accounts()
     info = next((a for a in accounts if a.key == key), None) if key or parent is not None \
@@ -407,17 +429,28 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     # la ligne de sa boîte (ADR 0132, 0134) : il ne part seul que si chaque destinataire le permet, et jamais avec
     # un passage à compléter
     rule = mail_rule_for_all(p.canaux, info.key, (a for _, a in addresses(f"{to},{cc}")))
-    needs_approval = mail_send(rule) != "seule" or bool(shown.blocked)
+    # ce qu'elle prépare pour qui n'a qu'un partage « lire et préparer » attend toujours l'accord du propriétaire
+    needs_approval = mail_send(rule) != "seule" or bool(shown.blocked) or owner_must_approve(ctx.frame, info.key)
     about = tuple(dict.fromkeys((*_asker(ctx), *(c.address_handle(a) for _, a in addresses(to)[:3]))))
     what = f"Répondre à {inert(to, 200)}" if parent is not None else f"Écrire à {inert(to, 200)}"
     summary = f"{what} (boîte « {inert(info.name, 60)} », {voice_word(info.voice)}) : « {inert(subject, 200)} »"
     payload = {"draft": draft.id, "account": info.key, "mail": ref, "_apercu": shown.digest}
     if needs_approval and (handle := approver_of(ctx.frame, info.key)):
         payload[rt.DECIDER] = handle  # la boîte d'une personne : sa carte d'accord, dans son chat (ADR 0185)
-    await ctx.propose(rt.EFFECT_PROPOSED.draft(
-        capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=needs_approval,
-        context="email", about=about))
+    # … et toujours pas de réponse partie au moment même de proposer : l'autrice de sa boîte a pu prendre quelques
+    # secondes, le temps qu'on réponde à la main
+    still = None if since is None else Guard(
+        "pas encore répondu", predicate=lambda view, r=ref, n=since: view.get(c.ANSWERED(r)) <= n)
+    try:
+        await ctx.propose(rt.EFFECT_PROPOSED.draft(
+            capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=needs_approval,
+            context="email", about=about), guard=still)
+    except Superseded:
+        port.discard_draft(draft.id)  # rien n'a été proposé : son brouillon ne sert plus
+        if still is None or still.predicate is None or still.predicate(ctx.mind.frame().view):
+            raise  # c'est la garde de l'épisode qui a cédé
+        return ToolResult(ok=False, content=phrase("email.tools.draft.answered"))
     who = approver_name(ctx.frame, info.key)
     after = phrase("email.tools.draft.proposed", who=who) if needs_approval else \
         phrase("email.tools.draft.queued")
@@ -482,9 +515,9 @@ async def _gesture(port: Any, ref: str, action: str, folder: str) -> str:
 
 
 @EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"), args=TidyArgs,
-            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True, owned=owns_a_box)
+            bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True, owned=owns_a_box_to_use)
 async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
-    port, refused = _port(ctx)
+    port, refused = _port(ctx, SHARE_USE)
     if refused is not None:
         return refused
     if not _may_tidy(ctx.frame):

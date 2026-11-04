@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 from mika.ports.sql import HANDLE_MAX, fit
 
 OWNER = "email"
@@ -114,3 +114,6 @@ class DraftView:
 UNREAD = FactKey("email.unread", type=tuple)
 #: Ses brouillons en attente d'accord, le plus ancien d'abord.
 DRAFTS = FactKey("email.drafts", type=tuple)
+#: La dernière réponse partie de sa boîte à un mail (le ``seq`` de son ``email.sent``) ; 0 : aucune. Une rédaction au
+#: travail la relit au moment même de proposer : rien ne part deux fois (ADR 0188).
+ANSWERED = FactFamily("email.answered", arg=str, type=int, doc="la dernière réponse partie à un mail (son seq)")

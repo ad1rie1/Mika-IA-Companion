@@ -197,6 +197,15 @@ class LoginThrottle:
                 del self._fails[next(iter(self._fails))]
         self._fails.setdefault(key, deque()).append(now)
 
+    def forgive(self, key: str) -> None:
+        """Rendre un essai compté d'avance (``fail`` avant de vérifier, pour que des essais lancés ensemble ne
+        passent pas tous la porte avant le premier échec) quand il a réussi."""
+        q = self._fails.get(key)
+        if q:
+            q.pop()
+            if not q:
+                del self._fails[key]
+
     def __len__(self) -> int:
         return len(self._fails)
 
@@ -362,11 +371,13 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         keys = (f"ip:{ip}", f"ip:{ip}:nom:{username.lower()}")
         if by_ip.blocked(keys[0]) or by_name.blocked(keys[1]):
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429, headers={"Retry-After": "60"})
+        by_ip.fail(keys[0])  # compté d'avance, rendu s'il réussit : la vérification attend (scrypt)
+        by_name.fail(keys[1])
         account = await accounts.verify(username, str(data.get("password") or ""))
         if account is None:
-            by_ip.fail(keys[0])
-            by_name.fail(keys[1])
             return JSONResponse({"error": "Identifiants invalides."}, status_code=401)
+        by_ip.forgive(keys[0])
+        by_name.forgive(keys[1])
         return await logged_in(request, account)
 
     async def bootstrap(request: Request) -> Response:
@@ -423,11 +434,13 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         keys = (f"ip:{ip}", f"ip:{ip}:nom:{username.lower()}")
         if by_ip.blocked(keys[0]) or by_name.blocked(keys[1]):
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429, headers={"Retry-After": "60"})
+        by_ip.fail(keys[0])  # compté d'avance, rendu s'il réussit (comme ``login``)
+        by_name.fail(keys[1])
         account = await accounts.verify(username, password)
         if account is None:
-            by_ip.fail(keys[0])
-            by_name.fail(keys[1])
             return JSONResponse({"error": "Identifiants invalides."}, status_code=401)
+        by_ip.forgive(keys[0])
+        by_name.forgive(keys[1])
         label = str(data.get("label") or "")
         info, raw = await accounts.create_token(account.id, label, client=client, source=SOURCE_LOGIN)
         await accounts.prune_login_tokens(account.id)
@@ -489,7 +502,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                             headers={"Cache-Control": "no-store"})
 
     async def pending_decision(request: Request) -> Response:
-        if not csrf_ok(request):
+        # un client natif pose lui-même cookie et en-tête : le double CSRF ne prouve rien pour lui, il n'écrit pas ici
+        if native_token(request.headers) or not csrf_ok(request):
             return csrf_refused()
         account = account_of(request)
         if account is None:
@@ -692,6 +706,10 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=headers)
         handle = found[0].handle
         got = await (phone.inbox(handle, data) if kind == "inbox" else phone.settled(handle, data))
+        if got.outcome == phone_p.ACCEPTED:
+            # admis par la porte : son dernier usage noté (un téléphone qui ne fait que pousser ses messages dit quand
+            # on l'a vu, ADR 0190) — jamais avant qu'elle l'ait admis
+            await accounts.use_token(native_token(request.headers))
         status = PHONE_STATUS.get(got.outcome, 400)
         if got.outcome == phone_p.BUSY and got.retry_after:
             headers["Retry-After"] = str(got.retry_after)

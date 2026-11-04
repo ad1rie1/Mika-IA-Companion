@@ -472,7 +472,10 @@ class KernelPort:
                           "text": shown.text[:4000] if shown is not None else summary[:400],
                           "digest": shown.digest if shown is not None else "",
                           "blocked": shown.blocked if shown is not None else "",
-                          "expires_at": expires // 1000 if expires else None})
+                          "expires_at": expires // 1000 if expires else None,
+                          # ce qu'elle veut faire, et le brouillon qu'elle a écrit : un client qui relit ses
+                          # brouillons là où ils partiront y mène plutôt que de les décider ici (ADR 0191)
+                          "capability": pending.capability, "draft": str(args.get("draft") or "")[:100]})
         return cards
 
     async def judge(self, handle: str, seq: int, verdict: str, comment: str) -> str:

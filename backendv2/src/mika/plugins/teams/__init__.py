@@ -49,7 +49,18 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.teams import DEFAULT_ACCOUNT, conversation_key
-from mika.vocab.access import ACCOUNT, PERSON, SELF, WORK, situation
+from mika.vocab.access import (
+    ACCOUNT,
+    AT_OWNER,
+    PERSON,
+    SELF,
+    SHARE_PREPARE,
+    SHARE_READ,
+    SHARE_USE,
+    WORK,
+    reaches,
+    situation,
+)
 from mika.vocab.canals import Canals, teams_rule
 from mika.vocab.episodes import Kind, task_of
 from mika.vocab.people import clean_display_name
@@ -96,6 +107,11 @@ class TeamsParams(BaseModel):
         label="À qui sont ses comptes Teams", group="Écrire", readonly=True,
         help="Réglé dans Réglages › Plugins › Teams (« À qui », ADR 0186) : un compte sert à son propriétaire — elle "
              "(« elle »), une personne (« personne:<clé> ») ; absent ou vide, à toi.")] = Field(default_factory=dict)
+    shares: Annotated[dict[str, dict[str, str]], Knob(
+        label="Avec qui ses comptes Teams sont partagés", group="Écrire", readonly=True,
+        help="Réglé par le propriétaire d'un compte (Paramètres › Partages, ADR 0188) : par compte, chaque personne "
+             "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir.")] = \
+        Field(default_factory=dict)
     accounts_off: Annotated[tuple[str, ...], Knob(
         label="Comptes Teams décochés", group="Écrire", readonly=True,
         help="Réglés dans Réglages › Plugins › Teams (« Actif ») : elle n'y prépare ni n'y propose plus rien.")] = ()
@@ -429,6 +445,13 @@ def _facing(audience: Any, kind: str) -> str:
     return PERSON + person if person and situation(audience, kind) == ACCOUNT else ""
 
 
+def _shared_with(audience: Any, kind: str) -> str:
+    """Qui est en face, comme personne à qui l'on partage un compte (ADR 0188) : une personne reconnue en tête-à-tête —
+    une de ses propriétaires aussi ; vide sinon."""
+    person = getattr(audience, "person", "") or ""
+    return PERSON + person if person and situation(audience, kind) in (ACCOUNT, AT_OWNER) else ""
+
+
 def task_account(frame: Frame, port: Any) -> str:
     """Le compte du message d'une tâche de rédaction en cours (vide : ce n'en est pas une, ou il n'est plus là)."""
     ref = task_message(frame)
@@ -436,34 +459,66 @@ def task_account(frame: Frame, port: Any) -> str:
     return found.account if found is not None else ""
 
 
-def accounts_here(frame: Frame, accounts: Iterable[str], port: Any = None) -> tuple[str, ...]:
+def accounts_here(frame: Frame, accounts: Iterable[str], port: Any = None, need: str = SHARE_USE) -> tuple[str, ...]:
     """Les comptes Teams dont elle peut se servir ici (ADR 0186) : un compte sert à son propriétaire.
 
     - les tiens (sans propriétaire nommé) : là où sa famille d'outils le permet (``for_owner``) — toi en privé,
       elle quand elle travaille, et qui une ligne de la famille ouvre ;
     - les siens : quand elle travaille, là où sa famille le permet ;
     - celui d'une personne : avec elle, reconnue, en tête-à-tête — et nulle part ailleurs ;
+    - ceux qu'on lui partage (ADR 0188) : avec elle, reconnue, en tête-à-tête, si son partage atteint ce que l'outil
+      demande (``need`` : lire, préparer, s'en servir — par défaut, s'en servir) ;
     - une tâche de rédaction : le compte de son message (``port`` le dit ; on la lui a demandée, ou elle l'a
       proposée dans un compte à toi ou à elle)."""
     kind = frame.episode.kind if frame.episode is not None else ""
-    owners, family = params_of(frame).owners, for_owner(frame)
+    p = params_of(frame)
+    owners, shares, family = p.owners, p.shares, for_owner(frame)
     alone = situation(frame.audience, kind) == WORK
-    person = _facing(frame.audience, kind)
+    person, shared = _facing(frame.audience, kind), _shared_with(frame.audience, kind)
     task = task_account(frame, port) if alone and family else ""
     out = []
     for a in accounts:
         owner = owners.get(a, "")
         if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person) \
-                or (task and a == task):
+                or (shared and reaches(shares.get(a, {}).get(shared, ""), need)) or (task and a == task):
             out.append(a)
     return tuple(out)
 
 
-def owns_an_account(audience: Any, kind: str, frame: Frame | None) -> bool:
-    """Qui est en face a un compte Teams à son nom (``ToolSpec.owned``) : ses outils Teams lui sont offerts, réduits
-    à ses comptes ; sans ce qu'elle vit (une console qui juge sans lui), personne."""
+def owns_an_account(audience: Any, kind: str, frame: Frame | None, need: str = SHARE_READ) -> bool:
+    """Qui est en face a un compte Teams à son nom, ou qu'on lui partage à ce niveau (``ToolSpec.owned``, ADR 0186,
+    0188) : ses outils Teams lui sont offerts, réduits à ces comptes — un outil qui lit dès « lire », celui qui
+    prépare dès « lire et préparer » ; sans ce qu'elle vit (une console qui juge sans lui), personne."""
+    if frame is None:
+        return False
+    p = params_of(frame)
     person = _facing(audience, kind)
-    return frame is not None and bool(person) and person in params_of(frame).owners.values()
+    if person and person in p.owners.values():
+        return True
+    shared = _shared_with(audience, kind)
+    return bool(shared) and any(reaches(given.get(shared, ""), need) for given in p.shares.values())
+
+
+def owns_an_account_to_prepare(audience: Any, kind: str, frame: Frame | None) -> bool:
+    """``owns_an_account`` pour un outil qui prépare une réponse : un compte à elle, ou partagé pour préparer."""
+    return owns_an_account(audience, kind, frame, SHARE_PREPARE)
+
+
+def owner_must_approve(frame: Frame, account: str, asked_by: str = "") -> bool:
+    """Ce qu'elle prépare dans ce compte attend l'accord de son propriétaire, quoi que dise la règle du compte
+    (ADR 0188) : la personne pour qui elle l'écrit — en tête-à-tête, ou qui lui a demandé cette réponse
+    (``asked_by``, une tâche) — n'atteint le compte que par un partage qui ne s'en sert pas (« lire et préparer »)."""
+    p = params_of(frame)
+    kind = frame.episode.kind if frame.episode is not None else ""
+    person = _shared_with(frame.audience, kind)
+    if not person and asked_by:
+        person = PERSON + str(frame.get(identity_c.PERSON(asked_by)) or asked_by)
+    owner = p.owners.get(account, "")
+    if not person or owner == person or (not owner and person.removeprefix(PERSON) in set(
+            frame.get(identity_c.OWNERS) or ())):
+        return False  # son compte, ou un compte « à toi » quand elle est une de ses propriétaires
+    level = p.shares.get(account, {}).get(person, "")
+    return bool(level) and not reaches(level, SHARE_USE)
 
 
 #: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)

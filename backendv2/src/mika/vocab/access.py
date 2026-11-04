@@ -43,6 +43,8 @@ OWNER, CLOSE, EVERYONE, PERSON, ADDRESS, SELF = "proprietaire", "proches", "tous
 SOURCES = ((OWNER, "Toi"), (CLOSE, "Tes proches"), (EVERYONE, "Tout le monde"))
 SOURCE = re.compile(rf"(?:{OWNER}|{CLOSE}|{EVERYONE}|{SELF}|{PERSON}\S{{1,200}}|{ADDRESS}\S{{1,200}})")
 SOURCE_WORDS = {OWNER: "toi", CLOSE: "tes proches", EVERYONE: "tout le monde", SELF: "elle"}
+#: les mêmes, dits à une personne qui n'est pas une de ses propriétaires (l'API par personne, ADR 0187)
+SOURCE_WORDS_OTHER = {**SOURCE_WORDS, OWNER: "ses propriétaires", CLOSE: "ses proches"}
 
 # ── par où ──────────────────────────────────────────────────────────────────
 
@@ -192,6 +194,19 @@ KEEPS = (("public", "public — un savoir"), ("perso", "personnel — un souveni
 KEEP_WORDS = {"public": "un savoir", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
 KEEP_RANK = {"rien": 0, "prive": 1, "perso": 2, "public": 3}
 Keep = Literal["public", "perso", "prive", "rien"]
+
+#: partager ce qui est à soi (ADR 0188) : une boîte, un compte Teams, un service — le lire (sans répondre ni ranger) ;
+#: le lire, et qu'elle prépare des réponses que le propriétaire approuve ; s'en servir, comme le propriétaire
+SHARE_READ, SHARE_PREPARE, SHARE_USE = "lire", "preparer", "servir"
+SHARES = ((SHARE_READ, "Lire"), (SHARE_PREPARE, "Lire et préparer"), (SHARE_USE, "S'en servir"))
+SHARE_RANK = {"": 0, SHARE_READ: 1, SHARE_PREPARE: 2, SHARE_USE: 3}
+Share = Literal["lire", "preparer", "servir"]
+
+
+def reaches(level: str, need: str) -> bool:
+    """Un partage à ce niveau ouvre-t-il ce qu'on demande (lire, préparer, s'en servir) ?"""
+    return SHARE_RANK.get(level, 0) >= SHARE_RANK.get(need, 99) > 0
+
 
 #: piloter un projet : en lecture seule (son détail, sans rien y changer) ; ses demandes sur l'accord du propriétaire ;
 #: appliquées aussitôt (modification) ; aucun pilotage
@@ -487,13 +502,15 @@ def in_order(who: Iterable[str]) -> tuple[str, ...]:
             *sorted(k for k in got if k.startswith(PERSON)), *sorted(k for k in got if k.startswith(ADDRESS)))
 
 
-def who_words(who: str | Iterable[str], name: Callable[[str], str], her: str = "") -> str:
-    """Qui une ligne désigne, en mots : ses sources, elle (``her`` : son nom, sinon « elle »), ses personnes par leur
-    nom (``name`` : sa clé → son nom), ses adresses ; personne (elle seule, réglée avant) ; la ligne par défaut."""
+def who_words(who: str | Iterable[str], name: Callable[[str], str], her: str = "",
+              sources: Mapping[str, str] = SOURCE_WORDS) -> str:
+    """Qui une ligne désigne, en mots : ses sources (``sources`` : dites à une de ses propriétaires, par défaut), elle
+    (``her`` : son nom, sinon « elle »), ses personnes par leur nom (``name`` : sa clé → son nom), ses adresses ;
+    personne (elle seule, réglée avant) ; la ligne par défaut."""
     who = ((who,) if who else ()) if isinstance(who, str) else tuple(who)
     if not who:
         return "—"
-    parts = [her if w == SELF and her else SOURCE_WORDS.get(w)
+    parts = [her if w == SELF and her else sources.get(w)
              or (name(w[len(PERSON):]) if w.startswith(PERSON) else w[len(ADDRESS):] if w.startswith(ADDRESS) else w)
              for w in who]
     said = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " et " + parts[-1]

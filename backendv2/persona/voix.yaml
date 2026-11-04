@@ -5236,6 +5236,8 @@ email:
       quote: citer le mail auquel tu réponds sous ton texte
       # ses refus
       waiting: Un brouillon de réponse à ce mail attend déjà l'accord de {who}.
+      # au travail : une réponse à ce mail est partie depuis qu'on t'a demandé la tienne (ou, sans demande, déjà)
+      answered: "Une réponse à ce mail est déjà partie : il n'y a plus rien à préparer."
       unknown_box: Je ne connais pas cette boîte.
       no_box: Aucune boîte ne peut envoyer.
       incomplete: Pour un nouveau mail, il faut un destinataire et un objet.

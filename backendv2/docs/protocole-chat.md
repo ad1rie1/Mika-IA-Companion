@@ -328,13 +328,16 @@ liste reçue (une carte absente n'attend plus rien) :
 ```json
 {"type": "approvals", "items": [{"id": 905, "title": "Appeler « prevision » (meteo) : {\"ville\": \"Lyon\"}",
   "text": "Service : meteo\nOutil : prevision\nCe qui partira :\n{\n \"ville\": \"Lyon\"\n}",
-  "digest": "3f9c…", "blocked": "", "expires_at": 1790602215002}]}
+  "digest": "3f9c…", "blocked": "", "expires_at": 1790602215002, "capability": "mcp.call", "draft": ""}]}
 ```
 
 - `text` : exactement ce qui partira (à montrer tel quel, en texte brut, jamais interprété).
 - `blocked` non vide : ça ne peut pas partir tel quel (l'outil a changé, n'est plus servi, la carte a expiré) — ne
   propose que « refuser ».
 - `expires_at` (ms, ou `null`) : passé ce moment, la carte ne vaut plus (le serveur la refuse au nom du délai).
+- `capability` : ce qu'elle veut faire (`mcp.call`, `email.send`, `teams.send`…) ; `draft` : le brouillon qu'elle a
+  écrit, pour un mail ou une réponse Teams (vide sinon). `frontendv2` montre ces deux-là par un lien vers Mail ou
+  Teams, où ils se relisent et se décident (ADR 0191) ; un autre client peut garder la carte.
 - Une carte n'arrive qu'aux connexions **authentifiées** de la personne qu'elle concerne. Pas de notification
   système pour elle : la parole de Mika qui l'accompagne en fait une.
 

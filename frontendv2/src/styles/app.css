@@ -1,0 +1,131 @@
+/* Ce que la maquette ne montrait pas, dans son thème : la connexion, les notes de la machine sous une bulle,
+   les états d'un envoi, le Markdown d'une réponse pro, ses vrais fichiers, les cartes d'accord bloquées ou
+   hors ligne, les écrans qui attendent l'API par personne. Les jetons et les composants viennent de base.css. */
+
+/* ── La connexion ─────────────────────────────────────────────────────── */
+.login { position: fixed; inset: 0; z-index: 10; overflow-y: auto; background: var(--bg); }
+.login-wrap { position: relative; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 40px 16px; background:
+    radial-gradient(60% 45% at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
+    radial-gradient(50% 40% at 50% 100%, color-mix(in srgb, var(--mika) 6%, transparent), transparent 70%); }
+.login-theme { position: absolute; top: 12px; right: 12px; }
+.login-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 24px 28px 26px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--raised); box-shadow: var(--shadow-float); }
+.login-brand { display: flex; align-items: center; gap: 9px; font: 650 15.5px var(--display); letter-spacing: -.01em; color: var(--text); }
+.login-face { display: flex; justify-content: center; margin-top: 6px; }
+.login-face .av.xl { width: 76px; height: 76px; box-shadow: 0 0 0 3px var(--raised), 0 0 0 5px var(--mika-line); }
+.login-face.down { margin: 6px auto 0; width: 56px; height: 56px; border-radius: 50%; align-items: center; background: var(--danger-soft); color: var(--danger); }
+.login-card h1 { font: 650 20px var(--display); letter-spacing: -.012em; text-align: center; }
+.login-lede { color: var(--text-2); text-align: center; font-size: 13px; margin-top: -6px; }
+.login-form { display: flex; flex-direction: column; gap: 12px; }
+.login-form input { width: 100%; height: 36px; font-size: 13.5px; }
+.login-form .field small { font-size: 11.5px; }
+.login-submit { width: 100%; height: 36px; margin-top: 2px; font-size: 13.5px; }
+.login-error, .login-note { display: flex; align-items: flex-start; gap: 7px; padding: 8px 10px; border-radius: var(--radius);
+  font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.login-error { background: var(--danger-soft); color: var(--danger); }
+.login-note { background: var(--accent-soft); color: var(--accent); }
+.login-error .ico, .login-note .ico { margin-top: 2px; }
+.login-server { font-size: 11.5px; color: var(--muted); }
+
+/* ── Les écrans qui attendent l'API par personne ──────────────────────── */
+.pending-screen { gap: 10px; }
+.pending-screen > .ico { width: 30px; height: 30px; color: var(--accent-line); }
+.pending-screen p { color: var(--text-2); }
+.pending-screen p.small { color: var(--muted); max-width: 52ch; }
+
+/* ── Le fil : ce que la machine dit sous une bulle ────────────────────── */
+.msg-sys { display: flex; align-items: flex-start; gap: 6px; max-width: min(72%, 860px); margin-top: -2px; padding: 0 4px;
+  font-size: 12px; line-height: 1.45; color: var(--muted); }
+.msg-sys.me { align-self: flex-end; text-align: right; }
+.msg-sys.her { align-self: flex-start; margin-left: 34px; }
+.msg-sys .ico { margin-top: 2px; color: var(--warn); }
+.msg-sys a { white-space: nowrap; }
+.msg.me.pending .bubble { opacity: .72; }
+.msg.me.failed .bubble { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+.msg-meta.ko, .msg-meta.ko .ico { color: var(--danger); }
+.msg.her .bubble.inner { font-style: italic; background: transparent; border-style: dashed; color: var(--text-2); }
+/* un avis donné reste en vue (le bouton choisi seulement) ; le reste au survol, comme dans la maquette */
+.verdict.set { opacity: 1; }
+.verdict.set > :not(.on) { opacity: 0; transition: opacity .12s; }
+.msg:hover .verdict.set > * { opacity: 1; }
+.verdict .why { display: inline-flex; align-items: center; margin-left: 4px; font-size: 11px; color: var(--muted); }
+.verdict .why:hover { color: var(--text); }
+.chat-thread > .empty { height: auto; padding-top: 12vh; }
+
+/* Ses fichiers : une image en vignette, un autre fichier en lien (la maquette n'en avait que l'image factice). */
+a.msg-file { color: var(--text); text-decoration: none; }
+a.msg-file:hover { text-decoration: none; background: var(--tint); }
+.msg-file b { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.msg-file > .ico:last-child:not(:first-child) { color: var(--muted); }
+.msg-file.img img { display: block; width: 100%; max-height: 260px; object-fit: cover; background: var(--tint); }
+.msg-file.gone { color: var(--muted); }
+.msg-file.gone b { font-weight: 500; text-decoration: line-through; }
+
+/* Le Markdown léger d'une réponse ordinaire (code et gras). */
+.bubble code { font: 12.5px var(--mono); background: color-mix(in srgb, var(--text) 7%, transparent); border-radius: 4px; padding: 1px 4px; }
+.msg.me .bubble code { background: rgb(255 255 255 / 18%); }
+.bubble pre.chat-code { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--text) 6%, transparent);
+  overflow-x: auto; white-space: pre; }
+.bubble pre.chat-code code { background: none; padding: 0; }
+
+/* Le Markdown d'une réponse pro (`@web/ui/proMarkdown`) : titres, listes, code, citations, tableaux. */
+.bubble.md p + .md-table, .bubble.md .md-table + p, .bubble.md p + ul, .bubble.md p + ol, .bubble.md ul + p, .bubble.md ol + p,
+.bubble.md p + pre, .bubble.md pre + p, .bubble.md p + blockquote, .bubble.md blockquote + p { margin-top: 10px; }
+.bubble.md .md-title { font-weight: 650; }
+.bubble.md * + .md-title { margin-top: 14px; }
+.bubble.md ul, .bubble.md ol { padding-left: 22px; }
+.bubble.md ul { list-style: disc; }
+.bubble.md ol { list-style: decimal; }
+.bubble.md li + li { margin-top: 3px; }
+.bubble.md li > ul, .bubble.md li > ol { margin-top: 3px; }
+.bubble.md code { font: 12.5px var(--mono); background: var(--tint); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.bubble.md pre.md-code { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+  overflow-x: auto; font: 12.5px/1.5 var(--mono); white-space: pre; }
+.bubble.md pre.md-code code { background: none; border: 0; padding: 0; }
+.bubble.md blockquote { margin: 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+.bubble.md hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+.bubble.md .md-table { overflow-x: auto; }
+.bubble.md .md-center { text-align: center; }
+.bubble.md .md-right { text-align: right; font-variant-numeric: tabular-nums; }
+.bubble.md a { overflow-wrap: anywhere; }
+
+/* Sa carte de travail : ce qu'elle écrit entre deux outils, une fin d'épisode, un résultat long qui défile. */
+.tools-card li.note, .tools-card li.end { grid-template-columns: 20px 1fr; color: var(--text-2); }
+.tools-card li .note-text { font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tools-card li.end .st { color: var(--warn); }
+.tools-card li.stop .st { color: var(--muted); }
+.tools-card li.run code { color: var(--accent); }
+.tools-card li pre { max-height: 132px; overflow: auto; }
+.tools-card li .note-text .ico, .tools-card li.note .st { color: var(--muted); }
+
+/* ── Les cartes d'accord ──────────────────────────────────────────────── */
+.ap-zone { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.approval.blocked { border-color: var(--border-strong); }
+.approval.blocked .ap-line > .ico { color: var(--muted); }
+.ap-meta.ap-ko { color: var(--warn); }
+.approval.done > .ico { color: var(--ok); }
+.approval.done.ko > .ico { color: var(--warn); }
+.ap-offline { display: flex; align-items: center; gap: 7px; padding: 0 4px; font-size: 12px; color: var(--muted); }
+.ap-offline.auto { color: var(--warn); }
+.ap-offline .ico { flex: none; }
+
+/* ── Le champ ─────────────────────────────────────────────────────────── */
+.cmp-attach .chip { max-width: 260px; }
+.cmp-notice { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--warn); }
+.cmp-count { margin-right: 4px; font-variant-numeric: tabular-nums; }
+/* un texte à sa borne (Mail, Teams) : le compte le dit ; dans la fenêtre d'un mail, sous le message, à droite */
+.cmp-count.full { color: var(--warn); }
+.cf-count { align-self: flex-end; margin: -4px 2px 0 0; }
+.chat-search { width: 260px; height: 30px; }
+.strand-note { color: var(--warn); margin-top: 2px; }
+.strand-head h2 .tag { margin-left: 6px; vertical-align: 1px; }
+.cm-body p.muted { color: var(--muted); }
+
+@media (max-width: 760px) {
+  /* au-dessus de la barre du bas, pas dessus */
+  .toasts { bottom: calc(58px + 14px + env(safe-area-inset-bottom)); }
+  .chat-search { width: 150px; }
+  .msg-sys { max-width: 88%; }
+  .login-card { padding: 20px 18px 22px; }
+}

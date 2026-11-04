@@ -65,7 +65,8 @@ from mika.plugins.teams import (
     under_way,
 )
 from mika.plugins.teams.accounts import Scope
-from mika.ports.teams import MODES, conversation_key, split_conversation_key, to_fill
+from mika.ports.teams import MODES, SEND, conversation_key, split_conversation_key, to_fill
+from mika.ports.teams import Draft as TeamsDraft
 from mika.vocab.access import PERSON, SELF
 from mika.vocab.privacy import Sensitivity
 
@@ -534,12 +535,23 @@ def _refuse(s: TeamsState, frame: Frame, args: RefuseArgs, ctx: Any) -> Done:
                 go=Ref.subject("reponse_teams", args.draft, ""))
 
 
+def _prepares_here(frame: Frame, account: str) -> None:
+    """Une demande de réponse ne se pose que là où elle prépare : Teams coupé ou ce compte décoché, elle ne s'y
+    mettrait jamais (ses tâches l'écartent) et la demande resterait « en cours » sans fin."""
+    p = params_of(frame)
+    if not p.enabled:
+        raise Refused("Teams est désactivé : elle n'y prépare rien.")
+    if account in p.accounts_off:
+        raise Refused("Ce compte Teams est décoché : elle n'y prépare rien.")
+
+
 @TEAMS.action("reprendre", title="Lui demander de la reprendre", args=RedoArgs, emits=[c.DRAFT_ASKED],
               description="Refuse celle-ci ; elle en écrira une autre, en tenant compte de ce que tu dis.")
 def _redo(s: TeamsState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
     seen = _waiting(s, args.draft)
     if not seen.message:
         raise Refused("Ce n'est pas une réponse à un message : refuse-la.")
+    _prepares_here(frame, seen.account)
     port = ctx.ports.get("teams")
     if port is not None:
         port.discard_draft(args.draft)
@@ -559,6 +571,7 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     m = port.message(args.message) if port is not None else None
     if m is None:
         raise Refused("Ce message n'est plus là.")
+    _prepares_here(frame, m.account)
     asked_still = m.ref in s.asked and s.attempts.get(m.ref, 0) < params_of(frame).draft_attempts_max
     if under_way(s, m.account, m.conversation) or asked_still:
         raise Refused("Une réponse est déjà en chemin dans cette conversation.")
@@ -568,6 +581,45 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
                                 else None, about=(ctx.by,) if ctx.by else (), account=m.account)
     return Done(drafts=(asked,), message="Demandé : elle la préparera à son prochain moment de travail.",
                 go=Ref("local", f"/inspecteur/{SECTION}/reponses", ""))
+
+
+class WriteArgs(BaseModel):
+    #: la conversation (``<compte>~<identifiant>``) : posée par la page, jamais tapée
+    conversation: Annotated[str, Knob(label="Conversation", widget="hidden")] = Field(min_length=3, max_length=400)
+    body: Annotated[str, Knob(label="Message", widget="textarea", advanced=False)] = \
+        Field(min_length=1, max_length=4000)
+    #: le message auquel on répond, s'il y en a un
+    reply_to: Annotated[str, Knob(label="En réponse à", widget="hidden")] = Field(default="", max_length=400)
+
+
+@TEAMS.action("ecrire", title="Écrire dans cette conversation", args=WriteArgs, emits=[],
+              description="Ton message part par l'extension de ce compte, sous ton nom et sans sa signature : c'est "
+                          "toi qui l'envoies (ADR 0189). Elle le verra parti, comme tes autres messages.")
+def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
+    """Ce que la personne écrit elle-même : un brouillon à son nom (``author``), aussitôt en file pour être envoyé —
+    son geste est l'envoi, aucun accord n'est à demander. L'extension le relève, l'envoie et l'accuse ; ses messages
+    à elle reviennent ensuite dans le fil (``own``), comme ce qu'elle tape dans Teams."""
+    port = ctx.ports.get("teams")
+    if port is None:
+        raise Refused(NO_PORT)
+    p = params_of(frame)
+    account, conversation = split_conversation_key(args.conversation)
+    if not p.enabled:
+        raise Refused("Teams est désactivé : rien ne part.")
+    if account in p.accounts_off:
+        raise Refused("Ce compte Teams est décoché : rien n'en part.")
+    if port.conversation(account, conversation) is None:
+        raise Refused("Cette conversation n'est plus là.")
+    body = args.body.strip()
+    if to_fill(body):
+        raise Refused("Il reste des passages [À COMPLÉTER] à remplir.", {"body": "un passage à compléter"})
+    draft = port.save_draft(TeamsDraft(id="", conversation=conversation, body=body, reply_to=args.reply_to,
+                                       author=ctx.by, account=account))
+    why = port.enqueue(draft.id, mode=SEND, digest="", expires_at=frame.now + p.queue_ttl_us, now=frame.now)
+    if why:
+        port.discard_draft(draft.id)
+        raise Refused(f"Il n'a pas pu partir : {why}.")
+    return Done(message="En file : l'extension de ce compte l'enverra dans Teams.")
 
 
 # ── La clé de l'extension d'un compte ─────────────────────────────────────

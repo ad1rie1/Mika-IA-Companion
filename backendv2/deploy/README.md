@@ -361,6 +361,19 @@ HTTPS sortant. Hors de chez toi, la notification arrive (elle passe par Google),
 répondre demande que le serveur soit joignable : une réponse écrite hors de portée
 attend dans la file d'envoi et part à la prochaine ouverture chez toi.
 
+## L'application du téléphone (ADR 0190)
+
+`frontendv2` propose l'application Android au téléchargement (Paramètres › Téléphones), à qui est connecté (sa
+session, ou un jeton de son compte, celui de son téléphone par exemple), jamais par un lien public : elle est servie depuis le dossier de données.
+Construite (`frontend/Android/`, son `README.md`), on la dépose sous ce nom :
+
+```bash
+sudo install -d -o mika -g mika -m 700 /var/lib/mika/telephone
+sudo install -o mika -g mika -m 640 app-release.apk /var/lib/mika/telephone/mika.apk
+```
+
+Sans ce fichier, la page dit qu'elle n'est pas encore déposée (`GET /api/moi/phone/apk` : 404).
+
 ## Surveiller
 
 `GET /health` est public et ne dit que des noms et des états :

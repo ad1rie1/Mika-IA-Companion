@@ -18,7 +18,16 @@ from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.plugins.email import EMAIL, WAITING, EmailState, account_of, keeper_name, keepers, params_of
+from mika.plugins.email import (
+    EMAIL,
+    WAITING,
+    EmailState,
+    account_of,
+    answered,
+    keeper_name,
+    keepers,
+    params_of,
+)
 from mika.vocab.access import SELF
 from mika.vocab.canals import mail_rule
 from mika.vocab.episodes import Kind, task_target
@@ -62,8 +71,8 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
             continue
         if p.owners.get(account, "") not in ("", SELF):  # la boîte d'une personne : rien d'elle-même (ADR 0185)
             continue
-        if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max:
-            continue
+        if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max or answered(s, m.mail):
+            continue  # une réponse déjà partie (à la main, d'un autre client relevé ici) : rien à préparer
         out.append(_candidate(m.mail, account, p.draft_evidence, phrase("email.task.auto", ref=m.mail,
                                                                            who=keepers(frame))))
         budget -= 1

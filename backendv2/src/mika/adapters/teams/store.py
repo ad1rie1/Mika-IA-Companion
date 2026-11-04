@@ -429,6 +429,8 @@ class TeamsStore:
                 self._write(s, replace(found, state=DISCARDED, updated=self._now()))
 
     def _final(self, s: Session, d: Draft, her: str) -> str:
+        if d.author:  # écrit par la personne elle-même (ADR 0189) : sous son nom, sans la signature de son IA
+            return d.body.strip()
         signature = self._voice_in(s, d.account).signature.replace(HER, her.strip() or "son IA")
         return f"{d.body.strip()}\n\n{signature}" if signature else d.body.strip()
 
@@ -469,6 +471,24 @@ class TeamsStore:
             self._write(s, replace(d, state=QUEUED, mode=mode, digest=shown.digest, final=shown.text,
                                    expires_at=expires_at, updated=now))
         return ""
+
+    def expire_written(self, account: str, now: int) -> int:
+        """Ce que la personne a écrit elle-même (``author``, ADR 0189) et que personne n'a envoyé à temps : passé son
+        échéance, en file ou posé, il ne part plus (``inutilise``) ; réservé par une extension qui n'a jamais rendu
+        compte, on ne sait pas s'il est parti (``echec``). Ses propositions à elle ont leur échéance au journal
+        (``teams.expire``) ; celles-ci n'y sont pas. Rend combien ont été réglés."""
+        settled = 0
+        with self._lock, self._session.begin() as s:
+            rows = s.execute(select(*_DRAFT).where(DraftRow.account == _account_key(account),
+                                                   DraftRow.state.in_((QUEUED, PLACED, SENDING)))).all()
+            for d in (_draft(r) for r in rows):
+                if not d.author or not d.expires_at or d.expires_at > now:
+                    continue
+                late = d.state == SENDING
+                self._write(s, replace(d, state=FAILED if late else UNUSED, updated=now,
+                                       reason="envoi sans nouvelles de l'extension" if late else "pas parti à temps"))
+                settled += 1
+        return settled
 
     def outbox(self, account: str, now: int) -> list[OutboxItem]:
         """Ce que l'extension de ce compte doit poser ou envoyer (jamais ce qui part d'un autre compte)."""

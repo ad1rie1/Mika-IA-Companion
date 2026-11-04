@@ -57,6 +57,10 @@ _Policy = Literal["seule", "carte", "toi", "non"]
 _Keep = Literal["public", "perso", "prive", "rien"]
 
 
+#: à qui est un service (ADR 0192) : une personne qui a un compte, par la clé de sa personne
+OWNER = re.compile(r"^personne:[A-Za-z0-9_.:@-]{1,120}$")
+
+
 class McpServer(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -70,6 +74,10 @@ class McpServer(BaseModel):
     enabled: Annotated[bool, Knob(label="Actif", group="Pour elle", advanced=False, order=7,
                                   help="Décoché : il n'est ni joint ni offert ; ses réglages et ses outils "
                                        "approuvés restent.")] = True
+    owner: Annotated[str, Knob(
+        label="À qui", group="Pour elle", readonly=True, order=8,
+        help="Branché par une personne, sous son propre compte (ADR 0192) : « personne:<clé> » ; vide, un des "
+             "siens, réglé par un opérateur. Ce qu'elle en fait reste dit par ses lignes d'accès.")] = ""
     transport: Annotated[Literal["distant", "local"], Knob(
         label="Où il tourne", group="Connexion", choices=TRANSPORTS, advanced=False, order=10,
         help="À une adresse (sur cette machine, ton réseau ou ailleurs), ou lancé ici par une commande, isolé.")] = \
@@ -139,6 +147,12 @@ class McpServer(BaseModel):
     def _without_retired(cls, data: Any) -> Any:
         """Un réglage retiré, encore dans une configuration gardée, ne la rend pas illisible."""
         return {k: v for k, v in data.items() if k not in RETIRED} if isinstance(data, dict) else data
+
+    @model_validator(mode="after")
+    def _owner(self) -> McpServer:
+        if self.owner and not OWNER.fullmatch(self.owner):
+            raise ValueError("« à qui » : vide (un des siens) ou « personne:<clé> »")
+        return self
 
     @property
     def local(self) -> bool:

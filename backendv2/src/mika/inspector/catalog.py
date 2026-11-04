@@ -205,6 +205,10 @@ class SettingsSection:
     #: juste avant ``save`` : ``adjust(valeur validée)`` → (valeur à enregistrer, notes) — ce qui se lit ailleurs pour
     #: la compléter (la fenêtre d'un modèle, chez son fournisseur : ADR 0136) ; les notes suivent le message de la page
     adjust: Callable[[Any], Awaitable[tuple[Any, list[str]]]] | None = None
+    #: un verrou que d'autres prennent pour relire puis réécrire ces réglages (l'API par personne : ses boîtes, ses
+    #: comptes Teams, ses serveurs) : une soumission le tient de sa lecture à son enregistrement, pour ne rien effacer
+    #: de ce qu'ils viennent d'écrire
+    lock: Any = None
 
 
 @dataclass(frozen=True, slots=True)

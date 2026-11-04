@@ -195,6 +195,11 @@ class Settings:
         self.reference_thread: Callable[[], str] = lambda: ""
         #: les connexions Microsoft des boîtes se relisent puis se réécrivent ensemble : une à la fois
         self._grants_lock = asyncio.Lock()
+        #: ses boîtes, ses comptes Teams et ses serveurs MCP s'enregistrent en entier : qui les relit pour en changer
+        #: une entrée le fait sous ce verrou, jusqu'à l'écriture (et ce qui s'en rejournalise). Deux enregistrements
+        #: qui se croisent (deux personnes, une personne et la console) ne s'effacent donc pas. Il ne se reprend pas :
+        #: ce qui le tient n'appelle rien qui le prenne à son tour (``settle`` des serveurs MCP le prend lui-même).
+        self.writing = asyncio.Lock()
 
     async def open(self) -> None:
         def create(sql: Any) -> None:

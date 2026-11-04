@@ -21,13 +21,13 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151 |
 | Le stockage | 0004, 0101 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
-| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170 |
+| Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
@@ -548,7 +548,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « est-il possible d'unifier le moteur de règles ? … une consultation globale des droits sur une page dédiée, et un point d'entrée unique pour vérifier si on a le droit » ; trois tableaux de lignes (services, envoi, projets) appliquaient chacun la même idée à sa façon, et ce qu'une personne pouvait faire ne se lisait qu'en ouvrant chaque page. Puis « pour la source il y a normalement : tout le monde, propriétaire, en privé (amis proches), elle qui travaille, personne (liste des personnes) », cinq vérifications « propriétaire » écrites chacune à sa façon, et « Piloter projet : lecture seule, accord du propriétaire, modification, aucun pilotage ».
 
-*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148.*
+*Révise 0104 (en partie), 0122 (en partie), 0131 (en partie), 0132 (en partie). Révisée par 0134, 0148, 0189.*
 
 ### 0134 — Qui, par où, quand : deux portes, six sortes de tableaux
 
@@ -597,7 +597,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « on peut lui associer à elle des comptes en toute autonomie comme pour les autres » — une boîte avait une voix (« elle écrit en son nom, en assistante, à ta place ») mais pas de propriétaire ; et une personne ne pouvait pas avoir la sienne sans que tu la lises.
 
-*Révise 0134 (en partie : une ressource à quelqu'un est offerte à son propriétaire), 0173 (en partie : « À qui » dans la fiche d'une boîte). Révisée par 0186.*
+*Révise 0134 (en partie : une ressource à quelqu'un est offerte à son propriétaire), 0173 (en partie : « À qui » dans la fiche d'une boîte). Révisée par 0186, 0188, 0191.*
 
 ### 0186 — Un Teams par personne : un compte sert à son propriétaire
 
@@ -611,7 +611,20 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « un onglet Ses comptes email, son plugin Teams » ; « on puisse sélectionner l'utilisateur pour voir ses comptes » — et le choix d'un Teams par personne, chacune avec sa clé, plutôt qu'un seul Teams attribué.
 
-*Révise 0069 (en partie : un compte par personne), 0185 (Teams suit la même règle).*
+*Révise 0069 (en partie : un compte par personne), 0185 (Teams suit la même règle). Révisée par 0188, 0191.*
+
+### 0188 — Partager ce qui est à soi : lire, lire et préparer, s'en servir
+
+- Qui possède une boîte, un compte Teams ou un service MCP le partage avec une personne qui a un compte, à l'un de trois niveaux : **lire** (elle le voit dans son propre Mika, sans répondre ni ranger), **lire et préparer** (Mika lui prépare aussi des réponses, que le propriétaire approuve, 0191), **s'en servir** (Mika s'en sert pour elle, en tête-à-tête, comme pour son propriétaire).
+- Un partage est rangé avec sa ressource et journalisé avec ses paramètres, comme son propriétaire (0185, 0186) ; il se retire d'un clic. Le propriétaire voit les siens dans Paramètres › Partages, la console les voit tous.
+- La règle du propriétaire s'étend à qui l'on partage : une boîte, un compte servent aussi avec elle, reconnue, en tête-à-tête (`boxes_here`, `accounts_here`), à son niveau — lire n'ouvre que ce qui lit ; préparer, aussi les brouillons ; s'en servir, comme le propriétaire, sous le tableau du canal de la ressource. Un service partagé reçoit une ligne d'accès pour elle (0192).
+- Rien ne se partage avec un salon, une inconnue, ni « tout le monde » ; ce qu'on te partage se montre à son nom (« Boîte de Léa »). Le non-lu d'une boîte partagée est celui du serveur : commun.
+- Une ressource « à toi » est déjà à chacune de ses propriétaires : elle ne leur est pas partagée, et ce qu'elles y font n'attend jamais l'accord d'une autre. On ne se partage rien à soi-même.
+- Répondre à la main à un mail (ce qui demande « s'en servir ») refuse les brouillons de Mika qui attendaient pour ce mail, quel que soit qui répond, et remplit la demande d'une réponse (« Préremplir ») : celle qu'elle finirait au travail ne se propose plus — relue au moment même de la proposer, même si la réponse est partie pendant qu'elle l'écrivait. La réponse se garde avec le mail (pas seulement parmi ses derniers envois) : elle ne lui en prépare pas d'autre. Rien ne part deux fois. C'est la seule fois où un partage touche aux brouillons du propriétaire.
+
+*Pourquoi :* « pour y gérer ses droits sur ses comptes : ex rajouter en lecture quelqu'un (et ça s'affichera dans son frontend à la personne) ou même partager son MCP » — une boîte de personne ne s'ouvrait à personne d'autre (0185).
+
+*Révise 0185 (en partie : la boîte d'une personne s'ouvre à qui elle la partage), 0186 (en partie : de même pour un compte Teams).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 
@@ -1316,6 +1329,8 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* elle doit savoir et retenir ce qu'on écrit à sa propriétaire, et l'aider à répondre, sans enfreindre les conditions de WhatsApp.
 
+*Révisée par 0189, 0190.*
+
 ### 0128 — Un service dit avec qui, ce qu'elle fait seule, et ce qu'elle en garde
 
 - Un serveur MCP se règle sur trois axes : avec qui (sa propriétaire, toute personne qui a un compte, des personnes nommées ; jamais un salon ni une inconnue), ce qu'elle fait seule (`seule`, `lit` : seule pour lire et sur accord pour agir, `carte` : sur accord à chaque appel, `toi` : sur l'accord de sa propriétaire à chaque appel), ce qu'elle en garde (`public`, `perso`, `prive`, `rien`). La console les remplit d'un coup par un genre ; le genre ne se garde pas.
@@ -1326,7 +1341,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* un serveur pro (factures, devis, tickets) ne doit servir qu'à sa propriétaire, et rien de ce qu'elle y lit ne doit ressortir ailleurs. Un serveur disait pour qui, jamais ce que valait ce qu'elle y lisait : sa mémoire le gardait au niveau de la question qu'on lui avait posée.
 
-*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129, 0130, 0131.*
+*Révise 0064 (en partie), 0085 (en partie), 0122 (en partie). Révisée par 0129, 0130, 0131, 0192.*
 
 ### 0129 — Ce qu'un service propose se regarde, et qui peut quoi se voit
 
@@ -1362,7 +1377,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* « on peut combiner les droits comme on veut » : avec qui, quand, l'accord et ce qu'elle garde, réglés à part au service puis corrigés outil par outil, ne se lisaient qu'en recomposant cinq réglages ; un tableau ordonné se lit d'un regard, et sa dernière ligne dit ce qui arrive à tout le reste.
 
-*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie). Révisée par 0133., 0134.*
+*Révise 0066 (en partie), 0128 (en partie), 0129 (en partie), 0130 (en partie). Révisée par 0133, 0134, 0192.*
 
 ### 0132 — Envoyer à ta place : des règles lues de haut en bas
 
@@ -1446,6 +1461,51 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* les octets d'une pièce étaient jetés au relevé, puis relus sur le serveur à chaque téléchargement : un mail rangé ou supprimé ailleurs perdait ses pièces, et un logo de signature (`cid:`) ne s'affichait jamais.
 
 *Révise 0027 (en partie), 0169 (en partie).*
+
+### 0189 — Ce que tu envoies toi-même depuis le web part sous ton geste
+
+- Dans frontendv2, un message que tu écris toi-même dans Teams ou au téléphone part sans carte d'accord : ton envoi, dans ta session authentifiée, est le geste que demande le plancher de 0133. Accepter ou retoucher là une proposition de Mika l'est aussi.
+- Teams : ton message entre dans la file de l'extension du compte, comme ce qu'elle prépare. Il part sous le nom de la personne connectée à Teams dans ce navigateur : la tienne, ou celle du propriétaire pour un compte qu'il te partage à « s'en servir ».
+- Téléphone, *pas encore fait* (ni l'API ni l'application n'ont cette voie, `protocole-moi.md` § 5) : il partira scellé au téléphone de sa conversation, qui l'enverra sans redemander ; sans nouvelles du téléphone en 2 h, il expirera, comme une proposition.
+- Ce que tu as envoyé entre dans sa vie comme tes propres messages. Pour Teams, ce sont ceux que l'extension rapporte une fois partis. Elle sait ce qui a été répondu, et ne le repropose pas.
+- Seul le propriétaire du compte écrit ainsi, ou qui s'en sert par un partage (0188) ; jamais le niveau « lire ».
+
+*Pourquoi :* « on peut y répondre aussi à la place de mika, lui demander de répondre » — et le web vaut le geste.
+
+*Révise 0120 (en partie), 0133 (en partie : le geste peut venir du client web).*
+
+### 0190 — Le téléphone : les apps qu'on choisit, plusieurs téléphones, l'application derrière la connexion
+
+- *À venir* : l'application lira les notifications des apps que la personne choisit, une à une (Paramètres › Téléphones), plus seulement WhatsApp et Messages ; jamais une app de banque ni un code à usage unique. Une notification sans conversation (un colis, un rendez-vous) se lira comme un message de son app. Aujourd'hui, ni l'API ni l'application n'ont ce choix.
+- Une personne a plusieurs téléphones, un jeton `mobile` chacun, sous le nom que l'application compose (« Android · fabricant modèle »). *À venir* : chaque message dira le sien et une réponse partira au téléphone de sa conversation ; aujourd'hui, frontendv2 les montre tous ensemble.
+- Elle voit et révoque ses téléphones elle-même ; un téléphone révoqué ne reçoit plus rien, ses messages restent.
+- L'application (l'APK) se télécharge dans Paramètres, derrière la connexion (`/api/moi/phone/apk` : sa session, ou un jeton de son compte, celui de son téléphone par exemple) : jamais par un lien public.
+
+*Pourquoi :* « toutes les notifications des app, la dernière position du tel » ; « pour y télécharger l'apk de téléphone et y gérer les téléphones connectés ».
+
+*Révise 0062 (en partie), 0120 (en partie : les apps lues).*
+
+### 0191 — Ses brouillons se relisent là où ils partiront
+
+- Un brouillon de courrier de Mika se relit dans Mail (« Ses brouillons »), une réponse Teams dans Teams, à côté de leur conversation : ce qui partira exactement, le retoucher, l'envoyer, le retirer. Le chat de frontendv2 n'en montre qu'un lien (la carte dit sa capacité et son brouillon : `capability`, `draft`) ; les autres clients (web, Android) gardent leur carte, la même décision.
+- Décider là est la décision du propriétaire de la ressource (`by` : sa personne), la même que « À valider » dans la console, qui voit toujours tout ; un `[À COMPLÉTER` bloque toujours l'envoi.
+- « Préremplir avec Mika », dans la saisie de Mail et de Teams, lui demande une réponse à ce message : elle l'écrit dans ses brouillons, et la saisie la reprend. Seulement là où elle prépare : jamais pour un mail parti de ta boîte (même revenu en copie : on y répond soi-même), ni dans un compte Teams décoché ou quand Teams est coupé (elle ne s'y mettrait jamais) — la console refuse de même. Au téléphone, *pas encore fait* : il viendra avec l'envoi de 0189.
+
+*Pourquoi :* les brouillons de Mika se relisent « dans mail, pareil pour teams ».
+
+*Révise 0185 (en partie : la carte d'accord se relit aussi là où le brouillon partira), 0186 (de même).*
+
+### 0192 — Chacun branche ses services MCP
+
+- Une personne branche ses propres services, dans Paramètres › Services : le service est à elle (son propriétaire, `personne:<clé>` ; sans propriétaire, ceux de Mika, réglés par un opérateur), né avec une seule ligne d'accès, la sienne, et la ligne par défaut fermée (0131).
+- Le partager ajoute une ligne pour la personne (0188) : lire, ses outils qui lisent ; s'en servir, tous, sur ton accord pour ceux qui agissent. Retirer le partage retire la ligne.
+- Ce que Mika en offre reste calculé par le moteur des droits (0134), sans exception pour un service à quelqu'un ; ce qu'elle y lit se garde au niveau de la ligne.
+- La console voit tous les services et les règle ; la personne ne voit et ne règle que les siens, et lit les lignes de ceux qu'on lui partage.
+- Une personne branche un service **distant**, par son adresse https (`McpServer.owner`, `/api/moi/mcp/…`) ; lancer une commande sur la machine (un service local) reste aux opérateurs, dans la console. Ses outils arrivent coupés, à choisir un par un (0129).
+
+*Pourquoi :* « chacun pour soi, ça crée un service MCP qui n'a que les droits avec la personne, dans inspection on peut voir tous les mcp, s'il veut partager son mcp, ça ajoute une règle d'accès … les mcp disponibles sont calculés en fonction des droits ».
+
+*Révise 0128 (en partie : un service a un propriétaire), 0131 (en partie).*
 
 ## Les fournisseurs de modèles
 
@@ -1818,7 +1878,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 
 *Pourquoi :* l'application devait la laisser écrire la première sans qu'une connexion de fond passe pour une présence, et elle ne pouvait envoyer aucun fichier.
 
-*Révise 0051 (en partie), 0060 (en partie). Révisée par 0063, 0077.*
+*Révise 0051 (en partie), 0060 (en partie). Révisée par 0063, 0077, 0190.*
 
 ### 0065 — Mika en fond : des portraits pré-rendus dans l'application mobile
 
@@ -1931,6 +1991,18 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* valider chaque appel un par un interrompait un travail que l'opératrice avait déjà décidé de lui confier — en mode pro, la boucle attend chaque accord (ADR 0165).
 
 *Révise 0064 (en partie).*
+
+### 0187 — Un client de tous les jours, à chacun ce qui est à lui
+
+- `frontendv2/` est le client web de tous les jours, pour toute personne qui a un compte : le chat (le mode pro reste aux opératrices, 0116), Outils, Mail, Teams, Téléphone, Paramètres. La console reste celle des opérateurs : elle voit tout, et rien n'y change.
+- Ce qu'il montre vient d'une API par personne (`/api/moi/…`), sous la session de la personne (le jeton CSRF pour écrire) : ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage (0188), et ses droits tels que le moteur les calcule pour elle, canal par canal. Jamais la ressource d'une autre ni une règle recopiée : la règle même de ses outils (`boxes_here`, `accounts_here`, `vocab.rights`).
+- Mika y est sans sa chambre : son visage (la VRM, sinon les portraits d'Android) au bout de la barre du haut, sur chaque écran et en mode pro ; dans le chat ordinaire, en grand, dans une colonne à droite, avec son humeur, ce à quoi elle repense et ce qu'elle a promis. On ne la déplace pas.
+- Sa forme : la navigation en haut (une barre en bas sur un téléphone), du blanc à filets, l'indigo pour ce que tu fais, le rose pour ce que fait Mika, toute la largeur partout ; un seul verbe pour lui demander d'écrire, « Préremplir avec Mika ».
+- La maquette validée reste dans `frontendv2/maquette/`. Le client se construit avec Vite et TypeScript, réutilise sans copie les modules purs du client web (`frontend/Web/src`) et sert sur le port 4173, admis d'office.
+- Ce qu'une personne branche fait joindre des serveurs au moteur ; l'API le borne. Qui n'est pas opératrice ne vise que des serveurs sur Internet (ni la machine, ni son réseau privé : cela reste à la console), au moment où elle les vise : un serveur neuf, ou son port et sa sécurité changés. Elle branche au plus dix ressources de chaque sorte, et teste ou relève au plus trente fois par minute. Un mot de passe gardé ne part jamais vers un serveur changé : on le redonne. Une boîte Microsoft ne joint que les serveurs de Microsoft. Une création redite avec la même clé d'envoi ne refait rien. Limite connue : un nom qui change d'adresse après coup n'est pas revérifié à la connexion.
+- Un client natif (un jeton sans `Origin`) ne fait que lire l'API ; il écrit par ses propres routes.
+
+*Pourquoi :* « un nouveau frontend web qui est plus comme la version android (pas de 3d) … le tout bien sûr limité à l'utilisateur », « il est pour des utilisateurs de mika » ; pour elle, « place-la juste bien de base », et « dans le chat elle doit être visible en gros ».
 
 ## La console et l'exploitation
 

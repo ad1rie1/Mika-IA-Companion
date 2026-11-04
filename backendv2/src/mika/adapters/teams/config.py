@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mika.kernel.forms import Knob
 from mika.ports.teams import ACCOUNT_KEY, ACCOUNT_KEY_RULE, DEFAULT_ACCOUNT, Voice
-from mika.vocab.access import PERSON, SELF
+from mika.vocab.access import PERSON, SELF, Share
 
 #: ce qui, dans la signature, devient son nom (celui de sa persona : le code ne l'écrit jamais)
 HER = "{elle}"
@@ -40,6 +40,11 @@ class TeamsAccount(BaseModel):
         help="À qui est ce Teams : toi (ses propriétaires), elle, ou une personne qui a un compte. Elle s'en sert "
              "avec son propriétaire — toi en privé et quand elle travaille, elle-même quand elle travaille, cette "
              "personne en privé (ADR 0186). Ce qu'elle y prépare part de ce compte, sous le nom de sa personne.")] = ""
+    shares: Annotated[dict[str, Share], Knob(
+        label="Partagé avec", group="Le compte", readonly=True, order=5,
+        help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
+             "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne le voit sous son propre "
+             "compte.")] = Field(default_factory=dict)
     display_name: Annotated[str, Knob(
         label="Son nom", group="Écrire", advanced=False, order=20,
         help="Comme ses collègues connaissent la personne de ce compte (vide : celui que Teams donne). Elle écrit à "
@@ -66,6 +71,14 @@ class TeamsAccount(BaseModel):
             raise ValueError("un compte Teams est à toi (vide), à elle (« elle ») ou à une personne "
                              "(« personne:<clé> »)")
         return owner
+
+    @field_validator("shares")
+    @classmethod
+    def _shares(cls, shares: dict[str, str]) -> dict[str, str]:
+        bad = [k for k in shares if not (k.startswith(PERSON) and len(k) > len(PERSON))]
+        if bad:
+            raise ValueError(f"un partage va à une personne (« personne:<clé> »), pas à « {bad[0][:40]} »")
+        return dict(shares)
 
     def voice(self, fallback_name: str = "") -> Voice:
         return Voice(display_name=self.display_name.strip() or fallback_name, tone=self.tone,

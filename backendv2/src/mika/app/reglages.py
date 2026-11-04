@@ -912,7 +912,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "autre hôte https) et en récupère l'histoire. L'adresse de chaque dépôt se règle sur la "
                             "fiche du projet (Projets › un projet › Dépôt git). Le jeton ne passe que par "
                             "l'environnement de git, limité à l'hôte du dépôt.")),)),
-        SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
+        SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail, lock=settings.writing,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
                         facts=mail_facts, fixed_names=("accounts",), describe={"accounts": describe_mailbox},
@@ -926,6 +926,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "prépare."), home="courrier/parametres", params="email",
                             template="handmade/mail/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
         SettingsSection("mcp", "Outils extérieurs", "sens", McpConfig, settings.mcp, save_mcp, order=15,
+                        lock=settings.writing,
                         description="Les serveurs MCP dont elle peut utiliser les outils (ADR 0064). Jetons et "
                                     "variables secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
                         fixed_names=("servers",),
@@ -961,6 +962,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
                             "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu.")),)),
         SettingsSection("teams", "Teams", "sens", TeamsConfig, settings.teams, save_teams, order=12,
+                        lock=settings.writing,
                         description="Les conversations Teams que l'extension de navigateur de chaque compte lui "
                                     "apporte (ADR 0069, 0186), et ce qu'elle fait des réponses qu'elle y prépare.",
                         facts=teams_facts, fixed_names=("accounts",), describe={"accounts": describe_teams_account},

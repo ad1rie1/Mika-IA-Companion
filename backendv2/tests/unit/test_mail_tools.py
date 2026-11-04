@@ -18,21 +18,28 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+from types import SimpleNamespace as NS
 
+from mika.app.moi import form
 from mika.faculties.identity import audience_for
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.rights import Rights
-from mika.plugins.email import EMAIL, READ
+from mika.plugins.email import EMAIL, READ, SENT_KEPT, answered
+from mika.plugins.email import params_of as email_params
+from mika.plugins.email.console.common import mail_key
+from mika.plugins.email.tasks import _prepare
 from mika.ports.llm import LLMRequest, LLMResponse
 from mika.ports.mail import AccountInfo, Attachment, Mail
+from mika.runtime.operations import perform
 from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tools import ToolContext, allowed, checked_args
 from mika.sim.clock import run_virtual
 from mika.sim.outside import FakeMail
-from mika.vocab.access import ALONE, NO
-from mika.vocab.canals import Canals
-from mika.vocab.episodes import Kind
+from mika.vocab.access import ALONE, EVERYONE, NO
+from mika.vocab.canals import CanalRule, Canals, CanalTable
+from mika.vocab.episodes import Kind, task_target
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.mika import at_paris, boot, build, connect
 
@@ -249,3 +256,121 @@ def test_tidying_acts_for_you_alone_and_never_deletes():
     assert allowed(tools, spec, you, Kind.REPLY, rights).level == ALONE
     assert allowed(tools, spec, camille, Kind.REPLY, rights).level == NO
     assert allowed(tools, spec, room, Kind.REPLY, rights).level == NO
+
+
+async def invoke_at_work(kernel, tool: str, mail_ref: str, authoring=None, **args):
+    """Un appel d'outil pendant sa tâche de rédaction pour ce mail (elle seule, au travail) ; ``authoring`` : l'autrice
+    de sa boîte, qui récrit son brouillon avant qu'il soit proposé."""
+    mind = kernel.mind
+    base, n = mind.frame(), next(_CALLS)
+    target = task_target("email", mail_ref)
+    audience = audience_for(base, EpisodeRequest(kind=Kind.TASK, target=target))
+    frame = Frame(base.root, mind.clock.now(), mind.registry, audience, EpisodeRef(f"ep-{n}", Kind.TASK,
+                                                                                    target=target))
+    spec = mind.registry.tools[tool]
+    ctx = ToolContext(mind, spec, f"appel-{n}", f"ep-{n}", frame, guard=None, ports=kernel.ports, authoring=authoring)
+    ctx.call_key = f"{tool}:{n}"
+    out = await spec.handler(spec.args.model_validate(args), ctx)
+    return out if isinstance(out, str) else out.content
+
+
+def test_a_reply_by_hand_closes_the_ask_and_her_late_draft_is_dropped(tmp_path):
+    """« Préremplir », puis on répond soi-même avant elle : la demande est remplie, et le brouillon qu'elle finissait
+    au travail n'a plus lieu d'être (rien ne part deux fois) ; une nouvelle demande la rouvre."""
+    async def scenario(kernel):
+        asked = await perform(kernel, "email.rediger", form(instruction="dis que c'est réglé"), by="user_1",
+                              subject=mail_key(ref(1)))
+        assert asked.ok, asked.message
+        replied = await perform(kernel, "email.repondre", form(to="factures@edf.fr", subject="Re: Facture",
+                                                               body="C'est réglé.", fixed={"reply_to": ref(1)}),
+                                by="user_1")
+        assert replied.ok, replied.message
+        out = {"asked": ref(1) in kernel.mind.frame().state("email").asked,
+               "late": await invoke_at_work(kernel, "email_draft", ref(1), mail=f"[{ref(1)}]", body="Bien reçu.")}
+        again = await perform(kernel, "email.rediger", form(instruction="précise la date"), by="user_1",
+                              subject=mail_key(ref(1)))
+        assert again.ok, again.message
+        out["reopened"] = await invoke_at_work(kernel, "email_draft", ref(1), mail=f"[{ref(1)}]",
+                                               body="Réglé le 28.")
+        return out
+
+    out = live(tmp_path, scenario)
+    assert out["asked"] is False  # la réponse partie a rempli la demande
+    assert out["late"] == phrase("email.tools.draft.answered")
+    assert out["reopened"].startswith(phrase("email.tools.draft.proposed", who="Adrien")[:20])
+
+
+def reply_by_hand(kernel, n: int = 1):
+    return perform(kernel, "email.repondre", form(to="factures@edf.fr", subject="Re: Facture", body="C'est réglé.",
+                                                   fixed={"reply_to": ref(n)}), by="user_1")
+
+
+def test_a_reply_by_hand_while_her_author_rewrites_hers_keeps_hers_from_leaving(tmp_path):
+    """« Préremplir », et elle écrit au travail ; l'autrice de sa boîte récrit son texte (quelques secondes) et, pendant
+    ce temps, on répond soi-même : relu au moment même de proposer, son brouillon ne l'est pas, et ne reste pas."""
+    async def scenario(kernel):
+        asked = await perform(kernel, "email.rediger", form(instruction="dis que c'est réglé"), by="user_1",
+                              subject=mail_key(ref(1)))
+        assert asked.ok, asked.message
+
+        async def author(flow: str, text: str, about: str) -> str:
+            replied = await reply_by_hand(kernel)  # partie pendant qu'elle récrivait
+            assert replied.ok, replied.message
+            return text + " Bonne journée."
+
+        said = await invoke_at_work(kernel, "email_draft", ref(1), authoring=author, mail=f"[{ref(1)}]",
+                                    body="Bien reçu.")
+        s = kernel.mind.frame().state("email")
+        kept = [d for d in kernel.ports["mail"].kept_drafts.values() if d.reply_to == ref(1)]
+        return {"said": said, "proposed": [d for d in s.drafts.values() if d.mail == ref(1)],
+                "kept": [d.state for d in kept]}
+
+    out = live(tmp_path, scenario)
+    assert out["said"] == phrase("email.tools.draft.answered")
+    assert out["proposed"] == []  # rien à approuver, rien qui parte seul
+    assert out["kept"] == ["abandonne"]  # écrit, puis abandonné : il ne sert plus
+
+
+class Preparing:
+    """Le cadre de sa vie, ses boîtes réglées pour préparer d'elle-même, sans rien journaliser (aucune tâche ne court
+    en fond : seul compte ce que son proposeur choisirait)."""
+
+    def __init__(self, frame, p) -> None:
+        self._frame = frame
+        self.env = NS(params_of=lambda owner, root: p if owner == "email" else frame.env.params_of(owner, root),
+                      tz_of=frame.env.tz_of, fact_spec=frame.env.fact_spec)
+
+    def __getattr__(self, name: str):
+        return getattr(self._frame, name)
+
+
+def test_a_reply_by_hand_is_kept_with_its_mail_and_she_never_prepares_another(tmp_path):
+    """Une boîte où elle prépare d'elle-même : le mail qui attend une réponse est pour elle ; on y répond à la main, elle
+    ne le reprend plus — même quand trente autres envois ont fait sortir cette réponse de ses derniers envois."""
+    async def scenario(kernel):
+        table = CanalTable(lines=(CanalRule(who=(EVERYONE,), canal=("courrier:perso",), prepare=True, reply="accord"),))
+
+        def proposed() -> list[str]:
+            frame = kernel.mind.frame()
+            p = email_params(frame).model_copy(update={"canaux": Canals(tables={"courrier:perso": table})})
+            return [c.args["mail"] for c in _prepare(frame.state("email"), Preparing(frame, p))]
+
+        out = {"before": proposed()}
+        replied = await reply_by_hand(kernel)
+        assert replied.ok, replied.message
+        out["after"] = proposed()
+        for i in range(SENT_KEPT + 1):
+            sent = await perform(kernel, "email.ecrire", form(account="perso", to=f"ami{i}@exemple.fr",
+                                                              subject=f"Nouvelles {i}", body="Bonjour."), by="user_1")
+            assert sent.ok, sent.message
+        s = kernel.mind.frame().state("email")
+        out["forgotten"] = not any(x.in_reply_to == ref(1) for x in s.sent.values())
+        out["answered"] = answered(s, ref(1))
+        out["later"] = proposed()
+        return out
+
+    out = live(tmp_path, scenario)
+    assert out["before"] == [ref(1)]  # la facture attend une réponse : elle la préparerait
+    assert out["after"] == []  # répondue à la main : rien à préparer
+    assert out["forgotten"] and out["answered"]  # sortie de ses derniers envois, gardée sur le mail
+    assert out["later"] == []

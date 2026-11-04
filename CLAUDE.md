@@ -10,11 +10,12 @@ Android et une extension Teams.
   données et l'environnement, comment écrire une faculté, toutes les commandes ;
 - `backendv2/docs/decisions.md` : les décisions et leur pourquoi (les « ADR » que le code cite par numéro) ;
 - `backendv2/README.md` pour démarrer en local ; `backendv2/deploy/README.md` pour la mise en service ;
-- dans `backendv2/docs/` : `protocole-chat.md` (`/ws`), `protocole-monde.md` (`mika.world/1`), `console-carte.md` (la
-  console) ;
+- dans `backendv2/docs/` : `protocole-chat.md` (`/ws`), `protocole-monde.md` (`mika.world/1`), `protocole-moi.md`
+  (`/api/moi`, l'API par personne), `console-carte.md` (la console) ;
 - `.claude/rules/console.md` : les règles du thème et de la disposition de la console (ADR 0176), chargées dès qu'on
   touche un de ses fichiers ;
-- `frontend/Web/README.md`, `frontend/Android/README.md`, `frontend/Extension/README.md`, `INJECTION/CLAUDE.md`.
+- `frontend/Web/README.md`, `frontendv2/README.md`, `frontend/Android/README.md`, `frontend/Extension/README.md`,
+  `INJECTION/CLAUDE.md`.
 
 En cas de désaccord entre une doc et le code, le code fait foi : corriger la doc.
 
@@ -25,6 +26,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 | `backendv2/` | Le moteur : paquet `mika`, Python ≥ 3.12. Il contient `src/mika/`, `tests/`, `persona/` (`mika.yaml`, `voix.yaml`), `deploy/` (unités systemd), `docs/` (décisions et protocoles), `tools/` (bancs de mesure du vrai modèle) et `examples/` (une app forgée, un monde). |
 | `services/mika-images/` | Serveur d'images local : stable-diffusion.cpp `sd-server` (Vulkan) avec Qwen-Image 2.1, démarré à la demande par des unités systemd utilisateur. Les poids et le binaire sont dans `/mnt/games/mika-images`. Mika s'y branche comme fournisseur d'images (ADR 0061). |
 | `frontend/Web/` | Client web : Vite, Three.js, VRM, TypeScript. Contient `src/`, `public/`, `assets-src/` (sources Blender et scripts, partagés avec Unity) et `studio.html`. |
+| `frontendv2/` | Le client web de tous les jours (Vite, TypeScript, ADR 0187) : chat et mode pro, Outils, Mail, Teams, Téléphone, Paramètres, pour chaque personne qui a un compte, sur l'API par personne (`/api/moi`, `backendv2/docs/protocole-moi.md`). Il réutilise sans copie les modules purs de `frontend/Web/src` ; `maquette/` est la maquette validée. Commencer par son `README.md`. |
 | `frontend/Unity/` | Client Unity : `Mika/` (le projet), `ArtSource/` (mocap, atelier), `tools/gen_world_protocol.py`. |
 | `frontend/Android/` | Messagerie Android (Kotlin, Compose, paquet `fr.qwartz.mika`). Commencer par son `README.md`. Côté serveur, voir les ADR 0062, 0067 et 0077. |
 | `frontend/Extension/` | Extension Chrome MV3 « Mika · Teams » (JS sans build). Elle lit ce que Teams web reçoit déjà et pose dans Teams ce que Mika a écrit (ADR 0069). Tests : `npm test`. |
@@ -70,8 +72,9 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
   rapide pour le cacher. Ne jamais supprimer ni sauter un test long pour gagner du temps.
 - **`--mariadb`** rejoue la suite sur des bases jetables du serveur MariaDB local ; le marqueur `sqlite_only` en
   écarte un test.
-- **Volumes.** La suite compte plus de 2 200 fonctions de test, dont une cinquantaine de longues. Mesure du 2026-10-04 :
-  ~10,5 min pour la suite entière, dont ~6 min de tests longs.
+- **Volumes.** La suite compte environ 4 550 cas (`--slow` compris). Mesure du 2026-11-04 : ~28 min pour la suite
+  entière, au-delà des 25 min de la borne. Avec `--slow`, poser `BORNE_TEMPS=45m`, et écrire la sortie dans un
+  fichier : tuée par la borne, elle ne laisse aucun résumé.
 
 **La mémoire de la machine (30 Go)**
 

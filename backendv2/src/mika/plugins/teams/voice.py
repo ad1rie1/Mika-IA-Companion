@@ -49,7 +49,7 @@ from mika.plugins.teams import (
 )
 from mika.ports.preprocess import inert
 from mika.ports.teams import Voice, conversation_key
-from mika.vocab.access import SELF
+from mika.vocab.access import SELF, SHARE_PREPARE, SHARE_READ
 from mika.vocab.canals import teams_rule
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import family, phrase
@@ -124,11 +124,14 @@ async def _gather(s: TeamsState, frame: Frame, ports: Mapping[str, Any]) -> dict
     """Ce que ses sections lisent de Teams, réduit aux comptes dont elle peut se servir ici (``accounts``, ADR 0186) :
     ce qui est dans un autre n'est ni lu ni montré."""
     store, port = ports.get("store"), ports.get("teams")
-    accounts = accounts_here(frame, [a.key for a in port.accounts()], port) if port is not None else ()
+    keys = [a.key for a in port.accounts()] if port is not None else []
+    accounts = accounts_here(frame, keys, port, SHARE_READ) if port is not None else ()
     if store is None or port is None or not accounts:
         return None
+    # ses réponses, leurs notes et sa voix : seulement là où l'on prépare (ADR 0188 : « lire » n'ouvre que ce qui lit)
+    prepares = accounts_here(frame, keys, port, SHARE_PREPARE)
     refs = [m.summary_ref for _, m in _recent(s, frame, accounts) if m.summary_ref]
-    refs += [d.note_ref for d in _outcomes(s, frame, accounts) if d.note_ref]
+    refs += [d.note_ref for d in _outcomes(s, frame, prepares) if d.note_ref]
     ref = task_message(frame)
     ask = s.asked.get(ref) if ref else None
     if ask is not None and ask.account in accounts and ask.instruction_ref:
@@ -137,11 +140,13 @@ async def _gather(s: TeamsState, frame: Frame, ports: Mapping[str, Any]) -> dict
     m = port.message(ref) if ref else None
     if m is not None and m.account not in accounts:
         m = None
-    voiced = m.account if m is not None else next((a for a in accounts if _pending_work(s, frame, a)), "")
+    voiced = m.account if m is not None else next((a for a in prepares if _pending_work(s, frame, a)), "")
+    if voiced not in prepares:
+        voiced = ""
     out: dict[str, Any] = {"texts": store.content(refs) if refs else {}, "accounts": accounts,
-                           "voice": port.voice(voiced) if voiced else None, "voiced": voiced, "task": None,
-                           "titles": {}}
-    for d in _outcomes(s, frame, accounts):
+                           "prepares": prepares, "voice": port.voice(voiced) if voiced else None, "voiced": voiced,
+                           "task": None, "titles": {}}
+    for d in _outcomes(s, frame, prepares):
         out["titles"][conversation_key(d.account, d.conversation)] = port.title(d.account, d.conversation)
     if m is not None:
         out["task"] = (m, port.thread(m.account, m.conversation, THREAD_SHOWN, before=m.at + 1),
@@ -198,7 +203,7 @@ def _draft_line(d: Any, what: str, who: str, frame: Frame, texts: Mapping[str, s
                untrusted=True)
 def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
-    titles, texts, accounts = got.get("titles") or {}, got.get("texts") or {}, got.get("accounts") or ()
+    titles, texts, accounts = got.get("titles") or {}, got.get("texts") or {}, got.get("prepares") or ()
     if not accounts:
         return None
     lines = []

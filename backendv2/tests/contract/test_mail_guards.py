@@ -181,6 +181,23 @@ def test_marking_twenty_mails_read_opens_one_session_not_twenty(tmp_path, server
 # ── Répondre à « "Dupré, Élodie" » (CON-20) ───────────────────────────────
 
 
+def test_a_reply_leaves_from_the_box_of_its_mail_and_never_from_a_guessed_one(tmp_path):
+    solo = box_for(tmp_path, account(1, 2))
+    assert solo._sender_key("", "perso:<x@exemple.fr>") == "perso"  # sa référence dit sa boîte
+    assert solo._sender_key("", "<ancien@exemple.fr>") == "perso"  # une ancienne référence : la seule qui envoie
+    with pytest.raises(ValueError):
+        solo._sender_key("", "pro:<x@exemple.fr>")  # une boîte retirée : jamais une autre à sa place
+    solo._cache.store(Mail("<garde@exemple.fr>", "Bob <bob@x.fr>", "bob@x.fr", "Vieux", 1, "Texte.",
+                           account="retiree", folder="INBOX"), 5)
+    with pytest.raises(ValueError):
+        solo._sender_key("", "<garde@exemple.fr>")  # gardé, mais de la boîte retirée : pas la seule qui reste
+    two = ImapSmtpMail(lambda: MailConfig(accounts={"perso": account(1, 2), "pro": account(3, 4)}),
+                       tmp_path / "deux.db", now=lambda: NOW, tz=UTC)
+    assert two._sender_key("", "pro:<x@exemple.fr>") == "pro"
+    with pytest.raises(ValueError):
+        two._sender_key("", "<ancien@exemple.fr>")  # deux boîtes et un mail oublié : on ne devine pas
+
+
 def test_replying_to_a_name_with_a_comma_writes_to_one_person(tmp_path, servers):
     raw = (b"From: =?utf-8?q?Dupr=C3=A9=2C_=C3=89lodie?= <elodie@exemple.fr>\r\nTo: mika@exemple.fr\r\n"
            b"Subject: test\r\nMessage-ID: <a@b>\r\n\r\nbonjour\r\n")

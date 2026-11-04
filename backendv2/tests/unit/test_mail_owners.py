@@ -62,8 +62,10 @@ def test_her_tools_are_offered_to_whoever_owns_a_box():
     assert not owns_a_box(YOU, Kind.REPLY, frame(YOU))  # toi : ta famille d'outils décide, comme avant
     assert not owns_a_box(ROOM, Kind.REPLY, frame(ROOM))  # jamais à plusieurs
     assert not owns_a_box(NADIA, Kind.REPLY, None)  # une console qui juge sans ce qu'elle vit : personne
-    from mika.plugins.email import EMAIL
-    assert all(t.owned is owns_a_box for t in EMAIL.tools if t.owner_only)
+    from mika.plugins.email import EMAIL, owns_a_box_to_prepare, owns_a_box_to_use
+    # chacun selon ce qu'il demande (ADR 0188) : préparer une réponse, ranger, sinon lire
+    wanted = {"email_draft": owns_a_box_to_prepare, "email_tidy": owns_a_box_to_use}
+    assert all(t.owned is wanted.get(t.name, owns_a_box) for t in EMAIL.tools if t.owner_only)
 
 
 def _mail(n: int, account: str) -> Mail:

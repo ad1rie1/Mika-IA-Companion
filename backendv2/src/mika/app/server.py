@@ -79,6 +79,8 @@ from mika.app.handmade.person import PersonOverview
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
 from mika.app.mindport import KernelPort
+from mika.app.moi import MeApi
+from mika.app.moi.phone import APK_NAME
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
 from mika.app.settings import SYSTEM_ACCESS_FIELDS, SecretBox, Settings, push_key_file
@@ -296,11 +298,15 @@ class Live:
         off = sorted(k for k, a in boxes.items() if not a.enabled)
         # à qui est chaque boîte (ADR 0185 ; vide : à toi) : ses outils ne lui montrent que celles de qui est en face
         owners = {k: a.owner for k, a in sorted(boxes.items())}
-        out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners}
+        # avec qui chacune est partagée, et ce que la personne en a (ADR 0188)
+        shares = {k: dict(sorted(a.shares.items())) for k, a in sorted(boxes.items()) if a.shares}
+        out["email"] = {"canaux": canaux, "boxes_off": off, "owners": owners, "shares": shares}
         teams = self.settings.teams()
         # à qui est chaque compte Teams (ADR 0186 ; vide : à toi) : ses outils ne lui montrent que ceux de qui est en face
         out["teams"] = {"enabled": teams.enabled, "canaux": canaux,
                         "owners": {k: a.owner for k, a in sorted(teams.accounts.items())},
+                        "shares": {k: dict(sorted(a.shares.items())) for k, a in sorted(teams.accounts.items())
+                                   if a.shares},
                         "accounts_off": sorted(k for k, a in teams.accounts.items() if not a.enabled)}
         return out
 
@@ -420,7 +426,13 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)), access=settings.mcp_system_access)
     async def settle_mcp(name: str, changes: Mapping[str, Any], create: bool = False) -> None:
         """Ce qu'un serveur de l'opérateur fait d'elle, réglé depuis sa fiche (ADR 0128) : sa fiche de réglages
-        réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche."""
+        réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche.
+        Relue puis réécrite d'un seul tenant (``Settings.writing``) : la console et l'API par personne qui règlent
+        deux serveurs en même temps ne s'effacent pas."""
+        async with settings.writing:
+            await _settle_mcp(name, changes, create)
+
+    async def _settle_mcp(name: str, changes: Mapping[str, Any], create: bool) -> None:
         if not create and name in system.names():
             # un serveur du système : ses accès seulement, rangés à part (ADR 0131) ; le reste suit son plugin
             if set(changes) - set(SYSTEM_ACCESS_FIELDS):
@@ -580,8 +592,12 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
     lent = Mount(LENT_PREFIX, app=lending.app())
+    # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187)
+    moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, settings=live.settings,
+                reconfigure=live.reconfigure)
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
+                                    *moi.routes(),
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
                                     *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp, lent,
                                     world_hub.route()],

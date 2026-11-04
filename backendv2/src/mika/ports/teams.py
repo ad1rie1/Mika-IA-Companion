@@ -390,6 +390,11 @@ class TeamsPort(Protocol):
         d'un autre compte lui est inconnu."""
         ...
 
+    def expire_written(self, account: str, now: int) -> int:
+        """Ce que la personne a écrit elle-même (ADR 0189) et qui n'est pas parti à temps : réglé (``inutilise``, ou
+        ``echec`` s'il était en cours d'envoi). Rend combien."""
+        return 0
+
     def drop_account(self, account: str) -> int:
         """Un compte supprimé des réglages : tout ce que son extension avait apporté s'efface (lignes effacées)."""
         ...

@@ -65,6 +65,7 @@ from mika.plugins.email import (
 )
 from mika.ports.mail import AccountInfo, Draft, Mail, split_ref
 from mika.ports.preprocess import inert
+from mika.vocab.access import SHARE_PREPARE, SHARE_READ
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.people import fold
 from mika.vocab.phrasebook import phrase
@@ -180,15 +181,19 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     """Ce que ses sections lisent du courrier, réduit aux boîtes dont elle peut se servir ici (``boxes``, ADR 0185) :
     ce qui est dans une autre n'est ni lu ni montré."""
     store, port = ports.get("store"), ports.get("mail")
-    boxes = boxes_here(frame, [a.key for a in port.accounts()]) if port is not None else ()
+    keys = [a.key for a in port.accounts()] if port is not None else []
+    boxes = boxes_here(frame, keys, SHARE_READ) if port is not None else ()
     if store is None or not boxes:
         return None
+    # ses brouillons, leurs notes et sa voix : seulement là où l'on prépare (ADR 0188 : « lire » n'ouvre que ce qui
+    # lit — les réponses en préparation sont l'affaire du propriétaire)
+    prepares = boxes_here(frame, keys, SHARE_PREPARE)
     out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None, "edits": [], "refused": [],
-                           "boxes": boxes}
+                           "boxes": boxes, "prepares": prepares}
     refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref and m.account in boxes]
     refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref and m.account in boxes]
     refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref and m.account in boxes]
-    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref and d.account in boxes]
+    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref and d.account in prepares]
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
     if ask is not None and ask.instruction_ref:
@@ -200,7 +205,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     out["texts"] = store.content(refs) if refs else {}
     if port is not None:
         out["accounts"] = {a.key: a for a in port.accounts() if a.key in boxes}
-        for d in [*_outcomes(s, frame), *out["refused"]]:
+        for d in [*(d for d in _outcomes(s, frame) if d.account in prepares), *out["refused"]]:
             got = port.draft(d.draft) if d.draft else None
             if got is not None:
                 out["drafts"][d.draft] = (got.to, got.subject)
@@ -274,7 +279,7 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                untrusted=True)
 def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
-    known, texts, boxes = got.get("drafts") or {}, got.get("texts") or {}, set(got.get("boxes") or ())
+    known, texts, boxes = got.get("drafts") or {}, got.get("texts") or {}, set(got.get("prepares") or ())
     if not boxes:
         return None
     lines = []
@@ -302,7 +307,8 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
                title=phrase("email.voice.title"))
 def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
-    accounts: dict[str, AccountInfo] = got.get("accounts") or {}
+    prepares = set(got.get("prepares") or ())
+    accounts: dict[str, AccountInfo] = {k: a for k, a in (got.get("accounts") or {}).items() if k in prepares}
     if not accounts:
         return None
     mail = task_mail(frame)

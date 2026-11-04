@@ -33,8 +33,10 @@ from mika.plugins.teams import (
     decider,
     her,
     latest,
+    owner_must_approve,
     owner_of,
     owns_an_account,
+    owns_an_account_to_prepare,
     params_of,
     task_message,
     under_way,
@@ -46,7 +48,7 @@ from mika.plugins.teams.voice import voice_text
 from mika.ports.preprocess import cite, inert
 from mika.ports.teams import DRAFT, SEND, Draft, person_handle, to_fill
 from mika.vocab import flows
-from mika.vocab.access import SELF
+from mika.vocab.access import SELF, SHARE_PREPARE, SHARE_READ
 from mika.vocab.episodes import WORKING, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -62,13 +64,13 @@ MODE_WORDS = {"brouillon": "posée dans Teams pour que {who} l'envoie",
               "validation": "envoyée après l'accord de {who}", "autonome": "envoyée sans accord"}
 
 
-def _port(ctx: Any) -> tuple[Any, ToolResult | None]:
-    """Teams tel que ses outils le voient ici : réduit aux comptes de qui est en face (ADR 0186) ; rien quand aucun
-    ne lui est ouvert."""
+def _port(ctx: Any, need: str = SHARE_READ) -> tuple[Any, ToolResult | None]:
+    """Teams tel que ses outils le voient ici : réduit aux comptes de qui est en face (ADR 0186), et à ceux qu'on lui
+    partage au niveau que l'outil demande (``need``, ADR 0188) ; rien quand aucun ne lui est ouvert."""
     port = ctx.ports.get("teams")
     if port is None:
         return None, ToolResult(ok=False, content=NO_TEAMS)
-    keys = accounts_here(ctx.frame, [a.key for a in port.accounts()], port)
+    keys = accounts_here(ctx.frame, [a.key for a in port.accounts()], port, need)
     if not keys:
         return None, ToolResult(ok=False, content=PRIVATE)
     return Accounts(port, keys), None
@@ -156,9 +158,9 @@ def _asker(ctx: Any) -> tuple[str, ...]:
 @TEAMS.tool("teams_draft", acts=True, description="Préparer une réponse à un message Teams, à la place de la personne "
             "du compte qui l'a reçu (selon son réglage, elle est posée dans Teams pour qu'elle l'envoie, envoyée après "
             "son accord, ou envoyée telle quelle).", args=DraftArgs, bundle=BUNDLE, episodes=EPISODES,
-            max_calls_per_episode=2, owner_only=True, owned=owns_an_account)
+            max_calls_per_episode=2, owner_only=True, owned=owns_an_account_to_prepare)
 async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
-    port, refused = _port(ctx)
+    port, refused = _port(ctx, SHARE_PREPARE)
     if refused is not None:
         return refused
     m = port.message(args.message.strip().strip("[]"))
@@ -192,8 +194,12 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     if shown is None or (shown.blocked and not to_fill(draft.body)):
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content=f"Cette réponse ne peut pas partir : {shown.blocked if shown else 'erreur'}.")
-    # comment elle partira : la règle d'envoi de sa conversation (ADR 0132)
+    # comment elle partira : la règle d'envoi de sa conversation (ADR 0132) — jamais d'elle-même pour qui n'a qu'un
+    # partage « lire et préparer » : son propriétaire l'accepte (ADR 0188)
     mode = MODE_OF.get(rule.reply, "validation")
+    asked = frame.state("teams").asked.get(m.ref)
+    if mode == "autonome" and owner_must_approve(frame, m.account, asked.by if asked is not None else ""):
+        mode = "validation"
     if shown.blocked and mode != "brouillon":
         port.discard_draft(draft.id)
         return ToolResult(ok=False, content="Elle ne peut pas partir avec des passages [À COMPLÉTER] : écris-la sans "

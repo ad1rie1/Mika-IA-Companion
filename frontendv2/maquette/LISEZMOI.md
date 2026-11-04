@@ -1,8 +1,9 @@
 # Maquette du frontendv2
 
 Le client web de tous les jours d'une personne connectée : le chat avec Mika (et le mode pro), ses outils, son
-courrier, son Teams, son téléphone et ses paramètres. Pas de monde 3D : Mika vit dans un coin de l'écran. Cette page
-est une **maquette à valider** : les données sont fictives et rien ne parle au moteur.
+courrier, son Teams, son téléphone et ses paramètres. Pas de monde 3D : Mika est au bout de la barre du haut, et en
+grand dans le chat. Cette page est la **maquette validée** (le 2026-11-04) : les données sont fictives et rien ne
+parle au moteur. Le vrai client est `frontendv2/` (son `README.md`), sur l'API par personne (ADR 0187).
 
 ## L'ouvrir
 
@@ -46,20 +47,21 @@ et pas dans l'interface, que la maquette dit ce qui n'existe pas encore.
 - Un écran tient dans la fenêtre ; chaque liste défile dans son cadre.
 - Deux couleurs portent un sens : **l'indigo** de l'app Android pour ce que tu fais, **le rose** de Mika pour ce
   qu'elle fait (ce qu'elle a lu, ce qu'elle propose, ce qu'elle a rédigé).
-- Mika a une place fixe, qui ne couvre rien : dans le chat, sa VRM en buste en bas à droite (la conversation et
-  son champ s'arrêtent avant elle) ; partout ailleurs, et en mode pro, son visage — sa VRM encore — au bout de la
-  barre de titre, comme sur Android. Un clic sur son visage ou sur son nom ouvre « Ce qu'elle fait ».
+- Mika a une place fixe, qui ne couvre rien, et qu'on ne déplace pas : son visage (sa VRM, sinon les portraits
+  d'Android) au bout de la barre du haut, sur chaque écran et en mode pro, avec son nom et ce qu'elle fait ; dans le
+  chat ordinaire, en grand, dans une colonne à droite (son humeur, ce à quoi elle repense, ce qu'elle a promis). Un
+  clic sur son visage ou sur son nom ouvre « Ce qu'elle fait ».
 - Ctrl K cherche partout : un mail, une personne, une discussion, un outil, un réglage.
 
 ## Les fichiers
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | le cadre : la barre du haut, les icônes, le coin de Mika, la palette |
+| `index.html` | le cadre : la barre du haut (son visage au bout), les icônes, la palette |
 | `maquette.css` | les jetons (clair, sombre) et les composants communs |
-| `maquette.js` | le moteur : routes, barre de titre, coin de Mika, palette, menus, fenêtres, toasts |
+| `maquette.js` | le moteur : routes, barre de titre, la place de Mika (la barre, la colonne du chat), palette, menus, fenêtres, toasts |
 | `donnees.js` | qui est connecté, les personnes, l'état de Mika et le fil rouge entre les écrans |
-| `mika-vrm.js` | la VRM du coin (module, HTTP seulement) |
+| `mika-vrm.js` | sa VRM (module, HTTP seulement) : son visage dans la barre, son buste dans le chat |
 | `ecrans/<écran>.js` et `.css` | un écran chacun : chat, outils, mail, teams, telephone, parametres |
 
 L'API d'un écran est décrite en tête de `maquette.js`.

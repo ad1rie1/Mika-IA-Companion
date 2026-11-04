@@ -554,6 +554,15 @@ class SettingsForms:
             return await self._command(ui, s, data[COMMAND], by, page)
         if s.model is None or s.save is None:
             return None, {s.key: State(messages=[("danger", "Rien à enregistrer ici.")])}, 400
+        if s.lock is None:
+            return await self._submit(ui, s, pg, data, lists, by, page)
+        # relue puis enregistrée d'un seul tenant : ce que d'autres viennent d'y écrire (l'API par personne) reste
+        async with s.lock:
+            return await self._submit(ui, s, pg, data, lists, by, page)
+
+    async def _submit(self, ui: Any, s: SettingsSection, pg: Any, data: Mapping[str, str],
+                      lists: Mapping[str, list[str]], by: str,
+                      page: str) -> tuple[Response | None, dict[str, State], int]:
         current = s.load()
         if data.get(DELETE):
             return await self._delete(ui, s, current, data[DELETE], data.get(RECORD_KEY, ""), by, page)
