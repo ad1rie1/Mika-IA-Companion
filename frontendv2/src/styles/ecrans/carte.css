@@ -1,0 +1,202 @@
+/* Porté de frontendv2/maquette/ecrans/carte.css ; le fond dessiné de la maquette est remplacé par la vraie carte
+   (MapLibre, sur les tuiles du serveur) ou par le plan dessiné d'une scène. */
+/* Carte : Explorer, Itinéraire, Voyages ; et la carte miniature de son message dans le chat. */
+.carte-split { grid-template-columns: 380px minmax(0, 1fr); }
+.carte-side { border-right: 1px solid var(--border); }
+.carte-side .pane-scroll { padding-bottom: 8px; }
+.cs-search { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); flex: none; }
+.search-field { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius); background: var(--raised); }
+.search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.search-field input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; font: inherit; color: var(--text); box-shadow: none !important; }
+.cs-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+.cat { height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 13px; background: var(--raised); color: var(--text-2);
+  font: 500 12.5px var(--font); cursor: pointer; }
+.cat:hover { background: var(--tint); color: var(--text); }
+.cat.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); font-weight: 600; }
+.carte-side .group-label { display: flex; align-items: baseline; gap: 6px; padding: 12px 12px 6px; font-size: 12px; font-weight: 600; color: var(--text-2);
+  text-transform: none; letter-spacing: 0; }
+.carte-side .group-label .muted { font-weight: 400; }
+.li.place { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border);
+  background: transparent; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
+.li.place:hover { background: var(--tint); }
+.li.place.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.li.place.on::before { display: none; }
+.li.place.on.by-mika { background: var(--mika-soft); box-shadow: inset 3px 0 0 var(--mika); }
+.li.place > .ico { margin-top: 2px; color: var(--muted); }
+.pl-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); flex: none; margin-top: 1px; }
+.pl-dot.mika { background: var(--mika-soft); color: var(--mika); }
+.pl-dist { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.mika-txt { color: var(--mika-strong); font-weight: 600; }
+.place-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.place-card.by-mika { border-top: 2px solid var(--mika); }
+.pc-head { display: flex; flex-direction: column; gap: 2px; }
+.pc-head b { font: 600 14px var(--display); }
+.pc-head .muted { font-size: 12.5px; }
+.pc-mika { display: flex; gap: 6px; align-items: baseline; margin: 0; font-size: 12.5px; color: var(--mika-strong); }
+.btn.mika { border-color: var(--mika-line); color: var(--mika-strong); }
+.btn.mika:hover { background: var(--mika-soft); }
+.btn.mika .ico { color: var(--mika); }
+
+/* Itinéraire */
+.iti { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.iti-points { display: flex; flex-direction: column; gap: 8px; }
+.iti-pt { display: flex; align-items: center; gap: 8px; }
+.iti-pt input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--raised); color: var(--text); font: inherit; }
+.iti-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
+  font: 700 11px var(--font); flex: none; }
+.iti-opts { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.iti-opts .check { display: flex; align-items: center; gap: 8px; }
+.iti-res { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  border-left: 3px solid var(--accent); }
+.iti-big { display: flex; align-items: baseline; gap: 10px; }
+.iti-big b { font: 700 22px var(--display); }
+.iti-big span { color: var(--text-2); }
+.iti-alt { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--accent);
+  font: 500 12.5px var(--font); cursor: pointer; }
+.iti-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.iti-steps li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.iti-steps .st-n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.iti-src { display: flex; gap: 6px; align-items: baseline; }
+
+/* Voyages */
+.trips { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding: 16px; overflow-y: auto; height: 100%; align-content: start; }
+.trip-card { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-float); overflow: hidden;
+  background: var(--raised); color: var(--text); text-align: left; font: inherit; cursor: pointer; padding: 0; }
+.trip-card:hover { text-decoration: none; border-color: var(--border-strong); box-shadow: 0 1px 3px rgb(22 20 52 / 8%); }
+.trip-card.passe { opacity: .78; }
+.tc-map { height: 170px; border-bottom: 1px solid var(--border); }
+.tc-empty { display: grid; place-items: center; height: 100%; color: var(--muted); }
+.tc-body { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 12px; }
+.tc-body b { font: 600 14px var(--display); }
+.tc-tags { gap: 5px; margin-top: 4px; }
+.trip-card.new { align-items: center; justify-content: center; gap: 6px; min-height: 250px; border-style: dashed; color: var(--text-2); }
+.trip { padding: 12px 12px 20px; display: flex; flex-direction: column; gap: 14px; }
+.trip-head { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.trip-head h2 { font: 700 18px var(--display); margin: 4px 0 0; }
+.trip-day { border: 1px solid var(--border); border-radius: var(--radius); }
+.trip-day-head { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.stops { list-style: none; margin: 0; padding: 6px 0; }
+.stop { display: flex; align-items: flex-start; gap: 10px; padding: 6px 12px; }
+.stop.by-mika { background: var(--mika-soft); }
+.stop-n { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
+  font: 700 11px var(--font); flex: none; margin-top: 1px; }
+.stop.by-mika .stop-n { background: var(--mika); color: var(--on-mika); }
+.stop-main { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.stop-main b { font-weight: 600; font-size: 13.5px; }
+.stop-mika { display: flex; gap: 5px; align-items: baseline; font-size: 12px; color: var(--mika-strong); }
+.stop .grip { color: var(--muted); cursor: grab; margin-top: 2px; }
+.leg { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 18px; font-size: 12px; color: var(--muted); }
+.add-stop { margin: 0 8px 8px; }
+.onroute { display: flex; flex-direction: column; gap: 8px; }
+.onroute .section-title { margin: 0; }
+.onroute-list { list-style: none; margin: 0; padding: 0; }
+.onroute-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.onroute-list .li-main { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 13px; }
+
+/* Sa carte, dans le chat */
+.msg-map { display: flex; flex-direction: column; width: min(340px, 100%); border: 1px solid var(--border); border-left: 3px solid var(--mika);
+  border-radius: var(--radius); overflow: hidden; background: var(--raised); color: var(--text); }
+.msg-map:hover { text-decoration: none; box-shadow: 0 1px 3px rgb(22 20 52 / 8%); }
+.mm-text { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--border); }
+.mm-text > .ico:first-child { color: var(--mika); }
+.mm-text span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.mm-text b { font-weight: 600; font-size: 13px; }
+.mm-text small { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 1240px) { .carte-split { grid-template-columns: 330px minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .carte-split { grid-template-columns: 1fr; grid-template-rows: 280px auto; overflow-y: auto; }
+  .carte-split .map-pane { order: -1; border-bottom: 1px solid var(--border); }
+  .carte-side { border-right: 0; }
+  .carte-side .pane-scroll { flex: none; overflow: visible; }
+  .carte-split .map-legend { display: none; }
+  .trips { grid-template-columns: 1fr; padding: 12px; }
+}
+
+/* ── Ce que la maquette ne montrait pas (la vraie carte, ses états, les gestes) ───────────────────────────────── */
+/* Les épingles posées sur la vraie carte (des repères MapLibre) : numérotées, roses pour ce que Mika a fait. */
+.cm-pin-el { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 2px solid var(--raised); border-radius: 50%;
+  background: var(--accent-fill); color: var(--on-fill, #fff); font: 700 11px/1 var(--font); box-shadow: 0 1px 3px rgb(22 20 52 / 30%); cursor: pointer; }
+span.cm-pin-el { cursor: default; pointer-events: none; }
+.cm-pin-el.dot { width: 14px; height: 14px; }
+.cm-pin-el.mika { background: var(--mika); color: var(--on-mika); }
+.cm-pin-el.sel { width: 30px; height: 30px; font-size: 12.5px; box-shadow: 0 0 0 3px var(--text), 0 2px 6px rgb(22 20 52 / 35%); z-index: 2; }
+.cm-pin-el.dot.sel { width: 20px; height: 20px; }
+.cm-pin-el:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cm-here-el { display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--accent-fill); border: 3px solid var(--raised);
+  box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
+
+/* Le plan dessiné d'une scène (sans carte servie, sans WebGL, au-delà des quatre miniatures vivantes). */
+.drawn-map { display: block; width: 100%; height: 100%; background: color-mix(in srgb, var(--info) 6%, var(--bg)); }
+.dm-bg { fill: color-mix(in srgb, var(--info) 6%, var(--bg)); }
+.dm-grid { stroke: color-mix(in srgb, var(--border) 70%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dm-line { fill: none; stroke: var(--accent); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.dm-line.straight { stroke-width: 2.2; stroke-dasharray: 3 5; opacity: .8; }
+.dm-line.mika { stroke: var(--mika); }
+.dm-pin circle { fill: var(--accent-fill); stroke: var(--bg); stroke-width: 2; }
+.dm-pin.mika circle { fill: var(--mika); }
+.dm-pin.sel circle { stroke: var(--text); stroke-width: 2.5; }
+.dm-pin text { fill: var(--on-fill, #fff); font: 700 9.5px var(--font); text-anchor: middle; }
+.dm-here { fill: var(--accent-fill); stroke: var(--bg); stroke-width: 2; }
+.dm-here-halo { fill: color-mix(in srgb, var(--accent) 18%, transparent); }
+.map-pane > .drawn-map { position: absolute; inset: 0; }
+
+/* La miniature : son plan, puis sa carte par-dessus quand elle paraît ; la mention de la carte, en texte. */
+.mm-map { position: relative; display: block; height: 150px; overflow: hidden; }
+.tc-map .mm-map { height: 100%; }
+.mm-plan, .mm-plan > svg { display: block; width: 100%; height: 100%; }
+/* deux classes : la feuille de MapLibre, chargée après, pose « position: relative » sur son cadre */
+.mm-map .mm-live { position: absolute; inset: 0; }
+.mm-live .maplibregl-canvas { cursor: pointer; }
+.mm-attrib { position: absolute; right: 0; bottom: 0; z-index: 1; padding: 1px 6px; font-size: 10px; color: var(--text-2);
+  background: color-mix(in srgb, var(--bg) 82%, transparent); border-top-left-radius: var(--radius-sm); pointer-events: none; }
+.msg-map.gone { border-left-color: var(--border-strong); opacity: .75; }
+.msg-map.gone .mm-text > .ico:first-child { color: var(--muted); }
+.msg-col > .msg-map { margin-top: 2px; }
+
+/* Explorer : une phrase sous la recherche, un refus du serveur, ce que Mika a cherché. */
+.cs-hint, .cs-warn { display: flex; gap: 6px; align-items: baseline; margin: 0; padding: 8px 12px 0; }
+.cs-warn { color: var(--warn); }
+.trip-head .cs-warn { padding: 0; }
+.carte-failed { height: auto; padding: 28px 18px; }
+.carte-failed > .ico { color: var(--warn); }
+.carte-side .group-label.mika-label { color: var(--mika-strong); }
+.carte-side .group-label.mika-label .ico { color: var(--mika); align-self: center; }
+
+/* Itinéraire : les propositions d'un point, une étape qu'on retire, un résultat en cours ou refusé. */
+.iti-sugg { display: flex; flex-direction: column; margin: -4px 0 2px 30px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--raised); box-shadow: var(--shadow-float); overflow: hidden; }
+.iti-sugg .li.place { padding: 7px 10px; }
+.iti-sugg .li.place:last-child { border-bottom: 0; }
+.iti-dot:not(.a):not(.b) { background: var(--accent-soft); color: var(--accent); }
+.iti-res.stale { opacity: .7; }
+.iti-res.ko { border-left-color: var(--warn); padding: 0; }
+.iti-res.mika { border-left-color: var(--mika); }
+.iti-hint { display: flex; gap: 6px; align-items: baseline; }
+/* Ce que les adresses n'ont pas pu dire (trop demandées, pas branchées), sous les propositions. */
+.iti-sugg-note { margin: -2px 0 2px 30px; padding: 0; }
+/* Ce qu'un lecteur d'écran annonce (un arrêt déplacé au clavier) : rien à voir. */
+.carte-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0; }
+
+/* Un voyage : glisser un arrêt (la poignée), le retirer, l'endroit où il tombera ; un jour vide ; ajouter un jour. */
+.stop .grip { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none;
+  touch-action: none; flex: none; }
+.stop .grip:hover, .stop .grip:focus-visible { background: var(--tint); color: var(--text); }
+.stop.dragging { opacity: .45; }
+.stop.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.stops.drop-end { box-shadow: inset 0 -2px 0 var(--accent); }
+.stop-x { margin-left: auto; opacity: 0; }
+.stop.by-mika .stop-x, .stop:hover .stop-x, .stop:focus-within .stop-x { opacity: 1; }
+.stop-note { color: var(--text-2); }
+.stop-empty { padding: 4px 12px; }
+.stop.flash { box-shadow: inset 3px 0 0 var(--accent); }
+.add-day { align-self: flex-start; }
+.add-stop-modal .add-stop-list { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.add-stop-modal .add-stop-list:empty { display: none; }
+.add-stop-modal .add-stop-list .li.place:last-child { border-bottom: 0; }
+.add-stop-modal .add-stop-list > p { padding: 8px 12px; }
+
+@media (hover: none) { .stop-x { opacity: 1; } }

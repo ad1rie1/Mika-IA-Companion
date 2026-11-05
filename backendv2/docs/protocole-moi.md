@@ -1,8 +1,9 @@
 # L'API par personne — `/api/moi`
 
 Ce document est pour qui écrit le client de tous les jours, `frontendv2/` : ce qu'il montre à la personne connectée,
-et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits.
-Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) ; le code fait foi dans
+et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
+carte et ses voyages. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
+pour la carte, 0193 à 0196) ; le code fait foi dans
 [`app/moi/`](../src/mika/app/moi/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
@@ -18,7 +19,7 @@ la console, celle des opérateurs, voit tout et ne passe pas par ici.
   **refusé** (400, `fields: {"<nom>": "N caractères au plus"}`), jamais coupé.
 - Une écriture peut porter une clé d'envoi, `Idempotency-Key` (ou `nonce` dans le corps). Le même envoi, rejoué,
   ne refait rien et répond `"deduped": true`. Cela vaut pour ce qui passe par une action de la console (Mail, Teams,
-  ses brouillons) et pour les créations (une boîte, un compte Teams, un service). Pour une création, la clé vaut tant
+  ses brouillons, tes voyages) et pour les créations (une boîte, un compte Teams, un service). Pour une création, la clé vaut tant
   que le serveur tourne. « Préremplir », redit, ne redemande rien et rend où en est la demande (`asked`, ou le
   brouillon qui attend : `draft`). Les autres réglages s'écrivent tels quels : les redire ne change rien de plus.
 - Les réglages (boîtes, comptes Teams, services, partages) se relisent puis se réécrivent d'un seul tenant, sous le
@@ -39,8 +40,8 @@ Les erreurs sont `{"error": "…"}` en français, plus `fields` (un message par 
 | 404 | introuvable — **ou pas à toi** : une ressource d'une autre personne n'existe pas, la réponse est la même |
 | 409 | l'action n'est pas possible en ce moment (déjà décidée, une boîte qui ne peut pas envoyer, dix ressources déjà branchées…) |
 | 429 | trop d'essais (changer son mot de passe ; tester, relever) |
-| 502 | le serveur de la boîte n'a pas répondu |
-| 503 | le domaine n'est pas branché (pas de courrier) |
+| 502 | le serveur de la boîte n'a pas répondu ; le serveur d'itinéraires a rendu un ordre illisible |
+| 503 | le domaine n'est pas branché (pas de courrier ; pas d'index des lieux, d'adresses ou d'itinéraires), ou le service de la carte n'a pas répondu (le message dit lequel) |
 
 Ce que fait une écriture de Mail ou de Teams passe par l'action que la console déclare pour la même chose, au nom de
 la personne (`by` : son adresse `user_N`) : journalisée, dédoublonnée et auditée comme dans la console ; un réglage
@@ -236,16 +237,20 @@ d'où viennent ses tuiles se règle dans la console (Réglages › Canaux › Ca
 seules dont le navigateur garde les réponses (`Cache-Control: private, max-age=86400`).
 
 - **`GET /api/moi/phone/map`** — `ready` (sinon `reason`, en mots : aucune carte réglée, un fichier absent, un
-  serveur injoignable — le client garde son plan dessiné), `kind` (`vecteur` : au schéma Protomaps ; `image`),
+  serveur injoignable — le client garde son plan dessiné ; un serveur de carte se revérifie au plus une fois par
+  minute), `kind` (`vecteur` : au schéma Protomaps ; `image`),
   `minzoom`, `maxzoom`, `bounds` (ouest, sud, est, nord ; `null` : partout), `attribution`, et les chemins de l'API
-  à poser sur l'adresse du serveur : `tiles` (`…/tiles/{z}/{x}/{y}`), `glyphs` (`…/fonts/{fontstack}/{range}.pbf`,
-  `null` sans polices : une carte sans noms), `sprite` (`…/sprites/v4`, la planche suit : `/light`, `/dark` ;
-  `null` sans icônes).
+  à poser sur l'adresse du serveur : `tiles` (`…/tiles/{z}/{x}/{y}?v=<version>`), `glyphs`
+  (`…/fonts/{fontstack}/{range}.pbf?v=<version>`, `null` sans polices : une carte sans noms), `sprite`
+  (`…/sprites/~<version>/v4`, la planche suit : `/light`, `/dark` ; `null` sans icônes). `<version>` (douze chiffres
+  hexadécimaux) change avec la source — le réglage, la date et la taille du fichier, l'en-tête et la version d'une
+  archive distante — : le navigateur, qui garde un jour ce qu'il a lu, ne ressert jamais d'une carte ce qu'il gardait
+  d'une autre ; les routes l'acceptent et l'ignorent.
 - **`GET /api/moi/phone/map/tiles/{z}/{x}/{y}`** — une tuile, telle que l'archive la garde (`Content-Encoding: gzip`
   pour Protomaps : le navigateur l'ouvre) ; aucune là (hors de la zone, hors des zooms) : 204, une tuile vide ;
   aucune carte réglée : 404 ; la carte ne se lit pas : 503.
 - **`GET /api/moi/phone/map/fonts/{pile}/{plage}.pbf`** — une plage de glyphes, de la première police de la pile qui
-  est là ; **`GET /api/moi/phone/map/sprites/v4/{planche}.json|.png`** (`@2x` compris) — les icônes. Rien en dehors
+  est là ; **`GET /api/moi/phone/map/sprites/v4/{planche}.json|.png`** (`@2x` compris, précédé ou non de `~<version>/`) — les icônes. Rien en dehors
   de leur dossier : 404.
 
 **`GET /api/moi/phone/phones`** — ses téléphones (les jetons `mobile` de son compte, révoqués compris, jamais leur
@@ -380,3 +385,59 @@ suffit pas (403). Un service partagé reçoit une ligne d'accès pour la personn
 | `GET /api/moi/people` | — | les personnes à qui partager : chaque compte actif sauf toi (`person`, `name`, `owner` : une de ses propriétaires, à qui ce qui est « à toi » est déjà) |
 | `GET /api/moi/shares` | — | `given` (ce que tu partages : `kind`, `key`, `title`, `person`, `name`, `level`) et `received` (ce qu'on te partage : `kind`, `key`, `title`, `level`, `owner_name`) |
 | `POST /api/moi/shares/set` | `kind` (`mail`, `teams`, `mcp`), `key`, `person`, `level` | partager à ce niveau, avec une personne qui a un compte actif (sinon 400) ; un `level` vide retire le partage, même fait à un compte fermé depuis. Toi-même : 400, pour partager comme pour retirer. Une ressource « à toi » à une de ses propriétaires : 400 (elle est déjà à elle). Une ressource qu'on te partage (un service aussi) : 403 ; ni à toi ni partagée : 404 |
+
+## 10. Carte, lieux, itinéraires et voyages
+
+Ce que l'écran Carte montre (ADR 0194, 0195, 0196). Le navigateur ne parle qu'à ce serveur ; le serveur cherche les
+lieux dans son index local (`cartes/lieux.db` : rien ne sort), demande une adresse à la Géoplateforme de l'IGN (seul
+le texte cherché part, jamais la position de la personne) et un itinéraire au serveur Valhalla réglé (seuls ses points
+partent). Ce qui n'est pas branché répond 503, en mots : sans index, « L'index des lieux n'est pas construit… » ; sans
+adresses, « Les adresses ne sont pas branchées… » ; sans itinéraires, « Les itinéraires ne sont pas réglés : Réglages ›
+Canaux › Itinéraires. ». Un service qui ne répond pas, ou aucun chemin entre deux points : 503 aussi, son message dit
+lequel.
+
+Un **lieu** : `id` (`l<n>` : l'index, qui change à chaque reconstruction — un arrêt garde son nom et ses
+coordonnées ; `a:<n>` : une adresse de cette réponse), `name`, `kind` (la sorte OpenStreetMap, `camp_site` ;
+`address`), `kind_fr` (« Camping »), `category` (`manger`, `dormir`… ; `adresse`), `lat`, `lon`, `town`,
+`distance_m` (depuis `near`, ou jusqu'au trajet), `along_m` (le long d'un trajet : où on le croise, depuis le départ ;
+sinon `null`). Des points s'écrivent `latitude,longitude`, séparés par `;` ; une zone `ouest,sud,est,nord` (ouest
+< est, sud < nord). Un paramètre hors de ses bornes est refusé (400), jamais ramené dedans : un nombre qui n'est pas
+entier (`2.9`, `Infinity`) aussi. Ce qui fait sortir une demande vers le serveur d'itinéraires (un trajet, un ordre,
+les lieux le long d'un trajet calculé, les tronçons d'un voyage, un GPX tracé) compte : au plus 20 par minute et par
+compte (429 au-delà) — le serveur public ne répond qu'une fois par seconde, pour tout ce serveur et pour elle ; une
+adresse cherchée a sa propre borne, 60 par minute et par compte (la Géoplateforme en permet bien davantage).
+
+### La carte
+
+| Route | Ce que ça rend |
+|---|---|
+| `GET /api/moi/carte` | `{"places": {"ready", "count", "built"}, "addresses": {"ready"}, "routing": {"ready", "provider", "modes", "avoid"}, "categories": [{"id", "label"}]}` : ce qui est branché (`built` : quand l'index a été construit, en ms ; `provider` : qui calcule les trajets, en mots ; `modes` : `voiture`, `velo`, `pied` ; `avoid` : `peages`, `autoroutes`, `ferries`), et les catégories dans l'ordre de l'écran |
+| `GET /api/moi/carte/lieux?q=&cat=&near=&bbox=&limit=` | `{"places": [lieu…]}` : dans l'index, par le nom (`q`, 200 caractères), d'une catégorie (`cat`), près d'un point (`near`, les plus proches d'abord), dans une zone (`bbox`) — au moins un de `q`, `near`, `bbox` ; `limit` : 1 à 50 (20) |
+| `GET /api/moi/carte/adresses?q=&limit=` | `{"places": [lieu…]}` : une adresse (`q` : 3 à 200 caractères ; `limit` : 1 à 10, 5) |
+| `GET /api/moi/carte/itineraire?points=&mode=&avoid=` | `{"distance_m", "duration_s", "legs": [{"distance_m", "duration_s", "shape", "steps": [{"text", "distance_m", "duration_s"}]}], "has_toll", "has_highway", "has_ferry", "provider"}` : de 2 à 20 points ; `shape`, le tracé d'un tronçon en polyline à six décimales ; `steps`, ses consignes en français ; `avoid` : `peages,autoroutes` |
+| `GET /api/moi/carte/ordre?points=&mode=` | `{"order": [0, 2, 1, 3]}` : le meilleur ordre de ces points, le départ et l'arrivée à leur place (un ordre illisible du serveur : 502) |
+| `GET /api/moi/carte/le-long?points=&cat=&corridor=&limit=&mode=&avoid=` | `{"places": [lieu…], "route"}` : les lieux à moins de `corridor` mètres (200 à 50 000 ; 5 000) du trajet entre ces points, dans l'ordre où on les croise ; `route` faux : sans itinéraires, le long des points reliés à vol d'oiseau |
+| `GET /api/moi/carte/regards/<seq>` | ce qu'elle a cherché (`"kind": "look"`) ou montré (`"kind": "map"`) pour toi, la note d'un de ses messages (`protocole-chat.md`, § 4) : `{"kind", "title", "what", "places": [lieu…], "route", "trip", "at"}` — `what` : `lieux` ou `trajet` (un regard) ; `route` : `{"mode", "distance_m", "duration_s", "shape", "avoid"}` (le trajet résumé, et ce qu'il évitait ; une carte qui relie ses lieux sans tracé calculé : `{"mode"}` seul), sinon `null` ; `trip` : le voyage qu'elle montrait, s'il est encore là. Pour quelqu'un d'autre, oublié, ou ni un regard ni une carte : 404 |
+
+### Tes voyages
+
+Un voyage est à toi seule : celui d'une autre personne n'existe pas (404). Chaque écriture passe par une action du
+plugin `trips`, en ton nom (`by` : ton adresse), et se dédoublonne par la clé d'envoi (§ 1 : une création redite rend le
+même `id`) ; un voyage changé entre la lecture et l'écriture : 409 (« La situation a changé… »), renvoie. Un arrêt que
+Mika a ajouté porte `"by": "mika"` (rose), un des tiens `"toi"` ; tu le retires comme un autre. Les identifiants sont
+des nombres (le `seq` de leur création), en chaînes.
+
+| Route | Corps | Ce que ça fait |
+|---|---|---|
+| `GET /api/moi/voyages` | — | `{"trips": [{"id", "title", "start", "mode", "avoid", "days", "stops", "updated", "mika"}]}`, le plus récemment changé d'abord — `start` : `AAAA-MM-JJ`, ou vide ; `days`, `stops` : combien ; `mika` : elle l'a préparé avec toi |
+| `POST /api/moi/voyages` | `title`, `start?`, `mode?`, `avoid?` | `{"ok", "message", "id"}` — un titre de 120 caractères, une date `AAAA-MM-JJ` d'une année de 1900 à 2200 (400 sinon) ; 50 voyages au plus (409 au-delà) |
+| `GET /api/moi/voyages/<id>` | — | `{"id", "title", "start", "mode", "avoid", "updated", "mika", "days": [{"n", "date", "stops": [{"id", "name", "kind", "lat", "lon", "note", "by"}]}]}` — du jour 1 au dernier qui a un arrêt (un jour vide entre deux compris) ; `date` : celle du jour, si le voyage en a une |
+| `POST /api/moi/voyages/<id>` | `title?`, `start?`, `mode?`, `avoid?` | le modifier : ce que le corps nomme, seulement (`start` vide : plus de date ; rien de nommé : 400) |
+| `POST /api/moi/voyages/<id>/supprimer` | — | le supprimer, ses arrêts avec |
+| `POST /api/moi/voyages/<id>/arrets` | `name`, `lat`, `lon`, `kind?`, `day`, `index?`, `note?` | `{"ok", "message", "id"}` — un arrêt au jour `day` (1 à 30), à la place `index` de ce jour (0 : la première ; −1, par défaut : à la fin) ; 60 arrêts au plus (409) ; `note` : 500 caractères |
+| `POST /api/moi/voyages/<id>/arrets/<arrêt>` | `day` et `index?`, et/ou `note` | le déplacer, le noter (`note` vide : plus de note), ou les deux |
+| `POST /api/moi/voyages/<id>/arrets/<arrêt>/retirer` | — | le retirer |
+| `GET /api/moi/voyages/<id>/trajet` | — | `{"days": [{"n", "distance_m", "duration_s", "legs": [{"from", "to", "distance_m", "duration_s", "shape", "steps"}]}], "distance_m", "duration_s", "has_toll", "has_highway", "has_ferry", "provider"}` : les tronçons d'un arrêt au suivant, rangés au jour de leur arrivée (`from`, `to` : les arrêts) ; sans itinéraires : 503 |
+| `POST /api/moi/voyages/<id>/ordre` | `day` | le meilleur ordre de ce jour, appliqué (son premier et son dernier arrêt restent à leur place) → `{"ok", "message", "order"}` ; moins de trois arrêts : rien à faire ; plus de 20 : refusé (400), le serveur d'itinéraires n'en range pas plus d'un coup |
+| `GET /api/moi/voyages/<id>/sur-la-route?cat=&day=&corridor=&limit=` | — | `{"places": [lieu…], "route"}` : les lieux le long du trajet de tout le voyage (`day` 0, par défaut) ou d'un jour (depuis le dernier arrêt de la veille) |
+| `GET /api/moi/voyages/<id>/gpx` | — | le voyage en GPX 1.1 (`application/gpx+xml`, en pièce jointe `voyage-<id>.gpx`) : ses arrêts dans l'ordre, et le tracé quand les itinéraires le calculent |

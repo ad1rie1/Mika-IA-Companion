@@ -5,8 +5,10 @@ la console règle d'où elles viennent."""
 from __future__ import annotations
 
 import gzip
+import os
+import re
 
-from mika.adapters.maps import FILE, MapConfig
+from mika.adapters.maps import FILE, MapConfig, MapsDesk, PlacesConfig, RoutingConfig
 from tests.protocol.test_moi_mail import API, login, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 from tests.unit.test_maps import LILLE, TILES, archive
@@ -35,9 +37,12 @@ def test_its_tiles_come_from_this_server_as_the_archive_keeps_them(world):  # no
     client, live = with_map(world)
     got = client.get(MAP).json()
     assert got["ready"] and got["kind"] == "vecteur" and (got["minzoom"], got["maxzoom"]) == (0, 2)
-    assert got["tiles"] == "/api/moi/phone/map/tiles/{z}/{x}/{y}" and got["attribution"] == "© OpenStreetMap"
+    assert re.fullmatch(r"/api/moi/phone/map/tiles/\{z\}/\{x\}/\{y\}\?v=[0-9a-f]{12}", got["tiles"])
+    assert got["attribution"] == "© OpenStreetMap"
     assert [round(v, 4) for v in got["bounds"]] == list(LILLE)
     assert got["glyphs"] is None and got["sprite"] is None  # sans polices ni icônes : une carte sans noms
+    versioned = client.get(got["tiles"].replace("{z}", "2").replace("{x}", "2").replace("{y}", "1"))
+    assert versioned.status_code == 200 and versioned.content == b"lille"  # la version : acceptée, ignorée
     tile = client.get(MAP + "/tiles/2/2/1")
     assert tile.status_code == 200 and tile.headers["content-type"] == "application/vnd.mapbox-vector-tile"
     assert tile.headers["content-encoding"] == "gzip" and tile.headers["cache-control"] == "private, max-age=86400"
@@ -59,12 +64,17 @@ def test_its_fonts_and_icons_are_served_from_their_folder_only(world):  # noqa: 
     sprites.mkdir(parents=True)
     (sprites / "light.json").write_text('{"poi": {"x": 0, "y": 0, "width": 16, "height": 16, "pixelRatio": 1}}')
     got = client.get(MAP).json()
-    assert got["glyphs"] == "/api/moi/phone/map/fonts/{fontstack}/{range}.pbf"
-    assert got["sprite"] == "/api/moi/phone/map/sprites/v4"
+    version = got["tiles"].rpartition("?v=")[2]
+    assert got["glyphs"] == f"/api/moi/phone/map/fonts/{{fontstack}}/{{range}}.pbf?v={version}"
+    # MapLibre ajoute « /light.json », « /dark@2x.png »… au chemin des icônes : leur version est un segment
+    assert got["sprite"] == f"/api/moi/phone/map/sprites/~{version}/v4"
     font = client.get(MAP + "/fonts/Noto Sans Medium,Noto Sans Regular/0-255.pbf")  # la première de la pile qui est là
     assert font.status_code == 200 and font.headers["content-type"] == "application/x-protobuf"
+    stack = got["glyphs"].replace("{fontstack}", "Noto Sans Regular").replace("{range}", "0-255")
+    assert client.get(stack).status_code == 200
     sprite = client.get(MAP + "/sprites/v4/light.json")
     assert sprite.status_code == 200 and sprite.json()["poi"]["width"] == 16
+    assert client.get(got["sprite"] + "/light.json").json() == sprite.json()
     assert client.get(MAP + "/sprites/v4/light.svg").status_code == 404
     assert client.get(MAP + "/fonts/..%2F..%2F..%2Fsecret.key/0-255.pbf").status_code == 404
     assert client.get(MAP + "/sprites/..%2F..%2F..%2Fsecret.key").status_code == 404
@@ -84,3 +94,55 @@ def test_the_console_sets_where_the_map_comes_from(world):  # noqa: F811
     refused = client.post(url, data={"csrf": client.cookies.get("csrftoken"), "_section": "carte",
                                      "_champs": ["source", "file"], "source": "fichier", "file": "../secret.key"})
     assert refused.status_code == 400 and client.portal.call(live.settings.map_config).source == "serveur"
+
+
+def test_a_replaced_map_gets_new_tile_addresses(world):  # noqa: F811
+    """Le navigateur garde une tuile un jour : une carte remplacée (un autre fichier, une autre source) lui donne
+    d'autres adresses, et il ne ressert rien de l'ancienne."""
+    client, live = with_map(world)
+    before = client.get(MAP).json()["tiles"]
+    path = live.data / "cartes" / "lille.pmtiles"
+    archive(path, {(0, 0, 0): b"le monde, en mieux"})
+    os.utime(path, ns=(1, 1))
+    after = client.get(MAP).json()["tiles"]
+    assert after != before and after.split("?")[0] == before.split("?")[0]
+    assert client.get(after.replace("{z}", "0").replace("{x}", "0").replace("{y}", "0")).content == \
+        b"le monde, en mieux"
+
+
+def test_the_kernel_has_the_maps_port(world):  # noqa: F811
+    """Le port ``maps`` du noyau : ce que le plugin des voyages et l'API de l'écran Carte lisent (ADR 0194)."""
+    _client, live, _ = world
+    desk = live.kernel.ports.get("maps")
+    assert isinstance(desk, MapsDesk)
+
+
+def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
+    """Réglages › Canaux : « Lieux et adresses » et « Itinéraires » (ADR 0194) — par défaut rien ne sort ; un
+    Valhalla à soi demande son adresse."""
+    client, live, _ = world
+    bootstrap(client)
+    places = client.get("/inspecteur/reglages/lieux")
+    assert places.status_code == 200 and "Lieux et adresses" in places.text
+    assert "mika carte lieux" in places.text and "aucune : rien ne sort" in places.text
+    saved = client.post("/inspecteur/reglages/lieux", data={
+        "csrf": client.cookies.get("csrftoken"), "_section": "lieux", "_champs": ["index", "addresses"],
+        "index": "cartes/lieux.db", "addresses": "geoplateforme"})
+    assert saved.status_code in (200, 303), saved.text[:300]
+    assert client.portal.call(live.settings.places_config) == PlacesConfig(addresses="geoplateforme")
+    desk = live.kernel.ports.get("maps")
+    assert client.portal.call(desk.addresses_ready)  # relu à chaque usage : sans redémarrer
+    routes = client.get("/inspecteur/reglages/itineraires")
+    assert routes.status_code == 200 and "Itinéraires" in routes.text and "aucun" in routes.text
+    refused = client.post("/inspecteur/reglages/itineraires", data={
+        "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
+        "source": "valhalla", "url": ""})
+    assert refused.status_code == 400 and client.portal.call(live.settings.routing_config).source == "aucun"
+    saved = client.post("/inspecteur/reglages/itineraires", data={
+        "csrf": client.cookies.get("csrftoken"), "_section": "itineraires", "_champs": ["source", "url"],
+        "source": "fossgis", "url": ""})
+    assert saved.status_code in (200, 303), saved.text[:300]
+    assert client.portal.call(live.settings.routing_config) == RoutingConfig(source="fossgis")
+    assert client.portal.call(desk.routing_ready)
+    assert client.portal.call(desk.routing_provider) == "Valhalla, serveur public de FOSSGIS"
+    assert "une demande par seconde" in client.get("/inspecteur/reglages/itineraires").text

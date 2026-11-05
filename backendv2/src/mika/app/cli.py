@@ -31,6 +31,7 @@ import getpass
 import importlib.util
 import json
 import os
+import resource
 import subprocess
 import sys
 import tempfile
@@ -49,8 +50,9 @@ from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCo
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.maps import FILE as MAP_FILE
-from mika.adapters.maps import MapConfig
+from mika.adapters.maps import MapConfig, PlacesConfig
 from mika.adapters.maps import extract as maps_extract
+from mika.adapters.maps import places as maps_places
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.shares import DiskShares
@@ -600,9 +602,35 @@ def _said(text: str) -> None:
     print(text, flush=True)  # au fil de l'eau, même dans un fichier
 
 
+def _places_index(data: Path, args: argparse.Namespace) -> dict[str, object]:
+    """``mika carte lieux`` (ADR 0194) : l'index des lieux tiré des tuiles d'une archive du dossier de données."""
+    source = data / MapConfig(source=MAP_FILE, file=args.depuis).file  # sous cartes/, comme le réglage le veut
+    rel = PlacesConfig(index=args.sortie).index
+    out = data / rel
+    out.parent.mkdir(parents=True, exist_ok=True)
+    got = maps_places.build(source, out, say=_said)
+    return {"ok": True, "fichier": str(got.path), "lieux": got.count, "tuiles": got.tiles, "zoom": got.zoom,
+            "illisibles": got.broken, "par_catégorie": got.categories,
+            "laissés_de_côté": [[kind, n] for kind, n in got.skipped[:15]], "secondes": got.seconds,
+            "mémoire_max_mo": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024),
+            "ensuite": f"Réglages › Canaux › Lieux et adresses : l'index {rel}"}
+
+
 def carte(data: Path, args: argparse.Namespace) -> int:
     """La carte de sa position (ADR 0193), serveur en marche sans risque : l'archive neuve ne remplace l'ancienne
-    qu'entière, et le serveur la rouvre de lui-même."""
+    qu'entière, et le serveur la rouvre de lui-même ; de même l'index des lieux (ADR 0194)."""
+    if args.carte_cmd == "lieux":
+        try:
+            out = _places_index(data, args)
+        except maps_places.BuildFailed as exc:
+            print(json.dumps({"ok": False, "erreur": str(exc)}, ensure_ascii=False))
+            return 1
+        except ValidationError as exc:
+            print(json.dumps({"ok": False, "erreur": _invalid(exc)}, ensure_ascii=False))
+            return 1
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+
     async def run() -> dict[str, object]:
         async with maps_extract.client() as client:
             if args.carte_cmd == "polices":
@@ -622,11 +650,20 @@ def carte(data: Path, args: argparse.Namespace) -> int:
 
     try:
         out = asyncio.run(run())
-    except (maps_extract.ExtractFailed, ValidationError) as exc:
+    except maps_extract.ExtractFailed as exc:
         print(json.dumps({"ok": False, "erreur": str(exc).splitlines()[-1]}, ensure_ascii=False))
+        return 1
+    except ValidationError as exc:
+        print(json.dumps({"ok": False, "erreur": _invalid(exc)}, ensure_ascii=False))
         return 1
     print(json.dumps(out, ensure_ascii=False))
     return 0
+
+
+def _invalid(exc: ValidationError) -> str:
+    """Un réglage refusé, en mots : le champ et ce qu'il demande — jamais l'adresse de la documentation de pydantic
+    (la dernière ligne de son message)."""
+    return " ; ".join(f"{path} : {message}" if path else message for path, message in forms.errors_fr(exc).items())
 
 
 def claude_code_login(data: Path, name: str | None) -> int:
@@ -967,6 +1004,11 @@ def _run(argv: list[str] | None) -> int:
                                                          "divise la taille par quatre environ)")
     cx.add_argument("--sortie", default="cartes/france.pmtiles", help="sous cartes/ du dossier de données")
     casub.add_parser("polices", help="ses polices et ses icônes (protomaps/basemaps-assets), sous cartes/assets")
+    cl = casub.add_parser("lieux", help="l'index des lieux (points d'intérêt, villes et lieux-dits) tiré des tuiles "
+                                        "d'une archive, sous cartes/ (ADR 0194)")
+    cl.add_argument("--depuis", default="cartes/france.pmtiles", help="l'archive PMTiles (vectorielle), sous cartes/ "
+                                                                      "du dossier de données")
+    cl.add_argument("--sortie", default="cartes/lieux.db", help="sous cartes/ du dossier de données")
     fo = sub.add_parser("forge", help="ce qu'un opérateur décide de ses apps (serveur arrêté)")
     fsub = fo.add_subparsers(dest="forge_cmd", required=True)
     for name in ("promote", "demote"):

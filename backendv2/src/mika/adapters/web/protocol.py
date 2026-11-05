@@ -189,9 +189,14 @@ def shared_item(meta: SharedMeta) -> dict[str, Any]:
 
 
 def note_item(note: MessageNote) -> dict[str, Any]:
-    """Une petite bulle jointe à un de ses messages (ADR 0119), telle qu'un client la montre : sa sorte, ce qu'elle a
-    vu (vide une fois oublié), de quand ça datait (ms). Le texte de la bulle se compose chez le client."""
-    return {"kind": note.kind, "text": _CONTROL.sub(" ", note.text)[:WHERE_LABEL_MAX], "at": int(note.at)}
+    """Une petite bulle jointe à un de ses messages (ADR 0119, 0196), telle qu'un client la montre : sa sorte, ce
+    qu'elle a vu (vide une fois oublié), de quand ça datait (ms), et ce qu'elle ouvre (``ref`` : un regard, une carte,
+    un voyage — absent s'il n'y a rien à ouvrir). Le texte de la bulle se compose chez le client."""
+    item: dict[str, Any] = {"kind": note.kind, "text": _CONTROL.sub(" ", note.text)[:WHERE_LABEL_MAX],
+                            "at": int(note.at)}
+    if note.ref:
+        item["ref"] = _CONTROL.sub("", note.ref)[:40]
+    return item
 
 
 @dataclass(frozen=True, slots=True)

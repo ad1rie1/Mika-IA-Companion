@@ -457,3 +457,28 @@ async def test_a_review_is_only_served_or_not_reads_or_acts_and_what_she_reads()
         await hub.review("meteo", "echo", enabled=True, nature="tout", description="", by="op")
     await hub.aclose()
     await client.aclose()
+
+
+async def test_two_reviews_at_once_both_stay():
+    """Deux regards sur deux outils du même serveur, en même temps (la console et l'API par personne) : les décisions
+    se relisent puis se réécrivent d'un seul tenant, aucune n'efface l'autre."""
+    fake, store = FakeServer(), Store(meteo=_server())
+
+    async def slow_save(reviews):
+        await asyncio.sleep(0)  # une base qui écrit : un autre regard peut se glisser là
+        store.reviews = reviews
+
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=fake))
+    hub = McpHub(lambda: store.config, lambda: store.reviews, slow_save,
+                 connect=lambda name, spec: HttpTransport(spec.url, headers=spec.headers(), client=client),
+                 settle=store.settle)
+    await hub.test("meteo")
+    await asyncio.gather(
+        hub.review("meteo", "echo", enabled=True, nature="lecture", description="", by="op"),
+        hub.review("meteo", "boom", enabled=True, nature="action", description="", by="léa"))
+    assert set(store.reviews["meteo"]) == {"echo", "boom"}
+    await asyncio.gather(hub.decide("meteo", {"slow": "lecture"}, by="op"),
+                         hub.review("meteo", "echo", enabled=False, nature="lecture", description="", by="léa"))
+    assert set(store.reviews["meteo"]) == {"echo", "boom", "slow"} and not store.reviews["meteo"]["echo"].enabled
+    await hub.aclose()
+    await client.aclose()

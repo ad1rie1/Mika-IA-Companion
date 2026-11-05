@@ -3,9 +3,10 @@ chaque jour — vers un fichier du dossier de données, ce que fait ``pmtiles ex
 style (``protomaps/basemaps-assets``). Rien d'autre à installer sur le serveur : ``mika carte extraire``, ``mika carte
 polices``.
 
-Seuls les répertoires et les tuiles de la zone se téléchargent : la racine, les feuilles qui la touchent, puis les
-tuiles, regroupées en morceaux (``CHUNK_BYTES``). L'archive s'écrit à côté (``….partiel``) et ne prend sa place qu'une
-fois entière ; la mémoire reste bornée (des tableaux, pas des objets par tuile)."""
+Seuls les répertoires et les tuiles de la zone se téléchargent : la racine, les feuilles qui la touchent (lues une à
+une, puis lâchées), puis les tuiles, regroupées en morceaux (``CHUNK_BYTES``), quelques-uns à la fois. L'archive
+s'écrit à côté (``….partiel``) et ne prend sa place qu'une fois entière. La mémoire reste bornée, quelques centaines
+de Mo pour la France au zoom 15 : des tableaux, jamais un objet par tuile ni une feuille gardée."""
 
 from __future__ import annotations
 
@@ -17,14 +18,24 @@ import os
 import shutil
 from array import array
 from bisect import bisect_left
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
-from pmtiles.tile import Compression, serialize_header, write_varint, zxy_to_tileid
+from pmtiles.tile import Compression, HeaderDict, serialize_header, write_varint, zxy_to_tileid
 
-from mika.adapters.maps.tiles import USER_AGENT, Archive, Read
+from mika.adapters.maps.tiles import (
+    BROKEN,
+    DIR_MAX_BYTES,
+    USER_AGENT,
+    Archive,
+    MapUnavailable,
+    Read,
+    fetch_directory,
+    no_cookies,
+    read_capped,
+)
 
 #: la liste des cartes de la planète refaites chaque jour, et où elles se lisent
 BUILDS = "https://build-metadata.protomaps.dev/builds.json"
@@ -36,10 +47,14 @@ FLAVORS = ("light", "dark")
 #: des zones nommées : ouest, sud, est, nord (la France métropolitaine et la Corse)
 ZONES = {"france": (-5.5, 41.2, 9.8, 51.2)}
 #: un morceau téléchargé d'un coup, et l'écart entre deux tuiles qu'on lit avec elles plutôt que de couper
-CHUNK_BYTES = 32 * 1024 * 1024
+CHUNK_BYTES = 16 * 1024 * 1024
 GAP_BYTES = 256 * 1024
 PARALLEL = 4
 TRIES = 4
+#: ce qu'un serveur répond en passant (débordé, en maintenance, « pas si vite ») : réessayé, comme une coupure
+TRANSIENT = frozenset({408, 425, 429, 500, 502, 503, 504})
+#: une attente demandée (``Retry-After``) n'est suivie que jusque-là
+RETRY_AFTER_MAX_S = 60.0
 #: la racine d'une archive tient dans les premiers 16 Kio (avec l'en-tête)
 ROOT_MAX = 16384 - 127
 TIMEOUT = httpx.Timeout(120.0, connect=20.0)
@@ -88,13 +103,13 @@ def tile_span(bbox: tuple[float, float, float, float], z: int) -> tuple[int, int
 
 
 def wanted(bbox: tuple[float, float, float, float], minzoom: int, maxzoom: int) -> array:
-    """Les identifiants (courbe de Hilbert) des tuiles de la zone, triés."""
-    ids: list[int] = []
+    """Les identifiants (courbe de Hilbert) des tuiles de la zone, triés. Ceux d'un zoom précèdent tous ceux du
+    suivant : chaque zoom se trie à part (la liste d'un seul en mémoire à la fois)."""
+    ids = array("Q")
     for z in range(minzoom, maxzoom + 1):
         x0, y0, x1, y1 = tile_span(bbox, z)
-        ids.extend(zxy_to_tileid(z, x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1))
-    ids.sort()
-    return array("Q", ids)
+        ids.extend(sorted(zxy_to_tileid(z, x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)))
+    return ids
 
 
 def _directory(ids: array, runs: array, lengths: array, offsets: array, lo: int, hi: int) -> bytes:
@@ -126,7 +141,7 @@ def directories(ids: array, runs: array, lengths: array, offsets: array) -> tupl
     leaf_size = 4096
     while True:
         leaves = io.BytesIO()
-        r_ids, r_runs, r_lens, r_offs = array("Q"), array("L"), array("L"), array("Q")
+        r_ids, r_runs, r_lens, r_offs = array("Q"), array("I"), array("I"), array("Q")
         for lo in range(0, count, leaf_size):
             leaf = _directory(ids, runs, lengths, offsets, lo, min(count, lo + leaf_size))
             r_ids.append(ids[lo])
@@ -153,29 +168,82 @@ async def latest_build(client: httpx.AsyncClient) -> str:
     return BUILD_BASE + keys[-1]
 
 
-def ranges(client: httpx.AsyncClient, url: str) -> Read:
-    """Lire une archive distante par plages, en réessayant ce qui échoue en chemin."""
+def _retry_after(value: str) -> float:
+    """L'attente que demande un serveur (``Retry-After`` en secondes) ; une date ou rien : aucune."""
+    return min(RETRY_AFTER_MAX_S, float(value)) if value.strip().isdigit() else 0.0
+
+
+def ranges(client: httpx.AsyncClient, url: str, *,
+           pause: Callable[[float], Awaitable[object]] = asyncio.sleep) -> Read:
+    """Lire une archive distante par plages, en flux : le statut d'abord (un serveur qui ignore les plages renverrait
+    toute l'archive), puis au plus la plage demandée. Ce qui échoue en passant — une coupure, une plage courte, un
+    serveur débordé (5xx, 429) — se réessaie, après l'attente qu'il demande ; un refus net (200 à une demande de
+    plage, 404…) arrête tout, dit en mots."""
     async def read(offset: int, length: int) -> bytes:
         for attempt in range(TRIES):
+            wait = float(2 ** attempt)
             try:
-                r = await client.get(url, headers={"Range": f"bytes={offset}-{offset + length - 1}"})
-                if r.status_code == 206 and len(r.content) == length:
-                    return r.content
-                if r.status_code != 206:
-                    raise ExtractFailed(f"le serveur ne sert pas cette archive par plages (HTTP {r.status_code})")
+                async with client.stream("GET", url, headers={"Range": f"bytes={offset}-{offset + length - 1}",
+                                                              "Accept-Encoding": "identity"}) as r:
+                    if r.status_code == 206:
+                        try:
+                            data = await read_capped(r, length)
+                        except ValueError:
+                            raise ExtractFailed("le serveur rend plus que la plage demandée : il ne sert pas cette "
+                                                "archive par plages") from None
+                        if len(data) == length:
+                            return data
+                    elif r.status_code in TRANSIENT:
+                        wait = max(wait, _retry_after(r.headers.get("retry-after", "")))
+                    elif r.status_code in (200, 416):
+                        raise ExtractFailed(f"le serveur ne sert pas cette archive par plages (HTTP {r.status_code})")
+                    else:
+                        raise ExtractFailed(f"le serveur refuse cette archive (HTTP {r.status_code})")
             except httpx.TransportError:
                 pass
-            await asyncio.sleep(2 ** attempt)
+            if attempt + 1 < TRIES:
+                await pause(wait)
         raise ExtractFailed(f"une plage de l'archive ne se télécharge pas ({offset}, {length} octets)")
 
     return read
 
 
+async def _zone_entries(read: Read, h: HeaderDict, want: array) -> tuple[array, array, array, int]:
+    """Les entrées de la zone (identifiant, où est son contenu dans la source, sa longueur), dans l'ordre des
+    identifiants, et le nombre de répertoires lus : la racine, puis les feuilles qui touchent la zone, lues une à une
+    et lâchées aussitôt (une feuille de la planète pèse quelques Mo, même en tableaux)."""
+    ids, src, lengths = array("Q"), array("Q"), array("I")
+    read_dirs = 0
+
+    async def walk(offset: int, length: int, end: int) -> None:
+        nonlocal read_dirs
+        found = await fetch_directory(read, offset, length)
+        read_dirs += 1
+        for i in range(len(found)):
+            tile_id, run = found.ids[i], found.runs[i]
+            if run == 0:  # une feuille : les identifiants de la sienne à la suivante
+                stop = found.ids[i + 1] if i + 1 < len(found) else end
+                if bisect_left(want, tile_id) < bisect_left(want, stop):
+                    await walk(h["leaf_directory_offset"] + found.offsets[i], found.lengths[i], stop)
+                continue
+            for k in range(bisect_left(want, tile_id), bisect_left(want, tile_id + run)):
+                ids.append(want[k])
+                src.append(h["tile_data_offset"] + found.offsets[i])
+                lengths.append(found.lengths[i])
+
+    await walk(h["root_offset"], h["root_length"], 2 ** 64)
+    return ids, src, lengths, read_dirs
+
+
 async def extract(read: Read, out: Path, bbox: tuple[float, float, float, float], maxzoom: int,
                   say: Callable[[str], None] = lambda _text: None) -> Extracted:
     """Écrire dans ``out`` les tuiles de la zone, jusqu'à ``maxzoom`` (au plus celui de la source)."""
-    source = Archive(read)
-    h = await source.header()
+    try:
+        h = await Archive(read).header()
+    except MapUnavailable as exc:
+        raise ExtractFailed(str(exc)) from None
+    except BROKEN:
+        raise ExtractFailed("ce n'est pas une archive PMTiles (version 3) lisible") from None
     if h["tile_compression"] is Compression.UNKNOWN:
         raise ExtractFailed("la compression de ses tuiles est inconnue")
     minzoom, top = h["min_zoom"], min(maxzoom, h["max_zoom"])
@@ -186,31 +254,21 @@ async def extract(read: Read, out: Path, bbox: tuple[float, float, float, float]
     want = wanted((w, s, e, n), minzoom, top)
     say(f"{len(want)} tuiles possibles dans la zone, zooms {minzoom} à {top}")
 
-    # 1. les entrées de la zone, dans l'ordre des identifiants : la racine, puis les feuilles qui la touchent
-    ids, src, lengths = array("Q"), array("Q"), array("L")
-
-    async def walk(offset: int, length: int, end: int) -> None:
-        entries = await source.directory(offset, length)
-        for i, entry in enumerate(entries):
-            if entry.run_length == 0:  # une feuille : les identifiants de la sienne à la suivante
-                stop = entries[i + 1].tile_id if i + 1 < len(entries) else end
-                if bisect_left(want, entry.tile_id) < bisect_left(want, stop):
-                    await walk(h["leaf_directory_offset"] + entry.offset, entry.length, stop)
-                continue
-            for k in range(bisect_left(want, entry.tile_id), bisect_left(want, entry.tile_id + entry.run_length)):
-                ids.append(want[k])
-                src.append(h["tile_data_offset"] + entry.offset)
-                lengths.append(entry.length)
-
-    await walk(h["root_offset"], h["root_length"], 2 ** 64)
+    # 1. les entrées de la zone, dans l'ordre des identifiants
+    try:
+        ids, src, lengths, read_dirs = await _zone_entries(read, h, want)
+    except BROKEN:
+        raise ExtractFailed("un répertoire de la carte source est abîmé") from None
+    del want
     if not ids:
         raise ExtractFailed("aucune tuile de cette carte dans la zone")
+    say(f"{len(ids)} tuiles trouvées dans {read_dirs} répertoires")
 
     # 2. une copie par contenu (l'océan, les terres vides partagent la leur), rangées dans l'ordre de la source : un
     #    tri d'indices et des tableaux, jamais un objet par tuile (la France en compte des millions)
     order = sorted(range(len(src)), key=src.__getitem__)
     new_of = array("Q", bytes(8 * len(src)))  # où va le contenu de chaque tuile, dans l'archive neuve
-    u_src, u_len, u_new = array("Q"), array("L"), array("Q")
+    u_src, u_len, u_new = array("Q"), array("I"), array("Q")
     total, last, here = 0, -1, 0
     for i in order:
         if src[i] != last:
@@ -226,7 +284,7 @@ async def extract(read: Read, out: Path, bbox: tuple[float, float, float, float]
         raise ExtractFailed(f"il faut {total / 1e9:.1f} Go libres à côté de {out.name} ({free / 1e9:.1f} Go)")
 
     # 3. les entrées de l'archive neuve : des suites d'identifiants qui partagent un contenu se replient
-    o_ids, o_runs, o_lens, o_offs = array("Q"), array("L"), array("L"), array("Q")
+    o_ids, o_runs, o_lens, o_offs = array("Q"), array("I"), array("I"), array("Q")
     for k in range(len(ids)):
         tile_id, new = ids[k], new_of[k]
         if o_ids and o_offs[-1] == new and o_ids[-1] + o_runs[-1] == tile_id:
@@ -236,62 +294,90 @@ async def extract(read: Read, out: Path, bbox: tuple[float, float, float, float]
         o_runs.append(1)
         o_lens.append(lengths[k])
         o_offs.append(new)
-    del new_of
+    addressed = len(ids)
+    del ids, src, lengths, new_of
     root, leaves = directories(o_ids, o_runs, o_lens, o_offs)
+    if not 0 <= h["metadata_length"] <= DIR_MAX_BYTES:
+        raise ExtractFailed("les métadonnées de la carte source sont démesurées")
     metadata = await read(h["metadata_offset"], h["metadata_length"])  # compressé comme ses répertoires : tel quel
     lon, lat = (w + e) / 2, (s + n) / 2
     header = {**h, "root_offset": 127, "root_length": len(root), "metadata_offset": 127 + len(root),
               "metadata_length": len(metadata), "leaf_directory_offset": 127 + len(root) + len(metadata),
               "leaf_directory_length": len(leaves),
               "tile_data_offset": 127 + len(root) + len(metadata) + len(leaves), "tile_data_length": total,
-              "addressed_tiles_count": len(ids), "tile_entries_count": len(o_ids), "tile_contents_count": len(u_src),
+              "addressed_tiles_count": addressed, "tile_entries_count": len(o_ids), "tile_contents_count": len(u_src),
               "clustered": True, "internal_compression": Compression.GZIP, "min_zoom": minzoom, "max_zoom": top,
               "min_lon_e7": int(w * 1e7), "min_lat_e7": int(s * 1e7), "max_lon_e7": int(e * 1e7),
               "max_lat_e7": int(n * 1e7), "center_zoom": min(top, max(minzoom, 6)), "center_lon_e7": int(lon * 1e7),
               "center_lat_e7": int(lat * 1e7)}
-    say(f"{len(ids)} tuiles, {len(u_src)} contenus : {total / 1e6:.0f} Mo à copier")
+    del o_ids, o_runs, o_lens, o_offs
+    say(f"{addressed} tuiles, {len(u_src)} contenus : {total / 1e6:.0f} Mo à copier")
 
-    # 4. l'archive à côté, puis les tuiles par morceaux, quelques-uns à la fois
+    # 4. l'archive à côté, puis les tuiles par morceaux : PARALLEL ouvriers, chacun un morceau en mémoire à la fois
     partial = out.with_name(out.name + ".partiel")
     base = header["tile_data_offset"]
-    # des morceaux de contenus voisins dans la source (des indices de u_src) : un téléchargement chacun
-    spans: list[tuple[int, int]] = []
-    a = 0
+    # des morceaux de contenus voisins dans la source (des indices de u_src, et où finit le dernier octet à lire) :
+    # un téléchargement chacun
+    spans: list[tuple[int, int, int]] = []
+    a, end = 0, 0
     for b in range(1, len(u_src) + 1):
-        if b == len(u_src) or u_src[b] - (u_src[b - 1] + u_len[b - 1]) > GAP_BYTES \
-                or u_src[b] + u_len[b] - u_src[a] > CHUNK_BYTES:
-            spans.append((a, b))
-            a = b
+        end = max(end, u_src[b - 1] + u_len[b - 1])
+        if b == len(u_src) or u_src[b] - end > GAP_BYTES or u_src[b] + u_len[b] - u_src[a] > CHUNK_BYTES:
+            spans.append((a, b, end))
+            a, end = b, 0
+    todo = iter(spans)
+    done = [0, 0]  # octets copiés, morceaux
+
+    async def worker(fd: int) -> None:
+        for a, b, end in todo:  # un itérateur partagé : chaque morceau va à un seul ouvrier
+            start = u_src[a]
+            view = memoryview(await read(start, end - start))
+            # ces contenus se suivent dans l'archive neuve ; dans la source, des tuiles d'ailleurs les séparent
+            # parfois : une écriture par suite contiguë, sans recopie (et dans la boucle : rien n'écrit après la
+            # fermeture du fichier)
+            j = a
+            while j < b:
+                k = j + 1
+                while k < b and u_src[k] == u_src[k - 1] + u_len[k - 1]:
+                    k += 1
+                _write_all(fd, view[u_src[j] - start:u_src[k - 1] + u_len[k - 1] - start], base + u_new[j])
+                j = k
+            done[0] += u_new[b - 1] + u_len[b - 1] - u_new[a]
+            done[1] += 1
+            if done[1] % 20 == 0 or done[1] == len(spans):
+                say(f"{done[0] / 1e6:.0f} Mo sur {total / 1e6:.0f} Mo")
+
     fd = os.open(partial, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o640)
     try:
-        os.pwrite(fd, serialize_header(header) + root + metadata + leaves, 0)
-        done = {"bytes": 0, "chunks": 0}
-        gate = asyncio.Semaphore(PARALLEL)
-
-        def put(data: bytes, a: int, b: int) -> None:
-            # ces contenus se suivent dans l'archive neuve : une seule écriture, sans les écarts de la source
-            start = u_src[a]
-            os.pwrite(fd, b"".join(data[u_src[j] - start:u_src[j] - start + u_len[j]] for j in range(a, b)),
-                      base + u_new[a])
-
-        async def copy(a: int, b: int) -> None:
-            async with gate:  # au plus PARALLEL morceaux en mémoire : téléchargés, puis écrits
-                data = await read(u_src[a], u_src[b - 1] + u_len[b - 1] - u_src[a])
-                await asyncio.to_thread(put, data, a, b)
-            done["bytes"] += sum(u_len[j] for j in range(a, b))
-            done["chunks"] += 1
-            if done["chunks"] % 20 == 0 or done["chunks"] == len(spans):
-                say(f"{done['bytes'] / 1e6:.0f} Mo sur {total / 1e6:.0f} Mo")
-
-        await asyncio.gather(*(copy(a, b) for a, b in spans))
+        _write_all(fd, serialize_header(header) + root + metadata + leaves, 0)
+        async with asyncio.TaskGroup() as workers:  # un ouvrier en échec arrête les autres, attendus avant la suite
+            for _ in range(min(PARALLEL, len(spans))):
+                workers.create_task(worker(fd))
         os.fsync(fd)
-    except BaseException:
+    except BaseException as exc:
         os.close(fd)
         partial.unlink(missing_ok=True)
+        if isinstance(exc, BaseExceptionGroup):
+            raise _first(exc) from None
         raise
     os.close(fd)
     os.replace(partial, out)
-    return Extracted(out, len(ids), out.stat().st_size, minzoom, top, (w, s, e, n))
+    return Extracted(out, addressed, out.stat().st_size, minzoom, top, (w, s, e, n))
+
+
+def _write_all(fd: int, data: bytes | memoryview, offset: int) -> None:
+    view = memoryview(data)
+    while view:
+        wrote = os.pwrite(fd, view, offset)
+        if wrote <= 0:
+            raise OSError("l'archive ne s'écrit plus")
+        view, offset = view[wrote:], offset + wrote
+
+
+def _first(group: BaseExceptionGroup) -> BaseException:
+    """La première erreur d'un groupe d'ouvriers : celle qui a tout arrêté."""
+    first = group.exceptions[0]
+    return _first(first) if isinstance(first, BaseExceptionGroup) else first
 
 
 async def assets(client: httpx.AsyncClient, folder: Path, say: Callable[[str], None] = lambda _text: None,
@@ -334,5 +420,6 @@ async def assets(client: httpx.AsyncClient, folder: Path, say: Callable[[str], N
 
 
 def client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True)
+    return httpx.AsyncClient(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
+                             cookies=no_cookies())
 

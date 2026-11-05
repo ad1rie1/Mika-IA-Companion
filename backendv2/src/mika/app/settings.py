@@ -32,7 +32,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mail.oauth import Grant
-from mika.adapters.maps import MapConfig
+from mika.adapters.maps import MapConfig, PlacesConfig, RoutingConfig
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
@@ -64,6 +64,9 @@ FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 #: d'où vient la carte de sa position (ADR 0193)
 MAP_KEY = "carte"
+#: l'index des lieux et les adresses, les itinéraires de l'écran Carte (ADR 0194)
+PLACES_KEY = "lieux"
+ROUTING_KEY = "itineraires"
 #: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
 GIT_KEY = "git"
 #: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
@@ -203,6 +206,9 @@ class Settings:
         #: qui se croisent (deux personnes, une personne et la console) ne s'effacent donc pas. Il ne se reprend pas :
         #: ce qui le tient n'appelle rien qui le prenne à son tour (``settle`` des serveurs MCP le prend lui-même).
         self.writing = asyncio.Lock()
+        #: les clés de l'extension Teams, relues puis réécrites d'un seul tenant (pris sous ``writing`` ou seul : il
+        #: ne prend jamais ``writing``)
+        self._keys = asyncio.Lock()
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -453,6 +459,28 @@ class Settings:
     async def save_map_config(self, cfg: MapConfig) -> None:
         await self._put(MAP_KEY, cfg.model_dump(mode="json"))
 
+    # ── Les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194) ──
+    def places_config(self) -> PlacesConfig:
+        """L'index des lieux et les adresses ; un réglage illisible : les défauts (l'index sous cartes/, aucune
+        adresse : rien ne sort)."""
+        try:
+            return PlacesConfig.model_validate(self._get(PLACES_KEY) or {})
+        except ValueError:
+            return PlacesConfig()
+
+    async def save_places_config(self, cfg: PlacesConfig) -> None:
+        await self._put(PLACES_KEY, cfg.model_dump(mode="json"))
+
+    def routing_config(self) -> RoutingConfig:
+        """Qui calcule les itinéraires ; un réglage illisible : aucun (rien ne sort)."""
+        try:
+            return RoutingConfig.model_validate(self._get(ROUTING_KEY) or {})
+        except ValueError:
+            return RoutingConfig()
+
+    async def save_routing_config(self, cfg: RoutingConfig) -> None:
+        await self._put(ROUTING_KEY, cfg.model_dump(mode="json"))
+
     # ── Notifications du téléphone (Firebase, ADR 0077) ──
     def push(self) -> str:
         """Le JSON de la clé du compte de service Firebase (déchiffré) ; vide : pas de notifications."""
@@ -599,10 +627,11 @@ class Settings:
         """Enregistre Teams ; la clé d'un compte retiré part avec lui (un compte recréé sous ce nom n'en a pas)."""
         cfg = TeamsConfig.model_validate(cfg.model_dump())
         await self._put(TEAMS_KEY, cfg.model_dump(mode="json"))
-        keys = self.teams_keys()
-        kept = {k: v for k, v in keys.items() if k in cfg.accounts}
-        if kept != keys:
-            await self._put(TEAMS_KEYS_KEY, kept)
+        async with self._keys:
+            keys = self.teams_keys()
+            kept = {k: v for k, v in keys.items() if k in cfg.accounts}
+            if kept != keys:
+                await self._put(TEAMS_KEYS_KEY, kept)
         return cfg
 
     def teams_keys(self) -> dict[str, dict[str, Any]]:
@@ -617,17 +646,21 @@ class Settings:
         return {str(k): dict(v) for k, v in got.items() if isinstance(v, dict) and v.get("digest")}
 
     async def save_teams_key(self, account: str, digest: str, hint: str, created_at: int, by: str) -> None:
-        keys = self.teams_keys()
-        keys[account] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
-        await self._put(TEAMS_KEYS_KEY, keys)
+        # relues puis réécrites d'un seul tenant (``_keys``) : deux comptes qui reçoivent leur clé en même temps
+        # gardent chacun la sienne
+        async with self._keys:
+            keys = self.teams_keys()
+            keys[account] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
+            await self._put(TEAMS_KEYS_KEY, keys)
 
     async def revoke_teams_key(self, account: str) -> bool:
-        keys = self.teams_keys()
-        if account not in keys:
-            return False
-        del keys[account]
-        await self._put(TEAMS_KEYS_KEY, keys)
-        return True
+        async with self._keys:
+            keys = self.teams_keys()
+            if account not in keys:
+                return False
+            del keys[account]
+            await self._put(TEAMS_KEYS_KEY, keys)
+            return True
 
     # ── Les jetons gardés en empreinte (appareils, console MCP) ──
     def _token_digest(self, key: str) -> str:

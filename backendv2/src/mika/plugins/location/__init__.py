@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -31,7 +32,7 @@ from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
 
-BUNDLE = "location"
+BUNDLE = c.BUNDLE
 #: le nom du lieu, au plus, tel qu'elle le lit
 LABEL_MAX = 200
 
@@ -89,15 +90,25 @@ def known(s: LocationState | None, handle: str) -> bool:
     return s is not None and handle in s.fixes
 
 
+def _last(s: LocationState | None, get: Callable[[Any], Any], target: str) -> Fix | None:
+    if s is None or not s.fixes:
+        return None
+    person = get(identity_c.PERSON(target)) or target
+    mine = [f for f in s.fixes.values() if f.handle == target or (get(identity_c.PERSON(f.handle)) or f.handle) == person]
+    return max(mine, key=lambda f: (f.fixed_at, f.seq)) if mine else None
+
+
 def last_for(s: LocationState | None, frame: Frame, target: str) -> Fix | None:
     """La dernière position de la personne qui écrit par ``target`` : celle de cette adresse, ou d'une autre adresse
     de la même personne (un téléphone et un navigateur liés) — jamais celle de quelqu'un d'autre."""
-    if s is None or not s.fixes:
-        return None
-    person = frame.get(identity_c.PERSON(target)) or target
-    mine = [f for f in s.fixes.values()
-            if f.handle == target or (frame.get(identity_c.PERSON(f.handle)) or f.handle) == person]
-    return max(mine, key=lambda f: (f.fixed_at, f.seq)) if mine else None
+    return _last(s, frame.get, target)
+
+
+@LOCATION.fact(c.FIX, reads=[identity_c.PERSON])
+def _fix(s: LocationState, cx, handle: str) -> c.FixReading | None:
+    """``location.fix`` : ce que ``last_for`` rend, pour un autre propriétaire qui ne lit pas cette tranche."""
+    fix = _last(s, cx.facts.get, handle)
+    return c.FixReading(fix.seq, fix.coords_ref, fix.label_ref, fix.fixed_at) if fix is not None else None
 
 
 def offered(audience: Any) -> bool:

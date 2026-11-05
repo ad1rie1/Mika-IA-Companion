@@ -24,7 +24,7 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187 |
@@ -1519,6 +1519,60 @@ cas de désaccord avec le code, le code fait foi : corriger l'entrée, ou en ajo
 *Pourquoi :* « peut-être un fournisseur gratuit ? … ou alors sur le pc portable héberger son propre openstreetmap ? » ; « ma carte se charge depuis le backend, et depuis le backend on doit pouvoir configurer le serveur de carte ».
 
 *Révise 0119 (en partie : la position se voit sur une carte).*
+
+*Révisée par 0194 (la même carte sert l'écran Carte).*
+
+### 0194 — Les lieux, les adresses et les itinéraires passent par le serveur
+
+- Un écran **Carte** (frontendv2) cherche un lieu, une adresse, et calcule un itinéraire, sur la carte de 0193. Le
+  navigateur ne parle qu'au serveur de Mika ; le serveur joint seul ce qu'il faut, sans rien de la personne (ni son
+  nom, ni ses cookies), avec l'agent `Mika/2 (carte de sa position)`.
+- **Les lieux** (points d'intérêt et lieux nommés) se cherchent dans un **index local**, `cartes/lieux.db` (SQLite :
+  texte intégral, arbre R), que `mika carte lieux` tire des tuiles de l'archive (zoom le plus fin) : rien ne sort. Ils
+  se rangent en catégories (Manger, Dormir, À voir, Nature, En route, Courses, Santé, Sortir, Services, Villes et
+  lieux-dits) ; on cherche par le nom, autour d'un point, dans une zone, le long d'un trajet.
+- **Les adresses** (numéro et rue) viennent de la Géoplateforme de l'IGN (la Base Adresse Nationale,
+  `data.geopf.fr/geocodage`), relayée : seul le texte cherché part, **jamais la position de la personne**.
+- **Les itinéraires** viennent d'un serveur **Valhalla** : voiture, vélo ou à pied ; péages, autoroutes ou ferries
+  évitables ; consignes en français ; le meilleur ordre des arrêts ; un GPX. D'abord le serveur public de FOSSGIS
+  (celui d'openstreetmap.org), relayé : **au plus une demande par seconde** pour tout le serveur, chaque trajet gardé en
+  cache, sans garantie qu'il réponde. Puis un Valhalla à soi, sur le portable (la recette : `deploy/README.md`). Vers
+  lui ne partent que les points du trajet.
+- Tout se règle dans la console (Réglages › Canaux : « Lieux et adresses », « Itinéraires ») ; par défaut, ni adresses
+  ni itinéraires : rien ne sort sans le choix d'un opérateur. Sans index ou sans itinéraires, l'écran le dit.
+
+*Pourquoi :* « ajouter des recherches de point d'intérêt, des itinéraires, des fonctions de programmation de road
+trip » ; « Valhalla public d'abord, puis le portable ».
+
+### 0195 — Les voyages se préparent à deux et restent dans sa vie
+
+- Un **voyage** (un road trip) appartient à la personne qui l'a créé : un titre, une date de départ, un mode (voiture,
+  vélo, à pied), ce qu'il évite, et ses arrêts, jour par jour (un nom, des coordonnées, une sorte, une note). Il
+  s'écrit au journal, comme le reste de sa vie (le plugin `trips`) : elle s'en souvient, elle peut en reparler ; oublier
+  la personne l'efface.
+- La personne le prépare dans l'écran Carte (créer, ajouter, déplacer, retirer un arrêt, réordonner un jour, le GPX).
+  Mika le prépare **en conversation, quand on le lui demande** : elle cherche des lieux, calcule les trajets, crée le
+  voyage, ajoute ou retire des arrêts, propose ce qu'il y a à voir le long de la route. Ce qu'elle a ajouté se voit en
+  rose (« ajouté par Mika ») et se retire d'un geste ; ce n'est pas une proposition qui attend un accord : c'est le
+  voyage que vous faites ensemble.
+- Ses outils ne servent qu'en tête-à-tête, avec une personne qui a un compte, pour ses voyages à elle (jamais en
+  salon, jamais ceux d'un autre). « Ici » est la dernière position que son téléphone a donnée (0119) : s'en servir est
+  un regard, et sa bulle 📍 se voit.
+- Pas encore : un voyage partagé avec quelqu'un d'autre, une page de la console, le guidage pendant la conduite, la
+  carte hors ligne sur le téléphone.
+
+*Pourquoi :* « pour que l'IA puisse interagir avec la carte » ; la maquette validée le 2026-11-04 (« nikel ça »).
+
+### 0196 — Elle propose une carte dans la conversation
+
+- Quand elle cherche des lieux ou calcule un trajet pour la personne, son message emporte une note (`look:<seq>`) :
+  une petite carte de ce qu'elle a cherché, qui s'ouvre dans l'écran Carte. Quand elle crée ou change un voyage, la
+  note `trip:<id>` ; quand elle montre une carte de son choix (des lieux, un parcours), `map:<seq>`.
+- Le chat les montre en **carte miniature** (MapLibre, sur les tuiles du serveur, créée quand elle paraît) ; une sorte
+  de note inconnue s'ignore (l'app Android et l'ancien client web n'en souffrent pas). Ce qu'elle a vu se garde au
+  journal (les lieux, le trajet résumé) ; oublier la personne l'efface, et la carte disparaît de son message.
+
+*Pourquoi :* « proposer des cartes, des parcours et des points d'intérêt ».
 
 ## Les fournisseurs de modèles
 

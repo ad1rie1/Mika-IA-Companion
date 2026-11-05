@@ -1,15 +1,14 @@
 /**
- * La vraie carte de sa position (ADR 0193), dessinée par MapLibre. Ce module se charge à part (import dynamique,
- * avec MapLibre et sa feuille) : il ne retarde aucun écran. Ses tuiles, ses polices et ses icônes viennent du serveur
- * de Mika, avec la session ; la position et sa précision s'y posent par-dessus, aux couleurs du thème.
+ * La vraie carte de sa position (ADR 0193), dessinée par MapLibre sur la carte du serveur (`map/base.ts` : ses tuiles,
+ * ses polices et ses icônes avec la session, les commandes en français, le thème, une autre carte du serveur qui se
+ * repose, des tuiles en échec de suite qui font revenir le plan). La position et sa précision s'y posent par-dessus,
+ * aux couleurs du thème. MapLibre arrive chargé (`map/load.ts`) : ce module ne l'importe pas.
  */
-import maplibregl, { type GeoJSONSource, type Map as MapLibre } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
-import { API_BASE } from "@web/network/api";
+import type { GeoJSONSource, Map as MapLibre } from "maplibre-gl";
 import type { MapInfo } from "../../api/phone";
-import { circle, zoomFor } from "./mapgeo";
-import { mapStyle } from "./mapstyle";
+import { createBaseMap, type MapLib } from "../../map/base";
+import { circle, zoomFor } from "../../map/mapgeo";
 
 export interface At {
   lat: number;
@@ -23,6 +22,8 @@ export interface LiveMap {
   readonly host: HTMLElement;
   /** Une autre position, ou un autre thème : la carte suit, sans se refaire. */
   show(at: At, dark: boolean): void;
+  /** Une autre carte du serveur (relue toutes les cinq minutes). */
+  restyle(info: MapInfo): void;
   resize(): void;
   remove(): void;
 }
@@ -61,22 +62,21 @@ function addHere(map: MapLibre, at: At): void {
       "circle-stroke-color": token("--raised", "#ffffff"), "circle-stroke-width": 3 } });
 }
 
-/** La carte dans `host`, centrée sur `first`. Lève si le navigateur ne dessine pas (pas de WebGL) : le plan reste. */
-export function mountMap(host: HTMLElement, info: MapInfo, first: At, dark: boolean): LiveMap {
+/**
+ * La carte dans `host`, centrée sur `first`. Lève si le navigateur ne dessine pas (pas de WebGL) : le plan reste.
+ * `onFail` : ses tuiles échouent de suite (un serveur de carte injoignable) — l'écran reprend son plan dessiné.
+ */
+export function mountMap(lib: MapLib, host: HTMLElement, info: MapInfo, first: At, dark: boolean, onFail?: () => void): LiveMap {
   let at = first;
   let shownDark = dark;
-  const map = new maplibregl.Map({
-    container: host,
-    style: mapStyle(info, dark, API_BASE),
+  const base = createBaseMap(lib, host, info, {
+    dark,
     center: [at.lon, at.lat],
     zoom: zoomFor(at.accuracy),
-    maxZoom: 19,
-    attributionControl: { compact: false },
-    // ses tuiles, polices et icônes : du serveur de Mika, avec la session (en dev, le client est d'une autre origine)
-    transformRequest: (url) => (url.startsWith(API_BASE) ? { url, credentials: "include" } : { url }),
+    overlay: (map) => addHere(map, at),
+    onFail,
   });
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-  map.on("style.load", () => addHere(map, at));
+  const map = base.map;
   return {
     host,
     show(next, nextDark) {
@@ -84,17 +84,20 @@ export function mountMap(host: HTMLElement, info: MapInfo, first: At, dark: bool
       at = next;
       if (nextDark !== shownDark) {
         shownDark = nextDark;
-        map.setStyle(mapStyle(info, nextDark, API_BASE), { diff: false }); // « style.load » repose la position
+        base.theme(nextDark); // « style.load » repose la position
       } else {
         (map.getSource(HERE) as GeoJSONSource | undefined)?.setData(features(at));
       }
       if (moved) map.easeTo({ center: [at.lon, at.lat] });
     },
+    restyle(next) {
+      base.restyle(next);
+    },
     resize() {
-      map.resize();
+      base.resize();
     },
     remove() {
-      map.remove();
+      base.remove();
     },
   };
 }

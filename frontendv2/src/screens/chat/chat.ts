@@ -7,6 +7,10 @@
  * Le comportement est celui du client web (`frontend/Web/src/ui/ChatOverlay.ts`), par les mêmes modules purs
  * (`@web/ui/chatSync`, `approvals`, `toolActivity`, `strands`, `verdicts`, `bubbles`, `messageNotes`) ; le
  * rendu, celui de la maquette (`markup.ts`). Le contrat : `backendv2/docs/protocole-chat.md`.
+ *
+ * Ses notes de carte (ADR 0196 : `look`, `map`, `trip`) ne passent pas par `@web/ui/messageNotes`, qui ne garde que
+ * la bulle 📍 (l'ancien client web les ignore) : elles se lisent ici (`map/notes.ts`), se gardent avec le message
+ * (`maps`) et se montrent en cartes miniatures (`map/minis.ts`), qui s'ouvrent dans l'écran Carte.
  */
 import { API_BASE } from "@web/network/api";
 import type { WebSocketClient } from "@web/network/WebSocketClient";
@@ -80,6 +84,11 @@ import {
 } from "@web/ui/strands";
 import { cardKey, isRunning, toolFrame, toolUses, withAnswer, withToolFrame, type WorkCard } from "@web/ui/toolActivity";
 import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "@web/ui/verdicts";
+import { attributionText, miniCard, pendingMini } from "../../map/cards";
+import { mapInfo } from "../../map/info";
+import { MiniMaps, slotKey } from "../../map/minis";
+import { mapNotes, sameMapNotes, type MapNote } from "../../map/notes";
+import { onTheme } from "../../shell/theme";
 import { $, h, norm, on } from "../../shell/dom";
 import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../shell/float";
 import { ico } from "../../shell/icons";
@@ -135,6 +144,22 @@ const STRAND_RESULT_NOTES: Record<string, string> = {
   forbidden: "Réglage refusé : réservé à une opératrice.",
   failed: "Le réglage n'a pas abouti — réessaie.",
 };
+
+/** Un message gardé, et ses notes de carte (ADR 0196), qu'il emporte dans le cache du navigateur. */
+type Kept = StoredMessage & { maps?: MapNote[] };
+
+/** Les notes de carte d'un message (aucune : `[]`). */
+function mapsOf(msg: StoredMessage): MapNote[] {
+  return (msg as Kept).maps ?? [];
+}
+
+/** Poser (ou retirer) les notes de carte d'un message ; rend vrai si elles ont changé. */
+function setMaps(msg: StoredMessage, maps: MapNote[]): boolean {
+  if (sameMapNotes(mapsOf(msg), maps)) return false;
+  if (maps.length) (msg as Kept).maps = maps;
+  else delete (msg as Kept).maps;
+  return true;
+}
 
 const EMOJIS = ["😊", "😅", "😂", "🙂", "😉", "😍", "🥲", "😴", "🤔", "😬", "🙏", "👍", "👌", "🔥", "✨", "❤️", "💪", "🎉", "☕", "🌧️", "🚶", "📎", "✅", "❌"];
 
@@ -236,6 +261,10 @@ export class ChatScreen {
 
   private body: HTMLElement | null = null;
   private mounted: "ordinary" | "pro" | null = null;
+  /** Ses cartes miniatures (ADR 0196) : au plus quatre vraies cartes à la fois, les autres en plan dessiné. */
+  private readonly minis = new MiniMaps();
+  /** Une phrase à poser dans le champ au prochain dessin (l'écran Carte : « Demander à Mika »). */
+  private pendingDraft: string | null = null;
   /** Le fil suit le bas tant qu'on y est : une image qui se charge, une bulle qui arrive le gardent en vue. */
   private stick = true;
   private resize: ResizeObserver | null = null;
@@ -261,6 +290,7 @@ export class ChatScreen {
     this.activeStrand = strandOf(read(() => localStorage, this.strandKey)) ?? "";
     this.restore();
     store.subscribe((snap) => this.paintMika(snap));
+    onTheme((dark) => this.minis.theme(dark));
     document.addEventListener("keydown", (e) => this.focusOnType(e));
   }
 
@@ -335,6 +365,7 @@ export class ChatScreen {
         restored.tools = tools.length ? tools : undefined;
         const notes = m.sender === "vtuber" ? messageNotes(m.notes) : [];
         restored.notes = notes.length ? notes : undefined;
+        setMaps(restored, m.sender === "vtuber" ? mapNotes((m as Partial<Kept>).maps) : []);
         restored.files = m.sender === "vtuber" ? sentFiles(m.files) : undefined;
         if (!restored.files?.length) delete restored.files;
         restored.strand = strandOf(m.strand);
@@ -374,6 +405,9 @@ export class ChatScreen {
     // un murmure n'a jamais d'identifiant : il se range après le curseur, pas en bas pour toujours
     const inner = data.voice_persona === "inner";
     if (pro) this.work = withAnswer(this.work, userId, replyId);
+    const maps = mapNotes(data.notes);
+    // un voyage qu'elle vient de changer : ses miniatures se relisent quand elles reparaissent
+    for (const note of maps) this.minis.invalidate(note);
     this.addMessage(data.text, "vtuber", {
       id: replyId ?? undefined,
       localOnly: inner && replyId === null,
@@ -382,6 +416,7 @@ export class ChatScreen {
       reveal: !inner && !pro,
       mode: pro,
       notes: messageNotes(data.notes),
+      maps,
       strand,
     });
     if (this.reveal.writing) this.showTyping("");
@@ -438,11 +473,33 @@ export class ChatScreen {
     const result = mergeHistory(this.history, entries, MAX_MESSAGES);
     this.history = result.history;
     this.truncated = mode === "initial" ? truncated : this.truncated || truncated;
-    const changed = wiped || result.added > 0 || result.adopted > 0 || result.judged > 0 || result.enriched > 0;
+    const mapped = this.mergeMaps(entries);
+    const changed = wiped || result.added > 0 || result.adopted > 0 || result.judged > 0 || result.enriched > 0 || mapped > 0;
     if (!changed && this.history.length === before && !truncated) return;
     this.persist();
     this.paintThread();
     if (result.sawReply) this.hideTyping();
+  }
+
+  /**
+   * Ses notes de carte, telles que le fil relu les dit (ADR 0196) : posées sur ses messages (une note oubliée depuis,
+   * un voyage supprimé, renommé, changé : la miniature suit). Rend combien de messages ont changé.
+   */
+  private mergeMaps(entries: HistoryMessage["messages"]): number {
+    let changed = 0;
+    for (const entry of entries ?? []) {
+      if (typeof entry?.id !== "number" || entry.role === "user") continue;
+      const shown = this.history.find((m) => m.id === entry.id);
+      if (!shown || shown.sender !== "vtuber") continue;
+      const maps = mapNotes((entry as { notes?: unknown }).notes);
+      const before = mapsOf(shown);
+      if (!setMaps(shown, maps)) continue;
+      for (const note of maps) {
+        if (!before.some((b) => b.kind === note.kind && b.ref === note.ref && b.at === note.at)) this.minis.invalidate(note);
+      }
+      changed += 1;
+    }
+    return changed;
   }
 
   private addMessage(
@@ -459,6 +516,7 @@ export class ChatScreen {
       reveal?: boolean;
       mode?: "pro";
       notes?: MessageNote[];
+      maps?: MapNote[];
       strand?: string;
     } = {},
   ): void {
@@ -479,6 +537,7 @@ export class ChatScreen {
       ...(opts.files?.length ? { files: opts.files } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
       ...(opts.notes?.length ? { notes: opts.notes } : {}),
+      ...(opts.maps?.length ? { maps: opts.maps } : {}),
       ...(opts.strand ? { strand: opts.strand } : {}),
     };
     this.history.push(stored);
@@ -1063,8 +1122,20 @@ export class ChatScreen {
       now: Date.now(),
       api: API_BASE,
       filter: query ? (m) => norm(m.text).includes(query) : undefined,
+      mapCards: (m) => this.mapCards(m),
     });
+    // ses cartes miniatures : les vivantes se relogent, les nouvelles s'observent
+    this.minis.attach(el);
     if (scroller && this.stick && !query) scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  /** Ses cartes miniatures d'un message : ce qu'on en sait déjà, sinon le texte de sa note en attendant. */
+  private mapCards(msg: StoredMessage): string {
+    const notes = mapsOf(msg);
+    if (!notes.length) return "";
+    const owner = typeof msg.id === "number" ? String(msg.id) : `t${msg.ts}`;
+    const attribution = attributionText(mapInfo.value);
+    return notes.map((n) => miniCard(slotKey(owner, n), this.minis.dataOf(n) ?? pendingMini(n), attribution)).join("");
   }
 
   /** Le fil défile dans son cadre : on suit le bas tant qu'on y est, même quand une image arrive après coup. */
@@ -1166,9 +1237,41 @@ export class ChatScreen {
       this.paintApprovals();
       this.followBottom();
       this.paintThread(true);
+      this.applyDraft();
       return;
     }
     this.paintThread();
+    this.applyDraft();
+  }
+
+  /**
+   * Ouvrir le chat avec une phrase préremplie (l'écran Carte : « Demander à Mika », « En parler à Mika ») : elle ne part
+   * pas d'elle-même, on la complète et on l'envoie. Ses outils de carte servent dans la conversation : le mode pro, s'il
+   * était choisi, cède la place.
+   */
+  prefill(text: string): void {
+    if (this.proMode) {
+      this.proPreferred = false;
+      write(() => localStorage, PRO_KEY, "0");
+      toast("Retour à la conversation avec Mika.", { ico: "terminal" });
+    }
+    this.pendingDraft = text;
+    this.shell.go("#chat");
+  }
+
+  /** La phrase préremplie, posée dans le champ (après ce qui y était déjà écrit), le curseur au bout. */
+  private applyDraft(): void {
+    const text = this.pendingDraft;
+    const input = this.input();
+    if (text === null || !input) return;
+    this.pendingDraft = null;
+    const before = input.value.trim();
+    input.value = (before ? `${before}\n${text}` : text).slice(0, MAX_MESSAGE_CHARS);
+    this.resizeInput(input);
+    this.paintCounter(input);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    this.ws?.noteComposing(input.value);
   }
 
   private mount(section: HTMLElement): void {

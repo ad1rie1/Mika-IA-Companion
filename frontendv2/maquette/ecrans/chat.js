@@ -28,6 +28,10 @@
     { de: 'mika', t: '14:12', note: { ico: 'pin', txt: 'Mika a regardé où tu es · rue Nationale, Lille · position de 14:10' },
       bulles: ['au fait, Julien t\'a écrit sur WhatsApp pour la rando de dimanche. il attend juste un oui ou un non'],
       lien: { ico: 'phone', titre: 'Julien Roux · WhatsApp', sous: '« alors dimanche, tu viens ? départ 8h30 »', route: '#telephone/messages/julien' } },
+    { de: 'moi', t: '18:40', lu: true, txt: 'tu m\'aides pour le road trip dans les Alpes ? cinq jours début avril, départ de Lille, j\'aimerais finir à Nice' },
+    { de: 'mika', t: '18:43', note: { ico: 'search', txt: 'Mika a cherché des campings autour du lac d\'Annecy et calculé le trajet', route: '#carte/explorer' },
+      bulles: ['je t\'ai fait une première version : Dijon le premier soir, deux nuits au bord du lac d\'Annecy, puis le Verdon avant Nice', 'j\'ai ajouté quatre arrêts, en rose. le Point Sublime, c\'est là que les gorges sont les plus belles. retire ce qui te plaît pas'],
+      carte: { voyage: 'alpes', titre: 'Voyage · Les Alpes en cinq jours', sous: '5 jours · 1 388 km · 16 h 10 de route · 4 arrêts de Mika', route: '#carte/voyages/alpes' } },
   ];
 
   const fils = [
@@ -81,8 +85,11 @@
   function bulleMika(m, i) {
     const note = m.note ? `<a class="msg-note"${m.note.route ? ` href="${m.note.route}"` : ''}>${ico(m.note.ico, 'xs')}${h(m.note.txt)}</a>` : '';
     const lien = m.lien ? `<a class="msg-link" href="${m.lien.route}">${ico(m.lien.ico)}<span><b>${h(m.lien.titre)}</b><small>${h(m.lien.sous)}</small></span>${ico('chev-right', 'sm')}</a>` : '';
+    // Sa carte (ADR à écrire) : la note de message « voyage: » ou « carte: », en carte miniature qui s'ouvre dans Carte.
+    const carte = m.carte ? `<a class="msg-map" href="${m.carte.route}">${M.carteMini ? M.carteMini(m.carte.voyage) : ''}
+      <span class="mm-text">${ico('map')}<span><b>${h(m.carte.titre)}</b><small>${h(m.carte.sous)}</small></span>${ico('chev-right', 'sm')}</span></a>` : '';
     return `<div class="msg her">${av('mika', 'sm')}<div class="msg-col">${note}
-      ${m.bulles.map((b) => `<div class="bubble">${texte(b)}</div>`).join('')}${lien}
+      ${m.bulles.map((b) => `<div class="bubble">${texte(b)}</div>`).join('')}${lien}${carte}
       <div class="msg-meta">${h(m.t)}${D.moi.operatrice ? `<span class="verdict"><button type="button" title="Bonne réponse" data-verdict="up">${ico('thumb-up', 'xs')}</button><button type="button" title="Elle aurait dû dire autre chose" data-verdict="down">${ico('thumb-down', 'xs')}</button></span>` : ''}</div></div></div>`;
   }
   function carteOutils(m) {

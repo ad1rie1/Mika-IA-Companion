@@ -114,7 +114,7 @@ FACULTY_LABELS: dict[str, str] = {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation", "forge_signals": "Signaux de ses apps",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
-    "phone": "Messages du téléphone",
+    "phone": "Messages du téléphone", "trips": "Carte et voyages",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -320,6 +320,11 @@ EVENT_LABELS: dict[str, str] = {
     "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",
     "location.located": "Son téléphone a dit où était la personne",
     "location.cleared": "La personne ne partage plus où elle est",
+    "trips.created": "Un voyage préparé", "trips.changed": "Un voyage modifié",
+    "trips.stop_added": "Un arrêt ajouté à un voyage", "trips.stop_moved": "Un arrêt de voyage déplacé",
+    "trips.stop_noted": "Un arrêt de voyage noté", "trips.stop_removed": "Un arrêt retiré d'un voyage",
+    "trips.removed": "Un voyage supprimé", "trips.looked": "Elle a regardé la carte (des lieux, un trajet)",
+    "trips.shown": "Elle a montré une carte dans la conversation",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",

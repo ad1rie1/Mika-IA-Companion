@@ -278,12 +278,17 @@ def test_a_mailbox_loads_its_folders_to_tick_and_keeps_the_ticked_ones(world):  
     assert post(client, url, account).status_code == 200
     asked: list[str] = []
 
+    held: list[bool] = []
+
     class Port:  # le serveur de la boîte, sans réseau
         def account(self, key):
             return object() if key == "perso" else None
 
         async def refresh_folders(self, key):
             asked.append(key)
+            # charger n'enregistre rien : le verrou des réglages reste libre pendant que le serveur répond (sinon un
+            # serveur lent tiendrait tous les réglages des autres)
+            held.append(live.settings.writing.locked())
             return [Folder("perso", "INBOX", "inbox", True), Folder("perso", "Archives", "archive"),
                     Folder("perso", "Projets")]
 
@@ -291,7 +296,22 @@ def test_a_mailbox_loads_its_folders_to_tick_and_keeps_the_ticked_ones(world):  
     page = html_of(client.get(f"{url}?enregistrement=accounts&cle=perso"))
     assert re.search(r'<button[^>]*name="_charger" value="folders"', page) and asked == []  # sur demande seulement
     loaded = html_of(post(client, url, {**account, "_ancienne": "perso", "_charger": "folders"}))
-    assert asked == ["perso"] and "Rien n'est encore enregistré" in loaded
+    assert asked == ["perso"] and "Rien n'est encore enregistré" in loaded and held == [False]
+    # seul ce chargement-là se passe du verrou : une suppression qui porterait aussi « _charger » réécrit les
+    # réglages, sous le verrou
+    saving = live.settings.save_email
+    under: list[bool] = []
+
+    async def watched(cfg):
+        under.append(live.settings.writing.locked())
+        return await saving(cfg)
+
+    live.settings.save_email = watched
+    try:
+        post(client, url, {"_section": "courrier", "_supprimer": "accounts", "_cle": "perso", "_charger": "folders"})
+    finally:
+        live.settings.save_email = saving
+    assert under == [True] and "perso" not in client.portal.call(live.settings.email).accounts
     ticks = re.findall(r'<label class="check"><input type="checkbox" name="folders" value="([^"]+)"( checked)?[^>]*> '
                        r'([^<]+)</label>', loaded)
     assert ticks == [("INBOX", " checked", "Réception (INBOX)"), ("Archives", "", "Archives"),

@@ -99,6 +99,9 @@ class McpHub:
         self._connect = connect or self.open_transport
         self._now = now_us or (lambda: time.time_ns() // 1000)
         self._servers: dict[str, _Server] = {}
+        #: les décisions sur les outils se relisent puis se réécrivent d'un seul tenant : deux regards qui se croisent
+        #: (la console, l'API par personne) ne s'effacent pas
+        self._reviewing = asyncio.Lock()
         self._listeners: list[Callable[[], Any]] = []
         self._tasks: set[asyncio.Task[Any]] = set()
         self._last_offer: tuple[Any, ...] | None = None
@@ -341,28 +344,31 @@ class McpHub:
         lignes d'accès de son serveur (ADR 0131)."""
         if not valid_choice(nature, NATURES):
             raise ValueError("nature inconnue : lecture ou action")
-        reviews = self._safe_reviews()
-        current = reviews.get(server, {}).get(remote)
-        st = self._servers.get(server)
-        tool = next((t for t in (st.live if st else ()) if t.remote == remote), None)
-        if tool is None and (enabled or current is None):
-            raise ValueError("le serveur ne propose pas cet outil en ce moment : teste-le d'abord")
-        if tool is not None:
-            stored = StoredReview(fingerprint=tool.fingerprint, enabled=enabled, nature=nature,
-                                  description=inert(description, MAX_DESCRIPTION), server_description=tool.description,
-                                  title=tool.title, schema=dict(tool.schema), by=by, at=self._now())
-        else:
-            assert current is not None
-            stored = current.model_copy(update={"enabled": False, "by": by, "at": self._now()})
-        await self._store(server, remote, stored, reviews)
+        async with self._reviewing:
+            reviews = self._safe_reviews()
+            current = reviews.get(server, {}).get(remote)
+            st = self._servers.get(server)
+            tool = next((t for t in (st.live if st else ()) if t.remote == remote), None)
+            if tool is None and (enabled or current is None):
+                raise ValueError("le serveur ne propose pas cet outil en ce moment : teste-le d'abord")
+            if tool is not None:
+                stored = StoredReview(fingerprint=tool.fingerprint, enabled=enabled, nature=nature,
+                                      description=inert(description, MAX_DESCRIPTION),
+                                      server_description=tool.description, title=tool.title,
+                                      schema=dict(tool.schema), by=by, at=self._now())
+            else:
+                assert current is not None
+                stored = current.model_copy(update={"enabled": False, "by": by, "at": self._now()})
+            await self._store(server, remote, stored, reviews)
         return _review(remote, stored, tool_name(server, remote))
 
-    async def settle(self, server: str, changes: Mapping[str, Any]) -> None:
+    async def settle(self, server: str, changes: Mapping[str, Any] | Callable[[Any], Mapping[str, Any]]) -> None:
         """Ce qu'un serveur fait d'elle (ADR 0131) : ses lignes d'accès et sa ligne par défaut — enregistrées dans ses
-        réglages, puis appliquées (ses outils sont recalculés)."""
+        réglages, puis appliquées (ses outils sont recalculés). ``changes`` peut être une fonction de la fiche relue
+        sous le verrou des réglages : ce qui dépend de ce qu'elle contient se calcule sur ce qui y est."""
         if self._settle is None:
             raise ValueError("les réglages des serveurs ne s'enregistrent pas d'ici")
-        await self._settle(server, dict(changes))
+        await self._settle(server, changes if callable(changes) else dict(changes))
         await self.reconfigure()
         self._changed()
 
@@ -379,6 +385,10 @@ class McpHub:
         """Les outils nouveaux ou changés, d'un coup (ADR 0129) : coupé (``non``), ou servi tel qu'il est maintenant,
         en ``lecture`` ou en ``action`` — un outil déjà regardé garde sa description. Seuls comptent les outils que le serveur propose et qui attendent un regard ;
         un autre nom est refusé. Rend ce qui a été appliqué."""
+        async with self._reviewing:
+            return await self._decide(server, choices, by=by)
+
+    async def _decide(self, server: str, choices: Mapping[str, str], *, by: str) -> dict[str, str]:
         reviews = self._safe_reviews()
         st = self._servers.get(server)
         mine = reviews.get(server, {})

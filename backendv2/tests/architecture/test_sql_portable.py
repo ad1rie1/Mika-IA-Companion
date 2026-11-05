@@ -20,6 +20,9 @@ EXEMPT = {
     "adapters/database.py": "le seul module qui parle de SQLite par nature (sa mise en route, la troncature du WAL)",
     "app/backup.py": "la copie d'un fichier SQLite par son API de sauvegarde (PRAGMA), par nature ; sur un serveur, "
                      "elle passe par mariadb-dump (app/backup_server.py)",
+    "adapters/maps/places.py": "l'index des lieux de l'écran Carte (ADR 0194) : un fichier SQLite à lui sous cartes/, "
+                               "tiré des tuiles et refait à la demande (texte intégral FTS5, arbre R), lu par sqlite3 "
+                               "seul — jamais une base de sa vie, ni sur MariaDB ni dans le schéma",
 }
 
 #: un texte précis permis dans un module, et pourquoi (le reste du module reste relu)

@@ -10,6 +10,7 @@ import "./styles/ecrans/outils.css";
 import "./styles/ecrans/mail.css";
 import "./styles/ecrans/teams.css";
 import "./styles/ecrans/telephone.css";
+import "./styles/ecrans/carte.css";
 import "./styles/ecrans/parametres.css";
 import "./styles/app.css";
 
@@ -20,6 +21,7 @@ import { ensureSession } from "./login/login";
 import { setManifest } from "./mika/face";
 import { loadManifest } from "./mika/portraits";
 import { MikaStore } from "./mika/store";
+import { carteScreen } from "./screens/carte";
 import { ChatScreen } from "./screens/chat/chat";
 import { mailScreen } from "./screens/mail";
 import { outilsScreen } from "./screens/outils";
@@ -81,9 +83,12 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   const chat = new ChatScreen(shell, store, account);
   shell.register(chat.screen());
   // dans l'ordre de la barre du haut, celui de la maquette
-  for (const make of [outilsScreen, mailScreen, teamsScreen, telephoneScreen, parametresScreen]) {
+  for (const make of [outilsScreen, mailScreen, teamsScreen, telephoneScreen]) {
     shell.register(make(shell));
   }
+  // la carte : « Demander à Mika » ouvre le chat avec une phrase préremplie
+  shell.register(carteScreen(shell, { ask: (text) => chat.prefill(text) }));
+  shell.register(parametresScreen(shell));
   shell.start();
   startCounts(() => shell.updateCounts());
 

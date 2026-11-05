@@ -17,7 +17,7 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
-from mika.app.moi import Call, Denied, MeApi, missing, person_of
+from mika.app.moi import Call, Denied, MeApi, missing, person_of, refused
 from mika.app.moi import mail as mail_moi
 from mika.app.moi import mcp as mcp_moi
 from mika.app.moi import teams as teams_moi
@@ -121,7 +121,7 @@ async def _share_mail(call: Call, settings: Any, key: str, person: str, level: s
         await settings.save_email(MailConfig(accounts={**cfg.accounts, key: MailAccount.model_validate(
             {**spec.model_dump(), "shares": shares})}))
     except ValidationError as exc:
-        raise Denied(400, str(exc).splitlines()[-1][:300]) from None
+        raise refused(exc) from None
 
 
 async def _share_teams(call: Call, settings: Any, key: str, person: str, level: str) -> None:
@@ -176,14 +176,20 @@ async def set_share(call: Call) -> dict[str, Any]:
             raise missing()
         if level == SHARE_PREPARE:
             raise Denied(400, "Un service se partage pour lire ou pour s'en servir.")
-        lines = [a.model_dump() for a in spec_m.access if tuple(a.who) != (who,)]
-        if level:
-            line = {"who": [who], "read": "seule", "act": "carte" if level == SHARE_USE else "non", "keep": "prive"}
-            lines.insert(1 if lines else 0, line)  # juste après la sienne : la première qui la désigne décide
+        def access(spec: Any) -> dict[str, Any]:
+            # calculées sur la fiche relue sous ``Settings.writing`` : une ligne retirée ailleurs entre-temps ne
+            # revient pas, une ligne ajoutée ailleurs reste
+            lines = [a.model_dump() for a in spec.access if tuple(a.who) != (who,)]
+            if level:
+                line = {"who": [who], "read": "seule", "act": "carte" if level == SHARE_USE else "non",
+                        "keep": "prive"}
+                lines.insert(1 if lines else 0, line)  # juste après la sienne : la première qui la désigne décide
+            return {"access": lines}
+
         port = call.port("mcp")
         if port is None:
             raise Denied(503, "Les services ne sont pas branchés.")
-        await port.settle(key, {"access": lines})  # ses réglages, relus et réécrits sous ``Settings.writing``
+        await port.settle(key, access)
     await audit(call.kernel, "moi.partage", by=call.me.handle, subject_kind=kind, subject=key)
     said = "Partage retiré." if not level else f"Partagé avec {_name(call, person)} ({dict(SHARES)[level].lower()})."
     return {"ok": True, "message": said}

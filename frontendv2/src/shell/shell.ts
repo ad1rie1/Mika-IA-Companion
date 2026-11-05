@@ -65,8 +65,8 @@ export interface ScreenDef {
   count?: () => number | "";
 }
 
-/** L'ordre de la barre du bas d'un téléphone, comme sur Android. */
-const TABBAR_ORDER = ["chat", "mail", "teams", "telephone", "outils", "parametres"];
+/** L'ordre de la barre du bas d'un téléphone, comme sur Android (et la maquette : sept entrées). */
+export const TABBAR_ORDER = ["chat", "mail", "teams", "telephone", "carte", "outils", "parametres"];
 
 function cornerMarkup(): string {
   return `<span class="mika-corner" id="mika-corner" data-size="mini">

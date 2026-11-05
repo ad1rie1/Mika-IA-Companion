@@ -395,7 +395,100 @@ mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'en
 
 Un serveur de carte à part (un `pmtiles serve`, une archive sur un stockage, un serveur `{z}/{x}/{y}` au schéma
 Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sans rien de la personne, et en relaie
-les tuiles.
+les tuiles. Il doit servir l'archive par plages (`Range`) ; s'il ne répond pas, ou si l'archive change à la même
+adresse, la carte le voit en une minute au plus (elle se rouvre, ou garde son plan dessiné).
+
+### Les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194)
+
+Les lieux (restaurants, campings, sommets, musées, villes et lieux-dits) se cherchent dans un index tiré des tuiles
+de la carte, sur la machine — rien ne sort :
+
+```bash
+mika carte lieux                                    # depuis cartes/france.pmtiles → cartes/lieux.db
+```
+
+Serveur en marche, sans risque : l'index neuf ne remplace l'ancien qu'entier, et le serveur le lit à la recherche
+suivante. À refaire après chaque `mika carte extraire`. Une autre archive : `--depuis cartes/<nom>.pmtiles` (et
+`--sortie cartes/<nom>.db`). Mesuré sur la zone de Lille (600 tuiles au zoom 15, 7 786 lieux) : 0,4 s, 290 Mo de
+mémoire au plus, dont 282 Mo pour charger la commande elle-même. Mesuré sur la France (2026-11-05, sur le PC : 1,84
+million de tuiles au zoom 15) : 2 978 370 lieux en 2 min 10 s, 467 Mo de mémoire au plus, un index de 522 Mo — sur
+le portable, compter davantage de temps, la même mémoire ; ou le construire sur un PC et le copier dans `cartes/`. La
+fin de la sortie dit combien de lieux par catégorie et les sortes laissées de côté les plus fréquentes.
+
+Puis, dans la console, Réglages › Canaux :
+
+- **Lieux et adresses** : l'index (`cartes/lieux.db` par défaut) et les adresses — « La Géoplateforme de l'IGN »
+  (la Base Adresse Nationale) : ce serveur ne lui envoie que le texte cherché, jamais la position de la personne.
+- **Itinéraires** : « Le Valhalla public de FOSSGIS » (celui d'openstreetmap.org : ses conditions demandent au plus
+  une demande par seconde, pour tout ce serveur, et il ne garantit pas de répondre ; chaque trajet est gardé un
+  jour), ou « Un Valhalla à toi » (ci-dessous). Vers lui ne partent que les points du trajet.
+
+Par défaut, ni adresses ni itinéraires : rien ne sort sans ce choix. Sans index ou sans itinéraires, l'écran Carte
+le dit.
+
+### Un Valhalla à toi, sur le portable
+
+Le serveur de FOSSGIS suffit pour un usage personnel ; un Valhalla à soi n'a ni sa limite ni ses pannes. Ses tuiles
+se construisent **sur le PC** (pour la France, plusieurs Go de mémoire et une heure ou plus), puis se copient : le
+portable ne fait que les servir. Avec Podman et l'image officielle (`ghcr.io/valhalla/valhalla-scripted`), sur le
+fichier France de Geofabrik :
+
+```bash
+# sur le PC : construire (le fichier .osm.pbf se télécharge dans le dossier, ~4,5 Go)
+mkdir -p ~/valhalla/custom_files
+podman run --rm --name valhalla-construit --memory 12g \
+  -v ~/valhalla/custom_files:/custom_files:Z,U \
+  -e tile_urls=https://download.geofabrik.de/europe/france-latest.osm.pbf \
+  -e serve_tiles=False -e build_elevation=False -e server_threads=4 \
+  ghcr.io/valhalla/valhalla-scripted:latest
+ls -lah ~/valhalla/custom_files     # valhalla_tiles.tar, valhalla.json, .file_hashes.txt, les bases admin et fuseaux
+# puis copier sur le portable, sans le .pbf
+rsync -a --exclude '*.pbf' ~/valhalla/custom_files/ mika-portable:valhalla-tuiles/
+# « :U » donne le dossier à l'utilisateur du conteneur : pour l'effacer, podman unshare rm -rf ~/valhalla
+```
+
+Sur le portable, le dossier en place, puis le service (une unité Quadlet de Podman,
+`/etc/containers/systemd/valhalla.container`), qui sert sur la seule boucle locale :
+
+```bash
+sudo install -d -m 0755 /var/lib/valhalla
+sudo rsync -a ~/valhalla-tuiles/ /var/lib/valhalla/custom_files/
+sudo podman pull ghcr.io/valhalla/valhalla-scripted:latest
+```
+
+```ini
+[Unit]
+Description=Valhalla, les itinéraires de l'écran Carte (ADR 0194)
+After=network-online.target
+
+[Container]
+Image=ghcr.io/valhalla/valhalla-scripted:latest
+ContainerName=valhalla
+PublishPort=127.0.0.1:8002:8002
+Volume=/var/lib/valhalla/custom_files:/custom_files:Z,U
+# les tuiles construites sur le PC, sans rien reconstruire ici
+Environment=use_tiles_ignore_pbf=True
+Environment=force_rebuild=False
+Environment=serve_tiles=True
+Environment=server_threads=2
+
+[Service]
+Restart=on-failure
+# le portable a peu de mémoire libre : les tuiles sont lues dans le fichier, au besoin
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl start valhalla
+curl -s http://127.0.0.1:8002/status                # sa version : il répond
+```
+
+Puis, dans la console, Réglages › Canaux › Itinéraires : « Un Valhalla à toi », `http://127.0.0.1:8002`, et son débit
+(10 demandes par seconde par défaut). Pour le mettre à jour : reconstruire sur le PC de temps en temps, recopier,
+`sudo systemctl restart valhalla`.
 
 ## Surveiller
 

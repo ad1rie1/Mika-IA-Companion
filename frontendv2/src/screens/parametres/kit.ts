@@ -14,8 +14,9 @@ import { clock, shortWhen } from "../chat/markup";
 
 /**
  * Une ressource de l'API, lue au plus une fois à la fois et gardée `ttl` millisecondes. Une relecture qui échoue
- * garde la valeur d'avant (et dit l'erreur) ; `version` ne bouge que si ce qui est lu change : un écran ne se
- * redessine que pour cela.
+ * garde la valeur d'avant (et dit l'erreur), sauf un 404 : ce qui n'existe plus (supprimé, oublié) ne se montre plus.
+ * Une relecture forcée demandée pendant une lecture en cours suit celle-ci (elle a pu partir avant ce qu'on vient
+ * d'écrire). `version` ne bouge que si ce qui est lu change : un écran ne se redessine que pour cela.
  */
 export class Cached<T> {
   value: T | null = null;
@@ -24,6 +25,8 @@ export class Cached<T> {
   private at = 0;
   private said = "";
   private pending: Promise<T | null> | null = null;
+  /** La relecture forcée qui suivra la lecture en cours : une seule, pour toutes les demandes d'ici là. */
+  private again: Promise<T | null> | null = null;
 
   constructor(
     private readonly fetcher: () => Promise<T>,
@@ -36,7 +39,14 @@ export class Cached<T> {
   }
 
   load(force = false): Promise<T | null> {
-    if (this.pending) return this.pending;
+    if (this.pending) {
+      if (!force) return this.pending;
+      this.again ??= this.pending.then(() => {
+        this.again = null;
+        return this.load(true);
+      });
+      return this.again;
+    }
     if (!force && this.settled && Date.now() - this.at < this.ttl) return Promise.resolve(this.value);
     this.pending = this.fetcher()
       .then((value) => {
@@ -48,8 +58,13 @@ export class Cached<T> {
         return value;
       })
       .catch((err: unknown) => {
-        if (this.error === null) this.version += 1;
+        const gone = err instanceof ApiError && err.status === 404 && this.value !== null;
+        if (this.error === null || gone) this.version += 1;
         this.error = err;
+        if (gone) {
+          this.value = null;
+          this.said = "";
+        }
         return this.value;
       })
       .finally(() => {

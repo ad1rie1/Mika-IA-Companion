@@ -45,7 +45,7 @@ from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.llm.models import model_limits
 from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mail.oauth import MicrosoftSignIn
-from mika.adapters.maps import MapTiles
+from mika.adapters.maps import MapsDesk, MapTiles
 from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
@@ -423,19 +423,30 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     teams = world["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
     phone = world["phone"] = PhoneDesk()
+    # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
+    # ``cartes/``, la Géoplateforme, Valhalla — réglés dans la console, relus à chaque usage
+    maps_desk = world["maps"] = MapsDesk(data, settings.places_config, settings.routing_config)
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
         lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)), access=settings.mcp_system_access)
-    async def settle_mcp(name: str, changes: Mapping[str, Any], create: bool = False) -> None:
+    async def settle_mcp(name: str, changes: Mapping[str, Any] | Callable[[McpServer], Mapping[str, Any]],
+                         create: bool = False) -> None:
         """Ce qu'un serveur de l'opérateur fait d'elle, réglé depuis sa fiche (ADR 0128) : sa fiche de réglages
         réécrite ; un serveur du système suit les paramètres de son plugin. ``create`` : un serveur qu'on branche.
         Relue puis réécrite d'un seul tenant (``Settings.writing``) : la console et l'API par personne qui règlent
-        deux serveurs en même temps ne s'effacent pas."""
+        deux serveurs en même temps ne s'effacent pas. ``changes`` peut se calculer depuis la fiche relue sous le
+        verrou (une fonction de la fiche) : un partage retiré ailleurs entre-temps ne revient pas."""
         async with settings.writing:
             await _settle_mcp(name, changes, create)
 
-    async def _settle_mcp(name: str, changes: Mapping[str, Any], create: bool) -> None:
+    async def _settle_mcp(name: str, changes: Mapping[str, Any] | Callable[[McpServer], Mapping[str, Any]],
+                          create: bool) -> None:
+        if callable(changes):
+            servers_now = {**system.config(McpConfig()).servers, **settings.mcp().servers}
+            if create or name not in servers_now:
+                raise ValueError("ce serveur ne se règle pas ici : il n'existe plus")
+            changes = dict(changes(servers_now[name]))
         if not create and name in system.names():
             # un serveur du système : ses accès seulement, rangés à part (ADR 0131) ; le reste suit son plugin
             if set(changes) - set(SYSTEM_ACCESS_FIELDS):
@@ -565,6 +576,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await push_sender.aclose()
                 if live.maps is not None:
                     await live.maps.close()
+                await maps_desk.close()
                 await live.calls.flush()
 
             await kernel.stop(release)

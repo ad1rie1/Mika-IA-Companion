@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Phone, PhoneConversation, PhoneOffer, PhoneThread } from "../../api/phone";
+import type { MapInfo, Phone, PhoneConversation, PhoneOffer, PhoneThread } from "../../api/phone";
+import { infoKey } from "../../map/info";
 import {
   appBadge,
   byApp,
   conversationTag,
   distanceWords,
+  liveWanted,
+  mapStep,
   matches,
   offerMarkup,
   offerWords,
@@ -156,6 +159,33 @@ describe("la position et le sélecteur", () => {
     expect(html).not.toContain('class="map"');
     expect(html).not.toContain("Un plan dessiné");
     expect(html).toContain("rue Nationale, Lille");  // la légende reste
+  });
+
+  const LILLE: MapInfo = { ready: true, reason: "", kind: "vecteur", bounds: [-5.2, 41.3, 9.6, 51.1],
+    tiles: "/api/moi/phone/map/tiles/{z}/{x}/{y}?v=1a2b3c4d5e6f", glyphs: null, sprite: null };
+  const HERE = { lat: 50.6365, lon: 3.0635 };
+  const POS = { known: true as const, coords: HERE, label: "rue Nationale, Lille", accuracy_m: 12, at: at(4, 14, 10) };
+
+  it("une carte qui n'a pas pu se dessiner ici (pas de WebGL, ses tuiles) : le plan revient avec sa note, sans réessayer", () => {
+    expect(liveWanted(LILLE, HERE, null)).toBe(true);
+    const failed = infoKey(LILLE);
+    expect(liveWanted(LILLE, HERE, failed)).toBe(false); // chaque dessin suivant : le plan, pas une autre tentative
+    const html = positionMarkup(POS, phone(1), NOW, liveWanted(LILLE, HERE, failed));
+    expect(html).toContain('class="map"');
+    expect(html).toContain("Un plan dessiné, pas une carte");
+    // une autre carte servie (relue) se réessaie
+    expect(liveWanted({ ...LILLE, tiles: "/api/moi/phone/map/tiles/{z}/{x}/{y}?v=ffffffffffff" }, HERE, failed)).toBe(true);
+    expect(liveWanted(LILLE, null, null)).toBe(false);
+    expect(liveWanted(LILLE, { lat: 52.52, lon: 13.4 }, null)).toBe(false); // hors de sa zone
+  });
+
+  it("une autre carte servie, relue pendant que la carte est ouverte, se repose sur elle", () => {
+    const now = infoKey(LILLE);
+    const next = infoKey({ ...LILLE, glyphs: "/api/moi/phone/map/fonts/{fontstack}/{range}.pbf?v=1" });
+    expect(mapStep(null, true, now)).toBe("mount");
+    expect(mapStep(now, true, now)).toBe("keep");
+    expect(mapStep(now, true, next)).toBe("restyle");
+    expect(mapStep(now, false, next)).toBe("plan");
   });
 
   it("le sélecteur nomme tous les téléphones, ou celui choisi", () => {

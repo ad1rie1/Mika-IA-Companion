@@ -23,6 +23,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
+from mika.contracts import trips as trips_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
 from mika.contracts.entry import Admission, HistoryRow, MessageNote, SharedDownload, SharedMeta, StrandItem
@@ -392,22 +393,36 @@ class KernelPort:
         return commit.seqs[-1] if commit.seqs else None
 
     def notes(self, ids: Sequence[str]) -> list[MessageNote]:
-        """Les positions qu'elle a regardées en écrivant ses messages, relues au journal : le lieu (sinon les
-        coordonnées), vide une fois oublié."""
-        wanted = {seq: ref for ref in ids if (seq := location_c.note_seq(ref)) is not None}
-        if not wanted:
-            return []
+        """Les petites bulles de ce qu'elle a fait en écrivant ses messages, relues au journal : la position qu'elle a
+        regardée (le lieu, sinon les coordonnées), ce qu'elle a cherché sur la carte (``look:``) ou montré
+        (``map:``), le voyage qu'elle a créé ou changé (``trip:``, son titre d'aujourd'hui). Vides une fois oubliés,
+        ou le voyage supprimé — et rien à ouvrir (``ref`` vide)."""
+        located = {seq: ref for ref in ids if (seq := location_c.note_seq(ref)) is not None}
+        marked = {ref: got for ref in ids if (got := trips_c.note_of(ref)) is not None}
+        seen = {int(ident): (kind, ref) for ref, (kind, ident) in marked.items() if kind != trips_c.NOTE_TRIP}
         mind = self.kernel.mind
         found: dict[str, MessageNote] = {}
-        for stored in mind.store.get_events(list(wanted)):
+        looked = {trips_c.NOTE_LOOK: (trips_c.LOOKED.name, "query"), trips_c.NOTE_MAP: (trips_c.SHOWN.name, "title")}
+        for stored in mind.store.get_events([*located, *seen]) if located or seen else ():
             ev = mind.decode(stored)
-            if ev.type.name != location_c.LOCATED.name or ev.seq not in wanted:
+            if ev.type.name == location_c.LOCATED.name and ev.seq in located:
+                d = with_content(mind, ev).data
+                text = (d.label.text if d.label is not None else None) or d.coords.text or ""
+                found[located[ev.seq]] = MessageNote(id=located[ev.seq], kind=location_c.NOTE_KIND, text=text,
+                                                     at=d.fixed_at // 1000)
+            elif ev.seq in seen and looked[seen[ev.seq][0]][0] == ev.type.name:
+                kind, ref = seen[ev.seq]
+                said = getattr(with_content(mind, ev).data, looked[kind][1]).text  # None : oublié
+                found[ref] = MessageNote(id=ref, kind=kind, text=said or "", at=ev.at // 1000,
+                                         ref=str(ev.seq) if said is not None else "")
+        state = mind.frame().state(trips_c.OWNER) if any(k == trips_c.NOTE_TRIP for k, _ in marked.values()) else None
+        for ref, (kind, ident) in marked.items():
+            if kind != trips_c.NOTE_TRIP:
                 continue
-            ev = with_content(mind, ev)
-            d = ev.data
-            text = (d.label.text if d.label is not None else None) or d.coords.text or ""
-            found[wanted[ev.seq]] = MessageNote(id=wanted[ev.seq], kind=location_c.NOTE_KIND, text=text,
-                                                at=d.fixed_at // 1000)
+            trip = state.trips.get(ident) if state is not None else None
+            title = self._store.content([trip.title_ref]).get(trip.title_ref) if trip is not None else None
+            found[ref] = MessageNote(id=ref, kind=kind, text=title or "", at=trip.updated_at // 1000 if trip else 0,
+                                     ref=trip.id if trip is not None and title is not None else "")
         return [found[ref] for ref in ids if ref in found]
 
     def wake_seen(self, endpoint: str, idempotency: str) -> int | None:

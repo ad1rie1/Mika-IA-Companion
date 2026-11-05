@@ -12,11 +12,13 @@ from types import SimpleNamespace as NS
 import pytest
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.app import LoginThrottle
 from mika.app.moi import Call, Denied
 from mika.app.moi import mail as mail_moi
 from mika.app.moi import mcp as mcp_moi
 from mika.app.moi import settings as settings_moi
+from mika.app.moi import shares as shares_moi
 from mika.vocab.access import OWNER, PERSON, SOURCE_WORDS_OTHER, who_words
 
 
@@ -221,3 +223,60 @@ def test_a_box_changed_elsewhere_meanwhile_is_not_overwritten(quiet):
     assert isinstance(changed, Denied) and changed.status == 409  # « rouvre-la » : rien d'écrasé sans le voir
     kept = api.settings.cfg.accounts["rando"]
     assert kept.label == "Pro" and kept.imap_host == "imap.example.test"
+
+
+class SlowServices:
+    """Des services MCP en mémoire, réglés sous le verrou comme ``settle_mcp`` le fait : une fiche relue sous le verrou,
+    ce qui en dépend calculé dessus, puis une écriture qui attend."""
+
+    def __init__(self, servers: dict) -> None:
+        self.servers = servers
+        self.writing = asyncio.Lock()
+
+    def mcp(self) -> NS:
+        return NS(servers=dict(self.servers))
+
+    async def settle(self, key: str, changes: object) -> None:
+        async with self.writing:
+            spec = self.servers[key]
+            got = changes(spec) if callable(changes) else changes
+            await asyncio.sleep(0)
+            self.servers[key] = spec.model_copy(update={"access": tuple(
+                AccessRule.model_validate(a) for a in got["access"])})
+
+
+def test_a_service_share_revoked_meanwhile_does_not_come_back(monkeypatch):
+    """Le propriétaire retire le partage de Léa ; en même temps, il partage le service avec Paul. Les lignes se
+    calculent sur la fiche relue sous le verrou : Léa ne revient pas, Paul est là."""
+    me, lea, paul = PERSON + "p7", PERSON + "p8", PERSON + "p9"
+    line = lambda who, act: {"who": [who], "read": "seule", "act": act, "keep": "prive"}  # noqa: E731
+    spec = McpServer.model_validate({"purpose": "des notes", "transport": "distant", "url": "https://notes.example.test/mcp",
+                                     "owner": me, "access": [line(me, "seule"), line(lea, "carte")]})
+    services = SlowServices({"notes": spec})
+
+    async def nothing(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(shares_moi, "audit", nothing)
+    monkeypatch.setattr(shares_moi, "people", lambda call: [{"person": "p8"}, {"person": "p9"}])
+    monkeypatch.setattr(shares_moi, "_name", lambda call, person: person)
+    api = NS(settings=services, reconfigure=None)
+    owner = Call(NS(headers={}, query_params={}), NS(account=NS(id=7), handle="user_7", person="p7", operator=False,
+                                                     owner=False, name="P7"),
+                 NS(ports={"mcp": services}), {"kind": "mcp", "key": "notes", "person": "p9", "level": "servir"},
+                 api)  # type: ignore[arg-type]
+
+    async def revoked_meanwhile() -> None:
+        async with services.writing:  # la console retire Léa ; le partage à Paul attend le verrou
+            await asyncio.sleep(0)
+            now = services.servers["notes"]
+            services.servers["notes"] = now.model_copy(update={"access": tuple(
+                a for a in now.access if tuple(a.who) != (lea,))})
+
+    async def together() -> list:
+        return list(await asyncio.gather(revoked_meanwhile(), shares_moi.set_share(owner), return_exceptions=True))
+
+    _, shared = asyncio.run(together())
+    assert shared["ok"], shared
+    who = [tuple(a.who) for a in services.servers["notes"].access]
+    assert (lea,) not in who and (paul,) in who and (me,) in who

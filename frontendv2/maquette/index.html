@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="ecrans/mail.css">
 <link rel="stylesheet" href="ecrans/teams.css">
 <link rel="stylesheet" href="ecrans/telephone.css">
+<link rel="stylesheet" href="ecrans/carte.css">
 <link rel="stylesheet" href="ecrans/parametres.css">
 <script>
   /* Le thème avant le premier rendu : ?theme=dark|light, sinon le choix retenu, sinon le système. */
@@ -133,6 +134,7 @@
       <a href="#mail" data-nav="mail" title="Mail" aria-label="Mail"><svg class="ico"><use href="#i-mail"/></svg><span>Mail</span><b class="badge" data-count="mail"></b></a>
       <a href="#teams" data-nav="teams" title="Teams" aria-label="Teams"><svg class="ico"><use href="#i-teams"/></svg><span>Teams</span><b class="badge" data-count="teams"></b></a>
       <a href="#telephone" data-nav="telephone" title="Téléphone" aria-label="Téléphone"><svg class="ico"><use href="#i-phone"/></svg><span>Téléphone</span><b class="badge" data-count="telephone"></b></a>
+      <a href="#carte" data-nav="carte" title="Carte" aria-label="Carte"><svg class="ico"><use href="#i-map"/></svg><span>Carte</span></a>
       <a href="#parametres" data-nav="parametres" title="Paramètres" aria-label="Paramètres"><svg class="ico"><use href="#i-settings"/></svg><span>Paramètres</span></a>
     </nav>
     <div class="top-right">
@@ -176,6 +178,7 @@
     <section class="screen" data-screen="mail" hidden></section>
     <section class="screen" data-screen="teams" hidden></section>
     <section class="screen" data-screen="telephone" hidden></section>
+    <section class="screen" data-screen="carte" hidden></section>
     <section class="screen" data-screen="parametres" hidden></section>
   </main>
 
@@ -186,6 +189,7 @@
     <a href="#mail" data-nav="mail"><svg class="ico"><use href="#i-mail"/></svg><span>Mail</span><b class="badge" data-count="mail"></b></a>
     <a href="#teams" data-nav="teams"><svg class="ico"><use href="#i-teams"/></svg><span>Teams</span><b class="badge" data-count="teams"></b></a>
     <a href="#telephone" data-nav="telephone"><svg class="ico"><use href="#i-phone"/></svg><span>Tél.</span><b class="badge" data-count="telephone"></b></a>
+    <a href="#carte" data-nav="carte"><svg class="ico"><use href="#i-map"/></svg><span>Carte</span></a>
     <a href="#outils" data-nav="outils"><svg class="ico"><use href="#i-tools"/></svg><span>Outils</span></a>
     <a href="#parametres" data-nav="parametres"><svg class="ico"><use href="#i-settings"/></svg><span>Paramètres</span></a>
   </nav>
@@ -215,6 +219,8 @@
 <script src="ecrans/mail.js"></script>
 <script src="ecrans/teams.js"></script>
 <script src="ecrans/telephone.js"></script>
+<script src="ecrans/carte-fond.js"></script>
+<script src="ecrans/carte.js"></script>
 <script src="ecrans/parametres.js"></script>
 <script>M.start();</script>
 <script type="module" src="mika-vrm.js"></script>

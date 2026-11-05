@@ -554,7 +554,12 @@ class SettingsForms:
             return await self._command(ui, s, data[COMMAND], by, page)
         if s.model is None or s.save is None:
             return None, {s.key: State(messages=[("danger", "Rien à enregistrer ici.")])}, 400
-        if s.lock is None:
+        # charger une liste d'une entrée (les dossiers d'une boîte, les modèles d'un fournisseur) n'enregistre rien :
+        # jamais sous le verrou, qu'un serveur lent tiendrait pour tous les réglages des autres. Seul ce chargement-là
+        # (``_save_record`` le reconnaît) : un envoi qui supprime, remplace le YAML ou enregistre la section, même
+        # porteur de ``_charger``, réécrit les réglages et reste sous le verrou.
+        loading = bool(data.get(LOAD) and data.get(RECORD) and not data.get(DELETE) and not data.get(YAML))
+        if s.lock is None or loading:
             return await self._submit(ui, s, pg, data, lists, by, page)
         # relue puis enregistrée d'un seul tenant : ce que d'autres viennent d'y écrire (l'API par personne) reste
         async with s.lock:

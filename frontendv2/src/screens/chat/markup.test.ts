@@ -3,6 +3,10 @@ import type { StoredMessage } from "@web/ui/chatSync";
 import { splitBubbles } from "@web/ui/bubbles";
 import { EMPTY_APPROVALS, withApprovals, withConnection } from "@web/ui/approvals";
 import { toolFrame, withToolFrame, type WorkCard } from "@web/ui/toolActivity";
+import { messageNotes } from "@web/ui/messageNotes";
+import { miniCard, pendingMini } from "../../map/cards";
+import { slotKey } from "../../map/minis";
+import { mapNotes } from "../../map/notes";
 import {
   approvalsMarkup,
   cardKinds,
@@ -258,5 +262,37 @@ describe("les cartes qui se décident ailleurs (ADR 0191)", () => {
     expect(html).toContain('href="#mail/messages/brouillon/d9"');
     expect(html).toContain("Ouvrir dans Mail");
     expect(html).not.toContain('data-ap="accept"');
+  });
+});
+
+describe("ses cartes dans le fil (ADR 0196)", () => {
+  // une ligne d'elle, telle que le fil relu la porte : la bulle 📍, un regard, un voyage, une sorte inconnue, une note vidée
+  const notes = [
+    { kind: "location", text: "rue Nationale, Lille", at: at(4, 14, 10) },
+    { kind: "look", text: "Dormir · près de Talloires", at: at(4, 14, 18), ref: "812" },
+    { kind: "trip", text: "Les Alpes en cinq jours", at: at(4, 14, 19), ref: "640" },
+    { kind: "meteo", text: "Soleil", at: 1, ref: "9" },
+    { kind: "map", text: "", at: 0 },
+  ];
+  const msg = {
+    text: "je t'ai fait une première version", sender: "vtuber", ts: at(4, 14, 20), id: 900,
+    notes: messageNotes(notes), maps: mapNotes(notes),
+  } as StoredMessage;
+  const cards = (m: StoredMessage) =>
+    mapNotes((m as { maps?: unknown }).maps).map((n) => miniCard(slotKey(String(m.id), n), pendingMini(n), "© OpenStreetMap")).join("");
+
+  it("montre un regard et un voyage en cartes miniatures qui s'ouvrent dans Carte ; la bulle 📍 ne change pas", () => {
+    const html = threadMarkup(view([msg], { mapCards: cards }));
+    expect(html).toContain("Mika a regardé où tu es · rue Nationale, Lille");
+    expect(html).toContain('href="#carte/explorer/regard-812"');
+    expect(html).toContain('href="#carte/voyages/640"');
+    expect(html).toContain('data-mini="900|trip:640"');
+    expect(html.match(/class="msg-map/g)).toHaveLength(2); // ni la sorte inconnue, ni la note vidée
+    expect(html.indexOf("msg-map")).toBeGreaterThan(html.indexOf("première version")); // sous ses bulles
+  });
+
+  it("attend la fin de ses bulles, comme ses fichiers", () => {
+    const html = threadMarkup(view([{ ...msg, text: "un\n\ndeux" } as StoredMessage], { mapCards: cards, shown: () => 1 }));
+    expect(html).not.toContain("msg-map");
   });
 });

@@ -144,6 +144,7 @@ modules = [
     "mika.plugins.teams",
     "mika.plugins.location",
     "mika.plugins.phone",
+    "mika.plugins.trips",
 ]
 
 [[tool.importlinter.contracts]]

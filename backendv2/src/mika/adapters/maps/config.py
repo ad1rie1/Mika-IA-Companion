@@ -1,6 +1,10 @@
 """D'où vient la carte de sa position (ADR 0193) : rien (le plan dessiné), un fichier PMTiles du dossier de données, ou
 un serveur de carte que le serveur relaie. Le navigateur ne parle qu'à Mika : aucune adresse du dehors ne lui est
-donnée, qui dirait où tu es."""
+donnée, qui dirait où tu es.
+
+Et d'où viennent les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194) : l'index local des lieux
+(``PlacesConfig.index``, rien ne sort), la Géoplateforme de l'IGN pour les adresses, un serveur Valhalla pour les
+itinéraires (``RoutingConfig``) — par défaut, ni adresses ni itinéraires : rien ne sort sans le choix d'un opérateur."""
 
 from __future__ import annotations
 
@@ -100,3 +104,105 @@ class MapConfig(BaseModel):
     def zxy(self) -> bool:
         """Une adresse de tuiles (``{z}/{x}/{y}``), pas une archive PMTiles."""
         return all(m in self.url for m in MARKS)
+
+
+def _http_url(url: str, example: str) -> str:
+    """Une adresse http(s) complète, sans espace, sans ``/`` final (on y ajoute le chemin de l'API)."""
+    url = url.strip()
+    if not url:
+        return url
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or " " in url or parts.query or parts.fragment:
+        raise ValueError(f"une adresse http(s) complète ({example})")
+    return url.rstrip("/")
+
+
+# ── les lieux et les adresses (ADR 0194) ──
+NO_ADDRESSES, GEOPLATEFORME = "aucune", "geoplateforme"
+ADDRESS_SOURCES = ((NO_ADDRESSES, "Aucune : rien ne sort"),
+                   (GEOPLATEFORME, "La Géoplateforme de l'IGN (la Base Adresse Nationale), relayée par ce serveur"))
+#: le service de géocodage de la Géoplateforme (iso-fonctionnel avec l'ancienne API Adresse)
+GEOPLATEFORME_URL = "https://data.geopf.fr/geocodage"
+
+
+class PlacesConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: Annotated[str, Knob(
+        label="Index des lieux", advanced=False, order=10,
+        help="Le fichier SQLite des lieux (points d'intérêt, villes et lieux-dits), sous cartes/ du dossier de "
+             "données, que « mika carte lieux » tire des tuiles de la carte (deploy/README.md, « La carte de sa "
+             "position »). On y cherche sans que rien ne sorte.")] = f"{MAPS_DIR}/lieux.db"
+    addresses: Annotated[Literal["aucune", "geoplateforme"], Knob(
+        label="Adresses", choices=ADDRESS_SOURCES, advanced=False, order=20,
+        help="Où chercher une adresse (un numéro et une rue). La Géoplateforme : ce serveur ne lui envoie que le "
+             "texte cherché — jamais la position de la personne, ni rien d'elle.")] = NO_ADDRESSES
+    addresses_url: Annotated[str, Knob(
+        label="Adresse du géocodage", order=30, only=(("addresses", (GEOPLATEFORME,)),),
+        help="Le service de géocodage de la Géoplateforme (son API /search). Seul ce serveur le joint.")] = \
+        GEOPLATEFORME_URL
+
+    @field_validator("index")
+    @classmethod
+    def _path(cls, value: str) -> str:
+        return _under_maps(value)
+
+    @field_validator("addresses_url")
+    @classmethod
+    def _url(cls, url: str) -> str:
+        return _http_url(url, GEOPLATEFORME_URL) or GEOPLATEFORME_URL
+
+
+# ── les itinéraires (ADR 0194) ──
+NO_ROUTING, FOSSGIS, VALHALLA = "aucun", "fossgis", "valhalla"
+ROUTING_SOURCES = ((NO_ROUTING, "Aucun : pas d'itinéraires"),
+                   (FOSSGIS, "Le Valhalla public de FOSSGIS (une demande par seconde, sans garantie)"),
+                   (VALHALLA, "Un Valhalla à toi"))
+#: le serveur Valhalla public de FOSSGIS (celui d'openstreetmap.org) : ses conditions — au plus une demande par
+#: seconde, aucune garantie qu'il réponde — valent pour tout ce serveur ; son adresse n'est écrite qu'ici
+FOSSGIS_URL = "https://valhalla1.openstreetmap.de"
+FOSSGIS_PER_SECOND = 1.0
+
+
+class RoutingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: Annotated[Literal["aucun", "fossgis", "valhalla"], Knob(
+        label="Itinéraires", choices=ROUTING_SOURCES, advanced=False, order=10,
+        help="Qui calcule les itinéraires. Le Valhalla public de FOSSGIS : ses conditions demandent au plus une "
+             "demande par seconde (pour tout ce serveur, toutes personnes confondues) et ne garantissent rien ; "
+             "chaque trajet est gardé un jour, un trajet redemandé ne repart pas. Un Valhalla à toi : sur le "
+             "portable, par exemple (deploy/README.md). Seuls les points du trajet partent.")] = NO_ROUTING
+    url: Annotated[str, Knob(
+        label="Adresse du serveur", advanced=False, order=20, only=(("source", (VALHALLA,)),),
+        help="Ton serveur Valhalla (http://127.0.0.1:8002). Seul ce serveur le joint.")] = ""
+    per_second: Annotated[float, Knob(
+        label="Demandes par seconde", lo=0.1, hi=100, step=0.1, order=30, only=(("source", (VALHALLA,)),),
+        help="Au plus tant de demandes par seconde à ton serveur, pour tout ce serveur.")] = 10.0
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, url: str) -> str:
+        return _http_url(url, "http://127.0.0.1:8002")
+
+    @field_validator("per_second")
+    @classmethod
+    def _rate(cls, value: float) -> float:
+        if not 0.1 <= value <= 100:
+            raise ValueError("entre 0,1 et 100 demandes par seconde")
+        return value
+
+    @model_validator(mode="after")
+    def _complete(self) -> RoutingConfig:
+        if self.source == VALHALLA and not self.url:
+            raise ValueError("un Valhalla à toi : son adresse")
+        return self
+
+    @property
+    def base(self) -> str:
+        """L'adresse du serveur réglé ; vide : aucun."""
+        return FOSSGIS_URL if self.source == FOSSGIS else self.url if self.source == VALHALLA else ""
+
+    @property
+    def rate(self) -> float:
+        return FOSSGIS_PER_SECOND if self.source == FOSSGIS else self.per_second

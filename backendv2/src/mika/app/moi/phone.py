@@ -161,8 +161,12 @@ async def apk(call: Call) -> Response:
 
 # ── la carte de sa position (ADR 0193) ──
 MAP = "/phone/map"
-#: ce que le navigateur garde d'une tuile, d'une police ou d'une planche d'icônes : pour lui seul, un jour
+#: ce que le navigateur garde d'une tuile, d'une police ou d'une planche d'icônes : pour lui seul, un jour — sous une
+#: adresse qui porte la version de la source (``?v=``, ou ``~<version>/`` pour les icônes : MapLibre ajoute leur fin
+#: au chemin), qu'une autre source change ; les routes l'acceptent et l'ignorent
 MAP_CACHE = "private, max-age=86400"
+#: le début du segment de version d'une adresse d'icônes (« sprites/~1a2b3c4d5e6f/v4/light.json »)
+VERSION_MARK = "~"
 
 
 def _maps(call: Call) -> Any:
@@ -180,11 +184,15 @@ async def map_info(call: Call) -> dict[str, Any]:
         return {"ready": False, "reason": "La carte n'est pas branchée sur ce serveur."}
     got = await maps.info()
     base = PREFIX + MAP
+    # la version de la source dans chaque adresse : le navigateur ne ressert pas, d'une carte remplacée (un autre
+    # fichier, des images au lieu de vecteurs), ce qu'il gardait de l'autre
+    query = f"?v={got.version}" if got.version else ""
+    sprites = f"{base}/sprites/{VERSION_MARK}{got.version}/v4" if got.version else f"{base}/sprites/v4"
     return {"ready": got.ready, "reason": got.reason, "kind": got.kind, "minzoom": got.minzoom,
             "maxzoom": got.maxzoom, "bounds": list(got.bounds) if got.bounds is not None else None,
-            "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}",
-            "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf" if got.fonts else None,
-            "sprite": f"{base}/sprites/v4" if got.sprites else None}
+            "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}{query}",
+            "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf{query}" if got.fonts else None,
+            "sprite": sprites if got.sprites else None}
 
 
 async def map_tile(call: Call) -> Response:
@@ -219,8 +227,11 @@ async def map_font(call: Call) -> Response:
 
 
 async def map_sprite(call: Call) -> Response:
-    """Une planche d'icônes de la carte (son image, ou ce qu'elle range où)."""
+    """Une planche d'icônes de la carte (son image, ou ce qu'elle range où) ; le segment de version qui la précède
+    (``~<version>/``) est accepté et ignoré."""
     rel = str(call.request.path_params["path"])
+    if rel.startswith(VERSION_MARK):
+        rel = rel.partition("/")[2]
     media = "application/json" if rel.endswith(".json") else "image/png" if rel.endswith(".png") else ""
     return _asset(_maps(call).asset("sprites", rel) if media else None, media)
 

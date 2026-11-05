@@ -3,7 +3,9 @@
  * de jour, messages, propositions), les conversations rangées par appli, la position et son lien OpenStreetMap. Le
  * balisage est celui de la maquette (`frontendv2/maquette/ecrans/telephone.js`).
  */
-import type { Phone, PhoneConversation, PhoneMessage, PhoneOffer, PhonePosition, PhoneThread } from "../../api/phone";
+import type { MapInfo, Phone, PhoneConversation, PhoneMessage, PhoneOffer, PhonePosition, PhoneThread } from "../../api/phone";
+import { infoKey } from "../../map/info";
+import { covers } from "../../map/mapgeo";
 import { mikaAvatar } from "../../mika/face";
 import { h, initials, norm } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
@@ -274,8 +276,27 @@ export function mapMarkup(accuracy: number, label: string): string {
 }
 
 /**
+ * La vraie carte se montre-t-elle ? Elle couvre la position, et elle ne s'est pas déjà refusée ici pour cette carte du
+ * serveur (`failed` : la clé de celle qui n'a pas pu se dessiner — pas de WebGL, MapLibre absent, ses tuiles en échec de
+ * suite). Sinon, le plan dessiné et sa note, sans réessayer à chaque dessin ; une autre carte servie se réessaie.
+ */
+export function liveWanted(info: MapInfo | null, at: { lat: number; lon: number } | null, failed: string | null): boolean {
+  return !!at && covers(info, at.lat, at.lon) && failed !== infoKey(info);
+}
+
+/** Ce que l'onglet fait de sa carte à ce dessin : le plan, la monter, la garder, ou reposer son style (une autre
+ *  carte du serveur, relue pendant qu'elle était ouverte). `liveKey` : la carte servie qu'elle dessine (`null` : aucune). */
+export type MapStep = "plan" | "mount" | "keep" | "restyle";
+
+export function mapStep(liveKey: string | null, wanted: boolean, key: string): MapStep {
+  if (!wanted) return "plan";
+  if (liveKey === null) return "mount";
+  return liveKey === key ? "keep" : "restyle";
+}
+
+/**
  * La position : sa carte (`live` : la vraie, servie par ce serveur et dessinée par MapLibre dans `[data-map]`), sinon
- * le plan dessiné ; à côté, ce qu'on en sait.
+ * le plan dessiné et sa note ; à côté, ce qu'on en sait.
  */
 export function positionMarkup(p: PhonePosition, phone: Phone | null, now: number, live = false): string {
   if (!p.known) {

@@ -151,6 +151,11 @@ export interface ThreadView {
   api: string;
   /** Une recherche dans la conversation : seulement ce qui la contient (sans accents ni casse). */
   filter?: (msg: StoredMessage) => boolean;
+  /**
+   * Ses cartes miniatures (ADR 0196 : un voyage, ce qu'elle a cherché, une carte qu'elle montre), sous ses bulles,
+   * qui s'ouvrent dans l'écran Carte (`map/cards.ts::miniCard`) ; aucune : rien.
+   */
+  mapCards?: (msg: StoredMessage) => string;
 }
 
 function sysNote(text: string, side: "me" | "her", href?: string, icon: "info" | "alert" | "moon-z" = "info"): string {
@@ -228,12 +233,13 @@ export function mikaMessage(msg: StoredMessage, view: ThreadView, carded: boolea
         .map((p) => `<div class="bubble${msg.inner ? " inner" : ""}">${inlineHtml(p)}</div>`)
         .join("");
   const files = complete ? (msg.files ?? []).map((f) => sentFile(f, view.api)).join("") : "";
+  const maps = complete && view.mapCards ? view.mapCards(msg) : "";
   const judged = complete && !msg.inner && typeof msg.id === "number" ? verdictButtons(msg, msg.id, view.api, view.operator) : "";
   const label = [clock(msg.ts), ...(pro ? ["mode pro"] : []), ...(msg.inner ? ["pensée à voix haute"] : [])].join(" · ");
   let out = "";
   // une réponse pro relue sans sa carte en direct (qui ne survit pas à un rechargement) : ses outils, repliés
   if (pro && !carded && msg.tools?.length) out += historyTools(msg.tools);
-  out += `<div class="msg ${pro ? "pro" : "her"}">${mikaAvatar("sm")}<div class="msg-col">${locationNote(msg)}${bubbles}${files}
+  out += `<div class="msg ${pro ? "pro" : "her"}">${mikaAvatar("sm")}<div class="msg-col">${locationNote(msg)}${bubbles}${files}${maps}
     <div class="msg-meta">${h(label)}${judged}</div></div></div>`;
   if (view.operator && msg.verdictNote) out += sysNote(`Ce qu'elle aurait dû dire : ${msg.verdictNote}`, "her");
   const error = typeof msg.id === "number" ? view.verdictErrors.get(msg.id) : undefined;

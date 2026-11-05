@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -40,7 +41,7 @@ from mika.adapters.web.app import (
     read_bounded,
 )
 from mika.contracts import identity as identity_c
-from mika.kernel.forms import RENDERED
+from mika.kernel.forms import RENDERED, errors_fr
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.operations import FIXED_FIELD, Outcome, perform
 
@@ -54,6 +55,13 @@ PASSWORD_TRIES = (5, 60.0)
 #: tester une boîte ou un service, relever ses boîtes (un clic les relève toutes) : au plus tant de fois par compte dans
 #: la fenêtre, car chaque essai fait joindre un serveur au moteur
 PROBES = (30, 60.0)
+#: ce qui fait sortir une demande vers un service du dehors pour la carte (un itinéraire, une adresse, un ordre,
+#: un GPX) : au plus tant par compte dans la fenêtre. Le serveur d'itinéraires public (une demande par seconde pour
+#: tout ce serveur) reste ainsi à tous, et à ses outils à elle : une seule personne ne le tient pas.
+OUTBOUND = (20, 60.0)
+#: une adresse cherchée, à la Géoplateforme (qui en permet 50 par seconde) : au plus tant par compte dans la fenêtre —
+#: une saisie en cours en demande plusieurs, sans priver qui que ce soit du serveur d'itinéraires
+ADDRESSES = (60, 60.0)
 #: ce qu'une personne qui n'est pas opératrice branche à elle : au plus tant de boîtes, de comptes Teams, de services
 OWN_MAX = 10
 #: les créations dont on garde la réponse, pour qu'une création redite avec la même clé ne refasse rien
@@ -76,6 +84,16 @@ NOT_FOUND = "Introuvable."
 
 def missing() -> Denied:
     return Denied(404, NOT_FOUND)
+
+
+def refused(exc: Exception) -> Denied:
+    """Un réglage refusé (400), dit en mots : pour pydantic, chaque champ et ce qu'il demande — jamais la dernière ligne
+    de son message, l'adresse de sa documentation ; sinon, la première ligne de l'erreur."""
+    if isinstance(exc, ValidationError):
+        said = " ; ".join(f"{path} : {message}" if path else message for path, message in errors_fr(exc).items())
+    else:
+        said = (str(exc).splitlines() or [""])[0]
+    return Denied(400, said[:300] or "Réglage refusé.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +252,16 @@ class Call:
             raise Denied(429, "Trop d'essais d'affilée : attends une minute avant de réessayer.")
         self.api.probes.fail(key)
 
+    def outbound(self, *, addresses: bool = False) -> None:
+        """Une demande de la carte qui sort vers un service du dehors : bornée par compte, 429 au-delà — le serveur
+        d'itinéraires public est à tous (``OUTBOUND``) ; une adresse a sa propre borne, plus large (``ADDRESSES``)."""
+        key = f"compte:{self.me.account.id}"
+        throttle = self.api.address_tries if addresses else self.api.outbound
+        if throttle.blocked(key):
+            raise Denied(429, "Trop d'adresses cherchées d'affilée : attends une minute." if addresses else
+                         "Trop de trajets demandés d'affilée : attends une minute.")
+        throttle.fail(key)
+
 
 Handler = Callable[[Call], Awaitable[Any]]
 
@@ -253,6 +281,10 @@ class MeApi:
         self.password_tries = LoginThrottle(*PASSWORD_TRIES)
         #: les essais qui font joindre un serveur (tester une boîte ou un service, relever), par compte
         self.probes = LoginThrottle(*PROBES)
+        #: les demandes de la carte qui sortent vers un service du dehors, par compte
+        self.outbound = LoginThrottle(*OUTBOUND)
+        #: les adresses cherchées, par compte (``ADDRESSES``)
+        self.address_tries = LoginThrottle(*ADDRESSES)
         #: les créations faites, par clé d'envoi (``Call.once``), et ce qui fait celles d'un compte l'une après l'autre
         self.created: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.creating: dict[int, asyncio.Lock] = {}
@@ -336,6 +368,7 @@ async def who(req: Call) -> dict[str, Any]:
 
 
 # ── les modules : chacun rend ses routes, et ce qu'il compte pour la barre du haut ──
+from mika.app.moi import carte as carte  # noqa: E402
 from mika.app.moi import mail as mail  # noqa: E402
 from mika.app.moi import mcp as mcp  # noqa: E402
 from mika.app.moi import phone as phone  # noqa: E402
@@ -345,6 +378,6 @@ from mika.app.moi import shares as shares  # noqa: E402
 from mika.app.moi import teams as teams  # noqa: E402
 
 MODULES: tuple[Callable[[MeApi], list[Route]], ...] = (mail.routes, teams.routes, phone.routes, rights.routes,
-                                                       settings.routes, mcp.routes, shares.routes)
+                                                       settings.routes, mcp.routes, shares.routes, carte.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
                                                             ("phone", phone.count))

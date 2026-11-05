@@ -25,7 +25,7 @@ from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpe
 from mika.adapters.llm.models import ListingFailed, list_models, settle_limits
 from mika.adapters.mail import MailConfig
 from mika.adapters.mail.config import MailAccount
-from mika.adapters.maps import MapConfig
+from mika.adapters.maps import MapConfig, PlacesConfig, RoutingConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
@@ -645,6 +645,26 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def map_facts() -> list[tuple[str, str]]:
         return live.maps.describe() if live.maps is not None else [("Source", "la carte n'est pas branchée")]
 
+    # ── les lieux, les adresses et les itinéraires de l'écran Carte (ADR 0194) : le port ``maps`` ──
+    def maps_desk() -> Any:
+        return live.kernel.ports.get("maps")
+
+    async def save_places(cfg: PlacesConfig, by: str) -> list[str]:
+        await settings.save_places_config(cfg)
+        return []
+
+    def places_facts() -> list[tuple[str, str]]:
+        desk = maps_desk()
+        return desk.describe_places() if desk is not None else [("Lieux", "pas branchés sur ce serveur")]
+
+    async def save_routing(cfg: RoutingConfig, by: str) -> list[str]:
+        await settings.save_routing_config(cfg)
+        return []
+
+    def routing_facts() -> list[tuple[str, str]]:
+        desk = maps_desk()
+        return desk.describe_routing() if desk is not None else [("Itinéraires", "pas branchés sur ce serveur")]
+
     # ── notifications du téléphone (ADR 0077) ──
     async def save_push(cfg: PushSettings, by: str) -> list[str]:
         await settings.save_push(cfg.service_account)
@@ -926,6 +946,32 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "réextrait) ne parle à personne ; un serveur de carte est joint par ce serveur seul, sans "
                             "rien de la personne. Hors de la zone couverte, ou sans carte, la position garde son "
                             "plan dessiné.")),)),
+        SettingsSection("lieux", "Lieux et adresses", "canaux", PlacesConfig, settings.places_config, save_places,
+                        order=26, facts=places_facts,
+                        description="Où l'écran Carte et ses outils cherchent un lieu et une adresse (ADR 0194) : "
+                                    "l'index des lieux du dossier de données (rien ne sort), et la Géoplateforme de "
+                                    "l'IGN pour les adresses, que ce serveur joint seul.",
+                        pages=(SettingsPage("lieux", "Lieux et adresses", description=(
+                            "Les lieux — restaurants, campings, sommets, musées, villes et lieux-dits — se cherchent "
+                            "dans un index tiré des tuiles de la carte par « mika carte lieux » (un fichier SQLite "
+                            "sous cartes/, refait quand la carte l'est) : par le nom, autour d'un point, dans une "
+                            "zone, le long d'un trajet, sans que rien ne sorte. Une adresse (un numéro et une rue) "
+                            "vient de la Géoplateforme de l'IGN (la Base Adresse Nationale), relayée par ce serveur : "
+                            "seul le texte cherché lui part, jamais la position de la personne. Sans index, ou sans "
+                            "adresses, l'écran Carte le dit.")),)),
+        SettingsSection("itineraires", "Itinéraires", "canaux", RoutingConfig, settings.routing_config, save_routing,
+                        order=27, facts=routing_facts,
+                        description="Qui calcule les itinéraires de l'écran Carte et de ses voyages (ADR 0194) : un "
+                                    "serveur Valhalla, le public de FOSSGIS ou le tien. Vers lui ne partent que les "
+                                    "points du trajet.",
+                        pages=(SettingsPage("itineraires", "Itinéraires", description=(
+                            "En voiture, à vélo ou à pied, péages, autoroutes ou ferries évitables, les consignes en "
+                            "français et le meilleur ordre des arrêts : un serveur Valhalla les calcule, joint par ce "
+                            "serveur seul. Le Valhalla public de FOSSGIS (celui d'openstreetmap.org) demande au plus "
+                            "une demande par seconde, pour tout ce serveur, et ne garantit pas de répondre : chaque "
+                            "trajet est gardé un jour, un trajet redemandé ne repart pas. Un Valhalla à toi, sur le "
+                            "portable, n'a pas ces limites (la recette : deploy/README.md, « La carte de sa "
+                            "position »). Par défaut, aucun : rien ne sort.")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

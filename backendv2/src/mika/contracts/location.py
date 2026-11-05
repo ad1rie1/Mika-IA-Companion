@@ -10,9 +10,16 @@ montre en petite bulle.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from mika.kernel.events import Content, Payload, event_type
+from mika.kernel.facts import FactFamily
 
 OWNER = "location"
+#: le lot de ses outils, et celui qui regarde où est la personne : ce qu'un autre outil qui s'en sert (« ici », pour
+#: chercher autour d'elle) revérifie par la même règle (``vocab.rights.here_allowed``)
+BUNDLE = "location"
+WHERE_TOOL = "location_where"
 #: la sorte des petites bulles qui disent qu'elle a regardé où était la personne (``MessageNote.kind``)
 NOTE_KIND = "location"
 #: le préfixe des références que ses messages emportent (``ToolResult.attach``) : ``location:<seq>``
@@ -42,6 +49,23 @@ class Cleared(Payload):
 LOCATED = event_type("location.located", OWNER, Located, content=("coords", "label"), subjects=("handle", "person"))
 CLEARED = event_type("location.cleared", OWNER, Cleared, subjects=("handle", "person"))
 ALL = (LOCATED, CLEARED)
+
+
+@dataclass(frozen=True, slots=True)
+class FixReading:
+    """La dernière position qu'une personne a donnée : ses contenus par référence (``label_ref`` vide : le téléphone
+    n'a pas trouvé de lieu), le ``seq`` de la mesure — la bulle d'un regard — et quand le téléphone l'a mesurée."""
+
+    seq: int
+    coords_ref: str
+    label_ref: str
+    fixed_at: int
+
+
+#: ``FIX(adresse)`` : la dernière position de cette adresse, ou d'une autre adresse de la même personne (un téléphone
+#: et un navigateur liés), jamais celle de quelqu'un d'autre (``FixReading`` ; ``None`` : aucune — jamais dite,
+#: effacée, oubliée). Ce que lit un outil qui cherche « ici » ; s'en servir reste un regard, qui se voit.
+FIX = FactFamily("location.fix", arg=str, type=FixReading)
 
 
 def note_ref(seq: int) -> str:

@@ -535,13 +535,13 @@ body.mika-en-grand .sp-static { display: block; }
 
 /* ── Petits écrans : la navigation passe en bas, comme sur Android ───── */
 .tabbar { display: none; }
-@media (max-width: 1380px) {
+@media (max-width: 1520px) {
   .gsearch { width: 34px; padding: 0; justify-content: center; }
   .gsearch span, .gsearch .kbd { display: none; }
   .nav a { padding: 0 9px; }
   .state-pill { width: 250px; }
 }
-@media (max-width: 1140px) {
+@media (max-width: 1240px) {
   .state-pill { width: auto; }
   .state-pill .sp-doing { display: none; }
   .nav a span { display: none; }
@@ -559,7 +559,7 @@ body.mika-en-grand .sp-static { display: block; }
   .nav { display: none; }
   .brand { margin-right: auto; }
   .state-pill { max-width: 150px; }
-  .tabbar { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid var(--border); background: var(--bg);
+  .tabbar { display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid var(--border); background: var(--bg);
     padding-bottom: env(safe-area-inset-bottom); }
   .tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--muted); font-size: 10.5px; font-weight: 550; position: relative; }
   .tabbar a:hover { text-decoration: none; }

@@ -88,14 +88,18 @@ class SharedMeta:
 
 @dataclass(frozen=True, slots=True)
 class MessageNote:
-    """Une petite bulle jointe à un de ses messages : ce qu'elle a fait en l'écrivant, qu'un écran montre (ADR 0119).
-    ``kind`` : ``location`` (elle a regardé où était la personne) ; ``text`` : ce qu'elle a vu (le lieu, sinon les
-    coordonnées), vide une fois oublié ; ``at`` : de quand datait ce qu'elle a vu (millisecondes)."""
+    """Une petite bulle jointe à un de ses messages : ce qu'elle a fait en l'écrivant, qu'un écran montre (ADR 0119,
+    0196). ``kind`` : ``location`` (elle a regardé où était la personne), ``look`` (elle a cherché des lieux ou un
+    trajet), ``map`` (elle a montré une carte), ``trip`` (elle a créé ou changé un voyage) ; ``text`` : ce qu'elle a
+    vu (le lieu, ce qu'elle a cherché, le titre), vide une fois oublié ou effacé ; ``at`` : de quand datait ce
+    qu'elle a vu (millisecondes) ; ``ref`` : ce qu'un écran ouvre (le ``seq`` d'un regard ou d'une carte,
+    l'identifiant d'un voyage), vide sinon — ou une fois disparu."""
 
     id: str
     kind: str
     text: str
     at: int
+    ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)

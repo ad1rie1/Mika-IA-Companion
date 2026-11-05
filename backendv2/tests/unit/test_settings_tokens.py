@@ -90,3 +90,24 @@ def test_the_secret_key_is_born_private_whatever_the_umask(tmp_path, monkeypatch
     path = data / "secret.key"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert SecretBox.for_data(data).open(box.seal("x")) == "x"  # relue : la même clé
+
+
+def test_two_teams_keys_made_at_once_both_stay(tmp_path):
+    """Deux comptes Teams reçoivent leur clé en même temps : les clés se relisent puis se réécrivent d'un seul tenant,
+    chacun garde la sienne ; une clé retirée en même temps ne revient pas."""
+    async def scenario(store, box, settings):
+        put = settings._put
+
+        async def slow_put(key, value):
+            await asyncio.sleep(0)  # une base qui écrit : l'autre enregistrement se glisse là
+            return await put(key, value)
+
+        settings._put = slow_put
+        await asyncio.gather(settings.save_teams_key("pro", "d1", "mt_1", 1, "op"),
+                             settings.save_teams_key("perso", "d2", "mt_2", 2, "op"))
+        both = sorted(settings.teams_keys())
+        await asyncio.gather(settings.revoke_teams_key("pro"), settings.save_teams_key("famille", "d3", "mt_3", 3, "op"))
+        return both, sorted(settings.teams_keys())
+
+    both, after = _run(tmp_path, scenario)
+    assert both == ["perso", "pro"] and after == ["famille", "perso"]

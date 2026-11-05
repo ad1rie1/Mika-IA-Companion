@@ -41,6 +41,9 @@ def test_a_service_she_plugs_is_hers_with_one_access_line(world):  # noqa: F811
     again = servers(client, live)["factures"]
     assert again.when_to_use == "quand on parle d'argent" and again.secret_headers == "Authorization: Bearer abc"
     assert post(client, "/mcp/save", {"name": "factures", "values": {"owner": ""}}).status_code == 400
+    # un réglage refusé se dit en mots : le champ et ce qu'il veut, jamais l'adresse de la documentation de pydantic
+    wrong = post(client, "/mcp/save", {"name": "factures", "values": {"enabled": "peut-être"}})
+    assert wrong.status_code == 400 and "enabled" in wrong.json()["error"] and "pydantic" not in wrong.text
 
     login(client, "adrien")  # le service de Léa n'existe pas pour toi ici (la console, elle, les voit tous)
     assert client.get(API + "/mcp/services").json()["items"] == []

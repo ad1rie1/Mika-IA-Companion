@@ -6,10 +6,11 @@
  * Ce que l'API ne sait pas encore, l'écran le dit au lieu de le feindre : répondre d'ici et « Préremplir avec Mika »
  * (ADR 0189, 0191), quel téléphone a reçu quel message, les apps autres que les messageries.
  */
-import { fetchConversations, fetchMap, fetchPosition, fetchThread, type MapInfo, type Phone, type PhoneThread } from "../../api/phone";
+import { fetchConversations, fetchPosition, fetchThread, type MapInfo, type Phone, type PhoneThread } from "../../api/phone";
+import { infoKey, mapInfo } from "../../map/info";
+import { loadMapLibre, noteWebglMissing, webglMissing } from "../../map/load";
 import { isDark, onTheme } from "../../shell/theme";
 import type { At, LiveMap } from "./livemap";
-import { covers } from "./mapgeo";
 import { countOf } from "../../shell/counts";
 import { $, h, isMobile, on } from "../../shell/dom";
 import { openMenu, type MenuItem } from "../../shell/float";
@@ -27,7 +28,8 @@ import {
   notificationsMarkup,
   onlyPhone,
   phoneSwitch,
-  mapMarkup,
+  liveWanted,
+  mapStep,
   positionMarkup,
   shortPhone,
   SWITCH_NOTE,
@@ -43,11 +45,17 @@ class TelephoneScreen {
   private readonly conversations = new Cached(() => fetchConversations(), 10_000);
   private readonly phones = store.phones;
   private readonly position = new Cached(() => fetchPosition(), 15_000);
-  /** La carte réglée sur le serveur (ADR 0193) : relue toutes les cinq minutes. */
-  private readonly mapInfo = new Cached(() => fetchMap(), 5 * 60_000);
+  /** La carte réglée sur le serveur (ADR 0193), partagée par toutes les cartes de la page : relue toutes les cinq
+   *  minutes. */
+  private readonly mapInfo = mapInfo;
   /** La vraie carte, dessinée : elle survit aux redessins de l'onglet, retirée quand on le quitte. */
   private live: LiveMap | null = null;
   private liveAt: At | null = null;
+  /** La carte du serveur qu'elle dessine (`infoKey`) : une autre, relue, se repose sur elle (`restyle`). */
+  private liveKey: string | null = null;
+  /** La carte du serveur qui ne s'est pas dessinée ici (pas de WebGL, MapLibre absent, ses tuiles en échec de suite) :
+   *  le plan dessiné et sa note, sans réessayer à chaque dessin — jusqu'à ce qu'une autre carte soit servie. */
+  private failedKey: string | null = null;
   /** Le dernier montage demandé (MapLibre se charge à part : seul le plus récent se pose). */
   private mapToken = 0;
   private readonly threads = new CachedMap<PhoneThread>((key) => fetchThread(key), 10_000);
@@ -184,9 +192,13 @@ class TelephoneScreen {
     }
     const info = this.mapInfo.value;
     const at: At | null = p.known && p.coords ? { lat: p.coords.lat, lon: p.coords.lon, accuracy: p.accuracy_m } : null;
-    const live = !!at && covers(info, at.lat, at.lon);
+    const key = infoKey(info);
+    // une autre carte servie depuis l'échec (le serveur l'a dite injoignable, puis de nouveau prête) : on réessaie
+    if (this.failedKey !== null && this.failedKey !== key) this.failedKey = null;
+    const live = liveWanted(info, at, webglMissing() ? key : this.failedKey);
     body.innerHTML = positionMarkup(p, this.phoneOfAll(), now, live);
-    if (!live || !at || !info) {
+    const step = mapStep(this.live ? this.liveKey : null, live, key);
+    if (step === "plan" || !at || !info) {
       this.dropMap();
       return;
     }
@@ -195,6 +207,9 @@ class TelephoneScreen {
     if (!slot) return;
     if (this.live) {
       slot.replaceWith(this.live.host);
+      // une autre carte du serveur (relue) : son style se repose sur la carte ouverte
+      if (step === "restyle") this.live.restyle(info);
+      this.liveKey = key;
       this.live.resize();
       this.live.show(at, isDark());
       return;
@@ -204,34 +219,40 @@ class TelephoneScreen {
 
   private async startMap(info: MapInfo): Promise<void> {
     const token = ++this.mapToken;
+    const key = infoKey(info);
+    let lib: Awaited<ReturnType<typeof loadMapLibre>>;
     let mod: typeof import("./livemap");
     try {
-      mod = await import("./livemap");
+      [lib, mod] = await Promise.all([loadMapLibre(), import("./livemap")]);
     } catch {
-      this.drawnInstead();
+      this.mapFailed(key); // le morceau de MapLibre ne vient pas (un nouveau déploiement) : le plan dessiné
       return;
     }
     if (token !== this.mapToken || this.live || !this.open() || this.ctx?.tab !== "position") return;
     const slot = this.body ? $<HTMLElement>("[data-map]", this.body) : null;
     if (!slot || !this.liveAt) return;
     try {
-      this.live = mod.mountMap(slot, info, this.liveAt, isDark());
+      // ses tuiles en échec : pour la carte servie qu'elle dessine alors (elle a pu se reposer sur une autre)
+      this.live = mod.mountMap(lib, slot, info, this.liveAt, isDark(), () => this.mapFailed(this.liveKey ?? key));
+      this.liveKey = key;
     } catch {
-      this.drawnInstead(); // pas de WebGL : le plan dessiné
+      noteWebglMissing(); // pas de WebGL : ni ici ni ailleurs, on ne réessaie pas
+      this.mapFailed(key);
     }
   }
 
-  /** La carte ne se dessine pas ici : le plan dessiné reprend sa place. */
-  private drawnInstead(): void {
-    const p = this.position.value;
-    const slot = this.body ? $<HTMLElement>("[data-map]", this.body) : null;
-    if (slot && p?.known) slot.outerHTML = mapMarkup(p.accuracy_m, p.label.trim());
+  /** La carte ne se dessine pas ici : le plan dessiné reprend sa place, avec sa note, pour cette carte du serveur. */
+  private mapFailed(key: string): void {
+    this.failedKey = key;
+    this.dropMap();
+    if (this.open() && this.ctx?.tab === "position") this.paint();
   }
 
   private dropMap(): void {
     this.mapToken += 1;
     this.live?.remove();
     this.live = null;
+    this.liveKey = null;
   }
 
   private paintMessages(body: HTMLElement, now: number): void {

@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from starlette.routing import Route
 
 from mika.adapters.mcp.config import McpConfig, McpServer
-from mika.app.moi import OWN_MAX, Call, Denied, MeApi, missing
+from mika.app.moi import OWN_MAX, Call, Denied, MeApi, missing, refused
 from mika.app.moi.hosts import LOCAL, local_host, url_host
 from mika.contracts import identity as identity_c
 from mika.runtime.operations import audit
@@ -132,7 +132,7 @@ async def _plug(call: Call) -> dict[str, Any]:
         McpServer.model_validate(spec)
         await port.plug(name, spec)
     except (ValidationError, ValueError) as exc:
-        raise Denied(400, str(exc).splitlines()[-1][:300]) from None
+        raise refused(exc) from None
     await audit(call.kernel, "moi.service_branche", by=call.me.handle, subject_kind="serveur", subject=name)
     return {"ok": True, "message": f"« {name} » branché : teste-le, puis choisis ses outils.", "name": name}
 
@@ -192,7 +192,7 @@ async def save(call: Call) -> dict[str, Any]:
     try:
         await _port(call).settle(name, changes)
     except (ValidationError, ValueError) as exc:
-        raise Denied(400, str(exc).splitlines()[-1][:300]) from None
+        raise refused(exc) from None
     await audit(call.kernel, "moi.service", by=call.me.handle, subject_kind="serveur", subject=name)
     return {"ok": True, "message": "Service réglé."}
 

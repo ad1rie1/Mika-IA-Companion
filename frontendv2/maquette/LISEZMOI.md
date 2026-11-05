@@ -4,6 +4,7 @@ Le client web de tous les jours d'une personne connectée : le chat avec Mika (e
 courrier, son Teams, son téléphone et ses paramètres. Pas de monde 3D : Mika est au bout de la barre du haut, et en
 grand dans le chat. Cette page est la **maquette validée** (le 2026-11-04) : les données sont fictives et rien ne
 parle au moteur. Le vrai client est `frontendv2/` (son `README.md`), sur l'API par personne (ADR 0187).
+L'écran **Carte** (lieux, itinéraires, voyages, et sa carte dans le chat) s'y est ajouté le même soir, validé lui aussi.
 
 ## L'ouvrir
 
@@ -16,6 +17,8 @@ parle au moteur. Le vrai client est `frontendv2/` (son `README.md`), sur l'API p
 
 - **Sans serveur** : ouvrir `index.html` dans le navigateur. Les modules étant refusés en `file://`, Mika garde son
   portrait pré-rendu, qui cligne des yeux.
+
+Le fond de l'écran Carte (`ecrans/carte-fond.js`) est la France tirée des tuiles Protomaps, puis simplifiée : données © OpenStreetMap (ODbL). Le vrai écran montre la carte vectorielle que le serveur sert (ADR 0193).
 
 La VRM (`frontend/Web/public/models/default.vrm`), les portraits (`frontend/Android/app/src/main/assets/avatar/`) et
 la police Inter (`backendv2/src/mika/inspector/static/fonts/`) sont lus là où ils sont : rien n'est copié ici. La VRM et
@@ -31,6 +34,7 @@ mode pro), `?notes=1` (panneau des notes ouvert), et la route après `#` :
 | Mail | `#mail/messages`, `#mail/messages/m-claire`, `#mail/messages/d-lefevre`, `#mail/contacts` |
 | Teams | `#teams/discussions/lumen`, `#teams/discussions/claire`, `#teams/brouillons` |
 | Téléphone | `#telephone/messages/julien`, `#telephone/notifications`, `#telephone/position` (le sélecteur en haut passe d'un téléphone à l'autre) |
+| Carte | `#carte/explorer`, `#carte/itineraire`, `#carte/voyages`, `#carte/voyages/alpes` (et sa carte dans le chat, en bas de `#chat`) |
 | Paramètres | `#parametres/compte`, `#parametres/comptes-mail/pro`, `#parametres/teams`, `#parametres/telephones`, `#parametres/partages`, `#parametres/mcp/factures` |
 
 ## Les notes
@@ -62,6 +66,6 @@ et pas dans l'interface, que la maquette dit ce qui n'existe pas encore.
 | `maquette.js` | le moteur : routes, barre de titre, la place de Mika (la barre, la colonne du chat), palette, menus, fenêtres, toasts |
 | `donnees.js` | qui est connecté, les personnes, l'état de Mika et le fil rouge entre les écrans |
 | `mika-vrm.js` | sa VRM (module, HTTP seulement) : son visage dans la barre, son buste dans le chat |
-| `ecrans/<écran>.js` et `.css` | un écran chacun : chat, outils, mail, teams, telephone, parametres |
+| `ecrans/<écran>.js` et `.css` | un écran chacun : chat, outils, mail, teams, telephone, carte, parametres (et `carte-fond.js`, le fond de France, généré) |
 
 L'API d'un écran est décrite en tête de `maquette.js`.

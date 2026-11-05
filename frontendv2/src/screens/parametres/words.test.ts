@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServiceTool } from "../../api/mcp";
+import { ApiError } from "../../api/moi";
 import { ago, Cached, dateWords, dayWords, remaining } from "./kit";
 import { newBoxValues, boxChanges, providersFor } from "./mail";
 import { splitChanges } from "./mcp";
@@ -197,6 +198,41 @@ describe("les dates et la lecture gardée", () => {
     await failing.load();
     expect(failing.settled).toBe(true);
     expect(failing.value).toBeNull();
+  });
+
+  it("une relecture forcée pendant une lecture en cours la suit : ce qu'on vient d'écrire se lit", async () => {
+    let calls = 0;
+    const c = new Cached(async () => ({ n: ++calls }), 60_000);
+    const before = c.load(); // partie avant l'écriture
+    const after = c.load(true); // demandée après l'écriture : une autre lecture, qui suit
+    const again = c.load(true);
+    expect(await before).toEqual({ n: 1 });
+    expect(await after).toEqual({ n: 2 });
+    expect(await again).toEqual({ n: 2 }); // une seule relecture pour les deux
+    expect(calls).toBe(2);
+    expect(c.value).toEqual({ n: 2 });
+  });
+
+  it("une relecture refusée garde la valeur d'avant, sauf un 404 : ce qui n'existe plus ne se montre plus", async () => {
+    let fail: ApiError | null = null;
+    const c = new Cached(async () => {
+      if (fail) throw fail;
+      return { n: 1 };
+    }, 60_000);
+    await c.load();
+    fail = new ApiError(503, "Les itinéraires ne sont pas réglés.");
+    await c.load(true);
+    expect(c.value).toEqual({ n: 1 });
+    expect(c.error).toBe(fail);
+    const v = c.version;
+    fail = new ApiError(404, "Introuvable.");
+    await c.load(true);
+    expect(c.value).toBeNull();
+    expect(c.version).toBe(v + 1);
+    fail = null;
+    await c.load(true);
+    expect(c.value).toEqual({ n: 1 });
+    expect(c.error).toBeNull();
   });
 });
 

@@ -270,11 +270,23 @@ répondre — réessaie ».
 - `source: "error"` sans identifiant : un texte de repli, pas une parole d'elle.
 - `user_message_id` / `client_msg_id` rattachent la réponse à la question (la bulle reçoit son identifiant).
 - `attachments` : les fichiers qu'elle envoie (§6). Toujours présent, souvent vide.
-- `notes` (absente s'il n'y en a pas) : les petites bulles de ce qu'elle a fait en écrivant ce message (ADR 0119) —
-  `[{"kind": "location", "text": "Rue de la République, Lyon", "at": 1790601490000}]` : elle a regardé où était la
-  personne ; `text` est le lieu (ou des coordonnées, ou vide une fois oublié), `at` l'instant de la mesure (ms). Le
-  client compose la bulle (« 📍 Mika a regardé où tu es · Rue de la République, Lyon · position de 14:10 ») et la
-  montre juste avant sa réponse ; une sorte inconnue s'ignore ; une liste illisible ne fait jamais perdre le message.
+- `notes` (absente s'il n'y en a pas) : les petites bulles de ce qu'elle a fait en écrivant ce message (ADR 0119,
+  0196), chacune `{"kind", "text", "at"}` (`at` en ms) et, quand il y a quelque chose à ouvrir, `ref` :
+  - `location` — `{"kind": "location", "text": "Rue de la République, Lyon", "at": 1790601490000}` : elle a regardé
+    où était la personne ; `text` est le lieu (ou des coordonnées, ou vide une fois oublié), `at` l'instant de la
+    mesure. Le client compose la bulle (« 📍 Mika a regardé où tu es · Rue de la République, Lyon · position de
+    14:10 ») ;
+  - `look` — elle a cherché des lieux ou calculé un trajet : `text`, ce qu'elle a cherché (« Dormir · près de
+    Talloires »), `at` l'instant du regard, `ref` son `seq` — ce qu'elle a vu se lit par
+    `GET /api/moi/carte/regards/<ref>` (`protocole-moi.md`, § 10) ;
+  - `map` — elle a montré une carte : `text` son titre, `ref` son `seq` (la même route) ;
+  - `trip` — elle a créé ou changé un voyage : `text` son titre d'aujourd'hui, `at` son dernier changement, `ref`
+    l'identifiant du voyage (`GET /api/moi/voyages/<ref>`).
+
+  Un regard oublié, un voyage supprimé ou une personne oubliée : `text` vide et pas de `ref`, rien à montrer. Le
+  client montre les bulles juste avant sa réponse — un `look`, un `map` ou un `trip` en carte miniature, qui s'ouvre
+  dans l'écran Carte ; une sorte inconnue s'ignore (l'application Android et l'ancien client web n'en souffrent pas) ;
+  une liste illisible ne fait jamais perdre le message.
 - `speak` n'est vrai que pour un seul écran regardé de la personne (celui qui a demandé, sinon le plus récemment
   actif) ; jamais pour une connexion absente.
 - `mode` : présent sur une parole, `"pro"` ou `""` ; absent d'une trame sans texte ou de repli. Une réponse pro
@@ -305,7 +317,7 @@ répondre — réessaie ».
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
 - Une ligne d'elle jugée, **pour une connexion d'opératrice seulement** : `verdict` (`ok` \| `ko`) et `verdict_note`
   (ce qu'elle aurait dû dire, ou vide) — absents sinon (ADR 0113).
-- Une ligne d'elle porte `notes` comme la `speech` (absente s'il n'y en a pas, ADR 0119).
+- Une ligne d'elle porte `notes` comme la `speech` (absente s'il n'y en a pas, ADR 0119, 0196).
 - Une ligne écrite en mode pro (ADR 0116) porte `mode: "pro"` (absent sinon) ; une ligne d'elle en mode pro porte
   aussi `tools` : `[{"name": "memory_search", "ok": true}, …]`, les outils dont elle s'est servie, dans l'ordre des
   appels (leurs noms seulement ; liste vide possible).
