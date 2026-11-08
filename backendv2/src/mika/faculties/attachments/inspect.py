@@ -1,11 +1,18 @@
 """La console des pièces reçues (ADR 0106) : leur liste et la place que chacun occupe (Mémoire › Pièces reçues), un
 onglet « Pièces reçues » sur la fiche d'une personne, et la fiche d'une pièce — ce qu'elle y a lu, les messages qui
-l'ont portée, ce qu'elle sait qui y est relié —, d'où un opérateur peut la télécharger. L'opérateur voit tout : les
-règles de ce qu'elle peut rouvrir devant qui sont celles de ses outils, pas de la console."""
+l'ont portée, ce qu'elle sait qui y est relié —, d'où un opérateur peut la télécharger ou la retirer. L'opérateur voit
+tout : les règles de ce qu'elle peut rouvrir devant qui sont celles de ses outils, pas de la console.
+
+Retirer (``attachments.retirer``, ADR 0205, confirmé, audité comme toute action) fait ce que fait la rétention, pour
+une seule pièce : ``attachments.expired``, sa raison ``operator`` ; ses octets s'effacent après le commit, sa ligne,
+ce qu'elle y a lu et ses liens restent (« retirée par un opérateur »). L'action est posée sur la fiche de la pièce
+(``subject``) ; les onglets dessinés la posent aussi sur sa ligne, la pièce pour objet."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from pydantic import BaseModel
 
 from mika.contracts import attachments as c
 from mika.contracts import identity as identity_c
@@ -19,6 +26,7 @@ from mika.faculties.attachments.faculty import (
     by_prefix,
     carriers,
     count,
+    holder,
     linked_knowledge,
     links,
     params_of,
@@ -47,12 +55,26 @@ from mika.kernel.inspect import (
     Text,
     When,
 )
+from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
 from mika.vocab.people import is_internal
 from mika.vocab.privacy import Sensitivity
 
 PAGE = 25
 KIND = "piece"
+#: « Retirer » une pièce (ADR 0205) : sur sa fiche, et sur sa ligne dans les onglets dessinés
+REMOVE = "attachments.retirer"
+#: ce que dit la ligne d'une pièce qu'un opérateur a retirée
+BY_OPERATOR = "retirée par un opérateur"
+GONE = "Cette pièce n'est plus là : déjà retirée, pas encore lue, ou sa personne oubliée."
+
+
+def removal_question(name: str = "") -> str:
+    """La question qui confirme « Retirer » (le nom de la pièce, quand la ligne le connaît)."""
+    what = f"« {name} »" if name else "cette pièce"
+    return (f"Retirer {what} ? Ses octets sont effacés : la pièce ne se télécharge plus, et elle ne peut plus la "
+            "regarder de nouveau. Ce qu'elle y a lu et ses liens restent ; sa ligne aussi, « retirée par un "
+            "opérateur ».")
 
 
 def size_words(n: int) -> str:
@@ -81,6 +103,8 @@ def _who(frame: Frame, handle: str) -> Cell:
 
 
 def _state(r: FileRow) -> Badge:
+    if r.gone and r.reason == c.OPERATOR:
+        return Badge(BY_OPERATOR, "muted")
     if r.gone:
         return Badge(f"retirée ({REASON_LABELS.get(r.reason or '', r.reason or '?')})", "muted")
     if not r.readable:
@@ -143,7 +167,9 @@ def _pieces(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                         empty="aucune pièce reçue" if not words and not kind else "aucune pièce ne correspond",
                         caption="« liens » : les souvenirs, croyances et moments qui s'appuient sur la pièce — en "
                                 "plus de leurs messages sources. « gardée, pas lue » : ses octets sont là, mais "
-                                "rien n'a pu en être lu (un format illisible, pas de modèle qui voit)."))
+                                "rien n'a pu en être lu (un format illisible, pas de modèle qui voit). « retirée » : "
+                                "ses octets sont effacés (trop ancienne, la place dépassée, ou par un opérateur), ce "
+                                "qu'elle en a lu reste."))
     return blocks + _place(frame, store, ctx)
 
 
@@ -280,3 +306,31 @@ async def _download(s: AttachmentsState, frame: Frame, ctx: InspectContext, key:
     if data is None:
         return Note("Cette pièce n'est plus disponible.", tone="warn")
     return Download(r.name or "piece", data)
+
+
+# ── Retirer une pièce (ADR 0205) ──────────────────────────────────────────
+
+
+class NoArgs(BaseModel):
+    """Rien à remplir : la fiche (ou la ligne) dit quelle pièce."""
+
+
+def _removable(s: AttachmentsState, frame: Frame, key: str) -> bool:
+    """Une pièce lue dont les octets sont encore gardés."""
+    return valid_id(key) and holder(s, key) is not None
+
+
+@ATTACHMENTS.action("retirer", title="Retirer une pièce reçue", args=NoArgs, emits=[c.EXPIRED], subject=KIND,
+                    available=_removable, danger=True, order=90, confirm=removal_question(),
+                    description="Ses octets sont effacés : la pièce ne se télécharge plus, et elle ne peut plus la "
+                                "regarder de nouveau. Ce qu'elle y a lu et ses liens restent ; sa ligne aussi, "
+                                "« retirée par un opérateur ».")
+def _remove(s: AttachmentsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
+    handle = holder(s, ctx.subject) if valid_id(ctx.subject) else None
+    r = row(ctx.store, ctx.subject) if handle is not None and ctx.store is not None else None
+    if handle is None or r is None or r.gone:
+        raise Refused(GONE)
+    # le même retrait que la rétention, à l'unité : la tranche et la ligne suivent, l'effet efface les octets
+    draft = c.EXPIRED.draft(files=(r.id,), handle=handle, reason=c.OPERATOR, dedupe_key=f"piece-retiree:{r.id}")
+    return Done(drafts=(draft,), message=f"« {r.name or 'pièce'} » retirée : ses octets sont effacés, ce qu'elle y "
+                                         "a lu reste.")

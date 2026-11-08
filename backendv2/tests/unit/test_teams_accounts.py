@@ -30,12 +30,18 @@ from pydantic import ValidationError
 from mika.adapters.teams import TeamsAccount, TeamsConfig, TeamsStore
 from mika.app import schema
 from mika.app.teams import digest
+from mika.contracts import identity as identity_c
 from mika.contracts import teams as teams_c
+from mika.faculties.projects.tools import caretaker
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.frame import Audience, EpisodeRef, Frame
+from mika.plugins import email as email_p
+from mika.plugins import teams as teams_p
+from mika.plugins.forge import _caretaker
 from mika.plugins.teams import TEAMS, TeamsParams, accounts_here, owns_an_account
 from mika.plugins.teams.accounts import Accounts
 from mika.plugins.teams.tools import ListArgs, _port, teams_conversations
+from mika.plugins.teams.voice import voice_text
 from mika.ports.teams import (
     ACCEPTED,
     DEFAULT_ACCOUNT,
@@ -45,11 +51,13 @@ from mika.ports.teams import (
     InboxConversation,
     InboxMessage,
     Message,
+    Voice,
     conversation_key,
     message_ref,
     split_conversation_key,
 )
 from mika.runtime.operations import perform
+from mika.vocab import phrasebook
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.privacy import ChannelTrust
 from tests.fixtures import backend
@@ -318,3 +326,34 @@ def test_a_base_from_before_is_taken_over_without_loss(tmp_path):
         assert {c.account for c in store.conversations(10)} == {PRINCIPAL, "nadia_t"}
     finally:
         store.close()
+
+
+# ── Qui s'occupe d'elle : dit une fois, sur sa voix (ADR 0071) ─────────────
+
+
+def named(owners: tuple[str, ...], names: dict[str, str]) -> NS:
+    """Un cadre qui ne sait que ses propriétaires et leurs noms."""
+    return NS(get=lambda ref: owners if ref is identity_c.OWNERS else NS(name=names.get(ref.arg, "")))
+
+
+def test_teams_says_who_keeps_her_with_her_voice(monkeypatch):
+    """Ce que Teams en dit vient de sa voix, comme au courrier : rien d'écrit en dur."""
+    words = {**phrasebook.catalog(), "identity.keeper.unknown": "ta marraine", "identity.keeper.either": " et "}
+    monkeypatch.setattr(phrasebook, "catalog", lambda: words)
+    nobody = named((), {})
+    assert teams_p.keeper_name(nobody, "user_9") == email_p.keeper_name(nobody, "user_9") == "ta marraine"
+    assert teams_p.keepers(nobody) == email_p.keepers(nobody) == "ta marraine"
+    assert "ta marraine" in voice_text(Voice(), "brouillon")  # dans ce que lit le modèle
+    both = named(("user_1", "user_2"), {"user_1": "Adrien", "user_2": "Bea"})
+    assert teams_p.keepers(both) == email_p.keepers(both) == "Adrien et Bea"
+
+
+def test_her_owners_are_said_alike_everywhere():
+    one, nobody = named(("user_1",), {"user_1": "Adrien"}), named(("user_1",), {})
+    both = named(("user_1", "user_2"), {"user_1": "Adrien", "user_2": "Bea"})
+    assert teams_p.keepers(one) == "Adrien" and teams_p.keepers(both) == "Adrien ou Bea"
+    assert caretaker(one) == _caretaker(one) == "« Adrien »"
+    assert caretaker(both) == _caretaker(both) == "« Adrien » ou « Bea »"  # jamais « la personne » quand on les connaît
+    assert caretaker(nobody) == _caretaker(nobody) == teams_p.keepers(nobody) == "la personne qui s'occupe de toi"
+    # un nom est une donnée citée : il entre nettoyé partout, jamais tel que le compte le dit
+    assert caretaker(named(("user_1",), {"user_1": "« Adrien »"})) == "« Adrien »"

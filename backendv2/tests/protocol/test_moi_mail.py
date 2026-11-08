@@ -4,17 +4,24 @@ ailleurs n'existe pour elle (le même 404) ; ce qu'elle fait passe par les actio
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
-from mika.app.moi import PROBES
+import mika.app.moi as moi
+from mika.app.moi import PROBES, form
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
 from mika.plugins.email import EmailParams
+from mika.plugins.email.console import actions as email_actions
+from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, Mail, Sent
 from mika.ports.mail import Draft as MailDraft
-from mika.ports.mail import File, Mail, Sent
-from tests.fixtures.courrier import NOW, mailbox
+from mika.runtime import decisions
+from mika.runtime.operations import perform
+from mika.sim.outside import FakeMail
+from mika.vocab.phrasebook import phrase
+from tests.fixtures.courrier import NOW, PRO, mailbox
 from tests.protocol.test_web import bootstrap, csrf, world  # noqa: F401 — fixture partagée
 
 API = "/api/moi"
@@ -262,7 +269,7 @@ def test_replying_yourself_withdraws_her_waiting_draft_for_that_mail(world):  # 
     assert r.status_code == 200, r.text
     states = {d["id"]: d["state"] for d in client.get(API + "/mail/drafts").json()["items"]}
     assert states[waiting] == "refuse"  # rien ne partira deux fois
-    assert client.get(API).json()["counts"]["mail"] == sum(1 for m in box.inbox if not m.seen and m.folder == "INBOX")
+    assert client.get(API).json()["counts"]["mail"] == 0  # plus rien n'attend ta décision
 
 
 def test_whoever_replies_by_hand_withdraws_her_waiting_draft(world):  # noqa: F811
@@ -357,3 +364,313 @@ def test_a_mail_says_whether_it_left_your_box_and_whether_a_copy_came_back(world
     assert not got["sent"] and got["received"]
     shown = {b["key"]: b["common"] for b in client.get(API + "/mail/boxes").json()["boxes"]}
     assert shown == {"perso": True, "pro": True}  # « à toi » : communes à ses propriétaires
+
+
+# ── audit du 2026-11-05 (lot L13) ──
+
+
+def test_a_reply_from_the_console_withdraws_her_waiting_draft_in_the_same_gesture(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    waiting = propose(client, live, box)
+    # Courrier › Répondre : l'action de la console, sans passer par l'API par personne
+    got = client.portal.call(lambda: perform(live.kernel, "email.repondre", form(
+        to="lea@example.test", subject="Re: Maquettes", body="Je réponds depuis la console.",
+        fixed={"reply_to": PROJET}), by="user_1"))
+    assert got.ok, got.message
+    decided = {d["id"]: d for d in client.get(API + "/mail/drafts").json()["items"]}
+    assert decided[waiting]["state"] == "refuse"  # rien ne part deux fois
+    assert box.draft(waiting).state == "abandonne"  # retiré de la boîte, comme un refus
+    # un seul geste : la réponse et le refus de son brouillon (elle sait pourquoi), sous la même corrélation
+    (gone,), (refused,) = journal(live, email_c.SENT), journal(live, rt.EFFECT_RESOLVED)
+    note = refused.data.note.ref
+    said = client.portal.call(lambda: live.kernel.ports["store"].content([note]))
+    # la raison qu'elle lit vient de sa voix (ADR 0071), pas du code
+    assert not refused.data.approved and said[note] == phrase("email.drafts.answered_by_hand")
+    assert refused.correlation == gone.correlation
+
+
+class _Racing(FakeMail):
+    """Pendant que la réponse part (le serveur d'envoi prend son temps), son brouillon est décidé ailleurs."""
+
+    async def send(self, *args, **kwargs):
+        await self.meanwhile()
+        return await super().send(*args, **kwargs)
+
+
+def test_a_draft_decided_elsewhere_while_the_reply_leaves_never_hides_the_reply(world):  # noqa: F811
+    """Relecture du lot L13 : refusé par quelqu'un d'autre pendant l'envoi, son brouillon n'a plus rien à refuser. La
+    réponse, partie, s'écrit au journal et le geste aboutit — avant, tout le geste était refusé : la réponse partait
+    sans qu'elle le sache, et l'on pouvait la renvoyer."""
+    client, live, box = with_mail(world)
+    box = _Racing(**{f.name: getattr(box, f.name) for f in dataclasses.fields(box)})
+    live.kernel.ports["mail"] = box
+    waiting = propose(client, live, box)
+    proposal = journal(live, rt.EFFECT_PROPOSED)[-1].seq
+
+    async def meanwhile():
+        await decisions.decide(live.kernel.mind, live.kernel.ports, proposal, False, by="user_2")
+
+    box.meanwhile = meanwhile
+    got = client.portal.call(lambda: perform(live.kernel, "email.repondre", form(
+        to="lea@example.test", subject="Re: Maquettes", body="Je réponds moi-même.",
+        fixed={"reply_to": PROJET}), by="user_1"))
+    assert got.ok, got.message  # partie : le geste aboutit, rien n'invite à la renvoyer
+    assert [s[3] for s in box.sent] == [PROJET]
+    (gone,) = journal(live, email_c.SENT)  # et elle le sait
+    assert gone.data.in_reply_to == PROJET
+    (refused,) = journal(live, rt.EFFECT_RESOLVED)  # la décision d'ailleurs, seule
+    assert refused.data.by == "user_2" and box.draft(waiting).state == "abandonne"
+
+
+class _Whole(FakeMail):
+    """Le serveur a le mail entier, la boîte n'en a gardé qu'une partie : le relire le complète."""
+
+    async def document(self, ref):
+        kept = self.cached_one(ref)
+        if kept is not None and not kept.complete:
+            self._update(ref, complete=True, body=kept.body + "\nLA SUITE, LUE SUR LE SERVEUR")
+        return self.cached_one(ref) or self.sent_mail(ref)
+
+
+class _Mute(FakeMail):
+    """Le serveur ne répond pas."""
+
+    async def document(self, ref):
+        raise OSError("le serveur ne répond pas")
+
+
+def _partial(world, kind):  # noqa: F811
+    client, live, box = with_mail(world)
+    box = kind(**{f.name: getattr(box, f.name) for f in dataclasses.fields(box)})
+    box._update(PROJET, complete=False, body="Bonjour,\n\nVoici les maquettes.")
+    live.kernel.ports["mail"] = box
+    return client, box
+
+
+def test_a_mail_kept_in_part_is_completed_on_the_server(world):  # noqa: F811
+    client, box = _partial(world, _Whole)
+    got = client.get(API + f"/mail/message?ref={PROJET}")
+    assert got.status_code == 200, got.text
+    assert got.json()["complete"] and "LA SUITE, LUE SUR LE SERVEUR" in got.json()["body"]
+
+
+def test_a_mail_kept_in_part_still_reads_when_the_server_is_mute(world):  # noqa: F811
+    client, _ = _partial(world, _Mute)
+    got = client.get(API + f"/mail/message?ref={PROJET}")
+    assert got.status_code == 200, got.text  # pas de 502 : la copie gardée se lit
+    assert not got.json()["complete"] and got.json()["body"].startswith("Bonjour")
+    # sans copie gardée, la panne se dit
+    assert client.get(API + "/mail/message?ref=pro:<inconnu@x>").status_code == 502
+
+
+def test_a_correspondent_of_two_boxes_counts_in_both(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    box.deliver(Mail("<atelier@example.test>", "Camille Durand <camille@example.test>", "camille@example.test",
+                     "Un moment pour préparer l'atelier ?", NOW + 120_000_000, "On se voit ?", account="pro",
+                     to=PRO.address))
+    (camille,) = client.get(API + "/mail/contacts?q=camille").json()["items"]
+    # cinq reçus dans Personnel, un dans Atelier ; un envoyé de Personnel ; le dernier échange, d'Atelier
+    assert (camille["received"], camille["sent"]) == (6, 1) and camille["last"] == (NOW + 120_000_000) // 1000
+    assert camille["name"] in ("Camille", "Camille Durand")
+
+
+def test_sent_mails_and_her_drafts_name_whom_they_go_to(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    sent = {s["box"]: s for s in client.get(API + "/mail/sent").json()["items"]}
+    # l'en-tête n'a que l'adresse ; la boîte connaît son nom
+    assert sent["perso"]["to"] == [{"name": "Camille", "address": "camille@example.test"}]
+    propose(client, live, box)
+    (draft,) = client.get(API + "/mail/drafts").json()["items"]
+    assert draft["to"] == "lea@example.test"  # ce qu'on retouche reste tel quel
+    assert [p["address"] for p in draft["to_people"]] == ["lea@example.test"]
+    assert draft["to_people"][0]["name"].startswith("Léa")
+
+
+def test_the_top_bar_counts_only_what_awaits_your_decision(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    assert any(not m.seen for m in box.inbox)  # des non-lus : ils ont leurs compteurs dans Mail, pas la pastille
+    assert client.get(API).json()["counts"]["mail"] == 0
+    propose(client, live, box)
+    assert client.get(API).json()["counts"]["mail"] == 1
+
+
+def test_a_box_shared_to_read_stays_out_of_your_common_views(world):  # noqa: F811
+    client, live, _ = with_mail(world)
+    lea = second_person(client, live)
+    client.portal.call(live.kernel.set_params, "email", EmailParams(
+        owners={"pro": "personne:" + lea}, shares={"perso": {"personne:" + lea: "lire"}}))
+    login(client, "lea")
+    assert {b["key"]: b["level"] for b in client.get(API + "/mail/boxes").json()["boxes"]} == \
+        {"pro": "proprietaire", "perso": "lire"}
+    # toutes les réceptions, ce qui est parti, ses correspondants : sa boîte à elle seulement
+    assert {m["box"] for m in client.get(API + "/mail/messages?folder=INBOX").json()["items"]} == {"pro"}
+    assert {s["box"] for s in client.get(API + "/mail/sent").json()["items"]} == {"pro"}
+    assert [c["address"] for c in client.get(API + "/mail/contacts").json()["items"]] == ["lea@example.test"]
+    assert client.get(API).json()["counts"]["mail"] == 0
+    # la boîte partagée s'ouvre à part, et s'y lit en entier
+    assert client.get(API + "/mail/messages?box=perso&folder=INBOX").json()["total"] == 5
+    assert {s["box"] for s in client.get(API + "/mail/sent?box=perso").json()["items"]} == {"perso"}
+
+
+def test_moving_mails_files_them_in_a_folder_of_their_box(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    perso = [m.ref for m in box.inbox if m.account == "perso"][:2]
+    moved = post(client, "/mail/tidy", {"refs": perso, "gesture": "move", "folder": "Archives"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["moved"] == 2 and "Archives" in moved.json()["message"]
+    assert all(box.cached_one(ref).folder == "Archives" for ref in perso)
+    assert [a for a in box.actions if a[0] == "move"] == [("move", ref, "Archives") for ref in perso]
+    done = [(e.data.action, e.data.by) for e in journal(live, rt.OPERATED) if "deplacer" in e.data.action]
+    assert done == [("moi.email.deplacer", "user_1")] * 2  # l'action « Déplacer », audité depuis son espace
+    again = post(client, "/mail/tidy", {"refs": perso[:1], "gesture": "move", "folder": "Archives"})
+    assert again.status_code == 200 and again.json()["moved"] == 0  # déjà là : rien ne bouge
+    both = [perso[0], PROJET]
+    assert post(client, "/mail/tidy", {"refs": both, "gesture": "move", "folder": "INBOX"}).status_code == 400
+    assert post(client, "/mail/tidy", {"refs": [PROJET], "gesture": "move", "folder": "Nulle part"}).status_code == 400
+    assert post(client, "/mail/tidy", {"refs": [PROJET], "gesture": "move"}).status_code == 400
+
+    lea = second_person(client, live)  # un partage qui prépare ne range pas
+    client.portal.call(live.kernel.set_params, "email", EmailParams(shares={"pro": {"personne:" + lea: "preparer"}}))
+    login(client, "lea")
+    refused = post(client, "/mail/tidy", {"refs": [PROJET], "gesture": "move", "folder": "Archives"})
+    assert refused.status_code == 403 and box.cached_one(PROJET).folder == "INBOX"
+
+
+# ── joindre, copier en cachette (ADR 0214) ──
+
+SECRET = b"CONTENU-DE-LA-PIECE"
+LETTER = {"box": "pro", "to": "lea@example.test", "subject": "Le devis", "body": "Le voici."}
+
+
+def upload(client, path: str, fields: dict, *pieces: tuple[str, bytes, str]) -> object:
+    """Un envoi en ``multipart/form-data``, tel que le navigateur le fait."""
+    return client.post(API + path, data=fields, files=[("files", p) for p in pieces], headers=csrf(client))
+
+
+def test_a_piece_leaves_with_the_mail_and_stays_out_of_the_journal(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    r = upload(client, "/mail/send", LETTER, ("devis final.pdf", SECRET, "application/pdf"), ("note.txt", b"mot", "text/plain"))
+    assert r.status_code == 200, r.text
+    assert "2 pièces jointes" in r.json()["message"]
+    gone = box.outgoing[-1]
+    assert [(a.name, a.mime, a.size) for a in gone.attachments] == [
+        ("devis final.pdf", "application/pdf", len(SECRET)), ("note.txt", "text/plain", 3)]
+    assert box.outgoing_files[gone.message_id][0].data == SECRET
+    assert len(journal(live, email_c.SENT)) == 1  # elle le sait
+    assert SECRET.decode() not in repr(list(live.kernel.mind.store.read()))  # rien des octets au journal (ADR 0172)
+    again = upload(client, "/mail/sent", {}, ("x.txt", b"x", "text/plain"))
+    assert again.status_code == 405  # une lecture ne reçoit rien
+
+
+def test_a_sent_piece_downloads_from_the_sent_mail(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    assert upload(client, "/mail/send", LETTER, ("devis.pdf", SECRET, "application/pdf")).status_code == 200
+    ref = box.outgoing[-1].ref
+    got = client.get(API + "/mail/file", params={"ref": ref, "part": "0"})
+    assert got.status_code == 200 and got.content == SECRET
+
+
+def test_a_reply_and_a_forward_carry_their_pieces_too(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    answered = upload(client, "/mail/reply", {"ref": PROJET, "to": "lea@example.test", "subject": "Re: Maquettes",
+                                              "body": "Ci-joint.", "quote": "1"}, ("plan.pdf", SECRET, "application/pdf"))
+    assert answered.status_code == 200, answered.text
+    assert [a.name for a in box.outgoing[-1].attachments] == ["plan.pdf"]
+    assert box.outgoing[-1].in_reply_to == PROJET
+    passed = upload(client, "/mail/forward", {"ref": PROJET, "to": "tom@example.test", "subject": "Tr : Maquettes"},
+                    ("en-plus.txt", b"mot", "text/plain"))
+    assert passed.status_code == 200, passed.text
+    assert [a.name for a in box.outgoing[-1].attachments] == ["en-plus.txt"]
+    twice = {"ref": PROJET, "to": "tom@example.test", "subject": "Tr", "nonce": "f1"}
+    first = upload(client, "/mail/forward", twice, ("a.txt", b"x", "text/plain"))
+    count = len(box.sent)
+    again = upload(client, "/mail/forward", twice, ("a.txt", b"x", "text/plain"))
+    assert first.status_code == 200 and again.json()["deduped"] and len(box.sent) == count  # un double clic ne renvoie pas
+
+
+def test_a_piece_at_the_bound_leaves_and_a_byte_more_is_refused(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    assert PIECE_MAX == 25 * 1024 * 1024  # la borne d'une pièce gardée (ADR 0172)
+    just = upload(client, "/mail/send", LETTER, ("juste.bin", b"x" * PIECE_MAX, "application/octet-stream"))
+    assert just.status_code == 200, just.text
+    assert len(box.sent) == 1
+    big = upload(client, "/mail/send", LETTER, ("gros.bin", b"x" * (PIECE_MAX + 1), "application/octet-stream"))
+    assert big.status_code == 400 and big.json()["fields"] == {"files": "25 Mo par pièce"}
+    assert "gros.bin" in big.json()["error"] and len(box.sent) == 1  # rien n'est parti
+
+
+def test_a_form_counts_its_line_ends_as_json_does(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    body = "\r\n".join(["x" * 132] * 150)  # 19 949 caractères en \n, plus de 20 000 en CRLF (ce que FormData envoie)
+    r = upload(client, "/mail/send", {**LETTER, "body": body}, ("a.txt", b"x", "text/plain"))
+    assert r.status_code == 200, r.text
+    assert box.sent[-1][2] == body.replace("\r\n", "\n")  # et le mail gardé n'a pas de CR
+
+
+def test_a_mail_refuses_too_many_or_too_heavy_pieces(world, monkeypatch):  # noqa: F811
+    client, _, box = with_mail(world)
+    tiny = ("a.txt", b"12345", "text/plain")
+    many = upload(client, "/mail/send", LETTER, *([tiny] * (PIECES_MAX + 1)))
+    assert many.status_code == 400 and many.json()["fields"] == {"files": f"{PIECES_MAX} au plus"}
+    beyond = upload(client, "/mail/send", LETTER, *([tiny] * (PIECES_MAX + 2)))
+    assert beyond.status_code == 400 and "pas pu être lu" in beyond.json()["error"]
+    monkeypatch.setattr(email_actions, "PIECES_TOTAL_MAX", 8)
+    heavy = upload(client, "/mail/send", LETTER, tiny, ("b.txt", b"12345", "text/plain"))
+    assert heavy.status_code == 400 and "trop lourdes" in heavy.json()["error"]
+    monkeypatch.setattr(moi, "UPLOAD_BODY_MAX", 64)
+    assert upload(client, "/mail/send", LETTER, tiny).status_code == 413
+    assert box.sent == []
+    assert PIECES_TOTAL_MAX == 50 * 1024 * 1024
+
+
+def test_a_piece_is_named_without_a_folder_and_never_passes_for_a_structure(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    r = upload(client, "/mail/send", LETTER, ("../../etc/passwd", b"x", "multipart/mixed"), ("a\r\nb.txt", b"y", "text/plain; charset=utf-8"),
+               ("mail.eml", b"z", "message/rfc822"))
+    assert r.status_code == 200, r.text
+    files = box.outgoing_files[box.outgoing[-1].message_id]
+    assert files[0].name == "passwd" and files[0].mime == "application/octet-stream"
+    assert "\r" not in files[1].name and "\n" not in files[1].name and files[1].mime == "text/plain"
+    assert files[2].mime == "application/octet-stream"
+
+
+def test_joining_needs_the_level_that_sends(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    lea = second_person(client, live)
+    login(client, "lea")
+    piece = ("devis.pdf", SECRET, "application/pdf")
+    client.portal.call(live.kernel.set_params, "email", EmailParams(shares={"pro": {"personne:" + lea: "servir"}}))
+    served = upload(client, "/mail/send", LETTER, piece)
+    assert served.status_code == 200, served.text
+    assert [a.name for a in box.outgoing[-1].attachments] == ["devis.pdf"]
+    for level in ("preparer", "lire"):
+        client.portal.call(live.kernel.set_params, "email", EmailParams(shares={"pro": {"personne:" + lea: level}}))
+        before = len(box.sent)
+        refused = upload(client, "/mail/send", LETTER, piece)
+        assert refused.status_code == 403 and len(box.sent) == before, level
+
+
+def test_an_upload_needs_the_csrf_token_and_a_readable_form(world):  # noqa: F811
+    client, _, box = with_mail(world)
+    bare = client.post(API + "/mail/send", data=LETTER, files=[("files", ("a.txt", b"x", "text/plain"))])
+    assert bare.status_code == 403 and box.sent == []
+    broken = client.post(API + "/mail/send", content=b"pas un formulaire",
+                         headers={**csrf(client), "Content-Type": "multipart/form-data"})
+    assert broken.status_code == 400 and box.sent == []
+    other = client.post(API + "/mail/tidy", data={"refs": PROJET}, files=[("files", ("a.txt", b"x", "text/plain"))],
+                        headers=csrf(client))
+    assert other.status_code == 400  # une route sans ``upload`` ne lit que du JSON
+
+
+def test_a_blind_copy_goes_in_the_envelope_and_nowhere_else(world):  # noqa: F811
+    client, live, box = with_mail(world)
+    r = post(client, "/mail/send", {**LETTER, "bcc": "cachee@example.test"})
+    assert r.status_code == 200, r.text
+    gone = box.outgoing[-1]
+    assert box.outgoing_bcc[gone.message_id] == "cachee@example.test"
+    assert "cachee" not in gone.to + gone.cc
+    assert "cachee" not in repr(list(live.kernel.mind.store.read()))  # elle ne le note pas
+    bad = post(client, "/mail/send", {**LETTER, "bcc": "pas une adresse"})
+    assert bad.status_code == 400 and "bcc" in bad.json()["fields"]
+    long = post(client, "/mail/send", {**LETTER, "bcc": "x" * 301})
+    assert long.status_code == 400 and long.json()["fields"] == {"bcc": "300 caractères au plus"}

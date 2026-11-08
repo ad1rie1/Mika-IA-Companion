@@ -77,7 +77,8 @@ class McpServer(BaseModel):
     owner: Annotated[str, Knob(
         label="À qui", group="Pour elle", readonly=True, order=8,
         help="Branché par une personne, sous son propre compte (ADR 0192) : « personne:<clé> » ; vide, un des "
-             "siens, réglé par un opérateur. Ce qu'elle en fait reste dit par ses lignes d'accès.")] = ""
+             "siens, réglé par un opérateur. Outils › Venus d'ailleurs et la fiche du service le disent par son nom. "
+             "Ce qu'elle en fait reste dit par ses lignes d'accès.")] = ""
     transport: Annotated[Literal["distant", "local"], Knob(
         label="Où il tourne", group="Connexion", choices=TRANSPORTS, advanced=False, order=10,
         help="À une adresse (sur cette machine, ton réseau ou ailleurs), ou lancé ici par une commande, isolé.")] = \
@@ -327,7 +328,3 @@ def tool_name(server: str, remote: str, taken: set[str] | None = None) -> str:
         return base
     digest = hashlib.sha256(f"{server}/{remote}".encode()).hexdigest()[:8]
     return f"{base[:MAX_TOOL_NAME - 9]}_{digest}"
-
-
-def bundle_of(server: str) -> str:
-    return f"{FAMILY}.{server}"

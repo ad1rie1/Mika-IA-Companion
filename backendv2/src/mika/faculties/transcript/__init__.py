@@ -354,7 +354,8 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
-#: version 9 : le fil de travail d'un message (``strand``, ADR 0164) ;
+#: version 10 : ``folded`` déplie les ligatures (ADR 0212) ; version 9 : le fil de travail d'un message (``strand``,
+#: ADR 0164) ;
 #: version 8 : le mode dans lequel un message a été écrit (``mode``, ADR 0116) ;
 #: version 7 : l'avis de son opératrice sur ses réponses (``verdict``, ``verdict_note``, ADR 0113), d'où
 #: ``transcript.judged`` ; version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
@@ -362,7 +363,7 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
 #: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=9, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=10, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED, c.JUDGED])(Thread)
 
 
@@ -436,25 +437,10 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
-def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[str, Any]]:
-    """Les ``limit`` plus anciens messages du fil privé d'une adresse après
-    ``after``, dans l'ordre : ce qu'un résumé replie en premier (il n'est relu
-    qu'en privé, un salon n'a rien à y faire ; un fil de travail non plus)."""
-    t = c.thread_table()
-    rows = _messages_of(store, t.c.person == person, t.c.room.is_(None), t.c.strand.is_(None), t.c.id > after,
-                        newest_first=False, limit=limit)
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
-
-
 def _count(store: Any, *where: Any) -> int:
     t = c.thread_table()
     rows = store.query_mind(select(func.count()).select_from(t).where(*where))
     return int(rows[0][0]) if rows else 0
-
-
-def count_after(store: Any, person: str, after: int) -> int:
-    t = c.thread_table()
-    return _count(store, t.c.person == person, t.c.room.is_(None), t.c.strand.is_(None), t.c.id > after)
 
 
 def window_start(total: int, window: int, step: int) -> int:
@@ -497,11 +483,13 @@ def strand_thread(store: Any, handle: str, strand: str, limit: int, before: int 
 
 def strand_history(store: Any, handle: str, strand: str, before: int | None, limit: int) -> tuple[list[dict[str, Any]],
                                                                                                    bool]:
-    """Les messages d'un fil de travail tels qu'un écran les relit : les ``limit`` derniers avant ``before`` (tous
-    s'il est nul), du plus ancien au plus récent, et s'il en reste de plus anciens."""
+    """Les messages d'un fil tels qu'un écran les relit : les ``limit`` derniers avant ``before`` (tous s'il est nul),
+    du plus ancien au plus récent, et s'il en reste de plus anciens. ``strand`` vide : le fil avec elle, c'est-à-dire
+    ce que ``recent`` en donne, sans ses fils de travail (ADR 0215)."""
     bound = before if before is not None else 2**62
     t = c.thread_table()
-    rows = _messages_of(store, t.c.person == handle, t.c.strand == strand, t.c.id < bound, limit=limit + 1)
+    thread = t.c.strand == strand if strand else t.c.strand.is_(None)
+    rows = _messages_of(store, t.c.person == handle, thread, t.c.id < bound, limit=limit + 1)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows[:limit])], len(rows) > limit
 
 
@@ -1399,7 +1387,7 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
     return blocks
 
 
-@TRANSCRIPT.inspect("fil", title="Fil", subject="handle", subject_param="handle", order=50,
+@TRANSCRIPT.inspect("fil", title="Fil", subject="handle", order=50,
                     description="Les messages de ce moyen de communication seulement.")
 def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle = ctx.subject or ctx.param("handle")

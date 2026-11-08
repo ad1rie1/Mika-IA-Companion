@@ -38,7 +38,6 @@ from mika.kernel.facts import FactFamily, FactKey
 OWNER = "agency"
 
 DAILY_CAP = "daily_cap"
-REFRACTORY = "refractory"
 #: Veto : des initiatives restées sans réponse vers cette personne — plus rien tant qu'elle n'a pas écrit (une
 #: seule relance douce, après un long délai, vers une amie ou une proche).
 UNANSWERED = "unanswered"

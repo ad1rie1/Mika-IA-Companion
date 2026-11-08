@@ -565,7 +565,8 @@ async def _start_intent(ctx: Any, steps: list[w.Step]) -> w.Intent:
     return intent
 
 
-@WORLD.tool("go_to", acts=True, description=phrase("world.tools.go_to.description"), args=GoArgs, bundle="world",
+@WORLD.tool("go_to", acts=True, description=phrase("world.tools.go_to.description"),
+            label=phrase("world.tools.go_to.label"), args=GoArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=1)
 async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame
@@ -598,7 +599,8 @@ async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     return ToolResult(content=phrase("world.tools.go_to.going", where=_where_phrase(s.definition, target.id, want)))
 
 
-@WORLD.tool("interact", acts=True, description=phrase("world.tools.interact.description"), args=InteractArgs, bundle="world",
+@WORLD.tool("interact", acts=True, description=phrase("world.tools.interact.description"),
+            label=phrase("world.tools.interact.label"), args=InteractArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=3)
 async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame
@@ -712,7 +714,8 @@ class LookArgs(BaseModel):
     pass
 
 
-@WORLD.tool("world_look", description=phrase("world.tools.look.description"), args=LookArgs, bundle="world",
+@WORLD.tool("world_look", description=phrase("world.tools.look.description"),
+            label=phrase("world.tools.look.label"), args=LookArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=1)
 async def world_look(args: LookArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame

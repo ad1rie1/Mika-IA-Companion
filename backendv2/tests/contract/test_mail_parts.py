@@ -21,16 +21,19 @@ from datetime import UTC, datetime
 from email.message import EmailMessage
 
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, update
 from sqlalchemy.dialects.mysql import mariadbconnector
 from sqlalchemy.dialects.sqlite import dml as sqlite_dml
 from sqlalchemy.sql import ClauseElement
 
-from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig
+from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig, compose
 from mika.adapters.mail import cache as cache_module
+from mika.adapters.mail import client as client_module
 from mika.adapters.mail.cache import MailCache
+from mika.adapters.mail.imap import Session
 from mika.adapters.mail.models import BlobRow, PartRow
 from mika.adapters.mail.parse import attachment_files, parse, parse_parts
+from mika.ports.mail import PIECES_MAX, Attachment, File, Sent
 from tests.fixtures.mail_servers import Imap, Smtp, serve
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"logo" * 50
@@ -214,10 +217,14 @@ def servers():
     smtp.shutdown()
 
 
+def account_for(imap_port: int, smtp_port: int) -> MailAccount:
+    return MailAccount(address="mika@exemple.fr", imap_host="127.0.0.1", imap_port=imap_port, imap_ssl=False,
+                       user="mika", password="secret", smtp_host="127.0.0.1", smtp_port=smtp_port,
+                       smtp_security="none", since_days=7)
+
+
 def box_for(tmp_path, imap_port: int, smtp_port: int) -> ImapSmtpMail:
-    account = MailAccount(address="mika@exemple.fr", imap_host="127.0.0.1", imap_port=imap_port, imap_ssl=False,
-                          user="mika", password="secret", smtp_host="127.0.0.1", smtp_port=smtp_port,
-                          smtp_security="none", since_days=7)
+    account = account_for(imap_port, smtp_port)
     return ImapSmtpMail(lambda: MailConfig(accounts={"pro": account}), tmp_path / "mail.db", now=lambda: NOW, tz=UTC)
 
 
@@ -245,3 +252,131 @@ def test_a_mail_kept_before_its_parts_rereads_them(tmp_path, servers):
     assert again.parts_kept and box.cached_one(m.ref).parts_kept and len(box.inline_images(m.ref)) == 2
     assert not Imap.boxes["INBOX"].mails[3][0]  # relire ne marque pas lu
     box._cache.close()
+
+
+# ── envoyer des pièces (ADR 0214) ───────────────────────────────────────
+
+
+def sent(message_id: str, date: int, *files: File) -> tuple[Sent, tuple[File, ...]]:
+    return (Sent(message_id, "dest@exemple.fr", "Objet", "Texte", date, account="pro",
+                 attachments=tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)), files)
+
+
+def test_a_mail_sent_with_pieces_keeps_them_apart_and_hides_its_blind_copy(tmp_path, servers):
+    box = box_for(tmp_path, *servers)
+    mid = asyncio.run(box.send("dest@exemple.fr", "Le devis", "Le voici.", by="user_1", account="pro",
+                               bcc="cachee@exemple.fr", files=(File("devis été.pdf", "application/pdf", PDF),)))
+    _, rcpts, data, _ = Smtp.received[-1]
+    assert any("cachee@exemple.fr" in r for r in rcpts) and b"cachee@exemple.fr" not in data  # dans l'enveloppe seulement
+    assert [f.data for f in attachment_files(data)] == [PDF]
+    ref = f"pro:{mid}"
+    source = box._cache.sent_source(ref)
+    assert b"Le voici" in source and b"cachee" not in source  # gardé ici sans ses octets ni sa copie cachée
+    assert PDF not in source
+    assert [(a.name, a.size) for a in box.sent_mail(ref).attachments] == [("devis été.pdf", len(PDF))]
+    assert asyncio.run(box.file(ref, "0")).data == PDF  # relu d'ici, en morceaux (ADR 0172)
+    assert kept(box._cache) == (1, 1)
+    whole = asyncio.run(box.file(ref, "source")).data  # le message entier : ses pièces remises, toujours pas sa copie cachée
+    assert [f.data for f in attachment_files(whole)] == [PDF] and b"cachee" not in whole
+    asyncio.run(box.forward(ref, "autre@exemple.fr", "Tr : Le devis", "Pour toi."))
+    assert [f.data for f in attachment_files(Smtp.received[-1][2])] == [PDF]
+    box._cache.close()
+
+
+def test_a_forward_adds_its_pieces_to_those_of_the_original(tmp_path, servers):
+    box = box_for(tmp_path, *servers)
+    m = asyncio.run(box.fetch_new(10))[0]
+    asyncio.run(box.forward(m.ref, "dest@exemple.fr", "Tr : Signature", "Pour toi.",
+                            files=(File("en-plus.txt", "text/plain", b"mot"),)))
+    assert [f.data for f in attachment_files(Smtp.received[-1][2])] == [b"GIF89a-bandeau", PDF, b"mot"]
+    box._cache.close()
+
+
+def test_a_forward_never_silently_loses_a_piece_given_up(tmp_path, servers):
+    box = box_for(tmp_path, *servers)
+    mid = asyncio.run(box.send("dest@exemple.fr", "Le devis", "Le voici.", account="pro",
+                               files=(File("devis.pdf", "application/pdf", PDF),)))
+    with box._cache._use(write=True) as s:
+        s.execute(update(PartRow).values(digest=""))  # ses octets cédés aux plus récents
+    ref = f"pro:{mid}"
+    with pytest.raises(ValueError, match="plus gardée"):
+        asyncio.run(box.forward(ref, "autre@exemple.fr", "Tr", "Pour toi."))
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(box.file(ref, "0"))
+    asyncio.run(box.forward(ref, "autre@exemple.fr", "Tr", "Pour toi.", attachments=False))  # sans elles : il part
+    box._cache.close()
+
+
+def test_files_added_to_a_forward_count_with_the_pieces_it_carries(tmp_path, servers, monkeypatch):
+    box = box_for(tmp_path, *servers)
+    m = asyncio.run(box.fetch_new(10))[0]  # il porte deux pièces
+    nine = tuple(File(f"p{i}.txt", "text/plain", b"x") for i in range(PIECES_MAX - 1))
+    with pytest.raises(ValueError, match="plus de 10"):
+        asyncio.run(box.forward(m.ref, "dest@exemple.fr", "Tr", "Pour toi.", files=nine))
+    monkeypatch.setattr(client_module, "PIECES_TOTAL_MAX", len(PDF))
+    with pytest.raises(ValueError, match="pèserait plus"):
+        asyncio.run(box.forward(m.ref, "dest@exemple.fr", "Tr", "Pour toi.", files=(File("a.txt", "text/plain", b"x"),)))
+    assert Smtp.received == []  # rien n'est parti
+    asyncio.run(box.forward(m.ref, "dest@exemple.fr", "Tr", "Pour toi."))  # sans ajout : comme avant
+    assert len(attachment_files(Smtp.received[-1][2])) == 2
+    asyncio.run(box.forward(m.ref, "dest@exemple.fr", "Tr", "Pour toi.", attachments=False, files=nine))  # sans les siennes
+    assert len(attachment_files(Smtp.received[-1][2])) == PIECES_MAX - 1
+    box._cache.close()
+
+
+# ── un mail lourd sur un débit lent (ADR 0214) ──
+
+#: au-delà de ce que les tampons de la boucle locale avalent sans que le serveur lise
+HEAVY = 12_000_000
+
+
+def test_the_delay_follows_the_weight_of_the_mail():
+    assert compose.transfer_timeout(2_000, 30.0) == 30.0  # un mail court : le délai d'une commande
+    on_the_wire = 70_800_000  # 2 × 25 Mio, encodés
+    assert compose.transfer_timeout(on_the_wire, 30.0) >= on_the_wire * 8 / 1_000_000  # il part à 1 Mbit/s
+    m = EmailMessage()
+    m.set_content("Bonjour")
+    m.add_attachment(b"x" * 1_000_000, maintype="application", subtype="octet-stream", filename="a.bin")
+    assert compose.wire_size(m) == pytest.approx(len(m.as_bytes()), rel=0.05)
+
+
+def test_a_slow_smtp_server_gets_the_time_a_heavy_mail_needs(servers, monkeypatch):
+    monkeypatch.setattr(client_module, "SMTP_TIMEOUT", 0.4)
+    monkeypatch.setattr(Smtp, "stall", 1.0)  # plus longtemps que le délai d'une commande
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = "mika@exemple.fr", "dest@exemple.fr", "Lourd"
+    m.set_content("Le voici.")
+    m.add_attachment(b"x" * HEAVY, maintype="application", subtype="octet-stream", filename="lourd.bin")
+    ImapSmtpMail._smtp_sync(account_for(*servers), m)
+    assert len(Smtp.received[-1][2]) > HEAVY
+
+
+def test_a_slow_imap_server_gets_the_copy_and_the_session_its_delay_back(servers, monkeypatch):
+    monkeypatch.setattr(Imap, "stall", 1.0)
+    with Session(account_for(*servers), timeout=0.4) as s:
+        s.append("Envoyés", b"x" * HEAVY)
+        assert s.box.sock.gettimeout() == 0.4  # la suite de la session garde le délai d'une commande
+    assert [len(raw) for _, raw in Imap.boxes["Envoyés"].mails.values()] == [HEAVY]
+
+
+def test_pieces_of_a_sent_mail_leave_with_it_and_share_their_bytes(cache):
+    one, two = sent("<s1@x>", 1, File("a.pdf", "application/pdf", PDF)), sent("<s2@x>", 2, File("b.pdf", "application/pdf", PDF))
+    cache.remember_sent(one[0], b"", one[1])
+    cache.remember_sent(two[0], b"", two[1])
+    assert kept(cache) == (2, 1)  # une fois par contenu
+    assert cache.part("pro:<s1@x>", 0).name == "a.pdf" and cache.part("pro:<s2@x>", 0).name == "b.pdf"
+    cache.remember_sent(one[0], b"", one[1])  # le même envoi, redit : rien de plus
+    assert kept(cache) == (2, 1)
+    assert cache.forget("dest@exemple.fr") == 2
+    assert kept(cache) == (0, 0) and cache.part("pro:<s1@x>", 0) is None
+
+
+def test_beyond_the_bound_a_sent_mail_gives_up_its_bytes_like_a_received_one(cache, monkeypatch):
+    monkeypatch.setattr(cache_module, "KEPT_MAX", 700)
+    old = sent("<vieux@x>", 1, File("a.bin", "application/octet-stream", b"a" * 500))
+    new = sent("<neuf@x>", 2, File("b.bin", "application/octet-stream", b"b" * 500))
+    cache.remember_sent(old[0], b"", old[1])
+    assert cache.part("pro:<vieux@x>", 0) is not None
+    cache.remember_sent(new[0], b"", new[1])
+    assert cache.part("pro:<vieux@x>", 0) is None and cache.part("pro:<neuf@x>", 0).data == b"b" * 500
+    assert [a.name for a in cache.sent_one("pro:<vieux@x>").attachments] == ["a.bin"]  # toujours listée

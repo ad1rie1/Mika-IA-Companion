@@ -8,16 +8,22 @@ import { miniCard, pendingMini } from "../../map/cards";
 import { slotKey } from "../../map/minis";
 import { mapNotes } from "../../map/notes";
 import {
+  accordToggle,
   approvalsMarkup,
   cardKinds,
+  composerMarkup,
+  composerPlaceholder,
   dayAndClock,
   elsewhere,
   inlineHtml,
+  messageKey,
   sentFile,
   shortWhen,
   sizeLabel,
-  splitAttachments,
+  filesTable,
   threadMarkup,
+  typedText,
+  userMessage,
   workCard,
   type ThreadView,
 } from "./markup";
@@ -36,7 +42,7 @@ function view(messages: StoredMessage[], extra: Partial<ThreadView> = {}): Threa
     typing: false,
     openWork: new Set(),
     verdictErrors: new Map(),
-    truncated: false,
+    older: "none",
     now: NOW,
     api: "http://localhost:8001",
     ...extra,
@@ -71,14 +77,54 @@ describe("les petites formes", () => {
     );
   });
 
-  it("splitAttachments : les fichiers que le fil compose, seulement s'ils en ont l'air", () => {
-    expect(splitAttachments("regarde ça [photo.jpg, devis-2026.pdf]")).toEqual({
-      text: "regarde ça",
-      files: ["photo.jpg", "devis-2026.pdf"],
-    });
-    expect(splitAttachments("[tableau-blanc.jpg]")).toEqual({ text: "", files: ["tableau-blanc.jpg"] });
-    expect(splitAttachments("je dis [bonjour]")).toEqual({ text: "je dis [bonjour]", files: [] });
-    expect(splitAttachments("collé[a.png]")).toEqual({ text: "collé[a.png]", files: [] });
+  it("typedText : le texte tapé, sans les noms de ses pièces ; pas de pièce annoncée, rien à retirer", () => {
+    const photo = [{ name: "photo.jpg", kind: "image" }, { name: "devis-2026.pdf", kind: "file" }];
+    expect(typedText({ text: "regarde ça [photo.jpg, devis-2026.pdf]", attachments: photo })).toBe("regarde ça");
+    expect(typedText({ text: "[tableau.jpg]", attachments: [{ name: "tableau.jpg", kind: "image" }] })).toBe("");
+    expect(typedText({ text: "ça [a.png]", matchText: "ça", attachments: [{ name: "b.png", kind: "image" }] })).toBe("ça");
+    expect(typedText({ text: "je finis par [notes.txt]" })).toBe("je finis par [notes.txt]");
+    expect(typedText({ text: "[note.txt] bonjour", attachments: [{ name: "note.txt", kind: "file" }] })).toBe("[note.txt] bonjour");
+  });
+
+  it("une bulle : ses pièces viennent d'attachments, jamais du texte qui finit par des crochets", () => {
+    const shown = { api: "http://m", operator: false, found: undefined };
+    const phantom: StoredMessage = { text: "voir [notes.txt]", sender: "user", ts: NOW };
+    const html = userMessage(phantom, false, shown);
+    expect(html).not.toContain("msg-file");
+    expect(html).toContain("voir [notes.txt]");
+    const real = userMessage({ text: "voir [notes.txt]", sender: "user", ts: NOW, attachments: [{ name: "notes.txt", kind: "file" }] }, false, shown);
+    expect(real).toContain("msg-file");
+    expect(real).toContain(">voir<");
+  });
+
+  it("le haut du fil : le bouton « Messages plus anciens », seulement s'il y en a", () => {
+    const conversation: StoredMessage[] = [{ text: "salut", sender: "user", ts: NOW, id: 1, status: "sent" }];
+    expect(threadMarkup(view(conversation))).not.toContain("data-older");
+    const more = threadMarkup(view(conversation, { older: "more" }));
+    expect(more).toContain("data-older");
+    expect(more).toContain("Messages plus anciens");
+    expect(more).not.toContain("tronqué");
+    const loading = threadMarkup(view(conversation, { older: "loading" }));
+    expect(loading).toContain("data-older disabled");
+    expect(loading).toContain("Chargement…");
+  });
+
+  it("les fichiers échangés : ta propre copie s'enregistre, tant qu'elle est gardée", () => {
+    const id = "a".repeat(32);
+    const html = filesTable([{
+      text: "tiens [a.txt, b.txt, c.txt]",
+      sender: "user",
+      ts: NOW,
+      attachments: [
+        { name: "a.txt", kind: "file", id, url: `/files/${id}`, available: true },
+        { name: "b.txt", kind: "file", id, url: `/files/${id}`, available: false },
+        { name: "c.txt", kind: "file" },
+      ],
+    } as StoredMessage], "http://m", NOW);
+    expect(html).toContain(`href="http://m/files/${id}"`);
+    expect(html.match(/Enregistrer/g)).toHaveLength(1);
+    expect(html).toContain("plus disponible");
+    expect(html).not.toContain("envoyé par toi");
   });
 });
 
@@ -178,6 +224,21 @@ describe("threadMarkup", () => {
     expect(threadMarkup(view([], { typing: true }))).not.toContain("data-typing hidden");
   });
 
+  it("chaque message porte sa clé (la palette y mène) ; celui qu'elle vient de montrer est surligné", () => {
+    const msgs = [
+      { text: "le devis ?", sender: "user", ts: at(4, 14, 1), id: 41 },
+      { text: "389,50 €", sender: "vtuber", ts: at(4, 14, 2), id: 42 },
+      { text: "pas encore accusé", sender: "user", ts: at(4, 14, 3) },
+    ] as StoredMessage[];
+    expect(msgs.map(messageKey)).toEqual(["41", "42", `t${at(4, 14, 3)}`]);
+    const html = threadMarkup(view(msgs, { found: "42" }));
+    expect(html).toContain('class="msg me" data-msg="41"');
+    expect(html).toContain('class="msg her found" data-msg="42"');
+    expect(html).toContain(`data-msg="t${at(4, 14, 3)}"`);
+    expect(html.match(/ found"/g)).toHaveLength(1);
+    expect(threadMarkup(view(msgs))).not.toContain(" found");
+  });
+
   it("une recherche ne garde que ce qui la contient", () => {
     const html = threadMarkup(view(conversation, { filter: (m) => m.text.includes("toi") }));
     expect(html).toContain("et toi ?");
@@ -254,14 +315,63 @@ describe("les cartes qui se décident ailleurs (ADR 0191)", () => {
     expect(elsewhere(undefined)).toBeNull();
   });
 
-  it("dessine un lien, sans boutons qui décident", () => {
-    const state = { ...EMPTY_APPROVALS, connected: true, cards: [
-      { id: 7, title: "Répondre à Claire", text: "Bonjour", digest: "ab12", blocked: "", expires_at: null }] };
+  it("une réponse Teams ouvre son brouillon même, comme un mail ; sans brouillon nommé, la liste", () => {
+    expect(elsewhere({ capability: "teams.send", draft: "t 3" })?.href).toBe("#teams/brouillons/t%203");
+    expect(elsewhere({ capability: "teams.send", draft: "" })?.href).toBe("#teams/brouillons");
+  });
+
+  const linkCard = (id: number, title: string) => ({ id, title, text: "Bonjour", digest: "ab12", blocked: "", expires_at: null });
+
+  it("dessine un lien compact, sans boutons qui décident : « Ouvrir » sur la même ligne, le titre entier en infobulle", () => {
+    const state = { ...EMPTY_APPROVALS, connected: true, cards: [linkCard(7, "Répondre à <Claire>")] };
     const html = approvalsMarkup(state, Date.now(), {
       note: null, auto: false, open: new Set(), kinds: new Map([[7, { capability: "email.send", draft: "d9" }]]) });
     expect(html).toContain('href="#mail/messages/brouillon/d9"');
-    expect(html).toContain("Ouvrir dans Mail");
+    expect(html).toContain('aria-label="Ouvrir dans Mail"');
+    expect(html).toContain('Ouvrir<span class="lbl"> dans Mail</span></a>');
+    expect(html).toContain('<b title="Répondre à &lt;Claire&gt;">Répondre à &lt;Claire&gt;</b>');
     expect(html).not.toContain('data-ap="accept"');
+    // une seule carte-lien : pas de ligne qui les replie
+    expect(html).not.toContain("data-ap-links");
+  });
+
+  it("deux cartes-liens ou plus : une ligne qui les replie sur un téléphone, posée avant la première", () => {
+    const state = { ...EMPTY_APPROVALS, connected: true, cards: [
+      { ...linkCard(5, "Appeler « prevision »"), text: "{}" }, linkCard(7, "Répondre à Claire"), linkCard(8, "Répondre sur Teams à Hugo"), linkCard(9, "Relancer Paul")] };
+    const kinds = new Map([
+      [5, { capability: "mcp.call", draft: "" }],
+      [7, { capability: "email.send", draft: "d7" }],
+      [8, { capability: "teams.send", draft: "t8" }],
+      [9, { capability: "email.send", draft: "d9" }],
+    ]);
+    const closed = approvalsMarkup(state, Date.now(), { note: null, auto: false, open: new Set(), kinds });
+    expect(closed.match(/data-ap-links/g)).toHaveLength(1);
+    expect(closed).toContain("<b>3 brouillons à relire</b><span class=\"ap-meta\">Mail · Teams</span>");
+    expect(closed).toContain('aria-expanded="false"');
+    // la carte qui se décide ici reste devant ; la ligne précède la première carte-lien
+    const at = (needle: string) => closed.indexOf(needle);
+    expect(at('data-card="5"')).toBeLessThan(at("data-ap-links"));
+    expect(at("data-ap-links")).toBeLessThan(at('data-card="7"'));
+    expect(closed.match(/class="approval link"/g)).toHaveLength(3);
+    const open = approvalsMarkup(state, Date.now(), { note: null, auto: false, open: new Set(), kinds, linksOpen: true });
+    expect(open).toContain('aria-expanded="true"');
+  });
+});
+
+describe("le champ sur un téléphone", () => {
+  it("le bouton des accords garde un mot quand son libellé se cache : « Un par un », « Tout accepter »", () => {
+    const one = accordToggle(false).html;
+    expect(one).toContain('<span class="lbl">Accords : un par un</span><span class="lbl-short">Un par un</span>');
+    // « Tout accepter » se lit à toutes les largeurs : pas de .lbl, que la barre du champ cache sur un téléphone
+    expect(accordToggle(true).html).toContain("<span>Tout accepter</span>");
+    expect(accordToggle(true).html).not.toContain("lbl");
+  });
+
+  it("l'invite du mode pro tient sur une ligne d'un téléphone", () => {
+    const pro = composerPlaceholder(true);
+    expect(pro.length).toBeLessThanOrEqual(36);
+    expect(composerMarkup({ pro: true, operator: true, auto: false }, 2000, "")).toContain(`placeholder="${pro}"`);
+    expect(composerPlaceholder(false)).toBe("Écrire à Mika…");
   });
 });
 

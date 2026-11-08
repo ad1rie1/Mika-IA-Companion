@@ -2,11 +2,12 @@
  * L'API par personne (`/api/moi/…`, ADR 0187 ; le contrat : `backendv2/docs/protocole-moi.md`) : ce que montrent
  * Outils, Mail, Teams, Téléphone et Paramètres — ses boîtes, ses comptes Teams, ses téléphones, ses services, ses
  * partages et ses droits, tels que le moteur les calcule pour elle. Sous la session du navigateur ; une écriture
- * passe par `sendJson` (et `postJson` du client web dessous), le seul chemin qui porte le jeton CSRF. Chaque
+ * passe par `sendJson` ou `sendForm` (et `postJson`, `postForm` du client web dessous), les seuls chemins qui portent
+ * le jeton CSRF. Chaque
  * domaine a son client typé à côté (`mail.ts`, `teams.ts`, `phone.ts`, `rights.ts`, `settings.ts`, `shares.ts`,
  * `mcp.ts`).
  */
-import { API_BASE, BackendUnreachableError, postJson } from "@web/network/api";
+import { API_BASE, BackendUnreachableError, postForm, postJson } from "@web/network/api";
 
 export { postJson };
 
@@ -78,6 +79,25 @@ export async function sendJson<T = Done>(path: string, body: Record<string, unkn
     if (err instanceof BackendUnreachableError) throw err;
     throw new BackendUnreachableError(err);
   }
+  return answer<T>(resp);
+}
+
+/**
+ * Écrire avec des fichiers (`POST`, `multipart/form-data`, jeton CSRF) : les mêmes champs qu'en JSON (un booléen faux,
+ * une chaîne vide sont absents), chaque fichier sous `files`. Un refus lève `ApiError`, comme `sendJson`.
+ */
+export async function sendForm<T = Done>(path: string, fields: Record<string, unknown>, files: readonly File[], nonce = ""): Promise<T> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(nonce ? { ...fields, nonce } : fields)) {
+    if (value === undefined || value === null || value === "" || value === false) continue;
+    form.set(key, value === true ? "1" : String(value));
+  }
+  for (const file of files) form.append("files", file, file.name);
+  return answer<T>(await postForm(path, form));
+}
+
+/** Ce qu'une écriture a donné, ou le refus qu'elle a dit. */
+async function answer<T>(resp: Response): Promise<T> {
   const got: unknown = await resp.json().catch(() => null);
   if (!resp.ok) {
     const o = got && typeof got === "object" ? (got as { error?: unknown; fields?: unknown }) : {};

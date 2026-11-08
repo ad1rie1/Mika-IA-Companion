@@ -12,11 +12,12 @@ from dataclasses import dataclass, replace
 from pydantic import BaseModel, Field
 
 from mika.contracts import runtime as rt
-from mika.kernel.events import Origin, Payload
+from mika.kernel.events import Content, Origin, Payload
 from mika.kernel.facts import FactKey
 from mika.kernel.faculty import Faculty
 from mika.kernel.guards import Guard
-from mika.kernel.operate import Done, Refused
+from mika.kernel.operate import Decision, Done, Refused
+from mika.runtime import decisions
 from mika.runtime.operations import perform
 from mika.sim.clock import run_virtual
 from tests.fixtures.harness import build
@@ -279,3 +280,77 @@ def test_a_failed_action_gives_its_form_back(tmp_path):
         assert ("board.fragile", "failed") in audit and ("board.fragile", "done") in audit
     finally:
         BOARD.actions[:] = [a for a in BOARD.actions if a.name != "fragile"]
+
+
+def test_a_refusal_that_holds_only_while_pending_never_holds_back_the_rest(tmp_path, monkeypatch):
+    """Audit du 2026-11-05, relecture du lot L13 : une action agit hors du journal (une réponse partie) et refuse dans
+    le même geste une de ses propositions, devenue sans objet (son brouillon). Décidée ailleurs entre-temps — avant
+    qu'on la lise, ou entre la lecture et l'ajout —, la proposition n'a plus rien à refuser : avec ``if_pending``, ce
+    refus est ignoré et le reste du geste s'écrit (sinon la réponse partie ne serait pas sue, et l'on la renverrait).
+    Sans lui, ou pour une approbation, une proposition déjà décidée refuse le geste, comme avant."""
+    plan: dict = {}
+
+    @BOARD.action("repondre", title="Répondre", args=NoArgs, emits=[PINNED])
+    def _answer(s, frame, args, ctx) -> Done:
+        return Done(drafts=(PINNED.draft(text=plan["text"]),), message="Parti.",
+                    decide=(Decision(plan["proposal"], plan["approved"], note="sans objet",
+                                     if_pending=plan["if_pending"]),))
+
+    try:
+        kernel, clock, _ = build(tmp_path, [BOARD])
+
+        async def propose() -> int:
+            commit = await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
+                capability="board.envoyer", owner="board", args_json="{}", summary=Content.of("un brouillon"))],
+                emitter=rt.OWNER, correlation="t", origin=Origin.KERNEL)
+            return commit.seqs[0]
+
+        async def decided_elsewhere(proposal: int, key: str = "décision") -> None:
+            # « décision » : la clé de toute décision (le même ajout se dédoublonne) ; une autre (une échéance) : la
+            # garde « encore en attente » le voit
+            await kernel.mind.append([rt.EFFECT_RESOLVED.draft(
+                proposal=proposal, approved=False, by="user_2", capability="board.envoyer", owner="board",
+                dedupe_key=f"{key}:{proposal}")], emitter=rt.OWNER, correlation="ailleurs", origin=Origin.EXTERNAL)
+
+        async def answer(text: str, proposal: int, *, approved: bool = False, if_pending: bool = False):
+            plan.update(text=text, proposal=proposal, approved=approved, if_pending=if_pending)
+            return await perform(kernel, "board.repondre", form(), by="user_1", nonce=text)
+
+        async def main():
+            await kernel.start()
+            out, asked = {}, {}
+            for case, how in (("moot", {"if_pending": True}), ("strict", {}),
+                              ("approval", {"approved": True, "if_pending": True})):
+                asked[case] = await propose()
+                await decided_elsewhere(asked[case])  # avant qu'on la lise
+                out[case] = await answer(case, asked[case], **how)
+            asked["calm"] = await propose()  # personne d'autre : le refus s'écrit
+            out["calm"] = await answer("calm", asked["calm"], if_pending=True)
+            real = decisions.prepare
+
+            async def stale(mind, ports, proposal, approved, **kw):
+                got = await real(mind, ports, proposal, approved, **kw)
+                await decided_elsewhere(proposal, plan["key"])  # entre la lecture et l'ajout
+                return got
+
+            monkeypatch.setattr(decisions, "prepare", stale)
+            for case, key in (("raced", "décision"), ("expired", "échéance")):
+                asked[case] = await propose()
+                plan["key"] = key
+                out[case] = await answer(case, asked[case], if_pending=True)
+            out["notes"] = kernel.mind.frame().state("board").notes
+            out["resolved"] = [(e.data.proposal, e.data.by) for e in events(kernel, rt.EFFECT_RESOLVED.name)]
+            await kernel.stop()
+            return out, asked
+
+        out, asked = run_virtual(clock, main)
+        assert all(out[case].ok for case in ("moot", "calm", "raced", "expired"))
+        assert out["notes"] == ("moot", "calm", "raced", "expired")  # ce qui est parti se sait
+        assert not out["strict"].ok and out["strict"].message == decisions.MESSAGES[decisions.UNKNOWN]
+        assert not out["approval"].ok  # une approbation n'est jamais sans objet
+        by = dict(out["resolved"])
+        assert len(out["resolved"]) == 6  # une décision par proposition, jamais deux
+        assert by[asked["calm"]] == "user_1"
+        assert all(by[asked[case]] == "user_2" for case in ("moot", "strict", "approval", "raced", "expired"))
+    finally:
+        BOARD.actions[:] = [a for a in BOARD.actions if a.name != "repondre"]

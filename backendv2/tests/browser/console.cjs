@@ -392,20 +392,24 @@ test('bouton retirer lisible en clair et sombre, au repos et au survol', async t
 });
 
 test('toutes les pages exportées : aucun débordement du document à 390 et 1440 px', async t => {
-  const page = await open(t);
   const files = (await fs.readdir(path.join(preview, 'clair'))).filter(file => file.endsWith('.html'));
   const overflows = [];
+  // Un même onglet pour toutes les pages monte à 3 Go (un seul moteur de rendu, qui ne rend rien) : il se renouvelle.
+  const pagesPerTab = 100;
   for (const width of [390, 1440]) {
-    await page.setViewportSize({ width, height: 900 });
-    for (const file of files) {
-      await page.goto('http://console.test/preview/' + file);
-      assert.equal(await page.locator('h1').count(), 1, file);
-      if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)) {
-        const elements = await page.locator('main *').evaluateAll(els => els.filter(el => el.checkVisibility() &&
-          el.getBoundingClientRect().right > innerWidth + 1 && !el.closest('.table-wrap')).slice(0, 8)
-          .map(el => `${el.tagName}.${el.className}`));
-        overflows.push({ file, width, elements });
+    for (let start = 0; start < files.length; start += pagesPerTab) {
+      const page = await open(t, { width });
+      for (const file of files.slice(start, start + pagesPerTab)) {
+        await page.goto('http://console.test/preview/' + file);
+        assert.equal(await page.locator('h1').count(), 1, file);
+        if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)) {
+          const elements = await page.locator('main *').evaluateAll(els => els.filter(el => el.checkVisibility() &&
+            el.getBoundingClientRect().right > innerWidth + 1 && !el.closest('.table-wrap')).slice(0, 8)
+            .map(el => `${el.tagName}.${el.className}`));
+          overflows.push({ file, width, elements });
+        }
       }
+      await page.context().close();
     }
   }
   assert.deepEqual(overflows, []);
@@ -421,6 +425,48 @@ test('réglages : catégories accessibles sans JavaScript et recherche des param
   assert.equal(await page.locator('#reglages-avances').evaluate(el => el.open), true);
   assert.equal(await page.locator('.settings-directory a[href="/inspecteur/reglages/comportement-memory"]').isVisible(), true);
   assert.equal(await page.locator('.settings-directory a[href="/inspecteur/reglages/comptes"]').count(), 0);
+});
+
+test('paramétrage : la même ligne de réglage aux Réglages, aux Paramètres avancés et au courrier', async t => {
+  const rows = id => `<div class="field" data-row="texte"><label for="${id}-a">Nom</label><input id="${id}-a"><span class="help">Aide</span></div>
+    <div class="field has-error" data-row="secret"><label for="${id}-b">Secret</label><input id="${id}-b" type="password">
+      <label class="check small"><input type="checkbox"> effacer</label><span class="error">Erreur</span></div>
+    <div class="field" data-row="liste"><span class="label">Liste</span><div class="check-list"><label class="check"><input type="checkbox"> un</label></div></div>
+    <div class="field" data-row="releve"><span class="label">Relevé</span><span class="value-ro">a : 1 · b : 2</span></div>`;
+  const sheets = ['console.css', 'handmade/base.css', 'handmade/courrier_reglages.css']
+    .map(sheet => `<link rel="stylesheet" href="/inspecteur/static/${sheet}">`).join('');
+  const page = await open(t, { html: `<!doctype html><html lang="fr"><head><meta charset="utf-8">${sheets}</head><body><main><h1>Réglages</h1>
+    <form class="settings"><fieldset class="group">${rows('r')}</fieldset></form>
+    <form class="params-form"><div class="param"><div class="param-main">${rows('p')}</div><div class="param-meta">bornes</div></div></form>
+    <div class="mailset-panes"><div class="mailset-param">${rows('m')}</div></div></main></body></html>` });
+  const read = container => page.evaluate(selector => {
+    const row = name => document.querySelector(`${selector} > [data-row=${name}]`);
+    const box = el => el.getBoundingClientRect();
+    const tracks = el => getComputedStyle(el).gridTemplateColumns.split(' ').map(parseFloat);
+    const same = (a, b) => Math.abs(a - b) < 1;
+    const text = row('texte'), secret = row('secret'), value = text.querySelector('input'), name = text.querySelector('label');
+    return { columns: tracks(text).length, valueColumn: Math.round(tracks(text).at(-1)),
+      right: box(value).left >= box(name).right, stacked: same(box(value).left, box(name).left),
+      fills: same(box(value).width, tracks(text).at(-1)),
+      eraseUnderValue: same(box(secret.querySelector('.check.small')).left, box(secret.querySelector('input[type=password]')).left),
+      errorFullWidth: same(box(secret.querySelector('.error')).width, box(secret).width),
+      listColumns: tracks(row('liste')).length,
+      recordLeft: same(box(row('releve').querySelector('.value-ro')).left, box(row('releve').querySelector('.label')).left) };
+  }, container);
+  const containers = ['.settings .group', '.params-form .param-main', '.mailset-panes .mailset-param'];
+  const wide = {};
+  for (const container of containers) {
+    const { valueColumn, ...row } = await read(container);
+    wide[container] = valueColumn;
+    assert.deepEqual(row, { columns: 2, right: true, stacked: false, fills: true, eraseUnderValue: true, errorFullWidth: true, listColumns: 1, recordLeft: true }, container);
+  }
+  assert.equal(wide['.params-form .param-main'], 200, 'sa ligne a une colonne de plus : la valeur reste étroite');
+  assert.ok(wide['.mailset-panes .mailset-param'] > 200, 'le courrier suit la largeur par défaut');
+  await page.setViewportSize({ width: 390, height: 900 });
+  for (const container of containers) {
+    const { columns, right, stacked, fills, listColumns } = await read(container);
+    assert.deepEqual({ columns, right, stacked, fills, listColumns }, { columns: 1, right: false, stacked: true, fills: true, listColumns: 1 }, container);
+  }
 });
 
 test('courrier mobile : déplier les dossiers au clavier, ouvrir un message et lire sa version HTML', async t => {
@@ -467,7 +513,10 @@ test('outils : ouvrir une fiche au clavier puis retrouver sa grille filtrée', a
   assert.equal(await rules.evaluate(el => el.open), false);
   await rules.locator(':scope > summary').click();
   assert.equal(await rules.getByRole('heading', { name: 'Ses arguments', exact: true }).isVisible(), true);
-  await page.getByRole('navigation', { name: "Fil d'Ariane", exact: true }).getByRole('link', { name: "Ce qu'elle peut faire", exact: true }).click();
+  // le fil part du menu (ADR 0202) : « Outils / Ses outils / email_read », la destination ramenant à la grille filtrée
+  const trail = page.getByRole('navigation', { name: "Fil d'Ariane", exact: true });
+  assert.deepEqual(await trail.locator(':scope > a, :scope > span:not([aria-hidden])').allTextContents(), ['Outils', 'Ses outils', 'email_read']);
+  await trail.getByRole('link', { name: 'Ses outils', exact: true }).click();
   // de retour sur la grille, toujours filtrée sur sa famille : la seule montrée, ses droits dépliés
   await page.waitForURL(/\?lot=email$/);
   assert.match(await page.locator('main .server-alert').textContent(), /Seulement la famille « email »/);

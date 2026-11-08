@@ -28,9 +28,14 @@ import hashlib
 import re
 import unicodedata
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from mika.ports.drafts import to_fill as to_fill
+from mika.ports.gate import ACCEPTED as ACCEPTED
+from mika.ports.gate import CONFLICT as CONFLICT
+from mika.ports.gate import MISSING as MISSING
+from mika.ports.gate import GateResult, KeyState
 from mika.ports.sql import HANDLE_MAX, fit
 
 #: le compte d'avant l'ADR 0186 (un seul Teams) : ce qui était déjà là, et le compte d'une installation neuve
@@ -44,21 +49,6 @@ _SEPARATOR = "~"
 #: le préfixe d'une clé d'extension (une clé se reconnaît, et ne se confond ni avec un jeton de compte, ``mw_``,
 #: ni avec une clé de réveil, ``mwk_``)
 KEY_PREFIX = "mtk_"
-
-# ── Les issues de la porte (``POST /api/teams/…``) ──
-ACCEPTED = "accepted"
-#: clé absente ou fausse : la même réponse dans les deux cas
-UNKNOWN = "unknown"
-#: Teams est désactivé dans ses réglages
-DISABLED = "disabled"
-#: une requête illisible (forme, tailles)
-INVALID = "invalid"
-#: trop de requêtes
-BUSY = "busy"
-#: un élément de la file inconnu
-MISSING = "missing"
-#: un accusé impossible (« posé » pour un message déjà parti)
-CONFLICT = "conflict"
 
 # ── Les modes d'envoi ──
 Mode = Literal["brouillon", "validation", "autonome"]
@@ -85,21 +75,10 @@ OPEN_STATES = frozenset({QUEUED, SENDING, PLACED})
 #: « sending » réserve un envoi avant de le faire (un seul navigateur l'enverra ; le second reçoit un refus)
 RESULTS = ("sending", "placed", "sent", "failed")
 
-#: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su), sous toutes ses graphies
-_TO_FILL = re.compile(r"\[\s*(?:a\s*)?(?:completer|remplir|preciser)\b")
 #: un identifiant de conversation Teams tel que le client les écrit (``19:…@thread.v2``, ``19:a_b@unq.gbl.spaces``)
 CONVERSATION_ID = re.compile(r"^\d{1,3}:[A-Za-z0-9@._:=+\-]{1,300}$")
 #: le préfixe des sujets (au sens de l'oubli) d'une personne connue par Teams
 HANDLE_PREFIX = "teams:"
-
-
-def to_fill(*texts: str) -> bool:
-    """Reste-t-il un « [À COMPLÉTER » (casse, accents, « à remplir », « à préciser ») ?"""
-    for text in texts:
-        folded = "".join(ch for ch in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(ch))
-        if _TO_FILL.search(folded.casefold()):
-            return True
-    return False
 
 
 def message_ref(conversation: str, external_id: str, account: str = DEFAULT_ACCOUNT) -> str:
@@ -284,23 +263,6 @@ class Voice:
 
 
 @dataclass(frozen=True, slots=True)
-class GateResult:
-    outcome: str
-    message: str = ""
-    data: dict[str, object] = field(default_factory=dict)
-    retry_after: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class KeyState:
-    """Ce qu'on montre de la clé de l'extension : jamais le secret, de quoi la reconnaître."""
-
-    hint: str
-    created_at: int
-    by: str = ""
-
-
-@dataclass(frozen=True, slots=True)
 class AccountInfo:
     """Un compte Teams (ADR 0186) : ses réglages sans voix, et ce que son extension en a dit."""
 
@@ -412,7 +374,7 @@ class TeamsKeys(Protocol):
         """Une clé neuve pour ce compte, montrée une seule fois ; ``ValueError`` si le compte n'existe pas."""
         ...
 
-    async def revoke_key(self, account: str, by: str) -> bool:
+    async def revoke_key(self, account: str) -> bool:
         """Retirer la clé de ce compte ; ``False`` s'il n'en avait pas."""
         ...
 

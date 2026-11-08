@@ -9,6 +9,10 @@
 <div class="now-page">
   <header class="now-head">
     <div>
+      {# le fil d'Ariane (ADR 0202), au-dessus du titre comme sur toute page : la rubrique du menu qui mène ici, à son
+         nom à elle #}
+      {% set rub = (nav or [])|selectattr("active")|first %}
+      {% if rub %}<nav class="crumbs" aria-label="Fil d'Ariane"><span>{{ rub.short }}</span></nav>{% endif %}
       <p class="now-kicker">{{ now.today|capitalize }}</p>
       <h1>{{ now.her }}, en ce moment</h1>
       <p class="now-lede">Ce qu'elle ressent, ce que vit son corps, ce qui lui trotte dans la tête et qui compte pour elle — lu à l'instant, aux mêmes faits que son prompt.</p>

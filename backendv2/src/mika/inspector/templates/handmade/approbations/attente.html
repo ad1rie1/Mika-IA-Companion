@@ -1,12 +1,15 @@
 {# À valider (pages/approvals.py, ADR 0177) : une seule file pour tout ce qui attend une décision, chaque onglet la
    même file filtrée (tout, les courriers, Teams, les identités, les noms). Elle se lit comme un courrier (le gabarit
-   « client », ADR 0176) — la file à gauche, une ligne par élément (sa sorte, ce qu'il veut, ce qu'il concerne, depuis
-   quand), qui défile dans son cadre ; l'élément ouvert à droite, sa place dans la file. Une demande d'envoi : ce qui
-   partira tel quel après ton accord, sa source (des liens), ce qui la bloque, ses détails techniques repliés, ta
-   note, approuver ou refuser, puis son historique (l'épisode qui l'a proposée, les dernières décisions du même
-   genre). Un autre élément (une identité à confirmer, un nom à relier) : ses faits, sa source, ses actions sur leur
-   page et ses boutons, qui ramènent ici. Après une décision, le suivant s'ouvre. Des puces filtrent la file par
-   sorte quand il y en a plusieurs. Sur un écran étroit, l'élément choisi passe avant la file. #}
+   « client », ADR 0176) — la file à gauche, une ligne par élément (sa sorte en nom court, sa phrase entière au survol ;
+   ce qu'il veut, ce qu'il concerne, depuis quand), qui défile dans son cadre ; l'élément ouvert à droite, sa place
+   dans la file. Une demande d'envoi : ce qui
+   partira tel quel après ton accord (son aperçu, sinon ses arguments un par ligne), sa source (des liens), ce qui la
+   bloque, ses détails techniques repliés, ta note, approuver ou refuser, puis son historique (l'épisode qui l'a
+   proposée, les dernières décisions du même genre, et tout l'historique de ce genre). Un autre élément (une identité
+   à confirmer, un nom à relier) : ses faits, sa source, ses actions sur leur page et ses boutons, qui ramènent ici.
+   Après une décision, le suivant s'ouvre. Des puces filtrent la file par sorte quand il y en a plusieurs — pas
+   celles qu'un onglet garde déjà ; « Toutes » ne se compte pas (l'onglet le dit), la file se compte quand une puce
+   filtre. Sur un écran étroit, l'élément choisi passe avant la file. #}
 {% from "_navigation.html" import pager %}
 {% from "_cells.html" import cell %}
 {% from "_forms.html" import action_button %}
@@ -16,18 +19,18 @@
 {% else %}
 {% if kinds %}
 <nav class="hm-chips apv-kinds" aria-label="Sorte de demande">
-  <a class="hm-chip{{ ' on' if not kind }}" href="{{ all_href }}"{% if not kind %} aria-current="page"{% endif %}>Toutes <span class="hm-count">{{ total }}</span></a>
-  {% for k in kinds %}<a class="hm-chip{{ ' on' if k.on }}" href="{{ k.href }}"{% if k.on %} aria-current="page"{% endif %}>{{ k.text }} <span class="hm-count">{{ k.count }}</span></a>{% endfor %}
+  <a class="hm-chip{{ ' on' if not kind }}" href="{{ all_href }}"{% if not kind %} aria-current="page"{% endif %}>Toutes</a>
+  {% for k in kinds %}<a class="hm-chip{{ ' on' if k.on }}" href="{{ k.href }}"{% if k.hint %} title="{{ k.hint }}"{% endif %}{% if k.on %} aria-current="page"{% endif %}>{{ k.text }} <span class="hm-count">{{ k.count }}</span></a>{% endfor %}
 </nav>
 {% endif %}
 <div class="apv-space">
   <section class="apv-queue" aria-labelledby="apv-queue-title">
-    <header class="apv-queue-head"><h2 id="apv-queue-title">En attente</h2><span class="person-count now-num">{{ shown }}</span></header>
+    <header class="apv-queue-head"><h2 id="apv-queue-title">En attente</h2>{% if kind %}<span class="person-count now-num">{{ shown }}</span>{% endif %}</header>
     <ol class="apv-list" role="list">
       {% for p in items %}
       <li><a href="{{ p.href }}"{% if p.on %} aria-current="true"{% endif %}>
-        <span class="apv-row-top"><span class="apv-kind">{{ p.capability }}</span><span class="apv-ago" title="{{ p.exact }}">{{ p.ago }}</span></span>
-        <span class="apv-row-text">{{ p.summary or p.capability }}</span>
+        <span class="apv-row-top"><span class="apv-kind"{% if p.described %} title="{{ p.described }}"{% endif %}>{{ p.capability }}</span><span class="apv-ago" title="{{ p.exact }}">{{ p.ago }}</span></span>
+        <span class="apv-row-text">{{ p.summary or p.described or p.capability }}</span>
         {% if p.context %}<span class="apv-row-ctx">{{ p.context }}</span>{% endif %}
       </a></li>
       {% endfor %}
@@ -86,11 +89,14 @@
     </section>
     <details class="hm-subfold"><summary>Détails techniques</summary><p class="mono">{{ p.capability_key }}</p><pre class="hm-code">{{ p.args }}</pre></details>
     {% else %}
+    {# pas d'aperçu : ses arguments, un par ligne ; le JSON exact et la clé de la capacité repliés, comme ailleurs #}
     <section class="hm-approval-preview" aria-label="Ce qui sera exécuté">
       <h3 class="now-subhead first">Ce qui sera exécuté</h3>
-      <pre class="hm-code">{{ p.args }}</pre>
-      <p class="now-muted mono">{{ p.capability_key }}</p>
+      {% if p.arguments %}<dl class="apv-facts">{% for a in p.arguments %}<div><dt>{{ a.label }}</dt><dd>{{ a.value }}</dd></div>{% endfor %}</dl>
+      {% elif p.arguments is none %}<pre class="hm-code">{{ p.args }}</pre>
+      {% else %}<p class="now-muted">Sans argument.</p>{% endif %}
     </section>
+    <details class="hm-subfold"><summary>Détails techniques</summary><p class="mono">{{ p.capability_key }}</p><pre class="hm-code">{{ p.args }}</pre></details>
     {% endif %}
     <form method="post" action="{{ PREFIX }}/approbations" class="approve-form">
       {# Entrée dans la note ne décide rien : le bouton par défaut d'un formulaire est son premier, désactivé ici #}

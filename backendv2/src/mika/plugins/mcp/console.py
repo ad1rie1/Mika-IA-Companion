@@ -1,9 +1,10 @@
 """La console des serveurs MCP (ADR 0064) : dans « Outils › Venus d'ailleurs », la liste des serveurs branchés, puis la fiche de
 chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses appels.
 
-Les connexions (adresse, jeton, commande) se règlent dans Réglages › Plugins › Outils extérieurs ; un lien y mène et
-l'enregistrement ramène ici. Ce qui se décide ici : qui peut quoi, en lignes d'accès lues de haut en bas comme les
-règles d'un pare-feu, et la ligne par défaut (ADR 0131) ; ce qu'il propose de neuf, regardé d'un coup (ADR 0129) ;
+Les connexions (adresse, jeton, commande) se règlent dans Ses outils › Paramètres des services, la roue en haut à
+droite (ADR 0206) ; « Modifier ses réglages » y mène et l'enregistrement ramène ici. Ce qui se décide ici : qui peut
+quoi, en lignes d'accès lues de haut en bas comme les règles d'un pare-feu, et la ligne par défaut (ADR 0131) ; ce
+qu'il propose de neuf, regardé d'un coup (ADR 0129) ;
 outil par outil : l'activer, sa nature (il lit ou il agit), la description qu'elle lit. « Qui peut quoi » se calcule
 par la règle du moteur (``access_for``), jamais par une recopie. Ce que le serveur dit de lui-même et de ses outils
 est une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
@@ -19,6 +20,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from mika.contracts import identity as identity_c
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
@@ -33,6 +35,8 @@ from mika.kernel.inspect import (
     Found,
     Head,
     InspectContext,
+    Nav,
+    NavItem,
     Note,
     Prose,
     Ref,
@@ -70,6 +74,7 @@ from mika.ports.mcp import (
 from mika.vocab.access import (
     OWNER,
     PERSON,
+    SELF,
     SOURCE_WORDS,
     TableArgs,
     canal_words,
@@ -81,7 +86,8 @@ from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import closeness_of, rights_of, tool_allowance
 
-SETTINGS = "/inspecteur/reglages/serveurs-mcp"
+#: leur connexion : dans Ses outils, en haut à droite (ADR 0206)
+SETTINGS = "/inspecteur/outils/parametres"
 LIST = "/inspecteur/outils/serveurs"
 NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche."
@@ -101,6 +107,42 @@ def name_of(frame: Frame | None, person: str) -> str:
     """Le nom d'une personne nommée (repli : sa clé)."""
     view = frame.get(identity_c.IDENTITY(person)) if frame is not None and person else None
     return str(getattr(view, "name", "") or person)
+
+
+#: le paramètre qui choisit à qui sont les services montrés (``?qui=``) : vide, tout le monde ; « elle » ; « personne:<clé> »
+WHOSE = "qui"
+
+
+def owner_name(st: Any, frame: Frame | None = None) -> str:
+    """À qui est un service (ADR 0192), en mots : son nom à elle (un des siens, branché par un opérateur), ou celui de
+    la personne qui l'a branché sous son compte."""
+    if st.owner.startswith(PERSON):
+        return name_of(frame, st.owner[len(PERSON):])
+    return (self_c.name_of(frame.get(self_c.PERSONA)) if frame is not None else "") or "Elle"
+
+
+def owner_cell(st: Any, frame: Frame | None = None) -> Text | Ref:
+    """À qui est un service, en cellule : la fiche de la personne qui l'a branché, son nom à elle sinon."""
+    if st.owner.startswith(PERSON):
+        return Ref.subject("person", st.owner[len(PERSON):], owner_name(st, frame))
+    return Text(owner_name(st, frame))
+
+
+def _whose(st: Any) -> str:
+    """La valeur de ``?qui=`` qui garde ce service."""
+    return st.owner if st.owner.startswith(PERSON) else SELF
+
+
+def _owners(statuses: Sequence[Any], frame: Frame | None, chosen: str) -> Nav | None:
+    """« À qui » : tout le monde, elle, puis chaque personne qui a branché un service, par son nom — seulement quand il
+    y en a au moins deux à distinguer."""
+    whose = {_whose(st): owner_name(st, frame) for st in statuses}
+    if len(whose) < 2:
+        return None
+    order = sorted(whose, key=lambda w: (w != SELF, whose[w].casefold()))
+    return Nav((NavItem("Tout le monde", Ref("local", LIST, ""), active=not chosen),
+                *(NavItem(whose[w], Ref("local", LIST, "", ((WHOSE, w),)), active=chosen == w) for w in order)),
+               title="À qui")
 
 
 def who_label(who: str | Sequence[str], frame: Frame | None = None) -> str:
@@ -261,10 +303,16 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
     offered: dict[str, int] = {}
     for t in port.offered():
         offered[t.server] = offered.get(t.server, 0) + 1
+    statuses = list(port.statuses())
+    owners = _owners(statuses, frame, ctx.param(WHOSE))
+    chosen = ctx.param(WHOSE) if owners is not None else ""
     rows = []
-    for st in port.statuses():
+    for st in statuses:
+        if chosen and _whose(st) != chosen:
+            continue
         review = len(st.new) + len(st.changed)
-        rows.append(Row((_fiche(st.name), Badge("sur cette machine" if st.kind == "local" else "à une adresse", "info"),
+        rows.append(Row((_fiche(st.name), owner_cell(st, frame),
+                         Badge("sur cette machine" if st.kind == "local" else "à une adresse", "info"),
                          Text(st.purpose or "—", clamp=160), state_badge(st.state),
                          Text(f"{offered.get(st.name, 0)} / {len(st.live)}", "num"),
                          Badge(str(review), "warn") if review else Text("0", "muted"),
@@ -274,10 +322,11 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
     # brancher un service : trois questions, que la console dessinée met en page (ADR 0128)
     plug = [ActionSlot("mcp.brancher", title="Brancher")] if ctx.params.get("brancher") else []
-    # deux liens seuls : la console dessinée en fait des boutons (``app/handmade/tools.py::Elsewhere``)
-    return [*plug, Fields((("un nouveau service", add_server()),
-                           ("leurs réglages", Ref("local", SETTINGS, "Leurs réglages")))),
-            Table(("service", Column("où", "fit"), "à quoi il lui sert", Column("état", "fit"),
+    # un lien seul : la console dessinée en fait un bouton (``app/handmade/tools.py::Elsewhere``) ; leurs réglages
+    # sont derrière la roue de Ses outils (ADR 0206)
+    return [*plug, Fields((("un nouveau service", add_server()),)),
+            *([owners] if owners is not None else []),
+            Table(("service", Column("à qui", "fit"), Column("où", "fit"), "à quoi il lui sert", Column("état", "fit"),
                    Column("outils servis / proposés", "num"), Column("à revoir", "num"), Column("joint", "fit"),
                    "avec qui", "accès"),
                   tuple(rows), title="Les services branchés", empty="Aucun service branché : « Brancher un service ».",
@@ -293,6 +342,8 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
         return None
     badges = [state_badge(st.state), Badge("sur cette machine" if st.kind == "local" else "à une adresse", "info"),
               Badge(f"avec {who_said(st, frame)}", "danger" if serves_nobody(st) else "info")]
+    if st.owner.startswith(PERSON):  # branché par une personne sous son compte (ADR 0192), pas un des siens
+        badges.insert(0, Badge(f"à {owner_name(st, frame)}", "info"))
     review = len(st.new) + len(st.changed)
     if review:
         badges.append(Badge(f"{review} outil(s) à revoir", "warn"))

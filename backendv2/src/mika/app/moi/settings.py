@@ -1,16 +1,18 @@
 """Paramètres, pour qui est connecté (ADR 0187) : son compte (son nom, son mot de passe), ses boîtes aux lettres (les
 ajouter, les régler, les tester, les connecter à Microsoft, les retirer), ses comptes Teams (les ajouter, les régler,
-la clé de leur extension).
+la clé de leur extension, les retirer), et comment part ce que Mika prépare depuis chacun (ADR 0207).
 
 Ce qu'une personne branche est à elle (ADR 0185, 0186) : à son nom (``personne:<clé>``), ou « à toi » si elle est une
 de ses propriétaires — jamais à quelqu'un d'autre ; le partager est une délégation (ADR 0188), pas un changement de
 propriétaire. Une ressource qui n'est pas à elle n'existe pas ici. Les secrets ne repartent jamais : un mot de passe
-laissé vide reste celui qui est gardé. Ce qui se dérive d'une boîte ou d'un compte (à qui, actif) est rejournalisé
-aussitôt (``reconfigure``), comme depuis la console.
+laissé vide reste celui qui est gardé. Ce qui se dérive d'une boîte ou d'un compte (à qui, actif, la règle de son
+canal) est rejournalisé aussitôt (``reconfigure``), comme depuis la console.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import secrets
 import unicodedata
@@ -23,12 +25,15 @@ from mika.adapters.mail.config import MICROSOFT, MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.app.moi import OWN_MAX, Call, Denied, MeApi, done, form, missing
 from mika.app.moi import mail as mail_moi
+from mika.app.moi import rights as rights_moi
 from mika.app.moi import teams as teams_moi
 from mika.app.moi.hosts import LOCAL, local_host
+from mika.contracts import self_ as self_c
 from mika.kernel import forms
 from mika.ports.mail import ACCOUNT_KEY
 from mika.runtime.operations import audit
-from mika.vocab.access import PERSON
+from mika.vocab.access import MAIL, PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, TEAMS, Canal, canal_key
+from mika.vocab.canals import CanalRule, Canals, CanalTable
 
 #: ce qu'une personne règle d'une boîte (``owner`` n'y est pas : une boîte reste à qui l'a branchée)
 MAIL_FIELDS = ("label", "address", "enabled", "auth", "imap_host", "imap_port", "imap_ssl", "user", "password",
@@ -51,6 +56,11 @@ TARGETS = {"imap_host": ("imap_host", "imap_port", "imap_ssl"),
 MICROSOFT_HOSTS = (".office365.com", ".outlook.com")
 #: ce que dit un serveur refusé à une boîte Microsoft
 NOT_MICROSOFT = "un serveur de Microsoft (outlook.office365.com, smtp.office365.com…)"
+#: ce que la propriétaire d'un compte règle de la règle de son canal (ADR 0207), ligne par ligne et par défaut :
+#: préparer d'elle-même, comment ça part — qui, quand et les lignes elles-mêmes restent à la console
+RULE_FIELDS = ("prepare", "reply")
+#: comment ça part : seule, ton accord, brouillon (le courrier n'en a pas : ton accord), non
+REPLY_CODES = tuple(code for code, _words in REPLIES)
 
 
 def _owner_for(call: Call) -> str:
@@ -183,6 +193,7 @@ async def box_get(call: Call) -> dict[str, Any]:
     signin = port.signin(key) if port is not None and found.microsoft else None
     got["signin"] = {"state": signin.state, "code": signin.code, "url": signin.url, "until": signin.until // 1000,
                      "error": signin.error} if signin is not None else None
+    got["rules"] = _rules_json(call, f"{MAIL}:{key}")
     return got
 
 
@@ -325,7 +336,7 @@ async def teams_get(call: Call) -> dict[str, Any]:
     found = _settings(call).teams().accounts.get(key)
     if found is None:
         raise missing()
-    return _teams_settings(key, found, call)
+    return {**_teams_settings(key, found, call), "rules": _rules_json(call, f"{TEAMS}:{key}")}
 
 
 async def teams_save(call: Call) -> dict[str, Any]:
@@ -405,7 +416,8 @@ async def teams_key(call: Call) -> dict[str, Any]:
         fresh = await keys.new_key(key, call.me.handle)
     except ValueError as exc:
         raise Denied(409, str(exc)) from None
-    await audit(call.kernel, "teams.cle", by=call.me.handle, subject_kind="compte_teams", subject=key)
+    # ce que fait l'action « teams.cle » de la console, ici depuis son espace : sa clé d'audit le dit (« moi. »)
+    await audit(call.kernel, "moi.teams.cle", by=call.me.handle, subject_kind="compte_teams", subject=key)
     return {"ok": True, "message": "Clé neuve : colle-la dans l'extension de ce compte (elle ne sera plus montrée).",
             "key": fresh}
 
@@ -416,10 +428,82 @@ async def teams_revoke(call: Call) -> dict[str, Any]:
     teams_moi.owned(call, key)
     if keys is None:
         raise missing()
-    if not await keys.revoke_key(key, call.me.handle):
+    if not await keys.revoke_key(key):
         raise Denied(409, "Ce compte n'avait pas de clé.")
-    await audit(call.kernel, "teams.retirer_cle", by=call.me.handle, subject_kind="compte_teams", subject=key)
+    await audit(call.kernel, "moi.teams.retirer_cle", by=call.me.handle, subject_kind="compte_teams", subject=key)
     return {"ok": True, "message": "Clé retirée : son extension est refusée jusqu'à une clé neuve."}
+
+
+# ── comment part ce qu'elle prépare (ADR 0207) ──
+
+
+def _canal_table(canals: Canals, canal: str) -> tuple[CanalTable, bool, bool]:
+    """Le tableau qui vaut pour un de ses comptes (``courrier:<clé>``, ``teams:<clé>``), tel que le courrier et Teams
+    le lisent (``mail_verdict``, ``teams_verdict``) : le sien s'il est réglé, sinon celui de tout son canal, sinon le
+    minimum vital ; s'il est à lui (``set``) ; s'il est celui de tout son canal, réglé dans la console (``common``)."""
+    kind, key = canal_key(canal)
+    table, used = canals.table_of(Canal(kind, key))
+    return table, used == canal, used == kind and kind in canals.tables
+
+
+def _version(table: CanalTable) -> str:
+    """L'empreinte d'un tableau : ce qu'on règle d'ici vaut pour le tableau qu'on a lu, pas pour un autre."""
+    said = json.dumps(table.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(said.encode()).hexdigest()[:16]
+
+
+def _rules_json(call: Call, canal: str) -> dict[str, Any]:
+    """La règle d'un de ses comptes, en mots comme dans la matrice (``app/moi/rights.py``) : ses lignes (qui, quand,
+    préparer d'elle-même, comment ça part), sa ligne par défaut, et son empreinte (``version``)."""
+    table, own, common = _canal_table(_settings(call).canals(), canal)
+    frame = call.frame
+    name, her = rights_moi._person_name(frame), self_c.name_of(frame.get(self_c.PERSONA))
+    sources = SOURCE_WORDS if call.me.owner else SOURCE_WORDS_OTHER
+    return {"canal": canal, "set": own, "common": common, "version": _version(table),
+            "lines": [rights_moi._rule_json(a, name, her, sources) for a in table.lines],
+            "default": rights_moi._rule_json(table.default, name, her, sources)}
+
+
+def _ruled(kind: str, canal: str, line: CanalRule, sent: Any, n: int) -> CanalRule:
+    """Une ligne de la règle, avec ce que sa propriétaire en règle d'ici : préparer d'elle-même, comment ça part. Le
+    courrier n'a pas de brouillon que tu envoies toi-même (la console le grise) : une ligne ne le devient pas d'ici."""
+    where = f"Ligne {n}" if n else "La ligne par défaut"
+    if not isinstance(sent, dict) or set(sent) - set(RULE_FIELDS):
+        raise Denied(400, f"{where} : « prepare » et « reply » seulement.")
+    prepare, reply = sent.get("prepare", line.prepare), sent.get("reply", line.reply)
+    if not isinstance(prepare, bool) or reply not in REPLY_CODES:
+        raise Denied(400, f"{where} : « prepare » vrai ou faux ; « reply » seule, accord, brouillon ou non.")
+    if kind == MAIL and reply == "brouillon" and line.reply != "brouillon":
+        raise Denied(400, f"{where} : le courrier n'a pas de brouillon que tu envoies toi-même — choisis ton accord.")
+    return line.model_copy(update={"prepare": prepare, "reply": reply, "canal": (canal,)})
+
+
+async def rules_save(call: Call) -> dict[str, Any]:
+    """Comment part ce qu'elle prépare depuis un de ses comptes (ADR 0207) : pour chaque ligne de sa règle et pour la
+    ligne par défaut, préparer d'elle-même et comment ça part. Le reste (qui, quand, ses lignes) reste à la console ;
+    la règle lue (``version``) doit être celle d'aujourd'hui (409 sinon). Enregistrée, la règle est celle du compte :
+    celle de tout le canal, réglée dans la console, ne vaut plus pour lui."""
+    canal = call.arg("canal", limit=60)
+    kind, key = canal_key(canal)
+    if kind not in (MAIL, TEAMS) or not key:
+        raise Denied(400, "« canal » : courrier:<ta boîte> ou teams:<ton compte>.")
+    (mail_moi if kind == MAIL else teams_moi).owned(call, key)
+    lines, default = call.data.get("lines"), call.data.get("default")
+    if not isinstance(lines, list) or not isinstance(default, dict):
+        raise Denied(400, "« lines » : une entrée par ligne de la règle ; « default » : sa ligne par défaut.")
+    settings = _settings(call)
+    async with settings.writing:  # relue puis réécrite d'un seul tenant, avec ce qui en dérive (``reconfigure``)
+        table, _own, _common = _canal_table(settings.canals(), canal)
+        if call.arg("version", limit=64) != _version(table) or len(lines) != len(table.lines):
+            raise Denied(409, "Cette règle vient d'être réglée ailleurs : rouvre-la, puis recommence.")
+        rows = tuple(_ruled(kind, canal, line, sent, n)
+                     for n, (line, sent) in enumerate(zip(table.lines, lines, strict=True), start=1))
+        await settings.save_canal(canal, CanalTable(lines=rows, default=_ruled(kind, canal, table.default, default, 0)))
+        await _rejournal(call)
+    # la règle est un réglage du compte : son geste est celui qui le règle
+    await audit(call.kernel, "moi.boite" if kind == MAIL else "moi.compte_teams", by=call.me.handle,
+                subject_kind="compte" if kind == MAIL else "compte_teams", subject=key)
+    return {"ok": True, "message": "Règle d'envoi enregistrée."}
 
 
 def routes(api: MeApi) -> list[Route]:
@@ -430,4 +514,4 @@ def routes(api: MeApi) -> list[Route]:
             r("/mail/box/microsoft", box_microsoft, write=True),
             r("/teams/account", teams_get), r("/teams/account/save", teams_save, write=True),
             r("/teams/account/key", teams_key, write=True), r("/teams/account/revoke", teams_revoke, write=True),
-            r("/teams/account/remove", teams_remove, write=True)]
+            r("/teams/account/remove", teams_remove, write=True), r("/rules", rules_save, write=True)]

@@ -16,7 +16,7 @@ from starlette.routing import Route
 
 from mika.adapters.web.accounts import password_problems
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Panel, destinations
+from mika.inspector.catalog import Builtin, Panel, destinations, menu_place
 from mika.inspector.formview import action_view, prefilled, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.canals import canals_post
@@ -91,8 +91,13 @@ def per_row(spec: Any) -> bool:
 #: un champ « sujet » propose au plus tant d'objets connus
 SUBJECT_CHOICES = 300
 
-#: les anciens onglets de réglages qui recevaient des enregistrements
+#: les anciens onglets de réglages qui recevaient des enregistrements (« canaux » et « sens » : les anciennes clés des
+#: rubriques Carte et téléphone et Plugins, ADR 0197)
 LEGACY_POSTS = frozenset({"modeles", "personnalite", "canaux", "sens"})
+
+#: les listes où vivent les épisodes et les événements : leur fil d'Ariane y mène
+EPISODES = "decisions/episodes"
+JOURNAL = "systeme/chronologie"
 
 
 def safe_back(target: str) -> str:
@@ -110,6 +115,61 @@ class Pages:
     def __init__(self, ui: UI) -> None:
         self.ui = ui
         self.dests = destinations(ui.deps.navigation)
+        #: la rubrique où chaque destination est rangée (``app/console.py``)
+        self.homes = {d.key: g.label for g in ui.deps.navigation for d in g.items}
+
+    # ── le fil d'Ariane ──
+    def trail(self, target: str, *levels: tuple[str, str], title: str = "", link: str = "",
+              group: str = "") -> list[tuple[str, str]]:
+        """Le fil d'Ariane d'une page (ADR 0177, 0202), le seul : il part de la rubrique du menu dont un lien mène à
+        ``target`` — la page du menu où elle vit (« destination/onglet » : son onglet, la liste d'une fiche) —, puis
+        dit sa destination ; pour Réglages et Système, le lien de menu qui couvre la page (sa colonne, s'il en a une),
+        ``group`` en repli quand seul l'annuaire la couvre. La page n'y ajoute que ses niveaux à elle (``levels`` :
+        un compte par son nom, un événement par son numéro). Chaque niveau mène à sa page, sauf la page même
+        (``title`` : son titre quand c'est une page du menu, vide pour une fiche). ``link`` : où mène le niveau de la
+        destination quand on y revient ailleurs qu'à sa racine (la liste filtrée d'où vient la fiche)."""
+        menu = self.ui.deps.menu
+        dest = self.dests.get(target.split("/", 1)[0])
+        own = list(levels)
+        place = menu_place(menu, self.ui.deps.navigation, target)
+        if place is None:
+            return ([(dest.label, link or dest_url(dest.key))] if dest is not None else []) + own
+        rubric_of, entry, route = menu[place[0]], menu[place[0]].items[place[1]], place[2]
+        rubric = self.ui.her_name() if rubric_of.her else (rubric_of.short or rubric_of.label)
+        # la page même du lien : son niveau se dit sans lien
+        itself = bool(title) and not own and target == entry.target
+        if dest is None:  # une page dessinée hors des destinations (En ce moment)
+            return [(rubric, ""), (entry.label, "" if itself else f"{PREFIX}/{entry.target}")] + own
+        if dest.layout != "menu":
+            # une rubrique qui porte le nom de sa destination (« À valider ») ne se dit qu'une fois
+            out = [] if rubric == dest.label else [(rubric, "")]
+            here = bool(title) and not own and title == dest.label
+            return out + [(dest.label, "" if here else link or dest_url(dest.key))] + own
+        # Réglages, Système : des pages rangées par le menu ; leur lien dit le second niveau
+        out = [(dest.label, dest_url(dest.key))] if rubric_of.label == self.homes.get(dest.key) else [(rubric, "")]
+        if route == dest.key:  # seul l'annuaire la couvre : son groupe, en repli
+            return out + ([(group, "")] if group else []) + own
+        if entry.column:
+            out.append((entry.column, ""))
+            if not itself:
+                out.append((entry.label, f"{PREFIX}/{entry.target}"))
+        else:
+            out.append((entry.label, "" if itself else f"{PREFIX}/{entry.target}"))
+            # une page de faculté : sa famille (« Paramètres avancés · Émotions »), après le lien qui y mène ; elle
+            # mène à la vue d'ensemble, ouverte sur cette famille (son ancre, ``handmade/reglages/comportement.html``)
+            if group.startswith(entry.label + " · "):
+                family = group.removeprefix(entry.label + " · ")
+                out.append((family, f"{PREFIX}/{entry.target}#famille-{family.lower().replace(' ', '-')}"))
+        return out + own
+
+    def family(self, page: str) -> tuple[str, ...]:
+        """Les pages d'un même sujet : celles du lien de menu qui nomme cette page (sa cible, puis ``also``, dans
+        l'ordre déclaré) — la barre d'onglets d'une page de Réglages ou de Système (C7-03)."""
+        place = menu_place(self.ui.deps.menu, self.ui.deps.navigation, page)
+        if place is None or place[2] != page:
+            return ()
+        link = self.ui.deps.menu[place[0]].items[place[1]]
+        return (link.target, *link.also)
 
     # ── utilitaires ──
     def tab_badge(self, item: Builtin | InspectSpec) -> int:
@@ -125,9 +185,10 @@ class Pages:
             if isinstance(got, Response):
                 return {"response": got}
             if isinstance(got, dict):
+                # ``crumbs`` : ses niveaux à elle, après ceux du menu ; ``back`` : la liste d'où l'on vient (``trail``)
                 return {"blocks": list(got.get("blocks") or []), "filters": tuple(got.get("filters") or ()),
                         "panel": got.get("panel"), "messages": list(got.get("messages") or []),
-                        "crumbs": list(got.get("crumbs") or [])}
+                        "crumbs": list(got.get("crumbs") or []), "back": str(got.get("back") or "")}
             if isinstance(got, Panel):
                 return {"blocks": [], "panel": got}
             return {"blocks": list(got or [])}
@@ -169,7 +230,7 @@ class Pages:
     def subject_choices(self, kind: str) -> list[tuple[str, str]]:
         """Les objets connus d'un type (une personne, un but) : ce qu'un champ « sujet » propose."""
         return [(f.key, f"{f.title} — {f.subtitle}" if f.subtitle else f.title)
-                for f in self.ui.inspection.search(kind, "", SUBJECT_CHOICES)]
+                for f in self.ui.inspection.search(kind, "", SUBJECT_CHOICES, when=self.ui.when)]
 
     def head_actions(self, request: Request, *, section: str = "", kind: str = "", subject: str = "") -> list[Any]:
         """Les actions d'une page : une action courte s'ouvre en panneau ; une action à plus de deux champs a
@@ -198,8 +259,10 @@ class Pages:
         if spec is None:
             return self.render_page(request, title="Action inconnue", active="", status=404,
                                     blocks=[Note("Cette action n'existe pas.", "warn")])
+        home, crumbs, returning = self.action_trail(spec, back)
         if not offered(self.ui.kernel, spec, subject):
-            return self.render_page(request, title=spec.title, active="", status=409, crumbs=[("Retour", back)],
+            return self.render_page(request, title=spec.title, active=home.key if home else "", status=409,
+                                    crumbs=crumbs, crumbs_back=returning,
                                     blocks=[Note("Cette action n'est pas possible maintenant (l'objet a changé ?).",
                                                  "warn")])
         dynamic = dynamic_fields(self.ui.kernel, spec, subject, {}) if spec.fields else None
@@ -209,12 +272,18 @@ class Pages:
                            subjects=self.subject_choices,
                            values={**initial_values(self.ui.kernel, spec, subject), **asked})
         form["description"] = ""  # dite en sous-titre de la page
+        return self.render_page(request, title=spec.title, heading=spec.title, subtitle=spec.description,
+                                active=home.key if home else "", crumbs=crumbs, crumbs_back=returning, blocks=[],
+                                panel=Panel("handmade/shared/action.html", {"form": form}))
+
+    def action_trail(self, spec: Any, back: str) -> tuple[Any, list[tuple[str, str]], tuple[str, str] | None]:
+        """Le fil d'une page d'action : la destination de son objet (ou de sa section) depuis sa rubrique, et le
+        retour vers la page d'où l'on vient, dit à part (il ne remplace pas le chemin, ADR 0202)."""
         home = self.dests.get(spec.section) if spec.section else next(
             (d for d in self.dests.values() if spec.subject and spec.subject in d.subjects), None)
-        crumbs = ([(home.label, dest_url(home.key))] if home else []) + [("Retour", back)]
-        return self.render_page(request, title=spec.title, heading=spec.title, subtitle=spec.description,
-                                active=home.key if home else "", crumbs=crumbs, blocks=[],
-                                panel=Panel("handmade/shared/action.html", {"form": form}))
+        crumbs = self.trail(home.key) if home is not None else []
+        same = back.rstrip("/") in (PREFIX, dest_url(home.key) if home is not None else PREFIX)
+        return home, crumbs, None if same else ("Retour", back)
 
     def render_page(self, request: Request, *, title: str, active: str, blocks: Sequence[Any],
                     filters: Sequence[Param] = (), panel: Panel | None = None, keep: Sequence[tuple[str, str]] = (),
@@ -300,27 +369,26 @@ class Pages:
         if d.lead:  # sa page, dessinée à part (Personnes) : le premier onglet, qui y ramène (ADR 0176)
             tab_list.insert(0, {"title": d.lead, "href": dest_url(d.key), "on": False, "badge": 0, "group": "",
                                 "slug": ""})
+        # le fil d'Ariane (ADR 0176, 0202) : la rubrique du menu, puis la destination — un lien quand le titre est
+        # celui de l'onglet (« Mika / Humeur et corps », puis « Besoins ») —, puis ce que l'onglet ajoute (l'outil
+        # ouvert depuis la liste : « Outils / Ses outils / email_read », la destination menant à cette liste)
+        group = next((t["group"] for t in tab_list if t["on"]), "")
+        crumbs = self.trail(f"{d.key}/{slug}", *(got.get("crumbs") or ()), title=current[1],
+                            link=got.get("back") or "", group=group)
         if d.layout == "menu":
-            # des pages rangées par rubrique (le menu de gauche y mène) : la page porte le titre de la sous-page
-            group = next((t["group"] for t in tab_list if t["on"]), "")
-            crumbs = [(d.label, dest_url(d.key))] + ([(group, "")] if group else []) + list(got.get("crumbs") or [])
+            # des pages rangées par le menu : la page porte le titre de la sous-page
             description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
-            # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles) ; pour les réglages, le
-            # répertoire complet est « Tous les réglages ».
-            family = next(((link.target, *link.also) for group in self.ui.deps.menu for link in group.items
-                           if f"{d.key}/{slug}" in (link.target, *link.also)), ())
-            related = [t for t in tab_list if t["href"].removeprefix(PREFIX + "/") in family]
+            # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles), dans l'ordre de leur lien
+            # au menu ; pour les réglages, le répertoire complet est « Tous les réglages ».
+            by_page = {t["href"].removeprefix(PREFIX + "/"): t for t in tab_list}
+            related = [by_page[page] for page in self.family(f"{d.key}/{slug}") if page in by_page]
             return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
                                     subtitle=description or "", tabs=related, blocks=got["blocks"],
                                     console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
-        # le fil d'Ariane (ADR 0176, la maquette) : sa rubrique, puis la destination — un lien quand le titre est
-        # celui de l'onglet (« Mika / Humeur et corps », puis « Besoins »)
-        crumbs = got.get("crumbs") or [(d.label, dest_url(d.key) if current[1] != d.label else "")]
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
-                                rubric=not got.get("crumbs"),
                                 subtitle=item.description or d.description, tabs=tab_list, gear=gear,
                                 blocks=got["blocks"],
                                 console_blocks=getattr(item, "owner", "") in self.ui.deps.plain_owners, **drawn,
@@ -366,11 +434,13 @@ class Pages:
             if request.url.query:
                 target += "?" + request.url.query
             return RedirectResponse(target, status_code=303)
-        crumbs = [(d.label, dest_url(d.key))] if d else [("Toutes les vues", f"{PREFIX}/systeme/vues")]
+        # une vue cachée : dans sa destination ; une vue sans destination : sous Système › Toutes les vues
+        crumbs = self.trail(d.key) if d else self.trail("systeme/vues")
+        where = {} if d else {"menu_path": f"{PREFIX}/systeme/vues", "menu_tab": False}
         blocks = await self.ui.inspection.arun(spec, request.query_params, self.ui.when_long)
         return self.render_page(request, title=spec.title, active=d.key if d else "systeme", crumbs=crumbs,
                                 blocks=blocks, filters=spec.typed, subtitle=spec.description,
-                                console_blocks=spec.owner in self.ui.deps.plain_owners)
+                                console_blocks=spec.owner in self.ui.deps.plain_owners, **where)
 
     # ── épisode, événement ──
     async def episode(self, request: Request) -> Response:
@@ -405,7 +475,7 @@ class Pages:
                                     "appels": "Les appels de modèle associés, leur durée et leur coût.",
                                     "decision": "Le déclencheur de l'épisode et les raisons de la décision.",
                                 }[slug],
-                                active="decisions", crumbs=[("Décisions", f"{PREFIX}/decisions/episodes")],
+                                active="decisions", crumbs=self.trail(EPISODES, ("Épisodes", f"{PREFIX}/{EPISODES}")),
                                 head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks,
                                 panel=drawn or panel)
 
@@ -422,7 +492,9 @@ class Pages:
         backend = str(data.get("fournisseur", ""))[:200]
         back = safe_back(str(data.get("_retour", "")))
         blocks, status = await replay_blocks(self.ui, corr, backend, by=account.handle)
-        crumbs = [("Son épisode", f"{PREFIX}/episode/{quote(corr, safe='')}?onglet=prompt"), ("Retour", back)]
+        # sous l'épisode qu'il rejoue (le formulaire y était : son onglet Prompt)
+        crumbs = self.trail(EPISODES, ("Épisodes", f"{PREFIX}/{EPISODES}"),
+                            ("Son épisode", f"{PREFIX}/episode/{quote(corr, safe='')}?onglet=prompt"))
         return self.render_page(request, title=title, heading=title, active="decisions", status=status,
                                 subtitle=f"Le même prompt, envoyé à « {backend} » : ce qu'elle a vraiment dit, et ce "
                                          "que ce modèle répond.", crumbs=crumbs, blocks=blocks,
@@ -456,9 +528,9 @@ class Pages:
                                                  "réponse.", "warn")])
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in got["facts"]]
-        crumbs = [("Conversations", f"{PREFIX}/fil")]
-        if got["correlation"]:
-            crumbs.append(("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}"))
+        # une parole (ou un message resté sans réponse) par son numéro, sous les conversations ; son épisode est
+        # dans ses faits
+        crumbs = self.trail("fil", (f"n° {seq}", ""))
         panel = replay_panel(self.ui, got["correlation"], self.back(request)) if spoken and got["correlation"] else None
         # dessinée (ADR 0121), sauf au repli : ses blocs, si le dessin échoue ou si on demande le tableau
         drawn = None if wants_table(request.query_params) else why_panel(got, env, dict(request.query_params), panel)
@@ -477,11 +549,15 @@ class Pages:
         # dessinée (ADR 0121) ; ses blocs au repli
         drawn = None if wants_table(request.query_params) else event_panel(got, self.ui.env(),
                                                                            dict(request.query_params))
-        crumbs = [("Journal d’événements", f"{PREFIX}/systeme/chronologie")]
+        # un événement par son numéro, sous le journal (« Système / Journaux / Journal d'événements / n° 93 ») : le
+        # menu allume le journal, pas un de ses onglets
+        crumbs = self.trail(JOURNAL, (f"n° {seq}", ""))
+        where = {"menu_path": f"{PREFIX}/{JOURNAL}", "menu_tab": False}
         if drawn is not None:
             return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=[],
-                                    panel=drawn)
-        return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=got["blocks"])
+                                    panel=drawn, **where)
+        return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=got["blocks"],
+                                **where)
 
     # ── vitaux, connexion ──
     async def vitals(self, request: Request) -> Response:
@@ -600,12 +676,16 @@ class Pages:
             values.update({path: "" for path in lists.get(RENDERED, []) if path not in values and path not in fixed})
             form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, initial=fixed,
                                values=values, errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
-            return self.render_page(request, title=spec.title, active="", status=400, crumbs=[("Retour", back)],
+            home, crumbs, returning = self.action_trail(spec, back)
+            return self.render_page(request, title=spec.title, active=home.key if home else "", status=400,
+                                    crumbs=crumbs, crumbs_back=returning,
                                     blocks=[], head_actions=[], messages=[("danger", outcome.message)],
                                     panel=Panel("handmade/shared/action.html", {"form": form}))
         if outcome.show:
-            return self.render_page(request, title=spec.title, active="", crumbs=[("Retour", back)],
-                                    blocks=list(outcome.show), messages=[(outcome.tone, outcome.message)])
+            home, crumbs, returning = self.action_trail(spec, back)
+            return self.render_page(request, title=spec.title, active=home.key if home else "", crumbs=crumbs,
+                                    crumbs_back=returning, blocks=list(outcome.show),
+                                    messages=[(outcome.tone, outcome.message)])
         token = single.get("_op", "") or key
         self.ui.flash(token, outcome.tone if outcome.ok else "danger", outcome.message)
         target = render.href(outcome.go) if outcome.go else back

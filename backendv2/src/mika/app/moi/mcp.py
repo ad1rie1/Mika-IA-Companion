@@ -1,5 +1,7 @@
 """Ses services MCP, pour qui est connecté (ADR 0192) : ceux qu'elle a branchés, à elle — leur état, leurs outils,
-leurs lignes d'accès — ; en brancher un, le tester, choisir ses outils, le régler, le retirer.
+leurs lignes d'accès — ; en brancher un, le tester, choisir ses outils, le régler, le retirer. Et ceux qu'une autre
+personne lui partage (ADR 0188), en lecture : à quoi ils servent, leur état, leurs outils servis, son niveau, à qui ils
+sont — jamais leur adresse ni leurs en-têtes.
 
 Un service branché ici est à la personne (``McpServer.owner``) et naît avec une seule ligne d'accès, la sienne
 (un outil qui lit : elle s'en sert ; un outil qui agit : elle lui demande ; ce qu'elle y lit reste une confidence),
@@ -20,11 +22,15 @@ from mika.adapters.mcp.config import McpConfig, McpServer
 from mika.app.moi import OWN_MAX, Call, Denied, MeApi, missing, refused
 from mika.app.moi.hosts import LOCAL, local_host, url_host
 from mika.contracts import identity as identity_c
+from mika.contracts import self_ as self_c
 from mika.runtime.operations import audit
 from mika.vocab.access import (
     KEEP_WORDS,
     PERSON,
     POLICY_WORDS,
+    SELF,
+    SHARE_READ,
+    SHARE_USE,
     SOURCE_WORDS,
     SOURCE_WORDS_OTHER,
     when_words,
@@ -54,6 +60,25 @@ def mine(call: Call) -> dict[str, McpServer]:
     return {n: s for n, s in call.api.settings.mcp().servers.items() if s.owner == me}
 
 
+def received(call: Call) -> dict[str, tuple[McpServer, str, Any]]:
+    """Les services qu'une autre personne lui partage (ADR 0188, 0192), comme Paramètres › Partages les compte
+    (``app/moi/shares.py``) : à quelqu'un d'autre qu'elle, avec une ligne d'accès pour elle seule — celle qu'un partage
+    ajoute. Par nom : le service, son niveau (lire : ses outils qui lisent ; s'en servir : aussi ceux qui agissent) et
+    sa ligne."""
+    if call.api.settings is None:
+        return {}
+    me = PERSON + call.me.person
+    out: dict[str, tuple[McpServer, str, Any]] = {}
+    for n, s in call.api.settings.mcp().servers.items():
+        if not s.owner or s.owner == me:
+            continue
+        # une ligne par personne, comme le partage l'écrit (s'il y en avait plusieurs, la dernière, comme Partages)
+        lines = [a for a in s.access if tuple(a.who) == (me,)]
+        if lines:
+            out[n] = (s, SHARE_USE if lines[-1].act != "non" else SHARE_READ, lines[-1])
+    return out
+
+
 def _service(call: Call, name: str) -> McpServer:
     found = mine(call).get(name)
     if found is None:
@@ -62,6 +87,8 @@ def _service(call: Call, name: str) -> McpServer:
 
 
 def _line_json(a: Any, call: Call) -> dict[str, Any]:
+    """Une ligne d'accès, en codes et en mots ; ``mine`` : elle ne désigne que toi (ta ligne, pas un partage) — le
+    client la reconnaît ainsi, jamais à un nom (deux personnes peuvent porter le même)."""
     frame = call.frame
 
     def name(key: str) -> str:
@@ -70,6 +97,7 @@ def _line_json(a: Any, call: Call) -> dict[str, Any]:
 
     sources = SOURCE_WORDS if call.me.owner else SOURCE_WORDS_OTHER
     return {"who": who_words(a.who, name, sources=sources) if a.who else "", "when": when_words(a.when),
+            "mine": tuple(a.who) == (PERSON + call.me.person,),
             "read": a.read,
             "act": a.act, "keep": a.keep, "read_words": POLICY_WORDS.get(a.read, a.read),
             "act_words": POLICY_WORDS.get(a.act, a.act), "keep_words": KEEP_WORDS.get(a.keep, a.keep),
@@ -95,11 +123,37 @@ def _service_json(call: Call, name: str, spec: McpServer) -> dict[str, Any]:
             "default": _line_json(st.default, call) if st is not None else None}
 
 
+def _owner_name(call: Call, owner: str) -> str:
+    """À qui est un service, en mots : une personne par son nom, elle par le sien."""
+    if owner == SELF:
+        return self_c.name_of(call.frame.get(self_c.PERSONA))
+    key = owner[len(PERSON):] if owner.startswith(PERSON) else owner
+    view = call.frame.get(identity_c.IDENTITY(key))
+    return getattr(view, "name", "") or key
+
+
+def _received_json(call: Call, name: str, spec: McpServer, level: str, line: Any) -> dict[str, Any]:
+    """Un service qu'on lui partage, en lecture : à quoi il sert, son état, ses outils servis (ni coupés, ni changés
+    depuis leur choix — suspendus —, ni retirés par le service), son niveau, sa ligne (ce qu'elle en fait pour elle) et
+    à qui il est. Ni son adresse, ni ses en-têtes, ni le détail d'une panne (il peut nommer l'adresse)."""
+    st = call.port("mcp").status(name)
+    reviews = st.reviews if st is not None else {}
+    off = {*st.changed, *st.missing} if st is not None else set()
+    tools = [{"remote": remote, "name": r.name, "description": r.description, "choice": r.nature}
+             for remote, r in sorted(reviews.items()) if r.enabled and remote not in off]
+    return {"name": name, "purpose": spec.purpose, "enabled": spec.enabled,
+            "state": st.state if st is not None else "jamais", "tools": tools, "level": level,
+            "line": _line_json(line, call), "owner_name": _owner_name(call, spec.owner)}
+
+
 async def services(call: Call) -> dict[str, Any]:
+    """Ses services (``items``), et ceux qu'on lui partage (``received``, en lecture)."""
     port = call.port("mcp")
     if port is None:
-        return {"plugged": False, "items": []}
-    return {"plugged": True, "items": [_service_json(call, n, s) for n, s in sorted(mine(call).items())]}
+        return {"plugged": False, "items": [], "received": []}
+    return {"plugged": True, "items": [_service_json(call, n, s) for n, s in sorted(mine(call).items())],
+            "received": [_received_json(call, n, s, level, line)
+                         for n, (s, level, line) in sorted(received(call).items())]}
 
 
 async def plug(call: Call) -> dict[str, Any]:

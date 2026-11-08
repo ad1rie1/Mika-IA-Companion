@@ -769,7 +769,8 @@ class Told:
 # v19 : de quel témoignage vient ce que la personne en ressent (``felt_from``) ; une discrétion demandée ne renforce
 # pas (``Reinforced.restricts``) ; un souvenir fondu la nuit garde aussi les messages de l'autre (``sources``)
 # v20 : les tables déclarées pour les deux moteurs (ADR 0101) ; ``folded`` (le texte replié que cherche la console)
-MEMORY.projector(c.ITEMS_TABLE, version=20, tier=Tier.T0,
+# v21 : ``folded`` déplie les ligatures (ADR 0212)
+MEMORY.projector(c.ITEMS_TABLE, version=21, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE, SUBJECT_FORGOTTEN])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)

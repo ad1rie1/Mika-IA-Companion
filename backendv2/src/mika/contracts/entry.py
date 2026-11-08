@@ -144,8 +144,9 @@ class MindPort(Protocol):
 
     def strand_history(self, handle: str, strand: str, before: int | None, limit: int) -> tuple[list[HistoryRow],
                                                                                                  bool]:
-        """Les ``limit`` derniers messages d'un fil de travail de ``handle`` avant ``before`` (tous s'il est nul), du
-        plus ancien au plus récent, et s'il en reste de plus anciens."""
+        """Les ``limit`` derniers messages d'un fil de ``handle`` avant ``before`` (tous s'il est nul), du plus ancien
+        au plus récent, et s'il en reste de plus anciens. ``strand`` : un de ses fils de travail, ou vide pour le fil
+        avec elle (ADR 0215)."""
         ...
 
     async def set_strand(self, handle: str, strand: str, *, title: str, description: str, archived: bool) -> str:
@@ -171,10 +172,16 @@ class MindPort(Protocol):
         ``attachments`` d'une ligne du fil), dans l'ordre ; un identifiant inconnu (oublié) n'y est pas."""
         ...
 
+    def pieces(self, files: Sequence[str]) -> list[SharedMeta]:
+        """Ce qu'une personne peut relire des pièces qu'elle a envoyées (ADR 0215), d'après leur clé : celles qui ont
+        été gardées, dans l'ordre ; une pièce pas encore lue, inconnue ou oubliée n'y est pas."""
+        ...
+
     async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:
-        """Un fichier qu'elle a envoyé, pour qui écrit par ``handle`` : seulement s'il est parti avec un message du
-        fil que cette adresse peut relire (la règle du verbatim, ``identity.THREAD``) — ``None`` sinon, la même
-        réponse pour un fichier inconnu et pour un fichier qui n'est pas le sien."""
+        """Ce que ``handle`` peut télécharger : un fichier qu'elle a envoyé, s'il est parti avec un message du fil
+        que cette adresse peut relire (la règle du verbatim, ``identity.THREAD``), ou une pièce que cette adresse
+        lui a elle-même envoyée (ADR 0215) — ``None`` sinon, la même réponse pour un fichier inconnu et pour un
+        fichier qui n'est pas le sien."""
         ...
 
     def health(self) -> dict[str, Any]:

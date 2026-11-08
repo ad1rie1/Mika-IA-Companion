@@ -26,7 +26,7 @@ from mika.kernel.events import Origin
 from mika.kernel.faculty import ActionSpec
 from mika.kernel.guards import Superseded
 from mika.kernel.inspect import Head, Ref, describe_error
-from mika.kernel.operate import ActionContext, Done, Refused
+from mika.kernel.operate import ActionContext, Decision, Done, Refused
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.inspection import Inspection
@@ -38,6 +38,12 @@ if TYPE_CHECKING:
 RETYPE_FIELD = "_confirmer"
 #: les valeurs fixées par la page (une app, une vue…), repostées telles quelles
 FIXED_FIELD = "_fixes"
+#: d'où vient un geste audité (``runtime.operated``), dit par le début de sa clé : la console de l'opératrice
+#: (``console.…`` ; une action déclarée qu'elle fait garde sa clé nue), l'espace d'une personne (``moi.…`` : l'API par
+#: personne, son chat), la ligne de commande (``cli.…``, ou ``by`` : ``CLI_BY``)
+CONSOLE, SPACE, CLI = "console", "moi", "cli"
+#: qui agit depuis la ligne de commande (``app/cli.py``)
+CLI_BY = "ligne de commande"
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +126,13 @@ def parse_args(spec: ActionSpec, form: Mapping[str, Sequence[str]], kernel: Kern
 
 
 async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *, by: str, subject: str = "",
-                  nonce: str = "") -> Outcome:
+                  nonce: str = "", via: str = "", files: tuple[Any, ...] = ()) -> Outcome:
+    """Une action déclarée, au nom de ``by``. ``via`` : d'où elle est faite — vide, la console (son audit garde la clé
+    nue) ; ``SPACE`` ou ``CLI`` : la clé de son audit en porte le début (« moi.email.ecrire »), pour que le journal des
+    gestes dise d'où chacun vient (``origin``). ``files`` : ce que le geste apporte, que l'action lit dans son contexte
+    et dont rien ne s'écrit au journal."""
+    if via not in ("", SPACE, CLI):
+        raise ValueError(f"origine d'une action inconnue : {via!r}")
     registry = kernel.registry
     spec: ActionSpec | None = registry.actions.get(key)
     if spec is None:
@@ -141,7 +153,7 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         return Outcome(True, "Ce formulaire a déjà été envoyé : rien de plus n'a été fait.", "info", deduped=True)
     consumed = False
     try:
-        outcome = await _perform(kernel, spec, args, by=by, subject=subject, nonce=nonce)
+        outcome = await _perform(kernel, spec, args, by=by, subject=subject, nonce=nonce, via=via, files=files)
         # le jeton ne sert qu'une fois quand l'action a abouti ou a été refusée ; un échec (une panne, la
         # situation qui a changé) le rend : renvoyer le même formulaire réessaie au lieu de répondre « déjà envoyé »
         consumed = not outcome.retry
@@ -151,11 +163,12 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
     return outcome
 
 
-async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subject: str, nonce: str) -> Outcome:
+async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subject: str, nonce: str,
+                   via: str, files: tuple[Any, ...] = ()) -> Outcome:
     mind = kernel.mind
     frame = mind.frame()
     ctx = ActionContext(by=by, subject=subject, now=mind.clock.now(), ports=kernel.ports,
-                        store=kernel.ports.get("store"))
+                        store=kernel.ports.get("store"), files=files)
     got: Any = call(spec.fn, frame.state(spec.owner), frame, args, ctx, label=f"action {spec.key}")
     if not isinstance(got, Failed) and pyinspect.isawaitable(got):
         pending = got
@@ -163,9 +176,9 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
     correlation = f"opérateur:{spec.key}:{nonce or mind.ids.new(ctx.now)}"
     if isinstance(got, Failed):
         if isinstance(got.error, Refused):
-            await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
+            await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce, via)
             return Outcome(False, got.error.message, "warn", errors=got.error.fields)
-        await _audit(kernel, spec, by, subject, (), "failed", correlation, nonce)
+        await _audit(kernel, spec, by, subject, (), "failed", correlation, nonce, via)
         return Outcome(False, f"L'action a échoué : {describe_error(got.error)}"[:400], "danger", retry=True)
     done: Done = got if isinstance(got, Done) else Done(message=str(got or ""))
     # la suite est vérifiée avant le premier ajout (sur des numéros fictifs) : rien ne s'écrit à moitié pour un
@@ -175,7 +188,7 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
     planned = [] if isinstance(probe, Failed) else probe
     stray = sorted({d.type.name for d in [*done.drafts, *planned]} - spec.emits)
     if stray:
-        await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
+        await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce, via)
         return Outcome(False, f"Action refusée : elle émettrait {', '.join(stray)} sans l'avoir déclaré.", "danger")
 
     resolutions = []
@@ -183,9 +196,11 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
         got_ = await decisions.prepare(mind, kernel.ports, d.proposal, d.approved, by=by, note=d.note, seen=d.seen,
                                        owner=spec.owner)
         if got_.draft is None:
-            await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
+            if _moot(d, got_.status):
+                continue  # décidée entre-temps : ce refus n'a plus d'objet, il ne retient pas le reste du geste
+            await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce, via)
             return Outcome(False, got_.message, "warn")
-        resolutions.append((d.proposal, got_.draft))
+        resolutions.append((d, got_.draft))
 
     seqs: tuple[int, ...] = ()
     deduped = False
@@ -198,7 +213,7 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
             commit = await mind.append(keyed, emitter=spec.owner, correlation=correlation, origin=Origin.EXTERNAL,
                                        basis=frame.root, guard=done.guard)
         except Superseded:
-            await _audit(kernel, spec, by, subject, (), "superseded", correlation, nonce)
+            await _audit(kernel, spec, by, subject, (), "superseded", correlation, nonce, via)
             return Outcome(False, "La situation a changé depuis l'ouverture de la page : rien n'a été fait.", "warn",
                            retry=True)
         seqs, deduped = tuple(commit.seqs), bool(commit.deduped)
@@ -206,21 +221,25 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
             # même après un dédoublonnage (un renvoi après une panne) : ses clés rendent la suite rejouable
             more = await _follow(mind, spec, done, seqs, correlation, nonce)
             if isinstance(more, Failed):
-                await _audit(kernel, spec, by, subject, seqs, "failed", correlation, nonce)
+                await _audit(kernel, spec, by, subject, seqs, "failed", correlation, nonce, via)
                 go = Ref.subject(done.go_created, str(seqs[0]), "") if done.go_created else done.go
                 return Outcome(False, "C'est créé, mais la suite n'a pas pu s'écrire : renvoie ce formulaire, ou "
                                "complète depuis sa fiche.", "warn", seqs=seqs, go=go, retry=True)
             seqs += more
-    for proposal, draft in resolutions:
-        keyed_ = replace(draft, dedupe_key=f"décision:{proposal}")
+    for d, draft in resolutions:
+        keyed_ = replace(draft, dedupe_key=f"décision:{d.proposal}")
         try:
             decided = await mind.append([keyed_], emitter=rt.OWNER, correlation=correlation, origin=Origin.EXTERNAL,
-                                        guard=decisions.still_pending(proposal))
+                                        guard=decisions.still_pending(d.proposal))
         except Superseded:
-            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce)
+            if _moot(d, decisions.UNKNOWN):
+                continue  # décidée entre la lecture et l'ajout : de même
+            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce, via)
             return Outcome(False, decisions.MESSAGES[decisions.UNKNOWN], "warn")
         if decided.deduped:
-            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce)
+            if _moot(d, decisions.UNKNOWN):
+                continue
+            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce, via)
             return Outcome(False, decisions.MESSAGES[decisions.UNKNOWN], "warn")
         seqs += tuple(decided.seqs)
     go = done.go
@@ -228,8 +247,14 @@ async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subj
         go = Ref.subject(done.go_created, str(seqs[0]), "")
     if deduped:
         return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=go)
-    await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce)
+    await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce, via)
     return Outcome(True, done.message or "Fait.", done.tone, seqs=seqs, go=go, show=done.show)
+
+
+def _moot(d: Decision, status: str) -> bool:
+    """Un refus qui ne valait que tant que la proposition attendait (``Decision.if_pending``), décidée entre-temps :
+    sans objet, il est ignoré. Une approbation ne l'est jamais : décidée ailleurs, elle refuse le geste."""
+    return d.if_pending and not d.approved and status == decisions.UNKNOWN
 
 
 async def _follow(mind: Any, spec: ActionSpec, done: Done, seqs: tuple[int, ...], correlation: str,
@@ -281,12 +306,12 @@ def _settle(kernel: Kernel, nonce: str, *, consumed: bool) -> None:
 
 
 async def _audit(kernel: Kernel, spec: ActionSpec, by: str, subject: str, seqs: tuple[int, ...], outcome: str,
-                 correlation: str, nonce: str) -> None:
+                 correlation: str, nonce: str, via: str) -> None:
     # l'audit d'une issue définitive porte le jeton (il ne resservira pas, même après un redémarrage) ;
     # celui d'une panne non : chaque essai se journalise, le suivant reste possible
     key = f"op:{nonce}:audit" if nonce and outcome not in RETRYABLE else None
-    draft = rt.OPERATED.draft(action=spec.key, by=by, subject_kind=spec.subject, subject=subject, seqs=seqs,
-                              outcome=outcome, dedupe_key=key)
+    draft = rt.OPERATED.draft(action=f"{via}.{spec.key}" if via else spec.key, by=by, subject_kind=spec.subject,
+                              subject=subject, seqs=seqs, outcome=outcome, dedupe_key=key)
     await kernel.mind.append([draft], emitter="runtime", correlation=correlation, origin=Origin.EXTERNAL)
 
 
@@ -296,6 +321,17 @@ async def audit(kernel: Kernel, action: str, *, by: str, subject_kind: str = "",
     draft = rt.OPERATED.draft(action=action, by=by, subject_kind=subject_kind, subject=subject, seqs=seqs,
                               outcome=outcome)
     await kernel.mind.append([draft], emitter="runtime", correlation=f"opérateur:{action}", origin=Origin.EXTERNAL)
+
+
+def origin(action: str, by: str) -> str:
+    """D'où vient un geste audité, d'après sa clé et qui l'a fait : ``CONSOLE``, ``SPACE`` ou ``CLI`` ; vide pour une
+    action déclarée sous sa clé nue — celle de la console, ou un geste d'une personne audité avant que son chemin ne le
+    marque (tous le font désormais : ``tests/protocol/test_audited_gestures.py`` le garde) : à qui la lit d'en juger
+    par ce qu'il sait de ``by``."""
+    head = action.partition(".")[0]
+    if by == CLI_BY or head == CLI:
+        return CLI
+    return head if head in (CONSOLE, SPACE) else ""
 
 
 @dataclass(frozen=True, slots=True)

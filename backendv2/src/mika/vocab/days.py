@@ -8,11 +8,11 @@ pas « aujourd'hui » quand elle a franchi minuit.
 from __future__ import annotations
 
 import re
-import unicodedata
 from datetime import datetime, time, timedelta
 from typing import Any
 
-from mika.kernel.clock import HOUR, instant, local
+from mika.kernel.clock import HOUR, MINUTE, instant, local
+from mika.kernel.text import fold
 from mika.vocab.phrasebook import phrase
 
 
@@ -52,6 +52,17 @@ def when_fr(then: int, now: int, tz: Any) -> str:
     return phrase("expression.when.days_ago", days=days)
 
 
+def ago_words(us: int) -> str:
+    """Depuis combien de temps, en peu de mots, à mettre après « il y a » ou « depuis » : en minutes jusqu'à deux
+    heures, en heures jusqu'à deux jours, en jours au-delà — ``timespan.ago`` dans sa voix. Une durée, pas un moment :
+    pour le jour du calendrier, ``when_fr``."""
+    minutes = max(1, us // MINUTE)
+    if minutes < 120:
+        return phrase("timespan.ago.minutes", n=minutes)
+    hours = minutes // 60
+    return phrase("timespan.ago.hours", n=hours) if hours < 48 else phrase("timespan.ago.days", n=hours // 24)
+
+
 _WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 #: les moments d'une journée, en heures locales [début, fin)
 _PARTS = {"matin": (5, 12), "midi": (11, 14), "apres-midi": (12, 18), "aprem": (12, 18), "soir": (17, 24),
@@ -60,15 +71,11 @@ _WHEN = re.compile(r"\b(avant-hier|hier|ce|cet|cette|" + "|".join(_WEEKDAYS) + r
                    r"(?:\s+(?:dernier|derniere))?(?:\s+(matin|midi|apres-midi|aprem|soir|nuit))?")
 
 
-def _folded(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
-
-
 def window_of(text: str, now: int, tz: Any) -> tuple[int, int] | None:
     """Le moment passé qu'une phrase désigne, en instants [début, fin) : « lundi matin » (le dernier lundi passé),
     « hier soir », « avant-hier », « ce matin ». ``None`` si elle n'en désigne aucun. Sert à se souvenir par le
     temps — « tu te souviens de ce que je t'ai dit lundi matin ? » ne contient aucun mot du souvenir."""
-    m = next((m for m in _WHEN.finditer(_folded(text))
+    m = next((m for m in _WHEN.finditer(fold(text))
               if m.group(1) not in ("ce", "cet", "cette") or m.group(2)), None)  # « ce que », « ce truc » : non
     if m is None:
         return None

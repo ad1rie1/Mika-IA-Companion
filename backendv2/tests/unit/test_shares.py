@@ -26,7 +26,8 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import shares as c
 from mika.faculties.identity import audience_for
-from mika.faculties.shares.faculty import MIB, SharesParams, due_expiries, params
+from mika.faculties.shares.faculty import MIB, SharesParams, due_expiries, params, row
+from mika.faculties.shares.inspect import REMOVE
 from mika.faculties.shares.tools import clean_name, may_share, offered, text_name
 from mika.kernel.clock import DAY, US
 from mika.kernel.events import Origin
@@ -427,6 +428,39 @@ def test_old_files_expire_and_a_full_place_retires_the_oldest(tmp_path):
     assert files == list(second.attach)
     assert [m.available for m in metas] == [False, True]
     assert later == [("user_1", c.RETENTION, second.attach)]  # au-delà d'un an : trop vieux
+
+
+def test_an_operator_removes_one_file_its_bytes_go_and_its_line_stays_marked(tmp_path):
+    """Retirer un fichier à l'unité, depuis la console (ADR 0205 ; audit du 2026-11-05, C9-11) : le même retrait que
+    la rétention, sa raison « operator » — ses octets s'effacent, sa ligne reste et le dit, la tranche ne le garde plus ;
+    l'autre fichier ne bouge pas ; c'est audité ; un fichier déjà retiré (ou inconnu) ne se retire pas."""
+
+    async def scenario(kernel, store, llm, deliveries):
+        [gone] = (await call(kernel, "share_text", "user_2", name="secret", content="à ne pas garder")).attach
+        [kept] = (await call(kernel, "share_text", "user_2", name="courses", content="- pain\n")).attach
+        done = await perform(kernel, REMOVE, {}, by="user_1", subject=gone)
+        await asyncio.sleep(1)  # l'effet efface les octets après le commit
+        again = await perform(kernel, REMOVE, {}, by="user_1", subject=gone)
+        unknown = await perform(kernel, REMOVE, {}, by="user_1", subject="f" * 32)
+        frame = kernel.mind.frame()
+        lines = [row(kernel.ports["store"], f) for f in (gone, kept)]
+        audit = [e.data for e in journal(kernel, rt.OPERATED) if e.data.action == REMOVE]
+        return (gone, kept, done, again, unknown, journal(kernel, c.EXPIRED), store.files(), lines,
+                [v.file for v in frame.get(c.RECENT("user_2"))], KernelPort(kernel).shared([gone, kept]), audit)
+
+    gone, kept, done, again, unknown, expired, files, lines, recent, metas, audit = live(tmp_path, scenario)
+    assert done.ok and "« secret.txt » retiré" in done.message
+    [e] = expired
+    assert (e.data.files, e.data.target, e.data.reason) == ((gone,), "user_2", c.OPERATOR)
+    assert files == [kept]  # ses octets seuls sont partis
+    removed, other = lines
+    assert removed is not None and removed.gone and removed.reason == c.OPERATOR and removed.name == "secret.txt"
+    assert other is not None and not other.gone
+    assert recent == [kept]  # la tranche ne le garde plus (la section du prompt, le quota de place)
+    assert [m.available for m in metas] == [False, True]
+    assert [(a.by, a.subject_kind, a.subject, a.outcome, a.seqs) for a in audit][0] == \
+        ("user_1", "partage", gone, "done", (e.seq,))
+    assert not again.ok and not unknown.ok  # déjà retiré, inconnu : l'action n'est pas offerte
 
 
 def test_the_retention_waits_until_a_file_is_due():

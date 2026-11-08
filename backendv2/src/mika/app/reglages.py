@@ -4,6 +4,12 @@ Chaque section apporte un modèle (le formulaire en sort), sa valeur actuelle
 et de quoi l'enregistrer ; la console les rend toutes de la même façon
 (``inspector/pages/settings_form.py``). Un enregistrement qui échoue au
 rechargement est défait : on ne laisse pas une configuration à moitié prise.
+
+Les réglages d'un plugin vivent là où l'on s'en sert, derrière la roue de sa
+destination (``SettingsPage.home``, ADR 0173, 0206) : Courrier, Teams, Réveils
+par API › Paramètres, Ses outils › Paramètres des services, et dans Ses sens les
+flux suivis, l'accès des appareils, la transcription ; ils s'enregistrent
+toujours sous Réglages. « Configuration des plugins » en est la vue d'ensemble.
 """
 
 from __future__ import annotations
@@ -31,9 +37,11 @@ from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
 from mika.app import authors as authors_m
 from mika.app import persona as persona_file
+from mika.app.console import FACULTY_LABELS, NAVIGATION
 from mika.app.handmade import ago
 from mika.app.handmade import authors as drawn_authors
 from mika.app.handmade import temperament as temper
+from mika.app.handmade.tabs import settings as drawn_settings
 from mika.app.settings import PUSH_KEY_FILE, push_key_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
 from mika.contracts import identity as identity_c
@@ -42,16 +50,16 @@ from mika.contracts import self_ as self_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
-from mika.inspector.pages.reglages import effect
+from mika.inspector.formview import decimal_fr
+from mika.inspector.pages.reglages import effect, faculty_url
 from mika.inspector.pages.settings_form import RECORD_KEY
+from mika.inspector.ui import PREFIX
 from mika.kernel import forms
 from mika.kernel.clock import DAY
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Badge, Column, Disclosure, Nav, NavItem, Note, Ref, Row, Table, Text, When
+from mika.kernel.inspect import Column, Disclosure, Note, Ref, Row, Table, Text, When
 from mika.plugins.email.console.common import VOICE_LABEL
 from mika.ports.imaging import DRAW
-from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
-from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.runtime.params import Parameters
 from mika.vocab.access import PERSON, SELF
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
@@ -64,15 +72,54 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("mika.reglages")
 
-#: les rubriques du sous-menu de la configuration, dans l'ordre
+#: les rubriques de l'annuaire des réglages, dans l'ordre ; chacune porte le nom de ce qu'elle contient (ADR 0197) :
+#: « Canaux » ne nomme que les tableaux de droits par canal (ADR 0134), et Dépôts Git, joint par Connexions extérieures,
+#: s'y range sous ce nom. Leurs clés ne sont pas des adresses : les anciennes (« canaux », « sens ») restent des
+#: adresses d'enregistrement dans ``inspector/pages/routes.py`` (LEGACY_POSTS)
 TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "Personnage"),
-        SettingsTab("canaux", "Canaux"), SettingsTab("sens", "Plugins"))
+        SettingsTab("carte-telephone", "Carte et téléphone"), SettingsTab("plugins", "Plugins"),
+        SettingsTab("connexions", "Connexions extérieures"))
 
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
                  "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "polish": "voix",
                  "character": "voix"}
+
+#: Réglages › Configuration des plugins : une ligne par paquet de ``plugins/`` (``test_settings_pages`` les compare,
+#: pour qu'aucun ne manque), dans l'ordre de la page — ce qui s'y règle, ses pages de réglages, où s'en servir (nom,
+#: « destination/onglet »). Une ligne n'est montrée que si son plugin est composé ; ses paramètres avancés, que si sa
+#: faculté en a.
+PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
+    "email": ("Ses boîtes : serveurs, identifiants, sa façon d'y écrire ; son relevé, ses brouillons", ("boites",),
+              ("Courrier", "courrier/reception")),
+    "teams": ("Ses comptes : à qui, sa façon d'y écrire, sa signature ; la clé de chaque extension", ("teams",),
+              ("Teams", "teams/conversations")),
+    "phone": ("Les messages WhatsApp et SMS que ton téléphone lui relaie, et ce qu'elle en fait", (),
+              ("Ses sens › Messages du téléphone", "sens/messages")),
+    "rss": ("Les adresses des flux qu'elle suit", ("flux",), ("Ses sens › Flux RSS", "sens/flux")),
+    "web": ("Sa recherche sur le web : ses bornes", (), ("La fiche du serveur « web »", "fiche/serveur/web")),
+    "mcp": ("Les serveurs MCP : à quoi ils servent pour elle, où les joindre ; qui peut quoi, sur leur fiche",
+            ("serveurs-mcp",), ("Outils › Venus d'ailleurs", "outils/serveurs")),
+    "camera": ("La fréquence de ses regards et la durée de ses observations", (),
+               ("Ses sens › Caméra", "sens/camera")),
+    "imaging": ("Ses fournisseurs d'images et qui dessine quoi ; sa qualité par défaut, ses quotas",
+                ("images-fournisseurs", "images-roles"), ("Ses sens › Dessins", "sens/dessins")),
+    "sensors": ("Le jeton avec lequel les appareils lui envoient leurs signaux", ("appareils",),
+                ("Ses sens › Appareils", "sens/appareils")),
+    "location": ("D'où viennent les tuiles de la carte de sa position", ("carte",),
+                 ("Ses sens › Localisation", "sens/positions")),
+    "trips": ("Où chercher un lieu et une adresse, qui calcule les itinéraires (l'écran Carte de frontendv2)",
+              ("lieux", "itineraires"), None),
+    "wakeup": ("Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur sa fiche",
+               ("reveils",), ("Réveils par API", "reveils")),
+    "forge": ("Le comportement du moteur qui exécute ses apps ; les réglages d'une app restent sur sa fiche", (),
+              ("Apps forgées", "apps")),
+}
+#: ce qui se branche sans être un plugin (le noyau s'en sert) : (nom, ce qui s'y règle, sa page de réglages)
+SERVICES = (("Transcription vocale", "Le service qui transcrit les messages vocaux qu'on lui envoie", "transcription"),
+            ("Notifications du téléphone", "Firebase, pour écrire à qui a fermé l'application Android",
+             "notifications"))
 
 
 @cache
@@ -211,7 +258,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     params = parameters(live)
 
     # ── modèles ──
-    async def save_llm(cfg: LLMConfig, by: str) -> list[str]:
+    async def save_llm(cfg: LLMConfig) -> list[str]:
         # un fournisseur retiré emporte les rôles qui le visaient (ils retombent sur leur repli)
         cfg = cfg.model_copy(update={"routes": {r: b for r, b in cfg.routes.items() if b in cfg.backends}})
         previous = settings.llm()
@@ -241,38 +288,35 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             return cfg, []
         return await settle_limits(cfg, live.read_limits)
 
-    def routing() -> list[Any]:
-        """Qui sert vraiment chaque rôle : le fournisseur déclaré, sinon le repli de rôle."""
+    def route(role: str, _chosen: Any) -> dict[str, Any]:
+        """La ligne d'un rôle dans Qui sert quoi (la correspondance rôle → fournisseur, en table) : sa famille, puis
+        ce qui le sert vraiment — le fournisseur déclaré, sinon celui de son rôle de repli, ou rien (chaque appel
+        échoue) —, son type et son modèle, et comment il y est arrivé."""
         cfg = settings.llm()
-        rows = []
-        for role in Role:
-            r = str(role)
-            chain, seen, cur, served = [], set(), r, ""
-            while cur and cur not in seen:
-                seen.add(cur)
-                name = cfg.routes.get(cur)
-                if name and name in cfg.backends:
-                    served = name
-                    break
-                chain.append(ROLE_LABELS.get(cur, cur))
-                nxt = FALLBACKS.get(Role(cur)) if cur in {str(x) for x in Role} else None
-                cur = str(nxt) if nxt else ""
-            spec = cfg.backends.get(served)
-            how = "déclaré" if cfg.routes.get(r) == served and served else \
-                (f"par repli ({' → '.join(chain[1:] + [ROLE_LABELS.get(cur, cur)])})" if served else "")
-            rows.append(Row((Text(ROLE_LABELS.get(r, r)), Badge(ROLE_FAMILIES.get(r, "—"), "muted"),
-                             Text(served or "aucun", "mono" if served else "muted"),
-                             Text(f"{spec.kind} · {spec.model}" if spec else "—", "muted"),
-                             Badge(how, "ok" if how == "déclaré" else "info") if served
-                             else Badge("chaque appel échoue", "danger")),
-                            tone="" if served else "danger"))
-        return [Table((Column("rôle"), Column("famille", "fit"), "fournisseur qui sert", "type · modèle",
-                       "comment"), tuple(rows), title="Ce qui sert vraiment chaque rôle",
-                      caption="Un rôle sans fournisseur retombe sur son rôle de repli (murmurer → répondre, "
-                              "vérifier → retenir → répondre…). Les rôles « voix » reçoivent sa persona.")]
+        chain, seen, cur, served = [], set(), role, ""
+        while cur and cur not in seen:
+            seen.add(cur)
+            name = cfg.routes.get(cur)
+            if name and name in cfg.backends:
+                served = name
+                break
+            chain.append(ROLE_LABELS.get(cur, cur))
+            nxt = FALLBACKS.get(Role(cur)) if cur in {str(x) for x in Role} else None
+            cur = str(nxt) if nxt else ""
+        spec = cfg.backends.get(served)
+        how = "déclaré" if cfg.routes.get(role) == served and served else \
+            (f"par repli ({' → '.join(chain[1:] + [ROLE_LABELS.get(cur, cur)])})" if served else "")
+        return {"title": "Ce qui sert vraiment chaque rôle", "key_head": "Rôle", "choice_head": "Son fournisseur",
+                "tone": "" if served else "danger",
+                "cells": [{"head": "Famille", "text": ROLE_FAMILIES.get(role, "—"), "tag": True, "before": True},
+                          {"head": "Ce qui le sert vraiment", "text": served or "aucun", "mono": bool(served),
+                           "tone": "" if served else "muted", "sub": f"{spec.kind} · {spec.model}" if spec else ""},
+                          # une étiquette pour ce qui se lit d'un coup (déclaré, rien) ; la chaîne d'un repli, en texte
+                          {"head": "Comment", "text": how or "chaque appel échoue", "tag": how in ("déclaré", ""),
+                           "tone": "ok" if how == "déclaré" else "muted" if served else "danger"}]}
 
     # ── images ──
-    async def save_images(cfg: ImagingConfig, by: str) -> list[str]:
+    async def save_images(cfg: ImagingConfig) -> list[str]:
         # un fournisseur retiré emporte les rôles qui le visaient (ils retombent sur « dessiner ») et les replis
         # qui menaient à lui
         cfg = cfg.model_copy(update={
@@ -296,28 +340,25 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             raise ValueError(str(exc)) from None
         return [(name, name) for name in names]
 
-    def image_routing() -> list[Any]:
-        """Qui sert chaque rôle d'images, et ce que ce fournisseur sait faire."""
+    def image_route(role: str, _chosen: Any) -> dict[str, Any]:
+        """La ligne d'un rôle d'images dans Qui dessine quoi (en table) : ce qui le sert, son type et son modèle, où
+        il tourne, ce qu'il sait aussi faire, et comment il y est arrivé. Sans fournisseur déclaré, elle ne génère pas
+        d'images ; le premier déclaré sert « dessiner », les autres rôles y retombent."""
         cfg = settings.imaging()
-        served = live.imaging.resolution()
-        status = {row["name"]: row for row in live.imaging.status()}
-        rows = []
-        for role in IMAGE_ROLES:
-            name = served.get(role, "")
-            spec = cfg.backends.get(name)
-            caps = status.get(name, {})
-            how = "déclaré" if cfg.routes.get(role) == name else "par repli (dessiner)"
-            rows.append(Row((Text(IMAGE_ROLE_LABELS[role]), Text(name or "aucun", "mono" if name else "muted"),
-                             Text(f"{spec.kind} · {spec.model}" if spec else "—", "muted"),
-                             Text(("local" if caps.get("local") else "hébergé") if name else "—", "muted"),
-                             Text(", ".join(w for w, on in (("retouche", caps.get("edit")),
-                                                            ("adulte", caps.get("adult"))) if on) or "—", "muted"),
-                             Badge(how, "ok" if how == "déclaré" else "info") if name
-                             else Badge("désactivé", "muted"))))
-        return [Table((Column("rôle"), "fournisseur qui sert", "type · modèle", Column("où", "fit"), "sait aussi",
-                       "comment"), tuple(rows), title="Ce qui sert chaque rôle",
-                      caption="Sans fournisseur déclaré, elle ne génère pas d'images. Le premier déclaré sert "
-                              "« dessiner » ; les autres rôles y retombent.")]
+        name = live.imaging.resolution().get(role, "")
+        spec = cfg.backends.get(name)
+        caps = next((row for row in live.imaging.status() if row["name"] == name), {}) if name else {}
+        how = "déclaré" if cfg.routes.get(role) == name else "par repli (dessiner)"
+        return {"title": "Ce qui sert chaque rôle", "key_head": "Rôle", "choice_head": "Son fournisseur",
+                "cells": [{"head": "Ce qui le sert", "text": name or "aucun", "mono": bool(name),
+                           "tone": "" if name else "muted", "sub": f"{spec.kind} · {spec.model}" if spec else ""},
+                          {"head": "Où", "text": ("local" if caps.get("local") else "hébergé") if name else "—",
+                           "tone": "muted"},
+                          {"head": "Sait aussi", "text": ", ".join(w for w, on in (("retouche", caps.get("edit")),
+                                                                                    ("adulte", caps.get("adult")))
+                                                                    if on) or "—", "tone": "muted"},
+                          {"head": "Comment", "text": how if name else "désactivé",
+                           "tag": how == "déclaré" or not name, "tone": "ok" if name and how == "déclaré" else "muted"}]}
 
     def image_facts() -> list[tuple[str, str]]:
         cfg = settings.imaging()
@@ -429,7 +470,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                      title="Qui la fait parler")]
 
     # ── personnalité ──
-    async def save_persona(doc: PersonaDoc, by: str) -> list[str]:
+    async def save_persona(doc: PersonaDoc) -> list[str]:
         if not doc.name.strip():
             return ["Son nom ne peut pas être vide : c'est ainsi qu'elle se présente."]
         previous = settings.persona_yaml()
@@ -440,8 +481,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             await live.reconfigure()
         return problems
 
-    async def save_temperament(t: Temperament, by: str) -> list[str]:
-        return await save_persona(live.persona().model_copy(update={"temperament": t}), by)
+    async def save_temperament(t: Temperament) -> list[str]:
+        return await save_persona(live.persona().model_copy(update={"temperament": t}))
 
     # ── ses autrices (ADR 0124) ──
     def author_flows() -> list[tuple[str, str]]:
@@ -450,9 +491,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def polish_served() -> str:
         return live.gateway.serving(str(Role.POLISH)) if live.gateway.configured else ""
 
-    async def save_authors(cfg: authors_m.Authors, by: str) -> list[str]:
+    async def save_authors(cfg: authors_m.Authors) -> list[str]:
         await settings.save_authors(cfg)
         return []
+
+    def author_facts() -> list[tuple[str, Any]]:
+        cfg, flow_rows, served = settings.authors(), author_flows(), polish_served()
+        writing = sum(1 for flow, _label in flow_rows if cfg.author_for(flow) is not None)
+        rest = " (les autres partent en premier jet)" if writing < len(flow_rows) else ""
+        return [("Flux qui ont une autrice", f"{writing} sur {len(flow_rows)}{rest}"),
+                ("Leur modèle", Ref("local", f"{PREFIX}/reglages/roles", f"« {served} », rôle « rendre naturel »")
+                 if served else "aucun")]
 
     def character_state() -> dict[str, Any]:
         """Son caractère écrit (ADR 0139), et ce qui retient l'appel qui l'écrirait : aucun modèle, ou le quota."""
@@ -537,7 +586,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("", "Toi (ses propriétaires)"), (SELF, her),
                 *sorted(people.items(), key=lambda kv: kv[1].casefold())]
 
-    async def save_mail(cfg: MailConfig, by: str) -> list[str]:
+    async def save_mail(cfg: MailConfig) -> list[str]:
         """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
         compte fermé depuis reste affiché, pour qu'on le corrige)."""
         before, known = settings.email().accounts, {v for v, _ in mail_owners()}
@@ -599,25 +648,26 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 "lead_plain": True, "facts": facts, "activity": activity, "activity_tone": tone,
                 "fiche": f"/inspecteur/fiche/compte/{key}", "box": f"/inspecteur/courrier/reception?compte={key}"}
 
-    def mail_facts() -> list[tuple[str, str]]:
+    def mail_facts() -> list[tuple[str, Any]]:
         accounts = settings.email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
         return [("Comptes", f"{len(accounts)} ({ready} prêt(s) à relever)" if accounts else "aucun"),
-                ("Lire et envoyer", "Courrier › Réception")]
+                ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
-    async def save_mcp(cfg: McpConfig, by: str) -> list[str]:
+    async def save_mcp(cfg: McpConfig) -> list[str]:
         await settings.save_mcp(cfg)
         if live.mcp is not None:  # les sessions dont la connexion a changé sont fermées, les serveurs actifs rejoints
             await live.mcp.reconfigure()
         return []
 
-    def mcp_facts() -> list[tuple[str, str]]:
+    def mcp_facts() -> list[tuple[str, Any]]:
         servers = settings.mcp().servers
         ready = sum(1 for x in servers.values() if x.enabled and x.ready)
         return [("Serveurs", f"{len(servers)} ({ready} actif(s) et prêt(s))" if servers else "aucun"),
-                ("État et outils", "Outils › Venus d'ailleurs")]
+                ("État, outils et qui peut quoi", Ref("local", f"{PREFIX}/outils/serveurs",
+                                                      "Outils › Venus d'ailleurs"))]
 
-    async def save_feeds(cfg: FeedsSettings, by: str) -> list[str]:
+    async def save_feeds(cfg: FeedsSettings) -> list[str]:
         await settings.save_feeds(list(cfg.urls))
         return []
 
@@ -625,7 +675,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         got = settings.stt()
         return _tolerant(SttSettings, base_url=got["base_url"], model=got["model"], api_key=got["api_key"])
 
-    async def save_stt(cfg: SttSettings, by: str) -> list[str]:
+    async def save_stt(cfg: SttSettings) -> list[str]:
         await settings.save_stt(cfg.base_url, cfg.api_key, cfg.model or "whisper-1")
         return []
 
@@ -633,12 +683,12 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         got = settings.git()
         return _tolerant(GitSettings, token=got["token"], user=got["user"], hosts=tuple(got["hosts"]))
 
-    async def save_git(cfg: GitSettings, by: str) -> list[str]:
+    async def save_git(cfg: GitSettings) -> list[str]:
         await settings.save_git(cfg.token, cfg.user, list(cfg.hosts))
         return []
 
     # ── la carte de sa position (ADR 0193) ──
-    async def save_map(cfg: MapConfig, by: str) -> list[str]:
+    async def save_map(cfg: MapConfig) -> list[str]:
         await settings.save_map_config(cfg)
         return []
 
@@ -649,7 +699,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def maps_desk() -> Any:
         return live.kernel.ports.get("maps")
 
-    async def save_places(cfg: PlacesConfig, by: str) -> list[str]:
+    async def save_places(cfg: PlacesConfig) -> list[str]:
         await settings.save_places_config(cfg)
         return []
 
@@ -657,7 +707,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         desk = maps_desk()
         return desk.describe_places() if desk is not None else [("Lieux", "pas branchés sur ce serveur")]
 
-    async def save_routing(cfg: RoutingConfig, by: str) -> list[str]:
+    async def save_routing(cfg: RoutingConfig) -> list[str]:
         await settings.save_routing_config(cfg)
         return []
 
@@ -666,7 +716,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return desk.describe_routing() if desk is not None else [("Itinéraires", "pas branchés sur ce serveur")]
 
     # ── notifications du téléphone (ADR 0077) ──
-    async def save_push(cfg: PushSettings, by: str) -> list[str]:
+    async def save_push(cfg: PushSettings) -> list[str]:
         await settings.save_push(cfg.service_account)
         return []
 
@@ -698,7 +748,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     #: à qui un compte Teams peut être : les mêmes qu'une boîte (toi, elle, une personne qui a un compte)
     teams_owners = mail_owners
 
-    async def save_teams(cfg: TeamsConfig, by: str) -> list[str]:
+    async def save_teams(cfg: TeamsConfig) -> list[str]:
         """Un compte Teams est à toi, à elle ou à une personne qui a un compte (ADR 0186) — sauf ce qui était déjà là
         (un compte fermé depuis reste affiché, pour qu'on le corrige)."""
         before, known = settings.teams().accounts, {v for v, _ in teams_owners()}
@@ -719,15 +769,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             log.warning("teams enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
         return []
 
-    def teams_facts() -> list[tuple[str, str]]:
+    def teams_facts() -> list[tuple[str, Any]]:
+        """Ses comptes en chiffres, et une fois chacun, en liens, les pages où le reste se fait (C7-15). La page vit
+        dans Teams (ADR 0206) : ses conversations et ses réponses sont les onglets d'à côté, pas un fait de plus."""
         accounts, keys = settings.teams().accounts, settings.teams_keys()
         store = live.kernel.ports.get("teams") if live.kernel is not None else None
         plugged = sum(1 for k in accounts if store is not None and store.configured(k))
         keyed = sum(1 for k in accounts if k in keys)
         return [("Comptes", f"{len(accounts)} ({keyed} avec une clé, {plugged} branché(s))"),
-                ("Clés de l'extension", "une par compte : Relations & échanges › Teams › Extension"),
-                ("Conversations et réponses", "Relations & échanges › Teams"),
-                ("Ce qu'elle prépare, comment ça part", "Réglages › Canaux (le tableau de Teams, ou celui d'un compte)")]
+                ("La clé de chaque extension", Ref("local", f"{PREFIX}/teams/extension", "Teams › Extension")),
+                ("Ce qu'elle prépare, comment ça part", Ref("local", f"{PREFIX}/reglages/canaux",
+                                                            "Canaux, le tableau de Teams ou celui d'un compte"))]
 
     def describe_teams_account(key: str, account: Any) -> dict[str, Any]:
         """La carte d'un compte Teams (ADR 0186) : à qui il est, sa clé, ce que son extension a apporté — et où la
@@ -744,8 +796,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         if account.sign:
             tags.append(("signé", ""))
         now = live.kernel.mind.clock.now() if live.kernel is not None else 0
+        # le chemin de sa clé est dit une fois, en lien, dans les faits de la page : le bandeau ne le répète pas
         activity = f"Son extension a poussé {ago(now, info.last_batch)}" if plugged else \
-            "Son extension n'a encore rien apporté : sa clé se crée dans Relations & échanges › Teams › Extension."
+            "Son extension n'a encore rien apporté." + ("" if has_key else " Sa clé n'est pas encore créée.")
         return {"title": account.label or key, "tags": tags, "lead_label": "Elle y écrit à la place de",
                 "lead": account.display_name or (info.self_name if info is not None and info.self_name else "") or
                 "la personne du compte (le nom que Teams donne)", "lead_plain": True,
@@ -769,7 +822,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                 (wakeup_c.NOBODY, "personne (le compte rendu reste dans la console)"),
                 *((a.handle, f"{a.display_name} (compte)") for a in live.accounts.all() if a.active)]
 
-    async def save_wakeup(cfg: WakeupConfig, by: str) -> list[str]:
+    async def save_wakeup(cfg: WakeupConfig) -> list[str]:
         """Un projet, une personne, des outils qui existent — sauf ce qui était déjà là (un projet archivé depuis
         reste affiché, pour qu'on le corrige)."""
         before = settings.wakeup().endpoints
@@ -790,56 +843,55 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_wakeup(cfg)
         return []
 
-    def wakeup_facts() -> list[tuple[str, str]]:
+    def wakeup_facts() -> list[tuple[str, Any]]:
         endpoints, keys = settings.wakeup().endpoints, settings.wakeup_keys()
         keyed = sum(1 for n in endpoints if n in keys)
         return [("Réveils", f"{len(endpoints)} ({keyed} avec une clé)" if endpoints else "aucun"),
                 ("Lots permis", ", ".join(wake_tools())),
-                ("Clés, appels et ce qu'ils ont donné", "Connexions extérieures › Réveils par API")]
+                ("Clés, appels et ce qu'ils ont donné", Ref("local", f"{PREFIX}/reveils", "Réveils par API"))]
 
-    def plugin_settings() -> list[Any]:
-        rows = (
-            ("Courrier", "Boîtes, serveurs, identifiants, façon d'écrire ; relevé et brouillons", "boites", "email",
-             "courrier/reception"),
-            ("Flux RSS", "Adresses des flux suivis", "flux", "rss", "sens/flux"),
-            ("Outils extérieurs", "Serveurs MCP : à quoi ils servent pour elle, où les joindre, pour qui",
-             "serveurs-mcp", "", "outils/serveurs"),
-            ("Caméra", "Fréquence des regards et durée des observations", "comportement-camera", "", "sens/camera"),
-            ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
-             "imaging", "sens/dessins"),
-            ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
-            ("Teams", "Ses comptes (à qui, sa façon d'y écrire, sa signature) ; la clé de chaque extension dans "
-             "Teams › Extension", "teams", "teams", "teams/conversations"),
-            ("Réveils par API", "Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur "
-             "sa fiche", "reveils", "wakeup", "reveils"),
-            ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
-        )
-        return [Note("Les connexions et le comportement des plugins se règlent ici. Les réglages propres à une "
-                     "app forgée restent dans sa fiche, dans la Forge."),
-                Table(("Plugin", "Ce qui se règle", "Configuration", "Paramètres avancés", "Utiliser / consulter"),
-                      tuple((label, help_, Ref("local", f"/inspecteur/reglages/{settings_page}", "Configurer"),
-                             Ref("local", f"/inspecteur/reglages/comportement-{owner}", "Paramètres") if owner else "—",
-                             Ref("local", f"/inspecteur/{usage}", "Ouvrir"))
-                            for label, help_, settings_page, owner, usage in rows), title="Plugins"),
-                Nav((NavItem("Configurer la transcription vocale", Ref("local", "/inspecteur/reglages/transcription",
-                                                                         "Transcription vocale")),))]
+    def plugin_rows() -> list[dict[str, Any]]:
+        """La vue d'ensemble des plugins : une ligne par plugin composé (``PLUGINS``, dans son ordre) — où se règle sa
+        connexion (ses pages de réglages), ses paramètres avancés (sa faculté en a-t-elle ?), où s'en servir —, puis
+        ce qui se branche sans être un plugin (``SERVICES``)."""
+        composed = live.kernel.registry.faculties if live.kernel is not None else {}
+        pages = {pg.key: (sec, pg) for sec in declared for pg in sec.pages}
+        destinations = {d.key: d.label for group in NAVIGATION for d in group.items}
 
-    return (
-        SettingsSection("plugins", "Plugins", "sens", None, order=0, blocks=plugin_settings,
-                        pages=(SettingsPage("plugins", "Vue d'ensemble des plugins", form=False, blocks=True,
-                                            description="Choisis le plugin à configurer ou ouvre sa vue d'utilisation."),)),
+        def link(key: str) -> tuple[str, str]:
+            sec, pg = pages[key]
+            # une page qui vit dans sa destination se nomme par elle (« Teams › Paramètres », « Ses sens › Flux
+            # suivis », ADR 0173, 0206)
+            if pg.home:
+                return f"{destinations.get(pg.home.split('/', 1)[0], sec.label)} › {pg.title}", f"{PREFIX}/{pg.home}"
+            return pg.title, f"{PREFIX}/reglages/{pg.key}"
+
+        rows = [{"name": FACULTY_LABELS.get(name, name), "what": what, "configure": [link(k) for k in keys],
+                 "params": faculty_url(name) if composed[name].params is not None else "",
+                 "usage": (usage[0], f"{PREFIX}/{usage[1]}") if usage else None}
+                for name, (what, keys, usage) in PLUGINS.items() if name in composed]
+        services = [{"name": name, "what": what, "configure": [link(key)], "params": "", "usage": None}
+                    for name, what, key in SERVICES]
+        return [{"title": "Plugins", "rows": rows}, {"title": "Hors plugins", "rows": services}]
+
+    declared = (
+        # dessinée (handmade/reglages/plugins.html) : une ligne par plugin composé, sans pagination
+        SettingsSection("plugins", "Plugins", "plugins", None, order=0,
+                        head=lambda query: drawn_settings.plugins(plugin_rows()),
+                        pages=(SettingsPage("plugins", "Vue d'ensemble des plugins", form=False,
+                                            description="Chaque plugin : où se règle sa connexion, ses paramètres "
+                                                        "avancés, et où s'en servir."),)),
         SettingsSection("modeles", "Modèles", "intelligence", LLMConfig, settings.llm, save_llm,
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
-                        describe={"backends": describe_backend}, adjust=settle_llm,
+                        describe={"backends": describe_backend, "routes": route}, adjust=settle_llm,
                         pages=(
                             SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, extra=who_replies,
                                          description=(
                                 "Les services qui font tourner ses modèles. Chaque fournisseur a sa page : son "
                                 "type, le modèle choisi dans la liste qu'il propose, sa clé ; le reste est rangé "
                                 "dans « Options avancées ». Le premier déclaré sert « répondre » d'office.")),
-                            SettingsPage("roles", "Qui sert quoi", ("routes",), order=20, extra=routing,
-                                         facts=False, description=(
+                            SettingsPage("roles", "Qui sert quoi", ("routes",), order=20, facts=False, description=(
                                              "Chaque rôle (répondre, rêver, retenir, trier le courrier…) choisit "
                                              "son fournisseur. Laisse vide : le rôle retombe sur son repli. "
                                              "« Répondre » est toujours servi : sans choix, par le premier "
@@ -849,6 +901,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Les fournisseurs qui génèrent ses images, et lequel sert chaque rôle. Aucun "
                                     "fournisseur : elle n'en génère pas. Les clés sont chiffrées, jamais "
                                     "réaffichées.", loaders={"image_models": image_models}, facts=image_facts,
+                        describe={"routes": image_route},
                         pages=(
                             SettingsPage("images-fournisseurs", "Fournisseurs d'images", ("backends",), order=10,
                                          description=(
@@ -858,7 +911,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "d'une panne, ou de ce que le premier ne sait pas faire ; jamais "
                                              "d'un refus de modération.")),
                             SettingsPage("images-roles", "Qui dessine quoi", ("routes",), order=20,
-                                         extra=image_routing, facts=False, description=(
+                                         facts=False, description=(
                                              "Dessiner (une demande), retoucher une image reçue, ses dessins à "
                                              "elle. Laisse vide : le rôle retombe sur « dessiner ».")),
                         )),
@@ -893,16 +946,19 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         )),
         SettingsSection("autrices", "Autrices", "personnage", authors_m.Authors, settings.authors, save_authors,
                         order=120,
-                        head=lambda query: drawn_authors.head(settings.authors(), author_flows(),
-                                                              served=polish_served(),
-                                                              teams_on=settings.teams().enabled),
+                        # en tête, le seul bandeau : aucun modèle ne les fait écrire
+                        head=lambda query: drawn_authors.head(served=polish_served()),
+                        facts=author_facts,
+                        # « Où elles écrivent » est le formulaire même : une ligne par flux, sa liste dans la colonne
+                        # « Autrice » (une seule table, un seul Enregistrer)
                         describe={"authors": lambda key, entry: drawn_authors.describe(
-                            key, entry, settings.authors(), dict(author_flows()))},
+                            key, entry, settings.authors(), dict(author_flows())),
+                                  "flows": lambda key, value: drawn_authors.flow(key,
+                                                                                 teams_on=settings.teams().enabled)},
                         keys={"flows": author_flows},
-                        description="Qui récrit ce qui part, et où (ADR 0124) : une autrice par flux — le chat, chaque "
-                                    "boîte mail, Teams, le téléphone —, chacune avec ses codes d'écriture. Le sens "
-                                    "reste celui du premier jet, la forme change. Toutes écrivent par le modèle du "
-                                    "rôle « rendre naturel »."),
+                        description="Qui récrit ce qui part, et où : une autrice par flux — le chat, chaque boîte "
+                                    "mail, Teams, le téléphone —, chacune avec ses codes d'écriture. Le sens reste "
+                                    "celui du premier jet, la forme change."),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
                         head=lambda query: temper.head(live.persona().temperament, query, character_state()),
@@ -910,8 +966,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         prefill=lambda query: temper.prefill(live.persona().temperament, query),
                         description="Sa matrice de personnalité : des curseurs rangés en familles, une humeur de "
                                     "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
-                                    "ses paramètres (Paramètres avancés), et ce qui s'écarte du milieu se dit au modèle "
-                                    "(ADR 0100).",
+                                    "ses paramètres (Paramètres avancés), et ce qui s'écarte du milieu se dit au "
+                                    "modèle.",
                         blocks=drives, preview=temperament_effect, aside=True,
                         pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(
                             "Des curseurs (0,5 = comme la plupart des gens ; la console s'arrête à 0,1 et 0,9), "
@@ -921,10 +977,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "d'après ces curseurs, à chaque enregistrement (en haut de la page). Un profil les pose "
                             "tous d'un coup : choisis-le en haut, le formulaire s'ouvre sur ses valeurs, rien n'est "
                             "enregistré avant « Enregistrer ».")),)),
-        SettingsSection("notifications", "Notifications du téléphone", "canaux", PushSettings,
+        SettingsSection("notifications", "Notifications du téléphone", "carte-telephone", PushSettings,
                         lambda: _tolerant(PushSettings, service_account=settings.push()), save_push, order=20,
                         description="Ce qu'elle écrit à quelqu'un dont l'application est fermée part par Firebase, "
-                                    "chiffré pour son seul téléphone (ADR 0077).", facts=push_facts,
+                                    "chiffré pour son seul téléphone.", facts=push_facts,
                         pages=(SettingsPage("notifications", "Notifications du téléphone", description=(
                             "L'application Android ne garde aucune connexion ouverte quand elle est fermée : ce "
                             "qu'elle écrit à la personne lui arrive en notification par Firebase Cloud Messaging, "
@@ -933,9 +989,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "compte de service de ce projet : collée ici, ou posée dans le dossier de données sous "
                             "le nom firebase-service-account.json (droits 600) — collée ici, elle prime. Sans elle, "
                             "l'application ne reçoit que ce qu'elle trouve en s'ouvrant.")),)),
-        SettingsSection("carte", "Carte de sa position", "canaux", MapConfig, settings.map_config, save_map,
+        SettingsSection("carte", "Carte de sa position", "carte-telephone", MapConfig, settings.map_config, save_map,
                         order=25, facts=map_facts,
-                        description="D'où viennent les tuiles de la carte de Téléphone › Position (ADR 0193) : un "
+                        description="D'où viennent les tuiles de la carte de Téléphone › Position : un "
                                     "fichier PMTiles du dossier de données, ou un serveur de carte que ce serveur "
                                     "relaie. Le navigateur ne parle qu'à ce serveur.",
                         pages=(SettingsPage("carte", "Carte de sa position", description=(
@@ -946,9 +1002,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "réextrait) ne parle à personne ; un serveur de carte est joint par ce serveur seul, sans "
                             "rien de la personne. Hors de la zone couverte, ou sans carte, la position garde son "
                             "plan dessiné.")),)),
-        SettingsSection("lieux", "Lieux et adresses", "canaux", PlacesConfig, settings.places_config, save_places,
+        SettingsSection("lieux", "Lieux et adresses", "carte-telephone", PlacesConfig, settings.places_config, save_places,
                         order=26, facts=places_facts,
-                        description="Où l'écran Carte et ses outils cherchent un lieu et une adresse (ADR 0194) : "
+                        description="Où l'écran Carte et ses outils cherchent un lieu et une adresse : "
                                     "l'index des lieux du dossier de données (rien ne sort), et la Géoplateforme de "
                                     "l'IGN pour les adresses, que ce serveur joint seul.",
                         pages=(SettingsPage("lieux", "Lieux et adresses", description=(
@@ -959,9 +1015,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "vient de la Géoplateforme de l'IGN (la Base Adresse Nationale), relayée par ce serveur : "
                             "seul le texte cherché lui part, jamais la position de la personne. Sans index, ou sans "
                             "adresses, l'écran Carte le dit.")),)),
-        SettingsSection("itineraires", "Itinéraires", "canaux", RoutingConfig, settings.routing_config, save_routing,
+        SettingsSection("itineraires", "Itinéraires", "carte-telephone", RoutingConfig, settings.routing_config, save_routing,
                         order=27, facts=routing_facts,
-                        description="Qui calcule les itinéraires de l'écran Carte et de ses voyages (ADR 0194) : un "
+                        description="Qui calcule les itinéraires de l'écran Carte et de ses voyages : un "
                                     "serveur Valhalla, le public de FOSSGIS ou le tien. Vers lui ne partent que les "
                                     "points du trajet.",
                         pages=(SettingsPage("itineraires", "Itinéraires", description=(
@@ -972,15 +1028,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "trajet est gardé un jour, un trajet redemandé ne repart pas. Un Valhalla à toi, sur le "
                             "portable, n'a pas ces limites (la recette : deploy/README.md, « La carte de sa "
                             "position »). Par défaut, aucun : rien ne sort.")),)),
-        SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
+        # joint par Connexions extérieures, où son lien est dans le menu (ADR 0197)
+        SettingsSection("depots", "Dépôts Git", "connexions", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
-                        facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],
-                        pages=(SettingsPage("depots", "Dépôts git", description=(
+                        facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun"),
+                                       ("L'adresse de chaque dépôt", Ref("local", f"{PREFIX}/projets",
+                                                                         "sur la fiche de son projet"))],
+                        pages=(SettingsPage("depots", "Dépôts Git", description=(
                             "Le jeton avec lequel l'atelier d'un projet pousse vers son dépôt distant (GitHub ou un "
-                            "autre hôte https) et en récupère l'histoire. L'adresse de chaque dépôt se règle sur la "
-                            "fiche du projet (Projets › un projet › Dépôt git). Le jeton ne passe que par "
-                            "l'environnement de git, limité à l'hôte du dépôt.")),)),
-        SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail, lock=settings.writing,
+                            "autre hôte https) et en récupère l'histoire ; l'adresse du dépôt se règle sur la fiche "
+                            "du projet. Le jeton ne passe que par l'environnement de git, limité à l'hôte du "
+                            "dépôt.")),)),
+        SettingsSection("courrier", "Courrier", "plugins", MailConfig, settings.email, save_mail, lock=settings.writing,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
                         facts=mail_facts, fixed_names=("accounts",), describe={"accounts": describe_mailbox},
@@ -993,66 +1052,70 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "fait le courrier de toutes : son relevé, ce qu'elle en dit, les réponses qu'elle "
                             "prépare."), home="courrier/parametres", params="email",
                             template="handmade/mail/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
-        SettingsSection("mcp", "Outils extérieurs", "sens", McpConfig, settings.mcp, save_mcp, order=15,
+        SettingsSection("mcp", "Outils extérieurs", "plugins", McpConfig, settings.mcp, save_mcp, order=15,
                         lock=settings.writing,
-                        description="Les serveurs MCP dont elle peut utiliser les outils (ADR 0064). Jetons et "
-                                    "variables secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
+                        description="Les serveurs MCP dont elle peut utiliser les outils. Jetons et variables "
+                                    "secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
                         fixed_names=("servers",),
                         # qui peut quoi : sur la fiche du serveur, en lignes d'accès (« Accès aux outils », ADR 0131)
                         # — ici, la connexion seulement
                         exclude=tuple(f"servers.{k}" for k in ("access", "default_read", "default_act",
                                                                "default_keep")),
-                        pages=(SettingsPage("serveurs-mcp", "Outils extérieurs (MCP)", ("servers",), description=(
-                            "Chaque serveur a sa page : à quoi il sert, pour elle — la ligne de son catalogue —, puis "
+                        # dans Ses outils, en haut à droite, à côté de Venus d'ailleurs (ADR 0206)
+                        pages=(SettingsPage("serveurs-mcp", "Paramètres des services", ("servers",), description=(
+                            "Chaque service branché (un serveur MCP) a sa page : à quoi il sert, pour elle — la ligne "
+                            "de son catalogue —, puis "
                             "où le joindre (une adresse, ou une commande lancée ici, isolée) et ses bornes. Qui peut "
-                            "quoi se règle sur sa fiche (Outils › Venus d'ailleurs › le serveur › « Accès aux "
-                            "outils »).")),)),
-        SettingsSection("reveils", "Réveils par API", "sens", WakeupConfig, settings.wakeup, save_wakeup, order=45,
-                        description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>, ADR "
-                                    "0068) : ce qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés "
-                                    "se génèrent sur leur fiche, montrées une seule fois.",
+                            "quoi se règle sur sa fiche, dans « Accès aux outils »."), home="outils/parametres"),)),
+        SettingsSection("reveils", "Réveils par API", "plugins", WakeupConfig, settings.wakeup, save_wakeup, order=45,
+                        description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>) : ce "
+                                    "qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés se génèrent "
+                                    "sur leur fiche, montrées une seule fois.",
                         facts=wakeup_facts, fixed_names=("endpoints",),
                         choices={"endpoints.project": wake_projects, "endpoints.notify": wake_notify},
-                        pages=(SettingsPage("reveils", "Réveils par API", ("endpoints",), description=(
+                        # dans Réveils par API, en haut à droite (ADR 0206)
+                        pages=(SettingsPage("reveils", "Paramètres", ("endpoints",), description=(
                             "Chaque réveil a sa page : à quoi il sert, ses consignes (elles priment sur le texte "
                             "qu'un appel apporte, qui n'est jamais une consigne), son projet, son mode, ses outils, "
                             "s'il passe outre son sommeil, à qui elle rend compte, ses bornes. Son nom est la fin de "
-                            "son URL. Sa clé, ses appels et ce qu'ils ont donné : Connexions "
-                            "extérieures › Réveils par API.")),)),
-        SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
+                            "son URL."), home="reveils/parametres"),)),
+        # Flux, Transcription et Appareils : dans Ses sens, derrière sa roue (ADR 0206)
+        SettingsSection("flux", "Flux", "plugins", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
                         save_feeds, description="Ce qu'elle lit du monde.", order=20,
-                        pages=(SettingsPage("flux", "Flux RSS", description=(
-                            "Les flux RSS ou Atom qu'elle relève. Ce qu'elle en remarque se lit dans Connexions "
-                            "extérieures › Flux RSS.")),)),
-        SettingsSection("transcription", "Transcription", "sens", SttSettings, stt, save_stt, order=30,
+                        facts=lambda: [("Suivis", str(len(settings.feeds()))),
+                                       ("Ce qu'elle en remarque", Ref("local", f"{PREFIX}/sens/flux", "Flux RSS"))],
+                        pages=(SettingsPage("flux", "Flux suivis", description=(
+                            "Les flux RSS ou Atom qu'elle relève."), home="sens/parametres-flux"),)),
+        SettingsSection("transcription", "Transcription", "plugins", SttSettings, stt, save_stt, order=30,
                         description="Pour entendre les messages vocaux (un service compatible Whisper).",
                         pages=(SettingsPage("transcription", "Transcription vocale", description=(
                             "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
-                            "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu.")),)),
-        SettingsSection("teams", "Teams", "sens", TeamsConfig, settings.teams, save_teams, order=12,
+                            "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu."),
+                            home="sens/parametres-transcription"),)),
+        SettingsSection("teams", "Teams", "plugins", TeamsConfig, settings.teams, save_teams, order=12,
                         lock=settings.writing,
                         description="Les conversations Teams que l'extension de navigateur de chaque compte lui "
-                                    "apporte (ADR 0069, 0186), et ce qu'elle fait des réponses qu'elle y prépare.",
+                                    "apporte, et ce qu'elle fait des réponses qu'elle y prépare.",
                         facts=teams_facts, fixed_names=("accounts",), describe={"accounts": describe_teams_account},
                         choices={"accounts.owner": teams_owners},
-                        pages=(SettingsPage("teams", "Teams", description=(
+                        # dans Teams, en haut à droite, comme le courrier (ADR 0173, 0206)
+                        pages=(SettingsPage("teams", "Paramètres", home="teams/parametres", description=(
                             "Chaque compte Teams — le tien, le sien, celui d'une personne qui a un compte — a son "
                             "extension (frontend/Extension), qui lit ce que Teams web reçoit dans le navigateur où il "
-                            "est ouvert et l'apporte ici, avec la clé de ce compte (créée dans Relations & échanges › "
-                            "Teams › Extension, montrée une seule fois). Elle y écrit à la place de la personne du "
-                            "compte : un brouillon posé dans Teams, un envoi après accord, ou un envoi sans demander — "
-                            "toujours de ce compte, sous son nom. Les conversations et les réponses se lisent dans "
-                            "Relations & échanges › Teams.")),)),
-        SettingsSection("appareils", "Appareils", "sens", None, order=40,
+                            "est ouvert et l'apporte ici, avec la clé de ce compte (montrée une seule fois). Elle y "
+                            "écrit à la place de la personne du compte : un brouillon posé dans Teams, un envoi après "
+                            "accord, ou un envoi sans demander — toujours de ce compte, sous son nom.")),)),
+        SettingsSection("appareils", "Appareils", "plugins", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
                         facts=lambda: [("Jeton", "défini" if settings.sensors_digest() else "aucun")],
                         commands=(Command("jeton", "Nouveau jeton", new_token,
                                           confirm="L'ancien jeton ne vaudra plus rien."),),
-                        pages=(SettingsPage("appareils", "Appareils connectés", commands=True, description=(
+                        pages=(SettingsPage("appareils", "Accès des appareils", commands=True, description=(
                             "Les appareils envoient leurs signaux à POST /api/perceptions avec ce jeton "
                             "(en-tête Authorization: Bearer). Un nouveau jeton se montre une seule fois ; l'ancien "
-                            "ne vaut plus rien.")),)),
+                            "ne vaut plus rien."), home="sens/parametres-appareils"),)),
     )
+    return declared
 
 
 def _tolerant(cls: type[BaseModel], /, **data: Any) -> Any:
@@ -1066,5 +1129,5 @@ def _tolerant(cls: type[BaseModel], /, **data: Any) -> Any:
 
 def _num(value: Any) -> str:
     if isinstance(value, float):
-        return f"{value:.3g}".replace(".", ",")
+        return decimal_fr(value, 3)  # « 0,00000001 », comme les bornes des Paramètres avancés
     return str(value)

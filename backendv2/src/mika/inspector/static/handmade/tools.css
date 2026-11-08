@@ -1,73 +1,8 @@
-/* Outils › Ce qu'elle peut faire (inspector/pages/tools.py, ADR 0122) : ses familles d'outils en lignes, leurs outils
-   dessous, les situations en colonnes ; chaque ligne a les mêmes colonnes, pour que tout s'aligne sans tableau. */
-.can { display: grid; gap: 18px; }
-.can-intro { display: grid; gap: 10px; font-size: 14px; }
-.can-intro p { margin: 0; }
-.can-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; padding: 0; list-style: none; }
-.can-legend li { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
-.can-facts { color: var(--text-2); font-size: 13px; }
-.can-warn { color: var(--danger); }
-.can-scope { margin: 0 0 10px; color: var(--text-2); font-size: 13px; }
+/* Les outils et les services branchés : leurs fiches, leurs accès, ce qu'elle prête (handmade/outils/, ADR 0128, 0134). */
 
-.can-card { padding: 10px 0 0; }
-.can-wrap { overflow-x: auto; }
-.can-grid { --name: minmax(250px, 1fr); --col: 78px; min-width: calc(250px + var(--cols) * var(--col)); font-size: 13px; }
-.can-row { display: grid; grid-template-columns: var(--name) repeat(var(--cols), var(--col)); align-items: center; }
-.can-row > * { padding: 7px 6px; }
-.can-name { padding-left: 20px; min-width: 0; }
-.can-head > * { color: var(--muted); font-size: 12px; font-weight: 600; text-align: center; }
-.can-head .can-name { text-align: left; }
-.can-moments > * { padding-bottom: 0; }
-.can-moment { color: var(--text); font-family: var(--now-serif); font-size: 13px; border-left: 1px solid var(--border); }
-/* le nombre de situations (celles que la composition connaît) et la largeur d'un groupe : pas de style en ligne */
-.can-cols-1 { --cols: 1; } .can-cols-2 { --cols: 2; } .can-cols-3 { --cols: 3; } .can-cols-4 { --cols: 4; } .can-cols-5 { --cols: 5; } .can-cols-6 { --cols: 6; } .can-cols-7 { --cols: 7; } .can-cols-8 { --cols: 8; }
-.can-span-1 { grid-column: span 1; } .can-span-2 { grid-column: span 2; } .can-span-3 { grid-column: span 3; } .can-span-4 { grid-column: span 4; } .can-span-5 { grid-column: span 5; } .can-span-6 { grid-column: span 6; } .can-span-7 { grid-column: span 7; } .can-span-8 { grid-column: span 8; }
-.can-sits { border-bottom: 1px solid var(--border); }
-.can-sit { align-self: end; line-height: 1.25; }
-.can-start { border-left: 1px solid var(--border); }
-
-/* une famille : une ligne qui s'ouvre sur ses outils */
-.can-family { border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.can-family > summary { cursor: pointer; list-style: none; }
-.can-family > summary::-webkit-details-marker { display: none; }
-.can-family > summary:hover > * { background: var(--surface-2); }
-.can-family > summary .can-name { display: flex; align-items: baseline; gap: 8px; }
-.can-family > summary .can-name::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .12s; }
-.can-family[open] > summary .can-name::before { transform: rotate(90deg); }
-.can-family[open] > summary { background: var(--surface-2); }
-.can-count { color: var(--muted); font-size: 11.5px; font-weight: 400; }
-
-/* la case d'une famille : tous ses outils, une partie, retirée, pas prévue */
-.can-sum, .can-mark { display: flex; align-items: center; justify-content: center; height: 26px; border-radius: var(--radius);
-  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.can-sum { margin: 3px 6px; padding: 0 !important; }
-.can-mark { min-width: 30px; height: 22px; padding: 0 6px; }
-.can-on { background: var(--ok-bg); color: var(--ok); }
-.can-part { background: color-mix(in srgb, var(--ok-bg) 55%, transparent); color: var(--ok); }
-.can-ask { background: var(--info-bg); color: var(--info); }
-.can-off { background: var(--warn-bg); color: var(--warn); }
-.can-none { color: var(--border-strong); font-weight: 400; }
-.can-sum.has-off { box-shadow: inset 0 0 0 2px var(--warn); }
-
-/* un outil : ce qu'il fait, son nom, une case par situation */
-.can-tool { border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
-.can-tool .can-name { padding-left: 38px; }
-.can-tool .can-name a { display: block; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
-.can-tool .can-name a:hover { color: var(--accent); }
-.can-id { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
-.can-id code { font-size: 11px; }
-.can-cell { display: flex; align-items: center; justify-content: center; align-self: stretch; }
-.can-cell.can-on, .can-cell.can-ask, .can-cell.can-off { background: none; }
-.can-cell.can-off { background: color-mix(in srgb, var(--warn-bg) 70%, transparent); }
-.can-cell.can-ask input { accent-color: var(--info); }
-.can-cell input { width: 17px; height: 17px; margin: 0; accent-color: var(--ok); cursor: pointer; }
-.can-cell.can-fixed { color: var(--ok); font-weight: 600; }
-
-.can-actions { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
-  margin-top: 4px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface);
-  border-radius: 0 0 var(--radius) var(--radius); }
+/* Ce que son prompt dit de ses outils, situation par situation (handmade/droits/familles.html) */
 .can-prompts > summary, .can-prompt > summary { cursor: pointer; }
-.can-prompts > summary { font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.can-prompts > summary { font-family: var(--display); font-size: 14px; font-weight: 600; }
 .can-prompts > p { margin: 8px 0 10px; font-size: 13px; }
 .can-prompt { margin-top: 8px; font-size: 13px; }
 .can-prompt > summary { color: var(--text-2); }
@@ -83,7 +18,6 @@
 .can-where-list select { width: 100%; }
 .can-where-no { color: var(--muted); }
 .can-where-off .can-where-sit { color: var(--warn); }
-.can-where .can-actions { position: static; padding: 12px 0 0; border: 0; }
 @media (max-width: 640px) {
   .can-where-list li { grid-template-columns: 1fr; gap: 4px; }
 }
@@ -97,7 +31,7 @@
 .expose-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 0; }
 .expose-served { margin-top: 18px; display: grid; gap: 14px; }
 .expose fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
-.expose legend { margin-bottom: 8px; padding: 0; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; }
+.expose legend { margin-bottom: 8px; padding: 0; color: var(--text); font-family: var(--display); font-size: 13.5px; font-weight: 600; }
 .expose legend code { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .expose-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
 .expose-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; cursor: pointer; }
@@ -121,7 +55,7 @@
 .expose-mode label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
 .expose-more { margin-top: 14px; font-size: 13px; }
 .expose-more > summary, .expose-relay > summary { color: var(--text-2); cursor: pointer; }
-.expose-relay > summary { font-family: var(--now-serif); font-size: 14px; font-weight: 600; color: var(--text); }
+.expose-relay > summary { font-family: var(--display); font-size: 14px; font-weight: 600; color: var(--text); }
 .expose-relay > p { margin: 10px 0 12px; font-size: 13px; }
 @media (max-width: 640px) {
   .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
@@ -177,10 +111,10 @@
   text-align: left; vertical-align: middle; }
 .server-who thead th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .server-who tbody th[scope="row"] { padding-left: 24px; font-weight: 400; white-space: nowrap; }
-.server-who-moment th { padding-top: 14px; color: var(--text); font-family: var(--now-serif); font-size: 13.5px; font-weight: 600; }
+.server-who-moment th { padding-top: 14px; color: var(--text); font-family: var(--display); font-size: 13.5px; font-weight: 600; }
 .server-who tr.no td, .server-who tr.no th[scope="row"] { color: var(--muted); }
 .server-who td:nth-child(2) { width: 1%; white-space: nowrap; }
-.server-tech > summary { cursor: pointer; font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.server-tech > summary { cursor: pointer; font-family: var(--display); font-size: 14px; font-weight: 600; }
 .server-tech .server-facts { margin-top: 12px; }
 .server-tech-title { margin: 14px 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .server-log { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; border-radius: var(--radius); background: var(--sunken);
@@ -204,21 +138,10 @@
 .service-check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
 .service-check span { display: grid; }
 .service-check span span { color: var(--text-2); font-size: 12.5px; }
-.service-people-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .service-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.service-step-n { color: var(--muted); font-size: 12px; }
-.service-step-name { font-weight: 650; }
-.service-step-what { color: var(--text-2); font-size: 13px; }
-.service-step-later { padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 12px; }
-.rule-clear-note { color: var(--text-2); font-size: 13px; }
-@media (max-width: 640px) {
-  .rule-clear > div { grid-template-columns: 1fr; gap: 0; }
-}
 .elsewhere-three { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; color: var(--text-2); font-size: 13px; }
 /* Brancher un service (handmade/outils/brancher.html, ADR 0128) */
-.plug-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; }
-.plug-field { display: grid; flex: 2 1 320px; gap: 4px; }
-.plug-field.plug-short { flex: 1 1 200px; }
+.plug-field { display: grid; gap: 4px; }
 .plug-field label { color: var(--text-2); font-size: 13px; font-weight: 600; }
 .plug-field input, .plug-field textarea { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius);
   background: var(--surface); color: var(--text); font: inherit; }
@@ -279,7 +202,7 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
 .plug-stack { display: grid; gap: 14px; max-width: 720px; }
 .plug-name input { max-width: 360px; font-family: var(--mono); font-size: 14.5px; }
 .plug-field code { font-size: 12px; }
-.plug-title { margin: 0; font-family: var(--now-serif); font-size: 22px; font-weight: 650; }
+.plug-title { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 650; }
 
 /* Accès aux outils (ADR 0131) : un tableau de lignes lues de haut en bas, puis le comportement par défaut */
 .access-form { margin: 0; }
@@ -296,6 +219,10 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
   background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px; }
 .access-select.non { color: var(--muted); }
 .access-select.seule { border-color: color-mix(in srgb, var(--ok, var(--accent)) 50%, var(--border-strong)); }
+/* dans un tableau de droits, un menu montre toute sa valeur : jamais plus étroit que l'option choisie (sans
+   field-sizing, que la plus longue), et de toute la largeur de sa colonne ; le tableau défile dans sa carte plutôt que
+   de couper « seule — sans demander » en « seule — sans ». Sa flèche est à 10 px du bord : 24 px lui suffisent. */
+.access-table .access-select { width: auto; min-width: 100%; padding-right: 24px; field-sizing: content; }
 /* menus et listes à cases se ressemblent : la même flèche, peinte au bord droit, qui ne passe jamais à la ligne */
 .access-select, .access-tools > summary { appearance: none; padding-right: 28px; background-repeat: no-repeat;
   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
@@ -348,11 +275,13 @@ summary.tool-edit-head::-webkit-details-marker { display: none; }
 }
 
 /* Un tableau de règles d'accès sur un écran étroit (ADR 0176) : il défile dans sa carte, la page ne déborde pas ; ses
-   menus déroulants restent dans le cadre qui défile (sur grand écran, ils en sortent librement). */
+   menus déroulants restent dans le cadre qui défile (sur grand écran, ils en sortent librement). Sur grand écran aussi,
+   un tableau plus large que sa carte défile dans son cadre, et ce qu'il cache (le titre « Ordre », placé en absolu) y
+   reste : sinon, la page s'élargit. */
 .access-form, .access-card, .now-page.service > * { min-width: 0; }
 .access-head > div { min-width: 0; }
+.access-card .hm-table-wrap { position: relative; }
 @media (max-width: 700px) {
   .access-card { overflow-x: auto; overscroll-behavior-x: contain; position: relative; }
   .access-card .access-table { min-width: 640px; }
-  .access-card .hm-table-wrap { position: relative; }
 }

@@ -33,7 +33,6 @@ def test_a_cell_names_the_means_of_communication_and_a_label_splits_from_its_rea
     assert identities.handle_of({"href": "/inspecteur/fiche/person/user_1"}) == ""
     assert identities._split("authentifiée (session vérifiée)") == ("authentifiée", "session vérifiée")
     assert identities._split("compte") == ("compte", "")
-    assert identities._number("−0,35") == -0.35 and identities._number("+1,00") == 1.0
 
 
 def test_one_line_per_means_of_communication_and_a_banner_while_a_claim_waits(world):  # noqa: F811

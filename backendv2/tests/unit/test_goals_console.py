@@ -243,6 +243,19 @@ def test_a_due_date_is_read_the_french_way_and_refused_when_unreadable():
 # ── La fiche d'un but ─────────────────────────────────────────────────────
 
 
+def test_a_goal_is_found_with_or_without_its_ligature(tmp_path):
+    """« coeur » trouve « cœur » : le repli du noyau, le même que celui de sa mémoire (audit K0-15)."""
+
+    async def scenario(kernel, llm):
+        ins = Inspection(kernel)
+        gid = str(await explore(kernel, "Explorer : le cœur des vieilles bornes"))
+        return gid, {typed: ins.search("goal", typed) for typed in ("coeur", "CŒUR", "tricot")}
+
+    gid, found = live(tmp_path, scenario, mode="honest")
+    assert [f.key for f in found["coeur"]] == [gid] and [f.key for f in found["CŒUR"]] == [gid]
+    assert found["tricot"] == []
+
+
 def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
     async def scenario(kernel, llm):
         ins = Inspection(kernel)

@@ -32,6 +32,7 @@ from mika.plugins.mcp.console import (
     closeness,
     edit_server,
     faces,
+    owner_name,
     said_level,
     serves_nobody,
     tool_state,
@@ -185,6 +186,8 @@ class ServerOverview(Overview):
         tags = [(STATES.get(st.state, st.state), STATE_TONES.get(st.state, "")),
                 ("sur cette machine" if st.kind == "local" else "à une adresse", "info"),
                 (f"avec {who_said(st, frame)}", "danger" if serves_nobody(st) else "info")]
+        if st.owner.startswith(PERSON):  # branché par une personne sous son compte (ADR 0192)
+            tags.insert(0, (f"à {owner_name(st, frame)}", "info"))
         if review:
             tags.append((f"{review} outil{'s' if review > 1 else ''} à revoir", "warn"))
         return Markup(env.get_template("handmade/outils/serveur_tete.html").render(

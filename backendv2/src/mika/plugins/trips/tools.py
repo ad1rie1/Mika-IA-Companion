@@ -349,7 +349,8 @@ class PlacesArgs(BaseModel):
     limit: int = Field(default=8, ge=1, le=c.FOUND_MAX, description=phrase("trips.tools.places.limit"))
 
 
-@TRIPS.tool("places_search", description=phrase("trips.tools.places.description"), args=PlacesArgs, bundle=BUNDLE,
+@TRIPS.tool("places_search", description=phrase("trips.tools.places.description"),
+            label=phrase("trips.tools.places.label"), args=PlacesArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=SEARCH_CALLS, when=offered, needs="maps")
 async def places_search(args: PlacesArgs, ctx: Any) -> Any:
     call = _open(ctx, "places_search")
@@ -397,7 +398,8 @@ class AddressArgs(BaseModel):
     text: str = Field(min_length=3, max_length=200, description=phrase("trips.tools.address.text"))
 
 
-@TRIPS.tool("address_search", description=phrase("trips.tools.address.description"), args=AddressArgs,
+@TRIPS.tool("address_search", description=phrase("trips.tools.address.description"),
+            label=phrase("trips.tools.address.label"), args=AddressArgs,
             bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=SEARCH_CALLS, when=offered, needs="maps")
 async def address_search(args: AddressArgs, ctx: Any) -> Any:
     call = _open(ctx, "address_search")
@@ -448,7 +450,8 @@ class RouteArgs(BaseModel):
                                description=phrase("trips.tools.route.avoid"))
 
 
-@TRIPS.tool("route_plan", description=phrase("trips.tools.route.description"), args=RouteArgs, bundle=BUNDLE,
+@TRIPS.tool("route_plan", description=phrase("trips.tools.route.description"),
+            label=phrase("trips.tools.route.label"), args=RouteArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered, needs="maps")
 async def route_plan(args: RouteArgs, ctx: Any) -> Any:
     call = _open(ctx, "route_plan")
@@ -494,7 +497,8 @@ class NoArgs(BaseModel):
     pass
 
 
-@TRIPS.tool("trip_list", description=phrase("trips.tools.list.description"), args=NoArgs, bundle=BUNDLE,
+@TRIPS.tool("trip_list", description=phrase("trips.tools.list.description"),
+            label=phrase("trips.tools.list.label"), args=NoArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered)
 async def trip_list(args: NoArgs, ctx: Any) -> Any:
     call = _open(ctx, "trip_list")
@@ -547,7 +551,8 @@ async def _legs(call: _Call, trip: Trip, texts: dict[str, str]) -> tuple[dict[st
     return {trip.stops[i + 1].id: leg for i, leg in enumerate(route.legs[:len(trip.stops) - 1])}, ""
 
 
-@TRIPS.tool("trip_read", description=phrase("trips.tools.read.description"), args=TripArgs, bundle=BUNDLE,
+@TRIPS.tool("trip_read", description=phrase("trips.tools.read.description"),
+            label=phrase("trips.tools.read.label"), args=TripArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered)
 async def trip_read(args: TripArgs, ctx: Any) -> Any:
     call = _open(ctx, "trip_read")
@@ -629,7 +634,8 @@ def _names(points: list[Point]) -> str:
     return ", ".join(shown) + (" …" if len(points) > 8 else "")
 
 
-@TRIPS.tool("trip_create", acts=True, description=phrase("trips.tools.create.description"), args=CreateArgs,
+@TRIPS.tool("trip_create", acts=True, description=phrase("trips.tools.create.description"),
+            label=phrase("trips.tools.create.label"), args=CreateArgs,
             bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered)
 async def trip_create(args: CreateArgs, ctx: Any) -> Any:
     call = _open(ctx, "trip_create", acts=True)
@@ -679,7 +685,8 @@ class EditArgs(BaseModel):
                                description=phrase("trips.tools.edit.move"))
 
 
-@TRIPS.tool("trip_edit", acts=True, description=phrase("trips.tools.edit.description"), args=EditArgs, bundle=BUNDLE,
+@TRIPS.tool("trip_edit", acts=True, description=phrase("trips.tools.edit.description"),
+            label=phrase("trips.tools.edit.label"), args=EditArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered)
 async def trip_edit(args: EditArgs, ctx: Any) -> Any:
     call = _open(ctx, "trip_edit", acts=True)
@@ -754,7 +761,8 @@ def along_points(trip: Trip, texts: dict[str, str], day: int) -> list[Point]:
     return [p for p in (stop_point(s, texts) for s in stops) if p is not None]
 
 
-@TRIPS.tool("trip_suggest", description=phrase("trips.tools.suggest.description"), args=SuggestArgs, bundle=BUNDLE,
+@TRIPS.tool("trip_suggest", description=phrase("trips.tools.suggest.description"),
+            label=phrase("trips.tools.suggest.label"), args=SuggestArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered, needs="maps")
 async def trip_suggest(args: SuggestArgs, ctx: Any) -> Any:
     call = _open(ctx, "trip_suggest")
@@ -806,7 +814,8 @@ class ShowArgs(BaseModel):
     trip: str = Field(default="", max_length=20, description=phrase("trips.tools.show.trip"))
 
 
-@TRIPS.tool("map_show", description=phrase("trips.tools.show.description"), args=ShowArgs, bundle=BUNDLE,
+@TRIPS.tool("map_show", description=phrase("trips.tools.show.description"),
+            label=phrase("trips.tools.show.label"), args=ShowArgs, bundle=BUNDLE,
             episodes=[Kind.REPLY], max_calls_per_episode=OTHER_CALLS, when=offered)
 async def map_show(args: ShowArgs, ctx: Any) -> Any:
     call = _open(ctx, "map_show")

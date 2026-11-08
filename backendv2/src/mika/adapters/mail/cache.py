@@ -84,6 +84,7 @@ from mika.adapters.mail.models import (
 )
 from mika.adapters.mail.parse import Part
 from mika.ports.mail import (
+    PIECE_MAX,
     AccountStatus,
     Attachment,
     Draft,
@@ -101,7 +102,7 @@ from mika.ports.sql import MAIL, insert_ignore
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
 #: au plus, une pièce gardée ; au-delà, elle reste sur le serveur (relue à la demande)
-PART_MAX = 25 * 1024 * 1024
+PART_MAX = PIECE_MAX
 #: au plus, les octets de toutes les pièces gardées ; au-delà, les mails les plus anciens cèdent les leurs (jusqu'aux
 #: neuf dixièmes, pour ne pas recommencer au mail suivant)
 KEPT_MAX = 4 * 1024 ** 3
@@ -326,11 +327,13 @@ class MailCache:
 
     # ── ses pièces ──
     def _owners(self, s: Session, ref: str) -> list[int]:
-        """Les lignes de ce mail (ses copies comprises), la meilleure d'abord (comme ``_best``)."""
-        return [int(i) for i in s.scalars(
+        """Les lignes de ce mail (ses copies comprises), la meilleure d'abord (comme ``_best``), puis son envoi."""
+        return [*(int(i) for i in s.scalars(
             select(M.id).where(self._where_ref(ref))
             .order_by(case((M.ref == fit(ref, REF), 1), else_=0).desc(), case((M.folder == "INBOX", 1), else_=0).desc(),
-                      M.date.desc(), M.id))]
+                      M.date.desc(), M.id))),
+                *(_sent_owner(int(i)) for i in s.scalars(select(S.id).where(*self._sent_where(ref))
+                                                         .order_by(S.id)))]
 
     def part(self, ref: str, position: int) -> File | None:
         """Une pièce jointe gardée, à son rang ; ``None`` : ses octets ne sont pas ici (le serveur les a)."""
@@ -597,7 +600,8 @@ class MailCache:
             self.save_folder(account, folder, total=int(total), unseen=int(unseen))
 
     # ── envoyés ──
-    def remember_sent(self, s: Sent, source: bytes | None = None) -> None:
+    def remember_sent(self, s: Sent, source: bytes | None = None, files: Iterable[File] = ()) -> None:
+        """Un mail parti ; ``files`` : ses pièces, gardées à part comme celles d'un mail reçu (ADR 0172, 0214)."""
         values = sent_values(s, source)
         with self._use(write=True) as db:
             row = db.scalar(select(S).where(S.message_id == values["message_id"]))
@@ -609,6 +613,14 @@ class MailCache:
                     setattr(row, name, value)
             db.flush()
             self._relink(db, SENT, row.id, people(SENT, row.id, to=s.to, cc=s.cc))
+            parts = [Part(i, f.name, f.mime, "", f.data) for i, f in enumerate(files)]
+            if parts:
+                owner = _sent_owner(row.id)
+                before = _drop_parts(db, [owner])
+                fresh = _keep_parts(db, owner, parts)
+                _collect(db, before)
+                if fresh:
+                    _bound(db)
 
     def _sent_where(self, ref: str) -> list[Any]:
         account, mid = split_ref(ref)
@@ -716,6 +728,8 @@ class MailCache:
                 if ids:
                     s.execute(delete(R).where(R.kind == kind, R.owner.in_(ids)))
                     n += int(s.execute(delete(entity).where(entity.id.in_(ids))).rowcount or 0)
+            if sent:
+                _collect(s, _drop_parts(s, [_sent_owner(i) for i in sent]))
             for r in rows:
                 insert_ignore(s, ForgottenRow, {"account": r.account, "fingerprint": r.fingerprint})
                 s.execute(delete(OfferedRow).where(OfferedRow.account == r.account, OfferedRow.ref == r.ref))
@@ -749,11 +763,12 @@ class MailCache:
             self._engine.dispose()
 
 
-def ref_of(m: Mail) -> str:
-    return m.ref
-
-
 # ── les pièces et leurs octets ──
+def _sent_owner(row_id: int) -> int:
+    """Le propriétaire des pièces d'un envoi : sa ligne de ``sent``, en négatif (celle d'un mail reçu est positive)."""
+    return -row_id
+
+
 def _keep_parts(s: Session, owner: int, parts: Iterable[Part]) -> bool:
     """Les pièces d'un mail, et leurs octets s'ils sont lisibles et pas trop gros ; rend s'il en a écrit de nouveaux."""
     rows, fresh = [], False
@@ -804,10 +819,10 @@ def _bound(s: Session) -> None:
     total = int(s.scalar(select(func.coalesce(func.sum(kept.c.size), 0))) or 0)
     if total <= KEPT_MAX:
         return
-    last = func.max(M.date)
+    last = func.max(func.coalesce(M.date, S.date))
     rows = s.execute(select(P.digest, func.max(P.size).label("size"), last.label("last"))
-                     .join(M, M.id == P.owner).where(P.digest != "").group_by(P.digest)
-                     .order_by(last, P.digest)).all()
+                     .outerjoin(M, M.id == P.owner).outerjoin(S, S.id == -P.owner).where(P.digest != "")
+                     .group_by(P.digest).order_by(last, P.digest)).all()
     gone = []
     for row in rows:
         if total <= KEPT_MAX * 9 // 10:

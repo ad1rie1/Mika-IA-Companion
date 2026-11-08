@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import email.utils
 import hashlib
+from collections.abc import Iterable
 from datetime import UTC, datetime, tzinfo
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 
 from mika.contracts.self_ import DEFAULT_NAME
-from mika.ports.mail import AccountInfo, Draft, Mail, Preview, addresses, to_fill
+from mika.ports.mail import AccountInfo, Draft, File, Mail, Preview, addresses, to_fill
 from mika.vocab.phrasebook import phrase
 
 
@@ -109,6 +112,32 @@ def message(shown: Preview, parent: Mail | None, message_id: str, *, when: datet
         msg["References"] = in_reply_to
     msg.set_content(shown.text)
     return msg
+
+
+def attach(msg: EmailMessage, files: Iterable[File]) -> None:
+    """Joint ces pièces au mail ; un message transféré en pièce (``message/rfc822``) reste un message."""
+    for file in files:
+        if file.mime == "message/rfc822":
+            msg.add_attachment(BytesParser(policy=policy.default).parsebytes(file.data), filename=file.name)
+            continue
+        maintype, _, subtype = file.mime.partition("/")
+        msg.add_attachment(file.data, maintype=maintype or "application", subtype=subtype or "octet-stream",
+                           filename=file.name)
+
+
+#: le débit montant le plus lent sur lequel un mail lourd doit encore partir : 1 Mbit/s, en octets par seconde
+SLOWEST_UPLINK = 125_000
+
+
+def transfer_timeout(size: int, base: float) -> float:
+    """Le délai d'une socket le temps d'écrire ``size`` octets : Python le compte pour toute l'écriture (``sendall``),
+    pas paquet par paquet. Celui d'une commande (``base``) ne suffit pas à un mail lourd (ADR 0214)."""
+    return max(base, size / SLOWEST_UPLINK)
+
+
+def wire_size(msg: EmailMessage) -> int:
+    """Ce que ce mail pèse à l'envoi, à quelques pour cent près, sans le mettre à plat une fois de plus."""
+    return sum(len(part.get_payload() or "") for part in msg.walk() if not part.is_multipart())
 
 
 def new_message_id(account: AccountInfo) -> str:

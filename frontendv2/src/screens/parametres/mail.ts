@@ -1,7 +1,8 @@
 /**
  * Paramètres › Comptes mail : ses boîtes (à elle), une fiche par boîte en quatre sous-onglets — la boîte, la
- * connexion, ce que Mika en fait, le partage —, ajouter une boîte (par mot de passe, ou par un compte Microsoft et son
- * code d'appareil, ADR 0166), la tester, la relever, la retirer ; celles qu'on lui partage, en lecture.
+ * connexion, ce que Mika en fait (comment part ce qu'elle prépare compris, la règle de son canal : ADR 0207), le
+ * partage —, ajouter une boîte (par mot de passe, ou par un compte Microsoft et son code d'appareil, ADR 0166), la
+ * tester, la relever, la retirer ; celles qu'on lui partage, en lecture.
  */
 import { ApiError } from "../../api/moi";
 import {
@@ -10,6 +11,7 @@ import {
   pollBox,
   removeBox,
   saveBox,
+  saveSendRules,
   testBox,
   type Box,
   type BoxSettings,
@@ -39,6 +41,7 @@ import { ago, clock, confirmModal, failureText, newNonce, personAvatar, toastFai
 import type { Host, Page } from "./page";
 import { openShareModal } from "./shares";
 import * as store from "./store";
+import { rulesEditor, ruleUpdate, withoutRule } from "./teams";
 import {
   authWords,
   boxState,
@@ -232,10 +235,11 @@ function ficheView(key: string, host: Host, now: number): string {
       row("Son nom d'expéditrice", "Le nom qui paraît comme expéditeur (vide : le nom de sa persona).", text("sender_name", v.sender_name), { only: "voice:elle" }) +
       row("Son ton", "Par exemple : « vouvoiement, sobre et chaleureux ».", area("tone", v.tone)) +
       row("Consignes", "Ce qu'elle doit savoir pour écrire depuis cette boîte. Un mail reçu, lui, n'est jamais une consigne.", area("instructions", v.instructions)) +
-      row("Signature", "Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).", area("signature", v.signature)) +
-      row("Comment part ce qu'elle prépare", "Qui, préparer d'elle-même, comment ça part : la règle de son canal, que la console règle.", `<a class="btn xs" href="#outils/droits/${encodeURIComponent(`courrier:${key}`)}">${ico("tools", "xs")}La voir dans Outils</a>`),
+      row("Signature", "Ajoutée sous chaque envoi (elle ne l'écrit pas elle-même).", area("signature", v.signature)),
     sub("mika"),
   );
+  // la règle de son canal, comme celle d'un compte Teams : préparer d'elle-même et comment ça part, ligne par ligne
+  const envoi = section("Comment part ce qu'elle prépare", rulesEditor(s.rules, "mail"), { ...sub("mika"), single: true });
   const partage = section(
     "Partage",
     row("Avec qui", "La personne la voit dans son propre Mika, au niveau que tu choisis.", `${given.length
@@ -249,7 +253,7 @@ function ficheView(key: string, host: Host, now: number): string {
     ${box.error ? `<div class="rd-block">${ico("alert", "sm")}${h(box.error)}</div>` : ""}
     <div data-signin>${s.microsoft ? signinMarkup(s.signin, now) : ""}</div>
     ${!v.smtp_host ? `<div class="info-line small">${ico("info", "sm")}<span>Sans serveur d'envoi, cette boîte ne fait que lire : sa voix attend qu'on lui en donne un.</span></div>` : ""}
-    ${subTabs("boite", SUBS, active)}${la}${connexion}${mika}${partage}</form>`;
+    ${subTabs("boite", SUBS, active)}${la}${connexion}${mika}${envoi}${partage}</form>`;
 }
 
 // ── Ajouter une boîte ────────────────────────────────────────────────
@@ -575,9 +579,12 @@ export const mailPage: Page = {
   },
   async save(form, changes, values, item, host) {
     const key = form.dataset.box ?? item ?? "";
-    const sent = boxChanges(changes);
-    if (!Object.keys(sent).length) return true;
-    const bounds = rangeProblems(changes);
+    // les réglages de la boîte d'un côté, la règle de son canal de l'autre (ADR 0207)
+    const { rule, rest } = withoutRule(changes);
+    const sent = boxChanges(rest);
+    const rules = store.boxSettings.get(key).value?.rules;
+    if (!Object.keys(sent).length && !(rule && rules)) return true;
+    const bounds = rangeProblems(rest);
     if (Object.keys(bounds).length) {
       showFieldErrors(form, bounds);
       return false;
@@ -585,7 +592,7 @@ export const mailPage: Page = {
     // la connexion change : ses secrets gardés se redonnent (le serveur refuserait sinon), dit sous leurs champs
     const kept = store.boxSettings.get(key).value?.secrets;
     const retype = kept
-      ? secretsToRetype(changes, kept, String(values.auth ?? ""), { imap_host: values.imap_host, smtp_host: values.smtp_host })
+      ? secretsToRetype(rest, kept, String(values.auth ?? ""), { imap_host: values.imap_host, smtp_host: values.smtp_host })
       : {};
     if (Object.keys(retype).length) {
       const rest = showFieldErrors(form, retype);
@@ -594,16 +601,20 @@ export const mailPage: Page = {
       return false;
     }
     try {
-      const done = await saveBox(sent, key);
-      toast(done.message || "Enregistré.", { ico: "check" });
+      const said: string[] = [];
+      if (Object.keys(sent).length) said.push((await saveBox(sent, key)).message);
+      if (rule && rules) said.push((await saveSendRules(ruleUpdate(rules, values))).message);
+      toast(said.filter(Boolean).join(" ") || "Enregistré.", { ico: "check" });
       await host.reload(store.boxes, store.boxSettings, store.rights);
       return true;
     } catch (err) {
       // un champ refusé (un serveur hors d'Internet, un mot de passe à redonner, une borne) : dit sous son champ
       if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const rest = showFieldErrors(form, fieldErrors(err.fields));
-        toast(rest.length ? `${err.message} ${rest.join(" ; ")}` : err.message, { ico: "alert", duration: 4200 });
+        const unplaced = showFieldErrors(form, fieldErrors(err.fields));
+        toast(unplaced.length ? `${err.message} ${unplaced.join(" ; ")}` : err.message, { ico: "alert", duration: 4200 });
       } else toastFailure(err);
+      // une règle changée ailleurs entre-temps : relue, « Annuler » la remontre telle qu'elle est
+      if (err instanceof ApiError && err.status === 409) void host.reload(store.boxSettings);
       return false;
     }
   },

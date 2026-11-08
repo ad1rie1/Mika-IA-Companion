@@ -106,3 +106,30 @@
 .tm-readonly > .ico { color: var(--muted); }
 .thread-head h2.ellipsis, .thread-head p.ellipsis { display: block; }
 .rule-none { padding: 6px 9px; max-width: 300px; }
+/* Sa réponse quand on a répondu autrement dans la discussion (ADR 0199) : elle ne partira pas, la carte le dit. */
+.tm-draft.done { border-style: solid; border-color: var(--border); background: var(--raised); }
+.tm-draft.done .tm-draft-head { color: var(--text-2); }
+.tm-draft.done .tm-draft-text { color: var(--text-2); }
+.tm-draft-why { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.tm-draft-why .ico { flex: none; }
+/* « Ses brouillons » : la réponse qu'une route désigne (#teams/brouillons/<id>). */
+.tm-replies tr.focus td { background: var(--select); }
+/* Sur un téléphone, une carte par réponse : sa discussion et son état, ce qu'elle a écrit, puis quand et le geste. */
+@media (max-width: 760px) {
+  .tbl.tm-replies, .tm-replies tbody { display: block; overflow: visible; white-space: normal; }
+  .tm-replies thead { display: none; }
+  .tm-replies tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px;
+    padding: 12px 2px; border-bottom: 1px solid var(--border); }
+  .tm-replies td { display: block; padding: 0; border: 0; min-width: 0; }
+  .tm-replies tr:hover td, .tm-replies tr.focus td { background: none; }
+  .tm-replies tr.focus { box-shadow: inset 3px 0 0 var(--accent); padding-left: 10px; }
+  .tm-replies .tm-r-conv { grid-column: 1; grid-row: 1; }
+  .tm-replies .tm-r-conv .row { min-width: 0; }
+  .tm-replies .tm-r-conv b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tm-replies .tm-r-state { grid-column: 2; grid-row: 1; justify-self: end; }
+  .tm-replies .tm-r-state .tag { white-space: normal; height: auto; padding: 2px 6px; }
+  .tm-replies .tm-r-text { grid-column: 1 / -1; overflow-wrap: anywhere; }
+  .tm-replies .tm-r-mode { display: none; }
+  .tm-replies .tm-r-when { grid-column: 1; grid-row: 3; color: var(--muted); }
+  .tm-replies td.actions { grid-column: 2; grid-row: 3; }
+}

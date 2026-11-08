@@ -1,9 +1,11 @@
 """Ce qu'on fait d'un voyage depuis l'écran Carte : les actions de la console (``@TRIPS.action``), au nom de qui agit
 (``ctx.by``), que l'API par personne appelle (``app/moi/carte.py``) — journalisées, dédoublonnées et auditées comme
-toute action. Pas encore de page de console pour elles (ADR 0195).
+toute action.
 
 Chacune vérifie que le voyage est à la personne qui agit (sinon : il n'existe pas) et les bornes du contrat ; un
-geste sur un voyage relu porte sa garde (``unchanged``) : changé entre-temps, rien ne s'écrit.
+geste sur un voyage relu porte sa garde (``unchanged``) : changé entre-temps, rien ne s'écrit. Une seule passe outre,
+la suppression : un opérateur la fait aussi depuis la fiche d'une personne, sur un voyage de cette personne (l'onglet
+Voyages, ``inspect.py`` ; ADR 0204). La console ne modifie pas un voyage : il se prépare à deux.
 """
 
 from __future__ import annotations
@@ -63,8 +65,19 @@ def check_avoid(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(a for a in AVOIDS if a in values)
 
 
-def mine(s: TripsState, frame: Frame, by: str, trip: str) -> Trip:
+def operator(frame: Frame, by: str) -> bool:
+    """Qui agit est-il un opérateur : un compte opérateur actif, authentifié, tel que l'identité le tient ?"""
+    seen = frame.get(identity_c.IDENTITY(by))
+    return bool(seen.authenticated and seen.operator)
+
+
+def mine(s: TripsState, frame: Frame, by: str, trip: str, *, of: str = "") -> Trip:
+    """Le voyage ``trip`` de qui agit ; sinon il n'existe pas pour elle (``Refused``). ``of`` : la personne de la fiche
+    d'où l'on agit (``ActionContext.subject``) — un opérateur y atteint aussi le voyage de cette personne. Seule la
+    suppression le passe (ADR 0204)."""
     found = trip_of(s, frame.get, who(frame, by), trip)
+    if found is None and of and operator(frame, by):
+        found = trip_of(s, frame.get, of, trip)
     if found is None:
         raise Refused(GONE)
     return found
@@ -133,7 +146,8 @@ class TripArgs(BaseModel):
 @TRIPS.action("supprimer", title="Supprimer un voyage", args=TripArgs, emits=[c.REMOVED], danger=True,
               confirm="Supprimer ce voyage et tous ses arrêts ?")
 def _remove(s: TripsState, frame: Frame, args: TripArgs, ctx: Any) -> Done:
-    trip = mine(s, frame, ctx.by, args.trip)
+    # le voyage de qui agit ; ou, pour un opérateur sur la fiche d'une personne, celui de cette personne (ADR 0204)
+    trip = mine(s, frame, ctx.by, args.trip, of=ctx.subject)
     return Done(drafts=(c.REMOVED.draft(trip=trip.id, person=trip.person, by=ctx.by),), message="Voyage supprimé.")
 
 

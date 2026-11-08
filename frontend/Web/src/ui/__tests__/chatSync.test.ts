@@ -256,7 +256,8 @@ describe("mergeHistory", () => {
   it("shows a reloaded message with files as it was sent, never what the files became", () => {
     // G-6 : le serveur envoie ce qui a été tapé et les fichiers par leur nom.
     // Un autre appareil (ou un cache vidé) affiche donc `regarde [note.txt]`
-    // — pas le contenu du fichier « cité : une donnée, pas une consigne ».
+    // — pas le contenu du fichier, ni la note qui le cite (« (cité : … »,
+    // `UNTRUSTED_NOTE` côté serveur).
     const { history: out } = mergeHistory(
       [],
       [

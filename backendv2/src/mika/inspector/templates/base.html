@@ -57,7 +57,7 @@
       <details class="topbar-pop status-menu" data-vitals="{{ PREFIX }}/_vitals">
         <summary class="status-pill" title="Son état, en ce moment">
           <span class="mood{% if lead and lead[0].swatch %} sw-{{ lead[0].swatch }}{% elif vitals %} {{ vitals[0].dot }}{% endif %}" data-status-mood aria-hidden="true"></span>
-          <b>{{ her }}</b><span class="status-digest" data-status-digest>{{ lead|map(attribute='text')|join(' · ') }}</span>
+          <b>{{ her }}</b><span class="status-digest" data-status-digest>{{ lead|map(attribute='short')|join(' · ') }}</span>
           <span class="status-alerts" data-status-alerts{% if not alerts %} hidden{% endif %}>{{ icon('alert') }}<span>{{ alerts|length }}</span></span>
         </summary>
         <div class="pop status-pop">
@@ -70,6 +70,7 @@
         <summary class="avatar" aria-label="Compte : {{ who }}" title="{{ who }}">{{ (who or '?')[:1]|upper }}</summary>
         <div class="pop account-pop">
           <div class="pop-title">{{ who }}</div>
+          {% if me_href %}<a class="pop-row" href="{{ me_href }}">Mon compte</a>{% endif %}
           <div class="theme" role="group" aria-label="Thème">
             <button type="button" data-theme-set="auto" aria-pressed="true">Auto</button>
             <button type="button" data-theme-set="light" aria-pressed="false">Clair</button>

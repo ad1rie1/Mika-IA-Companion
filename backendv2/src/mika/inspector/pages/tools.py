@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import inspect
 import secrets as _secrets
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
@@ -51,6 +50,7 @@ from mika.kernel.inspect import (
     paginate,
     read_params,
 )
+from mika.kernel.text import fold
 from mika.runtime import operations as ops
 from mika.runtime.tools import (
     acting,
@@ -211,10 +211,6 @@ def _tool_ref(name: str, text: str | None = None, context: Mapping[str, str] | N
     return Ref("local", f"{BASE}/tous", text or name, (*kept, ("outil", name)))
 
 
-def _fold(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
-
-
 def _params(ui: Any) -> tuple[Param, ...]:
     return (Param("q", "Chercher un outil", "search", placeholder="un nom, ce qu'il fait…"),)
 
@@ -240,10 +236,10 @@ async def all_tools(ui: Any, request: Request) -> Any:
     values, notes = read_params(params, request.query_params)
     query, lot = str(values.get("q") or ""), str(request.query_params.get("lot", "") or "")
     registry = ui.kernel.registry
-    terms = _fold(query).split()
+    terms = fold(query).split()
     specs = [spec for spec in sorted(registry.tools.values(), key=lambda x: x.name)
              if (not lot or spec.bundle == lot)
-             and all(x in _fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for x in terms)]
+             and all(x in fold(f"{spec.name} {spec.description} {ui.names.bundle(spec.bundle)}") for x in terms)]
     where = {}
     for spec in specs:
         sits = [s for s in situations(ui) if spec.name in offered_in(ui, s)]
@@ -272,10 +268,12 @@ async def all_tools(ui: Any, request: Request) -> Any:
 def _fiche(ui: Any, request: Request, name: str) -> Any:
     registry = ui.kernel.registry
     context = {k: v for k, v in request.query_params.items() if k in CATALOG_PARAMS or is_table_choice(k, v)}
-    back = [("Ce qu'elle peut faire", f"{BASE}/tous" + ("?" + urlencode(context) if context else ""))]
+    # le fil d'Ariane (ADR 0202) : « Outils / Ses outils / <l'outil> », la destination menant à la liste d'où l'on
+    # vient, ses filtres gardés
+    back = f"{BASE}/tous" + ("?" + urlencode(context) if context else "")
     spec = registry.tools.get(name)
     if spec is None:
-        return {"blocks": [Note(f"Aucun outil ne s'appelle « {name} ».", "warn")], "crumbs": back}
+        return {"blocks": [Note(f"Aucun outil ne s'appelle « {name} ».", "warn")], "crumbs": [(name, "")], "back": back}
     label, tone = origin(ui, spec)
     policies = ui.kernel.runner.policies
     where = []
@@ -323,7 +321,7 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
         Disclosure("Arguments et règles d’utilisation", (argument_table, Fields(tuple(pairs), title="Règles et provenance",
                                                                                columns=2))),
     ]
-    return {"blocks": blocks, "crumbs": back, "panel": Panel("handmade/outils/outil.html", {
+    return {"blocks": blocks, "crumbs": [(spec.name, "")], "back": back, "panel": Panel("handmade/outils/outil.html", {
         "page_heading": spec.name, "page_subtitle": spec.description,
         "tool_name": spec.name, "tool_origin": label, "tool_tone": tone, "tool_dynamic": dynamic,
         "tool_family": ui.names.bundle(spec.bundle), "tool_bundle": spec.bundle, "tool_reserved": spec.owner_only,

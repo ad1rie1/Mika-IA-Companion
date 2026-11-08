@@ -211,8 +211,7 @@ def text_of(ctx: Any, ref: str, level: int, empty: str) -> Content:
 
 def caretaker(frame: Frame) -> str:
     """Qui s'occupe d'elle, par son prénom (jamais « ta propriétaire »)."""
-    names = [n for n in (frame.get(identity_c.IDENTITY(o)).name for o in frame.get(identity_c.OWNERS)) if n]
-    return f"« {names[0]} »" if len(names) == 1 else phrase("projects.caretaker")
+    return identity_c.keepers(frame, quoted=True)
 
 
 def gone() -> str:
@@ -271,7 +270,7 @@ def commit_message(p: Project, o: Objective | None) -> str:
         phrase("projects.commit.run", run=p.runs)
 
 
-@PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3, ends_loop=True)
+@PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), label=phrase("projects.tools.report.label"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3, ends_loop=True)
 async def report_run(args: ReportArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -394,7 +393,7 @@ class NoteArgs(BaseModel):
     text: str = Field(min_length=1, max_length=2000, description=phrase("projects.tools.note.text"))
 
 
-@PROJECTS.tool(NOTE, acts=True, description=phrase("projects.tools.note.description"), args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
+@PROJECTS.tool(NOTE, acts=True, description=phrase("projects.tools.note.description"), label=phrase("projects.tools.note.label"), args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_note(args: NoteArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -414,7 +413,7 @@ class DecideArgs(BaseModel):
     replaces: int = Field(default=0, ge=0, description=phrase("projects.tools.decide.replaces"))
 
 
-@PROJECTS.tool(DECIDE, acts=True, description=phrase("projects.tools.decide.description"), args=DecideArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
+@PROJECTS.tool(DECIDE, acts=True, description=phrase("projects.tools.decide.description"), label=phrase("projects.tools.decide.label"), args=DecideArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_decide(args: DecideArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
@@ -449,7 +448,8 @@ class ObjectiveArgs(BaseModel):
                                description=phrase("projects.tools.objective_add.cadence_hours"))
 
 
-@PROJECTS.tool(OBJECTIVE_ADD, acts=True, description=phrase("projects.tools.objective_add.description"), args=ObjectiveArgs,
+@PROJECTS.tool(OBJECTIVE_ADD, acts=True, description=phrase("projects.tools.objective_add.description"),
+               label=phrase("projects.tools.objective_add.label"), args=ObjectiveArgs,
                bundle="projects", episodes=RUNS, max_calls_per_episode=3)
 async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     got = current(ctx)
@@ -532,7 +532,8 @@ def _plan_problems(p: Project, steps: list[PlanStep]) -> list[str]:
     return problems
 
 
-@PROJECTS.tool(PLAN_TOOL, acts=True, description=phrase("projects.tools.plan.description"), args=PlanArgs,
+@PROJECTS.tool(PLAN_TOOL, acts=True, description=phrase("projects.tools.plan.description"),
+               label=phrase("projects.tools.plan.label"), args=PlanArgs,
                bundle="projects", episodes=RUNS, max_calls_per_episode=2)
 async def project_plan(args: PlanArgs, ctx: Any) -> Any:
     """Écrire son plan (une séance de cadrage), ou le revoir en cours de route (ADR 0145) : ses objectifs vivants
@@ -599,7 +600,8 @@ class EquipArgs(BaseModel):
     why: str = Field(min_length=1, max_length=300, description=phrase("projects.tools.equip.why"))
 
 
-@PROJECTS.tool(EQUIP, acts=True, description=phrase("projects.tools.equip.description"), args=EquipArgs, bundle="projects",
+@PROJECTS.tool(EQUIP, acts=True, description=phrase("projects.tools.equip.description"),
+               label=phrase("projects.tools.equip.label"), args=EquipArgs, bundle="projects",
                episodes=RUNS, max_calls_per_episode=2)
 async def project_equip(args: EquipArgs, ctx: Any) -> Any:
     """Se donner un lot de plus, sur un projet à elle (``SELF_BUNDLES``) : en main à l'exécution suivante — les
@@ -699,7 +701,7 @@ class CreateArgs(BaseModel):
     tools: list[SelfBundle] = Field(default_factory=list, max_length=4, description=phrase("projects.tools.create.tools"))
 
 
-@PROJECTS.tool("create_project", acts=True, description=phrase("projects.tools.create.description"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
+@PROJECTS.tool("create_project", acts=True, description=phrase("projects.tools.create.description"), label=phrase("projects.tools.create.label"), args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
 async def create_project(args: CreateArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None or not owner_speaks(ctx.frame):
@@ -764,7 +766,8 @@ def _talking_to_owner(frame: Frame) -> bool:
     return _person(frame) is not None and owner_speaks(frame)
 
 
-@PROJECTS.tool("start_project", acts=True, description=phrase("projects.tools.start.description"), args=StartArgs, bundle="projects",
+@PROJECTS.tool("start_project", acts=True, description=phrase("projects.tools.start.description"),
+               label=phrase("projects.tools.start.label"), args=StartArgs, bundle="projects",
                episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=1, owner_only=True)
 async def start_project(args: StartArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
@@ -827,7 +830,9 @@ class CloseArgs(BaseModel):
 ENDING_REASON = {"done": "clos par elle : il a fait son temps", "dropped": "clos par elle : elle y renonce"}
 
 
-@PROJECTS.tool("project_close", acts=True, description=phrase("projects.tools.close.description"), args=CloseArgs, bundle="projects", episodes=[Kind.REPLY, Kind.STEP, *RUNS],
+@PROJECTS.tool("project_close", acts=True, description=phrase("projects.tools.close.description"),
+               label=phrase("projects.tools.close.label"), args=CloseArgs, bundle="projects",
+               episodes=[Kind.REPLY, Kind.STEP, *RUNS],
                max_calls_per_episode=1, owner_only=True)
 async def project_close(args: CloseArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
@@ -937,7 +942,8 @@ def _changed() -> ToolResult:
     return ToolResult(ok=False, content=phrase("projects.tools.steer.changed"))
 
 
-@PROJECTS.tool(STEER, acts=True, description=phrase("projects.tools.steer.description"), args=SteerArgs, bundle="projects",
+@PROJECTS.tool(STEER, acts=True, description=phrase("projects.tools.steer.description"),
+               label=phrase("projects.tools.steer.label"), args=SteerArgs, bundle="projects",
                episodes=[Kind.REPLY], max_calls_per_episode=2, fits=may_steer,
                rule="seulement en privé, sur un projet vivant que les lignes d'accès laissent piloter à la personne en "
                     "face ; sur ton accord, la demande attend")

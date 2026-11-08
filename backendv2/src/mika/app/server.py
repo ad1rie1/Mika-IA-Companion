@@ -71,7 +71,7 @@ from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
-from mika.app.handmade import approval_sources, fiches, handles, projects, servers, waiting
+from mika.app.handmade import access, approval_sources, fiches, handles, projects, rights, servers, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN
@@ -599,6 +599,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                  handles.KIND: handles.HandleOverview(), projects.KIND: projects.ProjectFiche(),
                                  **fiches.OVERVIEWS},
                       drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
+                      nameable=access.people_with_accounts, canal_instances=access.instances_from_settings,
+                      family_href=access.family_href,
                       plain_owners=frozenset({"forge"})),
         cookie_secure=web.cookie_secure)
     # les pages dessinées à la main dans le cadre de la console, qui croisent ses facultés (ADR 0121) : l'accueil ;
@@ -610,15 +612,17 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_digest, console_pages,
                                                             settings.console_mcp_served, settings.console_mcp_network))
     lent = Mount(LENT_PREFIX, app=lending.app())
-    # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187)
+    # ce que frontendv2 montre à qui est connecté, et seulement à elle (ADR 0187) ; sa borne des trajets vaut aussi pour
+    # le GPX d'un voyage qu'un opérateur tire de la console, sur son compte (ADR 0204)
     moi = MeApi(kernel, live.accounts, origins=web.origins, apk=data / "telephone" / APK_NAME, settings=live.settings,
                 reconfigure=live.reconfigure, maps=live.maps)
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(),
                                     *moi.routes(),
                                     *home_page.routes(), *now_page.routes(), *people_page.routes(),
-                                    *person_overview.routes(console_pages.ui), *inspector, relay, console_mcp, lent,
-                                    world_hub.route()],
+                                    *person_overview.routes(console_pages.ui, outbound=moi.outbound),
+                                    *rights.routes(console_pages.ui),
+                                    *inspector, relay, console_mcp, lent, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_digest=settings.sensors_digest,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
                       phone=phone), live

@@ -16,10 +16,6 @@ class Kind(enum.StrEnum):
     INITIATIVE = "INITIATIVE"
     STEP = "STEP"
     MURMUR = "MURMUR"
-    JOURNAL = "JOURNAL"
-    DREAM = "DREAM"
-    NARRATIVE = "NARRATIVE"
-    DECISION = "DECISION"
     #: une tâche silencieuse qu'une faculté lui confie (préparer un brouillon de réponse) : pour elle seule
     TASK = "TASK"
     #: une exécution de travail sur un projet, dans son mode à elle (sa voix, son humeur, ses avis)

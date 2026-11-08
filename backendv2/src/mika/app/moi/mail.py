@@ -23,8 +23,8 @@ from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
 from mika.plugins.email.console.common import important, mail_key
-from mika.ports.mail import AccountInfo, Mail, MailQuery, Sent, addresses, split_ref, to_fill
-from mika.runtime.operations import perform
+from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref, to_fill
+from mika.runtime.operations import SPACE, perform
 from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE, reaches
 
 #: le niveau de qui est connecté sur une boîte : la sienne ; sinon, ce qu'on lui en partage (ADR 0188 : ``lire``,
@@ -40,6 +40,8 @@ STATES = ("", "unread", "flagged", "noticed", "needs_reply")
 #: les gestes de « ranger », tels que l'action du courrier les nomme
 GESTURES = {"read": "lu", "unread": "non_lu", "archive": "archiver", "flag": "suivre", "unflag": "ne_plus_suivre",
             "trash": "corbeille"}
+#: le geste qui range dans un dossier de la boîte (``folder``) : l'action « Déplacer », mail par mail (ADR 0200)
+MOVE = "move"
 #: une image distante dans un mail HTML : ce que le cadre masque tant qu'on ne les permet pas (ADR 0175)
 REMOTE_IMAGE = re.compile(r"""<img\b[^>]*\bsrc\s*=\s*["']?\s*https?:|url\(\s*["']?\s*https?:""", re.I)
 #: les sortes qu'une pièce peut annoncer telles quelles ; les autres partent en ``application/octet-stream``
@@ -113,16 +115,23 @@ def _ref_mine(call: Call, ref: str, need: str = SHARE_READ) -> str:
 
 
 async def _mail(call: Call, ref: str, need: str = SHARE_READ) -> Mail:
-    """Un mail reçu ou parti d'une de ses boîtes. Un mail que la boîte n'a plus : introuvable ; un serveur muet :
-    502 (jamais une panne non dite)."""
+    """Un mail reçu ou parti d'une de ses boîtes, entier : un mail relevé en partie se complète sur le serveur
+    (``document`` rend la copie gardée quand elle est complète, sans le joindre). Si le serveur ne la donne pas, la
+    copie gardée se montre telle quelle (``complete`` le dit) : un mail gardé se lit serveur coupé. Un mail que la
+    boîte n'a plus : introuvable ; un serveur muet sans copie gardée : 502 (jamais une panne non dite)."""
     port = _mail_port(call)
     _ref_mine(call, ref, need)
+    kept = port.cached_one(ref)
     try:
-        found = port.cached_one(ref) or await port.document(ref)
+        found = await port.document(ref) or kept
     except (ValueError, FileNotFoundError):
-        raise missing() from None
+        if kept is None:
+            raise missing() from None
+        found = kept
     except (OSError, RuntimeError):  # une erreur IMAP est une RuntimeError (``ImapError``) ou une OSError
-        raise Denied(502, "Le serveur de cette boîte n'a pas répondu : réessaie plus tard.") from None
+        if kept is None:
+            raise Denied(502, "Le serveur de cette boîte n'a pas répondu : réessaie plus tard.") from None
+        found = kept
     if isinstance(found, Sent):  # un envoi, tel que certains ports le rendent : le même mail, vu de sa boîte
         info = port.account(found.account)
         found = Mail(found.message_id, info.address if info is not None else "", info.address if info else "",
@@ -153,8 +162,28 @@ def _ms(us: int) -> int:
     return us // 1000 if us else 0
 
 
-def _people(field: str) -> list[dict[str, str]]:
-    return [{"name": name, "address": address} for name, address in addresses(field or "")]
+def _people(field: str, names: dict[str, str] | None = None) -> list[dict[str, str]]:
+    """Les personnes d'un en-tête ; un nom absent se complète de ``names`` (les correspondants de la boîte)."""
+    known = names or {}
+    return [{"name": name or known.get(address.lower(), ""), "address": address}
+            for name, address in addresses(field or "")]
+
+
+def _names(port: Any, key: str) -> dict[str, str]:
+    """Les noms connus des correspondants récents d'une boîte, par adresse : ce qu'un envoi, un brouillon montrent à
+    la place d'une adresse nue, comme la réception."""
+    return {c.address.lower(): c.name for c in port.contacts_page(key, "", 1, PAGE_MAX).items if c.name}
+
+
+def _keys(mine: dict[str, tuple[AccountInfo, str]], box: str) -> tuple[str, ...]:
+    """Les boîtes d'une vue : celle qu'on demande ; sinon les tiennes et celles qu'on te partage pour préparer ou t'en
+    servir. Une boîte qu'on ne te partage qu'en lecture ne compte dans aucune vue commune (ADR 0200) : on l'ouvre à
+    part, sous « Partagée avec toi »."""
+    if box:
+        if box not in mine:
+            raise missing()
+        return (box,)
+    return tuple(key for key, (_, level) in mine.items() if level != SHARE_READ)
 
 
 def _snippet(text: str) -> str:
@@ -217,10 +246,7 @@ async def list_boxes(call: Call) -> dict[str, Any]:
 async def messages(call: Call) -> dict[str, Any]:
     port = _mail_port(call)
     mine = boxes(call)
-    box = call.arg("box", limit=40)
-    if box and box not in mine:
-        raise missing()
-    keys = (box,) if box else tuple(mine)
+    keys = _keys(mine, call.arg("box", limit=40))
     state = call.arg("state", limit=20)
     if state not in STATES:
         raise Denied(400, "« state » : unread, flagged, noticed ou needs_reply.")
@@ -312,9 +338,12 @@ async def drafts(call: Call) -> dict[str, Any]:
     mine = boxes(call)
     s = _state(call)
     out = []
+    names: dict[str, dict[str, str]] = {}
     for d in sorted(s.drafts.values(), key=lambda d: (-d.at, -d.proposal)):
         if d.account not in mine or not allows(mine[d.account][1], SHARE_PREPARE):
             continue
+        if d.account not in names:
+            names[d.account] = _names(port, d.account)
         kept = port.draft(d.draft)
         preview = port.preview(d.draft) if d.state == WAITING else None
         original = port.cached_one(d.mail) if d.mail else None
@@ -325,6 +354,8 @@ async def drafts(call: Call) -> dict[str, Any]:
             "original": {"subject": original.subject, "from": name_of(original.sender) or original.address}
             if original is not None else None,
             "to": kept.to if kept else "", "cc": kept.cc if kept else "", "subject": kept.subject if kept else "",
+            # ses destinataires, leur nom connu à côté de leur adresse (``to`` reste ce qu'on retouche)
+            "to_people": _people(kept.to if kept else "", names[d.account]),
             "body": kept.body if kept else "", "quote": kept.quote if kept else False,
             "edited": bool(kept and kept.edited_by),
             "preview": {"sender": preview.sender, "to": preview.to, "cc": preview.cc, "subject": preview.subject,
@@ -338,36 +369,34 @@ async def drafts(call: Call) -> dict[str, Any]:
 
 
 async def sent(call: Call) -> dict[str, Any]:
+    """Ce qui est parti de ses boîtes ; ses destinataires à leur nom quand la boîte le connaît."""
     port = _mail_port(call)
-    mine = boxes(call)
-    box = call.arg("box", limit=40)
-    if box and box not in mine:
-        raise missing()
+    keys = _keys(boxes(call), call.arg("box", limit=40))
     # boîte par boîte : une page prise sur tout le serveur laisserait de côté ses envois derrière ceux des autres
-    found = [x for key in ([box] if box else list(mine)) for x in port.sent_mails(PAGE_MAX, account=key)
-             if x.account == key]
+    found = [x for key in keys for x in port.sent_mails(PAGE_MAX, account=key) if x.account == key]
     items = sorted(found, key=lambda x: -x.date)[:PAGE_MAX]
-    return {"items": [{"ref": x.ref, "box": x.account, "to": _people(x.to), "cc": _people(x.cc),
-                       "subject": x.subject, "snippet": _snippet(x.body), "date": _ms(x.date), "by": x.by,
-                       "draft": x.draft, "attachments": len(x.attachments)} for x in items]}
+    names = {key: _names(port, key) for key in {x.account for x in items}}
+    return {"items": [{"ref": x.ref, "box": x.account, "to": _people(x.to, names[x.account]),
+                       "cc": _people(x.cc, names[x.account]), "subject": x.subject, "snippet": _snippet(x.body),
+                       "date": _ms(x.date), "by": x.by, "draft": x.draft, "attachments": len(x.attachments)}
+                      for x in items]}
 
 
 async def contacts(call: Call) -> dict[str, Any]:
-    """Ses correspondants (ceux du courrier relevé), pour écrire : cherchés par nom ou adresse."""
+    """Ses correspondants (ceux du courrier relevé), pour écrire : cherchés par nom ou adresse. Un correspondant de
+    plusieurs boîtes en fait une seule fiche : ses mails reçus et envoyés comptés dans toutes, son dernier échange, le
+    premier nom connu."""
     port = _mail_port(call)
-    mine = boxes(call)
-    box = call.arg("box", limit=40)
-    if box and box not in mine:
-        raise missing()
-    keys = [box] if box else list(mine)
+    keys = _keys(boxes(call), call.arg("box", limit=40))
     text = call.arg("q", limit=100).strip()
     size = call.number("size", 25, high=PAGE_MAX)
-    found: dict[str, Any] = {}
+    found: dict[str, Contact] = {}
     for key in keys:
         for c in port.contacts_page(key, text, 1, size).items:
             known = found.get(c.address)
-            if known is None or c.last > known.last:
-                found[c.address] = c
+            found[c.address] = c if known is None else Contact(
+                c.address, known.name or c.name, known.received + c.received, known.sent + c.sent,
+                max(known.last, c.last))
     ordered = sorted(found.values(), key=lambda c: (-c.last, c.address))[:size]
     return {"items": [{"address": c.address, "name": c.name, "received": c.received, "sent": c.sent,
                        "last": _ms(c.last)} for c in ordered]}
@@ -384,45 +413,39 @@ def _sendable(call: Call, key: str) -> AccountInfo:
 
 
 async def send(call: Call) -> dict[str, Any]:
-    """Un mail nouveau, depuis une de ses boîtes : il part tout de suite, et elle le sait."""
+    """Un mail nouveau, depuis une de ses boîtes : il part tout de suite, et elle le sait. En ``multipart``, avec ses
+    pièces (ADR 0214) : l'action du courrier les juge et les joint."""
     box = _sendable(call, call.arg("box", limit=40))
     got = await call.act("email.ecrire", form(account=box.key, to=call.arg("to", limit=300),
-                                              cc=call.arg("cc", limit=300), subject=call.arg("subject", limit=200),
+                                              cc=call.arg("cc", limit=300), bcc=call.arg("bcc", limit=300),
+                                              subject=call.arg("subject", limit=200),
                                               body=call.arg("body", limit=20_000)))
     return done(got)
 
 
-#: ce qu'elle apprend d'un brouillon devenu sans objet : quelqu'un a répondu lui-même
-ANSWERED = "Répondu autrement, depuis le client : ce brouillon n'a plus lieu d'être."
-
-
 async def reply(call: Call) -> dict[str, Any]:
     """Une réponse, depuis la boîte du mail reçu (pas à un mail qui n'est qu'un envoi de ta boîte : on le transfère).
-    Ses brouillons qui attendaient pour ce mail sont alors refusés (elle le sait), quel que soit qui répond : une
-    réponse est partie, une seconde ne partira pas. C'est la seule fois où un partage touche aux brouillons du
-    propriétaire : répondre demande « s'en servir », le niveau qui agit comme lui (ADR 0188)."""
+    L'action du courrier refuse dans le même geste ses brouillons qui attendaient pour ce mail (elle le sait), quel
+    que soit qui répond : une réponse est partie, une seconde ne partira pas. C'est la seule fois où un partage touche
+    aux brouillons du propriétaire : répondre demande « s'en servir », le niveau qui agit comme lui (ADR 0188)."""
     m = await _mail(call, call.arg("ref"))
     sent, received = _copies(call.port("mail"), m)
     if sent and not received:  # parti de sa boîte, sans copie reçue : on le transfère
         raise Denied(409, "On ne répond pas à un mail parti de ta boîte : transfère-le, ou réponds au mail reçu.")
     _sendable(call, m.account)
     got = await call.act("email.repondre", form(to=call.arg("to", limit=300), cc=call.arg("cc", limit=300),
-                                                subject=call.arg("subject", limit=200),
+                                                bcc=call.arg("bcc", limit=300), subject=call.arg("subject", limit=200),
                                                 body=call.arg("body", limit=20_000), quote=call.flag("quote"),
                                                 fixed={"reply_to": m.ref}))
-    answer = done(got)
-    # ses brouillons pour ce mail ne partiront plus : la réponse est partie
-    for d in [d for d in _state(call).drafts.values() if d.mail == m.ref and d.state == WAITING]:
-        await perform(call.kernel, "email.refuser_brouillon", form(fixed={"draft": d.draft}, note=ANSWERED),
-                      by=call.me.handle)
-    return answer
+    return done(got)
 
 
 async def forward(call: Call) -> dict[str, Any]:
     m = await _mail(call, call.arg("ref"))
     _sendable(call, m.account)
     got = await call.act("email.transferer", form(fixed={"original": m.ref}, to=call.arg("to", limit=300),
-                                                  cc=call.arg("cc", limit=300), subject=call.arg("subject", limit=200),
+                                                  cc=call.arg("cc", limit=300), bcc=call.arg("bcc", limit=300),
+                                                  subject=call.arg("subject", limit=200),
                                                   body=call.arg("body", limit=20_000),
                                                   attachments=call.flag("attachments")))
     return done(got)
@@ -430,15 +453,49 @@ async def forward(call: Call) -> dict[str, Any]:
 
 async def tidy(call: Call) -> dict[str, Any]:
     """Un geste sur des mails de ses boîtes (sur le serveur) : lu, non lu, archiver, suivre, ne plus suivre,
-    corbeille."""
-    gesture = GESTURES.get(call.arg("gesture", limit=20))
-    if gesture is None:
-        raise Denied(400, "« gesture » : read, unread, archive, flag, unflag ou trash.")
+    corbeille ; ou les déplacer dans un dossier de leur boîte (``move``, avec ``folder``). Tous demandent « s'en
+    servir »."""
+    name = call.arg("gesture", limit=20)
+    gesture = GESTURES.get(name)
+    if gesture is None and name != MOVE:
+        raise Denied(400, "« gesture » : read, unread, archive, flag, unflag, trash ou move.")
     refs = [_ref_mine(call, r, SHARE_USE) for r in call.strings("refs")]
     if not refs:
         raise Denied(400, "« refs » : au moins un mail.")
+    if gesture is None:
+        return await _move(call, refs, call.arg("folder", limit=300))
     got = await call.act("email.ranger", form(mails=[mail_key(r) for r in refs], geste=gesture))
     return done(got)
+
+
+async def _move(call: Call, refs: list[str], folder: str) -> dict[str, Any]:
+    """Les déplacer dans un dossier de leur boîte (ADR 0200) : un à un, par l'action « Déplacer » du courrier, chacun
+    audité comme fait depuis son espace. Un mail déjà dans ce dossier y reste."""
+    accounts = {split_ref(r)[0] for r in refs}
+    if len(accounts) != 1:
+        raise Denied(400, "« refs » : des mails d'une même boîte (chacune a ses dossiers).")
+    port = _mail_port(call)
+    target = next((f for f in port.folders(accounts.pop()) if f.name == folder), None) if folder else None
+    if target is None:
+        raise Denied(400, "« folder » : un dossier de leur boîte.", {"folder": "un dossier de leur boîte"})
+    nonce = call.nonce()
+    outcomes = []
+    for i, ref in enumerate(dict.fromkeys(refs)):
+        kept = port.cached_one(ref)
+        if kept is not None and kept.folder == folder:
+            continue
+        outcomes.append(await perform(call.kernel, "email.deplacer", form(folder=folder), by=call.me.handle,
+                                      subject=mail_key(ref), nonce=f"{nonce}:{i}" if nonce else "", via=SPACE))
+    moved = sum(1 for o in outcomes if o.ok)
+    refused = [o for o in outcomes if not o.ok]
+    if refused and not moved:
+        return done(refused[0])
+    label = target.label or target.name
+    said = (f"{moved} mail{'s' if moved > 1 else ''} déplacé{'s' if moved > 1 else ''} dans « {label} »."
+            if moved else f"Déjà dans « {label} ».")
+    note = f" {len(refused)} refusé{'s' if len(refused) > 1 else ''} : {refused[0].message}" if refused else ""
+    return {"ok": True, "message": said + note, "deduped": bool(outcomes) and all(o.deduped for o in outcomes),
+            "moved": moved}
 
 
 async def prefill(call: Call) -> dict[str, Any]:
@@ -522,15 +579,14 @@ async def poll(call: Call) -> dict[str, Any]:
 
 
 def count(call: Call) -> int:
-    """Pour la barre du haut : les non-lus de la réception de ses boîtes, et ses brouillons qui attendent ta décision —
-    dans tes boîtes seulement (dans une boîte partagée, c'est son propriétaire qui décide)."""
-    port = call.port("mail")
-    if port is None:
+    """Pour la barre du haut, ce qui attend ta décision (ADR 0200), comme Teams et Téléphone : ses brouillons qui
+    attendent, dans tes boîtes seulement (dans une boîte partagée, c'est son propriétaire qui décide). Les non-lus ont
+    leurs compteurs, dossier par dossier, dans Mail."""
+    if call.port("mail") is None:
         return 0
     mine = boxes(call)
-    unseen = sum(f.unseen for key in mine for f in port.folders(key) if f.role == "inbox" or f.name == "INBOX")
-    s = _state(call)
-    return unseen + sum(1 for d in s.drafts.values() if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWN)
+    return sum(1 for d in _state(call).drafts.values()
+               if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWN)
 
 
 def routes(api: MeApi) -> list[Route]:
@@ -538,8 +594,8 @@ def routes(api: MeApi) -> list[Route]:
     return [r("/mail/boxes", list_boxes), r("/mail/messages", messages), r("/mail/message", message),
             r("/mail/frame", frame_route(api), raw=True), r("/mail/file", file, raw=True),
             r("/mail/drafts", drafts), r("/mail/sent", sent), r("/mail/contacts", contacts),
-            r("/mail/send", send, write=True), r("/mail/reply", reply, write=True),
-            r("/mail/forward", forward, write=True), r("/mail/tidy", tidy, write=True),
+            r("/mail/send", send, write=True, upload=True), r("/mail/reply", reply, write=True, upload=True),
+            r("/mail/forward", forward, write=True, upload=True), r("/mail/tidy", tidy, write=True),
             r("/mail/prefill", prefill, write=True), r("/mail/images", images, write=True),
             r("/mail/poll", poll, write=True), r("/mail/draft/send", draft_send, write=True),
             r("/mail/draft/edit", draft_edit, write=True), r("/mail/draft/refuse", draft_refuse, write=True),

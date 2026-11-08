@@ -31,6 +31,9 @@ from typing import Any
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.frame import Frame
+from mika.vocab.people import clean_display_name
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Disclosure
 
 OWNER = "identity"
@@ -234,3 +237,40 @@ IS_OWNER = FactFamily("identity.is_owner", arg=str, type=bool)
 SPEAKS_AS_OWNER = FactFamily("identity.speaks_as_owner", arg=str, type=bool)
 #: Ses propriétaires (clés de personne), triés.
 OWNERS = FactKey("identity.owners", type=tuple)
+
+
+# ── Qui s'occupe d'elle, comme elle le dirait ─────────────────────────────
+# Une fois pour le courrier, Teams, la Forge et les projets. Qui les appelle doit déclarer ``IDENTITY`` et ``OWNERS``.
+
+
+def person_name(frame: Frame, handle: str) -> str:
+    """Le prénom (le nom affiché) de quelqu'un, nettoyé ; vide s'il est inconnu."""
+    view = frame.get(IDENTITY(handle)) if handle else None
+    return clean_display_name(getattr(view, "name", "") or "")
+
+
+def keeper() -> str:
+    """Comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)."""
+    return phrase("identity.keeper.unknown")
+
+
+def _quoted(name: str) -> str:
+    return f"« {name} »"
+
+
+def keeper_name(frame: Frame, handle: str, *, quoted: bool = False) -> str:
+    """Qui a agi, ou à qui elle pense, dit comme elle le dirait : son prénom (entre guillemets si ``quoted``), sinon
+    « la personne qui s'occupe de toi »."""
+    name = person_name(frame, handle)
+    if not name:
+        return keeper()
+    return _quoted(name) if quoted else name
+
+
+def keepers(frame: Frame, *, quoted: bool = False) -> str:
+    """Qui s'occupe d'elle : le prénom de ses propriétaires (« Adrien », « Adrien ou Bea » ; entre guillemets si
+    ``quoted``), sinon « la personne qui s'occupe de toi »."""
+    names = [n for n in dict.fromkeys(person_name(frame, o) for o in frame.get(OWNERS) or ()) if n][:3]
+    if not names:
+        return keeper()
+    return phrase("identity.keeper.either").join(map(_quoted, names) if quoted else names)

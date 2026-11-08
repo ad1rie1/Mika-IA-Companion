@@ -1,7 +1,7 @@
 /**
  * Ses services MCP (ADR 0192 ; `protocole-moi.md` § 8) : ceux qu'elle a branchés, à elle — distants, par une adresse
- * https —, leur état, leurs outils (coupés tant qu'on ne les a pas choisis, ADR 0129) et leurs lignes d'accès. Ce que
- * Mika en offre reste dans la matrice des droits (`rights.ts`).
+ * https —, leur état, leurs outils (coupés tant qu'on ne les a pas choisis, ADR 0129) et leurs lignes d'accès ; et ceux
+ * qu'on lui partage (ADR 0188), en lecture. Ce que Mika en offre reste dans la matrice des droits (`rights.ts`).
  */
 import { getJson, MOI, sendJson, type Done } from "./moi";
 
@@ -24,6 +24,8 @@ export interface ServiceTool {
 export interface AccessLine {
   who: string;
   when: string;
+  /** Elle ne désigne que toi : ta ligne, pas un partage (jamais déduit d'un nom : deux personnes peuvent le porter). */
+  mine: boolean;
   read: string;
   act: string;
   keep: string;
@@ -48,9 +50,34 @@ export interface Service {
   default: AccessLine | null;
 }
 
+/** Un outil d'un service qu'on te partage, servi par son propriétaire (ni coupé, ni changé depuis son choix). */
+export interface SharedTool {
+  remote: string;
+  name: string;
+  description: string;
+  /** `lecture` : il lit ; `action` : il agit. */
+  choice: "lecture" | "action" | string;
+}
+
+/** Un service qu'une autre personne te partage, en lecture : ni son adresse, ni ses en-têtes, ni le détail d'une panne. */
+export interface ReceivedService {
+  name: string;
+  purpose: string;
+  enabled: boolean;
+  state: ServiceState | string;
+  tools: SharedTool[];
+  /** `lire` : ses outils qui lisent ; `servir` : aussi ceux qui agissent. */
+  level: "lire" | "servir" | string;
+  /** Ta ligne : ce que Mika fait pour toi d'un outil qui lit, d'un outil qui agit, et ce qu'elle en garde. */
+  line: AccessLine;
+  owner_name: string;
+}
+
 export interface Services {
   plugged: boolean;
   items: Service[];
+  /** Ceux qu'on te partage (ADR 0188). */
+  received: ReceivedService[];
 }
 
 export interface PlugForm {

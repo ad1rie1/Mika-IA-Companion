@@ -147,7 +147,8 @@ class MessageRow(MailBase):
 
 
 class PartRow(MailBase):
-    """Une pièce d'un mail gardé (``owner`` : l'``id`` de sa ligne) : une pièce jointe (``position`` : son rang parmi
+    """Une pièce d'un mail gardé (``owner`` : l'``id`` de sa ligne ; pour un envoi, celui de sa ligne de ``sent``, en
+    négatif) : une pièce jointe (``position`` : son rang parmi
     elles, celui du lien de téléchargement) ou une image intégrée (``position`` -1), que son HTML désigne par son
     Content-ID (``content_id``, nu, en minuscules). ``digest`` : l'empreinte de ses octets (``blobs``) ; vide quand
     ils ne sont pas gardés ici (illisibles, trop gros, ou cédés aux plus récents) : on les relit sur le serveur."""

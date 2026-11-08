@@ -428,7 +428,7 @@ def test_pushing_without_a_token_fails_saying_so(tmp_path):
 
     executed, project = live(tmp_path, scenario, atelier=Atelier(token=""))
     [e] = executed
-    assert not e.data.ok and "aucun jeton" in e.data.result and "Dépôts git" in e.data.result
+    assert not e.data.ok and "aucun jeton" in e.data.result and "Connexions › Dépôts Git" in e.data.result
     assert not project.remote_ok and "aucun jeton" in project.remote_line
 
 

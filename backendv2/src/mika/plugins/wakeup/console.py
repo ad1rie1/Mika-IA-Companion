@@ -1,9 +1,10 @@
 """La console des réveils par API (ADR 0068) : une entrée à elle (« Connexions extérieures › Réveils par API »), la liste des
 réveils et leurs derniers appels, puis la fiche de chacun — ce qui a été déclaré, sa clé, ses appels et ce qu'ils ont donné.
 
-Un réveil se déclare dans Réglages › Plugins › Réveils par API (un lien y mène, l'enregistrement ramène ici). Sa
-clé se génère ici : montrée une seule fois, jamais gardée en clair (le port n'en garde que l'empreinte). Ce qu'un
-appel apporte est une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
+Un réveil se déclare dans Réveils par API › Paramètres (la roue en haut à droite, ADR 0206 ; « Déclarer un réveil »
+y mène, l'enregistrement ramène ici). Sa clé se génère ici : montrée une seule fois, jamais gardée en clair (le port
+n'en garde que l'empreinte). Ce qu'un appel apporte est une donnée venue d'ailleurs : montrée à l'opérateur, jamais
+obéie.
 """
 
 from __future__ import annotations
@@ -54,7 +55,8 @@ from mika.plugins.wakeup import (
 )
 from mika.plugins.wakeup.prompt import why_waiting
 
-SETTINGS = "/inspecteur/reglages/reveils"
+#: leurs réglages : dans Réveils par API, en haut à droite (ADR 0206)
+SETTINGS = "/inspecteur/reveils/parametres"
 LIST = "/inspecteur/reveils"
 NO_PORT = "Les réveils par API ne sont pas branchés sur ce serveur."
 CALLS_PAGE = 25
@@ -141,11 +143,11 @@ def risks(endpoint: Any) -> list[str]:
 @WAKEUP.inspect("reveils", title="Réveils par API", section="reveils", order=10,
                 params=[Param("reveil", "Réveil", placeholder="nom exact d'un réveil")],
                 description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>), et ce que "
-                            "leurs appels ont donné. Ils se déclarent dans Réglages › Plugins › Réveils par API.")
+                            "leurs appels ont donné. Ils se déclarent et se règlent dans Paramètres, en haut à droite.")
 def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("wakeup")
-    blocks: list[Block] = [Fields((("nouveau réveil", add_endpoint()),
-                                   ("tous les réglages", Ref("local", SETTINGS, "Réglages › Plugins › Réveils par API"))))]
+    # leurs réglages : la roue de la page (ADR 0206) ; ici, la tâche — en déclarer un
+    blocks: list[Block] = [Fields((("nouveau réveil", add_endpoint()),))]
     if port is None:
         blocks.append(Note(NO_PORT, tone="muted"))
     else:
@@ -357,7 +359,7 @@ async def _new_key(s: WakeupState, frame: Frame, args: NoArgs, ctx: Any) -> Done
                description="Sans clé, le réveil refuse tout appel (401) jusqu'à ce qu'on en génère une.")
 async def _revoke_key(s: WakeupState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     port = _port(ctx)
-    if not await port.revoke_key(ctx.subject, ctx.by):
+    if not await port.revoke_key(ctx.subject):
         raise Refused("Ce réveil n'avait pas de clé.")
     return Done(message=f"La clé de « {ctx.subject} » est retirée : plus aucun appel ne passe.", tone="warn")
 

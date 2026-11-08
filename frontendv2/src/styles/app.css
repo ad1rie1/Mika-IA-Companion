@@ -99,8 +99,19 @@ a.msg-file:hover { text-decoration: none; background: var(--tint); }
 .tools-card li pre { max-height: 132px; overflow: auto; }
 .tools-card li .note-text .ico, .tools-card li.note .st { color: var(--muted); }
 
+/* Le message que la palette a choisi : surligné un instant (chat.ts::applyShow). */
+.msg.found .bubble, .msg.found .msg-file { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* ── Les cartes d'accord ──────────────────────────────────────────────── */
 .ap-zone { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+/* à sa hauteur, la bande défile : une carte n'y est jamais écrasée */
+.ap-zone > * { flex: none; }
+/* Une carte qui se décide ailleurs (Mail, Teams, ADR 0191) : une ligne, ce qu'elle a préparé en deux lignes au plus,
+   « Ouvrir » au bout. */
+.approval.link .ap-main b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.approval.link .ap-line > .btn { flex: none; }
+/* Leur ligne repliée, sur un téléphone seulement (markup.ts::linksSummary). */
+.ap-links { display: none; }
 .approval.blocked { border-color: var(--border-strong); }
 .approval.blocked .ap-line > .ico { color: var(--muted); }
 .ap-meta.ap-ko { color: var(--warn); }
@@ -112,6 +123,8 @@ a.msg-file:hover { text-decoration: none; background: var(--tint); }
 
 /* ── Le champ ─────────────────────────────────────────────────────────── */
 .cmp-attach .chip { max-width: 260px; }
+/* « Un par un » : le mot que garde le bouton des accords sur un téléphone (markup.ts::accordToggle). */
+.cmp-bar .lbl-short { display: none; }
 .cmp-notice { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--warn); }
 .cmp-count { margin-right: 4px; font-variant-numeric: tabular-nums; }
 /* un texte à sa borne (Mail, Teams) : le compte le dit ; dans la fenêtre d'un mail, sous le message, à droite */
@@ -123,9 +136,22 @@ a.msg-file:hover { text-decoration: none; background: var(--tint); }
 .cm-body p.muted { color: var(--muted); }
 
 @media (max-width: 760px) {
-  /* au-dessus de la barre du bas, pas dessus */
-  .toasts { bottom: calc(58px + 14px + env(safe-area-inset-bottom)); }
+  /* au-dessus de la barre du bas, pas dessus ; sur l'écran Chat, au-dessus du champ (--toast-bottom) */
+  .toasts { bottom: var(--toast-bottom, calc(58px + 14px + env(safe-area-inset-bottom))); }
   .chat-search { width: 150px; }
   .msg-sys { max-width: 88%; }
   .login-card { padding: 20px 18px 22px; }
+  .cmp-bar .lbl-short { display: inline; }
+  /* les cartes laissent voir le fil ; une carte-lien reste sur une ligne, son bouton au bout */
+  .ap-zone { max-height: 28vh; }
+  .approval.link .ap-line { flex-wrap: nowrap; }
+  .approval.link .ap-main { flex-basis: 0; }
+  .approval.link .lbl { display: none; }
+  .ap-links { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 7px 12px; border: 1px solid var(--warn-line);
+    border-radius: 10px; background: var(--raised); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .ap-links > .ico { flex: none; color: var(--warn); }
+  .ap-links > .ico:last-child { margin-left: auto; color: var(--muted); }
+  .ap-links b { font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .ap-links .ap-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ap-links[aria-expanded="false"] ~ .approval.link { display: none; }
 }

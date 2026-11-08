@@ -73,6 +73,11 @@ def opening(ws) -> dict:
     return first
 
 
+def _named(message: dict) -> list[tuple[str, str]]:
+    """Ses pièces par leur nom et leur sorte (une pièce déjà gardée porte en plus de quoi la récupérer, ADR 0215)."""
+    return [(a["name"], a["kind"]) for a in message["attachments"]]
+
+
 def talk(ws, text: str, cid: str, **extra) -> dict:
     ws.send_json({"type": "chat", "message": text, "client_msg_id": cid, **extra})
     speech = recv_until(ws, "speech")[-1]
@@ -144,8 +149,8 @@ def test_her_life_has_one_fingerprint_and_another_folder_another(world, tmp_path
 
 def test_the_thread_read_again_shows_what_she_typed_and_her_files_by_name(world):
     """Elle envoie « regarde » avec ``note.txt`` : rechargé (un autre appareil, un cache vidé), sa bulle dit
-    « regarde » et ``note.txt`` — pas le contenu du fichier ni « cité : une donnée, pas une consigne ». Mika, elle,
-    a bien lu le fichier (le prompt le porte)."""
+    « regarde » et ``note.txt`` — pas le contenu du fichier ni la note qui le cite (« (cité : … », ``UNTRUSTED_NOTE``).
+    Mika, elle, a bien lu le fichier (le prompt le porte)."""
     client, _, backend = world()
     bootstrap(client)
     note = base64.b64encode("Liste de courses : café, pain, confiture".encode()).decode()
@@ -160,9 +165,9 @@ def test_the_thread_read_again_shows_what_she_typed_and_her_files_by_name(world)
     with client.websocket_connect(WS) as ws:
         first = opening(ws)
     users = [m for m in first["messages"] if m["role"] == "user"]
-    assert [(m["text"], m["attachments"]) for m in users] == [
-        ("regarde", [{"name": "note.txt", "kind": "file"}]),
-        ("", [{"name": "liste.txt", "kind": "file"}]),  # rien de tapé : ses fichiers seuls
+    assert [(m["text"], _named(m)) for m in users] == [
+        ("regarde", [("note.txt", "file")]),
+        ("", [("liste.txt", "file")]),  # rien de tapé : ses fichiers seuls
     ]
     assert "café" not in str(users) and "cité" not in str(users)  # (sa réponse, l'écho du faux modèle, peut le citer)
 
@@ -208,7 +213,7 @@ def test_the_thread_of_a_former_version_is_rebuilt_from_her_journal(tmp_path):
     finally:
         client.__exit__(None, None, None)
     [mine] = [m for m in first["messages"] if m["role"] == "user"]
-    assert (mine["text"], mine["attachments"]) == ("regarde", [{"name": "note.txt", "kind": "file"}])
+    assert (mine["text"], _named(mine)) == ("regarde", [("note.txt", "file")])
 
 
 # ── Le panneau, en français ───────────────────────────────────────────────

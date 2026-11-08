@@ -160,6 +160,8 @@ class ServerStatus:
     purpose: str = ""
     when_to_use: str = ""
     address: str = ""
+    #: à qui il est (ADR 0192) : « personne:<clé> », branché par une personne sous son compte ; vide, un des siens
+    owner: str = ""
     #: ses lignes d'accès, dans leur ordre, et sa ligne par défaut (ADR 0131)
     access: tuple[Access, ...] = ()
     default: Access = CLOSED

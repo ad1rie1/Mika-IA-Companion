@@ -1,7 +1,13 @@
-"""Résumé d'un épisode à partir du journal ; les traces complètes gardent leurs onglets."""
+"""Résumé d'un épisode à partir du journal ; les traces complètes gardent leurs onglets.
+
+Ce que dit le résumé (ses comptes, son issue, sa durée, ses dernières paroles) se lit une fois, par ``summary`` : ses
+blocs (``overview``, le repli et la bascule « Tableau ») et sa page dessinée (``episode_drawn._resume``) en font chacun
+leur forme, jamais leur propre calcul.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select
@@ -30,33 +36,70 @@ from mika.kernel.inspect import (
 from mika.ports.journal import JournalEvent
 
 PREVIEW_SPEECHES = 3
+#: un épisode sans fin au journal
+OPEN = "Aucune fin n’est enregistrée : il peut être encore en cours, ou avoir été coupé."
+#: où vérifier ce qui tourne
+RUNNING = "/inspecteur/decisions/en_cours"
+
+
+@dataclass(frozen=True, slots=True)
+class Summary:
+    """Ce que le résumé d'un épisode dit, lu une fois : ses événements par type, ses paroles, sa durée, son issue (texte
+    et ton), son détail en mots (``OPEN`` s'il n'a pas de fin), ses dernières paroles (de la plus récente)."""
+
+    counts: dict[str, int]
+    speeches: int
+    duration: str
+    timed: bool
+    outcome: str
+    tone: str
+    detail: str
+    open: bool
+    latest: list[Any]
+
+    @property
+    def events(self) -> int:
+        return sum(self.counts.values())
+
+    @property
+    def duration_said(self) -> str:
+        return "du début à la fin" if self.timed else "fin ou début absent"
+
+
+def summary(ui: Any, corr: str, info: dict[str, Any]) -> Summary:
+    """Le résumé d'un épisode, à partir du journal : une requête pour ses comptes, une pour ses dernières paroles."""
+    started, ended = info["started"], info["ended"]
+    e = JournalEvent
+    counts = dict(ui.kernel.mind.store.query_mind(
+        select(e.type, func.count()).where(e.correlation == corr).group_by(e.type)))
+    timed = bool(started and ended)
+    span = max(0, ended.at - started.at) if timed else 0
+    duration = ("< 1 s" if span < US else show_duration(span)) if timed else "—"
+    label, tone = names.outcome(ended.data.outcome, ended.data.kind) if ended else ("ouvert", "warn")
+    detail = names.detail(ended.data.detail or ended.data.guard) if ended else OPEN
+    latest = ui.inspection.context().events([rt.UTTERANCE], PREVIEW_SPEECHES, correlations=[corr])
+    return Summary(counts=counts, speeches=counts.get(rt.UTTERANCE.name, 0), duration=duration, timed=timed,
+                   outcome=label, tone=tone, detail=detail, open=ended is None, latest=latest)
 
 
 def overview(ui: Any, corr: str, info: dict[str, Any]) -> list[Any]:
-    started, ended = info["started"], info["ended"]
+    started = info["started"]
     store = ui.kernel.mind.store
-    e = JournalEvent
-    counts = dict(store.query_mind(select(e.type, func.count()).where(e.correlation == corr).group_by(e.type)))
-    speeches = counts.get(rt.UTTERANCE.name, 0)
+    said = summary(ui, corr, info)
+    speeches = said.speeches
 
     def tab(slug: str, label: str) -> Ref:
         return Ref("episode", corr, label, (("onglet", slug),))
 
     out: list[Any] = []
-    if ended:
-        label, tone = names.outcome(ended.data.outcome, ended.data.kind)
-        out.append(Note(names.detail(ended.data.detail or ended.data.guard) or f"Issue enregistrée : {label}.", tone,
-                        title="Résultat de l’épisode"))
+    if not said.open:
+        out.append(Note(said.detail or f"Issue enregistrée : {said.outcome}.", said.tone, title="Résultat de l’épisode"))
     else:
-        out.append(Note("Aucune fin n’est enregistrée. Cet épisode peut être encore en cours ou avoir été coupé ; "
-                        "consulte l’activité actuelle pour vérifier.", "info", title="Épisode ouvert"))
-        out.append(Nav((NavItem("Vérifier l’activité actuelle", Ref("local", "/inspecteur/decisions/en_cours", "")),)))
-    duration = show_duration(max(0, ended.at - started.at)) if started and ended else "—"
-    if started and ended and ended.at - started.at < US:
-        duration = "< 1 s"
-    out.append(Stats((Stat("Durée enregistrée", duration, "du début à la fin" if started and ended else "fin ou début absent"),
+        out.append(Note(said.detail, "info", title="Épisode ouvert"))
+        out.append(Nav((NavItem("Vérifier l’activité actuelle", Ref("local", RUNNING, "")),)))
+    out.append(Stats((Stat("Durée enregistrée", said.duration, said.duration_said),
                       Stat("Paroles produites", speeches, "dans le journal", href=tab("dit", "Paroles")),
-                      Stat("Événements", sum(counts.values()), "dans cet épisode", href=tab("deroule", "Déroulé")))))
+                      Stat("Événements", said.events, "dans cet épisode", href=tab("deroule", "Déroulé")))))
     context: list[Any] = []
     if started and started.data.reply_to:
         seq = started.data.reply_to
@@ -79,12 +122,11 @@ def overview(ui: Any, corr: str, info: dict[str, Any]) -> list[Any]:
     context.append(Nav((NavItem("Comprendre le déclenchement", tab("decision", "Décision")),)))
     out.append(Section("Ce qui l’a déclenché", tuple(context)))
 
-    latest = ui.inspection.context().events([rt.UTTERANCE], PREVIEW_SPEECHES, correlations=[corr])
-    if latest:
+    if said.latest:
         rows = tuple(Row((Badge("elle", "info"), ui.names.who_cell(e.data.target), When(e.at),
                           Badge("dans le fil" if e.data.visible else "hors du fil", "muted"),
                           Text(e.data.text.text if e.data.text.text is not None else "(oublié)", clamp=600)),
-                         href=Ref.why(e.seq)) for e in reversed(latest))
+                         href=Ref.why(e.seq)) for e in reversed(said.latest))
         out.append(Table((Column("Qui parle", role="title"), "À", "Quand", Column("Visibilité", role="badge"), Column("Texte", role="body")),
                          rows, title="Dernières paroles produites", layout="feed", link_label="Expliquer cette parole",
                          caption=f"Les {min(speeches, PREVIEW_SPEECHES)} dernières paroles sur {speeches}. "

@@ -1,6 +1,12 @@
-"""Les échéances : une réponse qui attend un accord trop longtemps ne part plus (elle le saura comme un refus) ; une
-réponse en file que l'extension n'a pas traitée à temps (Teams fermé), ou posée dans Teams et jamais envoyée, non
-plus — on ne répond pas en retard à une question dépassée."""
+"""Ce qui ne part plus.
+
+- **Les échéances** : une réponse qui attend un accord trop longtemps ne part plus (elle le saura comme un refus) ;
+  une réponse en file que l'extension n'a pas traitée à temps (Teams fermé), ou posée dans Teams et jamais envoyée,
+  non plus — on ne répond pas en retard à une question dépassée.
+- **Répondu autrement** (ADR 0199) : une réponse qui attend un accord dans une conversation où la personne du compte
+  a répondu elle-même (``DraftSeen.answered`` : son message est parti du web, ou revenu dans le fil après celui
+  auquel elle répondait) est refusée, avec la note ``ANSWERED`` — sinon elle partirait après la sienne.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +15,21 @@ from typing import Any
 from mika.contracts import runtime as rt
 from mika.contracts import teams as c
 from mika.kernel.events import Content
-from mika.kernel.guards import Guard
-from mika.plugins.teams import EXPIRER, FROM_PORT, PLACED, QUEUED, SETTLED, TEAMS, WAITING, TeamsState
-
-
-def _still_pending(proposal: int) -> Guard:
-    """Le refus au nom du délai ne vaut que si personne n'a décidé entre-temps."""
-    return Guard("encore en attente", reads=(rt.PENDING_EFFECTS,),
-                 predicate=lambda view, n=proposal: any(p.proposal == n for p in view.get(rt.PENDING_EFFECTS)))
+from mika.kernel.guards import Superseded
+from mika.plugins.teams import (
+    ANSWERED,
+    FROM_PORT,
+    PLACED,
+    QUEUED,
+    RECEIVED,
+    SETTLED,
+    TEAMS,
+    WAITING,
+    WRITTEN,
+    TeamsState,
+    decider,
+)
+from mika.vocab.phrasebook import phrase
 
 
 @TEAMS.process("teams.expire", wake_on=[rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED, SETTLED],
@@ -32,18 +45,42 @@ class Expire:
         port = ctx.ports.get("teams")
         for d in list(ctx.state.drafts.values()):
             if d.state == WAITING and d.expires and d.expires <= now:
-                draft = rt.EFFECT_RESOLVED.draft(
-                    proposal=d.proposal, approved=False, by=EXPIRER, note=Content.of("pas d'accord dans le délai"),
-                    capability=c.SEND, owner=c.OWNER, args_json=d.args_json or "{}", context=d.context,
-                    dedupe_key=f"décision:{d.proposal}")
+                draft = rt.expiry_draft(phrase("approvals.no_answer"), proposal=d.proposal, capability=c.SEND,
+                                        owner=c.OWNER, args_json=d.args_json or "{}", context=d.context)
                 try:
-                    await ctx.emit(draft, guard=_still_pending(d.proposal), emitter=rt.OWNER)
-                except Exception:  # noqa: BLE001 — décidée entre-temps : rien à faire
+                    commit = await ctx.emit(draft, guard=rt.still_pending(d.proposal), emitter=rt.OWNER)
+                except Superseded:  # décidée entre-temps : rien à faire ; toute autre panne remonte, la santé la voit
                     continue
-                if port is not None:
+                if port is not None and not commit.deduped:  # dédoublonnée : décidée avant nous, peut-être acceptée
                     port.discard_draft(d.draft)  # elle ne partira plus : le brouillon est abandonné
             elif d.state in (QUEUED, PLACED) and d.queued_until and d.queued_until <= now:
                 await ctx.emit(_expired(port, d.draft, now))
+
+
+@TEAMS.process("teams.answered", wake_on=[RECEIVED, WRITTEN, rt.EFFECT_PROPOSED], lane="background",
+               max_quantum_s=60, priority=60)
+class Answered:
+    """Ses réponses en attente d'accord auxquelles la personne du compte a répondu autrement : refusées en son nom
+    (qui décide pour ce compte, ``decider``), avec la note ``ANSWERED`` ; elle le saura, comme d'un refus."""
+
+    def next_due(self, s: TeamsState, frame: Any, last_run: int | None) -> int | None:
+        return frame.now if any(d.state == WAITING and d.answered for d in s.drafts.values()) else None
+
+    async def run(self, ctx: Any) -> None:
+        port = ctx.ports.get("teams")
+        for d in list(ctx.state.drafts.values()):
+            if d.state != WAITING or not d.answered:
+                continue
+            draft = rt.EFFECT_RESOLVED.draft(
+                proposal=d.proposal, approved=False, by=decider(ctx.frame, d.account), note=Content.of(ANSWERED),
+                capability=c.SEND, owner=c.OWNER, args_json=d.args_json or "{}", context=d.context,
+                dedupe_key=f"décision:{d.proposal}")
+            try:
+                commit = await ctx.emit(draft, guard=rt.still_pending(d.proposal), emitter=rt.OWNER)
+            except Superseded:  # décidée entre-temps (son échéance, ou quelqu'un) : rien à faire
+                continue
+            if port is not None and not commit.deduped:  # dédoublonnée : décidée avant nous, peut-être acceptée
+                port.discard_draft(d.draft)  # elle ne partira plus : le brouillon est abandonné
 
 
 def _expired(port: Any, draft_id: str, now: int) -> Any:

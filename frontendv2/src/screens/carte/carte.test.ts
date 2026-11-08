@@ -219,9 +219,9 @@ describe("Explorer", () => {
   });
 
   it("sans index : le message du serveur, et les adresses restent", () => {
-    const html = explorerMarkup(explorer({ places: [], error: "L'index des lieux n'est pas construit : Réglages › Canaux › Lieux et adresses (mika carte lieux).",
+    const html = explorerMarkup(explorer({ places: [], error: "La recherche de lieux n'est pas encore prête sur ce serveur.",
       addresses: [place({ id: "a:1", name: "12 Rue Royale 74000 Annecy", category: "adresse", kind_fr: "" })] }));
-    expect(html).toContain("L&#39;index des lieux n&#39;est pas construit : Réglages › Canaux › Lieux et adresses (mika carte lieux).");
+    expect(html).toContain("La recherche de lieux n&#39;est pas encore prête sur ce serveur.");
     expect(html).toContain("12 Rue Royale 74000 Annecy");
     expect(html).toContain("Géoplateforme (IGN), seul le texte part");
   });
@@ -261,8 +261,8 @@ describe("Itinéraire", () => {
   });
 
   it("sans itinéraires : le message du serveur", () => {
-    const html = itineraryMarkup(iti({ error: "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires." }));
-    expect(html).toContain("Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires.");
+    const html = itineraryMarkup(iti({ error: "Les itinéraires ne sont pas encore prêts sur ce serveur." }));
+    expect(html).toContain("Les itinéraires ne sont pas encore prêts sur ce serveur.");
     expect(html).not.toContain("En faire un voyage");
   });
 
@@ -355,8 +355,8 @@ describe("Voyages", () => {
   });
 
   it("sans itinéraires : le message du serveur, les arrêts restent", () => {
-    const html = tripEditorMarkup(tripView({ route: null, routeError: "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires." }));
-    expect(html).toContain("Les itinéraires ne sont pas réglés");
+    const html = tripEditorMarkup(tripView({ route: null, routeError: "Les itinéraires ne sont pas encore prêts sur ce serveur." }));
+    expect(html).toContain("Les itinéraires ne sont pas encore prêts sur ce serveur.");
     expect(html).toContain("Jour 2 · Bourg-en-Bresse → Annecy");
     expect(html).not.toContain('class="leg"');
   });

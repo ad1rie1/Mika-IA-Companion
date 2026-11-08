@@ -25,7 +25,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, TypeVar
 
-from mika.adapters.mail import oauth, utf7
+from mika.adapters.mail import compose, oauth, utf7
 from mika.adapters.mail.config import MailAccount
 
 TIMEOUT = 30.0
@@ -103,6 +103,7 @@ class Session:
     def __init__(self, account: MailAccount, *, timeout: float = TIMEOUT, token: str = "") -> None:
         if account.microsoft and not token:
             raise ImapError(oauth.NOT_SIGNED_IN)
+        self.timeout = timeout
         try:  # un accueil refusé ou coupé lève une erreur d'imaplib, pas une OSError
             if account.imap_ssl:
                 self.box: imaplib.IMAP4 = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
@@ -277,8 +278,12 @@ class Session:
 
     @_translated
     def append(self, folder: str, raw: bytes, *, seen: bool = True) -> None:
-        self._ok(self.box.append(quoted(folder), "(\\Seen)" if seen else None, None, raw),
-                 f"copie dans « {folder} » refusée")
+        self.box.sock.settimeout(compose.transfer_timeout(len(raw), self.timeout))
+        try:
+            self._ok(self.box.append(quoted(folder), "(\\Seen)" if seen else None, None, raw),
+                     f"copie dans « {folder} » refusée")
+        finally:
+            self.box.sock.settimeout(self.timeout)
 
 
 def _flags(head: bytes) -> frozenset[str]:

@@ -11,7 +11,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.app import console
+from mika.app.composition import arbitration, faculties, policies
 from mika.inspector import names
+from mika.inspector.catalog import Labels
 from mika.kernel import forms
 from mika.kernel.inspect import (
     INT_MAX,
@@ -24,6 +27,8 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
 )
+from mika.kernel.registry import Registry
+from mika.runtime.state import RUNTIME
 from mika.vocab.episodes import Kind, Role
 
 NNBSP = " "
@@ -70,12 +75,43 @@ def test_every_kind_and_role_has_a_french_name():
     assert len(labels) == len(set(labels))
 
 
+def test_every_episode_kind_can_really_run():
+    # une sorte sans politique n'existe que dans les libellés : la nuit écrit son journal et ses rêves par des rôles
+    assert set(Kind) == set(policies())
+
+
 def test_an_episode_that_went_well_has_spoken_only_if_it_was_speech():
-    # une réponse menée à bien « a parlé » ; un journal, un rêve, un travail de projet sont « terminés »
+    # une réponse menée à bien « a parlé » ; une tâche, un travail de projet sont « terminés »
     assert names.outcome("done", Kind.REPLY)[0] == "a parlé" and names.outcome("done", Kind.INITIATIVE)[0] == "a parlé"
-    assert names.outcome("done", Kind.JOURNAL)[0] == "terminé" and names.outcome("done", Kind.WORK)[0] == "terminé"
+    assert names.outcome("done", Kind.TASK)[0] == "terminé" and names.outcome("done", Kind.WORK)[0] == "terminé"
     # contre-exemple : une réponse qui s'est tue ne « parle » pas
     assert names.outcome("abstained", Kind.REPLY)[0] == "s'est tue"
+
+
+def _capabilities(**described: str) -> SimpleNamespace:
+    specs = {name.replace("_", "."): SimpleNamespace(description=said) for name, said in described.items()}
+    return SimpleNamespace(registry=SimpleNamespace(capabilities=specs))
+
+
+def test_a_capability_has_a_short_name_and_keeps_its_sentence():
+    shown = names.Names(_capabilities(a_push="Envoyer l'atelier vers son dépôt (git push)."),
+                        Labels(capabilities={"a.push": "Push git"}))
+    assert shown.capability_short("a.push") == "Push git"
+    assert shown.capability_phrase("a.push") == "Envoyer l'atelier vers son dépôt"
+    assert shown.capability("a.push") == "Envoyer l'atelier vers son dépôt (git push)."
+
+
+def test_a_capability_without_a_short_name_reads_by_its_sentence():
+    shown = names.Names(_capabilities(a_new="Faire autre chose (après accord)."), Labels())
+    assert shown.capability_short("a.new") == "Faire autre chose"
+    # contre-exemple : une capacité inconnue reste lisible, jamais un trou
+    assert shown.capability_short("b.autre_geste")
+
+
+def test_every_capability_of_the_composition_has_a_short_name():
+    declared = set(Registry([RUNTIME, *faculties()], arbitration=arbitration()).capabilities)
+    assert declared == set(console.CAPABILITY_LABELS)
+    assert all(len(short) <= 20 for short in console.CAPABILITY_LABELS.values())  # tient sur une ligne de la file
 
 
 def test_query_integers_are_bounded_for_sqlite():

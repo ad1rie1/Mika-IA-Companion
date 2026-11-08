@@ -1,8 +1,8 @@
 """Ce que partagent les tableaux de droits de la console (ADR 0131, 0133, 0134) — ceux de l'application (Réglages ›
-Canaux, Outils › Ses propres outils) et ceux des propriétaires (un service, un projet, une app) : les personnes qu'une
-ligne peut nommer, ses sources, ses canaux et ses moments à cocher, un formulaire de tableau lu d'un coup, le dessin
-(``handmade/droits/tableau.html``). Rien d'une faculté ici : les personnes viennent des comptes, les instances des
-réglages."""
+Canaux, Outils › Ce qu'elle peut faire) et ceux des propriétaires (un service, un projet, une app) : ses sources, ses
+canaux et ses moments à cocher, un formulaire de tableau lu d'un coup, le dessin (``handmade/droits/tableau.html``).
+Rien d'une faculté ni d'un plugin ici : les personnes qu'une ligne peut nommer et les instances de chaque canal viennent
+de la composition (``InspectorDeps.nameable``, ``InspectorDeps.canal_instances``)."""
 
 from __future__ import annotations
 
@@ -15,19 +15,13 @@ from mika.kernel.inspect import Pager
 from mika.vocab.access import (
     ANY,
     CANALS,
-    MAIL,
     MOMENTS,
     PERSON,
-    PRIVATE,
     SELF,
     SOURCE_WORDS,
     SOURCES,
-    TEAMS,
-    TOGETHER,
-    WEB,
     TableArgs,
     alone,
-    canal_key,
     canal_words,
     when_words,
     who_words,
@@ -37,19 +31,6 @@ from mika.vocab.access import (
 MOMENT_CHOICES = tuple((k, label[:1].upper() + label[1:]) for k, label in MOMENTS)
 #: les instances qu'un canal peut avoir, telles que la console les propose : par type, (clé, nom)
 Instances = dict[str, list[tuple[str, str]]]
-
-
-def people(ui: UI) -> list[dict[str, str]]:
-    """Les personnes qu'une ligne peut nommer : celles qui ont un compte (seules à pouvoir être reconnues), par leur
-    nom — jamais un opérateur propriétaire, que « Toi » désigne déjà."""
-    out = []
-    for account in ui.deps.accounts.all():
-        handle = getattr(account, "handle", "")
-        if not handle or getattr(account, "operator", False):
-            continue
-        person = ui.names.person_of(handle) or handle
-        out.append({"key": person, "name": ui.names.name_of(handle)})
-    return sorted({p["key"]: p for p in out}.values(), key=lambda p: p["name"].casefold())
 
 
 def who_choices(who: Sequence[str], people_: Sequence[dict[str, str]], name: Callable[[str], str],
@@ -75,29 +56,10 @@ def who_choices(who: Sequence[str], people_: Sequence[dict[str, str]], name: Cal
 
 
 def canal_instances(ui: UI) -> Instances:
-    """Les instances de chaque type de canal : le chat web (en privé, en salon), chaque boîte de courrier, chaque
-    compte Teams, et celles qu'un tableau réglé nomme déjà."""
-    out: Instances = {WEB: [(f"{WEB}:{PRIVATE}", "en privé"), (f"{WEB}:{TOGETHER}", "en salon")]}
-    settings = ui.deps.settings
-    try:
-        accounts = settings.email().accounts if settings is not None else {}
-    except Exception:  # noqa: BLE001 — des boîtes illisibles : aucune instance, le type reste
-        accounts = {}
-    out[MAIL] = [(f"{MAIL}:{key}", a.label or key) for key, a in sorted(accounts.items())]
-    try:  # chaque compte Teams (ADR 0186) : son tableau, comme une boîte
-        teams = settings.teams().accounts if settings is not None else {}
-    except Exception:  # noqa: BLE001 — des comptes illisibles : aucune instance, le type reste
-        teams = {}
-    out[TEAMS] = [(f"{TEAMS}:{key}", getattr(a, "label", "") or key) for key, a in sorted(teams.items())]
-    try:
-        keys = sorted(settings.canals().tables) if settings is not None else []
-    except Exception:  # noqa: BLE001 — des tableaux illisibles : les minimums vitaux, aucune instance de plus
-        keys = []
-    for key in keys:
-        kind, instance = canal_key(key)
-        if instance and key not in {k for k, _ in out.get(kind, ())}:
-            out.setdefault(kind, []).append((key, instance))
-    return out
+    """Les instances de chaque type de canal, que la composition lit des réglages (``InspectorDeps.canal_instances``) ;
+    rien : aucune instance, les types restent."""
+    provide = ui.deps.canal_instances
+    return provide(ui) if provide is not None else {}
 
 
 def canal_choices(canal: Sequence[str], instances: Instances) -> dict[str, Any]:
@@ -137,11 +99,14 @@ def choices(options: Sequence[tuple[str, str]], locked: Sequence[str] = ()) -> l
     return [(k, text, k in locked) for k, text in options]
 
 
-def rows_of(ui: UI, lines: Sequence[Any], values: Callable[[Any], dict[str, Any]],
+def rows_of(ui: UI, lines: Sequence[Any], cells: Callable[[Any], dict[str, Any]],
             tools: Sequence[tuple[str, str]] = (), show_canal: bool = True) -> list[dict[str, Any]]:
     """Les lignes d'un tableau, telles que le gabarit les dessine : qui (à cocher), par où (à cocher), quand, ses
-    colonnes (``values(line) -> {clé: valeur}``), ses outils (``tools`` : (nom, lit/agit))."""
-    known, instances = people(ui), canal_instances(ui)
+    colonnes (``cells(line) -> {clé: valeur}``, sous la clé ``cells``), ses outils (``tools`` : (nom, lit/agit)).
+    Jamais une clé nommée comme une méthode de ``dict`` (``values``, ``items``, ``keys``) : le gabarit lit
+    ``r.values`` comme la méthode, pas la clé — chaque liste montrait sa première option, et « Enregistrer » l'écrivait."""
+    known = ui.deps.nameable(ui) if ui.deps.nameable is not None else []
+    instances = canal_instances(ui)
     out = []
     for n, a in enumerate(lines, start=1):
         chosen = set(a.tools) if hasattr(a, "tools") else set()
@@ -151,7 +116,7 @@ def rows_of(ui: UI, lines: Sequence[Any], values: Callable[[Any], dict[str, Any]
             "canal": canal_choices(a.canal, instances) if show_canal else None,
             "always": not a.when, "when_said": when_words(a.when).capitalize() if a.when else "Toujours",
             "moments": [{"key": k, "label": label, "on": k in a.when} for k, label in MOMENT_CHOICES],
-            "values": values(a),
+            "cells": cells(a),
             "all": not chosen, "tools_said": "Tous" if not chosen else f"{len(chosen)} outil{'s' if len(chosen) > 1 else ''}",
             "tools": [{"name": t, "nature": nature, "on": t in chosen} for t, nature in tools],
             "first": n == 1, "last": n == len(lines)})

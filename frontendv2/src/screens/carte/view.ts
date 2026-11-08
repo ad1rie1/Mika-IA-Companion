@@ -43,7 +43,7 @@ export function legendMarkup(icon: "search" | "map" | "pin" | "sparkle", title: 
   return `${ico(icon, "sm")}<b>${h(title)}</b>${more ? `<span class="muted">${h(more)}</span>` : ""}`;
 }
 
-/** Un refus du serveur, dit tel quel (un 503 : ce qui n'est pas branché, et où le régler). */
+/** Un refus du serveur, dit tel quel (un 503 : ce qui n'est pas prêt ; où le régler, à une opératrice seulement). */
 export function failedBlock(title: string, message: string): string {
   return `<div class="empty carte-failed">${ico("alert")}<b>${h(title)}</b><p>${h(message)}</p></div>`;
 }

@@ -8,7 +8,6 @@
 .regx-source { display: inline-flex; align-items: center; gap: 6px; }
 .regx-source-text { color: var(--muted); }
 .regx-then { color: var(--border-strong); }
-.regx-note { margin: -6px 0 0; max-width: 110ch; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 
 /* les facultés, par famille, en colonnes */
 .regx-families { column-width: 250px; column-gap: 32px; }

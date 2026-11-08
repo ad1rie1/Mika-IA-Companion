@@ -70,7 +70,3 @@ class Rights:
     families: Mapping[str, Any] = field(default_factory=dict)
     in_hand: Mapping[str, str] = field(default_factory=dict)
 
-
-def why_words(index: int) -> str:
-    """La ligne qui décide, en mots : « ligne 2 », ou le comportement par défaut (``index`` 0)."""
-    return f"ligne {index}" if index else "comportement par défaut"

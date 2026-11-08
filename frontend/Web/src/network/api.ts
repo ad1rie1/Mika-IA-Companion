@@ -86,6 +86,23 @@ export async function postJson(path: string, body: unknown): Promise<Response> {
   }
 }
 
+/**
+ * POST a multipart form with credentials + the CSRF token. The browser writes
+ * the `Content-Type` itself: it carries the boundary.
+ */
+export async function postForm(path: string, body: FormData): Promise<Response> {
+  try {
+    return await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "X-CSRFToken": csrfToken() },
+      body,
+    });
+  } catch (err) {
+    throw new BackendUnreachableError(err);
+  }
+}
+
 /** Ce qu'il faut lancer pour que le serveur admette cette page. */
 export function serveCommand(origin: string): string {
   return `python -m mika serve --origin ${origin}`;

@@ -5,6 +5,7 @@ d'abord, en face du message auquel elles répondent ; l'extension, ses chiffres 
 from __future__ import annotations
 
 import json
+import re
 
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
@@ -31,7 +32,7 @@ def test_without_the_extension_each_tab_says_how_to_plug_it(world):  # noqa: F81
     assert 'data-tab="teams/conversations"' in page and "L'extension n'a encore rien apporté" in page
     steps = _between(page, 'class="teams-steps"', "</ol>")
     assert steps.index("L'installer") < steps.index("Lui donner sa clé") < steps.index("Ouvrir Teams")
-    assert 'href="/inspecteur/reglages/teams"' in steps
+    assert 'href="/inspecteur/teams/parametres"' in steps  # ses comptes : Teams › Paramètres (ADR 0206)
     extension = drawn(client, "/inspecteur/teams/extension")
     assert extension.count('class="person-tab-note warn"') == 1 and "La brancher" in extension
     assert "aucune réponse préparée" in drawn(client, "/inspecteur/teams/reponses")
@@ -73,3 +74,11 @@ def test_replies_waiting_for_you_come_first_facing_the_message(world):  # noqa: 
     assert "Réponses à décider" in band and 'href="/inspecteur/teams/reponses?compte=principal"' in band
     assert "Adrien" in _between(extension, "Ce compte Teams", "</section>")
     assert 'class="person-tab-note warn"' not in extension  # branchée : pas de bandeau
+    # son compte et sa clé côte à côte (ADR 0206) : sa voix et sa signature mènent à ce compte dans Teams › Paramètres,
+    # qui ramène à son extension une fois enregistré
+    voice = _between(extension, "Sa voix, sa signature", "</dd>")
+    edit = voice.split('href="', 1)[1].split('"', 1)[0]
+    assert ">Modifier ce compte<" in voice and edit.startswith("/inspecteur/teams/parametres?") and "cle=principal" in edit
+    account = drawn(client, edit)
+    assert re.search(r"<h1>Compte « [^<]+ »</h1>", account), _between(account, "<h1", "</h1>")
+    assert 'name="_retour" value="/inspecteur/teams/extension?compte=principal"' in account

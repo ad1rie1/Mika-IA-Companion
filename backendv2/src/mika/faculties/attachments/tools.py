@@ -39,7 +39,6 @@ from mika.faculties.attachments.faculty import (
     linked_knowledge,
     links,
     recent,
-    rows,
 )
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Audience, Frame
@@ -185,7 +184,8 @@ def _score(r: FileRow, sim: float, wanted: set[str]) -> float:
     return sim + 0.3 * _overlap(r, wanted)
 
 
-@ATTACHMENTS.tool(SEARCH, description=phrase("attachments.tools.search.description"), args=SearchArgs, bundle=BUNDLE,
+@ATTACHMENTS.tool(SEARCH, description=phrase("attachments.tools.search.description"),
+                  label=phrase("attachments.tools.search.label"), args=SearchArgs, bundle=BUNDLE,
                   episodes=[*CONVERSATIONAL, *WORKING], max_calls_per_episode=4)
 async def attachments_search(args: SearchArgs, ctx: Any) -> Any:
     store = ctx.ports.get("store")
@@ -263,7 +263,8 @@ def pages(text: str, size: int = PAGE_CHARS) -> list[str]:
     return [p for p in out if p] or [""]
 
 
-@ATTACHMENTS.tool(OPEN, description=phrase("attachments.tools.open.description"), args=OpenArgs, bundle=BUNDLE,
+@ATTACHMENTS.tool(OPEN, description=phrase("attachments.tools.open.description"),
+                  label=phrase("attachments.tools.open.label"), args=OpenArgs, bundle=BUNDLE,
                   episodes=[*CONVERSATIONAL, *WORKING], max_calls_per_episode=4)
 async def attachment_open(args: OpenArgs, ctx: Any) -> Any:
     store = ctx.ports.get("store")
@@ -348,7 +349,8 @@ async def _element(ctx: Any, here: Here, text: str, among: Sequence[int] | None 
     return best[1] if best is not None else None
 
 
-@ATTACHMENTS.tool(LINK, acts=True, description=phrase("attachments.tools.link.description"), args=LinkArgs, bundle=BUNDLE,
+@ATTACHMENTS.tool(LINK, acts=True, description=phrase("attachments.tools.link.description"),
+                  label=phrase("attachments.tools.link.label"), args=LinkArgs, bundle=BUNDLE,
                   episodes=[*CONVERSATIONAL, *WORKING], max_calls_per_episode=3)
 async def attachment_link(args: LinkArgs, ctx: Any) -> Any:
     store = ctx.ports.get("store")
@@ -371,8 +373,3 @@ async def attachment_link(args: LinkArgs, ctx: Any) -> Any:
     if args.remove:
         return ToolResult(content=phrase("attachments.tools.link.undone", text=text))
     return ToolResult(content=phrase("attachments.tools.link.done", text=text))
-
-
-def visible_rows(frame: Frame, store: Any, files: Sequence[str]) -> list[FileRow]:
-    """Ces pièces, celles qu'elle peut rouvrir devant l'audience de ce cadre (ses sections, ses autres outils)."""
-    return _visible(Here(frame), rows(store, files), store)

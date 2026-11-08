@@ -228,7 +228,7 @@ class TextArgs(BaseModel):
     content: str = Field(description=phrase("shares.tools.share_text.content"))
 
 
-@SHARES.tool(SHARE_TEXT, acts=True, description=phrase("shares.tools.share_text.description"), args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
+@SHARES.tool(SHARE_TEXT, acts=True, description=phrase("shares.tools.share_text.description"), label=phrase("shares.tools.share_text.label"), args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
 async def share_text(args: TextArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -278,7 +278,9 @@ def _entries(tree: list[str]) -> list[str]:
     return [line for line in tree if not line.startswith("[")]
 
 
-@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4,
+@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"),
+             label=phrase("shares.tools.project_files.label"), args=FilesArgs, bundle=BUNDLE,
+             episodes=CONVERSATIONAL, max_calls_per_episode=4,
              when=offered)  # il ne liste que ce qu'elle pourrait envoyer : rien dans un salon ni pour une inconnue
 async def project_files(args: FilesArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
@@ -326,7 +328,7 @@ class ProjectFileArgs(BaseModel):
     path: str = Field(description=phrase("shares.tools.share_project_file.path"))
 
 
-@SHARES.tool(SHARE_PROJECT_FILE, acts=True, description=phrase("shares.tools.share_project_file.description"), args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
+@SHARES.tool(SHARE_PROJECT_FILE, acts=True, description=phrase("shares.tools.share_project_file.description"), label=phrase("shares.tools.share_project_file.label"), args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE)
 async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -374,7 +376,7 @@ def _named(raw: Any, name: str) -> bool:
     return bool(wanted) and wanted in (name.casefold(), name.rpartition(".")[0].casefold())
 
 
-@SHARES.tool(REREAD_SENT_FILE, description=phrase("shares.tools.reread.description"), args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4)
+@SHARES.tool(REREAD_SENT_FILE, description=phrase("shares.tools.reread.description"), label=phrase("shares.tools.reread.label"), args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4)
 async def reread_sent_file(args: RereadArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):

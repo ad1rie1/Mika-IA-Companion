@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from mika.kernel.clock import DAY, MINUTE, US
-from mika.kernel.forms import show_duration
+from mika.kernel.forms import plural, show_duration
 from mika.kernel.inspect import describe_error
 from mika.kernel.registry import zone_known
 from mika.ports.journal import JournalOutbox
@@ -81,7 +81,7 @@ def _journal(kernel: Kernel) -> Check:
     if mind.gaps:
         # des événements ont disparu du journal : l'état relu n'est plus celui vécu (audit du 2026-10-26)
         holes = ", ".join(f"{a}–{b - 1}" if b - 1 > a else str(a) for a, b in mind.gaps[:10])
-        return Check("journal", KO, f"{len(mind.gaps)} trou(s) de séquence dans le journal relu",
+        return Check("journal", KO, f"{plural(len(mind.gaps), 'trou', 'trous')} de séquence dans le journal relu",
                      (*detail, f"seq manquants : {holes}{'…' if len(mind.gaps) > 10 else ''} — "
                                "`mika replay --verify` les liste tous"))
     state = DEGRADED if behind > limit else OK
@@ -90,8 +90,8 @@ def _journal(kernel: Kernel) -> Check:
     slow = recent() if callable(recent) else []
     if slow:
         worst_ms, sql = slow[0]
-        detail += (f"{len(slow)} lecture(s) de plus de {SLOW_READ_MS:.0f} ms ces 10 min, la plus longue "
-                   f"{worst_ms:.0f} ms : {sql[:100]}",)
+        detail += (f"{plural(len(slow), 'lecture', 'lectures')} de plus de {SLOW_READ_MS:.0f} ms ces 10 min, "
+                   f"la plus longue {worst_ms:.0f} ms : {sql[:100]}",)
         if worst_ms >= SLOW_READ_STALL_MS:
             state = DEGRADED
     return Check("journal", state, f"{mind.head} événements, dernier instantané {behind} derrière", detail)
@@ -100,7 +100,7 @@ def _journal(kernel: Kernel) -> Check:
 def _slices(kernel: Kernel) -> Check:
     tainted = dict(kernel.mind.root.tainted.items())
     if tainted:
-        return Check("slices", KO, f"{len(tainted)} tranche(s) corrompue(s)",
+        return Check("slices", KO, plural(len(tainted), "tranche corrompue", "tranches corrompues"),
                      tuple(f"{o} : un réducteur a levé au seq {seq}" for o, seq in sorted(tainted.items())))
     return Check("slices", OK, "toutes les tranches saines")
 
@@ -108,7 +108,7 @@ def _slices(kernel: Kernel) -> Check:
 def _loops(kernel: Kernel) -> Check:
     dead = kernel.dead_loops()
     if dead:
-        return Check("loops", KO, "boucle(s) arrêtée(s) : " + ", ".join(dead))
+        return Check("loops", KO, plural(len(dead), "boucle arrêtée", "boucles arrêtées") + " : " + ", ".join(dead))
     return Check("loops", OK, "ordonnanceur, file de sortie et projections tournent")
 
 
@@ -116,7 +116,7 @@ def _projections(kernel: Kernel) -> Check:
     lag = kernel.projections.lag()
     late = {name: n for name, n in lag.items() if n > PROJECTION_LAG_MAX}
     quarantined = kernel.projections.quarantined
-    detail = tuple(f"{name} : {n} événement(s) de retard" for name, n in sorted(lag.items()))
+    detail = tuple(f"{name} : {plural(n, 'événement', 'événements')} de retard" for name, n in sorted(lag.items()))
     detail += tuple(f"{name} : seq {seq} en quarantaine ({error[:120]})" for name, seq, error in quarantined[-10:])
     if late or quarantined:
         return Check("projections", DEGRADED, f"{len(late)} en retard, {len(quarantined)} en quarantaine", detail)
@@ -126,10 +126,11 @@ def _projections(kernel: Kernel) -> Check:
 def _processes(kernel: Kernel) -> Check:
     sched = kernel.scheduler
     failing = {n: k for n, k in sched.consecutive.items() if k >= PROCESS_FAILURES_MAX}
-    detail = tuple(f"{n} : {k} échec(s) d'affilée — {sched.last_error.get(n, (0, ''))[1]}"
+    detail = tuple(f"{n} : {plural(k, 'échec', 'échecs')} d'affilée — {sched.last_error.get(n, (0, ''))[1]}"
                    for n, k in sorted(failing.items()))
     # un processus qui a tourné en rafale (retenu par l'ordonnanceur) : un défaut à comprendre, jamais un régime
-    detail += tuple(f"{n} : {k} rafale(s) retenue(s)" for n, k in sorted(sched.storms.items()) if k)
+    detail += tuple(f"{n} : {plural(k, 'rafale retenue', 'rafales retenues')}"
+                    for n, k in sorted(sched.storms.items()) if k)
     if failing or sched.storms:
         what = [f"{len(failing)} processus en échec"] if failing else []
         what += [f"{len(sched.storms)} processus en rafale"] if sched.storms else []
@@ -152,15 +153,15 @@ def _outbox(kernel: Kernel) -> Check:
     pending = store.pending_outbox()
     oldest = store.get_events([pending[0].seq]) if pending else []
     age = now - oldest[0].at if oldest else 0
-    detail = tuple(f"{r.effect} (seq {r.seq}) : {r.attempts} tentative(s) {describe_error(r.last_error or '')}"
-                   for r in pending[:10])
+    detail = tuple(f"{r.effect} (seq {r.seq}) : {plural(r.attempts, 'tentative', 'tentatives')} "
+                   f"{describe_error(r.last_error or '')}" for r in pending[:10])
     detail += tuple(f"abandonné : {effect} (seq {seq}) — {describe_error(error or '')}"
                     for seq, effect, error in failed[:10])
     parts = []
     if pending:
-        parts.append(f"{len(pending)} effet(s) en attente, le plus vieux depuis {age // 1_000_000} s")
+        parts.append(f"{plural(len(pending), 'effet', 'effets')} en attente, le plus vieux depuis {_span(age)}")
     if failed:
-        parts.append(f"{len(failed)} abandonné(s) en 24 h")
+        parts.append(f"{plural(len(failed), 'abandonné', 'abandonnés')} en 24 h")
     state = DEGRADED if failed or age > OUTBOX_AGE_MAX_US else OK
     return Check("outbox", state, " ; ".join(parts) or "rien en attente", detail)
 

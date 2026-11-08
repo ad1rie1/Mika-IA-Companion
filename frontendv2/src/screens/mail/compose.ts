@@ -8,8 +8,8 @@ import { fetchContacts, MAIL_LIMITS, type Contact, type Person } from "../../api
 import { $, $$, h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { chars, countLabel, outgoingText, parseAddresses, type OutgoingText } from "./format";
-import { chip, composeForm, suggestions, type ComposeForm } from "./markup";
+import { addPieces, chars, countLabel, outgoingText, parseAddresses, type OutgoingText, type Piece } from "./format";
+import { chip, composeForm, pieceChips, suggestions, type ComposeForm } from "./markup";
 
 // ── Les destinataires ────────────────────────────────────────────────
 
@@ -23,8 +23,8 @@ interface Pending {
 
 const SUGGESTED = 6;
 
-/** Les puces d'un champ (`to`, `cc`) sous `root`, plus ce qui est tapé et vaut une adresse. */
-export function readRecipients(root: ParentNode, field: "to" | "cc"): Person[] {
+/** Les puces d'un champ (`to`, `cc`, `bcc`) sous `root`, plus ce qui est tapé et vaut une adresse. */
+export function readRecipients(root: ParentNode, field: "to" | "cc" | "bcc"): Person[] {
   const box = $<HTMLElement>(`[data-rcpt="${field}"]`, root);
   if (!box) return [];
   const chips = $$<HTMLElement>(".chip[data-addr]", box).map((c) => ({ name: c.dataset.name ?? "", address: c.dataset.addr ?? "" }));
@@ -52,6 +52,8 @@ export function refusalText(message: string, fields: Readonly<Record<string, str
 const FIELD_LABEL: Record<string, string> = {
   to: "À",
   cc: "Cc",
+  bcc: "Cci",
+  files: "Pièces",
   subject: "Objet",
   body: "Message",
   instruction: "Consigne",
@@ -244,12 +246,78 @@ export function bindRecipients(root: HTMLElement): void {
   });
 }
 
+// ── Les pièces ───────────────────────────────────────────────────────
+
+/** Qui garde les pièces d'un mail qu'on écrit (la fenêtre, la réponse en place). */
+export interface PiecesHost {
+  pieces(): File[];
+  /** Les pièces, changées : qui les garde repeint sa liste (`[data-jointes]`). */
+  replace(next: File[]): void;
+  /** Ce qui n'a pas pu être joint ; vide : plus rien à dire. */
+  say(problem: string): void;
+  /** Un transfert : les pièces d'origine qui repartent avec lui, comptées dans les bornes. */
+  carried?(): readonly Piece[];
+}
+
+/** Repeint la liste des pièces sous `root`. */
+export function paintPieces(root: ParentNode, files: readonly File[]): void {
+  const list = $<HTMLElement>("[data-jointes]", root);
+  if (list) list.innerHTML = pieceChips(files);
+}
+
+/** Joindre sous `root` (délégué : survit aux rendus) : le bouton et son choix de fichiers, le dépôt (`[data-depot]`), retirer une pièce. */
+export function bindPieces(root: HTMLElement, host: PiecesHost): void {
+  const add = (picked: readonly File[]) => {
+    const got = addPieces(host.pieces(), picked, host.carried?.());
+    host.replace(got.pieces);
+    host.say(got.problem);
+  };
+  const zoneOf = (e: Event) => (e.target as Element).closest?.<HTMLElement>("[data-depot]") ?? null;
+  root.addEventListener("click", (e) => {
+    const t = e.target as Element;
+    const button = t.closest?.<HTMLElement>("[data-joindre]");
+    if (button) {
+      $<HTMLInputElement>("[data-fichiers]", button.closest("[data-reply], [data-compose]") ?? root)?.click();
+      return;
+    }
+    const gone = t.closest?.<HTMLElement>("[data-retirer-piece]");
+    if (gone) {
+      const at = Number(gone.dataset.retirerPiece);
+      host.replace(host.pieces().filter((_, k) => k !== at));
+      host.say("");
+    }
+  });
+  root.addEventListener("change", (e) => {
+    const input = e.target as HTMLInputElement;
+    if (!input.matches?.("[data-fichiers]")) return;
+    add([...(input.files ?? [])]);
+    input.value = ""; // le même fichier, retiré, se choisit à nouveau
+  });
+  root.addEventListener("dragover", (e) => {
+    const zone = zoneOf(e);
+    if (!zone || !e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    zone.classList.add("over");
+  });
+  root.addEventListener("dragleave", (e) => zoneOf(e)?.classList.remove("over"));
+  root.addEventListener("drop", (e) => {
+    const zone = zoneOf(e);
+    if (!zone) return;
+    zone.classList.remove("over");
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    add([...e.dataTransfer.files]);
+  });
+}
+
 // ── La fenêtre d'un mail ─────────────────────────────────────────────
 
 export interface ComposeValues {
   box: string;
   to: Person[];
   cc: Person[];
+  /** Les fichiers joints (jamais pour la retouche d'un brouillon). */
+  files: File[];
   subject: string;
   body: string;
   /** Un transfert : joindre ses pièces. */
@@ -265,6 +333,8 @@ export interface ComposeOptions extends ComposeForm {
   submitLabel: string;
   /** Le corps peut-il être vide (un transfert) ? */
   emptyBody?: boolean;
+  /** Un transfert : ses pièces d'origine. */
+  carried?: readonly Piece[];
   submit: (v: ComposeValues) => Promise<string>;
 }
 
@@ -292,23 +362,40 @@ export function openCompose(opts: ComposeOptions): HTMLElement {
       t.closest("[data-cc]")!.remove();
       $<HTMLInputElement>('[data-rcpt="cc"] [data-ac]', el)?.focus();
     }
+    if (t.closest("[data-bcc]")) {
+      $<HTMLElement>("[data-bccrow]", el)!.hidden = false;
+      t.closest("[data-bcc]")!.remove();
+      $<HTMLInputElement>('[data-rcpt="bcc"] [data-ac]', el)?.focus();
+    }
+  });
+  let files: File[] = [];
+  bindPieces(el, {
+    pieces: () => files,
+    replace: (next) => {
+      files = next;
+      paintPieces(el, files);
+    },
+    say,
+    carried: () => ($<HTMLInputElement>("[data-pieces]", form)?.checked ? opts.carried ?? [] : []),
   });
   const button = $<HTMLButtonElement>("[data-envoyer-mail]", el)!;
   button.addEventListener("click", async () => {
     const to = readRecipients(form, "to");
     const cc = readRecipients(form, "cc");
+    const bcc = readRecipients(form, "bcc");
     const subject = $<HTMLInputElement>("[data-objet]", form)!.value.trim();
     const body = $<HTMLTextAreaElement>("[data-corps]", form)!.value;
     if (!to.length) return say("À qui ? Ajoute au moins un destinataire.");
     if (!subject) return say("Il lui faut un objet.");
     if (!body.trim() && !opts.emptyBody) return say("Le message est vide.");
     // dans les bornes de l'API, sinon rien ne part (le serveur refuserait : rien ne part coupé)
-    const fits = outgoingText({ to, cc, subject, body });
+    const fits = outgoingText({ to, cc, bcc, subject, body });
     if (!fits.mail) return say(fits.problem);
     const values: ComposeValues = {
       box: $<HTMLSelectElement>("[data-de]", form)?.value ?? opts.box,
       to,
       cc,
+      files,
       subject,
       body,
       pieces: !!$<HTMLInputElement>("[data-pieces]", form)?.checked,

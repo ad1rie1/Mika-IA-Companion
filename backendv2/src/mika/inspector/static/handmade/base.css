@@ -4,8 +4,6 @@
    porte par sa classe — sw-<émotion> pose --sw — et les longueurs sont des attributs SVG. */
 
 :root {
-  /* les titres des pages dessinées : la police des titres de la console (ADR 0176), plus de serif */
-  --now-serif: var(--display);
   --now-gap: 14px;
   --now-pos: color-mix(in srgb, var(--emo-happy) 32%, transparent);
   --now-neg: color-mix(in srgb, var(--emo-sad) 34%, transparent);
@@ -128,7 +126,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .now-avatar { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%;
   border: 1.5px solid color-mix(in srgb, var(--sw) 45%, transparent);
   background: color-mix(in srgb, var(--sw) 18%, var(--surface));
-  color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--now-serif); font-size: 19px; font-weight: 600; }
+  color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--display); font-size: 19px; font-weight: 600; }
 .now-notes { display: flex; flex-wrap: wrap; gap: 3px 12px; margin: 6px 0 0; padding: 0; list-style: none;
   color: var(--muted); font-size: 12px; }
 .now-notes .ok { color: var(--ok); }
@@ -159,7 +157,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .now-feed a:hover { color: var(--accent); }
 .now-feed .tone-danger a, .now-feed .tone-danger p { color: var(--danger); }
 .now-feed .tone-muted p, .now-feed .tone-muted a { color: var(--muted); }
-.now-feed q { display: block; margin-top: 2px; color: var(--text-2); font-family: var(--now-serif); font-size: 14px;
+.now-feed q { display: block; margin-top: 2px; color: var(--text-2); font-family: var(--display); font-size: 14px;
   font-style: italic; quotes: "« " " »"; }
 
 /* ── Une présence (en ligne, en train d'écrire) ───────────────────────── */
@@ -171,7 +169,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .person-tab { gap: var(--now-gap); }
 .person-counts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; list-style: none; color: var(--muted);
   font-size: 13px; }
-.person-counts .now-num { color: var(--text); font-family: var(--now-serif); font-size: 1.25rem; font-weight: 600; }
+.person-counts .now-num { color: var(--text); font-family: var(--display); font-size: 1.25rem; font-weight: 600; }
 .person-tab-bar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
 .person-as-table { margin-left: auto; font-size: 12.5px; }
 
@@ -386,7 +384,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-chip.warn { color: var(--warn); }
 .hm-toolbar { align-items: center; }
 .now-page form.action-card.card { padding: 20px 22px; border-radius: var(--radius); }
-.now-page form.action-card.card > h3 { font-family: var(--now-serif); font-size: 1.15rem; font-weight: 600; }
+.now-page form.action-card.card > h3 { font-family: var(--display); font-size: 1.15rem; font-weight: 600; }
 
 /* une cellule « aperçu » (un titre et sa suite : l'objet d'un message et son début) dans une liste dessinée */
 .person-entry-title .cell-preview { display: grid; gap: 2px; max-width: 78ch; }
@@ -407,7 +405,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-approval { display: grid; gap: 14px; box-shadow: inset 4px 0 0 var(--st, var(--warn)); }
 .hm-approval.st-warn { --st: var(--warn); } .hm-approval.st-danger { --st: var(--danger); }
 .hm-approval-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.hm-approval-head h2 { margin: 4px 0; font-family: var(--now-serif); font-size: 1.3rem; font-weight: 600; overflow-wrap: anywhere; }
+.hm-approval-head h2 { margin: 4px 0; font-family: var(--display); font-size: 1.3rem; font-weight: 600; overflow-wrap: anywhere; }
 .hm-approval-head .now-sub { margin: 0; }
 .hm-approval-preview { display: grid; gap: 8px; }
 .hm-approval-preview .hm-reading { padding: 14px 16px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border);
@@ -437,11 +435,11 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-settings-facts { margin: 0; font-size: 13px; }
 .hm-form, .params-form { display: grid; gap: 14px; min-width: 0; padding: 20px 22px; border: 1px solid var(--border);
   border-radius: var(--radius); background: var(--surface); }
-.hm-form-title { margin: 0; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.hm-form-title { margin: 0; font-family: var(--display); font-size: 1.24rem; font-weight: 600; }
 .hm-form fieldset.group, .params-form fieldset.group { margin: 0; padding: 0; border: 0; }
 .hm-form fieldset.group + fieldset.group, .params-form fieldset.group + fieldset.group { padding-top: 14px; border-top: 1px solid var(--border); }
 .hm-form fieldset.group > legend, .params-form fieldset.group > legend { margin-bottom: 10px; padding: 0; color: var(--text);
-  font-family: var(--now-serif); font-size: 1.1rem; font-weight: 600; }
+  font-family: var(--display); font-size: 1.1rem; font-weight: 600; }
 .hm-form .form-actions, .params-form .form-actions { margin-top: 2px; padding-top: 14px; border-top: 1px solid var(--border); }
 .params-form .param { padding: 12px 0; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
 .params-form .param:first-of-type { border-top: 0; }
@@ -484,7 +482,6 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .record-periods .record-grid-row { grid-template-columns: minmax(170px, 1.4fr) 1fr 1fr; }
 .record-roles .record-grid-row { grid-template-columns: minmax(140px, 1.6fr) repeat(3, minmax(70px, .7fr)) minmax(120px, 1fr) minmax(70px, .7fr); min-width: 620px; }
 .record-grid-row [role="cell"] { font-variant-numeric: tabular-nums; }
-.hm-commands .commands { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Fiches / Tableau : le bouton à choix de la console (``.seg``, la maquette) */
 .hm-modes { display: inline-flex; margin-left: auto; padding: 2px; gap: 2px; border: 1px solid var(--border-strong);
   border-radius: var(--radius); background: var(--raised); font-size: 12px; }
@@ -510,7 +507,7 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-tool-intro { display: grid; gap: 6px; }
 .hm-tool-intro p { margin: 0; }
 .hm-login { display: grid; gap: 16px; }
-.hm-login-title { margin: 0; font-family: var(--now-serif); font-size: 1.9rem; font-weight: 600; }
+.hm-login-title { margin: 0; font-family: var(--display); font-size: 1.9rem; font-weight: 600; }
 
 /* un texte à lire (un journal, un message, un document) : son titre, puis le texte tel qu'il a été écrit */
 .hm-reading { font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
@@ -551,18 +548,11 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
   .stack:has(> .params-form):has(nav.hm-chips) > *, .stack:has(> .params-form):has(nav.hm-chips) > .now-page > * { grid-column: 1; }
   .stack:has(> .params-form) > .now-page > nav.hm-chips { grid-row: auto; position: static; display: flex; flex-wrap: wrap; }
 }
-/* une ligne par paramètre : son nom et son aide | d'où il vient et ses bornes | sa valeur */
+/* une ligne par paramètre : la ligne d'un réglage (console.css), puis d'où il vient et ses bornes ; cette colonne de
+   plus resserre celle de la valeur */
 .params-form .param { grid-template-columns: minmax(0, 1fr) minmax(200px, 30%); align-items: center; }
-.params-form .param-main > .field:not(:has(textarea, .slider)) { grid-template-columns: minmax(0, 1fr) minmax(130px, 200px);
-  column-gap: 18px; align-items: center; }
-.params-form .param-main > .field:not(:has(textarea, .slider)) > :is(input, select) { grid-column: 2; grid-row: 1 / span 3; width: 100%; }
-.params-form .param-main > .field:not(:has(textarea, .slider)) > :is(label, .label, .help, .value-ro) { grid-column: 1; }
-.params-form .param-main > .field:not(:has(textarea, .slider)) > .error { grid-column: 1 / -1; }
+.params-form .param-main { --field-value: minmax(130px, 200px); }
 .params-form .param-meta { gap: 2px; }
-@media (max-width: 700px) {
-  .params-form .param-main > .field:not(:has(textarea, .slider)) { grid-template-columns: minmax(0, 1fr); }
-  .params-form .param-main > .field:not(:has(textarea, .slider)) > * { grid-column: 1 !important; grid-row: auto !important; }
-}
 .params-form .param-origin > summary { font-size: 12px; font-weight: 500; color: var(--muted); }
 
 /* Des sous-onglets (ADR 0176) : une page à plusieurs sujets, leur liste dans une colonne à gauche, un seul ouvert à

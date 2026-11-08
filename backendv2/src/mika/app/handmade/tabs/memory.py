@@ -5,8 +5,10 @@
 - Croyances : la même liste, chaque croyance avec sa confiance en avant (un chiffre et sa jauge) et son origine
   (on le lui a dit, elle l'a vu, elle le déduit) ; une croyance remplacée s'estompe, celle qui la remplace le dit.
 - Pièces reçues : la place en chiffres, puis en sous-onglets les pièces — une entrée chacune : sa sorte en icône, son
-  nom vers sa fiche, qui l'a envoyée, ce qu'elle y a lu, ce qui s'y relie, la télécharger — et la place de chacun,
-  une jauge par personne, de la plus chargée à la moins chargée (ADR 0182).
+  nom vers sa fiche, qui l'a envoyée, ce qu'elle y a lu, ce qui s'y relie, la télécharger, la retirer (ADR 0205) — et
+  la place de chacun, une jauge par personne, de la plus chargée à la moins chargée (ADR 0182).
+- Fichiers envoyés (ADR 0205) : ce qu'elle a envoyé, à tout le monde — une entrée par fichier : sa sorte en icône,
+  son nom vers sa fiche, pour qui, son origine, le message qui l'a emporté, son état ; le télécharger, le retirer.
 - Promesses : celles qui l'engagent encore d'abord, leur échéance à gauche (en retard : dit) ; puis, côte à côte,
   celles qu'elle a tenues et celles qu'elle a abandonnées.
 - La vie des autres : un agenda — ce qui dure en ce moment, ce qui vient (le plus proche d'abord), ce qui est passé
@@ -23,13 +25,13 @@ un moment, dans ce que la faculté sait de lui (une situation qui dure, comment 
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from markupsafe import Markup
 
 from mika.app.handmade import MONTHS, WEEKDAYS
-from mika.app.handmade.lists import ORDINARY
+from mika.app.handmade.lists import ORDINARY, forms_for, subject_key
 from mika.app.handmade.nights import day_label
 from mika.app.handmade.tabs import (
     Got,
@@ -47,7 +49,9 @@ from mika.app.handmade.tabs import (
     text,
     tiles,
 )
+from mika.faculties.attachments import inspect as received
 from mika.faculties.memory.inspect import ORIGIN_FR
+from mika.faculties.shares import inspect as sent
 from mika.inspector import render
 from mika.inspector.ui import PREFIX
 from mika.kernel.frame import Frame
@@ -105,7 +109,9 @@ def souvenirs(got: Got) -> Markup | None:
 
 
 def _origin(said: str) -> dict[str, str] | None:
-    """« on le lui a dit (Adrien) » : sa sorte (``told``…), ses mots, qui."""
+    """« on le lui a dit (Adrien) » : sa sorte (``told``…), ses mots, qui. La faculté écrit la colonne avec la seule
+    table de ces mots (``ORIGIN_FR``, chaque origine d'une croyance, « elle l'a lu » comprise) : ses mots se
+    retrouvent tels quels ; une origine qu'elle ne nommerait pas resterait sans sorte, sous sa clé."""
     for kind, words in ORIGIN_FR.items():
         if said.startswith(words):
             return {"kind": kind, "text": words, "who": said[len(words):].strip().removeprefix("(").removesuffix(")")}
@@ -207,27 +213,45 @@ def moments(got: Got) -> Markup | None:
 PIECE_KINDS = {"photo": "image", "vocal": "audio", "document": "file"}
 
 
+def _download(line: Line) -> dict[str, Any] | None:
+    """Le lien « télécharger » d'un fichier encore là (« — » une fois retiré)."""
+    got = line.get("télécharger")
+    return got if (got or {}).get("t") == "link" else None
+
+
+def _removals(got: Got, items: list[dict[str, Any]], action: str, question: Callable[[str], str]) -> None:
+    """« Retirer » sur chaque fichier encore là (ADR 0205) : le formulaire que la console prépare pour l'action de sa
+    faculté, le fichier pour objet, confirmé par son nom (``remove`` de l'entrée)."""
+    prepared = forms_for(got.ui, got.forms, action, [x["key"] for x in items], got.query, title="Retirer",
+                         button="Retirer")
+    for x in items:
+        if x["key"] in prepared:
+            x["remove"] = {**prepared[x["key"]], "confirm": question(x["title"])}
+
+
 def _piece(line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
     state = line.get("état")
     href = raw.get("nom")
     tied = int(number(line.get("liens")) or 0)
     links = render.href(Ref(href.kind, href.key, "", (("onglet", "liens"),))) if isinstance(href, Ref) else ""
-    return {"name": line["nom"], "from": line.get("de"), "kind": PIECE_KINDS.get(line.text("sorte"), "file"),
+    return {"key": subject_key(href, received.KIND), "title": line.text("nom"),
+            "name": line["nom"], "from": line.get("de"), "kind": PIECE_KINDS.get(line.text("sorte"), "file"),
             "sort": line.text("sorte"), "size": line.text("taille"), "at": line.get("reçue"),
             "seen": None if blank(line.get("ce qu'elle y a lu")) else line.get("ce qu'elle y a lu"),
             "state": None if blank(state) or text(state) == "gardée" else state,
             "gone": text(state).startswith("retirée"), "unread": text(state) == "gardée, pas lue",
-            "tied": tied, "links": links if tied else "",
-            "download": line.get("télécharger") if (line.get("télécharger") or {}).get("t") == "link" else None}
+            "tied": tied, "links": links if tied else "", "download": _download(line)}
 
 
 def recues(got: Got) -> Markup | None:
     """Mémoire › Pièces reçues : la place en chiffres ; en sous-onglets, une entrée par pièce (ce qu'elle y a lu en
-    avant), puis la place de chacun, une jauge par personne. Une page plus loin d'une liste rouvre son sous-onglet."""
+    avant ; la télécharger, la retirer), puis la place de chacun, une jauge par personne. Une page plus loin d'une liste
+    rouvre son sous-onglet."""
     table, by_person, facts = got.table("Pièces reçues"), got.table("Par personne"), got.fields("Place")
     if table is None or by_person is None or facts is None:
         return _empty_or_none(got, "handmade/memoire/recues.html")
     items = [_piece(x, r) for x, r in zip(got.lines("Pièces reçues"), raw_lines(got, table), strict=False)]
+    _removals(got, items, received.REMOVE, received.removal_question)
     f = pairs(facts)
     people = [{"who": x["personne"], "href": x.href, "n": x.text("pièces"), "used": x.text("occupé"),
                "share": gauge(x.get("de sa place"))} for x in got.lines("Par personne")]
@@ -239,6 +263,35 @@ def recues(got: Got) -> Markup | None:
     return got.draw("handmade/memoire/recues.html", t=anchored(table, "pieces-list"),
                     p=anchored(by_person, "pieces-place"), band=band, budget=text(f.get("place par personne")),
                     items=items, people=people, notes=got.notes())
+
+
+# ── Fichiers envoyés ──────────────────────────────────────────────────────
+
+#: la sorte d'un fichier envoyé, telle que la faculté l'écrit, et son icône
+SENT_KINDS = {"image": "image", "document": "file"}
+
+
+def _sent(line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
+    state = line.get("état")
+    return {"key": subject_key(raw.get("nom"), sent.KIND), "title": line.text("nom"), "name": line["nom"],
+            "to": None if blank(line.get("pour")) else line.get("pour"),
+            "kind": SENT_KINDS.get(line.text("sorte"), "file"), "sort": line.text("sorte"),
+            "size": line.text("taille"), "at": line.get("quand"), "origin": line.get("origine"),
+            "message": None if blank(line.get("message")) else line.get("message"),
+            "state": None if blank(state) or text(state) == "envoyé" else state,
+            "gone": text(state).startswith("retiré"), "download": _download(line)}
+
+
+def envoyes(got: Got) -> Markup | None:
+    """Mémoire › Fichiers envoyés (ADR 0205) : une entrée par fichier qu'elle a envoyé, à tout le monde — pour qui,
+    quand, son origine, le message qui l'a emporté, son état ; le télécharger, le retirer. La pagination de la
+    faculté."""
+    table = got.table("Fichiers envoyés")
+    if table is None:
+        return _empty_or_none(got, "handmade/memoire/envoyes.html")
+    items = [_sent(x, r) for x, r in zip(got.lines("Fichiers envoyés"), raw_lines(got, table), strict=False)]
+    _removals(got, items, sent.REMOVE, sent.removal_question)
+    return got.draw("handmade/memoire/envoyes.html", t=table, items=items, notes=got.notes())
 
 
 # ── Voir venir ────────────────────────────────────────────────────────────
@@ -336,6 +389,7 @@ TABS: dict[str, Any] = {
     "memoire/souvenirs": Tab(souvenirs, *STYLES),
     "memoire/croyances": Tab(croyances, *STYLES),
     "memoire/recues": Tab(recues, *STYLES),
+    "memoire/envoyes": Tab(envoyes, *STYLES),
     "memoire/promesses": Tab(promesses, *STYLES),
     "memoire/moments": Tab(moments, *STYLES),
     "memoire/voir-venir": Tab(voir_venir, *STYLES),

@@ -191,7 +191,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .brand-mark { width: 24px; height: 24px; border-radius: var(--radius); display: grid; place-items: center; color: #fff; font-size: 12px;
   font-weight: 750; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .menu-toggle { display: none; }
-.primary-nav { display: flex; align-items: stretch; align-self: stretch; min-width: 0; }
+.primary-nav { display: flex; align-items: stretch; align-self: stretch; min-width: 0; flex-shrink: 0; }
 .nav-panel-head { display: none; }
 .nav-group { position: relative; display: flex; }
 .nav-group > summary, .nav-item[data-top] { display: flex; align-items: center; gap: 5px; padding: 0 10px; color: var(--text-2); font-size: 13px;
@@ -238,8 +238,10 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 1320px) { .nav-columns { grid-auto-columns: 150px; } }
 .menu-icon { flex: 0 0 16px; width: 16px; height: 16px; }
 
-.topbar-side { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; padding-left: 12px; }
-.search { position: relative; display: flex; align-items: center; gap: 7px; width: 240px; height: var(--ctl); padding: 0 6px 0 10px;
+/* Les rubriques gardent leur place ; quand la barre manque de largeur, c'est la pastille d'état qui cède (son
+   résumé se coupe), jamais un chevauchement avec les rubriques. */
+.topbar-side { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding-left: 12px; }
+.search { position: relative; display: flex; align-items: center; gap: 7px; width: 240px; flex-shrink: 0; height: var(--ctl); padding: 0 6px 0 10px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--raised); color: var(--muted); }
 .search:hover { border-color: var(--border-strong); }
 .search:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
@@ -268,6 +270,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .status-pill:hover, .status-menu[open] .status-pill { border-color: var(--border-strong); }
 .status-pill b { color: var(--text); font-weight: 600; }
 .status-digest { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status-menu { min-width: 0; }
 .mood { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--sw, var(--ok));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--sw, var(--ok)) 22%, transparent); }
 .mood.ok { --sw: var(--ok); } .mood.warn { --sw: var(--warn); } .mood.danger { --sw: var(--danger); } .mood.muted { --sw: var(--muted); }
@@ -296,6 +299,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .pop-row { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 10px; border: 0; border-radius: var(--radius); background: none;
   color: var(--text); font: 13px var(--font); cursor: pointer; text-align: left; }
 .pop-row:hover { background: var(--hover); }
+a.pop-row:hover { text-decoration: none; }
 .theme { display: flex; gap: 2px; margin: 2px 6px 8px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius); }
 .theme button { flex: 1; height: 26px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
   font: 500 12px var(--font); cursor: pointer; }
@@ -336,10 +340,9 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .tab .count { background: var(--accent); color: var(--on-accent); }
 /* combien un onglet en compte, en petit (la maquette : « Objectifs 8 ») */
 .tab .tab-n { color: var(--muted); font-size: 11.5px; font-weight: 500; }
-/* ce qui règle une destination (``gear``, ADR 0176) : au bout de la barre d'onglets, à droite */
+/* la barre d'onglets et ce qui la termine : « Plus » (.tabs-more), des filtres de petits choix (.tabs-tail) */
 .tabs-row { display: flex; align-items: flex-end; gap: 22px; margin: 0 0 18px; border-bottom: 1px solid var(--border); }
 .tabs-row .tabs { flex: 1 1 auto; min-width: 0; margin: 0; border-bottom: 0; }
-.tab-gear { margin-left: auto; }
 /* des filtres de petits choix (la période) : des boutons à choix au bout de la barre d'onglets (la maquette) */
 .tabs-tail { flex: none; align-self: center; display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .quick-filters { display: flex; justify-content: flex-end; margin: 0 0 16px; }
@@ -355,15 +358,14 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
   .tabs-row:has(> .tabs-tail) > .tabs { flex-basis: 100%; order: 2; }
   .tabs-row > .tabs-tail { order: 1; padding-bottom: 6px; }
 }
-.tab-gear .menu-icon { width: 14px; height: 14px; flex-basis: 14px; }
-.tabs-more, .gear-tabs { position: relative; flex: none; }
-.tabs-more > summary, .gear-tabs > summary { list-style: none; cursor: pointer; }
-.tabs-more > summary::-webkit-details-marker, .gear-tabs > summary::-webkit-details-marker { display: none; }
-.tabs-more-panel, .gear-tabs-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 9; display: grid; min-width: 220px;
+.tabs-more { position: relative; flex: none; }
+.tabs-more > summary { list-style: none; cursor: pointer; }
+.tabs-more > summary::-webkit-details-marker { display: none; }
+.tabs-more-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 9; display: grid; min-width: 220px;
   padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); box-shadow: var(--shadow-pop); }
-.tabs-more-panel a, .gear-tabs-panel a { padding: 7px 10px; border-radius: var(--radius); color: var(--text); }
-.tabs-more-panel a:hover, .tabs-more-panel a.on, .gear-tabs-panel a:hover, .gear-tabs-panel a.on { background: var(--hover); color: var(--text); text-decoration: none; }
-.tabs-more-panel a.on, .gear-tabs-panel a.on { color: var(--accent); font-weight: 600; }
+.tabs-more-panel a { padding: 7px 10px; border-radius: var(--radius); color: var(--text); }
+.tabs-more-panel a:hover, .tabs-more-panel a.on { background: var(--hover); color: var(--text); text-decoration: none; }
+.tabs-more-panel a.on { color: var(--accent); font-weight: 600; }
 
 .flash { padding: 9px 14px; border-radius: var(--radius); margin: 0 0 14px; border: 1px solid transparent; }
 .flash.ok { background: var(--ok-bg); color: var(--ok); } .flash.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-line); }
@@ -636,7 +638,6 @@ form.inline { display: inline; }
 .record-form { border-color: var(--accent); }
 .field > .btn, .field > .check { justify-self: start; }
 .check.small { font-size: 12.5px; color: var(--muted); }
-.inline-form { display: inline; }
 
 
 /* Actions d'en-tête : des boutons, un panneau à la fois */
@@ -668,7 +669,6 @@ form.inline { display: inline; }
 .login h1 { margin: 20px 0; }
 .login .btn { width: 100%; }
 .form-status { color: var(--warn); font-size: 12.5px; margin-left: auto; }
-.kv-inline { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 
 .sw-neutral { --sw: var(--emo-neutral); }
 .sw-happy { --sw: var(--emo-happy); }
@@ -710,12 +710,19 @@ form.inline { display: inline; }
 @media (max-width: 1440px) {
   .search kbd { display: none; }
   .search { width: 190px; }
-  .status-pill { max-width: 250px; }
+  /* son résumé tient en entier (« curieuse · énergie 53 % ») : son nom, déjà en tête de la barre, n'est plus lu
+     qu'à voix haute */
+  .status-pill { max-width: 300px; }
+  .status-pill b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .nav-group > summary, .nav-item[data-top] { padding: 0 8px; }
   .nav-group.active > summary::after, .nav-item[data-top].on::after { left: 8px; right: 8px; }
 }
-@media (max-width: 1280px) {
+/* trop étroit pour son résumé : la pastille garde son nom, sa couleur et ses alertes */
+@media (max-width: 1360px) {
   .status-digest { display: none; }
+  .status-pill b { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+}
+@media (max-width: 1280px) {
   .search { width: 150px; }
   .brand-name { display: none; }
 }
@@ -1025,13 +1032,21 @@ form.inline { display: inline; }
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 0 36px; padding-top: 6px; }
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > legend { margin-bottom: 4px; }
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field { padding: 11px 0; border-top: 1px solid var(--border); }
-:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) {
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 45%); column-gap: 16px; row-gap: 2px; align-items: center; }
-:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) > :is(input, select, .unit) {
-  grid-column: 2; grid-row: 1 / span 3; width: 100%; align-self: center; }
-:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) > :is(label, .label, .help) { grid-column: 1; }
-:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) > :is(.check.small, .btn) { grid-column: 2; justify-self: start; }
-:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) > .error { grid-column: 1 / -1; }
+/* La ligne d'un réglage, écrite ici seulement, pour chaque page qui en a : un groupe de réglages, les Paramètres avancés
+   (.param-main), ceux du courrier (.mailset-param). --field-value règle la colonne de la valeur ; un relevé en lecture
+   seule (.value-ro) est trop long pour elle et reste à gauche. */
+:is(:is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group, .params-form .param-main,
+  .mailset-panes .mailset-param) > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) {
+  grid-template-columns: minmax(0, 1fr) var(--field-value, minmax(150px, 45%)); column-gap: 16px; row-gap: 2px; align-items: center;
+  > :is(input, select) { grid-column: 2; grid-row: 1 / span 3; width: 100%; align-self: center; }
+  > :is(label, .label, .help, .value-ro) { grid-column: 1; }
+  > :is(.check.small, .btn) { grid-column: 2; justify-self: start; }
+  > .error { grid-column: 1 / -1; }
+  @media (max-width: 700px) {
+    grid-template-columns: minmax(0, 1fr);
+    > * { grid-column: 1 !important; grid-row: auto !important; }
+  }
+}
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field > label:not(.check) { font-weight: 550; }
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field > label.check { font-weight: 550; }
 :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group:not(:has(.field ~ .field)) > .field select { max-width: none; }
@@ -1051,10 +1066,6 @@ form.inline { display: inline; }
     grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; align-items: start; }
   :is(.page-view > .now-page > form.action-card, .stack > form.action-card):has(> fieldset.group ~ fieldset.group ~ fieldset.group) > :not(fieldset.group) {
     grid-column: 1 / -1; }
-}
-@media (max-width: 700px) {
-  :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) { grid-template-columns: minmax(0, 1fr); }
-  :is(.settings, .hm-form, .page-view > .now-page > form.action-card, .stack > form.action-card) .group > .field:not(.mapping):not(:has(textarea, .check-list, .slider)) > * { grid-column: 1 !important; grid-row: auto !important; }
 }
 .mono, code { overflow-wrap: anywhere; }
 /* la marque sur la page de connexion (hors du cadre) */

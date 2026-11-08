@@ -60,7 +60,8 @@ class PromiseArgs(BaseModel):
 MEMORY.bundle("memory", phrase("memory.tools.bundle"))
 
 
-@MEMORY.tool("memory_search", description=phrase("memory.tools.search.description"), args=SearchArgs, bundle="memory",
+@MEMORY.tool("memory_search", description=phrase("memory.tools.search.description"),
+             label=phrase("memory.tools.search.label"), args=SearchArgs, bundle="memory",
              episodes=[*CONVERSATIONAL, *WORKING])
 async def memory_search(args: SearchArgs, ctx: Any) -> str:
     vectors, store = ctx.ports.get("vectors"), ctx.ports.get("store")
@@ -162,7 +163,8 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     return out
 
 
-@MEMORY.tool("memory_promise_done", acts=True, description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,
+@MEMORY.tool("memory_promise_done", acts=True, description=phrase("memory.tools.promise_done.description"),
+             label=phrase("memory.tools.promise_done.label"), args=PromiseArgs,
              bundle="memory", episodes=CONVERSATIONAL)
 async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     state = ctx.frame.state("memory")

@@ -1,0 +1,23 @@
+{# Réglages › Configuration des plugins (app/handmade/tabs/settings.py ``plugins``, ADR 0121) : une table par groupe — les
+   plugins composés, puis ce qui se branche sans en être un —, une ligne par plugin : son nom et ce qui s'y règle, ses
+   pages de réglages, ses paramètres avancés, où s'en servir. Les lignes viennent d'app/reglages.py (``PLUGINS``). #}
+{% from "_navigation.html" import pager as pages %}
+<div class="stack hm-plugins">
+{% for g in groups %}
+<section class="now-card hm-table-card table-block" aria-labelledby="plugins-{{ loop.index }}">
+  <header class="now-card-head"><h2 id="plugins-{{ loop.index }}">{{ g.title }}</h2><span class="person-count now-num">{{ g.rows|length }}</span></header>
+  <div class="hm-table-wrap"><table class="hm-table hm-plugins-table">
+    <thead><tr><th scope="col">Plugin</th><th scope="col">Configuration</th><th scope="col">Paramètres avancés</th><th scope="col">Où s'en servir</th></tr></thead>
+    <tbody>
+    {% for r in g.rows %}<tr>
+      <th scope="row"><span class="hm-plugin-name">{{ r.name }}</span><span class="hm-plugin-what">{{ r.what }}</span></th>
+      <td>{% for title, href in r.configure %}<a href="{{ href }}">{{ title }}</a>{% if not loop.last %}<br>{% endif %}{% else %}<span class="now-muted">—</span>{% endfor %}</td>
+      <td>{% if r.params %}<a href="{{ r.params }}">Paramètres</a>{% else %}<span class="now-muted">—</span>{% endif %}</td>
+      <td>{% if r.usage %}<a href="{{ r.usage[1] }}">{{ r.usage[0] }}</a>{% else %}<span class="now-muted">—</span>{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <div class="hm-pager single">{{ pages(g.pager) }}</div>
+</section>
+{% endfor %}
+</div>

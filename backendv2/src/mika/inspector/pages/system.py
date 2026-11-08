@@ -3,6 +3,7 @@ contributions, journal d'exploitation, simulations, toutes les vues."""
 
 from __future__ import annotations
 
+import asyncio
 import re
 import secrets as _secrets
 from collections import defaultdict
@@ -37,6 +38,7 @@ from mika.kernel.inspect import (
     Nav,
     NavItem,
     Note,
+    Pager,
     Param,
     Prose,
     Ref,
@@ -54,11 +56,12 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
     read_params,
+    size_fr,
 )
 from mika.ports.journal import JournalContent, JournalEvent, JournalOutbox, JournalSnapshot
 from mika.runtime import health
 from mika.runtime import operations as ops
-from mika.runtime.boundary import Failed, call
+from mika.runtime.boundary import Failed, acall, call
 
 #: les états d'une ligne de la file de sortie (``runtime/effects.py``) ; « seen » : un échec qu'un opérateur a
 #: vu et laissé. « stale » : une parole qui n'a pas pu partir dans les dix minutes (elle ne la dira plus, et
@@ -91,14 +94,14 @@ def _names(items: Any) -> str:
     return ", ".join(sorted(items)) or "—"
 
 
-@TABS.tab("systeme.sante", title="Santé générale", group="Surveillance", badge=lambda ui: sum(
+@TABS.tab("systeme.sante", title="Santé générale", group="Surveiller", badge=lambda ui: sum(
     1 for c in health.report(ui.kernel).checks if c.state != health.OK),
           description="Repérer les problèmes de fonctionnement et retrouver le diagnostic utile pour chacun.")
 async def sante(ui: Any, request: Request) -> Any:
     return health_page(ui)
 
 
-@TABS.tab("systeme.appels", title="Appels et coûts", group="Surveillance",
+@TABS.tab("systeme.appels", title="Appels et coûts", group="Surveiller",
           description="Chaque appel de modèle : combien, par qui, pour combien, combien de temps, avec quelle part "
                       "de cache (30 jours gardés).")
 async def appels(ui: Any, request: Request) -> list[Any]:
@@ -329,41 +332,97 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
     return out
 
 
-@TABS.tab("systeme.operations", title="Actions des opérateurs", group="Journaux",
-          description="Ce que les opérateurs ont fait depuis la console : l'action, qui, sur quoi, l'issue (jamais "
-                      "un contenu).")
-async def operations(ui: Any, request: Request) -> list[Any]:
+#: d'où vient un geste, en bouton à choix au bout de la barre d'onglets (ADR 0176 : quatre choix au plus, toujours
+#: posé)
+ORIGIN_PARAM = Param("depuis", "depuis", kind="select", default="tout", choices=(("tout", "tout"),
+                                                                                 *names.ORIGINS.items()))
+
+
+@TABS.tab("systeme.operations", title="Gestes audités", group="Journaux",
+          description="Ce que les opérateurs ont fait dans la console, et chacun depuis son espace : le geste, qui, "
+                      "d'où, sur quoi, l'issue (jamais un contenu).")
+async def operations(ui: Any, request: Request) -> Any:
     ctx = ui.inspection.context(request.query_params)
-    done, pager = ctx.older([rt.OPERATED], OPERATIONS_PAGE)
-    rows = tuple(operation_row(ui, e) for e in done)
-    return [Table((Column("quand", "fit"), "action", "par", "sur", "issue", Column("action (clé)", detail=True),
-                   Column("événements", detail=True)), rows,
-                  title="Ce que les opérateurs ont fait", empty="Aucune action d'opérateur encore.", pager=pager)]
+    values, _ = read_params((ORIGIN_PARAM,), request.query_params)
+    wanted = str(values["depuis"] or "")
+    operators = operator_handles(ui)
+
+    def origin(e: Any) -> str:
+        return gesture_origin(e.data.action, e.data.by, operators)
+
+    if wanted in names.ORIGINS:
+        done, pager = _older_where(ctx, [rt.OPERATED], OPERATIONS_PAGE, lambda e: origin(e) == wanted)
+    else:
+        done, pager = ctx.older([rt.OPERATED], OPERATIONS_PAGE)
+    rows = tuple(operation_row(ui, e, origin(e)) for e in done)
+    empty = f"Aucun geste depuis {names.ORIGINS[wanted]}." if wanted in names.ORIGINS else "Aucun geste audité encore."
+    return {"blocks": [Table((Column("quand", "fit"), "action", "par", "depuis", "sur", "issue",
+                              Column("action (clé)", detail=True), Column("événements", detail=True)), rows,
+                             title=OPERATIONS_TITLE, empty=empty, pager=pager)],
+            "filters": (ORIGIN_PARAM,)}
 
 
-#: les opérations, par page
+#: les gestes audités, par page ; le titre de leur tableau (la page dessinée le lit, ``app/handmade/tabs/system.py``)
 OPERATIONS_PAGE = 100
+OPERATIONS_TITLE = "Gestes audités"
+#: un filtre que le journal ne sait pas dire (d'où vient un geste) se lit par lots du plus récent, au plus tant
+#: d'événements par page
+SCAN_BATCH, SCAN_MAX = 200, 2000
 
 
-def operation_row(ui: Any, e: Any) -> Row:
-    """Une action d'opérateur : son titre, qui (un nom), sur quoi (un nom), l'issue en mots ; les clés au
-    détail."""
+def operator_handles(ui: Any) -> frozenset[str]:
+    """Les adresses des opérateurs (``user_N``) : la console n'est qu'à eux (vide si les comptes ne se lisent pas)."""
+    got = call(ui.deps.accounts.all, label="comptes des opérateurs")
+    return frozenset() if isinstance(got, Failed) else frozenset(a.handle for a in got if a.operator)
+
+
+def gesture_origin(action: str, by: str, operators: frozenset[str]) -> str:
+    """D'où vient un geste : ce que dit sa clé (``operations.origin``) ; une action déclarée sous sa clé nue, la console
+    si c'est un opérateur qui l'a faite (elle n'est qu'à eux), sinon l'espace de la personne."""
+    return ops.origin(action, by) or (ops.CONSOLE if by in operators else ops.SPACE)
+
+
+def _older_where(ctx: Any, types: list[Any], size: int, keep: Any) -> tuple[list[Any], Pager]:
+    """Une page du journal à curseur, réduite à ce que garde ``keep`` : lue par lots du plus récent, jusqu'à une page et
+    une ligne de plus, ou ``SCAN_MAX`` événements lus — « Plus anciens » reprend alors après le dernier lu."""
+    current = ctx.int_param("avant", 0)
+    cursor: int | None = current or None
+    found: list[Any] = []
+    read, exhausted = 0, False
+    while len(found) <= size and read < SCAN_MAX:
+        batch = ctx.events(types, SCAN_BATCH, before=cursor)
+        read += len(batch)
+        found.extend(e for e in batch if keep(e))
+        if len(batch) < SCAN_BATCH:
+            exhausted = True
+            break
+        cursor = batch[-1].seq
+    if len(found) > size or exhausted:
+        return cursor_page(found, size, current=current)
+    return found, Pager(param="avant", size=size, older=(("avant", str(cursor)),))
+
+
+def operation_row(ui: Any, e: Any, origin: str) -> Row:
+    """Un geste audité : son titre, qui (un nom), d'où, sur quoi (un nom), l'issue en mots ; les clés au détail. Sur quoi
+    ne mène qu'à une fiche qui s'ouvre : le journal garde des objets retirés depuis, et des sortes que la console donne à
+    autre chose (un compte de connexion sous « compte », dont les fiches sont des boîtes) ; ceux-là restent du texte."""
     label, tone = names.OPERATED.get(e.data.outcome, (e.data.outcome, ""))
     subject, kind = e.data.subject or "", e.data.subject_kind or ""
     on: Any = "—"
     spec = ui.inspection.subject(kind) if kind else None
     if subject and kind in ("person", "handle"):
         on = ui.names.who_cell(subject)
-    elif subject and spec is not None:
+    elif subject and spec is not None and ui.inspection.head(kind, subject) is not None:
         on = Ref.subject(kind, subject, f"{spec.label} {subject}")
     elif subject:
         on = Text(subject, hint=kind)
-    return Row((When(e.at), ui.names.action(e.data.action), ui.names.who(e.data.by), on, Badge(label, tone),
-                Text(e.data.action, "mono"), ", ".join(str(s) for s in e.data.seqs) or "—"),
+    return Row((When(e.at), ui.names.action(e.data.action), ui.names.who(e.data.by),
+                names.ORIGINS.get(origin, origin), on, Badge(label, tone), Text(e.data.action, "mono"),
+                ", ".join(str(s) for s in e.data.seqs) or "—"),
                href=Ref("event", str(e.seq), ""))
 
 
-@TABS.tab("systeme.simulations", title="Simulations", group="Outils",
+@TABS.tab("systeme.simulations", title="Simulations", group="Anatomie",
           description="Les rapports de simulation (« mika sim run --report »).")
 async def simulations(ui: Any, request: Request) -> list[Any]:
     folder = ui.deps.reports
@@ -397,7 +456,7 @@ async def all_views(ui: Any, request: Request) -> list[Any]:
     return [Table(("vue", "faculté", "destination", "fiche", ""), rows, title="Ce que chaque faculté montre d'elle")]
 
 
-@TABS.tab("systeme.processus", title="Processus", group="Surveillance",
+@TABS.tab("systeme.processus", title="Processus", group="Surveiller",
           badge=lambda ui: sum(1 for s in ui.kernel.scheduler.specs if ui.kernel.scheduler.consecutive.get(s.name, 0)
                                  >= health.PROCESS_FAILURES_MAX),
           description="Ses processus de fond (relire la mémoire, dormir, relever le courrier…) : combien de passages, "
@@ -406,7 +465,7 @@ async def processus(ui: Any, request: Request) -> list[Any]:
     return process_blocks(ui, request.query_params)
 
 
-@TABS.tab("systeme.anomalies", title="Anomalies", group="Surveillance",
+@TABS.tab("systeme.anomalies", title="Anomalies", group="Surveiller",
           badge=lambda ui: len(getattr(ui.kernel.mind, "anomalies", ()) or ()),
           description="Ce qui s'est mal passé sans tout arrêter : une évaluation, une réduction, un choix de l'arbitre ; et "
                       "les traces du journal (épisode supplanté, oubli, reconstruction). En mémoire depuis le "
@@ -415,7 +474,7 @@ async def anomalies(ui: Any, request: Request) -> list[Any]:
     return anomaly_blocks(ui)
 
 
-@TABS.tab("systeme.sorties", title="File de sortie", group="Surveillance",
+@TABS.tab("systeme.sorties", title="File de sortie", group="Surveiller",
           badge=lambda ui: _outbox_problems(ui),
           description="Ce qui part d'elle vers les écrans et les services — ses messages, ce que montrent ses "
                       "écrans, ses actions (un mail, une réponse Teams…) — après son écriture au journal. Ce qui n'a "
@@ -533,7 +592,7 @@ async def outbox_post(ui: Any, request: Request) -> Response:
     return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
 
 
-@TABS.tab("systeme.passerelle", title="Moteur des modèles", group="Surveillance",
+@TABS.tab("systeme.passerelle", title="Moteur des modèles", group="Surveiller",
           description="La passerelle des modèles telle qu'elle tourne : pour chaque fournisseur, ses créneaux "
                       "(occupés, en attente), son quota ; pour chaque rôle, qui le sert vraiment.")
 async def passerelle(ui: Any, request: Request) -> list[Any]:
@@ -575,7 +634,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
 WORLD_ROLES = {"viewer": "écran", "host": "hôte", "creator": "créateur"}
 
 
-@TABS.tab("systeme.monde", title="Écrans du monde", group="Surveillance",
+@TABS.tab("systeme.monde", title="Écrans du monde", group="Surveiller",
           badge=lambda ui: len(_world_warnings(ui.deps.world.overview())) if ui.deps.world is not None else 0,
           description="Les clients du monde (/ws/world) : qui est connecté, avec quel moteur et quels rôles, qui "
                       "tient le bail d'hôte (le moteur qui joue ses actions), et ce que chaque hôte a dit lui manquer "
@@ -644,9 +703,10 @@ def _world_warnings(view: dict[str, Any]) -> list[tuple[dict[str, Any], list[str
     return [(r, lacks) for r in view["loaded"] if r["session"] in connected and (lacks := _world_lacks(r, view["rev"]))]
 
 
-@TABS.tab("systeme.stockage", title="Stockage et sauvegardes", group="Surveillance",
-          description="Ses bases (sa vie dans mind.db, les projections jetables dans views.db), le dernier instantané "
-                      "et ce que garde le journal. Les sauvegardes se font par « mika backup ».")
+@TABS.tab("systeme.stockage", title="Stockage et sauvegardes", group="Surveiller",
+          description="Chacune de ses bases et chacun de ses dossiers : la place qu'il prend, ce qu'il garde, ce que la "
+                      "sauvegarde en fait ; le dernier instantané et ce que garde le journal. Les sauvegardes se font "
+                      "par « mika backup ».")
 async def stockage(ui: Any, request: Request) -> list[Any]:
     store = ui.kernel.mind.store
     mind = ui.kernel.mind
@@ -660,9 +720,10 @@ async def stockage(ui: Any, request: Request) -> list[Any]:
 
     snap = store.latest_snapshot()
     boots = mind.root.slices["kernel"].boots
+    places = await _places(ui)
     return [
-        Stats((Stat(mind_base.name, _size(mind_base), f"sa vie : à sauvegarder{mind_base.note}"),
-               Stat(views_base.name, _size(views_base), f"reconstruisible{views_base.note}"),
+        Stats((Stat(mind_base.name, size_fr(mind_base.size), f"sa vie : à sauvegarder{mind_base.note}"),
+               Stat(views_base.name, size_fr(views_base.size), f"reconstruisible{views_base.note}"),
                Stat("Événements", mind.head, f"{boots} démarrage(s)"),
                Stat("Dernier instantané", f"seq {snap.seq}" if snap else "aucun",
                     ui.when_long(snap.at) if snap else "le démarrage rejoue tout"))),
@@ -673,11 +734,47 @@ async def stockage(ui: Any, request: Request) -> list[Any]:
             ("outbox", count("outbox"), "la file de sortie"),
             ("settings", count("settings"), "les réglages d'exploitation"),
         ), title=f"Ce que garde {mind_base.name}"),
+        *([_places_table(places)] if places is not None else []),
         *backup_blocks(ui),
         Note("Sauvegarder : « mika --data DOSSIER backup ARCHIVES --keep 14 » (sans risque serveur en marche) ; "
              "vérifier : « mika --data DOSSIER verify ARCHIVE » ; restaurer (serveur arrêté) : « mika restore "
              "ARCHIVE ». Chaque sauvegarde (réussie ou non) et chaque vérification se notent ici.", "muted"),
     ]
+
+
+#: ce que la sauvegarde fait d'une base ou d'un dossier (``app/backup.place``) : en mots, et son ton
+KEPT_WORDS = {"oui": ("sauvegardé", "ok"), "jetable": ("jetable : se reconstruit", "muted"),
+              "réextrait": ("pas sauvegardé : se réextrait", "muted"),
+              "retéléchargé": ("pas sauvegardé : se retélécharge", "muted"), "non": ("pas sauvegardé", "muted"),
+              "mis de côté": ("mis de côté par une restauration", "warn")}
+PLACES_TITLE = "Ses bases et ses dossiers"
+
+
+async def _places(ui: Any) -> list[dict[str, Any]] | None:
+    """Ce que porte son dossier de données (``app/backup.place``, que fournit la composition), mesuré hors de la
+    boucle d'événements (un parcours du dossier) ; ``None`` : ce serveur ne le dit pas, ou la mesure a échoué."""
+    fn = ui.deps.backups
+    measure = (fn() or {}).get("place") if fn is not None else None
+    if not callable(measure):
+        return None
+    got = await acall(lambda: asyncio.to_thread(measure), label="stockage : le dossier de données")
+    return None if isinstance(got, Failed) else list(got)
+
+
+def _places_table(places: list[dict[str, Any]]) -> Table:
+    rows = []
+    for p in places:
+        said, tone = KEPT_WORDS.get(str(p.get("sauvegarde")), (str(p.get("sauvegarde") or "—"), ""))
+        size = "sur le serveur MariaDB" if p.get("serveur") else size_fr(int(p.get("octets") or 0))
+        name = f"{p['nom']}/" if p.get("dossier") else str(p["nom"])
+        rows.append(Row((Text(name, "mono"), Text(size, "num"), Text(str(p.get("garde") or "—"), "muted"),
+                         Badge(said, tone)), tone="warn" if tone == "warn" else ""))
+    return Table(("nom", Column("place", "num"), "ce qu'il garde", "sauvegarde"), tuple(rows), title=PLACES_TITLE,
+                 empty="Le dossier de données ne se lit pas.",
+                 caption="La sauvegarde (« mika backup ») emporte ce qui ne se reconstruit pas ; views.db se reconstruit "
+                         "depuis le journal (les traces et les appels de modèle des derniers jours s'y perdent), la "
+                         "carte se réextrait, le modèle de plongements se retélécharge. Sous MariaDB, ses bases sont "
+                         "sur le serveur : la sauvegarde en fait une copie SQL.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -699,8 +796,9 @@ _COUNTED = {"events": JournalEvent.__table__, "content": JournalContent.__table_
 
 def _base(sql: Any) -> _Base:
     """Une base lue par sa connexion : ses tables (``inspect`` de SQLAlchemy, jamais le catalogue d'un moteur) et sa
-    place, qui dépend du moteur et le dit — la taille du fichier sous SQLite, ce qu'InnoDB déclare de ses données et
-    de ses index sous MariaDB (``information_schema`` : une estimation, sans les journaux du serveur)."""
+    place, qui dépend du moteur et le dit — la taille du fichier et de son journal d'écriture sous SQLite, ce qu'InnoDB
+    déclare de ses données et de ses index sous MariaDB (``information_schema`` : une estimation, sans les journaux du
+    serveur)."""
     bind = sql.session.get_bind()
     tables = set(inspect(bind).get_table_names())
     counts = {name: int(sql.query(select(func.count()).select_from(t))[0][0])
@@ -709,7 +807,9 @@ def _base(sql: Any) -> _Base:
     engine = sql.dialect.name
     if engine == "sqlite":
         path = Path(url.database) if url.database and url.database != ":memory:" else None
-        size = path.stat().st_size if path is not None and path.exists() else None
+        # avec son journal d'écriture (``-wal``, ``-shm``) : la place qu'elle prend, comme « Ses bases et ses dossiers »
+        size = sum(p.stat().st_size for p in (path, *(Path(f"{path}{s}") for s in ("-wal", "-shm"))) if p.exists()) \
+            if path is not None and path.exists() else None
         return _Base(path.name if path is not None else "en mémoire", size, "", counts)
     if engine in ("mysql", "mariadb"):
         info = sa_table("tables", column("table_schema"), column("data_length"), column("index_length"),
@@ -718,10 +818,6 @@ def _base(sql: Any) -> _Base:
                         .where(info.c.table_schema == func.database()))
         return _Base(str(url.database or engine), int(got[0][0] or 0), " (estimation d'InnoDB)", counts)
     return _Base(str(url.database or engine), None, f" (place inconnue sous {engine})", counts)
-
-
-def _size(base: _Base) -> str:
-    return _bytes(base.size) if base.size is not None else "—"
 
 
 #: au-delà, une sauvegarde est « ancienne » (l'accueil le signale)
@@ -780,25 +876,19 @@ def backup_blocks(ui: Any) -> list[Any]:
               else f"échec : {check.get('erreur', '?')}")[:120] if check else
              "« mika verify ARCHIVE » rejoue une archive sans rien toucher",
              "" if not check else "ok" if check.get("ok") else "danger"),
-        Stat("Archives gardées", len(archives), _bytes(sum(int(a.get("octets") or 0) for a in archives))
+        Stat("Archives gardées", len(archives), size_fr(sum(int(a.get("octets") or 0) for a in archives))
              + (f" · {last.get('dossier')}" if last else "")),
     ), title="Sauvegardes")]
     if last:
         out.append(Fields((("archive", Text(str(last.get("archive", "—")), "mono")), ("fichiers", last.get("fichiers")),
-                           ("taille", _bytes(int(last.get("octets") or 0))), ("tête du journal", last.get("tete")),
+                           ("taille", size_fr(int(last.get("octets") or 0))), ("tête du journal", last.get("tete")),
                            ("en garde", f"les {last['garde']} plus récentes" if last.get("garde") else "toutes"),
                            ("remarques", "; ".join(last.get("remarques") or []) or "—")),
                           title="La dernière sauvegarde", columns=2))
     if archives:
         out.append(Table((Column("archive"), Column("taille", "num"), Column("écrite", "fit")), tuple(
-            (Text(a["nom"], "mono"), _bytes(int(a.get("octets") or 0)), When(int(a.get("at") or 0)))
+            (Text(a["nom"], "mono"), size_fr(int(a.get("octets") or 0)), When(int(a.get("at") or 0)))
             for a in archives), title=f"Archives ({len(archives)})"))
     return out
 
 
-def _bytes(n: int) -> str:
-    for unit in ("o", "Ko", "Mo", "Go"):
-        if n < 1024 or unit == "Go":
-            return f"{n:.0f} {unit}" if unit == "o" else f"{n:.1f} {unit}".replace(".", ",")
-        n /= 1024
-    return str(n)

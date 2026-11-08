@@ -34,7 +34,6 @@ from mika.kernel.events import (
     Content,
     Draft,
     Event,
-    EventType,
     Origin,
     Payload,
     VoiceProvenance,
@@ -651,10 +650,6 @@ class Mind:
         t, data = registry.events.decode_or_retired(stored.type, stored.v, stored.data)
         return Event(stored.seq, stored.id, t, stored.at, data, stored.causation, stored.correlation,
                      stored.basis, Origin(stored.origin))
-
-
-def event_type_names(types: Iterable[EventType[Any]]) -> set[str]:
-    return {t.name for t in types}
 
 
 class _Gaps:

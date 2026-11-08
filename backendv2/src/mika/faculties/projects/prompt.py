@@ -61,6 +61,7 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import describe_error
 from mika.kernel.prompt import SectionBody
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import hearable
@@ -228,7 +229,7 @@ def _objective_line(o: Objective, texts: Mapping[str, str], pm: Any, now: int) -
     if o.kind == c.CONSTANT and o.status != c.OPEN:
         state = phrase("projects.objective.aside", status=status)
     elif o.kind == c.CONSTANT:
-        last = phrase("projects.objective.last_pass", ago=ago(now - o.passed_at)) if o.passed_at else \
+        last = phrase("projects.objective.last_pass", ago=ago_words(now - o.passed_at)) if o.passed_at else \
             phrase("projects.objective.never")
         state = phrase("projects.objective.constant", every=_every(cadence(o, pm)), last=last)
     else:
@@ -239,17 +240,9 @@ def _objective_line(o: Objective, texts: Mapping[str, str], pm: Any, now: int) -
     return line
 
 
-def ago(us: int) -> str:
-    if us < HOUR:
-        return phrase("projects.duration.minutes", n=max(1, us // MINUTE))
-    if us < 2 * DAY:
-        return phrase("projects.duration.hours", n=us // HOUR)
-    return phrase("projects.duration.days", n=us // DAY)
-
-
 def _every(us: int) -> str:
-    return phrase("projects.duration.days", n=us // DAY) if us >= 2 * DAY and us % DAY == 0 else \
-        phrase("projects.duration.hours", n=max(1, round(us / HOUR)))
+    return phrase("timespan.ago.days", n=us // DAY) if us >= 2 * DAY and us % DAY == 0 else \
+        phrase("timespan.ago.hours", n=max(1, round(us / HOUR)))
 
 
 def _decision_line(d: Decision, texts: Mapping[str, str]) -> str:
@@ -297,7 +290,7 @@ def app_lines(p: Project, frame: Frame, problems: Mapping[str, list[str]] | None
         elif not a.enabled:
             state = phrase("projects.run.app.stopped")
         elif a.ticked_at:
-            state = phrase("projects.run.app.ticked", ago=ago(frame.now - a.ticked_at))
+            state = phrase("projects.run.app.ticked", ago=ago_words(frame.now - a.ticked_at))
         else:
             state = phrase("projects.run.app.waiting")
         line = phrase("projects.run.app.line", title=a.title, app=a.name, version=a.version, state=state)
@@ -371,7 +364,7 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     if reports:  # sa mémoire de travail : ses derniers comptes rendus, le plus récent en dernier (ADR 0145)
         verdicts = family("projects.run.verdicts")
         lines.append(phrase("projects.run.reports") + "\n" + "\n".join(
-            "- " + phrase("projects.run.report_line", ago=ago(frame.now - at), objective=oid,
+            "- " + phrase("projects.run.report_line", ago=ago_words(frame.now - at), objective=oid,
                           verdict=verdicts.get(verdict, verdict), summary=_clip(summary, REPORT_CLIP))
             for at, oid, verdict, summary in reports))
     elif p.summary_ref and texts.get(p.summary_ref):
@@ -489,7 +482,7 @@ def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) 
     if got is None or not got[0].network_out:
         return None
     p = got[0]
-    return SectionBody(phrase("projects.network.head", ago=ago(frame.now - p.network_out_at)) + f"\n{p.network_out}",
+    return SectionBody(phrase("projects.network.head", ago=ago_words(frame.now - p.network_out_at)) + f"\n{p.network_out}",
                        level=0, provenance=(f"project:{p.id}",))
 
 
@@ -507,7 +500,7 @@ def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -
     if got is None or got[1] is None or not lines:
         return None
     p, o = got
-    body = (phrase("projects.answer.head", who=_who(frame, o.asked_to), ago=ago(frame.now - o.asked_at)) + "\n"
+    body = (phrase("projects.answer.head", who=_who(frame, o.asked_to), ago=ago_words(frame.now - o.asked_at)) + "\n"
             + "\n".join(f"- {line}" for line in lines))
     return SectionBody(body, level=written(p), provenance=(f"project:{p.id}",))
 
@@ -709,7 +702,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
                                                    aud.private_ok):
             if p.last_run_at:
                 summary = texts.get(p.summary_ref, "")
-                since = ago(frame.now - p.last_run_at)
+                since = ago_words(frame.now - p.last_run_at)
                 line += "\n  " + (phrase("projects.live.last_run_summary", ago=since, summary=summary[:300]) if summary
                                    else phrase("projects.live.last_run", ago=since))
             nxt = _next_words(p, texts, frame.now, pm)

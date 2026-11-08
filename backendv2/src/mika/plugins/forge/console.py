@@ -57,9 +57,11 @@ from mika.kernel.inspect import (
     Text,
     When,
     paginate,
+    size_fr,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.kernel.rights import Grant, RuleTable
+from mika.kernel.text import fold
 from mika.plugins.forge import (
     ACCESS_SET,
     EMITTED,
@@ -90,7 +92,6 @@ from mika.plugins.forge.views import (
     decode_view,
     failure_note,
     find_view,
-    fold,
     render,
     summary,
     view_params,
@@ -648,8 +649,8 @@ async def _tab_base(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Bl
                   ", ".join(f"{c['name']} {c['type']}" + (" (clé)" if c.get("key") else "") for c in t["columns"]))
                  for t in schema["tables"])
     blocks: list[Block] = [
-        Fields((("moteur", schema["engine"]), ("taille", _octets(schema["size"])),
-                ("plafond", _octets(schema["max"])), ("vues", ", ".join(schema["views"]) or "aucune")),
+        Fields((("moteur", schema["engine"]), ("taille", size_fr(schema["size"])),
+                ("plafond", size_fr(schema["max"])), ("vues", ", ".join(schema["views"]) or "aucune")),
                title="Sa base"),
         Table(("table", Column("lignes", "num"), "colonnes"), rows, title="Ses tables",
               caption="_kv : le stockage de api.kv_*."),
@@ -665,10 +666,6 @@ async def _tab_base(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Bl
     page, pager = paginate(found, ctx.pager(size=LOGS_PAGE))
     return [*blocks, Table(columns, tuple(tuple(_shown(r.get(c)) for c in columns) for r in page),
                            title=f"{len(found)} ligne(s)", pager=pager, empty="aucune ligne")]
-
-
-def _octets(n: int) -> str:
-    return f"{n / 1_000_000:.1f} Mo".replace(".", ",") if n >= 100_000 else f"{max(1, n // 1000)} Ko"
 
 
 @FORGE.inspect("journal", title="Journal", subject="app", order=50,

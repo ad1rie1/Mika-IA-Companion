@@ -217,12 +217,3 @@ def event_type(
         upcasters=dict(upcasters or {}), content_fields=frozenset(content),
         subject_fields=frozenset(subjects), authored=authored,
     )
-
-
-def content_fields_of(payload: Payload, names: frozenset[str]) -> dict[str, Content]:
-    out: dict[str, Content] = {}
-    for n in names:
-        v = getattr(payload, n, None)
-        if isinstance(v, Content):
-            out[n] = v
-    return out

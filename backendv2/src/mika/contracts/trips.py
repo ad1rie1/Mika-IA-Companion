@@ -168,8 +168,6 @@ REMOVED = event_type("trips.removed", OWNER, Removed, subjects=("person",))
 LOOKED = event_type("trips.looked", OWNER, Looked, content=("query", "found"), subjects=("person", "handle"))
 SHOWN = event_type("trips.shown", OWNER, Shown, content=("title", "places", "line"), subjects=("person", "handle"))
 ALL = (CREATED, CHANGED, STOP_ADDED, STOP_MOVED, STOP_NOTED, STOP_REMOVED, REMOVED, LOOKED, SHOWN)
-#: ce qui change un voyage (son empreinte, ``STAMP``, suit chacun)
-EDITS = (CHANGED, STOP_ADDED, STOP_MOVED, STOP_NOTED, STOP_REMOVED)
 
 #: ``STAMP(voyage)`` : le ``seq`` du dernier geste qui l'a changé (0 : il n'existe pas) — ce qu'une garde relit pour
 #: qu'un geste fait sur un voyage lu ne s'applique pas à un voyage changé entre-temps

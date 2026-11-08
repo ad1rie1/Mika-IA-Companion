@@ -112,6 +112,14 @@ export interface StoredMessage {
    */
   files?: SentFile[];
   /**
+   * Les pièces d'un message de la personne (ADR 0215), telles que le fil relu
+   * les dit : nom, sorte, et de quoi reprendre sa copie quand elle a été
+   * gardée — validées par `userAttachments`. Le texte, lui, garde leurs noms
+   * (`withAttachments`) : c'est ainsi que le client web les affiche et qu'une
+   * bulle se reconnaît au retour du serveur.
+   */
+  attachments?: HistoryAttachment[];
+  /**
    * L'avis de son opératrice sur cette réponse (ADR 0113), et ce qu'elle
    * aurait dû dire. Seule une connexion d'opératrice les reçoit.
    */
@@ -552,6 +560,31 @@ export function sentFiles(raw: unknown): SentFile[] {
   return out;
 }
 
+/**
+ * Les pièces qu'une ligne du serveur annonce pour un message de la personne,
+ * telles qu'on peut les montrer : un nom, une sorte, et seulement une adresse
+ * qui est exactement `/files/<id>`. Une entrée sans adresse valide garde son
+ * nom : rien à télécharger, mais la pièce reste montrée.
+ */
+export function userAttachments(raw: unknown): HistoryAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: HistoryAttachment[] = [];
+  for (const a of raw as Array<Partial<HistoryAttachment> | null>) {
+    if (!a || typeof a.name !== "string" || !a.name) continue;
+    const kind = typeof a.kind === "string" && a.kind ? a.kind : "file";
+    const item: HistoryAttachment = { name: a.name, kind };
+    if (typeof a.id === "string" && FILE_ID.test(a.id) && a.url === `/files/${a.id}`) {
+      item.id = a.id;
+      item.url = a.url;
+      if (typeof a.mime === "string") item.mime = a.mime;
+      if (typeof a.size === "number") item.size = a.size;
+      item.available = a.available !== false;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
 function attachmentNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -666,10 +699,12 @@ export function mergeHistory(
         m.id === undefined && m.sender === sender && m.strand === strand && matches(m, text, typed)
     );
     const files = sender === "vtuber" ? sentFiles(entry.attachments) : [];
+    const pieces = sender === "user" ? userAttachments(entry.attachments) : [];
     if (mine) {
       mine.id = entry.id;
       mine.ts = entry.ts ?? mine.ts;
       if (files.length && !mine.files?.length) mine.files = files;
+      if (pieces.length) mine.attachments = pieces;
       if (sender === "user") {
         mine.status = "sent";
         mine.reason = undefined;
@@ -687,6 +722,7 @@ export function mergeHistory(
         id: entry.id,
         status: sender === "user" ? "sent" : undefined,
         ...(files.length ? { files } : {}),
+        ...(pieces.length ? { attachments: pieces } : {}),
         ...(verdict ? { verdict } : {}),
         ...(verdictNote ? { verdictNote } : {}),
         ...(mode ? { mode } : {}),
@@ -729,6 +765,15 @@ function enrich(shown: StoredMessage, mode: "pro" | undefined, entry: HistoryEnt
     const notes = messageNotes(entry.notes);
     if (!sameNotes(shown.notes, notes)) {
       shown.notes = notes.length ? notes : undefined;
+      changed = true;
+    }
+  }
+  if (shown.sender === "user" && Array.isArray(entry.attachments)) {
+    // ses pièces, telles que le fil relu les dit : l'adresse d'une pièce arrive une fois qu'elle a été gardée
+    const pieces = userAttachments(entry.attachments);
+    if (JSON.stringify(shown.attachments ?? []) !== JSON.stringify(pieces)) {
+      if (pieces.length) shown.attachments = pieces;
+      else delete shown.attachments;
       changed = true;
     }
   }

@@ -1,5 +1,5 @@
 """Connexions extérieures, chaque onglet dans sa forme (``app/handmade/tabs/senses.py``, ADR 0177), à travers le vrai
-serveur : la phrase d'état de la vue en tête, ses liens vers ses réglages dans la barre de titre ; un flux en panne en
+serveur : la phrase d'état de la vue en tête, ses réglages derrière la roue de Ses sens (ADR 0206) ; un flux en panne en
 bandeau ; ce que voit la caméra à côté de ses appareils ; un dessin dit pour qui (son nom, pas sa clé) et ce qu'elle y
 voit ; les appareils à gauche, leurs signaux à droite ; et ce que chaque page dit, vide."""
 
@@ -51,7 +51,14 @@ def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_per
     kernel, now = _life(client, live)
     empty = drawn(client, "/inspecteur/sens/flux")
     assert 'data-tab="sens/flux"' in empty and "Aucun flux n'est suivi" in empty
-    assert "Configurer le plugin" in _head(empty) and "gear-link" in _head(empty)  # ses réglages, en roue
+    # ses réglages : la roue de Ses sens (ADR 0206), qui les liste tous, pas un lien de plus dans la barre de titre
+    head = _head(empty)
+    assert "Configurer le plugin" not in head and 'class="gear-panel"' in head
+    gear = head.split('class="gear-panel"', 1)[1]
+    assert gear.index('href="/inspecteur/sens/parametres-flux"') < gear.index(
+        'href="/inspecteur/sens/parametres-appareils"') < gear.index('href="/inspecteur/sens/parametres-transcription"')
+    assert head.count('href="/inspecteur/sens/parametres-flux"') == 1 and "Flux suivis" in gear
+    assert "Réglages › Flux suivis, en haut à droite" in empty  # l'état vide dit où les ajouter
     feeds = Feeds()
     feeds.publish(Entry(id="e1", feed="Sciences", title="Une exoplanète habitable", link="https://example.net/1",
                         summary="Une planète rocheuse, à 40 années-lumière.", published=now - HOUR))
@@ -86,6 +93,9 @@ def test_camera_shows_what_she_sees_beside_her_devices_and_never_an_image(world)
     empty = drawn(client, "/inspecteur/sens/camera")
     assert 'data-tab="sens/camera"' in empty and "Aucun appareil ne s'est encore connecté" in empty
     assert "elle n'a encore rien vu" in empty and "Connecter une caméra" in _head(empty)
+    # une tâche reste dans la barre de titre, vers la page de la roue qui la sert (ADR 0206)
+    link = _head(empty).split("Connecter une caméra", 1)[0].rsplit("<a ", 1)[1]
+    assert 'href="/inspecteur/sens/parametres-appareils"' in link
     kernel.ports["camera"].put("salon", "image/jpeg", b"\xff" * 4096)
     append(client, kernel, [cam.SEEN.draft(source="camera", kind="view", device="salon", digest="d1", notable=True,
                                            summary=Content.of("Adrien est rentré et pose son sac."), pertinence=0.8)],

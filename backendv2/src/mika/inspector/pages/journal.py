@@ -245,12 +245,6 @@ def decision_blocks(ui: Any, started: Any, ended: Any, info: dict[str, Any]) -> 
     return out
 
 
-def event_blocks(ui: Any, seq: int, query=None) -> tuple[str, list[Any]] | None:
-    """Un événement du journal, en blocs (le repli de sa page dessinée) : son titre, ses blocs."""
-    got = event_page(ui, seq, query)
-    return (got["title"], got["blocks"]) if got is not None else None
-
-
 def event_page(ui: Any, seq: int, query=None) -> dict[str, Any] | None:
     """Un événement du journal : son titre, ses blocs, et ce que dessine ``handmade/evenement/evenement.html``
     (``view``) — ce qui s'est passé en mots, ses textes, son parcours dans la machine (qui le réduit, ce qu'il

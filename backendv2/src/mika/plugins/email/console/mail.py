@@ -249,7 +249,7 @@ def _files(ref: str, attachments: tuple) -> list[Block]:
         for i, a in enumerate(attachments)), title="Pièces jointes")] if attachments else []
 
 
-@EMAIL.inspect("message", title="Message", subject="mail", subject_param="id", order=10,
+@EMAIL.inspect("message", title="Message", subject="mail", order=10,
                description='Lis le contenu du message et choisis la suite : répondre, ranger ou marquer comme lu.')
 def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")

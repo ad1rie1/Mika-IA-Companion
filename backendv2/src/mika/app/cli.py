@@ -365,7 +365,7 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
                 "usage": "à coller dans l'extension de navigateur de ce compte ; Authorization: Bearer <clé> sur "
                          "/api/teams/…"}
     if args.teams_cmd == "revoke":
-        return {"ok": await desk.revoke_key(account, "ligne de commande"), "compte": account}
+        return {"ok": await desk.revoke_key(account), "compte": account}
     cfg = settings.teams()
     teams_rules = [a.model_dump() for a in settings.canals().table("teams").lines]
     accounts = {}
@@ -395,7 +395,7 @@ async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[s
         if ep is not None and ep.signed:
             usage += " — ou le corps signé par la clé (X-Hub-Signature-256 : le « secret » d'un webhook GitHub)"
         return {"ok": True, "name": args.name, "key": key, "usage": usage}
-    if not await desk.revoke_key(args.name, "ligne de commande"):
+    if not await desk.revoke_key(args.name):
         return {"ok": False, "error": f"« {args.name} » n'a pas de clé."}
     return {"ok": True, "name": args.name, "revoked": True}
 
@@ -613,7 +613,7 @@ def _places_index(data: Path, args: argparse.Namespace) -> dict[str, object]:
             "illisibles": got.broken, "par_catégorie": got.categories,
             "laissés_de_côté": [[kind, n] for kind, n in got.skipped[:15]], "secondes": got.seconds,
             "mémoire_max_mo": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024),
-            "ensuite": f"Réglages › Canaux › Lieux et adresses : l'index {rel}"}
+            "ensuite": f"Réglages › Carte et téléphone › Lieux et adresses : l'index {rel}"}
 
 
 def carte(data: Path, args: argparse.Namespace) -> int:
@@ -646,7 +646,7 @@ def carte(data: Path, args: argparse.Namespace) -> int:
                                              args.zoom, say=_said)
             return {"ok": True, "fichier": str(got.path), "tuiles": got.tiles, "octets": got.size,
                     "zooms": [got.minzoom, got.maxzoom], "zone": [round(v, 4) for v in got.bounds],
-                    "ensuite": f"Réglages › Canaux › Carte de sa position : « Un fichier », {rel}"}
+                    "ensuite": f"Réglages › Carte et téléphone › Carte de sa position : « Un fichier », {rel}"}
 
     try:
         out = asyncio.run(run())

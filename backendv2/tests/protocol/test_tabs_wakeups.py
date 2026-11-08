@@ -20,6 +20,8 @@ def test_wakeups_are_tiles_then_their_calls_with_what_they_brought(world):  # no
     assert "Aucun appel pour l'instant." in empty
     head = empty.split('class="page-head', 1)[1].split('data-tab=', 1)[0]
     assert ">Déclarer un réveil</a>" in head and "nouveau=1" in head and "gear-link" in head  # l'action, puis la roue
+    # la roue est celle de la destination (ses réglages y vivent, ADR 0206), une seule fois
+    assert head.count('href="/inspecteur/reveils/parametres"') == 1
     client.portal.call(live.settings.save_wakeup, WakeupConfig(endpoints={
         "serre": WakeEndpoint(label="L'alerte de la serre", instructions="Résume-la.", notify=c.NOBODY),
         "cave": WakeEndpoint(label="La sonde de la cave", enabled=False)}))

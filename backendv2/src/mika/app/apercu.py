@@ -12,6 +12,7 @@ qu'on a choisi. Le cadre d'un mail HTML (ADR 0169) s'exporte à part, sous
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import logging
@@ -30,18 +31,26 @@ from starlette.testclient import TestClient
 
 from mika.adapters.llm.config import BackendSpec, LiveGateway, LLMConfig
 from mika.adapters.llm.gateway import Gateway, LLMTrace
+from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.system import RealClock
+from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app import schema
 from mika.app.apercu_activity import activity
+from mika.app.apercu_git import URL as REMOTE_URL
 from mika.app.apercu_git import repository
 from mika.app.apercu_inner import inner
 from mika.app.apercu_mail import mailbox
 from mika.app.console import NAVIGATION
+from mika.app.moi import form
 from mika.app.server import build
+from mika.contracts import attachments as attachments_c
 from mika.contracts import email as email_c
 from mika.contracts import runtime as rt
+from mika.contracts import shares as shares_c
+from mika.contracts import trips as trips_c
+from mika.faculties.attachments import file_id
 from mika.inspector.pages.journal import EPISODE_TABS
 from mika.kernel.events import Content, Origin
 from mika.ports.journal import JournalEvent
@@ -49,7 +58,8 @@ from mika.ports.llm import LLMRequest, LLMResponse, Usage
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim.llm.persona import PersonaSimLLM
-from mika.vocab.episodes import FALLBACKS, VOICE_ROLES
+from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ
+from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, project_target
 
 #: le fournisseur de l'aperçu (la doublure du simulateur, locale : rien ne sort de la machine)
 NAME = "apercu"
@@ -90,8 +100,25 @@ async def _project(kernel, *, title: str = "Outils réseau",
     return got.go.key.split("/", 1)[1] if got.ok and got.go is not None else ""
 
 
-async def _approvals(kernel) -> None:
-    """Deux demandes fictives restent en attente dans le magasin temporaire ; aucun envoi."""
+async def _approvals(kernel, project: str) -> None:
+    """Des demandes fictives de sortes différentes restent en attente dans le magasin temporaire ; aucun envoi. Celles
+    du projet (``project``, son dépôt et son distant posés par ``repository``) portent leurs arguments comme les vraies
+    propositions : son numéro, et pour l'envoi le dépôt, la branche et le commit épinglé — leur aperçu se lit comme en
+    vrai."""
+    pid = int(project) if project.isdigit() else 0
+    port = kernel.ports.get("workshop")
+    sha = await port.head(pid) if pid and port is not None and port.exists(pid) else ""
+    last = (await port.commits(pid, 1))[0].title if sha else ""
+    work = (
+        ("projects.networked", "projects", {"project": pid, "argv": ["pip", "install", "requests"]},
+         "Lancer « pip install requests » avec le réseau, pour les outils réseau", project_target(pid)),
+        ("projects.push", "projects", {"project": pid, "url": REMOTE_URL, "branch": "main", "sha": sha},
+         f"Pousser le commit {sha[:12]} (« {last} ») vers {REMOTE_URL}, branche main — la doc RDP est prête",
+         project_target(pid)),
+        ("projects.networked", "projects",
+         {"project": pid, "argv": ["curl", "-sS", "https://api.github.com/repos/exemple/outils-reseau"]},
+         "Relire la fiche du dépôt sur GitHub avec le réseau, pour les outils réseau", project_target(pid)),
+    ) if pid else ()
     await kernel.mind.append([
         rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", approval=True,
             args_json=json.dumps({"draft": "stream", "account": "perso", "mail": "perso:<stream@example.net>"}),
@@ -109,20 +136,114 @@ async def _approvals(kernel) -> None:
                "Répondre sur Teams à Léa (« Projet vitrine »), à ta place : « Je regarde ça demain matin. »", "teams"),
               ("mcp.call", "mcp", {"server": "agenda", "tool": "create_event", "title": "Concert de Béa"},
                "Appeler « create_event » (agenda) : ajouter le concert de Béa, samedi à 20 h", "mcp:agenda"),
-              ("projects.networked", "projects", {"argv": ["pip", "install", "requests"]},
-               "Lancer « pip install requests » avec le réseau, pour le labo de trading", "project:61"),
-              ("projects.push", "projects", {"remote": "origin", "branch": "main"},
-               "Pousser trois commits vers le dépôt distant du labo de trading", "project:61"),
+              *work[:2],
               ("email.send", "email", {"draft": "relance-libraire", "account": "perso"},
                "Relancer le libraire au sujet de la commande de carnets", "user_1"),
               ("forge.install", "forge", {"app": "meteo", "packages": ["httpx"]},
                "Installer « httpx » pour l'app Météo, qu'elle a forgée", "forge:meteo"),
               ("mcp.call", "mcp", {"server": "notion", "tool": "append_page", "page": "Lectures"},
                "Appeler « append_page » (notion) : noter le livre que Béa a conseillé", "mcp:notion"),
-              ("projects.networked", "projects", {"argv": ["curl", "-sS", "https://api.ecb.europa.eu"]},
-               "Lire les taux de la BCE avec le réseau, pour le labo de trading", "project:61"),
+              *work[2:],
           )),
     ], emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-validations")
+    # deux demandes déjà tranchées (refusées : rien ne s'exécute), que l'historique des autorisations montre
+    decided = await kernel.mind.append([
+        rt.EFFECT_PROPOSED.draft(capability="mcp.call", owner="mcp", approval=True, context="mcp:agenda",
+                                 args_json=json.dumps({"server": "agenda", "tool": "delete_event", "title": "Répétition"}),
+                                 summary=Content.of("Appeler « delete_event » (agenda) : retirer la répétition de jeudi")),
+        rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", approval=True, context="email",
+                                 args_json=json.dumps({"draft": "relance-imprimeur", "account": "perso"}),
+                                 summary=Content.of("Relancer l'imprimeur au sujet des affiches"))],
+        emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-historique")
+    await kernel.mind.append([
+        rt.EFFECT_RESOLVED.draft(proposal=decided.seqs[0], approved=False, by="user_1", capability="mcp.call",
+                                 owner="mcp", context="mcp:agenda",
+                                 note=Content.of("Garde-la : on la déplacera plutôt.")),
+        rt.EFFECT_RESOLVED.draft(proposal=decided.seqs[1], approved=False, by="user_1", capability="email.send",
+                                 owner="email", context="email")],
+        emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-historique")
+
+
+async def _trips(kernel, handle: str) -> None:
+    """Deux voyages de Béa, préparés comme dans l'écran Carte (les actions du plugin, en son nom), et un arrêt que Mika
+    y a ajouté en conversation : la fiche de Béa a son onglet Voyages (ADR 0204)."""
+    made = await perform(kernel, "trips.creer", form(title="Les lacs de Savoie", start="2027-05-14", mode="voiture",
+                                                     avoid=["peages"]), by=handle, nonce="apercu-voyage")
+    if not made.ok:
+        return
+    trip = str(made.seqs[0])
+    for name, lat, lon, kind, day, note in (
+            ("Annecy", 45.899247, 6.129384, "Ville", 1, "Le marché de la vieille ville, le matin"),
+            ("Talloires", 45.840612, 6.212843, "Village", 1, ""),
+            ("Aix-les-Bains", 45.688374, 5.915091, "Ville", 2, "Se baigner au Grand Port")):
+        await perform(kernel, "trips.ajouter_arret", form({"trip": trip}, name=name, lat=lat, lon=lon, kind=kind,
+                                                          day=day, index=-1, note=note), by=handle)
+    level = 2  # un contenu personnel, comme ceux que ses outils écrivent
+    person = kernel.mind.frame().state(trips_c.OWNER).trips[trip].person
+    await kernel.mind.append([trips_c.STOP_ADDED.draft(
+        trip=trip, person=person, by=trips_c.BY_HER, day=2, kind=Content.of("Abbaye", level=level),
+        name=Content.of("Abbaye d'Hautecombe", level=level), coords=Content.of("45.751500,5.844200", level=level),
+        note=Content.of("Au bord du lac du Bourget : la traversée en bateau vaut le détour", level=level))],
+        emitter=trips_c.OWNER, origin=Origin.EXTERNAL, correlation="apercu-voyages")
+    await perform(kernel, "trips.creer", form(title="Un week-end à Lyon", start="", mode="velo", avoid=[]),
+                  by=handle, nonce="apercu-voyage-lyon")
+
+
+#: les fichiers de l'aperçu : pour qui (``bea`` ou l'opérateur), leur nom, leur texte
+SENT_FILES = (("bea", "programme-du-stream.md", "# Programme\n\n- Ouverture\n- Les questions du chat\n"),
+              ("bea", "liste-de-courses.md", "- pain\n- lait\n- œufs\n"),
+              ("operator", "idees-de-niveaux.md", "## Idées\n\n- un niveau sous la pluie\n"))
+#: les pièces que Béa lui a envoyées : leur nom, leur sorte, ce qu'elle y a lu
+RECEIVED_FILES = (("affiche.png", "image/png", "Une affiche violette pour une exposition de dessins, datée du 14 mai."),
+                  ("devis-imprimeur.txt", "text/plain", "Devis de l'imprimeur : 200 affiches A3, 84 euros."))
+
+
+async def _files(kernel, operator: str, bea: str) -> list[str]:
+    """Des fichiers qu'elle a envoyés (à Béa, à l'opérateur) et des pièces que Béa lui a envoyées, leurs octets dans
+    leur port, leur fiche au journal, comme ses outils et sa lecture de près les y mettent ; l'opérateur en retire un
+    de chaque (ADR 0205). Mémoire › Fichiers envoyés et Pièces reçues, et l'onglet Fichiers de Béa, ont de quoi se
+    montrer. Rend les adresses de leurs fiches."""
+    sent, received = kernel.ports.get("shares"), kernel.ports.get(attachments_c.PORT)
+    if sent is None or received is None:
+        return []
+    level = 2  # un contenu personnel, comme ceux que ses outils écrivent
+    shared, kept = [], []
+    for who, name, text in SENT_FILES:
+        target, data = bea if who == "bea" else operator, text.encode()
+        file = hashlib.blake2b(f"apercu:{target}:{name}".encode(), digest_size=16).hexdigest()
+        await sent.put(file, data, subjects=[target])
+        shared.append(shares_c.SHARED.draft(file=file, target=target, name=Content.of(name, level=level),
+                                            mime="text/markdown", size=len(data),
+                                            digest=hashlib.sha256(data).hexdigest(), about=(target,)))
+    said = [kernel.mind.decode(e) for e in kernel.mind.store.latest([rt.PERCEPTION_RECEIVED.name], 50)]
+    message = next((e.seq for e in said if e.data.handle == bea), 0)
+    for index, (name, mime, seen) in enumerate(RECEIVED_FILES, 1):
+        data = seen.encode() * 40
+        file = file_id(bea, data)
+        await received.put(file, data, subjects=[bea])
+        kept.append(attachments_c.KEPT.draft(
+            file=file, message=message, index=index, handle=bea, name=Content.of(name, level=level), mime=mime,
+            size=len(data), digest=hashlib.sha256(data).hexdigest(),
+            kind=attachments_c.IMAGE if mime.startswith("image/") else attachments_c.FILE,
+            seen=Content.of(seen, level=level), read=True, sensitivity=level))
+    await kernel.mind.append(shared, emitter=shares_c.OWNER, origin=Origin.EXTERNAL, correlation="apercu-fichiers")
+    await kernel.mind.append(kept, emitter=attachments_c.OWNER, origin=Origin.EXTERNAL,
+                             correlation="apercu-fichiers")
+    gone_sent, gone_piece = shared[1].data.file, kept[1].data.file
+    await perform(kernel, "shares.retirer", {}, by=operator, subject=gone_sent, nonce="apercu-retirer-partage")
+    await perform(kernel, "attachments.retirer", {}, by=operator, subject=gone_piece, nonce="apercu-retirer-piece")
+    return [*(f"/inspecteur/fiche/partage/{d.data.file}" for d in shared),
+            *(f"/inspecteur/fiche/piece/{d.data.file}" for d in kept)]
+
+
+async def _shares(settings, bea: str, owner: str) -> None:
+    """Une boîte de l'opérateur et un compte Teams à une personne, partagés à Béa : Réglages › Droits › Partages a de
+    quoi se montrer (ADR 0210). Rangés seulement dans les réglages : ni l'une ni l'autre ne relève rien."""
+    who = PERSON + bea
+    await settings.save_email(MailConfig(accounts={"atelier": MailAccount(
+        label="Atelier", address="atelier@example.test", enabled=False, shares={who: SHARE_READ})}))
+    await settings.save_teams(TeamsConfig(accounts={"equipe": TeamsAccount(
+        label="Équipe", owner=PERSON + owner, enabled=False, shares={who: SHARE_PREPARE})}))
 
 
 async def _noticed(kernel, box) -> None:
@@ -260,7 +381,7 @@ def export(out: Path) -> list[str]:
                              for v in live.kernel.registry.inspectors if v.subject == "project"]
             demo_mail = mailbox(clock.now)
             live.kernel.ports["mail"] = demo_mail
-            client.portal.call(lambda: _approvals(live.kernel))
+            client.portal.call(lambda: _approvals(live.kernel, project))
             client.portal.call(lambda: _noticed(live.kernel, demo_mail))
             for kind, keys in (("mail", [m.ref for m in demo_mail.inbox] + [m.ref for m in demo_mail.outgoing]),
                                ("brouillon", ["stream", "brouillon-demo-supprime"])):
@@ -270,6 +391,13 @@ def export(out: Path) -> list[str]:
                     urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
             urls += client.portal.call(lambda: activity(live.kernel))
             client.portal.call(lambda: inner(live.kernel))
+            bea = next((a.handle for a in client.portal.call(live.accounts.all) if a.username == "bea"), "")
+            if bea:  # ses voyages : l'onglet Voyages de sa fiche (ADR 0204)
+                client.portal.call(lambda: _trips(live.kernel, bea))
+            adrien = next((a.handle for a in client.portal.call(live.accounts.all) if a.username == "adrien"), "")
+            if bea and adrien:  # des fichiers envoyés et reçus, un de chaque retiré (ADR 0205), et leurs fiches
+                urls += client.portal.call(lambda: _files(live.kernel, adrien, bea))
+                client.portal.call(lambda: _shares(live.settings, bea, adrien))
             for account in client.portal.call(live.accounts.all):
                 urls.append(f"/inspecteur/reglages/comptes?compte={account.id}")
                 client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))

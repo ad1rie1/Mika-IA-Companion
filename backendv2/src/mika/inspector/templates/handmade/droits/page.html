@@ -1,9 +1,11 @@
 {# Réglages › Droits (app/handmade/rights.py, ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie
    interne, les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une sorte par
-   sous-onglet (ADR 0176) ; une ressource tient sur sa ligne (sa description, ses outils en étiquettes), ses outils
+   sous-onglet (ADR 0176) ; une ressource tient sur sa ligne (sa description, son nombre d'outils), ses outils
    décrits se déplient dessous, et le lien du détail de ses accès (son tableau, « Modifier », « Retour »). Les droits
-   exacts, outil par outil, seulement quand on a choisi qui et par quel canal : les étiquettes disent alors ce qui
-   est ouvert, la ligne dépliée dit comment. #}
+   exacts, outil par outil, seulement quand on a choisi qui et par quel canal : une étiquette par outil vient alors
+   sur la ligne et dit ce qui est ouvert, la ligne dépliée dit comment. Sans ce choix, les noms des outils ne sont
+   que dans le repli : ils allongeaient chaque ligne sans rien dire de plus. « Partages » (ADR 0210) : qui a reçu quoi,
+   de qui ; seul sous-onglet où l'on agit, et seulement pour retirer. #}
 {% from "_navigation.html" import pager as pages %}
 <div class="now-page service rights-page">
   {% if detail %}
@@ -72,6 +74,7 @@
       <p class="hm-subnav-title">Ressources</p>
       {% for s in sections %}<a href="#{{ s.id }}">{{ s.title }} <span class="hm-count">{{ s.rows | length }}</span></a>{% endfor %}
       <div class="hm-subnav-sep"></div>
+      <a href="#d-partages">Partages <span class="hm-count">{{ shares | length }}</span></a>
       <a href="#d-code">Ce que le code fixe</a>
     </nav>
     <div class="hm-subpanes">
@@ -90,7 +93,7 @@
                 <span class="rights-res-name">{{ r.label }}</span>
                 <span class="rights-res-body">
                   {% if r.description %}<span class="rights-res-about">{{ r.description }}</span>{% endif %}
-                  <span class="rights-chips">{% for x in r.tools %}<span class="rights-chip{{ ' shut' if got and x.closed }}{{ ' on' if got and not x.closed }}">{{ x.name }}</span>{% endfor %}</span>
+                  {% if got and r.tools %}<span class="rights-chips">{% for x in r.tools %}<span class="rights-chip {{ 'shut' if x.closed else 'on' }}">{{ x.name }}</span>{% endfor %}</span>{% endif %}
                 </span>
                 <span class="rights-res-count now-muted">{% if got %}{{ r.open }} / {{ r.tools | length }} ouvert{{ 's' if r.open > 1 }}{% else %}{{ r.tools | length }} outil{{ 's' if r.tools | length > 1 }}{% endif %}</span>
               </summary>
@@ -134,6 +137,35 @@
         {% else %}<p class="now-muted">Rien pour l'instant.</p>{% endif %}
       </section>
       {% endfor %}
+
+      <section class="now-card rights-card table-block" id="d-partages" data-pane aria-labelledby="d-partages-title">
+        <header class="rights-head"><div><h2 id="d-partages-title">Partages</h2><p>qui a reçu la boîte, le compte Teams ou le service de qui. Tu peux en retirer ; seul son propriétaire en donne, depuis son espace.</p></div></header>
+        {% if shares %}
+        <div class="hm-table-wrap" tabindex="0" role="region" aria-label="Partages">
+          <table class="access-table rights-list">
+            <thead><tr><th scope="col">Ressource</th><th scope="col">Propriétaire</th><th scope="col">Reçu par</th><th scope="col">Niveau</th><th scope="col"></th></tr></thead>
+            <tbody>
+              {% for s in shares %}
+              <tr>
+                <th scope="row">{{ s.title }} <span class="now-tag info">{{ s.sort }}</span></th>
+                <td>{{ s.owner }}</td>
+                <td><a href="{{ s.href }}">{{ s.name }}</a></td>
+                <td>{{ s.level }}</td>
+                <td class="rights-link">
+                  {% if s.access %}<a href="{{ s.access }}">ses lignes d'accès</a>
+                  {% else %}<form method="post" action="{{ unshare }}" class="inline" data-confirm="{{ s.ask }}">
+                    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="{{ s.kind }}"><input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="person" value="{{ s.person }}">
+                    <button class="btn quiet small danger">Retirer</button>
+                  </form>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="hm-pager single">{{ pages(shares_pager) }}</div>
+        {% else %}<p class="now-muted">Aucun partage pour l'instant.</p>{% endif %}
+      </section>
 
       <section class="now-card rights-card rights-fixed" id="d-code" data-pane aria-labelledby="d-code-title">
         <header class="rights-head"><div><h2 id="d-code-title">Ce que le code fixe</h2><p>ce qu'aucun tableau ne change, et ce que ses outils déclarent d'eux-mêmes.</p></div></header>

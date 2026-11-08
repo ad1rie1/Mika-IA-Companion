@@ -8,6 +8,8 @@
 - **La personne** le prépare dans l'écran Carte, par les actions de la console (``actions.py``, au nom de qui agit),
   que l'API par personne appelle (``app/moi/carte.py``) ; **elle**, en conversation, quand on le lui demande
   (``tools.py``). Ce qu'elle a fait porte ``by = BY_HER`` : l'écran le montre en rose, et on le retire d'un geste.
+- **La console** le montre sur la fiche de la personne, onglet Voyages (``inspect.py``, ADR 0204) : un opérateur peut
+  l'y supprimer, rien de plus.
 - **Ses regards** : des lieux cherchés, un trajet calculé (``trips.looked``), une carte qu'elle montre
   (``trips.shown``) ; son message en emporte la note (``look:``, ``map:``, ``trip:``). Ses derniers regards restent
   dans la tranche, par personne : un lieu qu'elle a trouvé se reprend par son identifiant (« l123 »).
@@ -275,6 +277,7 @@ def looks_of(s: TripsState | None, person: str, episode: str = "") -> list[Look]
 
 
 from mika.plugins.trips import actions as actions  # noqa: E402 — s'enregistrent sur TRIPS
+from mika.plugins.trips import inspect as inspect  # noqa: E402 — s'enregistre sur TRIPS
 from mika.plugins.trips import tools as tools  # noqa: E402
 
 __all__ = ["BUNDLE", "TRIPS", "Look", "Stop", "Trip", "TripsState", "days_of", "looks_of", "owner_key", "place",

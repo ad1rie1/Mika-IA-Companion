@@ -3,12 +3,12 @@
  * messages, un mail entier, ses brouillons à relire, ses envoyés, ses correspondants ; écrire, répondre, transférer,
  * ranger, lui demander une réponse, décider de ses brouillons. Les instants sont en millisecondes (0 : jamais).
  */
-import { apiUrl, getJson, MOI, sendJson, type Done } from "./moi";
+import { apiUrl, getJson, MOI, sendForm, sendJson, type Done } from "./moi";
 
 /**
  * Les bornes des chaînes que l'API reçoit (`app/moi/mail.py`, en caractères) : au-delà, elle refuse (400, avec
  * `fields: {"<nom>": "N caractères au plus"}`) — elle ne coupe jamais. Le client les tient d'avance (`maxlength`, un
- * envoi trop long ne part pas). `recipients` vaut pour `to` comme pour `cc`.
+ * envoi trop long ne part pas). `recipients` vaut pour `to`, `cc` et `bcc`.
  */
 export const MAIL_LIMITS = {
   recipients: 300,
@@ -20,6 +20,16 @@ export const MAIL_LIMITS = {
   search: 200,
   /** `q` de `/mail/contacts`. */
   contacts: 100,
+} as const;
+
+/** Ce qu'un mail qu'on écrit peut joindre (`ports/mail.py`, ADR 0214) : au-delà, le serveur refuse. */
+export const PIECE_LIMITS = {
+  /** Au plus tant de pièces. */
+  count: 10,
+  /** Au plus tant d'octets par pièce. */
+  each: 25 * 1024 * 1024,
+  /** Au plus tant d'octets en tout. */
+  total: 50 * 1024 * 1024,
 } as const;
 
 /** Son niveau sur une boîte : la sienne, ou ce qu'on lui en partage (ADR 0188). */
@@ -158,7 +168,10 @@ export interface MailDraft {
   /** Le mail auquel il répond (sa référence). */
   in_reply_to: string;
   original: { subject: string; from: string } | null;
+  /** Ses destinataires tels qu'on les retouche (le texte de l'en-tête). */
   to: string;
+  /** Les mêmes, chacun à son nom quand la boîte le connaît (ce que la liste montre). */
+  to_people: Person[];
   cc: string;
   subject: string;
   body: string;
@@ -190,8 +203,9 @@ export interface Contact {
   last: number;
 }
 
-/** « Où elle est passée » : ceux qu'elle a remarqués. */
-export type MailState = "" | "unread" | "flagged" | "noticed";
+/** `noticed` : « où elle est passée », ceux qu'elle a remarqués ; `needs_reply` : « réponse attendue », ceux qu'elle
+ *  juge appeler une réponse, pas encore lus d'elle. */
+export type MailState = "" | "unread" | "flagged" | "noticed" | "needs_reply";
 
 export interface MessagesQuery {
   box?: string;
@@ -202,7 +216,8 @@ export interface MessagesQuery {
   size?: number;
 }
 
-export type Gesture = "read" | "unread" | "archive" | "flag" | "unflag" | "trash";
+/** `move` : les ranger dans un dossier de leur boîte (`folder`), par l'action « Déplacer » (ADR 0200). */
+export type Gesture = "read" | "unread" | "archive" | "flag" | "unflag" | "trash" | "move";
 
 export interface PrefillReply extends Done {
   /** Un brouillon d'elle qui attend déjà pour ce mail : la saisie le reprend. */
@@ -214,6 +229,8 @@ export interface PrefillReply extends Done {
 export interface Outgoing {
   to: string;
   cc?: string;
+  /** Ses copies cachées (ADR 0214). */
+  bcc?: string;
   subject: string;
   body: string;
 }
@@ -265,20 +282,26 @@ export function fileUrl(ref: string, part: string): string {
   return apiUrl(`${M}/file${query({ ref, part })}`);
 }
 
-export function sendMail(box: string, mail: Outgoing, nonce = ""): Promise<Done> {
-  return sendJson(`${M}/send`, { box, ...mail, cc: mail.cc ?? "" }, nonce);
+/** Un mail qui part : en JSON sans fichier, en `multipart` avec ses pièces (les mêmes champs). */
+function write(path: string, fields: Record<string, unknown>, nonce: string, files: readonly File[]): Promise<Done> {
+  return files.length ? sendForm(path, fields, files, nonce) : sendJson(path, fields, nonce);
 }
 
-export function replyMail(ref: string, mail: Outgoing & { quote: boolean }, nonce = ""): Promise<Done> {
-  return sendJson(`${M}/reply`, { ref, ...mail, cc: mail.cc ?? "" }, nonce);
+export function sendMail(box: string, mail: Outgoing, nonce = "", files: readonly File[] = []): Promise<Done> {
+  return write(`${M}/send`, { box, ...mail, cc: mail.cc ?? "" }, nonce, files);
 }
 
-export function forwardMail(ref: string, mail: Outgoing & { attachments: boolean }, nonce = ""): Promise<Done> {
-  return sendJson(`${M}/forward`, { ref, ...mail, cc: mail.cc ?? "" }, nonce);
+export function replyMail(ref: string, mail: Outgoing & { quote: boolean }, nonce = "", files: readonly File[] = []): Promise<Done> {
+  return write(`${M}/reply`, { ref, ...mail, cc: mail.cc ?? "" }, nonce, files);
 }
 
-export function tidy(refs: string[], gesture: Gesture): Promise<Done> {
-  return sendJson(`${M}/tidy`, { refs, gesture });
+/** `attachments` : celles du mail d'origine ; `files` : celles qu'on y ajoute. */
+export function forwardMail(ref: string, mail: Outgoing & { attachments: boolean }, nonce = "", files: readonly File[] = []): Promise<Done> {
+  return write(`${M}/forward`, { ref, ...mail, cc: mail.cc ?? "" }, nonce, files);
+}
+
+export function tidy(refs: string[], gesture: Gesture, folder = ""): Promise<Done> {
+  return sendJson(`${M}/tidy`, folder ? { refs, gesture, folder } : { refs, gesture });
 }
 
 export function prefill(ref: string, instruction = ""): Promise<PrefillReply> {

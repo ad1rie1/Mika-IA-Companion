@@ -50,16 +50,16 @@
 .goal-hero { align-items: start; }
 .goal-hero-main { min-width: 0; }
 .goal-seeks p { white-space: pre-line; }
-.goal-title { margin: 12px 0 0; font-family: var(--now-serif); font-size: clamp(1.15rem, 1.8vw, 1.4rem); font-weight: 650;
+.goal-title { margin: 12px 0 0; font-family: var(--display); font-size: clamp(1.15rem, 1.8vw, 1.4rem); font-weight: 650;
   line-height: 1.3; }
 .goal-where { margin: 22px 0 0; }
 .goal-where .now-eyebrow { margin: 0 0 6px; }
 .goal-where p:last-child { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.55; white-space: pre-line; }
 .goal-side { display: grid; align-content: start; gap: 4px; min-width: 0; }
-.goal-count { margin: 6px 0 0; color: var(--text-2); font-family: var(--now-serif); font-size: 1.5rem; }
+.goal-count { margin: 6px 0 0; color: var(--text-2); font-family: var(--display); font-size: 1.5rem; }
 .goal-count b { color: var(--text); font-size: clamp(2.4rem, 4vw, 3.2rem); font-weight: 600; letter-spacing: -.02em; }
 .goal-unit { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
-.goal-when { margin: 8px 0 6px; font-family: var(--now-serif); font-size: clamp(1.25rem, 2vw, 1.55rem); font-weight: 650; }
+.goal-when { margin: 8px 0 6px; font-family: var(--display); font-size: clamp(1.25rem, 2vw, 1.55rem); font-weight: 650; }
 .goal-facts { display: grid; gap: 8px; margin: 16px 0 0; }
 .goal-facts > div { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 10px; font-size: 13.5px; }
 .goal-facts dt { color: var(--muted); font-size: 12.5px; }
@@ -157,7 +157,7 @@ a.teams-draft-text:hover { color: var(--accent); }
 
 /* ── Un texte cité (ce qu'elle a retenu, ce qu'elle lit, une consigne, un début de mail) ── */
 .obj-quote { margin: 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--accent-soft); color: var(--text);
-  font-family: var(--now-serif); font-size: 15px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+  font-family: var(--display); font-size: 15px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 .mailknown-quote { display: grid; gap: 10px; }
 .mailknown-quote .now-eyebrow { margin: 0; }
 .mailknown-quote .obj-quote { font-size: clamp(15px, 1.4vw, 17px); }
@@ -182,7 +182,7 @@ a.teams-draft-text:hover { color: var(--accent); }
 .mailthread-note { margin-top: 14px; }
 
 /* ── Un brouillon, « Pourquoi », « Historique » ───────────────────────── */
-.draftwhy-subject { margin: 0; font-family: var(--now-serif); font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
+.draftwhy-subject { margin: 0; font-family: var(--display); font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
 .draftwhy-subject a { color: var(--text); }
 .draftwhy-subject a:hover { color: var(--accent); }
 .draftwhy-opening { margin-top: 12px; color: var(--text-2); font-size: 14px; }

@@ -123,7 +123,8 @@ NAMED = "name:"
 #: v6 : les suggestions de noms écartées par un opérateur (``dismissed``).
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
                    # 7 : ``last_seen`` sur chaque adresse, et les inconnues de passage s'oublient (audit du 2026-10-26)
-                   state_version=7)
+                   # 8 : ``same_name`` suit le repli commun, « Lætitia » et « Laetitia » sont un seul nom (ADR 0212)
+                   state_version=8)
 IDENTITY.declare(*c.ALL)
 #: les inconnues de passage sont relues à ce rythme
 EXPIRY_PERIOD = DAY

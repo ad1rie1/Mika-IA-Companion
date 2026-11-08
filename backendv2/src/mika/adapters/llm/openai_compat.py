@@ -44,7 +44,6 @@ except ImportError:  # pragma: no cover — extra « llm » absent
 
 log = logging.getLogger("mika.llm.openai")
 
-GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 RAW_ARGS_KEY = "_raw"
 
 _FINISH = {

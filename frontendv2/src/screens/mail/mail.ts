@@ -46,7 +46,7 @@ import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { dayAndClock } from "../chat/markup";
 import * as store from "../parametres/store";
-import { bindCounts, bindRecipients, errorText, openAsk, openCompose, readRecipients, type ComposeValues } from "./compose";
+import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
 import { answerable, caps, clip, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
 import {
   boxesPane,
@@ -56,24 +56,29 @@ import {
   draftRow,
   emptyList,
   filtersApply,
+  folderIcon,
   inboxOf,
   inlineReply,
   listFilters,
   listFoot,
   listHead,
+  listHolds,
   listTools,
   mailRow,
+  moveTargets,
   parseView,
   readerDraft,
   readerEmpty,
   readerMail,
   readerTidy,
   sentRow,
+  viewHolds,
   viewKey,
   viewTitle,
   type BoxView,
   type InlineReply,
   type RowView,
+  type Shown,
   type View,
 } from "./markup";
 
@@ -89,7 +94,7 @@ const REFRESH_MS = 60_000;
 const PAGE_SIZE = 25;
 const CONTACTS_SIZE = 100;
 
-const GESTURE_ICON: Record<Gesture, IconName> = { read: "check", unread: "mail", archive: "archive", flag: "star", unflag: "star", trash: "trash" };
+const GESTURE_ICON: Record<Gesture, IconName> = { read: "check", unread: "mail", archive: "archive", flag: "star", unflag: "star", trash: "trash", move: "folder" };
 
 export function mailHash(ref: string): string {
   return `#mail/messages/${encodeURIComponent(ref)}`;
@@ -320,8 +325,8 @@ export class MailScreen {
     switch (v.kind) {
       case "flagged":
         return { ...base, state: "flagged" };
-      case "noticed":
-        return { ...base, state: "noticed" };
+      case "needs_reply":
+        return { ...base, state: "needs_reply" };
       case "folder":
         return { ...base, box: v.box, folder: v.folder, state: this.filter };
       default:
@@ -329,7 +334,8 @@ export class MailScreen {
     }
   }
 
-  private async loadList(opts: { quiet?: boolean } = {}): Promise<void> {
+  /** Rend `true` quand la liste demandée est là : ni dépassée par une autre demande, ni en erreur. */
+  private async loadList(opts: { quiet?: boolean } = {}): Promise<boolean> {
     const seq = ++this.listSeq;
     const v = this.view;
     if (!opts.quiet) {
@@ -340,31 +346,45 @@ export class MailScreen {
     try {
       if (v.kind === "drafts") {
         await this.loadDrafts();
-        if (seq !== this.listSeq) return;
+        if (seq !== this.listSeq) return false;
         this.total = this.visibleDrafts().length;
       } else if (v.kind === "sent") {
         const items = await fetchSent(v.box);
-        if (seq !== this.listSeq) return;
+        if (seq !== this.listSeq) return false;
         this.sentRows = items;
         this.total = this.visibleSent().length;
       } else {
         const got = await fetchMessages(this.queryOf(v));
-        if (seq !== this.listSeq) return;
+        if (seq !== this.listSeq) return false;
         const same = opts.quiet && JSON.stringify(got.items) === JSON.stringify(this.rows) && got.total === this.total;
         this.rows = got.items;
         this.total = got.total;
         this.page = got.page;
         this.size = got.size;
-        if (same && !this.listLoading) return;
+        if (same && !this.listLoading) return true;
       }
       this.listLoading = false;
       this.listError = "";
     } catch (err) {
-      if (seq !== this.listSeq) return;
+      if (seq !== this.listSeq) return false;
       this.listLoading = false;
       this.listError = errorText(err);
     }
     this.paintRows();
+    return !this.listError;
+  }
+
+  /** Une autre vue, un autre filtre : la liste qui arrive fait foi pour la liseuse (`listHolds`). Ce qui met un mail
+   *  dans une vue du serveur n'est pas tout entier dans ce que l'API dit de lui (« Réponse attendue ») : le mail
+   *  ouvert reste s'il est à gauche, se ferme s'il n'est pas dans une liste entière. */
+  private async loadListAndHold(): Promise<void> {
+    const v = this.view;
+    const filter = this.filter;
+    const ref = this.open?.kind === "mail" ? this.open.ref : null;
+    const loaded = await this.loadList();
+    if (!loaded || !ref || v.kind === "drafts" || v.kind === "sent" || this.view !== v || this.filter !== filter) return;
+    if (this.open?.kind !== "mail" || this.open.ref !== ref) return; // on a ouvert autre chose entre-temps
+    if (listHolds(ref, this.rows, this.total) === false) this.closeReader();
   }
 
   private async loadContacts(): Promise<void> {
@@ -391,7 +411,9 @@ export class MailScreen {
 
   private route(item: string | null): void {
     if (!item) {
-      if (this.reading) {
+      // l'adresse ne nomme rien : la liseuse non plus (un rechargement montrerait « Choisis un mail »)
+      if (this.open) this.closeReader();
+      else if (this.reading) {
         this.reading = false;
         this.paintSplit();
       }
@@ -415,7 +437,7 @@ export class MailScreen {
     window.clearTimeout(this.askTimer);
     this.captureReply();
     const r = this.reply;
-    if (r && this.open?.kind === "mail" && (r.sending || r.error || r.fromDraft || r.body.trim())) this.parked.set(this.open.ref, r);
+    if (r && this.open?.kind === "mail" && (r.sending || r.error || r.fromDraft || r.body.trim() || r.files.length)) this.parked.set(this.open.ref, r);
     this.reply = null;
   }
 
@@ -487,15 +509,30 @@ export class MailScreen {
     this.page = 1;
     this.checked.clear();
     if ("box" in v && v.box) this.opened.add(v.box);
+    this.keepReaderInList();
     if (!this.onMessages()) return;
     this.paintBoxes();
     this.paintListPane();
-    if (load) void this.loadList();
+    if (load) void this.loadListAndHold();
     else if (v.kind === "drafts") {
       this.total = this.visibleDrafts().length;
       this.listLoading = false;
       this.paintRows();
     }
+  }
+
+  /** Ce que la liseuse montre, pour savoir si la liste le tient encore. */
+  private shown(): Shown {
+    const open = this.open;
+    if (open?.kind === "draft") return { kind: "draft", box: this.drafts.find((d) => d.id === open.id)?.box ?? null };
+    const m = open?.kind === "mail" && this.mail?.ref === open.ref ? this.mail : null;
+    return { kind: "mail", mail: m, common: !!m && this.boxOf(m.box)?.level !== "lire" };
+  }
+
+  /** À droite, rien qui ne soit de la liste de gauche (la vue et son filtre) : sinon la liseuse se ferme, et l'adresse
+   *  avec elle (on décidait d'un brouillon en croyant regarder ses envois). */
+  private keepReaderInList(): void {
+    if (this.open && !viewHolds(this.view, filtersApply(this.view) ? this.filter : "", this.shown())) this.closeReader();
   }
 
   private visibleDrafts(): MailDraft[] {
@@ -536,7 +573,8 @@ export class MailScreen {
     const host = $("[data-boxes]", this.body!);
     if (!host) return;
     const scroll = $(".pane-scroll", host)?.scrollTop ?? 0;
-    const unseen = this.boxes.reduce((n, b) => n + (inboxOf(b)?.unseen ?? 0), 0);
+    // « Toutes les réceptions » : tes boîtes, sans celles qu'on ne te partage qu'en lecture (ADR 0200), comme sa liste
+    const unseen = this.boxes.reduce((n, b) => n + (b.level === "lire" ? 0 : inboxOf(b)?.unseen ?? 0), 0);
     const waiting = this.drafts.filter((d) => d.state === "attend" && this.capsOf(d.box).decide).length;
     host.innerHTML = boxesPane({
       boxes: this.boxViewList(),
@@ -612,7 +650,7 @@ export class MailScreen {
         const f = this.boxOf(v.box)?.folders.find((x) => x.name === v.folder);
         if (f && !f.polled) return emptyList("folder", "Ce dossier n'est pas relevé", "Mika ne relève pas ce dossier : choisis-le dans Paramètres › Comptes mail pour qu'il arrive ici.");
       }
-      if (v.kind === "noticed") return emptyList("eye", "Elle n'est passée nulle part", "Les mails qu'elle remarque en relevant tes boîtes arrivent ici.");
+      if (v.kind === "needs_reply") return emptyList("reply", "Rien n'attend de réponse", "Les mails qu'elle juge appeler une réponse arrivent ici, tant qu'ils ne sont pas lus.");
       if (v.kind === "flagged") return emptyList("star", "Aucun mail suivi", "Suis un mail (l'étoile) pour le retrouver ici.");
       return emptyList("inbox", "Rien ici", this.filter ? "Aucun mail pour ce filtre." : "Aucun mail dans ce dossier.");
     }
@@ -726,6 +764,7 @@ export class MailScreen {
     if (!r || !host) return;
     r.to = readRecipients(host, "to");
     r.cc = readRecipients(host, "cc");
+    r.bcc = readRecipients(host, "bcc");
     r.body = $<HTMLTextAreaElement>("[data-rd-txt]", host)?.value ?? r.body;
     r.quote = !!$<HTMLInputElement>("[data-quote]", host)?.checked;
   }
@@ -752,10 +791,10 @@ export class MailScreen {
     }, delay);
   }
 
-  private async gesture(refs: string[], g: Gesture, quiet = false): Promise<void> {
+  private async gesture(refs: string[], g: Gesture, quiet = false, folder = ""): Promise<void> {
     try {
-      const done = await tidy(refs, g);
-      const gone = g === "archive" || g === "trash";
+      const done = await tidy(refs, g, folder);
+      const gone = g === "archive" || g === "trash" || g === "move";
       for (const r of this.rows) {
         if (!refs.includes(r.ref)) continue;
         if (g === "read" || g === "unread") r.seen = g === "read";
@@ -790,7 +829,7 @@ export class MailScreen {
     const m = this.mail;
     const bar = this.body && $<HTMLElement>("[data-rd-actions]", this.body);
     if (!m || !bar) return;
-    for (const el of $$("[data-act='archiver'], [data-act='lu'], [data-act='suivre'], [data-act='corbeille']", bar)) el.remove();
+    for (const el of $$("[data-act='archiver'], [data-act='lu'], [data-act='suivre'], [data-act='deplacer'], [data-act='corbeille']", bar)) el.remove();
     bar.insertAdjacentHTML("beforeend", readerTidy(m));
     const head = $("[data-rd-tags]", this.body!);
     if (head) {
@@ -813,6 +852,9 @@ export class MailScreen {
       to,
       cc,
       showCc: cc.length > 0,
+      bcc: [],
+      showBcc: false,
+      files: [],
       // un objet qu'on ne voit ni ne tape ici : dans sa borne, sinon l'envoi serait refusé sans qu'on sache pourquoi
       subject: clip(replySubject(m.subject), MAIL_LIMITS.subject),
       body: "",
@@ -839,11 +881,16 @@ export class MailScreen {
     if (!m || !answerable(m)) return;
     const to = parseAddresses(d.to);
     const cc = parseAddresses(d.cc);
+    this.captureReply();
+    const before = this.reply; // ce que tu y avais joint, et ta copie cachée, ne se perdent pas
     this.reply = {
       all: cc.length > 0,
       to: to.length ? to : replyTargets(m, this.boxOf(m.box)?.address ?? "", false).to,
       cc,
       showCc: cc.length > 0,
+      bcc: before?.bcc ?? [],
+      showBcc: before?.showBcc ?? false,
+      files: before?.files ?? [],
       subject: clip(d.subject || replySubject(m.subject), MAIL_LIMITS.subject),
       body: d.body,
       quote: d.quote,
@@ -936,7 +983,9 @@ export class MailScreen {
     const here = () => this.reply === r && this.open?.kind === "mail" && this.open.ref === ref;
     const mail = { ...fits.mail, quote: r.quote };
     try {
-      const done = r.fromDraft && this.capsOf(m.box).decide ? await this.sendThroughDraft(r.fromDraft, mail, m) : await replyMail(ref, mail, newNonce());
+      // un brouillon part tel qu'il est lu : avec des pièces ou une copie cachée, c'est ta réponse qui part (le sien est retiré)
+      const asDraft = r.fromDraft && !r.files.length && !mail.bcc && this.capsOf(m.box).decide;
+      const done = asDraft ? await this.sendThroughDraft(r.fromDraft, mail, m) : await replyMail(ref, mail, newNonce(), r.files);
       if (this.parked.get(ref) === r) this.parked.delete(ref);
       if (here()) {
         this.reply = null;
@@ -1015,7 +1064,7 @@ export class MailScreen {
       quote: null,
       submitLabel: "Envoyer",
       submit: async (v: ComposeValues) => {
-        const done = await sendMail(v.box, v.mail, newNonce());
+        const done = await sendMail(v.box, v.mail, newNonce(), v.files);
         if (toFill(v.subject, v.body)) return done.message;
         if (this.view.kind === "sent") void this.loadList({ quiet: true });
         return done.message;
@@ -1035,11 +1084,12 @@ export class MailScreen {
       subject: clip(forwardSubject(m.subject), MAIL_LIMITS.subject),
       body: "",
       attachments: m.attachments.length,
+      carried: m.attachments,
       quote: null,
       emptyBody: true,
       submitLabel: "Transférer",
       submit: async (v) => {
-        const done = await forwardMail(m.ref, { ...v.mail, attachments: v.pieces }, newNonce());
+        const done = await forwardMail(m.ref, { ...v.mail, attachments: v.pieces }, newNonce(), v.files);
         return done.message;
       },
     });
@@ -1194,6 +1244,18 @@ export class MailScreen {
     this.section = section;
     bindRecipients(section);
     bindCounts(section);
+    bindPieces(section, {
+      pieces: () => this.reply?.files ?? [],
+      replace: (next) => {
+        if (!this.reply) return;
+        this.reply.files = next;
+        const host = this.body && $<HTMLElement>("[data-reply]", this.body);
+        if (host) paintPieces(host, next);
+      },
+      say: (problem) => {
+        if (problem) toast(problem, { ico: "alert" });
+      },
+    });
     on(section, "[data-nouveau]", "click", () => this.newMail());
     on(section, "[data-vue]", "click", (_e, b) => {
       const v = parseView(b.dataset.vue ?? "inbox");
@@ -1235,13 +1297,18 @@ export class MailScreen {
         this.paintRows();
         return;
       }
+      if (g === "move") {
+        this.moveMenu(b, [...this.checked]);
+        return;
+      }
       void this.gesture([...this.checked], g);
     });
     on(section, "[data-filtre]", "click", (_e, b) => {
       this.filter = (b.dataset.filtre ?? "") as MailState;
       this.page = 1;
       for (const x of $$("[data-filtre]", section)) x.setAttribute("aria-pressed", String(x === b));
-      void this.loadList();
+      this.keepReaderInList();
+      void this.loadListAndHold();
     });
     on(section, "[data-page]", "click", (_e, b) => {
       const p = Number(b.dataset.page);
@@ -1347,6 +1414,14 @@ export class MailScreen {
           $<HTMLInputElement>('[data-reply] [data-rcpt="cc"] [data-ac]', this.body!)?.focus();
         }
         return;
+      case "cci":
+        if (this.reply) {
+          this.captureReply();
+          this.reply.showBcc = true;
+          this.paintReader();
+          $<HTMLInputElement>('[data-reply] [data-rcpt="bcc"] [data-ac]', this.body!)?.focus();
+        }
+        return;
       case "vider":
         if (this.reply) {
           this.captureReply();
@@ -1373,6 +1448,9 @@ export class MailScreen {
         return;
       case "suivre":
         if (m) void this.gesture([m.ref], m.flagged ? "unflag" : "flag");
+        return;
+      case "deplacer":
+        if (m) this.moveMenu(b, [m.ref]);
         return;
       default:
         void b;
@@ -1421,6 +1499,29 @@ export class MailScreen {
     }
   }
 
+  /** « Déplacer » (ADR 0200) : les dossiers de leur boîte, un seul geste pour tous ; des mails de plusieurs boîtes ne se
+   *  déplacent pas ensemble (chacune a ses dossiers). */
+  private moveMenu(anchor: HTMLElement, refs: string[]): void {
+    const found = refs.map((ref) => this.rows.find((r) => r.ref === ref) ?? (this.mail?.ref === ref ? this.mail : null));
+    const keys = new Set(found.map((r) => r?.box ?? ""));
+    const box = keys.size === 1 ? this.boxOf([...keys][0]) : undefined;
+    if (!box || !refs.length) {
+      toast("Choisis des mails d'une seule boîte : chacune a ses dossiers.", { ico: "alert" });
+      return;
+    }
+    const here = new Set(found.map((r) => r?.folder ?? ""));
+    const targets = moveTargets(box, here.size === 1 ? [...here][0] : "");
+    if (!targets.length) {
+      toast("Cette boîte n'a pas d'autre dossier où les ranger.", { ico: "folder" });
+      return;
+    }
+    const items: MenuItem[] = [
+      { header: refs.length > 1 ? `Déplacer ${refs.length} mails vers` : "Déplacer vers" },
+      ...targets.map((f): MenuItem => ({ label: f.label || f.name, icon: folderIcon(f), action: () => void this.gesture(refs, "move", false, f.name) })),
+    ];
+    openMenu(anchor, items, { align: "right" });
+  }
+
   private foldersMenu(anchor: HTMLElement): void {
     const views = this.boxViewList();
     const pick = (v: View) => () => {
@@ -1431,7 +1532,7 @@ export class MailScreen {
     const items: MenuItem[] = [
       { header: "Mika" },
       { label: "Ses brouillons", icon: "pen", action: pick({ kind: "drafts", box: "" }) },
-      { label: "Où Mika est passée", icon: "eye", action: pick({ kind: "noticed" }) },
+      { label: "Réponse attendue", icon: "reply", action: pick({ kind: "needs_reply" }) },
       { header: "Réceptions" },
       { label: "Toutes les réceptions", icon: "inbox", action: pick({ kind: "inbox" }) },
       { label: "Suivis", icon: "star", action: pick({ kind: "flagged" }) },

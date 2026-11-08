@@ -22,13 +22,13 @@ from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import identity as identity_c
 from mika.inspector.catalog import Labels
 from mika.kernel.inspect import Cell, Ref, Text, describe_error
+from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
 from mika.vocab.episodes import GOAL_PREFIX, PROJECT_PREFIX, TASK_PREFIX, Kind, goal_of, project_of, task_of
 
 #: les sortes d'épisodes, au singulier (« une réponse »)
 KINDS: dict[str, str] = {
     Kind.REPLY: "réponse", Kind.INITIATIVE: "initiative", Kind.STEP: "séance de travail", Kind.MURMUR: "murmure",
-    Kind.JOURNAL: "journal", Kind.DREAM: "rêve", Kind.NARRATIVE: "récit de soi", Kind.DECISION: "décision",
     Kind.TASK: "tâche silencieuse", Kind.WORK: "travail sur un projet", Kind.JOB: "exécution impersonnelle",
     Kind.WAKE: "réveil extérieur", Kind.WAKE_JOB: "réveil extérieur impersonnel",
 }
@@ -58,13 +58,42 @@ PROCESSES: dict[str, str] = {"arbitre": "Décider d'agir (l'arbitre)", "séries"
 OPERATED: dict[str, tuple[str, str]] = {"done": ("faite", "ok"), "refused": ("refusée", "warn"),
                                         "superseded": ("la situation avait changé", "warn"),
                                         "failed": ("échouée", "danger")}
+#: d'où vient un geste audité (``runtime.operations.origin``)
+ORIGINS: dict[str, str] = {ops.CONSOLE: "la console", ops.SPACE: "son espace", ops.CLI: "la ligne de commande"}
+#: ce que la console, l'espace d'une personne (``app/moi/``) et la ligne de commande auditent eux-mêmes
+#: (``operations.audit``), par leur clé ; une action déclarée garde son titre (``ActionSpec.title``), et d'où vient le
+#: geste se dit à part (``ORIGINS``)
+GESTURES: dict[str, str] = {
+    "console.comptes.creer": "Compte créé", "console.comptes.modifier": "Compte modifié",
+    "console.comptes.revoquer_jeton": "Application révoquée", "console.comptes.jeton": "Jeton créé",
+    "console.comptes.sessions": "Sessions fermées",
+    "console.canaux.regler": "Tableau d'un canal réglé", "console.outils.familles": "Familles d'outils réglées",
+    "console.droits.partage_retire": "Partage retiré",
+    "console.mcp.jeton": "Jeton de la console en MCP renouvelé", "console.mcp.fermer": "Console en MCP fermée",
+    "console.mcp.reseau.ouvrir": "Console en MCP ouverte au réseau",
+    "console.mcp.reseau.fermer": "Console en MCP réservée à cette machine",
+    "console.mcp.servir": "Ce que sert la console en MCP réglé",
+    "console.mcp.pret.declarer": "Point de prêt déclaré", "console.mcp.pret.regler": "Point de prêt réglé",
+    "console.mcp.pret.jeton": "Jeton d'un point de prêt renouvelé", "console.mcp.pret.retirer": "Point de prêt retiré",
+    "console.sorties.relancer": "Effet relancé", "console.sorties.vu": "Effet marqué comme vu",
+    "console.rejouer": "Rejoué avec un autre modèle",
+    "moi.nom": "Nom changé", "moi.mot_de_passe": "Mot de passe changé",
+    "moi.boite": "Boîte branchée ou réglée", "moi.boite_retiree": "Boîte retirée",
+    "moi.compte_teams": "Compte Teams branché ou réglé", "moi.compte_teams_retire": "Compte Teams retiré",
+    "moi.partage": "Partage modifié", "moi.service_branche": "Service branché", "moi.service": "Service réglé",
+    "moi.service_outils": "Outils d'un service réglés", "moi.service_retire": "Service retiré",
+    "moi.telephone_revoque": "Téléphone révoqué",
+}
+#: les familles de gestes que la console et la ligne de commande nomment par une partie de leur clé
+#: (« console.reglages.<section> », « console.parametres.<faculté> ») ; l'oubli à part (« …oublier.<sorte> »)
+GESTURE_FAMILIES: dict[str, str] = {"reglages": "Réglages", "parametres": "Paramètres", "sorties": "File de sortie"}
 
 
 def kind(value: str | None) -> str:
     return KINDS.get(str(value or ""), str(value or "épisode").lower())
 
 
-#: les sortes d'épisodes qui, menées à bien, ont parlé (les autres ont travaillé, écrit, rêvé…)
+#: les sortes d'épisodes qui, menées à bien, ont parlé (les autres ont travaillé)
 SPEAKING: frozenset[str] = frozenset({Kind.REPLY, Kind.INITIATIVE, Kind.MURMUR})
 
 
@@ -243,30 +272,42 @@ class Names:
         return f"{self.faculty(owner)} · {humanize(rest or type_name)}"
 
     def action(self, key: str) -> str:
-        """Une action d'opérateur (« projects.creer ») : son titre, ou celle de la console."""
+        """Le titre d'un geste audité (``runtime.operated``) : celui de l'action déclarée qu'il a faite (« projects.creer »,
+        ou précédée d'où il vient : « moi.email.ecrire », « cli.identity.relier »), sinon celui que la console,
+        l'espace d'une personne ou la ligne de commande donnent à ce qu'ils font eux-mêmes (``GESTURES``, l'oubli, les
+        familles). Une clé inconnue garde sa forme générique, sans son origine (la colonne « depuis » la dit)."""
         spec = self.kernel.registry.actions.get(key)
         if spec is not None:
             return spec.title
-        if key.startswith("cli."):  # la ligne de commande : une action de la console, ou l'oubli
-            rest = key[len("cli."):]
-            inner = self.kernel.registry.actions.get(rest)
-            if inner is not None:
-                return f"{inner.title} (ligne de commande)"
-            if rest.startswith("oublier"):
-                kind = self.kernel.registry.subjects.get(rest.partition(".")[2])
-                return f"Oublier{' · ' + kind.label.lower() if kind is not None else ''} (ligne de commande)"
-            return f"{self.action(rest)} (ligne de commande)"
-        if key.startswith("console."):
-            parts = key.split(".")
-            what = {"oublier": "Oublier", "reglages": "Réglages", "parametres": "Paramètres",
-                    "sorties": "File de sortie", "rejouer": "Rejouer avec un autre modèle"}.get(
-                parts[1] if len(parts) > 1 else "", humanize(key))
-            return f"{what} · {' · '.join(parts[2:])}" if len(parts) > 2 else what
-        return humanize(key)
+        if key in GESTURES:
+            return GESTURES[key]
+        head, _, rest = key.partition(".")
+        if head not in ORIGINS or not rest:
+            return humanize(key)
+        inner = self.kernel.registry.actions.get(rest)
+        if inner is not None:
+            return inner.title
+        what, _, more = rest.partition(".")
+        if what == "oublier":
+            kind = self.kernel.registry.subjects.get(more)
+            return f"Oublier{' · ' + kind.label.lower() if kind is not None else ''}"
+        if what in GESTURE_FAMILIES:
+            tail = self.faculty(more) if what == "parametres" else humanize(more)
+            return f"{GESTURE_FAMILIES[what]} · {tail}" if more else GESTURE_FAMILIES[what]
+        return humanize(rest)
 
     def capability(self, name: str) -> str:
         spec = getattr(self.kernel.registry, "capabilities", {}).get(name)
         return getattr(spec, "description", "") or humanize(name)
+
+    def capability_phrase(self, name: str) -> str:
+        """Ce que fait une capacité, sans la parenthèse de sa description (« Envoyer un mail »)."""
+        said = self.capability(name)
+        return said.split(" (", 1)[0].rstrip(" .") or said
+
+    def capability_short(self, name: str) -> str:
+        """Le nom court d'une capacité (« Commande réseau »), que la composition lui donne ; sans lui, sa phrase."""
+        return self.labels.capabilities.get(name) or self.capability_phrase(name)
 
     def resource(self, res: str) -> str:
         """Une ressource réservée par un bail : « la parole avec Adrien », « l'atelier du but n° 3 »."""

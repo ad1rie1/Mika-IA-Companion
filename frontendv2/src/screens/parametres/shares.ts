@@ -48,8 +48,10 @@ function subOf(kind: ShareKind, key: string): string {
   return shareables().find((s) => s.kind === kind && s.key === key)?.sub ?? "";
 }
 
-function openOf(kind: ShareKind): string {
-  return kind === "mail" ? "#mail/messages" : kind === "teams" ? "#teams/discussions" : "#outils/services";
+/** Où s'ouvre ce qu'on te partage : une boîte dans Mail, un compte dans Teams, un service sur sa fiche (Paramètres ›
+ *  Services MCP, « Partagé avec toi »). */
+export function openOf(kind: ShareKind, key: string): string {
+  return kind === "mail" ? "#mail/messages" : kind === "teams" ? "#teams/discussions" : `#parametres/mcp/${encodeURIComponent(key)}`;
 }
 
 // ── La fenêtre « Partager » ──────────────────────────────────────────
@@ -235,7 +237,7 @@ function receivedTable(): string {
   return `<table class="tbl"><thead><tr><th>Quoi</th><th>De</th><th>Ce que tu peux</th><th></th></tr></thead><tbody>${received
     .map((s) => `<tr><td><div class="row">${ico(KIND_ICONS[s.kind], "sm")}<b>${h(whatLabel(s.kind, s.title))}</b></div></td>
       <td><div class="row">${personAvatar(s.owner_name, "sm")}${h(s.owner_name)}</div></td><td><span class="tag">${h(shareWords(s.level))}</span></td>
-      <td class="actions"><a class="btn xs" href="${openOf(s.kind)}">Ouvrir</a></td></tr>`)
+      <td class="actions"><a class="btn xs" href="${openOf(s.kind, s.key)}">Ouvrir</a></td></tr>`)
     .join("")}</tbody></table>`;
 }
 

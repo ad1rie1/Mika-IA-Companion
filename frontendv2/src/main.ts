@@ -21,6 +21,7 @@ import { ensureSession } from "./login/login";
 import { setManifest } from "./mika/face";
 import { loadManifest } from "./mika/portraits";
 import { MikaStore } from "./mika/store";
+import { startVrmWhenShown } from "./mika/view";
 import { carteScreen } from "./screens/carte";
 import { ChatScreen } from "./screens/chat/chat";
 import { mailScreen } from "./screens/mail";
@@ -29,6 +30,7 @@ import { parametresScreen } from "./screens/parametres";
 import { teamsScreen } from "./screens/teams";
 import { telephoneScreen } from "./screens/telephone";
 import { startCounts } from "./shell/counts";
+import { MOBILE_QUERY } from "./shell/dom";
 import { injectSprite } from "./shell/icons";
 import { Shell, type Account } from "./shell/shell";
 import { applyTheme, currentChoice, followSystem } from "./shell/theme";
@@ -90,7 +92,13 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
   shell.register(carteScreen(shell, { ask: (text) => chat.prefill(text) }));
   shell.register(parametresScreen(shell));
   shell.start();
-  startCounts(() => shell.updateCounts());
+  // les pastilles, et le nom du compte relu avec elles : renommé ailleurs (un autre appareil, la console), le menu suit
+  startCounts(
+    () => shell.updateCounts(),
+    (me) => {
+      if (me.name && me.name !== shell.user.displayName) shell.setAccount({ ...shell.user, displayName: me.name });
+    },
+  );
 
   // Les reconnexions refusées d'affilée : une connexion restée ouverte un moment remet le compte à zéro, pas
   // une ouverture suivie d'un refus aussitôt (sinon un serveur qui accepte puis refuse ferait tourner en rond).
@@ -138,12 +146,14 @@ function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement
 
   connect();
 
-  // Sa VRM, à part : three et three-vrm ne retardent pas l'écran ; ?vrm=0 la coupe (portrait seul).
-  if (new URLSearchParams(location.search).get("vrm") !== "0") {
+  // Sa VRM, à part : three et three-vrm ne retardent pas l'écran ; ?vrm=0 la coupe (portrait seul). Sur un téléphone,
+  // son coin est masqué (son portrait seul) : ni three ni le modèle (~100 Mo) ne se chargent, sauf si la fenêtre
+  // s'élargit.
+  startVrmWhenShown(location.search, matchMedia(MOBILE_QUERY), () => {
     import("./mika/vrm")
       .then((m) => m.startVrm(shell.corner, store))
       .catch((err) => console.warn("VRM indisponible, le portrait reste :", err));
-  }
+  });
 }
 
 void boot();

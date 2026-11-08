@@ -1,11 +1,13 @@
 """L'API par personne, Paramètres (ADR 0187) : son nom, son mot de passe ; les boîtes et les comptes Teams qu'elle
 branche, à elle et à personne d'autre (ADR 0185, 0186), leurs secrets jamais rendus ; la clé de son extension Teams,
-montrée une seule fois."""
+montrée une seule fois ; comment part ce que Mika prépare depuis chacun, qu'elle règle elle-même (ADR 0207)."""
 
 from __future__ import annotations
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.app.moi import settings as settings_moi
+from mika.plugins import email as email_p
+from mika.vocab.canals import CanalRule, CanalTable, mail_rule, teams_rule
 from tests.protocol.test_moi_mail import API, login, post, second_person
 from tests.protocol.test_web import bootstrap, csrf, world  # noqa: F401 — fixture partagée
 
@@ -247,3 +249,83 @@ def test_a_person_plugs_a_bounded_number_of_boxes(world, monkeypatch):  # noqa: 
     login(client, "adrien")  # un opérateur, comme dans la console
     for _ in range(2):
         assert post(client, "/mail/box/save", {"values": BOX}).status_code == 200
+
+
+def canals(client, live):
+    return client.portal.call(live.settings.canals)
+
+
+def test_she_sets_how_what_mika_prepares_leaves_her_box(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    second_person(client, live)
+    login(client, "lea")
+    key = post(client, "/mail/box/save", {"values": BOX}).json()["box"]
+    canal = f"courrier:{key}"
+    rules = client.get(API + f"/mail/box?box={key}").json()["rules"]
+    # jamais réglée : la règle de départ du courrier, telle que le courrier la lit (rien ne part sans ton accord)
+    assert (rules["canal"], rules["set"], rules["common"]) == (canal, False, False)
+    assert [(a["who"], a["prepare"], a["reply"]) for a in rules["lines"]] == [("Tout le monde", False, "accord")]
+    assert (rules["default"]["prepare"], rules["default"]["reply"]) == (False, "non")
+    body = {"canal": canal, "version": rules["version"], "lines": [{"prepare": True, "reply": "seule"}],
+            "default": {"prepare": False, "reply": "accord"}}
+    for wrong, code in (({"lines": [{"prepare": True, "reply": "brouillon"}]}, 400),  # le courrier n'en a pas
+                        ({"lines": [{"prepare": "oui", "reply": "seule"}]}, 400),
+                        ({"lines": [{"prepare": True, "reply": "seule", "who": ["tous"]}]}, 400),  # qui : la console
+                        ({"lines": []}, 409),  # une ligne de moins : ce n'est plus la règle lue
+                        ({"version": "0" * 16}, 409),
+                        ({"canal": "courrier"}, 400), ({"canal": "courrier:pas-la-sienne"}, 404)):
+        assert post(client, "/rules", {**body, **wrong}).status_code == code, wrong
+    assert canal not in canals(client, live).tables  # rien d'écrit
+    saved = post(client, "/rules", body)
+    assert saved.status_code == 200, saved.text
+    table = canals(client, live).tables[canal]
+    assert table.lines[0].who == ("tous",) and (table.lines[0].prepare, table.lines[0].reply) == (True, "seule")
+    assert table.lines[0].canal == (canal,) and table.default.reply == "accord"
+    # le courrier la lit : la règle du canal de la boîte, journalisée avec ses paramètres
+    assert mail_rule(canals(client, live), key, "quelqu.un@example.test").reply == "seule"
+    assert canal in email_p.params_of(live.kernel.mind.frame()).canaux.tables
+    again = client.get(API + f"/mail/box?box={key}").json()["rules"]
+    assert again["set"] and again["version"] != rules["version"] and again["lines"][0]["prepare"]
+    assert post(client, "/rules", body).status_code == 409  # l'empreinte d'avant ne vaut plus
+
+    login(client, "adrien")  # la boîte de Léa : ni la sienne, ni à toi
+    assert post(client, "/rules", {**body, "version": again["version"]}).status_code == 404
+
+
+def test_a_shared_box_keeps_its_rule_to_its_owner_and_teams_has_drafts(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    second_person(client, live)
+    adrien = client.get(API).json()["person"]
+    login(client, "lea")
+    key = post(client, "/mail/box/save", {"values": BOX}).json()["box"]
+    assert post(client, "/shares/set", {"kind": "mail", "key": key, "person": adrien, "level": "servir"}
+                ).status_code == 200
+    account = post(client, "/teams/account/save", {"values": {"label": "Teams de Léa"}}).json()["account"]
+    rules = client.get(API + f"/teams/account?account={account}").json()["rules"]
+    assert rules["canal"] == f"teams:{account}" and not rules["set"]
+    # une ligne réglée dans la console (qui, par où) : la propriétaire n'en règle que préparer et comment ça part
+    client.portal.call(live.settings.save_canal, f"teams:{account}", CanalTable(
+        lines=(CanalRule(who=("adresse:Marc",), reply="accord"), CanalRule(who=("tous",), reply="accord"))))
+    rules = client.get(API + f"/teams/account?account={account}").json()["rules"]
+    assert [a["who"] for a in rules["lines"]] == ["Marc", "Tout le monde"] and rules["set"]
+    teams = post(client, "/rules", {"canal": f"teams:{account}", "version": rules["version"],
+                                    "lines": [{"prepare": True, "reply": "brouillon"}, {"prepare": False, "reply": "non"}],
+                                    "default": {"prepare": False, "reply": "non"}})
+    assert teams.status_code == 200, teams.text  # Teams a ses brouillons, posés dans Teams
+    assert teams_rule(canals(client, live), account, "Marc Dupont").reply == "brouillon"
+    assert teams_rule(canals(client, live), account, "Quelqu'un d'autre").reply == "non"
+    assert canals(client, live).tables[f"teams:{account}"].lines[0].who == ("adresse:Marc",)
+    # une boîte sans règle à elle suit celle de tout le courrier, si la console l'a réglée : c'est celle-là qu'elle lit
+    client.portal.call(live.settings.save_canal, "courrier", CanalTable(
+        lines=(CanalRule(who=("tous",), prepare=True, reply="seule"),)))
+    common = client.get(API + f"/mail/box?box={key}").json()["rules"]
+    assert (common["set"], common["common"]) == (False, True)
+    assert [(a["prepare"], a["reply"]) for a in common["lines"]] == [(True, "seule")]
+
+    login(client, "adrien")  # elle la lui partage pour s'en servir : la règle reste à elle
+    shared = client.get(API + "/mail/boxes").json()["boxes"]
+    assert [b["level"] for b in shared if b["key"] == key] == ["servir"]
+    assert post(client, "/rules", {"canal": f"courrier:{key}", "version": "x", "lines": [], "default": {}}
+                ).status_code == 403

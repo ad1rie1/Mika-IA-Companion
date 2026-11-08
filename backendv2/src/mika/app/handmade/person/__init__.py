@@ -14,6 +14,11 @@ les traverse : cette page les croise, lus aux faits au même instant, à sa mém
 
 Réservée aux opérateurs, comme la console (secrets compris) ; elle se relit seule (``handmade/live.js``). Une adresse mène à
 la page de sa personne.
+
+Son en-tête dit aussi si un de ses moyens de communication est un compte (utilisateur ou opérateur) et mène à sa page
+(Réglages › Comptes). Son onglet Comptes réunit en sous-onglets ses boîtes et ses comptes Teams (les listes des
+plugins), puis les services qu'elle a branchés et ses partages, lus dans les réglages (``owned``). Son onglet Voyages
+(``voyages.py``) montre ses voyages et sert leur GPX ; un opérateur peut y en supprimer un, rien de plus (ADR 0204).
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
 from sqlalchemy import or_, select
@@ -31,6 +36,9 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
+from mika.adapters.mcp.config import TRANSPORTS
+from mika.adapters.web.accounts import Account, account_of_handle
+from mika.adapters.web.app import LoginThrottle
 from mika.app.handmade import (
     FORGOTTEN,
     MONTHS,
@@ -49,9 +57,15 @@ from mika.app.handmade import (
 )
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
-from mika.app.handmade.lists import Roles, drawn
+from mika.app.handmade.lists import Roles, drawn, listing
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memoire import memory
+from mika.app.handmade.person.voyages import GPX as TRIP_GPX
+from mika.app.handmade.person.voyages import gpx as trip_gpx
+from mika.app.handmade.person.voyages import voyages
+from mika.app.handmade.tabs import anchored
+from mika.app.moi import OUTBOUND
+from mika.app.moi.shares import _mcp_shares as service_shares
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
@@ -65,22 +79,32 @@ from mika.faculties.affect import prose
 from mika.faculties.attention.inspect import ORIGIN_FR as THOUGHT_ORIGIN_FR
 from mika.faculties.goals.inspect import KIND_FR as GOAL_KIND_FR
 from mika.faculties.goals.inspect import STATUS_FR as GOAL_STATUS_FR
-from mika.faculties.memory.inspect import SENSITIVITY_FR
+from mika.faculties.memory.inspect import ORIGIN_SHORT, SENSITIVITY_FR
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.faculties.social.sections import profile_parts, refs_of
+from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
-from mika.kernel.inspect import Head, num_fr, pct_fr
+from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr
+from mika.plugins import email as email_p
+from mika.plugins import teams as teams_p
+from mika.plugins.teams.console import ACCOUNT as TEAMS_ACCOUNT
+from mika.plugins.teams.console import SECTION as TEAMS_SECTION
+from mika.plugins.teams.console import WHOSE as TEAMS_WHOSE
+from mika.plugins.teams.console import YOURS
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
+from mika.vocab.access import PERSON, SHARES
 from mika.vocab.knowledge import knowns
 from mika.vocab.people import is_identifiable
 
 #: la page, et le fragment qu'elle relit
 BASE = PERSON_BASE
 FRAGMENT = f"{PREFIX}/_personne"
+#: la page d'un compte (Réglages › Comptes, ``?compte=<id>``)
+ACCOUNTS = f"{PREFIX}/reglages/comptes"
 #: leur histoire : tant de semaines de jours échangés (lundi en tête) ; les messages relus au plus
 WEEKS = 26
 HISTORY_ROWS = 40_000
@@ -94,7 +118,6 @@ CELL, PITCH, DAY_GUTTER, MONTH_GUTTER = 13, 16, 30, 18
 #: les heures : une barre, son pas, la hauteur
 HOUR_BAR, HOUR_PITCH, HOURS_H = 11, 14, 54
 
-ORIGIN_FR = {memory_c.TOLD: "dit", memory_c.OBSERVED: "vu", memory_c.INFERRED: "déduit", memory_c.READ: "lu"}
 #: les liens qu'on lui a racontés (``memory.Relation``), et ce qu'ils sont devenus
 RELATION_FR = {"friend": "amitié", "family": "famille", "partner": "en couple", "colleague": "travail",
                "acquaintance": "connaissance", "hostile": "en froid"}
@@ -166,6 +189,7 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         facts.append(f"le dernier {look.ago(contact.last_in)}")
     count = len(who.handles)
     how = "vérifiée" if view.authenticated else f"certitude {pct_fr(view.certainty)}"
+    account = account_of(look, who)
     return {
         "name": who.name, "initial": (who.name[:1] or "?").upper(),
         "emotion": felt["emotion"] if felt else "neutral",
@@ -177,7 +201,17 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         "where": f"{count} moyen{'s' if count > 1 else ''} de communication" + (f" · {view.channel}, {how}" if view.channel else ""),
         "where_href": fiche_url("person", person, "adresses"),
         "toward": f"{PREFIX}/decisions/envers?personne={quote(person, safe='')}",
+        # un de ses moyens de communication est un compte : lequel, et sa page (Réglages › Comptes)
+        "account": {"kind": "compte opérateur" if account.operator else "compte utilisateur",
+                    "off": not account.active, "href": f"{ACCOUNTS}?compte={account.id}"} if account else None,
     }
+
+
+def account_of(look: Look, who: Who) -> Account | None:
+    """Son compte : un de ses moyens de communication (``user_<n>``) — l'actif d'abord, s'il y en a plusieurs."""
+    ids = {i for i in (account_of_handle(h) for h in (who.person, *who.handles)) if i is not None}
+    found = [a for a in look.ui.deps.accounts.all() if a.id in ids] if ids else []
+    return next((a for a in found if a.active), found[0] if found else None)
 
 
 # ── qui elle est pour elle ──
@@ -316,7 +350,7 @@ def _item(look: Look, k: Any) -> dict[str, Any]:
     tag, tone = ("secret", "danger") if k.secret else (SENSITIVITY_FR.get(k.sensitivity, ""), "")
     told = [p for p in k.told_by if p]
     return {"text": excerpt(k.text, 260), "tag": tag, "tone": tone, "when": look.ago(k.born_at),
-            "origin": ORIGIN_FR.get(k.origin or "", ""), "told_by": look.who(told),
+            "origin": ORIGIN_SHORT.get(k.origin or "", ""), "told_by": look.who(told),
             "confidence": pct_fr(k.confidence) if k.confidence is not None else "",
             "confidence_w": unit(k.confidence or 0.0)}
 
@@ -474,6 +508,98 @@ def circle(look: Look, who: Who) -> dict[str, Any]:
     return {"people": people[:12], "more": max(0, len(people) - 12)}
 
 
+# ── ses comptes : ses boîtes, ses comptes Teams, ses services, ses partages ──
+
+#: les sous-onglets de Comptes que les plugins remplissent, dans l'ordre où la console passe leurs sections (l'onglet
+#: qui porte l'autre d'abord) : leur onglet (l'ancre où mène son adresse), leur nom, la forme de leurs listes
+OWNED = (("boites", "Courrier", Roles(title="boîte", badges=("état", "elle y écrit"), tiles=True)),
+         ("teams", "Teams", Roles(title="compte", badges=("état",), tiles=True)))
+#: ce qui se partage (ADR 0188), et à quel niveau, tels que la fiche les nomme
+SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service"}
+LEVEL_FR = {level: label.lower() for level, label in SHARES}
+
+
+def _with(look: Look, who: str, level: str) -> dict[str, str]:
+    """Une personne d'un partage (``personne:<clé>``) et son niveau, pour la fiche."""
+    person = who.removeprefix(PERSON)
+    return {"name": look.name(person), "person_href": look.href(person), "level": LEVEL_FR.get(level, level)}
+
+
+def services(look: Look, who: Who) -> list[dict[str, Any]]:
+    """Les services MCP qu'elle a branchés depuis son espace (ADR 0192 : ``McpServer.owner``), lus dans les réglages :
+    chacun, à quoi il sert, s'il est actif, avec qui elle le partage."""
+    settings = look.ui.deps.settings
+    if settings is None:
+        return []
+    mine = PERSON + who.person
+    return [{"name": name, "href": fiche_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
+             "on": spec.enabled, "where": dict(TRANSPORTS).get(spec.transport, spec.transport),
+             "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec, mine).items())]}
+            for name, spec in sorted(settings.mcp().servers.items()) if spec.owner == mine]
+
+
+def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
+    """Ce qu'elle partage et ce qu'on lui partage (ADR 0188) : ses boîtes et ses comptes Teams (les partages
+    journalisés, ``EmailParams.shares``, ``TeamsParams.shares`` ; une boîte « à toi » est à chacune de ses
+    propriétaires), ses services (une ligne d'accès à une seule personne, ``app/moi/shares.py``). Lecture seule."""
+    frame, mine = look.frame, PERSON + who.person
+    owner = bool(frame.get(identity_c.IS_OWNER(who.person)))
+    given: list[dict[str, Any]] = []
+    received: list[dict[str, Any]] = []
+
+    def teams_href(key: str, whose: str) -> str:
+        return f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: whose or YOURS, TEAMS_ACCOUNT: key})
+
+    for kind, of, href, holder in (
+            ("mail", email_p.params_of, lambda key, _whose: fiche_url("compte", key), email_p.approver_name),
+            ("teams", teams_p.params_of, teams_href, teams_p.writer_of)):
+        port = look.ui.kernel.ports.get(kind)
+        if port is None:
+            continue
+        p = of(frame)
+        for a in port.accounts():
+            whose, shared = p.owners.get(a.key, ""), p.shares.get(a.key, {})
+            resource = {"kind": SHARED_KINDS[kind], "title": a.name, "href": href(a.key, whose)}
+            if (not whose and owner) or whose == mine:
+                given += [{**resource, **_with(look, x, level)} for x, level in sorted(shared.items())]
+            elif level := shared.get(mine, ""):
+                received.append({**resource, "owner": holder(frame, a.key), "level": LEVEL_FR.get(level, level)})
+    settings = look.ui.deps.settings
+    for name, spec in sorted(settings.mcp().servers.items()) if settings is not None else ():
+        resource = {"kind": SHARED_KINDS["mcp"], "title": name, "href": fiche_url("serveur", name)}
+        if spec.owner == mine:
+            given += [{**resource, **_with(look, x, level)} for x, level in sorted(service_shares(spec, mine).items())]
+        elif spec.owner and (level := service_shares(spec, spec.owner).get(mine, "")):
+            received.append({**resource, "owner": look.name(spec.owner.removeprefix(PERSON)),
+                             "level": LEVEL_FR.get(level, level)})
+    return {"given": given, "received": received}
+
+
+def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+    """L'onglet Comptes, dessiné : en sous-onglets, ses boîtes et ses comptes Teams (les listes des plugins, réunies
+    par ``joined``, ADR 0185, 0186), puis ses services et ses partages, lus dans les réglages (ADR 0188, 0192) — ce
+    que la console voit de tous, en lecture seule (chacun les règle dans son espace)."""
+    sections = list(blocks) if blocks and all(isinstance(b, Section) for b in blocks) \
+        else [Section(OWNED[0][1], tuple(blocks))]
+    shown, name, counter = ui.env(), ui.names.name_of(key), [0]
+    panes = []
+    for (anchor, label, roles), section in zip(OWNED, sections, strict=False):
+        lists = [{**anchored(listing(t, shown, query, name, roles, counter), anchor), "kind": anchor}
+                 for t in section.items if isinstance(t, Table)]
+        panes.append({"id": anchor, "label": label, "count": sum(x["count"] or 0 for x in lists), "lists": lists,
+                      "facts": [render.block(b, shown, query) for b in section.items if isinstance(b, Fields)],
+                      "notes": [{"text": b.text, "title": b.title, "tone": b.tone} for b in section.items
+                                if isinstance(b, Note)]})
+    look = Look.of(ui, DAY)
+    who = who_of(look, key)
+    plugged, shared = services(look, who), shares(look, who)
+    panes += [{"id": "services", "label": "Services", "count": len(plugged), "services": plugged},
+              {"id": "partages", "label": "Partages", "count": len(shared["given"]) + len(shared["received"]),
+               "shares": shared}]
+    return Markup(env.get_template("handmade/person/tabs/comptes.html").render(
+        panes=panes, name=who.name, of=elided("de", who.name), that=elided("que", who.name)))
+
+
 # ── la page ──
 
 #: les onglets des facultés dessinés : leur nom → ce qui les dessine (les données restent celles de la faculté)
@@ -481,20 +607,28 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "echanges": exchanges,
     "memoire": memory,
     "adresses": drawn(Roles(title="moyen de communication", badges=("confiance",), tiles=True), "adresses"),
-    # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``) ; les pièces seules, sans l'autre
+    # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``), « Retirer » sur chacun
+    # (ADR 0205) ; les pièces seules, sans l'autre
     "fichiers": files,
     "pieces": drawn(Roles(title="nom", badges=("sorte", "état"), body=("ce qu'elle y a lu",), time="reçue",
                           tiles=True), "pieces"),
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
     "projets": drawn(Roles(title="projet", badges=("mode", "état"), time="ouvert"), "projets"),
-    # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``)
-    "boites": drawn(Roles(title="boîte", badges=("état", "elle y écrit"), tiles=True), "boites"),
-    "teams": drawn(Roles(title="compte", badges=("état",), tiles=True), "teams"),
+    # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``),
+    # puis ses services et ses partages (ADR 0188, 0192) ; sans boîte, Teams reste un onglet à lui
+    "boites": owned,
+    "teams": drawn(OWNED[1][2], "teams"),
     # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
     "telephone": senses.phone_tab, "position": senses.position_tab,
+    # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
+    "voyages": voyages,
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console
     "synthese": blocks_tab, "lien": blocks_tab, "devine": blocks_tab, "affect": blocks_tab, "pensees_personne": blocks_tab,
 }
+
+#: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (« fixer la
+#: proximité »), les voyages (« Supprimer ») et les fichiers (« Retirer ») ; les autres n'en ont pas
+FORMED = (blocks_tab, voyages, files)
 
 #: chaque partie de la page, lue à part
 PARTS: tuple[tuple[str, Callable[[Look, Who], dict[str, Any]]], ...] = (
@@ -558,8 +692,7 @@ class PersonOverview(Overview):
         draw = TABS.get(tab)
         if draw is None or not self.known(ui, key):
             return None
-        # dessiné bloc par bloc, un onglet dessine aussi ses formulaires (« fixer la proximité ») ; les autres n'en ont pas
-        return draw(ui, key, blocks, query, forms) if draw is blocks_tab else draw(ui, key, blocks, query)
+        return draw(ui, key, blocks, query, forms) if draw in FORMED else draw(ui, key, blocks, query)
 
     async def fragment(self, request: Request) -> Response:
         assert self.ui is not None
@@ -572,7 +705,17 @@ class PersonOverview(Overview):
         """L'ancienne adresse de la page : la fiche, ouverte sur sa vue d'ensemble."""
         return secure(RedirectResponse(fiche_url("person", request.path_params["key"]), status_code=303))
 
-    def routes(self, ui: UI) -> list[Route]:
+    def routes(self, ui: UI, outbound: LoginThrottle | None = None) -> list[Route]:
+        """Ses routes. ``outbound`` : la borne des demandes au serveur d'itinéraires, celle de l'écran Carte
+        (``MeApi.outbound``), que le GPX d'un voyage use sur le compte de l'opérateur ; sans elle, une borne à la
+        console seule, aux mêmes nombres (``OUTBOUND``) — jamais aucune."""
         self.ui = ui
+        throttle = outbound if outbound is not None else LoginThrottle(*OUTBOUND)
+
+        async def gpx(request: Request) -> Response:
+            return await trip_gpx(ui, request, throttle)
+
         return [Route(BASE + "/{key:path}", ui.guarded(self.page), methods=["GET"]),
-                Route(FRAGMENT + "/{key:path}", ui.guarded(self.fragment), methods=["GET"])]
+                Route(FRAGMENT + "/{key:path}", ui.guarded(self.fragment), methods=["GET"]),
+                # le GPX d'un voyage, depuis son onglet (ADR 0204)
+                Route(TRIP_GPX + "/{trip:int}/gpx", ui.guarded(gpx), methods=["GET"])]

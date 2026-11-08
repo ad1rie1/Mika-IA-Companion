@@ -86,19 +86,20 @@ def line(r: Request, texts: Mapping[str, str]) -> str:
     consigne."""
     what = phrase("mcp.section.what", tool=inert(r.remote, 80), server=inert(r.server, 40))
     if r.status == WAITING:
-        who = phrase("mcp.section.by_chat") if r.approval == "conversation" else phrase("mcp.section.by_operator")
-        return "- " + phrase("mcp.section.waiting", what=what, who=who)
+        who = (phrase("approvals.section.by_chat") if r.approval == "conversation"
+               else phrase("approvals.section.by_operator"))
+        return "- " + phrase("approvals.section.waiting", what=what, who=who)
     said = texts.get(r.text_ref, "")
     if r.status == ANSWERED:
-        return "- " + phrase("mcp.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
-                                                                          or phrase("mcp.tools.nothing"))
+        return "- " + phrase("approvals.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
+                                                                          or phrase("approvals.nothing"))
     if r.status == FAILED:
         if not said.strip():
-            return "- " + phrase("mcp.section.failed", what=what)
-        return "- " + phrase("mcp.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
+            return "- " + phrase("approvals.section.failed", what=what)
+        return "- " + phrase("approvals.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
     if r.status == EXPIRED:
-        return "- " + phrase("mcp.section.expired", what=what)
-    return "- " + phrase("mcp.section.refused", what=what)
+        return "- " + phrase("approvals.section.expired", what=what)
+    return "- " + phrase("approvals.section.refused", what=what)
 
 
 @MCP.section("services", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,

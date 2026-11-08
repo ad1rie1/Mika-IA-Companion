@@ -97,8 +97,8 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
-    num_fr,
     paginate,
+    size_fr,
 )
 from mika.ports.workshop import Hosted, OutsideWorkshop, argv_lines
 from mika.vocab.episodes import Kind, project_target
@@ -259,10 +259,6 @@ def _page(ctx: InspectContext, types: Sequence[Any], where: tuple[str, Any] | No
     page = found[:PAGE]
     older = ((cursor, str(page[-1].seq)),) if len(found) > PAGE else ()
     return page, Pager(param=cursor, size=PAGE, older=older)
-
-
-def _size(n: int) -> str:
-    return f"{n} o" if n < 1024 else f"{num_fr(n / 1024, 1)} Ko" if n < 1024 * 1024 else f"{num_fr(n / 1024 / 1024, 1)} Mo"
 
 
 def _cut(text: str, n: int) -> str:
@@ -992,10 +988,10 @@ async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> lis
         acc = f"{acc}/{part}" if acc else part
         crumbs.append(NavItem(part, _folder_ref(p, acc, part), active=acc == folder))
     rows: list[Any] = [Row((_folder_ref(p, f"{folder}/{name}" if folder else name, f"{name}/"),
-                            Badge("dossier", "info"), f"{count} fichier(s)", _size(size), ""),
+                            Badge("dossier", "info"), f"{count} fichier(s)", size_fr(size), ""),
                            href=_folder_ref(p, f"{folder}/{name}" if folder else name, ""))
                        for name, count, size in dirs]
-    rows += [Row((_file_ref(p, path, path.rsplit("/", 1)[-1]), Badge("fichier"), "", _size(size),
+    rows += [Row((_file_ref(p, path, path.rsplit("/", 1)[-1]), Badge("fichier"), "", size_fr(size),
                   _download_link(p.id, path))) for path, size in files]
     total = sum(int(m.group("size")) for m in (_TREE_LINE.match(x) for x in tree) if m is not None)
     opened = await _opened_file(p, port, ctx.param("fichier"))
@@ -1009,7 +1005,7 @@ async def _files_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> lis
         Table((Column("nom"), Column("sorte", "fit"), Column("contenu", "fit"), Column("taille", "num"),
                Column("télécharger", "fit")), tuple(rows), title=f"/{folder}" if folder else "Le dossier du projet",
               empty="ce dossier est vide",
-              caption=f"{len(tree)} fichier(s) {where}, {_size(total)} en tout. Un nom ouvre le fichier ici ; "
+              caption=f"{len(tree)} fichier(s) {where}, {size_fr(total)} en tout. Un nom ouvre le fichier ici ; "
                       "« télécharger » le rapatrie tel quel."),
         *deposit,
     ]
@@ -1204,8 +1200,8 @@ def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
         items.append(Disclosure("Régler le dépôt distant", (
             ActionSlot("projects.depot_distant", title="Enregistrer le dépôt distant", compact=True),),
             open=not p.remote))
-    items.append(Note("Le jeton qui permet de pousser (GitHub ou un autre hôte https) se règle dans Réglages › "
-                      "Canaux › Dépôts git : il n'apparaît jamais dans le journal ni dans ce qu'elle lit.", "muted"))
+    items.append(Note("Le jeton qui permet de pousser (GitHub ou un autre hôte https) se règle dans Connexions › "
+                      "Dépôts Git : il n'apparaît jamais dans le journal ni dans ce qu'elle lit.", "muted"))
     return Section("Son dépôt distant", tuple(items),
                    description="Pousser envoie ce qui est enregistré ; récupérer avance l'atelier en ligne droite (un "
                                "atelier vierge prend toute l'histoire du dépôt distant).")

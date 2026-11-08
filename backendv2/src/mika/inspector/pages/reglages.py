@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import re
 import secrets as _secrets
-import unicodedata
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlencode
@@ -29,7 +28,7 @@ from starlette.responses import RedirectResponse, Response
 
 from mika.contracts import runtime as rt
 from mika.inspector.catalog import Builtin, Panel
-from mika.inspector.formview import field_view
+from mika.inspector.formview import decimal_fr, field_view
 from mika.inspector.pages.decisions import arbiter_diff
 from mika.inspector.pages.system import facts_diff
 from mika.inspector.pages.tabs import TABS
@@ -55,11 +54,12 @@ from mika.kernel.inspect import (
     cursor_page,
     describe_error,
 )
+from mika.kernel.text import fold
 from mika.ports.journal import JournalEvent
 from mika.ports.sql import json_field
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
-from mika.runtime.params import ParamsOverlay, Planned
+from mika.runtime.params import SHOWN_DIGITS, ParamsOverlay, Planned
 from mika.runtime.params import shown as params_shown
 
 FACULTY_PAGE = "comportement-"
@@ -83,8 +83,7 @@ def faculty_url(owner: str, **more: str) -> str:
 
 
 def _slug(text: str) -> str:
-    folded = "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]+", "-", folded).strip("-") or "general"
+    return re.sub(r"[^a-z0-9]+", "-", fold(text)).strip("-") or "general"
 
 
 def _value(f: forms.FormField, value: Any) -> str:
@@ -101,7 +100,7 @@ def _value(f: forms.FormField, value: Any) -> str:
         if isinstance(plain, list | tuple):
             return ", ".join(str(v) for v in plain) or "—"
         return json.dumps(plain, ensure_ascii=False, default=str)
-    text = f"{value:.4g}".replace(".", ",") if f.kind in ("float", "slider") and isinstance(value, float) \
+    text = decimal_fr(value, 4) if f.kind in ("float", "slider") and isinstance(value, float) \
         else forms.as_text(f, value)
     label = next((lbl for v, lbl in f.choices if v == text), "")
     unit = f" {f.unit}" if f.unit and f.kind in ("int", "float", "slider") else ""
@@ -115,14 +114,15 @@ def _bounds(f: forms.FormField) -> str:
     def show(x: float) -> str:
         if f.kind == "duration":
             return forms.show_duration(round(x * forms.UNIT_US[f.unit]))
-        return f"{x:g}".replace(".", ",")
+        # la notation de la valeur, à côté (« 0,00000001 – 0,0005 », jamais « 1e-08 – 0,0005 »)
+        return decimal_fr(x)
 
     return f"{show(f.lo) if f.lo is not None else '…'} – {show(f.hi) if f.hi is not None else '…'}"
 
 
 def _num(value: Any) -> str:
     if isinstance(value, float):
-        return f"{value:.3g}".replace(".", ",")
+        return decimal_fr(value, 3)
     return str(value)
 
 
@@ -157,9 +157,8 @@ def param_builtins(parameters: Any, families: Any, labels: Mapping[str, str]) ->
 
 
 @TABS.tab("reglages.comportement", title="Vue d'ensemble", group="Paramètres avancés", order=COMPORTEMENT_ORDER,
-          description="Chaque faculté règle son comportement par des paramètres internes. Le tempérament "
-                      "(Personnage › Tempérament) est l'entrée principale ; une surcharge se pose sur la page de la "
-                      "faculté.")
+          description="Chaque faculté règle son comportement par des paramètres internes. Le tempérament en est "
+                      "l'entrée principale ; une surcharge se pose sur la page de la faculté.")
 async def comportement(ui: Any, request: Request) -> Any:
     owner = request.query_params.get("faculte", "")
     ps = ui.deps.parameters
@@ -295,7 +294,9 @@ def _param_views(ps: Any, owner: str, groups: list[tuple[str, list[forms.FormFie
                 raw = given.get(f.path)
                 if view is not None and f.kind in ("float", "slider") and isinstance(raw, float) \
                         and f.path not in typed:
-                    view["value"] = params_shown(raw)  # 6 chiffres : renvoyé sans y toucher, rien ne change
+                    # 6 chiffres : renvoyé sans y toucher, rien ne change (``params._close``) ; un champ en notation
+                    # décimale française, comme ses bornes — un curseur garde le point qu'attend son contrôle
+                    view["value"] = decimal_fr(raw, SHOWN_DIGITS) if f.kind == "float" else params_shown(raw)
                 if view is not None and f.kind == "duration":
                     view["placeholder"] = "ex. 10 min, 1 h 30"
             items.append({"field": view, "label": f.label, "help": f.help, "value": _value(f, flat.get(f.path)),

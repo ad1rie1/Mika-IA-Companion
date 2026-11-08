@@ -304,7 +304,8 @@ def test_every_settings_change_lands_in_the_configuration_journal_without_conten
             urls |= links(html_of(first), f"/inspecteur/{d.key}")
     urls |= {f"{BASE}/fournisseurs?enregistrement=backends&cle=claude", f"{BASE}/comportement-identity",
              "/inspecteur/systeme/operations"}
-    assert f"{BASE}/transcription" in urls and "/inspecteur/systeme/sorties" in urls
+    # la transcription vit dans Ses sens, derrière sa roue (ADR 0206) : sa page y est relue aussi
+    assert "/inspecteur/sens/parametres-transcription" in urls and "/inspecteur/systeme/sorties" in urls
     for u in sorted(urls):
         r = client.get(u, follow_redirects=True)
         assert r.status_code == 200, u

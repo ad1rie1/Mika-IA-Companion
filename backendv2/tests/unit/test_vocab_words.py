@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import pytest
 
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.sim.lane import PARIS, at_paris
-from mika.vocab.days import window_of
+from mika.vocab.days import ago_words, window_of
 from mika.vocab.words import elided, fold, stems
+from tests.architecture.test_phrasebook import uses
 
 
 @pytest.mark.parametrize("word, before, expected", [
@@ -50,3 +52,16 @@ def test_a_moment_said_in_words_is_found_in_time(text, expected):
     day, lo, hi = expected
     assert got == (at_paris(2026, 10, day, 0, 0) + lo * 3_600_000_000,
                    min(at_paris(2026, 10, day, 0, 0) + hi * 3_600_000_000, now))
+
+
+@pytest.mark.parametrize(("us", "expected"), [
+    (0, "1 min"), (-HOUR, "1 min"), (MINUTE // 2, "1 min"), (12 * MINUTE, "12 min"), (119 * MINUTE, "119 min"),
+    (2 * HOUR, "2 h"), (3 * HOUR + 59 * MINUTE, "3 h"), (47 * HOUR, "47 h"), (2 * DAY, "2 jours"), (9 * DAY, "9 jours"),
+])
+def test_how_long_ago_is_said_in_few_words(us, expected):
+    assert ago_words(us) == expected
+
+
+def test_how_long_ago_is_counted_in_one_place():
+    """Une seule façon de compter : les seuils ne divergent plus d'un greffon à l'autre."""
+    assert {u.where.split(":")[0] for u in uses() if u.key == "timespan.ago.minutes"} == {"vocab/days.py"}

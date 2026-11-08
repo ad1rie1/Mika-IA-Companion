@@ -66,9 +66,9 @@
             </td>
             {% for c in t.columns %}
             <td>
-              {% if c.kind == 'bool' %}<label class="access-tool"><input type="checkbox" name="{{ c.key }}.{{ r.n }}"{{ ' checked' if r.values[c.key] }}{{ ' disabled' if locked or c.locked }}> oui</label>
-              {% else %}<select name="{{ c.key }}.{{ r.n }}" class="access-select {{ r.values[c.key] }}" aria-label="{{ c.label }}, ligne {{ r.n }}"{{ ' disabled' if locked }} title="{{ c.help }}">
-                {% for k, text, off in c.choices %}<option value="{{ k }}"{{ ' selected' if k == r.values[c.key] }}{{ ' disabled' if off and k != r.values[c.key] }}>{{ text }}{% if off %} 🔒{% endif %}</option>{% endfor %}
+              {% if c.kind == 'bool' %}<label class="access-tool"><input type="checkbox" name="{{ c.key }}.{{ r.n }}"{{ ' checked' if r.cells[c.key] }}{{ ' disabled' if locked or c.locked }}> oui</label>
+              {% else %}<select name="{{ c.key }}.{{ r.n }}" class="access-select {{ r.cells[c.key] }}" aria-label="{{ c.label }}, ligne {{ r.n }}"{{ ' disabled' if locked }} title="{{ c.help }}">
+                {% for k, text, off in c.choices %}<option value="{{ k }}"{{ ' selected' if k == r.cells[c.key] }}{{ ' disabled' if off and k != r.cells[c.key] }}>{{ text }}{% if off %} 🔒{% endif %}</option>{% endfor %}
               </select>{% endif %}
             </td>
             {% endfor %}

@@ -13,13 +13,21 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+from types import SimpleNamespace
+
+import pytest
 
 from mika.app.mindport import KernelPort
 from mika.contracts import mcp as c
 from mika.contracts import runtime as rt
-from mika.kernel.clock import MINUTE, US
+from mika.kernel.clock import DAY, MINUTE, US
+from mika.kernel.guards import Superseded
 from mika.kernel.registry import ArbitrationPolicy
-from mika.plugins.mcp import ANSWERED, EPISODES, EXPIRED, FAILED, MCP, Request, prompt
+from mika.plugins import mcp as mcp_plugin
+from mika.plugins.forge import calls as forge_calls
+from mika.plugins.mcp import ANSWERED, EPISODES, EXPIRED, FAILED, MCP, PINNED, Request, call_digest, prompt
+from mika.plugins.mcp import calls as mcp_calls
+from mika.plugins.teams import expire as teams_expire
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build, connect, said
@@ -160,6 +168,117 @@ def test_a_card_left_unanswered_expires_and_she_is_told(tmp_path):
     assert req.status == EXPIRED and still == {} and calls == []
     assert [x.reason for x in owed] == [c.ANSWERED_REASON] and owed[0].target == "user_1"
     assert "expiré" in owed[0].args["brief:mcp"]
+
+
+def test_a_failed_expiry_reaches_health_and_is_tried_again(tmp_path):
+    """Audit du 2026-11-05, K0-03 : l'échéance avalait toute panne ; le processus « réussissait », la santé ne voyait
+    rien et la demande restait « attend ». La panne est journalisée, et l'échéance repasse une fois la panne finie."""
+    port = AnsweringPort(ruled("carte", fingerprint="f1"))
+
+    async def scenario(kernel, llm):
+        await ask(kernel)
+        (proposal,) = pending(kernel)
+        append = kernel.mind.append
+
+        async def broken(drafts, **how):
+            if any(d.type is rt.EFFECT_RESOLVED for d in drafts):
+                raise RuntimeError("la base est en panne")
+            return await append(drafts, **how)
+
+        kernel.mind.append = broken
+        await asyncio.sleep(11 * MINUTE / US)
+        during = kernel.mind.frame().state("mcp").requests[proposal].status
+        failed = [e.data for e in map(kernel.mind.decode, kernel.mind.store.read(types={rt.PROCESS_FAILED.name}))
+                  if e.data.process == "mcp.expire"]
+        kernel.mind.append = append
+        await asyncio.sleep(10 * MINUTE / US)
+        return during, failed, kernel.mind.frame().state("mcp").requests[proposal].status
+
+    during, failed, after = live(tmp_path, scenario, port)
+    assert during == rt.WAITING and after == EXPIRED
+    assert len(failed) == 1 and "la base est en panne" in failed[0].error  # une série d'échecs : une seule trace
+
+
+def overdue(n):
+    """Une demande échue, telle que la lisent les trois échéances."""
+    return SimpleNamespace(proposal=n, status=rt.WAITING, state=rt.WAITING, expires=1, queued_until=0, args_json="{}",
+                           context="ici", target="", app="cours", draft=f"d{n}")
+
+
+def passing(rows, emit):
+    return SimpleNamespace(frame=SimpleNamespace(now=2), state=SimpleNamespace(**rows), ports={}, emit=emit)
+
+
+EXPIRIES = [pytest.param(mcp_calls.Expire, "requests", id="mcp"), pytest.param(forge_calls.Expire, "calls", id="forge"),
+            pytest.param(teams_expire.Expire, "drafts", id="teams")]
+
+
+@pytest.mark.parametrize(("process", "rows"), EXPIRIES)
+async def test_an_expiry_forgives_a_decision_taken_meanwhile_and_nothing_else(process, rows):
+    seen: list[int] = []
+
+    async def superseded_first(draft, guard=None, emitter=None):
+        seen.append(draft.data.proposal)
+        if draft.data.proposal == 1:
+            raise Superseded("encore en attente", "le prédicat ne tient plus")
+        return SimpleNamespace(deduped=False)
+
+    async def broken(draft, guard=None, emitter=None):
+        raise RuntimeError("la base est en panne")
+
+    both = {rows: {1: overdue(1), 2: overdue(2)}}
+    await process().run(passing(both, superseded_first))
+    assert seen == [1, 2]  # décidée entre-temps : rien à faire, et la suivante passe
+    with pytest.raises(RuntimeError, match="la base est en panne"):
+        await process().run(passing(both, broken))
+
+
+@pytest.mark.parametrize(("process", "rows"), EXPIRIES)
+async def test_an_expiry_is_signed_by_the_delay_under_the_same_guard_everywhere(process, rows):
+    sent = []
+
+    async def emit(draft, guard=None, emitter=None):
+        sent.append((draft, guard, emitter))
+        return SimpleNamespace(deduped=False)
+
+    await process().run(passing({rows: {7: overdue(7)}}, emit))
+    [(draft, guard, emitter)] = sent
+    assert not draft.data.approved and draft.data.by == rt.EXPIRER and draft.dedupe_key == "décision:7"
+    assert draft.data.note.text == "pas d'accord dans le délai"
+    assert guard.name == "encore en attente" and guard.reads == (rt.PENDING_EFFECTS,) and emitter == rt.OWNER
+
+
+def test_the_digest_of_a_card_already_journaled_does_not_change():
+    """L'empreinte d'une carte en attente est au journal : relevée avant son passage au contrat, elle ne bouge pas."""
+    call = {"server": "meteo", "remote": "prevision", "fingerprint": "f1", "args": {"ville": "Lyon"}}
+    assert call_digest(call) == "0b1958bb5d2149575c529cbc2b76b70b"
+    assert call_digest({**call, rt.DECIDER: "user_1"}) == "09fff26a5ad8320b50329007c48d0f8e"
+    assert call_digest({**call, "keep": "rien", "request": "e:1"}) == call_digest(call)
+
+
+def test_a_request_says_who_decides_and_until_when():
+    call = {"server": "meteo", "remote": "prevision", "fingerprint": "f1", "args": {}}
+    card = rt.call_request(call, PINNED, request="e:1", target="user_1", in_chat=True, now=1000)
+    desk = rt.call_request(call, PINNED, request="e:1", target="", in_chat=False, now=1000)
+    assert (card["approval"], card[rt.DECIDER], card[rt.EXPIRES]) == ("conversation", "user_1", 1000 + 10 * MINUTE)
+    assert desk["approval"] == "operateur" and rt.DECIDER not in desk and desk[rt.EXPIRES] == 1000 + DAY
+    assert card["_apercu"] == call_digest(card) and desk["_apercu"] == call_digest(desk)
+    assert card["_apercu"] != desk["_apercu"]  # qui décide fait partie de ce qui est accepté
+
+
+def test_the_summary_of_a_call_comes_from_her_voice(tmp_path, monkeypatch):
+    """Audit du 2026-11-05, K0-03 : le résumé de ``mcp`` était écrit en dur, celui de la forge par une clé."""
+    said_by_voice = mcp_plugin.phrase
+    monkeypatch.setattr(mcp_plugin, "phrase", lambda key, /, **holes: f"[{sorted(holes)}]" if key == "mcp.calls.summary"
+                        else said_by_voice(key, **holes))
+    port = AnsweringPort(ruled("carte", fingerprint="f1"))
+
+    async def scenario(kernel, llm):
+        await ask(kernel)
+        (view,) = kernel.mind.frame().get(rt.PENDING_EFFECTS)
+        return kernel.mind.store.content([view.summary_ref])[view.summary_ref]
+
+    assert live(tmp_path, scenario, port) == "[['args', 'server', 'tool']]"
 
 
 def test_her_approval_asked_before_someone_else_has_no_card_and_is_decided_in_the_console(tmp_path):

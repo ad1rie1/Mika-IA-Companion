@@ -3,9 +3,10 @@ avancement, sa prochaine séance, ses garde-fous, son plan de travail (chaque t�
 séances et la dernière consigne reçue ; le détail complet, replié. Un rappel se dit autrement : quoi, quand, à qui,
 s'il a été dit. Ses autres onglets (cadre, séances, carnet, décisions, épisodes) se dessinent bloc par bloc.
 
-Les données sont celles de la faculté ``goals`` : sa tranche, lue par ses propres fonctions (statut, budget, envie,
-prochaine séance et ce qui la retient), ses textes et son journal (ses séances). Les formulaires du plan sont ceux que
-la console a préparés pour l'onglet (``Forms``), retrouvés dans les blocs de la faculté.
+Les données sont celles de la faculté ``goals`` : sa tranche, lue par ses propres fonctions (statut, budget, envie),
+ses textes et son journal (ses séances). Ce que sa vue dit déjà se lit dans ses blocs : la prochaine séance et ce qui la
+retient, dans l'en-tête qu'elle déclare (une seule règle, ``goals.inspect.next_session``). Les formulaires du plan sont
+ceux que la console a préparés pour l'onglet (``Forms``), retrouvés dans les blocs de la faculté.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from mika.app.handmade.fiche_parts import (
     STYLES,
     draw,
     fact,
+    faculty_head,
     rendered,
     safely,
     shaped,
@@ -34,6 +36,7 @@ from mika.faculties.goals.faculty import Goal, budget, desire, goal_at, musing, 
 from mika.faculties.goals.inspect import (
     AUTHORITY_FR,
     KIND_FR,
+    NEXT_SESSION,
     PRIORITY_FR,
     PRIORITY_TONE,
     STATUS_FR,
@@ -43,7 +46,6 @@ from mika.faculties.goals.inspect import (
     VERDICT_FR,
     VERDICT_TONE,
 )
-from mika.faculties.goals.work import next_step_at, why_not_now
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
@@ -78,15 +80,11 @@ def _who(ui: UI, key: str | None) -> dict[str, str] | None:
     return {"name": ui.names.name_of(key) or person, "href": person_href(person)}
 
 
-def _next(g: Goal, s: Any, frame: Any, look: Look) -> str:
-    """La prochaine séance en mots : quand, ou ce qui la retient (comme la faculté la dit)."""
-    why = why_not_now(g, s, frame)
-    if not why:
-        return "dès que possible"
-    nxt = next_step_at(g, s, frame) if status(g, frame.now) in (c.ACTIVE, c.WAITING) else None
-    if nxt is not None and nxt > frame.now and why.startswith("pas encore"):
-        return f"{look.day(nxt)} ({why.split(' : ', 1)[-1]})"
-    return why
+def _next(ui: UI, key: str) -> str:
+    """La prochaine séance, telle que la faculté la dit dans l'en-tête qu'elle déclare (quand, ou ce qui la retient) ;
+    vide quand elle n'en montre pas (un rappel, un but clos ou en pause)."""
+    got = faculty_head(ui, KIND, key)
+    return str(dict(got.facts).get(NEXT_SESSION) or "") if got is not None else ""
 
 
 def _progress(g: Goal, p: Any) -> dict[str, Any]:
@@ -197,8 +195,8 @@ class GoalFiche(Overview):
             facts.append(fact("pour", who["name"], who["href"]))
         if g.due is not None:
             facts.append(fact("échéance", look.day(g.due)))
-        if g.kind != c.REMINDER and st in (c.ACTIVE, c.WAITING) and not g.paused_at:
-            facts.append(fact("prochaine séance", _next(g, s, frame, look)))
+        if nxt := _next(ui, key):
+            facts.append(fact(NEXT_SESSION, nxt))
         facts.append(fact("ouvert", look.day(g.opened_at)))
         return draw("tete.html", kicker=f"But n° {g.id} · {_kind(g)} · {AUTHORITY_FR.get(g.authority, g.authority)}",
                     title=title, tags=tags, facts=facts, lede="")
@@ -223,7 +221,6 @@ class GoalFiche(Overview):
                           *(t.text_ref for t in g.tasks), *(t.note_ref for t in g.tasks)))
         st = status(g, frame.now)
         reminder = g.kind == c.REMINDER
-        alive = st in (c.ACTIVE, c.WAITING) and not g.paused_at
         exploring = g.kind == c.EXPLORATION and g.status not in c.CLOSED_STATUSES
         wish = desire(g, frame.now, p) if exploring else None
         parts = _blocks(blocks, rendered(ui, blocks, query))
@@ -237,7 +234,7 @@ class GoalFiche(Overview):
             summary=said.get(g.summary_ref, FORGOTTEN) if g.summary_ref else "",
             last_step=look.ago(g.last_step_at) if g.last_step_at else "", chips=chips,
             status={"text": STATUS_FR.get(st, st), "tone": tone(STATUS_TONE.get(st, ""))},
-            progress=_progress(g, p), next=_next(g, s, frame, look) if alive and not reminder else "",
+            progress=_progress(g, p), next=_next(ui, key),
             due=look.day(g.due) if g.due is not None else "",
             wish={"text": f"{round(100 * wish)} %", "w": unit(wish), "frozen": bool(g.paused_at)}
             if wish is not None else None,

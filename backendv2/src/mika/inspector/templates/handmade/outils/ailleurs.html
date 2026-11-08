@@ -1,14 +1,16 @@
 {# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons de la barre de titre (la
    console les y porte) ; une carte par service
-   branché (son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard) ; une carte par app et les
-   outils qu'elle lui donne. #}
+   branché (à qui il est, son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard), et « À qui » en
+   bouton à choix quand plusieurs personnes en ont branché (ADR 0192) ; une carte par app et les outils qu'elle lui
+   donne. #}
 <div class="now-page elsewhere">
   {% if services is not none %}
   <section class="now-card" aria-labelledby="elsewhere-services">
     <header class="now-card-head">
       <h2 id="elsewhere-services">Les services branchés</h2>
       <span class="person-count now-num">{{ services|length }}</span>
-      <p>Des serveurs MCP qui lui prêtent leurs outils. Chacun dit avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde. Un outil ne lui sert qu'une fois que tu l'as approuvé sur la fiche du service ; s'il change, il est suspendu jusqu'à ton nouvel accord.</p>
+      <p>Des serveurs MCP qui lui prêtent leurs outils, les siens et ceux qu'une personne a branchés sous son compte. Chacun dit avec qui elle s'en sert, ce qu'elle fait seule et ce qu'elle en garde. Un outil ne lui sert qu'une fois que tu l'as approuvé sur la fiche du service ; s'il change, il est suspendu jusqu'à ton nouvel accord.</p>
+      {% if owners %}<nav class="seg" aria-label="À qui">{% for o in owners %}<a href="{{ o.href }}"{% if o.on %} aria-current="true"{% endif %}>{{ o.text }}</a>{% endfor %}</nav>{% endif %}
     </header>
     {% if services %}
     <ul class="elsewhere-list" role="list">
@@ -21,6 +23,7 @@
         {% if s.purpose %}<p class="elsewhere-what">{{ s.purpose[:1]|upper }}{{ s.purpose[1:] }}</p>{% endif %}
         {% if s.who %}<p class="elsewhere-three"><span>Avec {{ s.who }}</span><span>{{ s.access[:1]|upper }}{{ s.access[1:] }}</span></p>{% endif %}
         <p class="elsewhere-facts">
+          {% if s.owner %}<span>à {% if s.owner_href %}<a href="{{ s.owner_href }}">{{ s.owner }}</a>{% else %}{{ s.owner }}{% endif %}</span>{% endif %}
           <span><b>{{ s.served }}</b> outil{{ 's' if s.served not in ('0', '1') }} servi{{ 's' if s.served not in ('0', '1') }} sur {{ s.offered }} proposé{{ 's' if s.offered not in ('0', '1') }}</span>
           {% if s.where %}<span>{{ s.where }}</span>{% endif %}
           {% if s.joined %}<span>joint {{ s.joined }}</span>{% endif %}

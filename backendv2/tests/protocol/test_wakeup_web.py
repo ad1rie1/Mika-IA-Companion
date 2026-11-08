@@ -97,7 +97,7 @@ def test_a_new_key_voids_the_old_one_a_revoked_key_lets_nothing_through(world): 
     old = key_for(client, live)
     new = key_for(client, live)
     assert send(client, old).status_code == 401 and send(client, new).status_code == 202
-    assert client.portal.call(live.wakeups.revoke_key, "serre", "test") is True
+    assert client.portal.call(live.wakeups.revoke_key, "serre") is True
     assert send(client, new).status_code == 401
     # retiré de la configuration, il emporte sa clé : recréé sous ce nom, il n'en a pas
     key = key_for(client, live)
@@ -168,3 +168,19 @@ def test_a_hostile_body_is_refused_cleanly(world):  # noqa: F811
 
     assert client.post(ROUTE, content=chunks(), headers=auth).status_code == 413
     assert called(client, live) == []
+
+
+def test_the_console_takes_a_key_back_and_its_audit_says_who(world):  # noqa: F811
+    """K0-26 : ``revoke_key`` ne reçoit plus qui retire la clé ; le geste de la console reste au journal à son nom."""
+    client, live, _ = world
+    configure(client, live, max_pending=50)
+    key = key_for(client, live)
+    done = client.portal.call(lambda: perform(live.kernel, "wakeup.retirer_cle", {}, by="user_1", subject="serre",
+                                              nonce="retrait"))
+    assert done.ok and send(client, key).status_code == 401
+
+    async def audit():
+        mind = live.kernel.mind
+        return [mind.decode(e).data for e in mind.store.read() if e.type == rt.OPERATED.name]
+
+    assert any(d.action == "wakeup.retirer_cle" and d.by == "user_1" for d in client.portal.call(audit))

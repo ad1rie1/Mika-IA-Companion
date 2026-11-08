@@ -19,6 +19,7 @@ import json
 import re
 import socketserver
 import threading
+import time
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 
@@ -73,6 +74,8 @@ class Imap(socketserver.StreamRequestHandler):
     caps = "IMAP4rev1 MOVE UIDPLUS"
     #: ce que le serveur a reçu (pour vérifier qu'un relevé n'écrit rien)
     commands: list[str] = []
+    #: ce qu'il laisse passer avant de lire un littéral : un débit lent, vu du client
+    stall = 0.0
 
     @classmethod
     def reset(cls, inbox: dict[int, bytes] | None = None, *, caps: str = "IMAP4rev1 MOVE UIDPLUS") -> None:
@@ -104,6 +107,7 @@ class Imap(socketserver.StreamRequestHandler):
             data = b""
             if literal:
                 self.say("+ vas-y")
+                time.sleep(self.stall)
                 data = self.rfile.read(int(literal.group(1)))
                 self.rfile.readline()
             tag, _, rest = line.partition(" ")
@@ -237,6 +241,8 @@ class Imap(socketserver.StreamRequestHandler):
 
 class Smtp(socketserver.StreamRequestHandler):
     received: list[tuple[str, list[str], bytes, str]] = []
+    #: ce qu'il laisse passer avant de lire le mail : un débit lent, vu du client
+    stall = 0.0
 
     def say(self, line: str) -> None:
         self.wfile.write(line.encode() + b"\r\n")
@@ -271,10 +277,11 @@ class Smtp(socketserver.StreamRequestHandler):
                 self.say("250 ok")
             elif up == "DATA":
                 self.say("354 vas-y")
-                data = b""
+                time.sleep(self.stall)
+                lines = []
                 while (chunk := self.rfile.readline()) not in (b".\r\n", b""):
-                    data += chunk
-                self.received.append((sender, rcpts, data, auth))
+                    lines.append(chunk)
+                self.received.append((sender, rcpts, b"".join(lines), auth))
                 self.say("250 reçu")
             elif up == "QUIT":
                 self.say("221 salut")

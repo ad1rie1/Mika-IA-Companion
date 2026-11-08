@@ -44,6 +44,10 @@ from mika.contracts import email as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts.identity import keeper as keeper
+from mika.contracts.identity import keeper_name as keeper_name
+from mika.contracts.identity import keepers as keepers
+from mika.contracts.identity import person_name
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Payload
 from mika.kernel.faculty import Faculty
@@ -51,20 +55,12 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
-from mika.vocab.access import (
-    ACCOUNT,
-    AT_OWNER,
-    PERSON,
-    SELF,
-    SHARE_PREPARE,
-    SHARE_READ,
-    SHARE_USE,
-    WORK,
-    reaches,
-    situation,
-)
+from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind, task_of
+from mika.vocab.ownership import OWNED as OWNED
+from mika.vocab.ownership import SHARED as SHARED
+from mika.vocab.ownership import best_handle, must_approve, owns_one, reach, shared_with
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
 from mika.vocab.rights import here_allowed
@@ -150,7 +146,8 @@ class EmailParams(BaseModel):
     shares: Annotated[dict[str, dict[str, str]], Knob(
         label="Avec qui ses boîtes sont partagées", group="Envoyer", readonly=True,
         help="Réglé par le propriétaire d'une boîte (Paramètres › Partages, ADR 0188) : par boîte, chaque personne "
-             "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir.")] = \
+             "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir. Tous se voient et se "
+             "retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
         Field(default_factory=dict)
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
@@ -511,38 +508,10 @@ def owner_of(frame: Frame, account: str) -> str:
     return params_of(frame).owners.get(account, "")
 
 
-def _facing(audience: Any, kind: str) -> str:
-    """Qui est en face, comme propriétaire possible d'une boîte : ``personne:<clé>`` d'une personne reconnue en
-    tête-à-tête ; vide sinon (toi, elle seule, un salon, une inconnue)."""
-    person = getattr(audience, "person", "") or ""
-    return PERSON + person if person and situation(audience, kind) == ACCOUNT else ""
-
-
-def _shared_with(audience: Any, kind: str) -> str:
-    """Qui est en face, comme personne à qui l'on partage une boîte (ADR 0188) : ``personne:<clé>`` d'une personne
-    reconnue en tête-à-tête — une de ses propriétaires aussi, à qui l'on peut partager la boîte d'une autre ; vide
-    sinon (elle seule, un salon, une inconnue)."""
-    person = getattr(audience, "person", "") or ""
-    return PERSON + person if person and situation(audience, kind) in (ACCOUNT, AT_OWNER) else ""
-
-
 def boxes_here(frame: Frame, accounts: Iterable[str], need: str = SHARE_USE) -> tuple[str, ...]:
-    """Les boîtes dont elle peut se servir ici (ADR 0185) : une boîte sert à son propriétaire.
-
-    - les tiennes (sans propriétaire nommé) : là où sa famille d'outils le permet (``for_owner``) — toi en privé,
-      elle quand elle travaille, et qui une ligne de la famille ouvre ;
-    - les siennes : quand elle travaille, là où sa famille le permet ;
-    - celles d'une personne : avec elle, reconnue, en tête-à-tête — et nulle part ailleurs ;
-    - celles qu'on lui partage (ADR 0188) : avec elle, reconnue, en tête-à-tête, si son partage atteint ce que l'outil
-      demande (``need`` : lire, préparer, s'en servir — par défaut, s'en servir) ;
-    - une tâche de rédaction : la boîte de son mail (on la lui a demandée, ou elle l'a proposée pour une boîte à
-      toi ou à elle)."""
+    """Les boîtes dont elle peut se servir ici (ADR 0185, 0188) : la règle est ``vocab.ownership.reach``, ``need`` ce
+    que l'outil demande ; une tâche de rédaction a la boîte de son mail."""
     return tuple(a for a in accounts if reach_of(frame, a, need))
-
-
-#: comment une boîte sert ici : par ce qu'elle est (à toi, à elle, à la personne en face, la boîte d'une tâche), ou
-#: seulement par un partage (ADR 0188)
-OWNED, SHARED = "proprietaire", "partage"
 
 
 def reach_of(frame: Frame, account: str, need: str = SHARE_USE) -> str:
@@ -550,17 +519,8 @@ def reach_of(frame: Frame, account: str, need: str = SHARE_USE) -> str:
     vide (elle ne sert pas)."""
     kind = frame.episode.kind if frame.episode is not None else ""
     p = params_of(frame)
-    family = for_owner(frame)
-    alone = situation(frame.audience, kind) == WORK
-    person, shared = _facing(frame.audience, kind), _shared_with(frame.audience, kind)
-    owner = p.owners.get(account, "")
-    if (not owner and family) or (owner == SELF and alone and family) or (person and owner == person):
-        return OWNED
-    if alone and family and split_ref(task_mail(frame))[0] == account:
-        return OWNED
-    if shared and reaches(p.shares.get(account, {}).get(shared, ""), need):
-        return SHARED
-    return ""
+    return reach(p.owners.get(account, ""), p.shares.get(account, {}), frame.audience, kind, need,
+                 family=for_owner(frame), task=split_ref(task_mail(frame))[0] == account)
 
 
 def owns_a_box(audience: Any, kind: str, frame: Frame | None, need: str = SHARE_READ) -> bool:
@@ -571,11 +531,7 @@ def owns_a_box(audience: Any, kind: str, frame: Frame | None, need: str = SHARE_
     if frame is None:
         return False
     p = params_of(frame)
-    person = _facing(audience, kind)
-    if person and person in p.owners.values():
-        return True
-    shared = _shared_with(audience, kind)
-    return bool(shared) and any(reaches(given.get(shared, ""), need) for given in p.shares.values())
+    return owns_one(p.owners, p.shares, audience, kind, need)
 
 
 def owns_a_box_to_prepare(audience: Any, kind: str, frame: Frame | None) -> bool:
@@ -594,48 +550,14 @@ def owner_must_approve(frame: Frame, account: str) -> bool:
     n'atteint la boîte que par un partage qui ne s'en sert pas (« lire et préparer »)."""
     p = params_of(frame)
     kind = frame.episode.kind if frame.episode is not None else ""
-    person = _shared_with(frame.audience, kind)
+    person = shared_with(frame.audience, kind)
     if not person:
         ref = task_mail(frame)
         ask = frame.state(EMAIL.name).asked.get(ref) if ref else None
         if ask is not None and ask.by:
             person = PERSON + str(frame.get(identity_c.PERSON(ask.by)) or ask.by)
-    owner = p.owners.get(account, "")
-    if not person or owner == person or (not owner and _one_of_hers(frame, person)):
-        return False  # sa boîte, ou une boîte « à toi » quand elle est une de ses propriétaires : un partage n'y retire rien
-    level = p.shares.get(account, {}).get(person, "")
-    return bool(level) and not reaches(level, SHARE_USE)
-
-
-def _one_of_hers(frame: Frame, person: str) -> bool:
-    """Cette personne (``personne:<clé>``) est-elle une de ses propriétaires ?"""
-    return person.removeprefix(PERSON) in set(frame.get(identity_c.OWNERS) or ())
-
-
-def keeper() -> str:
-    """Comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)."""
-    return phrase("projects.caretaker")
-
-
-def person_name(frame: Frame, handle: str) -> str:
-    """Le prénom (le nom affiché) de quelqu'un, nettoyé ; vide s'il est inconnu."""
-    view = frame.get(identity_c.IDENTITY(handle)) if handle else None
-    return clean_display_name(getattr(view, "name", "") or "")
-
-
-def keeper_name(frame: Frame, handle: str) -> str:
-    """Qui a agi depuis sa boîte (écrit, retouché, refusé), dit comme elle le dirait : son prénom,
-    sinon « la personne qui s'occupe de toi »."""
-    return person_name(frame, handle) or keeper()
-
-
-def keepers(frame: Frame) -> str:
-    """Qui doit approuver ce qui part : le prénom de ses propriétaires (« Adrien », « Adrien ou
-    Bea »), sinon « la personne qui s'occupe de toi »."""
-    names = [n for n in dict.fromkeys(person_name(frame, o) for o in frame.get(identity_c.OWNERS)) if n]
-    if not names:
-        return keeper()
-    return names[0] if len(names) == 1 else phrase("email.keepers_or").join(names[:3])
+    return must_approve(p.owners.get(account, ""), p.shares.get(account, {}), person,
+                        frame.get(identity_c.OWNERS) or ())
 
 
 def approver_of(frame: Frame, account: str) -> str:
@@ -646,10 +568,8 @@ def approver_of(frame: Frame, account: str) -> str:
     if not owner.startswith(PERSON):
         return ""
     person = owner[len(PERSON):]
-    handles = list(frame.get(identity_c.HANDLES(person)) or (person,))
-    here, reachable = set(frame.get(presence_c.PRESENT)), set(frame.get(identity_c.REACHABLE(person)))
-    return next((h for h in handles if h in here), None) or next((h for h in handles if h in reachable), None) \
-        or (handles[0] if handles else "")
+    return best_handle(list(frame.get(identity_c.HANDLES(person)) or (person,)), set(frame.get(presence_c.PRESENT)),
+                       set(frame.get(identity_c.REACHABLE(person))))
 
 
 def approver_name(frame: Frame, account: str) -> str:

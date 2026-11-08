@@ -8,7 +8,7 @@
   border: 2px solid color-mix(in srgb, var(--sw) 50%, transparent); border-radius: 50%;
   background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--sw) 26%, var(--surface)),
                               color-mix(in srgb, var(--sw) 12%, var(--surface)));
-  color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--now-serif); font-size: 38px;
+  color: color-mix(in srgb, var(--sw) 85%, var(--text)); font-family: var(--display); font-size: 38px;
   font-weight: 600; }
 .person-avatar .now-presence { right: 3px; bottom: 3px; width: 18px; height: 18px; border-width: 3px; }
 .person-head-text { display: grid; gap: 6px; min-width: 0; }
@@ -60,7 +60,7 @@
 .person-life li.past time { color: var(--muted); }
 .person-life li.ongoing time { color: var(--warn); }
 .person-life p, .person-known p, .person-pending p { margin: 0; }
-.person-self { margin: 0; font-family: var(--now-serif); font-size: 15px; font-style: italic; line-height: 1.5; }
+.person-self { margin: 0; font-family: var(--display); font-size: 15px; font-style: italic; line-height: 1.5; }
 .person-known { display: grid; gap: 10px; }
 .person-known li { padding-bottom: 10px; border-bottom: 1px dashed var(--border); }
 .person-known li:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -75,7 +75,7 @@
 .person-pending li.tone-warn > div > p:first-child { color: var(--warn); }
 .person-pending li.tone-danger > div > p:first-child { color: var(--danger); }
 .person-pending li.tone-ok > div > p:first-child { color: var(--ok); }
-.person-pending li.tone-thought > div > p:first-child { font-family: var(--now-serif); font-style: italic; }
+.person-pending li.tone-thought > div > p:first-child { font-family: var(--display); font-style: italic; }
 .person-circle { display: grid; gap: 7px; }
 
 /* ── Écrans plus étroits ──────────────────────────────────────────────── */

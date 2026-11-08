@@ -59,7 +59,6 @@ import stat
 import subprocess
 import threading
 import time
-import unicodedata
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -68,6 +67,8 @@ from urllib.parse import urlsplit
 
 from mika.adapters import cage
 from mika.contracts.self_ import DEFAULT_NAME
+from mika.kernel.inspect import size_fr
+from mika.kernel.text import fold
 from mika.ports.workshop import Commit, OutsideWorkshop, RunResult, WorkshopFull
 
 #: ce qu'on peut lancer sans réseau. Ce n'est **pas** une barrière (``sh`` et ``python`` font tout) : c'est la
@@ -100,8 +101,7 @@ def author_identity(name: str) -> tuple[str, ...]:
     """Qui signe les enregistrements de l'atelier : son nom (celui de sa persona, que l'application fournit) et une
     adresse locale qui en dérive (« Léa Martin » → ``lea.martin@atelier.local``) — jamais une vraie boîte."""
     shown = " ".join(_AUTHOR_UNSAFE.sub(" ", name).split())[:80] or DEFAULT_NAME
-    plain = unicodedata.normalize("NFKD", shown.lower()).encode("ascii", "ignore").decode()
-    local = re.sub(r"[^a-z0-9]+", ".", plain).strip(".") or "atelier"
+    local = re.sub(r"[^a-z0-9]+", ".", fold(shown)).strip(".") or "atelier"
     return ("-c", f"user.name={shown}", "-c", f"user.email={local}@atelier.local")
 #: un identifiant de commit (abrégé ou complet), une branche
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
@@ -150,8 +150,7 @@ def check_remote(url: str) -> str:
     if parts.scheme != "https" or not parts.hostname:
         raise ValueError("une adresse https (https://github.com/compte/depot.git)")
     if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Réglages › Canaux › "
-                         "Dépôts git")
+        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Connexions › Dépôts Git")
     if any(ch.isspace() for ch in raw) or raw.startswith("-"):
         raise ValueError("adresse illisible")
     return raw
@@ -180,10 +179,6 @@ def _killpg(proc: subprocess.Popen[bytes]) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-
-
-def _size(n: int) -> str:
-    return f"{n / 1024 ** 2:.0f} Mo" if n < 1024 ** 3 else f"{n / 1024 ** 3:.1f} Go"
 
 
 def _entry(rel: str, st: os.stat_result) -> str:
@@ -281,7 +276,7 @@ class BwrapWorkshop:
         size = self._sizes.get(goal, 0)
         if size <= self.limits.workshop_bytes:
             return ""
-        return (f"l'atelier pèse {_size(size)} (au plus {_size(self.limits.workshop_bytes)}) : fais de la place "
+        return (f"l'atelier pèse {size_fr(size)} (au plus {size_fr(self.limits.workshop_bytes)}) : fais de la place "
                 "(rm …) avant d'écrire ou de lancer autre chose")
 
     def _grew(self, goal: int, n: int) -> None:
@@ -597,7 +592,7 @@ class BwrapWorkshop:
             cut |= clipped or len(buf) > cap
         notes: tuple[str, ...] = ()
         if overflow:
-            notes = (f"Programme arrêté : sa sortie dépassait {_size(self.limits.output_bytes)}.",)
+            notes = (f"Programme arrêté : sa sortie dépassait {size_fr(self.limits.output_bytes)}.",)
         elif job.cancelled:
             notes = ("Programme arrêté : l'exécution qui l'avait lancé a été interrompue.",)
         return RunResult(argv, proc.returncode, texts[0], texts[1], duration, timed_out, cut, notes=notes)
@@ -787,14 +782,14 @@ class BwrapWorkshop:
         token = (creds.get("token") or "").strip()
         env = {"GIT_ASKPASS": "/bin/false"}
         if not token:
-            return env, (), "aucun jeton : règle-le dans Réglages › Canaux › Dépôts git"
+            return env, (), "aucun jeton : règle-le dans Connexions › Dépôts Git"
         hosts = creds.get("hosts") or DEFAULT_HOSTS
         allowed = {h.strip().lower() for h in (hosts.split(",") if isinstance(hosts, str) else hosts) if h.strip()}
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
         if host not in allowed:
             return env, (), (f"le jeton n'est pas autorisé pour « {host} » (hôtes autorisés : "
-                             f"{', '.join(sorted(allowed)) or 'aucun'} — Réglages › Canaux › Dépôts git)")
+                             f"{', '.join(sorted(allowed)) or 'aucun'} — Connexions › Dépôts Git)")
         basic = base64.b64encode(f"{creds.get('user') or 'x-access-token'}:{token}".encode()).decode()
         # l'en-tête ne vaut que pour l'adresse de ce dépôt (le chemin compris, et le port s'il y en a un)
         scope = f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"

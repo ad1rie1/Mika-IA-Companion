@@ -19,13 +19,13 @@ from mika.contracts import identity as identity_c
 from mika.contracts import imaging as c
 from mika.contracts import presence as presence_c
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.plugins.imaging.faculty import IMAGING, ImagingState, Job, of_person, params_of, subject_of
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -59,17 +59,11 @@ async def _texts(s: ImagingState, frame: Frame, ports: Mapping[str, Any]) -> dic
     return store.content([r for j in jobs for r in (j.prompt_ref, j.caption_ref, j.reason_ref) if r])
 
 
-def _ago(us: int) -> str:
-    minutes = max(1, us // MINUTE)
-    return phrase("projects.duration.minutes", n=minutes) if minutes < 120 else \
-        phrase("projects.duration.hours", n=minutes // 60)
-
-
 def line(j: Job, texts: Mapping[str, str], now: int) -> str:
     what = texts.get(j.prompt_ref, "")
     what = phrase("imaging.section.quoted", prompt=f"{what[:160]}{'…' if len(what) > 160 else ''}") if what else ""
     if j.status == c.WAITING:
-        return "- " + phrase("imaging.section.drawing", what=what, ago=_ago(now - j.at))
+        return "- " + phrase("imaging.section.drawing", what=what, ago=ago_words(now - j.at))
     if j.status == c.READY:
         seen = texts.get(j.caption_ref, "")
         return "- " + phrase("imaging.section.ready", what=what,

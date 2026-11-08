@@ -1,0 +1,64 @@
+{# La fiche d'une personne › Voyages (app/handmade/person/voyages.py ; ADR 0195, 0204) : ses voyages, du plus récemment
+   changé — son titre, comment on s'y déplace, s'il a été préparé avec elle ; son départ, ce qu'il évite, ses jours et
+   ses arrêts ; son GPX et « Supprimer » (confirmé, audité), les seuls gestes de la console sur un voyage ; ses arrêts
+   jour par jour, repliés (ce qu'elle y a ajouté se dit, sous son nom). Pas d'édition : un voyage se prépare à deux,
+   dans l'écran Carte et en conversation. La personne se nomme par son nom : « elle », dans la console, c'est Mika. #}
+{# « Supprimer » : le formulaire que la console a préparé pour ``trips.supprimer`` (son jeton, son retour, la personne
+   de la fiche pour objet), en bouton discret sur la ligne du voyage, confirmé comme toute action dangereuse. #}
+{# « GPX » : un lien sans ``download`` — le fichier se télécharge de lui-même (``Content-Disposition``), et un refus
+   se lit au lieu d'un téléchargement en échec : 404 (voyage parti) ou 429 (la borne des trajets de l'écran Carte,
+   sur le compte de l'opérateur). #}
+{% macro removal(a) -%}
+<form method="post" action="{{ a.url }}" class="inline" data-confirm="{{ a.confirm }}">
+  <input type="hidden" name="csrf" value="{{ a.csrf }}"><input type="hidden" name="_op" value="{{ a.nonce }}">
+  <input type="hidden" name="_retour" value="{{ a.back }}"><input type="hidden" name="_sujet" value="{{ a.subject }}">
+  {% for k, v in a.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <noscript><label class="check"><input type="checkbox" name="_je_confirme" required> je confirme : {{ a.confirm }}</label></noscript>
+  <button class="btn quiet small danger">{{ a.button }}</button>
+</form>
+{%- endmacro %}
+<div class="now-page person-tab">
+  <section class="now-card person-list" aria-labelledby="person-trips-title">
+    <header class="now-card-head"><h2 id="person-trips-title">Ses voyages</h2><span class="person-count now-num">{{ trips|length }}</span>
+      <p>Ce que {{ name }} prépare dans l'écran Carte, et avec {{ her }} en conversation. Un voyage se prépare à deux : la console ne le modifie pas. Le supprimer l'efface pour {{ name }}, et Système › Gestes audités le garde.</p></header>
+    {% if trips %}
+    <ul class="person-entries">
+      {% for t in trips %}
+      <li id="voyage-{{ t.id }}">
+        <div class="person-entry-top">
+          <div class="person-entry-name"><p class="person-entry-title">{{ t.title }}</p>
+            <p class="person-entry-tags"><span class="now-tag">{{ t.mode }}</span>{% if t.with_her %}<span class="now-tag owner">préparé avec {{ her }}</span>{% endif %}</p></div>
+          <span class="person-entry-time">changé {{ t.changed }}</span>
+        </div>
+        <div class="person-entry-foot">
+          <p class="person-entry-facts"><span><span class="k">départ</span> {{ t.start or "sans date" }}</span><span><span class="k">évite</span> {{ t.avoid }}</span><span><span class="k">durée</span> {{ t.days }}</span><span><span class="k">arrêts</span> {{ t.stops }}</span><span><span class="k">créé</span> {{ t.created }}</span><span><a href="{{ t.journal }}" title="sa création, au journal">#{{ t.id }}</a></span></p>
+          <div class="person-entry-more">
+            {% if t.gpx or t.remove %}<div class="toolbar hm-toolbar" role="group" aria-label="« {{ t.title }} »">{% if t.gpx %}<a class="btn quiet small" href="{{ t.gpx }}" title="Le voyage en GPX : ses arrêts, et son tracé quand les itinéraires le calculent">GPX</a>{% endif %}{% if t.remove %}{{ removal(t.remove) }}{% endif %}</div>{% endif %}
+            {% if t.gpx %}
+            <details class="person-entry-detail"><summary>Ses arrêts, jour par jour</summary>
+              <div class="stack">
+                {% for d in t.itinerary %}
+                <p class="person-day">Jour {{ d.n }}{% if d.date %} · {{ d.date }}{% endif %}</p>
+                {% if d.stops %}
+                <ol class="person-entries dense">
+                  {% for s in d.stops %}
+                  <li>
+                    <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ s.name }}</p>{% if s.kind or s.hers %}<p class="person-entry-tags">{% if s.kind %}<span class="now-tag">{{ s.kind }}</span>{% endif %}{% if s.hers %}<span class="now-tag owner">ajouté par {{ her }}</span>{% endif %}</p>{% endif %}</div></div>
+                    {% if s.note %}<div class="person-entry-text">{{ s.note }}</div>{% endif %}
+                    <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">coordonnées</span> {{ s.coords }}</span></p></div>
+                  </li>
+                  {% endfor %}
+                </ol>
+                {% else %}<p class="now-empty">aucun arrêt ce jour-là.</p>{% endif %}
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="now-empty">{{ name }} n'a aucun voyage.</p>{% endif %}
+  </section>
+</div>

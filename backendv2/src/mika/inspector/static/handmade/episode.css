@@ -4,7 +4,7 @@
 
 /* ── Le résumé : son issue en grand, de la couleur de son ton ────────── */
 .episode-hero { padding: 26px 30px; }
-.episode-outcome { margin: 8px 0 0; font-family: var(--now-serif); font-size: clamp(1.5rem, 2.4vw, 1.9rem); font-weight: 650;
+.episode-outcome { margin: 8px 0 0; font-family: var(--display); font-size: clamp(1.5rem, 2.4vw, 1.9rem); font-weight: 650;
   line-height: 1.05; letter-spacing: -.015em; }
 .episode-hero.ok .episode-outcome { color: var(--ok); }
 .episode-hero.warn .episode-outcome { color: var(--warn); }

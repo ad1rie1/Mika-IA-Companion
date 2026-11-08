@@ -13,6 +13,10 @@ import re
 import unicodedata
 from collections.abc import Iterable
 
+from mika.kernel.prompt import LINE_DASHES, neutral
+from mika.kernel.text import fold as text_fold
+from mika.kernel.text import unaccented
+
 #: Pas des personnes : la tuyauterie de Mika elle-même.
 INTERNAL_IDS = frozenset({"conscience_mika", "__global__", "anonymous", ""})
 EPHEMERAL_PREFIX = "anon_"
@@ -24,24 +28,18 @@ RESERVED_PREFIXES = (EXTERNAL_PREFIX, "module_", "conscience", ACCOUNT_PREFIX, E
 _CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 DISPLAY_NAME_MAX = 40
-_INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
 _QUOTES = frozenset('«»"“”')
-#: Tous les tirets d'Unicode (et le signe moins) : une suite d'entre eux imite les
-#: titres des sections du prompt (« --- QUI TU AS EN FACE --- »).
-_DASHES = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2043\u2212\u2e3a\u2e3b\ufe58\ufe63\uff0d"
-_DASH_RUN = re.compile(rf"[{_DASHES}](?:\s*[{_DASHES}])+")
-#: Les mots qui encadrent son état interne, quelle que soit la casse ou l'accent
-#: (« --- FIN ETAT INTERNE --- » tapé dans un nom ou un titre).
-_INNER_STATE = re.compile(r"[EÉÈÊeéèê]\s*[Tt]\s*[AaÀàÂâ]\s*[Tt]\s+[IiÎî]\s*[Nn]\s*[Tt]\s*[EÉÈeéè]\s*[Rr]\s*[Nn]\s*[EÉÈeéè]")
 
 
 def neutralize(text: str) -> str:
-    """Ce qui vient d'ailleurs ne peut pas imiter la charpente du prompt : une
-    suite de tirets (de n'importe quel alphabet) devient un seul tiret, et les
-    mots « état interne » (toute casse, tout accent) disparaissent."""
+    """Ce qui vient d'ailleurs ne peut pas imiter la charpente du prompt : la
+    neutralisation du noyau (``kernel.prompt.neutral``), au seuil d'une ligne —
+    ce qui ne se voit pas est retiré, deux tirets à la suite (de n'importe quelle
+    graphie) deviennent un seul tiret, et les mots « état interne » (toute
+    graphie) disparaissent : un nom ne les porte jamais."""
     if not text:
         return ""
-    return _INNER_STATE.sub(" ", _DASH_RUN.sub("-", text))
+    return neutral(text, run=LINE_DASHES, dash="-", state=" ")
 
 
 def is_internal(handle: str | None) -> bool:
@@ -55,10 +53,6 @@ def is_ephemeral(handle: str | None) -> bool:
 def is_identifiable(handle: str | None) -> bool:
     """Vaut-il la peine d'attacher une mémoire durable à cette adresse ?"""
     return not is_internal(handle) and not is_ephemeral(handle)
-
-
-def account_handle(account_id: int) -> str:
-    return f"{ACCOUNT_PREFIX}{account_id}"
 
 
 def client_claim_allowed(handle: str | None) -> bool:
@@ -82,7 +76,10 @@ def clean_display_name(raw: str | None, *, max_chars: int = DISPLAY_NAME_MAX) ->
     for c in raw:
         if c.isspace():
             kept.append(" ")
-        elif c in _QUOTES or unicodedata.category(c) in _INVISIBLE:
+        elif c in _QUOTES or unicodedata.category(c) == "Cn":
+            # un caractère que la table d'Unicode ne connaît pas : un nom s'en passe, comme avant l'ADR 0198, et sa
+            # clé ``name:`` ne bouge pas (un texte le garde : c'est souvent un émoji) ; l'invisible, ``neutralize``
+            # le retire
             continue
         else:
             kept.append(c)
@@ -91,13 +88,14 @@ def clean_display_name(raw: str | None, *, max_chars: int = DISPLAY_NAME_MAX) ->
 
 
 def fold(text: str) -> str:
-    """Casse et accents repliés (comparaison de noms)."""
-    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c)).strip()
+    """Le repli qui forme les clés ``name:…`` : casse et accents repliés, les ligatures gardées. Ces clés sont écrites
+    au journal et l'oubli les recalcule : il ne suit pas ``kernel.text.fold`` (ADR 0212)."""
+    return unaccented(text.lower()).strip()
 
 
 def same_name(a: str | None, b: str | None) -> bool:
     """Deux noms désignent-ils la même personne ? Un prénom vaut le nom complet."""
-    fa, fb = fold(a or ""), fold(b or "")
+    fa, fb = text_fold(a or "").strip(), text_fold(b or "").strip()
     if not fa or not fb:
         return False
     if fa == fb:
@@ -107,9 +105,9 @@ def same_name(a: str | None, b: str | None) -> bool:
 
 def mentions(text: str | None, names: Iterable[str]) -> bool:
     """Le texte nomme-t-il une de ces personnes (son nom, ou son prénom, en mot entier ; casse et accents repliés) ?"""
-    said = " " + " ".join(re.findall(r"\w+", fold(text or ""))) + " "
+    said = " " + " ".join(re.findall(r"\w+", text_fold(text or ""))) + " "
     for name in names:
-        parts = re.findall(r"\w+", fold(name))
+        parts = re.findall(r"\w+", text_fold(name))
         if parts and len(parts[0]) >= 3 and (f" {parts[0]} " in said or f" {' '.join(parts)} " in said):
             return True
     return False

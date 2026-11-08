@@ -1,9 +1,11 @@
 """La file « À valider » (ADR 0177) : une seule page pour tout ce qui attend une décision. La composition lui donne ses
 onglets (``TABS`` : les courriers à envoyer, les réponses Teams, les identités à confirmer, les noms à relier — « Tout »
-et l'historique sont ceux de la console) et ce qui n'est pas une demande d'envoi (``Waiting.items``) : les identités à
+et l'historique sont ceux de la console), ce qui n'est pas une demande d'envoi (``Waiting.items``) — les identités à
 confirmer et les noms à relier, lus dans les vues de la faculté d'identité, avec leurs faits, leur source et leurs
-actions déjà orientées (``tabs/identities.py``). Ces deux vues n'ont plus de destination : la file est le seul
-endroit où l'on en décide (ADR 0180). L'inspecteur dessine la file sans nommer ni plugin ni faculté.
+actions déjà orientées (``tabs/identities.py``) — et ce que concerne une demande (``Waiting.about``, lu dans son
+contexte par ``approval_sources.about`` : une personne, un projet, un service, une app, un canal). Les vues de la
+faculté d'identité n'ont plus de destination : la file est le seul endroit où l'on en décide (ADR 0180). L'inspecteur
+dessine la file sans nommer ni plugin ni faculté.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from mika.app.handmade import approval_sources
 from mika.app.handmade.tabs import Got, Line, blank, instant, raw_lines, text
 from mika.app.handmade.tabs.identities import claim_entry, handle_of, name_entry
 from mika.contracts import email as email_c
@@ -99,6 +102,11 @@ class Waiting:
             got = ui.inspection.badge(spec) if spec is not None else None
             total += int(got[0]) if got else 0
         return total
+
+    def about(self, ui: UI, context: str) -> tuple[str, str | None]:
+        """Ce que concerne une demande, dit simplement (« Adrien », « projet n° 61 », « Teams »), et la fiche où ça
+        mène (``None`` : aucune) — la file, sa demande ouverte et l'historique le disent tous ainsi."""
+        return approval_sources.about(ui, context)
 
     async def items(self, ui: UI) -> list[QueueItem]:
         """Les identités à confirmer et les noms à relier, tels que leurs vues les disent."""

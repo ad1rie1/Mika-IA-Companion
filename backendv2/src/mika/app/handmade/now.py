@@ -519,12 +519,6 @@ def _said(look: Look, e: Any) -> tuple[str, str]:
             (f"S'est retenue d'écrire{to}", "muted")
     if kind == Kind.MURMUR:
         return "A murmuré", ""
-    if kind == Kind.JOURNAL:
-        return "A écrit son journal", ""
-    if kind == Kind.DREAM:
-        return "A rêvé", ""
-    if kind == Kind.NARRATIVE:
-        return "A repris le récit de qui elle devient", ""
     text, tone = names.outcome(outcome, kind)
     return f"{names.kind(kind).capitalize()}{' pour ' + who if who else ''} · {text}", tone if tone == "warn" else ""
 

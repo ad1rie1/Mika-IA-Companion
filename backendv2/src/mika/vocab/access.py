@@ -225,7 +225,6 @@ Steer = Literal["lecture", "accord", "modification", "non"]
 REPLIES = (("seule", "seule"), ("accord", "ton accord"), ("brouillon", "brouillon — c'est toi qui l'envoies"),
            ("non", "non"))
 REPLY_WORDS = dict(REPLIES)
-REPLY_RANK = {"non": 0, "brouillon": 1, "accord": 2, "seule": 3}
 Reply = Literal["seule", "accord", "brouillon", "non"]
 
 

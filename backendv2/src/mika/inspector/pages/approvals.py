@@ -1,8 +1,12 @@
 """Approbations : ce qu'elle voudrait faire hors de la machine. Ce qui est
 montré est exactement ce qui partira : quand la capacité le sait
-(``preview``), l'aperçu du résultat, et c'est cet aperçu-là qu'on approuve.
-Les demandes en attente se lisent comme un courrier : la file à gauche, la
-demande ouverte à droite, la suivante après chaque décision."""
+(``preview``), l'aperçu du résultat, et c'est cet aperçu-là qu'on approuve ;
+sinon, ses arguments un à un, le JSON replié. Les demandes en attente se lisent
+comme un courrier : la file à gauche, la demande ouverte à droite, la suivante
+après chaque décision. Ce qu'une demande concerne (une personne, un projet, un
+service, une app, un canal) est lu par la composition (``queue.about``) :
+l'inspecteur ne nomme aucun plugin. L'historique se pagine par demande tranchée
+et se filtre par sorte et par issue."""
 
 from __future__ import annotations
 
@@ -21,7 +25,22 @@ from mika.inspector.formview import action_view
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.render import PREFIX
 from mika.inspector.ui import QueueItem, QueueTab
-from mika.kernel.inspect import Badge, Column, Ref, Row, Table, Text, When, paginate
+from mika.kernel.inspect import (
+    Badge,
+    Column,
+    Nav,
+    NavItem,
+    Note,
+    Pager,
+    Param,
+    Ref,
+    Row,
+    Table,
+    Text,
+    When,
+    paginate,
+    read_params,
+)
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.operations import offered
@@ -34,28 +53,40 @@ OPEN, KIND = "demande", "sorte"
 LINE_TEXT = 160
 
 
-def _kind(ui: Any, capability: str) -> str:
-    """Le nom court d'une sorte de demande : la description de sa capacité, sans sa parenthèse (« Envoyer un mail »)."""
-    said = ui.names.capability(capability)
-    return said.split(" (", 1)[0].rstrip(" .") or said
-
-
-#: d'où vient une demande qui ne concerne pas une personne : un service, une app, un canal
-SOURCES = {"mcp": "service « {} »", "forge": "app « {} »"}
-CHANNELS = {"teams": "Teams", "email": "courrier", "phone": "téléphone"}
-
-
-def _about(ui: Any, context: str) -> str:
-    """Ce qu'une demande concerne, dit simplement : une personne (son nom), un projet (« projet n° 61 »), un service
-    (« service « agenda » »), une app, un canal."""
+def _concerns(ui: Any, context: str) -> tuple[str, str]:
+    """Ce qu'une demande concerne, dit simplement, et la fiche où ça mène (vide : aucune). La composition le lit dans
+    son contexte (``queue.about`` : une personne, un projet, un service, une app, un canal — jamais une personne pour
+    un canal) ; sans elle, le nom que la console donne à toute cible."""
     if not context:
-        return ""
-    head, _, rest = context.partition(":")
-    if rest and head in SOURCES:
-        return SOURCES[head].format(rest)
-    if context in CHANNELS:
-        return CHANNELS[context]
-    return ui.names.who(context).removeprefix("le ")
+        return "", ""
+    fn = getattr(_provider(ui), "about", None)
+    got = call(fn, ui, context, label="file à valider : ce que concerne une demande") if fn is not None else None
+    if got is None or isinstance(got, Failed):
+        return ui.names.who(context).removeprefix("le "), ""
+    text, link = got
+    return str(text or ""), str(link or "")
+
+
+#: ce que la ligne d'un argument montre d'une valeur, au plus (le JSON exact reste dans les détails techniques)
+ARG_TEXT = 500
+
+
+def _arguments(args_json: str) -> list[dict[str, str]] | None:
+    """Les arguments d'une demande sans aperçu, un par ligne (« nom : valeur ») ; ``None`` s'ils ne se lisent pas."""
+    try:
+        args = json.loads(args_json or "{}")
+    except ValueError:
+        return None
+    if not isinstance(args, dict):
+        return None
+    out = []
+    for name, value in args.items():
+        if name == decisions.SEEN_KEY:
+            continue
+        said = ("oui" if value else "non") if isinstance(value, bool) else "—" if value is None else \
+            value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        out.append({"label": str(name), "value": said if len(said) <= ARG_TEXT else said[:ARG_TEXT] + "…"})
+    return out
 
 
 #: les dernières décisions de la même sorte, dans l'historique d'une demande
@@ -108,8 +139,6 @@ def _summary(texts: Any, p: Any) -> str:
 
 #: un élément de la file qui n'est pas une demande d'envoi (``QueueItem``) : ``?element=<sorte>:<clé>``
 ELEMENT = "element"
-#: l'onglet de la file d'où l'on décide (le retour d'une décision y ramène)
-FROM_TAB = "file"
 MESSAGES = {"oui": [("ok", "Approuvé.")], "non": [("ok", "Refusé.")],
             "inconnu": [("warn", "Action inconnue ou déjà décidée.")],
             "change": [("warn", decisions.MESSAGES[decisions.CHANGED])],
@@ -123,6 +152,12 @@ def _provider(ui: Any) -> Any:
 
 def _keeps(tab: QueueTab | None, capability: str) -> bool:
     return tab is None or capability in tab.capabilities
+
+
+def _covered(ui: Any) -> set[str]:
+    """Les sortes qu'un onglet de la file garde déjà (ses capacités, ses sortes d'éléments) : leur onglet y mène, une
+    puce de plus répéterait ce filtre."""
+    return {k for t in getattr(_provider(ui), "tabs", ()) or () for k in (*t.capabilities, *t.kinds)}
 
 
 def _count(ui: Any, tab: QueueTab | None) -> int:
@@ -209,8 +244,9 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
     rows = []
     for e in page:
         p, x = e["effect"], e["item"]
-        rows.append({"capability": _kind(ui, p.capability) if p is not None else x.label,
-                     "context": _about(ui, p.context) if p is not None else x.context,
+        rows.append({"capability": ui.names.capability_short(p.capability) if p is not None else x.label,
+                     "described": ui.names.capability(p.capability) if p is not None else "",
+                     "context": _concerns(ui, p.context)[0] if p is not None else x.context,
                      "summary": " ".join((_summary(texts, p) if p is not None else x.summary).split())[:LINE_TEXT],
                      "ago": render.relative(e["at"], now) if e["at"] else "",
                      "exact": ui.when_long(e["at"]) if e["at"] else "", "href": href(e),
@@ -235,23 +271,33 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
                 args = full.args_json if full else ""
             preview = await decisions.preview(kernel.mind, kernel.ports, p.capability, full.args_json) \
                 if full else None
-            opened = {**base, "effect": True, "proposal": p.proposal, "capability": _kind(ui, p.capability),
+            opened = {**base, "effect": True, "proposal": p.proposal,
+                      "capability": ui.names.capability_phrase(p.capability),
                       "described": ui.names.capability(p.capability), "capability_key": p.capability,
-                      "owner": p.owner, "context": _about(ui, p.context), "summary": _summary(texts, p),
-                      "args": args, "when": ui.when_long(p.at), "ago": render.relative(p.at, now),
+                      "owner": p.owner, "context": _concerns(ui, p.context)[0], "summary": _summary(texts, p),
+                      "args": args, "arguments": _arguments(full.args_json) if full else [],
+                      "when": ui.when_long(p.at), "ago": render.relative(p.at, now),
                       "event": render.href(Ref("event", str(p.proposal), "")),
                       "preview": preview.text if preview is not None else "",
                       "seen": preview.digest if preview is not None else "",
                       "blocked": preview.blocked if preview is not None else "",
                       "follow": follow["id"] if follow is not None and follow["effect"] is not None else "",
                       "sources": _sources(ui, p, full.args_json if full else ""),
-                      "history": _history(ui, ctx, p, now), "history_href": f"{PREFIX}/approbations/historique"}
-    labels = {e["sort"]: (_kind(ui, e["sort"]) if e["effect"] is not None else e["item"].label) for e in everything}
-    kinds = [{"text": labels[k], "count": n, "href": "?" + urlencode({KIND: k}), "on": k == sort}
-             for k, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+                      "history": _history(ui, ctx, p, now),
+                      # tout l'historique de ce genre de demande : la même sorte, filtrée
+                      "history_href": f"{PREFIX}/approbations/historique?" + urlencode({KIND: p.capability})}
+    labels = {e["sort"]: (ui.names.capability_short(e["sort"]) if e["effect"] is not None else e["item"].label)
+              for e in everything}
+    hints = {e["sort"]: ui.names.capability(e["sort"]) for e in everything if e["effect"] is not None}
+    # une puce par sorte, sauf celles qu'un onglet de la file garde déjà (sur « Tout ») : deux chemins ne mènent pas
+    # au même filtre ; celle qui filtre reste, qu'on voie ce qui est filtré
+    covered = _covered(ui) if tab is None else set()
+    kinds = [{"text": labels[k], "hint": hints.get(k, ""), "count": n, "href": "?" + urlencode({KIND: k}),
+              "on": k == sort}
+             for k, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])) if k not in covered or k == sort]
     return {"panel": Panel("handmade/approbations/attente.html", {
                 "items": rows, "opened": opened, "total": len(everything), "shown": len(shown),
-                "kinds": kinds if len(kinds) > 1 else [], "kind": sort, "all_href": "?",
+                "kinds": kinds if len(counts) > 1 and kinds else [], "kind": sort, "all_href": "?",
                 "explicit": bool(wanted) and opened is not None and current["id"] == wanted,
                 "empty": tab.empty if tab is not None else "",
                 "pending_pager": render._pager(pager, query)}, styles=("handmade/approbations.css",)),
@@ -277,34 +323,138 @@ def queue_builtins(provider: Any) -> dict[str, Builtin]:
     return out
 
 
-#: l'historique, par page
+#: l'historique, par page : des demandes tranchées, chacune avec son exécution — une décision et son exécution ne se
+#: séparent jamais d'une page à l'autre
 HISTORY_PAGE = 30
+#: un filtre qui écarte beaucoup de décisions lit le journal par lots, au plus tant, puis dit que la recherche continue
+HISTORY_SCAN = 200
+HISTORY_SCAN_BATCHES = 10
+#: l'issue d'une demande tranchée (``?issue=``) : un bouton à choix, toujours posé
+ISSUE = "issue"
+ALL, APPROVED, REFUSED, FAILED = "tout", "approuve", "refuse", "echec"
+ISSUES = ((ALL, "Toutes"), (APPROVED, "Approuvées"), (REFUSED, "Refusées"), (FAILED, "En échec"))
+#: ses filtres : la sorte (``?sorte=<capacité>``, en puces dans la page — gardée par le bouton à choix) et l'issue
+HISTORY_PARAMS = (Param(KIND, "Sorte", "hidden"), Param(ISSUE, "Issue", "select", ISSUES, default=ALL))
+#: la liste des demandes tranchées, et la rangée de puces de ses sortes
+HISTORY_TABLE, HISTORY_SORTS = "Décisions et exécutions", "Sorte de demande"
+
+
+#: les exécutions d'une demande qu'on relit avec sa décision, au plus (d'ordinaire une seule)
+RUNS_SHOWN = 4
+
+
+def _runs(ctx: Any, proposal: int) -> list[Any]:
+    """Les exécutions d'une demande approuvée, la dernière d'abord (aucune : pas encore revenue)."""
+    return ctx.events([rt.EFFECT_EXECUTED], RUNS_SHOWN, where=("proposal", proposal))
+
+
+def _decided(ctx: Any, sort: str, issue: str, before: int | None) -> tuple[list[tuple[int, Any]], bool, int]:
+    """Une page de demandes tranchées, du plus récent : ``(curseur, décision)`` — lues par leur décision, ou par leur
+    exécution ratée (« en échec ») ; s'il en reste ; où reprendre quand le budget de lecture s'arrête avant d'avoir
+    rempli la page (0 : il ne s'est pas arrêté). Lu par lots jusqu'à la remplir, et une de plus."""
+    # le journal ne filtre que la sorte : un booléen (accordée, réussie) ne se lit pas pareil sous SQLite et MariaDB,
+    # l'issue se lit ici ; « en échec » part des exécutions ratées, dont la décision se relit
+    types = [rt.EFFECT_EXECUTED] if issue == FAILED else [rt.EFFECT_RESOLVED]
+    where = ("capability", sort) if sort and issue != FAILED else None
+    seen: set[int] = set()
+
+    def keep(e: Any) -> Any:
+        if e.data.proposal in seen:
+            return None
+        if issue == FAILED:
+            if e.data.ok:
+                return None
+            found = ctx.events([rt.EFFECT_RESOLVED], 1, where=("proposal", e.data.proposal))
+            d = found[0] if found else None
+        else:
+            d = e
+        # une exécution sans décision (une demande qui n'en attendait pas) n'est pas une autorisation
+        if d is None or (sort and d.data.capability != sort) or (issue == APPROVED and not d.data.approved) \
+                or (issue == REFUSED and d.data.approved):
+            return None
+        seen.add(e.data.proposal)
+        return d
+
+    shown: list[tuple[int, Any]] = []
+    cursor = before
+    batch: list[Any] = []
+    for _ in range(HISTORY_SCAN_BATCHES):
+        batch = ctx.events(types, HISTORY_SCAN, where=where, before=cursor)
+        for e in batch:
+            if (got := keep(e)) is not None:
+                shown.append((e.seq, got))
+                if len(shown) > HISTORY_PAGE:
+                    break
+        if len(shown) > HISTORY_PAGE or len(batch) < HISTORY_SCAN:
+            break
+        cursor = batch[-1].seq
+    more = len(shown) > HISTORY_PAGE
+    stopped = not more and len(batch) == HISTORY_SCAN
+    return shown[:HISTORY_PAGE], more, (cursor or 0) if stopped else 0
+
+
+def _sorts(ui: Any, ctx: Any, sort: str, issue: str) -> Nav | None:
+    """Les sortes de demandes déjà tranchées, en puces (les plus fréquentes d'abord) : chacune filtre l'historique,
+    l'issue choisie gardée ; rien quand il n'y en a qu'une et qu'aucune ne filtre."""
+    known = [str(c) for c, _, _ in sorted(ctx.tally(rt.EFFECT_RESOLVED, "capability"),
+                                          key=lambda t: (-t[1], str(t[0]))) if c]
+    if sort and sort not in known:
+        known.append(sort)
+    if len(known) < 2 and not sort:
+        return None
+    here = f"{PREFIX}/approbations/historique"
+    kept = ((ISSUE, issue),) if issue != ALL else ()
+    return Nav((NavItem("Toutes", Ref("local", here, "", kept), active=not sort),
+                *(NavItem(ui.names.capability_short(c), Ref("local", here, "", ((KIND, c), *kept)), active=c == sort)
+                  for c in known)), title=HISTORY_SORTS)
 
 
 @TABS.tab("approbations.historique", title="Historique des autorisations",
-          description="Chaque décision (approuvé, refusé, par qui) et chaque exécution (réussie ou non), avec la "
-                      "capacité concernée.")
-async def history(ui: Any, request: Request) -> list[Any]:
+          description="Chaque demande tranchée : ta décision (approuvée ou refusée, par qui, ta note) et son exécution "
+                      "(réussie ou non, ce qu'elle a donné), à filtrer par sorte et par issue.")
+async def history(ui: Any, request: Request) -> dict[str, Any]:
     ctx = ui.inspection.context(request.query_params)
-    done, pager = ctx.older([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], HISTORY_PAGE)
-    # la capacité d'une exécution se lit sur sa décision
-    proposals = {e.data.proposal for e in done if e.type.name == rt.EFFECT_EXECUTED.name}
-    resolved = {p: found[0].data for p in proposals
-                if (found := ctx.events([rt.EFFECT_RESOLVED], 1, where=("proposal", p)))}
+    values, notes = read_params(HISTORY_PARAMS, request.query_params)
+    sort, issue = values[KIND], values[ISSUE]
+    before = ctx.int_param("avant", 0) or None
+    page, more, stopped = _decided(ctx, sort, issue, before)
+    entries = [(d, _runs(ctx, d.data.proposal) if d.data.approved else []) for _, d in page]
+    # la plus récente d'abord : celle dont la dernière nouvelle (sa décision, ou son exécution) est la plus récente ;
+    # chacune, sa décision et ses exécutions, la dernière en tête
+    entries.sort(key=lambda dx: -max([dx[0].seq, *(x.seq for x in dx[1])]))
     rows = []
-    for e in done:
-        is_decision = e.type.name == rt.EFFECT_RESOLVED.name
-        capability = e.data.capability if is_decision else getattr(resolved.get(e.data.proposal), "capability", "")
-        tone = "" if is_decision and e.data.approved else "muted" if is_decision else \
-            ("ok" if e.data.ok else "danger")
-        rows.append(Row((When(e.at), Badge("décidé" if is_decision else "exécuté", "info" if is_decision else "ok"),
-                         Text(ui.names.capability(capability) if capability else "—", hint=capability),
-                         Ref("event", str(e.data.proposal), f"n° {e.data.proposal}"),
-                         Text(_detail(ui, e), "muted", clamp=200), Text(capability or "—", "mono")),
-                        href=Ref("event", str(e.seq), ""), tone=tone))
-    return [Table((Column("quand", "fit"), Column("quoi", "fit"), "capacité", Column("proposition", "fit"),
-                   "détail", Column("capacité (clé)", detail=True)), tuple(rows), title="Décisions et exécutions",
-                  empty="Rien n'a encore été décidé.", pager=pager)]
+    for d, ran in entries:
+        capability = d.data.capability
+        about, link = _concerns(ui, d.data.context)
+        said: tuple[Any, ...] = (Text(ui.names.capability_short(capability) if capability else "—", hint=capability),
+                                 Ref("event", str(d.data.proposal), f"n° {d.data.proposal}"),
+                                 Ref("local", link, about) if link else (about or "—"))
+        for x in ran:
+            rows.append(Row((When(x.at), Badge("exécuté", "ok"), *said, Text(_detail(ui, x), "muted", clamp=200),
+                             Text(capability or "—", "mono")),
+                            href=Ref("event", str(x.seq), ""), tone="ok" if x.data.ok else "danger"))
+        rows.append(Row((When(d.at), Badge("décidé", "info"), *said, Text(_detail(ui, d), "muted", clamp=200),
+                         Text(capability or "—", "mono")),
+                        href=Ref("event", str(d.seq), ""), tone="" if d.data.approved else "muted"))
+    if more:
+        pager = Pager(older=(("avant", str(page[-1][0])),))
+    elif stopped:
+        pager = Pager(older=(("avant", str(stopped)),))
+    elif not before:
+        pager = Pager(param="avant", size=max(1, len(rows)), total=len(rows))
+    else:
+        pager = Pager(param="avant")
+    out: list[Any] = [Note(n, "warn") for n in notes]
+    if (chips := _sorts(ui, ctx, sort, issue)) is not None:
+        out.append(chips)
+    out.append(Table((Column("quand", "fit"), Column("quoi", "fit"), "capacité", Column("proposition", "fit"),
+                      "concerne", "détail", Column("capacité (clé)", detail=True)), tuple(rows),
+                     title=HISTORY_TABLE, pager=pager,
+                     empty="Aucune demande tranchée ne correspond à ces filtres." if sort or issue != ALL
+                     else "Rien n'a encore été décidé."))
+    if stopped:
+        out.append(Note("La recherche continue dans les décisions plus anciennes : utilise « Plus anciens ».", "info"))
+    return {"blocks": out, "filters": HISTORY_PARAMS}
 
 
 def _detail(ui: Any, e: Any) -> str:

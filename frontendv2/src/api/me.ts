@@ -4,8 +4,9 @@
  */
 import { getJson, MOI } from "./moi";
 
+/** Ce qui attend ta décision, domaine par domaine (ADR 0200) : une pastille n'a que ce sens-là. */
 export interface Counts {
-  /** Les non-lus de la réception de ses boîtes, et ses brouillons qui attendent. */
+  /** Ses brouillons de mail qui attendent ta décision, dans tes boîtes (les non-lus ont leurs compteurs dans Mail). */
   mail: number;
   /** Ses réponses Teams qui attendent ta décision. */
   teams: number;

@@ -8,8 +8,8 @@ l'emporte (``Utterance.attachments``, des références opaques pour le reste du 
 
 - ``shares.shared`` : un fichier préparé pour ``target`` (une adresse). Tant qu'aucun message ne l'a emporté, il
   « n'est pas parti » (une réponse supplantée, une abstention) ; la rétention finit par le retirer.
-- ``shares.expired`` : des fichiers retirés (trop vieux, ou la place d'une personne dépassée) ; leurs octets sont
-  effacés après le commit. La ligne reste, « retiré ».
+- ``shares.expired`` : des fichiers retirés (trop vieux, la place d'une personne dépassée, ou un opérateur qui en
+  retire un depuis la console, ADR 0205) ; leurs octets sont effacés après le commit. La ligne reste, « retiré ».
 
 Un fichier peut aussi venir d'ailleurs (ADR 0061) : un propriétaire qui produit un fichier pour quelqu'un (un dessin,
 qui prend des minutes) en dépose les octets dans le même port et lève **son** événement public, dont la charge utile
@@ -33,9 +33,9 @@ FILE, IMAGE = "file", "image"
 KINDS = (FILE, IMAGE)
 WRITTEN, PROJECT, DRAWN = "written", "project", "drawn"
 ORIGINS = (WRITTEN, PROJECT, DRAWN)
-# raisons d'un retrait
-RETENTION, BUDGET = "retention", "budget"
-REASONS = (RETENTION, BUDGET)
+# raisons d'un retrait : trop vieux, la place dépassée (la rétention) ; un opérateur, à l'unité (ADR 0205)
+RETENTION, BUDGET, OPERATOR = "retention", "budget", "operator"
+REASONS = (RETENTION, BUDGET, OPERATOR)
 
 
 class Shared(Payload):
@@ -74,7 +74,8 @@ class ProducedFile(Payload):
 
 
 class Expired(Payload):
-    """Des fichiers d'une personne retirés : leurs octets s'effacent, la ligne reste (« retiré »)."""
+    """Des fichiers d'une personne retirés (``reason`` : une des ``REASONS``) : leurs octets s'effacent, la ligne
+    reste (« retiré »)."""
 
     files: tuple[str, ...]
     target: str

@@ -7,8 +7,9 @@ conversation, tu peux lui demander de préparer une réponse au dernier message 
 
 **Un Teams par personne** (ADR 0186) : chaque onglet se lit par propriétaire (« Les comptes de », ``?qui=`` : tout le
 monde, toi, elle par son nom, chaque personne qui a un compte Teams) puis par compte (``?compte=``) — un affichage,
-pas un droit. L'extension se branche compte par compte : sa clé se crée et se retire sur l'onglet Extension. La fiche
-d'une personne a l'onglet « Teams » (``teams``) quand un compte est à elle.
+pas un droit. L'extension se branche compte par compte : sa clé se crée et se retire sur l'onglet Extension, qui mène
+aussi aux réglages du compte (Teams › Paramètres, la roue en haut à droite, ADR 0206). La fiche d'une personne a
+l'onglet « Teams » (``teams``) quand un compte est à elle.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ from mika.plugins.teams import (
     TEAMS,
     UNUSED,
     WAITING,
+    WRITTEN,
     DraftSeen,
     TeamsState,
     her,
@@ -72,6 +74,10 @@ from mika.vocab.privacy import Sensitivity
 
 SECTION = "teams"
 PAGE = 25
+#: le tableau de canal d'un compte (« teams:<clé> », ADR 0134) : pour qui elle prépare, comment ça part
+CANALS_PAGE = "/inspecteur/reglages/canaux"
+#: ses paramètres (« Actif », ses comptes) : dans Teams, en haut à droite (ADR 0206)
+SETTINGS = f"/inspecteur/{SECTION}/parametres"
 NO_PORT = "Teams n'est pas branché ici."
 KIND_LABEL = {"dm": "tête-à-tête", "group": "groupe", "channel": "canal", "meeting": "réunion", "other": "—"}
 STATE_LABEL = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvée", "info"), REFUSED: ("refusée", ""),
@@ -173,8 +179,8 @@ def _navs(port: Any, ctx: InspectContext, frame: Frame, base: str) -> list[Block
 
 def _nothing_for(frame: Frame, ctx: InspectContext) -> Note:
     name = owner_name(frame, "" if whose(ctx) == YOURS else whose(ctx))
-    return Note(f"Aucun compte Teams n'est à {name}. Dans Réglages › Plugins › Teams, un compte se donne à quelqu'un "
-                "par « À qui ».", title="Aucun compte", tone="info")
+    return Note(f"Aucun compte Teams n'est à {name}. Dans Teams › Paramètres (en haut à droite), un compte se donne à "
+                "quelqu'un par « À qui ».", title="Aucun compte", tone="info")
 
 
 def _unplugged(port: Any, account: str) -> Note | None:
@@ -299,8 +305,13 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("son nom dans Teams", self_name or "pas encore vu"), ("son identifiant Teams", owner_id or "pas encore vu"),
         ("messages remarqués (en tête)", sum(1 for m in s.messages.values() if m.account == account)),
         ("sa clé", _key_words(ctx, account)),
-        ("clé, signature", Ref("local", "/inspecteur/reglages/teams", "Réglages › Plugins › Teams")),
-        ("ce qu'elle prépare, comment ça part", Ref("local", "/inspecteur/envoi", "Envoyer à ta place")),
+        # sa voix et sa signature, réglées dans Teams › Paramètres : ce compte-là, qui ramène ici (ADR 0206)
+        ("sa voix, sa signature", Ref("local", SETTINGS, "Modifier ce compte",
+                                      (("section", SECTION), ("enregistrement", "accounts"), ("cle", account),
+                                       ("retour", f"/inspecteur/{SECTION}/extension?{ACCOUNT}={account}")))),
+        # le tableau de canal de ce compte (ADR 0134 : « Envoyer à ta place » est fondu dans les canaux), comme une boîte
+        ("ce qu'elle prépare, comment ça part", Ref("local", CANALS_PAGE, "le tableau de ce compte (Réglages › Canaux)",
+                                                    (("canal", f"teams:{account}"),))),
     ]
     blocks: list[Block] = [*navs, Fields(tuple(pairs), title="L'extension", columns=1),
                            Note("L'extension (frontend/Extension) lit ce que Teams web reçoit dans le navigateur où ce "
@@ -358,7 +369,7 @@ def _person_accounts(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[B
                    Column("dernier envoi de l'extension", "fit"), Column("lire", "fit")), tuple(rows),
                   title=f"Teams ({len(rows)})", empty="aucun compte Teams à son nom",
                   caption=f"Un compte Teams se donne à {'toi' if not owner else owner_name(frame, owner)} dans "
-                          "Réglages › Plugins › Teams (« À qui »).")]
+                          "Teams › Paramètres (« À qui »).")]
 
 
 # ── Une conversation ──────────────────────────────────────────────────────
@@ -592,13 +603,17 @@ class WriteArgs(BaseModel):
     reply_to: Annotated[str, Knob(label="En réponse à", widget="hidden")] = Field(default="", max_length=400)
 
 
-@TEAMS.action("ecrire", title="Écrire dans cette conversation", args=WriteArgs, emits=[],
+@TEAMS.action("ecrire", title="Écrire dans cette conversation", args=WriteArgs, emits=[WRITTEN],
               description="Ton message part par l'extension de ce compte, sous ton nom et sans sa signature : c'est "
-                          "toi qui l'envoies (ADR 0189). Elle le verra parti, comme tes autres messages.")
+                          "toi qui l'envoies (ADR 0189). Elle le verra parti, comme tes autres messages ; ses réponses "
+                          "qui attendaient ton accord ici ne partiront plus (ADR 0199).")
 def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
     """Ce que la personne écrit elle-même : un brouillon à son nom (``author``), aussitôt en file pour être envoyé —
     son geste est l'envoi, aucun accord n'est à demander. L'extension le relève, l'envoie et l'accuse ; ses messages
-    à elle reviennent ensuite dans le fil (``own``), comme ce qu'elle tape dans Teams."""
+    à elle reviennent ensuite dans le fil (``own``), comme ce qu'elle tape dans Teams. Le journal le sait aussitôt
+    (``teams.written``, sans texte) : ses réponses qui attendaient un accord dans cette conversation n'ont plus lieu
+    d'être (ADR 0199) — refusées par ``teams.answered``, jamais par ce geste, qui ne peut donc pas échouer à cause
+    d'elles une fois le message en file."""
     port = ctx.ports.get("teams")
     if port is None:
         raise Refused(NO_PORT)
@@ -619,7 +634,8 @@ def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
     if why:
         port.discard_draft(draft.id)
         raise Refused(f"Il n'a pas pu partir : {why}.")
-    return Done(message="En file : l'extension de ce compte l'enverra dans Teams.")
+    return Done(drafts=(WRITTEN.draft(conversation=conversation, account=account),),
+                message="En file : l'extension de ce compte l'enverra dans Teams.")
 
 
 # ── La clé de l'extension d'un compte ─────────────────────────────────────
@@ -654,7 +670,7 @@ async def _new_key(s: TeamsState, frame: Frame, args: KeyArgs, ctx: Any) -> Done
               description="Sans clé, l'extension de ce compte est refusée (rien n'est reçu, rien ne part) jusqu'à ce "
                           "qu'on en crée une.")
 async def _revoke_key(s: TeamsState, frame: Frame, args: KeyArgs, ctx: Any) -> Done:
-    if not await _keys(ctx).revoke_key(args.compte, ctx.by):
+    if not await _keys(ctx).revoke_key(args.compte):
         raise Refused("Ce compte n'avait pas de clé.")
     return Done(message=f"La clé du compte « {args.compte} » est retirée : son extension est refusée jusqu'à une clé "
                         "neuve.", tone="warn")

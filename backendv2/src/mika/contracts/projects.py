@@ -61,7 +61,6 @@ STATUSES = (ACTIVE, PAUSED, ARCHIVED)
 # l'état de son plan (ADR 0145) : sans plan (un projet d'avant, ou de la console), à cadrer (une séance de cadrage est
 # due), plan proposé (il attend la réponse de qui l'a demandé), planifié (il suit son plan)
 UNPLANNED, TO_FRAME, PROPOSED, PLANNED = "", "to_frame", "proposed", "planned"
-PLAN_STATES = (UNPLANNED, TO_FRAME, PROPOSED, PLANNED)
 # sortes et statuts d'un objectif
 ONCE, CONSTANT = "once", "constant"
 OBJECTIVE_KINDS = (ONCE, CONSTANT)
@@ -246,7 +245,7 @@ class ProjectView:
     #: les suivent
     access: tuple[ProjectAccess, ...] = UNSET
     default_access: ProjectAccess = UNSET_DEFAULT
-    #: l'état de son plan (ADR 0145 : ``PLAN_STATES``)
+    #: l'état de son plan (ADR 0145 : ``UNPLANNED``, ``TO_FRAME``, ``PROPOSED``, ``PLANNED``)
     plan_state: str = UNPLANNED
 
 

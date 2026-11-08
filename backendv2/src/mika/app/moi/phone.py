@@ -30,6 +30,9 @@ LIMIT = 100
 SNIPPET = 160
 #: le nom sous lequel l'application se télécharge
 APK_NAME = "mika.apk"
+#: d'une carte réglée qui ne se lit pas, ce qu'une personne lit : ce qui ne va pas (un fichier du serveur, une archive
+#: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY`` de ``carte.py``
+MAP_NOT_READY = "La carte n'est pas encore prête sur ce serveur."
 
 
 def _ms(us: int) -> int:
@@ -176,6 +179,10 @@ def _maps(call: Call) -> Any:
     return maps
 
 
+def _map_trouble(call: Call, reason: str) -> str:
+    return reason if call.me.operator else MAP_NOT_READY
+
+
 async def map_info(call: Call) -> dict[str, Any]:
     """Ce que le client sait de la carte : prête ou non (et pourquoi), ses tuiles, sa zone, ses polices et ses icônes
     — toutes servies par ce serveur, jamais une adresse du dehors."""
@@ -183,12 +190,15 @@ async def map_info(call: Call) -> dict[str, Any]:
     if maps is None:
         return {"ready": False, "reason": "La carte n'est pas branchée sur ce serveur."}
     got = await maps.info()
+    reason = got.reason
+    if reason and maps.config().source != NO_MAP:  # rien de réglé n'est pas une panne : tout le monde le lit tel quel
+        reason = _map_trouble(call, reason)
     base = PREFIX + MAP
     # la version de la source dans chaque adresse : le navigateur ne ressert pas, d'une carte remplacée (un autre
     # fichier, des images au lieu de vecteurs), ce qu'il gardait de l'autre
     query = f"?v={got.version}" if got.version else ""
     sprites = f"{base}/sprites/{VERSION_MARK}{got.version}/v4" if got.version else f"{base}/sprites/v4"
-    return {"ready": got.ready, "reason": got.reason, "kind": got.kind, "minzoom": got.minzoom,
+    return {"ready": got.ready, "reason": reason, "kind": got.kind, "minzoom": got.minzoom,
             "maxzoom": got.maxzoom, "bounds": list(got.bounds) if got.bounds is not None else None,
             "attribution": got.attribution, "tiles": f"{base}/tiles/{{z}}/{{x}}/{{y}}{query}",
             "glyphs": f"{base}/fonts/{{fontstack}}/{{range}}.pbf{query}" if got.fonts else None,
@@ -202,7 +212,7 @@ async def map_tile(call: Call) -> Response:
     try:
         tile = await _maps(call).tile(p["z"], p["x"], p["y"])
     except MapUnavailable as exc:
-        raise Denied(503, str(exc)) from None
+        raise Denied(503, _map_trouble(call, str(exc))) from None
     if tile is None:
         return Response(status_code=204, headers={"Cache-Control": MAP_CACHE})
     headers = {"Cache-Control": MAP_CACHE, "X-Content-Type-Options": "nosniff"}

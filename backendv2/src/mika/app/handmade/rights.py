@@ -5,27 +5,55 @@ détail de ses accès** : son tableau de règles, lu tel qu'il est écrit, avec 
 « Retour » (vers sa ligne). Les droits exacts, outil par outil, seulement quand on a choisi **qui** et **par quel
 canal** : la règle du moteur, appliquée à cette personne par ce canal (les deux portes, le plafond) — jamais une
 recopie.
+
+Une lecture, sauf **Partages** (ADR 0210) : qui a reçu la boîte, le compte Teams ou le service de qui. Un opérateur y
+retire le partage d'une boîte ou d'un compte Teams, par l'écriture de son propriétaire (``moi.shares.write_share``),
+confirmé et audité ; celui d'un service se retire sur ses lignes d'accès. Il n'en crée aucun : donner reste au
+propriétaire.
+
+Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMILY_ABOUT``) : la phrase que lit le modèle
+(sa voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
 """
 
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 from markupsafe import Markup
+from starlette.requests import Request
+from starlette.responses import RedirectResponse, Response
+from starlette.routing import Route
 
 from mika.app.handmade.access import people_with_accounts
+from mika.app.handmade.servers import KIND as SERVICE
+from mika.app.moi import Denied, missing
+from mika.app.moi import shares as shares_moi
 from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
-from mika.inspector.ui import UI, env
+from mika.inspector.ui import PREFIX, UI, env, secure
 from mika.kernel.frame import Audience
-from mika.kernel.inspect import Pager
+from mika.kernel.inspect import Pager, Ref
 from mika.kernel.rights import Grant
-from mika.vocab.access import INTERNAL, INTERNET, MOBILE, PRIVATE, TOGETHER, WEB, canal_key
+from mika.runtime import operations
+from mika.vocab.access import (
+    INTERNAL,
+    INTERNET,
+    MOBILE,
+    PERSON,
+    PRIVATE,
+    SELF,
+    SHARES,
+    TOGETHER,
+    WEB,
+    canal_key,
+)
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 
@@ -47,6 +75,12 @@ CANAL_CHOICES = ((f"{WEB}:{PRIVATE}", "le chat web, en privé"), (f"{WEB}:{TOGET
 #: elle travaille seule : personne n'écoute (l'audience d'un pas, d'une exécution, d'une tâche)
 WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
+#: la page, et où « Retirer » un partage envoie son formulaire (ADR 0210)
+PAGE = f"{PREFIX}/reglages/droits"
+UNSHARE = f"{PAGE}/partages"
+#: ce qui se partage, dit à l'opératrice ; ce que la console retire elle-même (un service : ses lignes d'accès)
+SHARED_KINDS = {"mail": "boîte", "teams": "compte Teams", "mcp": "service"}
+RETIRED_HERE = ("mail", "teams")
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +176,34 @@ def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, A
             "closed": got is not None and (got.get(spec.name) is None or got[spec.name].closed)}
 
 
+#: ce que fait chaque famille de ses propres outils, dit à l'opératrice (sa vie interne) ; une famille absente n'a pas
+#: de description, jamais celle de sa voix, écrite pour le modèle
+FAMILY_ABOUT: Mapping[str, str] = {
+    "attachments": "retrouver, rouvrir et relier ce qu'on lui a envoyé (photos, documents, messages vocaux)",
+    "attention": "ce qui lui trotte dans la tête en ce moment",
+    "camera": "regarder par la caméra, sur le moment",
+    "email": "lister, chercher et lire le courrier des boîtes qu'elle lit, le ranger, préparer une réponse",
+    "forge": "se fabriquer une app qui surveille ou relève pour elle : l'écrire, la tester, la commander",
+    "forge_signals": "lire la file de signaux d'une de ses apps, et dire ce qu'elle en fait",
+    "goals": "ses rappels et ses explorations ; noter une séance et en rendre compte",
+    "identity": "douter d'une identité, défaire un lien",
+    "imaging": "dessiner pour la personne (quelques minutes par image), montrer un dessin prêt",
+    "location": "savoir où est la personne qui lui parle, d'après ce que son téléphone en a dit",
+    "memory": "fouiller ses souvenirs et ce qu'elle sait ; dire qu'une promesse est tenue",
+    "phone": "lire les messages (WhatsApp, SMS) du téléphone de la personne, préparer une réponse à sa place",
+    "projects": "ouvrir, accepter ou clore un projet ; en l'exécutant, son carnet, ses décisions, ses objectifs",
+    "rss": "ses flux d'actualité : les derniers titres, lire un article",
+    "self": "relire ce qu'elle a écrit dans son journal un jour passé",
+    "shares": "envoyer à la personne un texte qu'elle écrit ou un fichier d'un projet ; relire un envoi",
+    "social": "relire qui lui écrit et ce qu'elle sait de cette personne, quand son état ne le dit pas déjà",
+    "teams": "lister et relire les conversations Teams des comptes qu'elle lit, préparer une réponse",
+    "trips": "la carte : chercher un lieu, calculer un trajet, préparer un voyage avec la personne",
+    "wakeup": "conclure un réveil par API : le compte rendu de ce que l'appel lui a fait faire",
+    "workshop": "l'atelier d'un projet : lire, écrire, lancer des programmes isolés, son dépôt git",
+    "world": "se déplacer et faire des choses dans sa chambre (on la voit le faire)",
+}
+
+
 def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str, Any]]:
     """Les ressources, par sorte : sa vie interne (ses familles, par lot), les apps de la Forge, les services MCP,
     ses projets, ses canaux — chacune avec ses outils décrits et le lien de son détail."""
@@ -164,7 +226,7 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
                 "edit": render.href(table.href) if table is not None and table.href is not None else "",
                 "exact": exact_}
 
-    internal = [entry(b, ui.names.bundle(b), registry.bundles.get(b, ""), specs, f"famille:{b}")
+    internal = [entry(b, ui.names.bundle(b), FAMILY_ABOUT.get(b, ""), specs, f"famille:{b}")
                 for b, specs in sorted(by_bundle.items(), key=lambda kv: ui.names.bundle(kv[0]).casefold())
                 if not any(registry.is_dynamic(s.name) for s in specs)]
     forged = []
@@ -237,16 +299,89 @@ def fixed_tools(ui: UI) -> dict[str, Any]:
             "count": sum(len(n) for n in reserved.values()), "guarded_count": sum(len(n) for n in guarded.values())}
 
 
-def page(ui: UI, items: Sequence[Any], query: Mapping[str, str]) -> Markup:
+def _resource(s: shares_moi.Shared) -> str:
+    return f"{'la' if s.kind == 'mail' else 'le'} {SHARED_KINDS[s.kind]} « {s.title} »"
+
+
+def _owner(ui: UI, owner: str) -> str:
+    """Le propriétaire d'une ressource, en mots : toi (vide), elle, ou la personne."""
+    if owner == SELF:
+        return ui.her_name()
+    return ui.names.who(owner[len(PERSON):]) if owner.startswith(PERSON) else "toi"
+
+
+def shared(ui: UI) -> list[dict[str, Any]]:
+    """Partages (ADR 0210) : une ligne chacun, en mots — sa ressource et sa sorte, son propriétaire, qui le reçoit, son
+    niveau. La date n'y est pas : un partage ne la garde pas."""
+    settings = ui.deps.settings
+    if settings is None:
+        return []
+    out = []
+    for s in shares_moi.every_share(settings):
+        name = ui.names.who(s.person)
+        out.append({"kind": s.kind, "key": s.key, "person": s.person, "title": s.title, "sort": SHARED_KINDS[s.kind],
+                    "owner": _owner(ui, s.owner), "name": name, "level": dict(SHARES).get(s.level, s.level),
+                    "href": render.href(Ref.subject("person", ui.names.person_of(s.person), name)),
+                    "access": "" if s.kind in RETIRED_HERE else render.href(Ref.subject(SERVICE, s.key, s.title, "fait")),
+                    "ask": f"Retirer à {name} son accès à {_resource(s)} ? Il disparaît de son espace ; seul son "
+                           "propriétaire peut le lui redonner."})
+    return out
+
+
+async def _unshared(ui: UI, data: Mapping[str, Any], by: str) -> tuple[str, str]:
+    """Retirer ce partage : ce qu'il faut en dire. Il a pu partir entre-temps (un autre onglet, son propriétaire) : rien
+    n'est alors écrit ni audité."""
+    kind, key, person = (str(data.get(k, "")) for k in ("kind", "key", "person"))
+    if kind not in RETIRED_HERE:
+        return "warn", "Un service se retire sur ses lignes d'accès : rien n'a été retiré ici."
+    found = next((s for s in shares_moi.every_share(ui.deps.settings)
+                  if (s.kind, s.key, s.person) == (kind, key, person)), None)
+
+    def there(spec: Any) -> None:
+        if PERSON + person not in spec.shares:
+            raise missing()
+
+    try:
+        await shares_moi.write_share(ui.deps.settings, ui.deps.reconfigure, kind, key, person, "", there)
+    except Denied as exc:
+        return "warn", "Ce partage n'est plus là : rien à retirer." if exc.status == 404 else exc.message
+    await operations.audit(ui.kernel, "console.droits.partage_retire", by=by,
+                           **shares_moi.audited_share(kind, key, person))
+    what = _resource(found) if found is not None else f"« {key} »"
+    return "ok", f"Partage retiré : {ui.names.who(person)} n'a plus accès à {what}."
+
+
+async def unshare(ui: UI, request: Request) -> Response:
+    """« Retirer », dans Partages : confirmé par la page, audité ; on revient à la liste, le message en tête."""
+    data = await ui.form(request)
+    account = ui.operator(request)
+    token = secrets.token_urlsafe(9)
+    if data is None or account is None:
+        ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
+    elif ui.deps.settings is None:
+        ui.flash(token, "warn", "Les réglages ne sont pas joignables : rien n'a été retiré.")
+    else:
+        ui.flash(token, *await _unshared(ui, data, account.handle))
+    return secure(RedirectResponse(f"{PAGE}?flash={quote(token, safe='')}#d-partages", status_code=303))
+
+
+def routes(ui: UI) -> list[Route]:
+    async def post(request: Request) -> Response:
+        return await unshare(ui, request)
+
+    return [Route(UNSHARE, ui.guarded(post), methods=["POST"])]
+
+
+def page(ui: UI, items: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Markup:
     """La page : les ressources et leurs outils ; le détail d'une (``?detail=``) ; les droits exacts quand on a choisi
-    qui (``?qui=``) et par quel canal (``?canal=``)."""
+    qui (``?qui=``) et par quel canal (``?canal=``) ; les partages, et le jeton de leurs formulaires (``forms.csrf``)."""
     all_whos = whos(ui)
     who = next((w for w in all_whos if w.key == query.get("qui", "")), None)
     canal = query.get("canal", "") if query.get("canal", "") in dict(CANAL_CHOICES) else ""
     got = exact(ui, who, canal) if who is not None and canal else None
     kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
     shown = detail(ui, query["detail"]) if query.get("detail") else None
-    listed = sections(ui, got, kept)
+    listed, given = sections(ui, got, kept), shared(ui)
     # « Retour » ramène à la ligne de la ressource, dans son sous-onglet
     back = next((r["id"] for s in listed for r in s["rows"] if shown and r["detail_key"] == query["detail"]), "")
     return Markup(env.get_template("handmade/droits/page.html").render(
@@ -254,4 +389,5 @@ def page(ui: UI, items: Sequence[Any], query: Mapping[str, str]) -> Markup:
         canals=[{"key": k, "label": label, "on": k == canal} for k, label in CANAL_CHOICES],
         chosen=(who.label if who else "", dict(CANAL_CHOICES).get(canal, "")), got=got,
         canal_said=_what(got["canal"]) if got else "", sections=listed, kept=kept, back=back,
-        detail=shown, fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous"))
+        detail=shown, fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous",
+        shares=given, shares_pager=_one_page(len(given)), unshare=UNSHARE, csrf=getattr(forms, "csrf", "")))

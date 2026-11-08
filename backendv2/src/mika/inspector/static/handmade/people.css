@@ -24,12 +24,12 @@
 .people-card.online { border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
 .people-card-head { display: flex; align-items: center; gap: 14px; }
 .people-card-id { display: grid; gap: 4px; min-width: 0; }
-.people-card-name { margin: 0; font-family: var(--now-serif); font-size: 1.25rem; font-weight: 600; line-height: 1.15; }
+.people-card-name { margin: 0; font-family: var(--display); font-size: 1.25rem; font-weight: 600; line-height: 1.15; }
 .people-card-name a { color: var(--text); }
 .people-card-name a:hover { color: var(--accent); }
 .people-card-felt { margin: 0; color: var(--text-2); font-size: 13px; }
 .people-card .now-notes { margin: 0; }
-.people-card-summary { margin: 0; color: var(--text-2); font-family: var(--now-serif); font-size: 14px; font-style: italic;
+.people-card-summary { margin: 0; color: var(--text-2); font-family: var(--display); font-size: 14px; font-style: italic;
   line-height: 1.45; }
 .people-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px;
   margin-top: 2px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12px; }

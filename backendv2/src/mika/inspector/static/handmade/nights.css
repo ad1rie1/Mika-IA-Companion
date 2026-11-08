@@ -3,7 +3,7 @@
 /* le journal : une page qu'on lit, en serif, une ligne de texte aérée */
 .nights-journal { display: grid; gap: 16px; padding: 28px 32px; }
 .nights-journal-head { display: grid; gap: 4px; }
-.nights-journal-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.25rem; font-weight: 600; }
+.nights-journal-head h2 { margin: 0; font-family: var(--display); font-size: 1.25rem; font-weight: 600; }
 .nights-page { max-width: 68ch; color: var(--text); font-size: 15px; line-height: 1.75;
   white-space: pre-line; overflow-wrap: anywhere; }
 .nights-page::first-letter { text-transform: uppercase; }
@@ -17,11 +17,11 @@
 /* ses nuits : une carte par nuit, son journal puis ses rêves */
 .nights-list { display: grid; gap: 12px; }
 .nights-list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
-.nights-list-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.3rem; font-weight: 600; }
+.nights-list-head h2 { margin: 0; font-family: var(--display); font-size: 1.3rem; font-weight: 600; }
 .nights-list-head p { margin: 0; font-size: 12.5px; }
 .nights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); align-items: start; gap: var(--now-gap); }
 .nights-night { display: grid; gap: 10px; min-width: 0; }
-.nights-night-head h3 { margin: 0; font-family: var(--now-serif); font-size: 1.1rem; font-weight: 600; }
+.nights-night-head h3 { margin: 0; font-family: var(--display); font-size: 1.1rem; font-weight: 600; }
 .nights-entries { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .nights-entries > li { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border); }
 .nights-entries > li:first-child { padding-top: 0; border-top: 0; }
@@ -29,7 +29,7 @@
 .nights-awake { color: var(--muted); }
 .nights-awake.on { color: var(--accent); font-weight: 600; }
 .nights-entry-text { color: var(--text); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
-.nights-entries > li.dream .nights-entry-text { font-family: var(--now-serif); font-style: italic; color: var(--text-2); }
+.nights-entries > li.dream .nights-entry-text { font-family: var(--display); font-style: italic; color: var(--text-2); }
 .nights-entry-text .more > summary { color: var(--text-2); font-size: inherit; cursor: pointer; }
 .nights-entry-text .more > summary:hover { color: var(--accent); }
 .nights-entry-text .more[open] > summary { display: none; }

@@ -27,7 +27,7 @@ from urllib.parse import quote, unquote, urlencode
 from markupsafe import Markup
 
 from mika.app.handmade.handles import CHANNELS
-from mika.app.handmade.tabs import Got, Line, Tab, blank, pairs, text, tiles
+from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs, text, tiles
 from mika.app.handmade.tabs.people import person_of
 from mika.contracts.identity import DENIED, VOUCHED
 from mika.inspector.formview import PREFILL
@@ -55,13 +55,6 @@ def _split(said: str) -> tuple[str, str]:
     """« authentifiée (session vérifiée) » : le mot, puis sa raison."""
     head, sep, tail = said.partition(" (")
     return (head.strip(), tail.rstrip(")").strip()) if sep else (said.strip(), "")
-
-
-def _number(said: str) -> float:
-    try:
-        return float(said.strip().replace("+", "").replace("−", "-").replace(",", "."))
-    except ValueError:
-        return 0.0
 
 
 def _pct(value: float) -> float:
@@ -171,8 +164,8 @@ def _bars(fields: Mapping[str, Any] | None) -> list[dict[str, Any]]:
 def _scale(degrees: Sequence[Line], bar: tuple[float, str], confidence: tuple[float, str]) -> dict[str, Any]:
     """L'échelle de la certitude (0 à 1) : ses degrés, la barre et celle des confidences, en pourcentages."""
     marks = []
-    for i, x in enumerate(sorted(degrees, key=lambda d: _number(d.text("certitude")))):
-        value = _number(x.text("certitude"))
+    for i, x in enumerate(sorted(degrees, key=lambda d: number(d.text("certitude")) or 0.0)):
+        value = number(x.text("certitude")) or 0.0
         marks.append({"name": x.text("degré"), "value": x.text("certitude"), "x": _pct(value),
                       "row": i % 2, "over": x.text("barre") == "atteint la barre",
                       "anchor": "start" if value <= 0.02 else "end" if value >= 0.98 else "middle"})
@@ -183,7 +176,7 @@ def _scale(degrees: Sequence[Line], bar: tuple[float, str], confidence: tuple[fl
 def _channels(lines: Sequence[Line]) -> list[dict[str, Any]]:
     out = []
     for x in lines:
-        floor, ceiling = _number(x.text("plancher")), _number(x.text("plafond"))
+        floor, ceiling = number(x.text("plancher")) or 0.0, number(x.text("plafond")) or 0.0
         short, why = _split(x.text("ce que prouve le canal"))
         out.append({"trust": x.get("confiance"), "why": why or short, "floor": x.text("plancher"),
                     "ceiling": x.text("plafond"), "x1": _pct(floor), "x2": _pct(ceiling),
@@ -194,7 +187,7 @@ def _channels(lines: Sequence[Line]) -> list[dict[str, Any]]:
 def _weights(lines: Sequence[Line]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {"pour": [], "contre": []}
     for x in lines:
-        weight = _number(x.text("poids"))
+        weight = number(x.text("poids")) or 0.0
         out.setdefault(x.text("sens"), []).append({"name": x.text("preuve"), "key": x.text("clé"),
                                                   "weight": x.text("poids"), "w": _pct(abs(weight))})
     for side in out.values():
@@ -210,7 +203,7 @@ def politique(got: Got) -> Markup | None:
     bars, owners = got.fields("Les barres"), got.fields("Propriétaires")
     if None in (channels, degrees, weights, ranks, bars, owners):
         return None
-    values = {_split(k)[0]: (_number(text(v)), text(v)) for k, v in pairs(bars).items()}
+    values = {_split(k)[0]: (number(v) or 0.0, text(v)) for k, v in pairs(bars).items()}
     calibration = next((n for n in got.notes() if n.get("title") == "Calibration"), None)
     return got.draw(
         "handmade/identites/politique.html", bars=_bars(bars),

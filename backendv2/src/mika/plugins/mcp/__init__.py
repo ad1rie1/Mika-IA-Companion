@@ -28,7 +28,6 @@ journalise leur état quand il change (``mcp.status`` : des noms et des nombres,
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -39,20 +38,30 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import mcp as c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.kernel.clock import DAY, HOUR, MINUTE, US
-from mika.kernel.codec import canonical_json
+from mika.contracts.runtime import (
+    ANSWERED,
+    APPROVED,
+    EXPIRED,
+    EXPIRER,
+    EXPIRY_GRACE_S,
+    FAILED,
+    FINAL,
+    REFUSED,
+    WAITING,
+)
+from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.rights import Rights
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert, visible
-from mika.vocab.access import KINDS_OF, can_approve
+from mika.vocab.access import KINDS_OF
 
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
 from mika.vocab.access import moment as moment
 from mika.vocab.access import situation as situation
-from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING, is_work_target
+from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.rights import grants_of, rights_of, tool_allowance
@@ -75,12 +84,8 @@ ANSWER_LEVELS = {"public": int(Sensitivity.ANODYNE), "perso": int(Sensitivity.PE
                  "prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
 #: ce qu'un accord peut être (ADR 0128) : ``non`` retire l'outil
 NO, ALONE, CARD, OWNER_OK = "non", "seule", "carte", "toi"
-#: une carte d'accord dans la conversation vaut tant ; un accord de l'opérateur, tant
-CARD_TTL = 10 * MINUTE
-OPERATOR_TTL = DAY
-#: en mode pro, l'attente d'une carte dans la boucle (ADR 0165) dure son délai, plus de quoi laisser passer le
-#: refus au nom du délai (``mcp.expire``)
-EXPIRY_GRACE_S = 60.0
+#: ce qui fait un appel : l'empreinte que la carte (ou l'opérateur) approuve porte sur ces champs
+PINNED = ("server", "remote", "fingerprint", "args")
 #: ce que la raison d'un échec montre d'elle, dans la boucle
 WHY_CHARS = 300
 #: ce qu'un service a rendu n'est plus annoncé passé ce délai (il reste dans la console)
@@ -89,11 +94,6 @@ TOO_LATE = 6 * HOUR
 REQUESTS_KEPT = 100
 #: ce qu'on garde d'une réponse (le contenu journalisé)
 ANSWER_KEPT = 8000
-#: qui signe un refus faute d'accord à temps
-EXPIRER = "délai"
-#: l'état d'une demande
-WAITING, APPROVED, REFUSED, EXPIRED, ANSWERED, FAILED = "attend", "acceptée", "refusée", "expirée", "rendue", "ratée"
-FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
 PROVENANCE = "mcp:"
 
 
@@ -276,10 +276,8 @@ def label(server: str) -> str:
 
 
 def call_digest(args: Mapping[str, Any]) -> str:
-    """L'empreinte de ce qui partirait : le serveur, l'outil approuvé (son empreinte), ses arguments, qui décide.
-    C'est elle que la carte (ou l'opérateur) approuve : un argument changé n'est pas le même accord."""
-    pinned = {k: args.get(k) for k in ("server", "remote", "fingerprint", "args", rt.DECIDER)}
-    return hashlib.sha256(canonical_json(pinned).encode()).hexdigest()[:32]
+    """L'empreinte de ce qui partirait : le serveur, l'outil approuvé (son empreinte), ses arguments, qui décide."""
+    return rt.call_digest(args, PINNED)
 
 
 #: ce qu'une consultation garde de sa réponse, pour la relecture de la nuit (ADR 0085)
@@ -314,7 +312,7 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
     # page, « je n'ai lu que le début » — à surveiller au banc). Elle part entière, sans ses caractères invisibles :
     # la boucle la cite et la borne à ce que lit l'épisode, coupée à une frontière (ADR 0163)
     return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
-                              + (visible(result.text).strip() or phrase("mcp.tools.nothing")),
+                              + (visible(result.text).strip() or phrase("approvals.nothing")),
                       floor=FLOORS.get(keep, 0), unkept=keep == "rien")
 
 
@@ -322,25 +320,16 @@ async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> T
     """Un appel qui demande un accord : il propose l'appel (rien ne part) et le dit. La carte va à la personne en
     face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
     ep = ctx.frame.episode
-    audience = ctx.frame.audience
-    # au travail, la cible est un but ou un projet, pas une personne : rien à lui dire, l'opérateur décide
-    target = (ep.target if ep is not None else None) or ""
-    target = "" if is_work_target(target) else target
-    in_chat = bool(target) and can_approve(audience) and (level == CARD or bool(audience.owner))
+    target, in_chat = rt.approval_route(ep, ctx.frame.audience, level)
     data = args.model_dump()
-    payload: dict[str, Any] = {
-        "server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
-        "request": f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", "target": target,
-        "approval": "conversation" if in_chat else "operateur", "keep": keep,
-        rt.EXPIRES: ctx.frame.now + (CARD_TTL if in_chat else OPERATOR_TTL)}
-    if in_chat:
-        payload[rt.DECIDER] = target
-    payload["_apercu"] = call_digest(payload)
+    payload = rt.call_request({"server": t.server, "remote": t.remote, "args": data, "fingerprint": t.fingerprint,
+                               "keep": keep}, PINNED, request=f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}",
+                              target=target, in_chat=in_chat, now=ctx.frame.now)
     shown = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 300)
     commit = await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.CALL, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        summary=Content.of(f"Appeler « {inert(t.remote, 80)} » ({inert(t.server, 40)}) : {shown}"[:400],
-                           level=int(Sensitivity.PERSONAL)),
+        summary=Content.of(phrase("mcp.calls.summary", tool=inert(t.remote, 80), server=inert(t.server, 40),
+                                  args=shown)[:400], level=int(Sensitivity.PERSONAL)),
         approval=True, context=f"mcp:{t.server}", about=(target,) if target else ()))
     # en mode pro, la personne regarde son travail : elle attend sa décision avant de continuer (ADR 0165)
     if in_chat and ep is not None and ep.attrs.get("mode") == PRO:
@@ -349,8 +338,8 @@ async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> T
                                   (payload[rt.EXPIRES] - ctx.frame.now) / US + EXPIRY_GRACE_S)
         if decided is not None:
             return _decided(decided.state(MCP.name).requests[proposal], ctx)
-    who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
-    return ToolResult(content=phrase("mcp.tools.asked", who=who))
+    who = phrase("approvals.in_chat") if in_chat else phrase("approvals.operator")
+    return ToolResult(content=phrase("approvals.asked", who=who))
 
 
 def _settled(frame: Frame, proposal: int) -> bool:
@@ -367,15 +356,15 @@ def _decided(req: Request, ctx: Any) -> ToolResult:
     what = phrase("mcp.section.what", tool=inert(req.remote, 80), server=inert(req.server, 40))
     if req.status == ANSWERED:
         return ToolResult(content=phrase("mcp.tools.answered", server=label(req.server)) + "\n"
-                          + (visible(text).strip() or phrase("mcp.tools.nothing")),
+                          + (visible(text).strip() or phrase("approvals.nothing")),
                           floor=FLOORS.get(req.keep, 0), unkept=req.keep == "rien", provenance=told)
     if req.status == FAILED:
-        why = (phrase("mcp.section.failed_said", what=what) + "\n" + cite(text, WHY_CHARS) if text.strip()
-               else phrase("mcp.section.failed", what=what))
+        why = (phrase("approvals.section.failed_said", what=what) + "\n" + cite(text, WHY_CHARS) if text.strip()
+               else phrase("approvals.section.failed", what=what))
         return ToolResult(ok=False, content=why, provenance=told)
     if req.status == EXPIRED:
-        return ToolResult(ok=False, content=phrase("mcp.section.expired", what=what), provenance=told)
-    return ToolResult(ok=False, content=phrase("mcp.section.refused", what=what), provenance=told)
+        return ToolResult(ok=False, content=phrase("approvals.section.expired", what=what), provenance=told)
+    return ToolResult(ok=False, content=phrase("approvals.section.refused", what=what), provenance=told)
 
 
 def _handler(t: Any) -> Any:

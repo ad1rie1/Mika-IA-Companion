@@ -12,6 +12,8 @@
 .mb-name b { font-weight: 600; }
 .mb-name .tag, .mb-name .cnt { margin-left: auto; }
 .mb-name .tag { height: 18px; font-size: 10.5px; }
+/* Une boîte partagée : son niveau, puis son non-lu à côté (ADR 0200). */
+.mb-name .tag + .cnt { margin-left: 4px; }
 .mb-scroll > .mb-box { margin: 0 6px; }
 .mb-box .nav-list { padding-top: 0; }
 .mb-box .nav-list button { height: 28px; padding-left: 22px; font-size: 13px; }
@@ -82,7 +84,8 @@
 .rd-exact { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--raised); font: 13px/1.6 var(--font); white-space: pre-wrap; color: var(--text); }
 mark.completer { background: var(--danger-soft); color: var(--danger); font-weight: 600; border-radius: 3px; padding: 0 3px; }
 .rd-block { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius); background: var(--danger-soft); color: var(--danger); font-size: 12.5px; font-weight: 550; }
-.rd-decide { display: flex; align-items: center; gap: 6px; }
+/* Décider d'un brouillon : la rangée passe à la ligne plutôt que de pousser « Envoyer » hors de l'écran. */
+.rd-decide { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
 .linkish:hover { text-decoration: underline; }
 .rd-back { margin: 10px 0 0 12px; }
@@ -106,6 +109,13 @@ label.cf-row { grid-template-columns: 56px 1fr; }
 .cmp-form textarea { min-height: 200px; }
 .dropzone { display: flex; align-items: center; gap: 7px; padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--muted); font-size: 12.5px; }
 .dropzone .ico { color: var(--muted); }
+.dropzone.over, .rd-reply.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.cf-pieces { display: flex; flex-direction: column; gap: 6px; }
+.cf-pieces-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cf-pieces-list:empty { display: none; }
+.rd-reply .cf-pieces-list { padding: 2px 12px 6px; }
+.piece-chip { padding-left: 8px; max-width: min(320px, 100%); }
+.piece-chip small { flex: none; color: var(--muted); font-size: 11.5px; }
 
 /* Les contacts. */
 .ct-split { grid-template-columns: 340px minmax(0, 1fr); }
@@ -143,13 +153,21 @@ label.cf-row { grid-template-columns: 56px 1fr; }
   .rd-reply .cmp-bar .lbl { display: none; }
   .cf-row { grid-template-columns: 44px 1fr auto; }
 }
+/* Sur un téléphone, « Envoyer » (le geste principal) prend toute une ligne sous les autres. */
+@media (max-width: 600px) {
+  .rd-decide .grow { display: none; }
+  .rd-decide .btn.primary { flex: 1 0 100%; justify-content: center; }
+}
 
 .rd-reply.filled, .cmp-form textarea.filled { border-color: var(--mika); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mika) 12%, transparent); }
 .cmp-form .tm-filled { padding: 0 2px; }
 
 /* ── Ce que les vraies données demandent (frontendv2, lot 2) ─────────────── */
-/* Un mail HTML : son document isolé (ADR 0169), à la hauteur de son contenu quand on peut la lire, sinon fixe. */
-.rd-frame.framed { padding: 0; overflow: hidden; }
+/* Un mail HTML : son document isolé (ADR 0169), à la hauteur de son contenu quand on peut la lire, sinon fixe ; la
+   même marge intérieure qu'un mail texte (`.rd-frame`), sur le blanc de son document, en sombre aussi (le cadre et le
+   document s'y éteignent ensemble). */
+.rd-frame.framed { overflow: hidden; }
+:root[data-theme="dark"] .rd-frame.framed { background: #ffffff; }
 .rd-frame.framed iframe { display: block; width: 100%; height: 62vh; min-height: 160px; border: 0; background: #ffffff; }
 .rd-images-on { display: flex; align-items: center; gap: 6px; }
 .rd-images-on .ico { color: var(--muted); }

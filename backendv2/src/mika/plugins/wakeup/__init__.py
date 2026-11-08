@@ -1,6 +1,6 @@
 """Le plugin ``wakeup`` : les réveils par API (ADR 0068).
 
-Un opérateur déclare des réveils (Réglages › Plugins › Réveils par API) ; un système extérieur appelle l'un
+Un opérateur déclare des réveils (Réveils par API › Paramètres, ADR 0206) ; un système extérieur appelle l'un
 d'eux (``POST /api/wake/<nom>``, avec sa clé) et lui apporte un texte. Rien ici ne parle au réseau : la porte HTTP
 vérifie la clé et les plafonds, puis journalise ``wakeup.called`` — le réglage du réveil figé à cet instant.
 
@@ -422,7 +422,7 @@ class ReportArgs(BaseModel):
 WAKEUP.bundle("wakeup", phrase("wakeup.bundle"))
 
 
-@WAKEUP.tool(REPORT, acts=True, description=phrase("wakeup.tools.report.description"), args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
+@WAKEUP.tool(REPORT, acts=True, description=phrase("wakeup.tools.report.description"), label=phrase("wakeup.tools.report.label"), args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
 async def report_wake(args: ReportArgs, ctx: Any) -> Any:
     call = current(ctx)
     if call is None:

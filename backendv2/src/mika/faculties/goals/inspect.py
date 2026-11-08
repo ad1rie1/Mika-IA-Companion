@@ -16,8 +16,7 @@ contenu oublié s'affiche « (oublié) ».
 
 from __future__ import annotations
 
-import unicodedata
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from mika.contracts import goals as c
@@ -80,6 +79,7 @@ from mika.kernel.inspect import (
     paginate,
     pct_fr,
 )
+from mika.kernel.text import fold
 from mika.vocab.episodes import Kind, goal_target
 
 GOALS_PAGE = 50
@@ -90,14 +90,7 @@ NOTES_CURSOR = "avant_notes"
 #: les buts clos filtrés par autorité : relus par lots jusqu'à remplir la page, au plus tant de lots
 CLOSED_SCAN = 200
 CLOSED_SCAN_BATCHES = 10
-#: les décisions et exécutions relues d'un coup pour dire ce que sont devenus ses effets (au-delà : relues
-#: demande par demande)
-OUTCOMES_SCANNED = 500
-#: les pas relus pour rattacher un enregistrement de l'atelier à son pas
-STEPS_MATCHED = 1000
 DIFF_SHOWN = 20_000
-#: ce qu'on montre du résultat d'un effet (au-delà, coupé et dit)
-EFFECT_DETAIL = 4000
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
@@ -158,10 +151,6 @@ def _said(content: Content | None, empty: str = "—") -> str:
     if content is None:
         return empty
     return content.text if content.text is not None else FORGOTTEN
-
-
-def _fold(text: str) -> str:
-    return "".join(ch for ch in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(ch))
 
 
 def _name(frame: Frame, key: str | None) -> str:
@@ -252,7 +241,9 @@ def _head(s: GoalsState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
     # l'en-tête se lit en texte : des instants dits en heure locale
     facts: list[tuple[str, Any]] = []
     if g.kind != c.REMINDER:
-        facts += [("avancement", _plan_progress(g, p)), ("prochaine séance", _next_words(g, s, frame, ctx))]
+        facts.append(("avancement", _plan_progress(g, p)))
+        if nxt := next_session(g, s, frame, ctx.when):
+            facts.append((NEXT_SESSION, nxt))
     if g.kind == c.EXPLORATION:
         facts.append(("envie", _desire(g, frame.now, frame)))
     facts += [("échéance", ctx.when(g.due) if g.due is not None else "—"), ("pour qui", _person(frame, g.owner))]
@@ -270,7 +261,7 @@ def _head(s: GoalsState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
 def _search(s: GoalsState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
     goals = sorted(s.goals.values(), key=lambda g: -g.id)
     texts = _texts(ctx, (g.title_ref for g in goals))
-    wanted = _fold(text.strip())
+    wanted = fold(text.strip())
     number = wanted.lstrip("#")
     out: list[Found] = []
     skip = max(0, ctx.int_param("_offset", 0))
@@ -279,7 +270,7 @@ def _search(s: GoalsState, frame: Frame, ctx: InspectContext, text: str, limit: 
         if number.isdigit():
             if str(g.id) != number:
                 continue
-        elif wanted and wanted not in _fold(title):
+        elif wanted and wanted not in fold(title):
             continue
         if skip:
             skip -= 1
@@ -329,11 +320,10 @@ def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     texts = _texts(ctx, (r for g in page for r in (g.title_ref, g.details_ref)))
     rows = []
     for g in page:
-        nxt = next_step_at(g, s, frame) if g.kind != c.REMINDER else None
         rows.append(Row((
             _link(g), _subject(_text(texts, g.title_ref, "(sans titre)"), g, texts), _kind_fr(g),
             AUTHORITY_FR.get(g.authority, g.authority), _status(g, now), _desire(g, now, frame), _steps(g),
-            ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—", _due(g),
+            next_session(g, s, frame, ctx.when) or "—", _due(g),
             _person(frame, g.owner)), href=_link(g), tone="warn" if g.paused_at else ""))
     recent = sum(1 for t in s.steps_at if now - t < HOUR)
     ready = ready_to_undertake(s, p)
@@ -444,9 +434,8 @@ def _fields(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Ma
             ("prochain essai", When(g.retry_at) if g.retry_at > now else "—"),
         ]
     else:
-        nxt = next_step_at(g, s, frame) if current in (c.ACTIVE, c.WAITING) else None
         pairs += [
-            ("prochaine séance", ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—"),
+            (NEXT_SESSION, next_session(g, s, frame, ctx.when) or "—"),
             ("dernière séance", When(g.last_step_at) if g.last_step_at else "—"),
             ("sans verdict d'affilée", g.silent),
             ("« fini » sans preuve", g.unproven),
@@ -526,14 +515,23 @@ def _plan_progress(g: Goal, p: Any) -> Meter:
     return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most} séances")
 
 
-def _next_words(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) -> str:
-    """La prochaine séance en mots : quand, ou pourquoi pas."""
+#: la prochaine séance d'un but, dite par ``next_session`` dans toutes ses vues ; la fiche dessinée la lit dans
+#: l'en-tête que la faculté déclare (``app/handmade/goal.py``)
+NEXT_SESSION = "prochaine séance"
+
+
+def next_session(g: Goal, s: GoalsState, frame: Frame, when: Callable[[int], str]) -> str:
+    """La prochaine séance d'un but, en mots : « dès que possible », quand (et pourquoi pas avant), ou ce qui la retient
+    (``why_not_now``) ; vide pour un but qui n'en aura pas — un rappel, un but clos ou en pause. Une seule règle pour
+    son en-tête, ses listes, sa fiche et son rythme."""
+    if g.kind == c.REMINDER or status(g, frame.now) not in (c.ACTIVE, c.WAITING):
+        return ""
     why = why_not_now(g, s, frame)
     if not why:
         return "dès que possible"
-    nxt = next_step_at(g, s, frame) if status(g, frame.now) in (c.ACTIVE, c.WAITING) else None
+    nxt = next_step_at(g, s, frame)
     if nxt is not None and nxt > frame.now and why.startswith("pas encore"):
-        return f"{ctx.when(nxt)} ({why.split(' : ', 1)[-1]})"
+        return f"{when(nxt)} ({why.split(' : ', 1)[-1]})"
     return why
 
 
@@ -572,7 +570,7 @@ def _cards(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, p: Any) ->
         progress.append(("tâches bloquées", Badge(str(blocked), "danger")))
     if g.kind == c.EXPLORATION:
         progress.append(("envie", _desire(g, frame.now, frame)))
-    nxt: list[tuple[str, Any]] = [("prochaine séance", _next_words(g, s, frame, ctx)),
+    nxt: list[tuple[str, Any]] = [(NEXT_SESSION, next_session(g, s, frame, ctx.when) or "—"),
                                   ("ce qui la porte", "son envie (elle s'use)"),
                                   ("échéance", _due(g)),
                                   ("dernière séance", When(g.last_step_at) if g.last_step_at else "aucun encore")]
@@ -656,12 +654,10 @@ def _edit_blocks(g: Goal, s: GoalsState, frame: Frame) -> list[Block]:
 
 
 def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    now = frame.now
     p = params(frame.env.params_of("goals", frame.root))
     texts = _texts(ctx, (g.details_ref, *g.instructions))
     most = budget(g, p)
     spacing = p.step_spacing_us
-    nxt = next_step_at(g, s, frame) if status(g, now) in (c.ACTIVE, c.WAITING) and g.kind != c.REMINDER else None
     blocks: list[Block] = [Prose(_text(texts, g.details_ref), title="Ce qu'elle cherche")] if g.details_ref else []
     if g.instructions:
         blocks.append(Table((Column("n°", "fit"), Column("consigne")), tuple(
@@ -676,7 +672,7 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
         ), title="Ce qui la porte", columns=2),
     ]
     if g.kind == c.EXPLORATION:
-        blocks += _rhythm_blocks(g, p, nxt, now, most, spacing)
+        blocks += _rhythm_blocks(g, p, next_session(g, s, frame, ctx.when) or "—", most, spacing)
     blocks += [
         Fields((
             ("pour qui", _person(frame, g.owner)), ("où lui en parler", _who(frame, g.address)),
@@ -691,10 +687,10 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
     return blocks
 
 
-def _rhythm_blocks(g: Goal, p: Any, nxt: int | None, now: int, most: int, spacing: int) -> list[Block]:
+def _rhythm_blocks(g: Goal, p: Any, nxt: str, most: int, spacing: int) -> list[Block]:
     return [
         Fields((
-            ("prochaine séance", ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—"),
+            (NEXT_SESSION, nxt),
             ("échéance", _due(g)),
             ("séances", f"{g.steps} faites sur {most} au plus" + ("" if g.max_steps else " (valeur par défaut)")),
             ("espacement des séances", f"{spacing // MINUTE} min au moins"),

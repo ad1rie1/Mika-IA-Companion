@@ -32,13 +32,13 @@ from __future__ import annotations
 import email.utils
 import hashlib
 import re
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from email.errors import HeaderParseError
 from email.headerregistry import Address
 from typing import Literal, Protocol
 
+from mika.ports.drafts import to_fill as to_fill
 from mika.ports.paging import Page
 
 #: les trois façons d'écrire depuis une boîte
@@ -48,10 +48,6 @@ VOICES: tuple[tuple[str, str], ...] = (
     ("assistante", "en assistante (« son nom, pour … »)"),
     ("proprietaire", "à ta place (en ton nom)"),
 )
-#: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su) ; reconnu sous
-#: toutes ses graphies par ``to_fill`` (casse, accents, blancs, « à remplir », « à préciser »)
-TO_FILL = "[À COMPLÉTER"
-_TO_FILL = re.compile(r"\[\s*(?:a\s*)?(?:completer|remplir|preciser)\b")
 #: un Message-ID qui peut entrer tel quel dans une référence (et dans un prompt, entre crochets)
 _CLEAN_MID = re.compile(r"^<[A-Za-z0-9!#$%&'*+./=?^_`{|}~@:-]{1,298}>$")
 #: les rôles de dossiers reconnus (special-use, RFC 6154)
@@ -61,16 +57,6 @@ ROLES: tuple[tuple[str, str], ...] = (
 )
 _ACCOUNT = re.compile(r"^([a-z0-9][a-z0-9_-]{0,39}):(.+)$", re.S)
 ACCOUNT_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
-
-
-def to_fill(*texts: str) -> bool:
-    """Reste-t-il un « [À COMPLÉTER » (sous n'importe quelle graphie : casse, accents
-    décomposés, blancs, « à remplir », « à préciser », crochets pleine chasse) ?"""
-    for text in texts:
-        folded = "".join(ch for ch in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(ch))
-        if _TO_FILL.search(folded.casefold()):
-            return True
-    return False
 
 
 def mail_ref(account: str, message_id: str) -> str:
@@ -236,6 +222,13 @@ class Contact:
     received: int
     sent: int
     last: int
+
+
+#: ce qu'un mail écrit à la main peut joindre (ADR 0214) : une pièce, au plus ce que le courrier garde d'une pièce
+#: (ADR 0172) ; un mail, au plus tant de pièces et tant d'octets en tout (il tient en mémoire le temps de partir)
+PIECE_MAX = 25 * 1024 * 1024
+PIECES_MAX = 10
+PIECES_TOTAL_MAX = 50 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,7 +421,9 @@ class MailPort(Protocol):
         ...
 
     async def forward(self, ref: str, to: str, subject: str, body: str, *, cc: str = "", by: str = "",
-                      attachments: bool = True) -> str: ...
+                      attachments: bool = True, bcc: str = "", files: tuple[File, ...] = ()) -> str:
+        """Transfère un mail, ses pièces avec si ``attachments`` ; ``files`` s'y ajoutent, ``bcc`` comme pour ``send``."""
+        ...
 
     def configured(self) -> bool:
         """Au moins un compte prêt à relever."""
@@ -501,9 +496,11 @@ class MailPort(Protocol):
         ...
 
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "", by: str = "", *,
-                   account: str = "", cc: str = "", quote: bool = False) -> str:
+                   account: str = "", cc: str = "", quote: bool = False, bcc: str = "",
+                   files: tuple[File, ...] = ()) -> str:
         """Envoie depuis un compte (le premier prêt, par défaut) ; ``in_reply_to`` est la
-        référence du mail auquel on répond. Rend le Message-ID parti (gardé dans
+        référence du mail auquel on répond. ``files`` : ses pièces, gardées avec lui (ADR 0172). ``bcc`` : ses copies
+        cachées, qui ne sont gardées nulle part ici (ADR 0214). Rend le Message-ID parti (gardé dans
         « Envoyés », avec qui l'a écrit). Lève si l'envoi échoue."""
         ...
 

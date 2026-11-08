@@ -3,7 +3,8 @@
 - Réveils par API : ses réveils en tuiles — à quoi chacun sert, s'il est actif, s'il a sa clé, ce qui attend, son
   dernier appel ; puis ses derniers appels en fil, chacun avec ce qu'il apportait (une donnée venue d'ailleurs), où il
   en est, l'épisode qui l'a traité, et son détail replié. « Déclarer un réveil » est l'action de la page (barre de
-  titre), ses réglages ferment la barre.
+  titre) ; ses réglages sont derrière la roue de la destination, qui ferme la barre (Réveils par API › Paramètres,
+  ADR 0206).
 
 Tout se lit dans les blocs de la vue du plugin (``plugins/wakeup/console.py``), qui reste la source pour la console en
 MCP et le repli.
@@ -53,9 +54,9 @@ def reveils(got: Got) -> tuple[Markup, list[Any], Markup] | None:
     if calls is None:
         return None
     endpoints = got.table("Réveils")
-    add, everything = links.get("nouveau réveil") or {}, links.get("tous les réglages") or {}
-    head = got.draw(HEAD, primary=[("Déclarer un réveil", add["href"])] if add.get("href") else [],
-                    gear=[("Réglages", everything["href"])] if everything.get("href") else [])
+    # l'action de la page ; ses réglages sont derrière la roue de la destination (ADR 0206), pas un bouton de plus
+    add = links.get("nouveau réveil") or {}
+    head = got.draw(HEAD, primary=[("Déclarer un réveil", add["href"])] if add.get("href") else [])
     items = [_endpoint(x) for x in got.lines("Réveils")]
     html = got.draw("handmade/reveils/reveils.html", state=state(got), endpoints=endpoints, items=items,
                     waiting=sum(x["waiting"] for x in items), add=add.get("href") or "", calls=calls,

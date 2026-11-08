@@ -59,6 +59,9 @@ class MenuLink:
     also: tuple[str, ...] = ()
     #: ce qu'on y trouve, en quelques mots, sous le lien dans le menu de sa rubrique (ADR 0176)
     hint: str = ""
+    #: la colonne où il se range, dans une rubrique dont les pages se lisent en colonnes (Système, ADR 0202) : les
+    #: liens qui se suivent sous un même nom y sont les pages de la colonne, et le fil d'Ariane dit ce nom
+    column: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,8 @@ class MenuGroup:
     short: str = ""
     #: la question de l'opératrice à laquelle la rubrique répond, en tête de son menu
     question: str = ""
+    #: ses colonnes, quand ses liens en ont (``MenuLink.column``) : leur nom et ce qu'on y trouve (ADR 0202)
+    columns: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,9 +149,9 @@ class SettingsSection:
     (``kernel/forms.py`` en tire le formulaire : groupes, bloc « avancé » replié,
     secrets jamais réaffichés, enregistrements, correspondances).
 
-    ``load()`` rend la valeur actuelle ; ``save(valeur, opérateur)`` l'enregistre et
-    rend les problèmes (rien n'est gardé s'il y en a) ; ``loaders`` chargent des
-    choix à la demande (``fn(valeurs) -> [(valeur, libellé)]``, qui lève
+    ``load()`` rend la valeur actuelle ; ``save(valeur)`` l'enregistre et rend les
+    problèmes (rien n'est gardé s'il y en a ; qui l'a fait, c'est l'audit de la page
+    qui l'appelle) ; ``loaders`` chargent des choix à la demande (``fn(valeurs) -> [(valeur, libellé)]``, qui lève
     ``ValueError`` avec un message) ; ``commands`` sont des boutons ;
     ``facts()`` et ``blocks()`` ajoutent ce qu'il faut savoir (l'état du robot, ce
     que pilote chaque curseur) ; ``preview(ui, valeur)`` rend ce que changerait une
@@ -158,7 +163,7 @@ class SettingsSection:
     tab: str
     model: type[Any] | None = None
     load: Callable[[], Any] = lambda: None
-    save: Callable[[Any, str], Awaitable[list[str]]] | None = None
+    save: Callable[[Any], Awaitable[list[str]]] | None = None
     description: str = ""
     order: int = 100
     loaders: Mapping[str, Callable[[Mapping[str, Any]], Awaitable[list[tuple[str, str]]]]] = \
@@ -238,6 +243,9 @@ class Labels:
     #: lot d'outils → sa famille pour un opérateur, quand ce n'est pas le nom de sa faculté (« L'atelier d'un
     #: projet ») ; « préfixe.* » nomme les lots qu'une source ajoute, par ce qui suit le préfixe (« Service « {} » »)
     bundles: Mapping[str, str] = field(default_factory=dict)
+    #: capacité (« projects.push ») → son nom court, là où sa phrase serait coupée (« Push git ») ; sa phrase entière
+    #: reste la description que déclare son propriétaire
+    capabilities: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +287,24 @@ def builtin_keys(d: Destination, builtins: Mapping[str, Builtin]) -> list[str]:
 
 def destinations(nav: Sequence[NavGroup]) -> dict[str, Destination]:
     return {d.key: d for g in nav for d in g.items}
+
+
+def menu_place(menu: Sequence[MenuGroup], nav: Sequence[NavGroup], target: str) -> tuple[int, int, str] | None:
+    """Le lien du menu qui mène à une page (``target`` : « destination/onglet », relatif à /inspecteur/) :
+    ``(rubrique, lien, route)``, ``route`` étant l'adresse du lien qui la couvre. Le plus précis gagne (une page dont
+    l'adresse prolonge celle du lien, par « / » ou par « - », lui appartient) ; à précision égale, le lien de la
+    rubrique où sa destination est rangée — Système › Journaux mène à l'historique des réglages, qui reste dans
+    Réglages (ADR 0202) —, puis le premier déclaré. Le menu l'allume, le fil d'Ariane en part."""
+    home = {d.key: g.label for g in nav for d in g.items}.get(target.split("/", 1)[0])
+    best: tuple[tuple[int, bool, int, int], int, int, str] | None = None
+    for gi, group in enumerate(menu):
+        for li, link in enumerate(group.items):
+            for route in (link.target, *link.also):
+                if target == route or (route and target.startswith((route + "/", route + "-"))):
+                    rank = (len(route), group.label == home, -gi, -li)
+                    if best is None or rank > best[0]:
+                        best = (rank, gi, li, route)
+    return (best[1], best[2], best[3]) if best is not None else None
 
 
 def check(nav: Sequence[NavGroup], registry: Any, builtins: Mapping[str, Builtin]) -> None:

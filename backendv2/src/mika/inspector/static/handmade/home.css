@@ -23,7 +23,10 @@
 .home-body { margin-top: 16px; }
 .home-energy { display: flex; align-items: center; gap: 10px; }
 .home-energy .now-bar { flex: 1; max-width: 160px; }
-.home-needs { display: grid; gap: 6px; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); list-style: none; }
+/* ses besoins : un sous-titre (le filet qui les sépare de son corps), ce que mesure le %, puis les barres */
+.home-needs-head { margin: 14px 0 2px; padding-top: 12px; border-top: 1px solid var(--border); }
+.home-needs-help { margin: 0; color: var(--muted); font-size: 12.5px; }
+.home-needs { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
 .home-needs li { display: grid; grid-template-columns: 9em 1fr 3.4em; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
 .home-needs li .now-num { text-align: right; }
 .home-needs li.dominant > span:first-child { color: var(--text); font-weight: 600; }

@@ -8,15 +8,45 @@ détail repliable, leur pagination — et n'en change que la forme : une carte p
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from markupsafe import Markup
 
 from mika.inspector import render
-from mika.inspector.ui import UI, env
-from mika.kernel.inspect import Fields, Note, Section, Stats, Table, Text
+from mika.inspector.ui import UI, Forms, env
+from mika.kernel.inspect import ActionSlot, Fields, Note, Ref, Row, Section, Stats, Table, Text
+
+
+def subject_key(ref: Any, kind: str) -> str:
+    """La clé de l'objet qu'un lien vers une fiche désigne (``Ref.subject(kind, clé, …)``) ; vide sinon."""
+    if not isinstance(ref, Ref) or ref.kind != "subject" or not ref.key.startswith(f"{kind}/"):
+        return ""
+    return ref.key.split("/", 1)[1]
+
+
+def row_keys(table: Table, kind: str) -> list[str]:
+    """La clé de l'objet de chaque ligne d'une liste déclarée (son lien, vers sa fiche), dans l'ordre ; vide pour une
+    ligne qui ne mène pas à une fiche de cette sorte."""
+    return [subject_key(r.href, kind) if isinstance(r, Row) else "" for r in table.rows]
+
+
+def forms_for(ui: UI, forms: Any, action: str, keys: Iterable[str], query: Mapping[str, str],
+              **extra: Any) -> dict[str, dict[str, Any]]:
+    """Le formulaire d'une action d'objet sur chacun de ces objets (« Retirer » sur la ligne d'un fichier), préparé par
+    la console comme ceux de ses blocs — son jeton, son retour —, l'objet pour sujet (``_sujet``) : l'action se fait
+    sur sa ligne comme sur sa fiche. Seuls les objets où elle est offerte (``available``) en ont un ; sans formulaires
+    (un rendu hors d'une page), aucun. ``extra`` : ce que la ligne dit autrement (son bouton, sa confirmation)."""
+    if not isinstance(forms, Forms):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key in dict.fromkeys(k for k in keys if k):
+        slots = render.blocks([ActionSlot(action)], ui.env(), query)
+        got = forms.of(slots, key).get(slots[0]["slot"])
+        if got is not None:
+            out[key] = {**got, **extra}
+    return out
 
 
 def counts(blocks: Sequence[Any]) -> list[dict[str, str]]:

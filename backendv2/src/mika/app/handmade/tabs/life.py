@@ -38,7 +38,7 @@ from markupsafe import Markup
 from mika.app.handmade import Look, date_fr
 from mika.app.handmade.now import mood as mood_of
 from mika.app.handmade.now import needs as needs_of
-from mika.app.handmade.tabs import Got, Line, Tab, anchored, blank, pairs, text, tiles
+from mika.app.handmade.tabs import Got, Line, Tab, anchored, blank, number, pairs, text, tiles
 from mika.contracts import affect as affect_c
 from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
@@ -57,8 +57,6 @@ STYLES = ("handmade/vie.css",)
 SPANS = {"24h": DAY, "7j": 7 * DAY}
 #: une heure dite « 06:00 » dans un texte de la faculté
 HOUR_RE = re.compile(r"(\d{1,2}):(\d{2})")
-#: un nombre dit à la française (« 0,35 »)
-NUMBER_RE = re.compile(r"\d+(?:,\d+)?")
 #: les deux bouts d'un curseur, à la fin de son aide (« … (0 : imperturbable · 1 : à fleur de peau) »)
 ENDS_RE = re.compile(r"\s*\(0 : (.+) · 1 : (.+)\)\s*$")
 MINUTES = 24 * 60
@@ -84,11 +82,6 @@ def _meter(c: Mapping[str, Any] | None) -> dict[str, Any] | None:
 def _note(blocks: Sequence[Mapping[str, Any]]) -> str:
     """Le texte de la première note d'un détail (ce qu'elle a dit, ce qu'elle se dit)."""
     return next((str(d.get("text") or "") for d in blocks if d.get("t") == "note"), "")
-
-
-def _number(value: str) -> float | None:
-    found = NUMBER_RE.search(value or "")
-    return float(found.group().replace(",", ".")) if found else None
 
 
 def _minutes(value: str) -> int | None:
@@ -371,9 +364,9 @@ def _scale(s: Mapping[str, Any], rules: Mapping[str, dict[str, Any]]) -> dict[st
     estime = _meter(s.get("Estime", {}).get("value"))
     if estime is None:
         return None
-    doubt = _number(text(rules.get("elle doute sous")))
-    sure = _number(text(rules.get("sûre d'elle au-dessus de")))
-    bounds = [float(n.replace(",", ".")) for n in NUMBER_RE.findall(text(rules.get("bornes")))]
+    doubt = number(rules.get("elle doute sous"))
+    sure = number(rules.get("sûre d'elle au-dessus de"))
+    bounds = [n for n in map(number, text(rules.get("bornes")).split("–")) if n is not None]
     return {"value": estime["w"], "text": estime["text"], "tone": estime["tone"],
             "doubt": None if doubt is None else round(100 * doubt, 1),
             "sure": None if sure is None else round(100 * sure, 1),

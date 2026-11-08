@@ -11,11 +11,12 @@ from starlette.requests import Request
 
 from mika.contracts import runtime as rt
 from mika.inspector import names
-from mika.inspector.pages.diagnostics import CHECKS
+from mika.inspector.catalog import destinations
+from mika.inspector.pages.diagnostics import CHECKS, DESTINATIONS, HEALTH, check_href
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, MINUTE, US
-from mika.kernel.forms import show_duration
+from mika.kernel.forms import plural, show_duration
 from mika.kernel.inspect import (
     Badge,
     Column,
@@ -43,8 +44,11 @@ def outcome_badge(outcome: str, kind: str | None = None) -> Badge:
 
 def episode_row(ui: Any, e: Any) -> Row:
     """Une ligne d'épisode terminé (accueil, Activité › Épisodes) : quand, quoi, vers qui (un
-    nom), l'issue, le détail en mots — la ligne mène à l'épisode."""
-    return Row((When(e.at), names.kind(e.data.kind), ui.names.who_cell(e.data.target),
+    nom ; « — » quand il ne s'adresse à personne, une séance de travail : la liste de l'accueil le tait), l'issue, le
+    détail en mots — la ligne mène à l'épisode."""
+    target = e.data.target
+    toward = ui.names.who_cell(target) if target and target != "none" else Text("—", "muted")
+    return Row((When(e.at), names.kind(e.data.kind), toward,
                 outcome_badge(e.data.outcome, e.data.kind),
                 Text(names.detail(e.data.detail or e.data.guard or "")[:200], "muted")),
                href=Ref("episode", e.correlation, ""),
@@ -58,6 +62,11 @@ def _local(href: str, text: str) -> Ref:
 
 #: les épisodes (Activité › Épisodes)
 EPISODES_HREF = "/inspecteur/decisions/episodes"
+#: la santé générale : son badge compte les contrôles qui ne vont pas, que « À traiter » montre un à un, chacun vers
+#: sa page — l'accueil ne la compte pas une seconde fois
+HEALTH_HREF = "/inspecteur/" + HEALTH
+#: ce que dit un badge qui ne dit pas ce qu'il compte
+VAGUE = "à regarder"
 #: les réponses relues pour savoir si elles échouent (les plus récentes d'abord)
 REPLIES_SCANNED = 200
 _REPLY = str(Kind.REPLY)
@@ -78,6 +87,17 @@ def failed_replies(ui: Any, ctx: Any) -> tuple[int, int, str] | None:
     return (count, since, why or "échec") if count else None
 
 
+def page_label(ui: Any, path: str) -> str:
+    """Une page de la console comme la disent les badges de ses onglets, « Destination › Onglet »
+    (``systeme/sorties`` → « Système › File de sortie ») ; son adresse si la console ne la connaît pas."""
+    key, _, slug = path.partition("/")
+    d = destinations(ui.deps.navigation).get(key)
+    if d is None:
+        return path
+    title = next((title for name, title, _ in ui.tabs_of(d) if name == slug), "")
+    return f"{d.label} › {title}" if title else d.label
+
+
 def render_ago(us: int) -> str:
     """Une durée passée, à la minute (« 12 min », « 3 h 5 min ») — « moins d'une minute » en dessous."""
     if us < MINUTE:
@@ -88,15 +108,20 @@ def render_ago(us: int) -> str:
 @TABS.tab("accueil.a_traiter", title="À traiter",
           description="Chaque cadre mène à la page où décider. Vide : rien n'attend.")
 async def attention(ui: Any, request: Request) -> list[Any]:
+    """Ce qui attend, un cadre par chose, chacun vers sa page : l'accueil n'en garde qu'un par page
+    (``handmade/home.py::priorities``). Chaque chose une fois : la file « À valider » par son total, la santé
+    générale par ses contrôles — chacun vers la page où regarder (« Système › File de sortie »), pas vers elle."""
     report = health.report(ui.kernel)
     out: list[Any] = []
-    items = ui.attention_items(distinct=True)  # chaque chose une fois : la file « À valider » par son total
+    items = [i for i in ui.attention_items(distinct=True) if i["href"] != HEALTH_HREF]
     gateway = ui.kernel.deps.gateway
-    cards = [Stat(i["label"], i["count"], i["hint"] or "à regarder", "warn", _local(i["href"], i["label"]))
+    cards = [Stat(i["label"], i["count"], i["hint"] or VAGUE, "warn", _local(i["href"], i["label"]))
              for i in items]
+    told: set[str] = set()  # les contrôles de santé qu'un cadre dit déjà
     if not getattr(gateway, "configured", gateway is not None):
         cards.insert(0, Stat("Modèles", "aucun", "rien ne sert « répondre » : chaque tour échoue — déclare un "
                              "fournisseur", "danger", _local("/inspecteur/reglages/fournisseurs", "Modèles")))
+        told.add("llm")  # « aucun modèle ne sert « répondre » » : la même panne
     else:
         failed = failed_replies(ui, ui.inspection.context(request.query_params))
         if failed is not None:
@@ -116,12 +141,16 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     if tone in ("warn", "danger"):
         cards.append(Stat("Sauvegarde", "à faire" if tone == "warn" else "en échec", text, tone,
                           _local("/inspecteur/systeme/stockage", "Stockage et sauvegardes")))
+    for c in report.checks:
+        if c.state == health.OK or c.name in told:
+            continue
+        own = c.name in DESTINATIONS  # sinon : la santé générale, qui dit lequel
+        label = page_label(ui, DESTINATIONS.get(c.name, HEALTH))
+        cards.append(Stat(label, "!", c.summary if own else f"{CHECKS.get(c.name, c.name)} : {c.summary}",
+                          "danger" if c.state == health.KO else "warn", _local(check_href(c.name), label)))
     if cards:
         out.append(Stats(tuple(cards)))
-    for c in report.checks:
-        if c.state != health.OK:
-            out.append(Note(c.summary, "danger" if c.state == health.KO else "warn", title=f"Santé · {CHECKS.get(c.name, c.name)}"))
-    if not cards and len(out) == 0:
+    else:
         out.append(Note("Rien ne demande ton attention.", "ok", title="Tout va bien"))
     return out
 
@@ -176,7 +205,8 @@ async def today(ui: Any, request: Request) -> list[Any]:
         spent = calls.usage(midnight, by="role")
         cost = sum(u.cost_usd for u in spent)
         failed = sum(u.failures for u in spent)
-        cards.append(Stat("Appels de modèle", sum(u.calls for u in spent), f"{money_fr(cost)} · {failed} échec(s)",
+        cards.append(Stat("Appels de modèle", sum(u.calls for u in spent),
+                          f"{money_fr(cost)} · {plural(failed, 'échec', 'échecs')}",
                           "danger" if failed else "", _local("/inspecteur/systeme/appels", "Appels et coûts")))
     ended, pager = ctx.older([rt.EPISODE_ENDED], EPISODES_PAGE)
     rows = tuple(episode_row(ui, e) for e in ended)

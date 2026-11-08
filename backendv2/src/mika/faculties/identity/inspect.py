@@ -67,7 +67,7 @@ from mika.kernel.inspect import (
     paginate,
 )
 from mika.vocab import privacy
-from mika.vocab.people import fold, is_identifiable, is_internal
+from mika.vocab.people import ACCOUNT_PREFIX, fold, is_identifiable, is_internal
 from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity
 
 #: Au plus tant de lignes au registre des preuves par page, tant de lignes par page d'une liste.
@@ -520,7 +520,10 @@ def _search_handles(s: IdentityState, frame: Frame, ctx: InspectContext, text: s
         if skip:
             skip -= 1
             continue
-        out.append(Found(key, handle_label(s, key), f"{key} · {TRUST_SHORT[h.trust]}"))
+        # la clé d'un compte (« user_2 ») est interne, et le titre dit déjà « compte » : sa seule confiance ; une vraie
+        # adresse (un mail, un numéro) reste, c'est ce qui distingue deux moyens de communication
+        trust = TRUST_SHORT[h.trust]
+        out.append(Found(key, handle_label(s, key), trust if key.startswith(ACCOUNT_PREFIX) else f"{key} · {trust}"))
         if len(out) >= limit:
             break
     return out
@@ -936,7 +939,7 @@ def _handle_of(s: IdentityState, ctx: InspectContext) -> tuple[str, Handle | Non
     return handle, h, []
 
 
-@IDENTITY.inspect("verdict", title="Verdict", subject="handle", subject_param="handle", order=10,
+@IDENTITY.inspect("verdict", title="Verdict", subject="handle", order=10,
                   description="Pourquoi ce moyen de communication ouvre ce qu'il ouvre, pas à pas.")
 def _handle_verdict(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
@@ -952,7 +955,7 @@ def _may_claim(s: IdentityState, key: str) -> bool:
     return h is None or not h.authenticated
 
 
-@IDENTITY.inspect("revendication", title="Revendication", subject="handle", subject_param="handle", order=20,
+@IDENTITY.inspect("revendication", title="Revendication", subject="handle", order=20,
                   shown=_may_claim, description="Qui elle dit être, et ce qui manque pour le croire.")
 def _handle_claim(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
@@ -964,7 +967,7 @@ def _handle_claim(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[B
     return _claim(s, h, view_of(s, handle, frame.now), ctx)
 
 
-@IDENTITY.inspect("preuves", title="Preuves", subject="handle", subject_param="handle", order=30,
+@IDENTITY.inspect("preuves", title="Preuves", subject="handle", order=30,
                   description="Chaque raison de croire, ou de ne plus croire.")
 def _handle_evidence(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)
@@ -973,7 +976,7 @@ def _handle_evidence(s: IdentityState, frame: Frame, ctx: InspectContext) -> lis
     return [_ledger(s, handle, ctx)]
 
 
-@IDENTITY.inspect("autres", title="Ses autres moyens de communication", subject="handle", subject_param="handle", order=40,
+@IDENTITY.inspect("autres", title="Ses autres moyens de communication", subject="handle", order=40,
                   description="Les autres moyens de communication de la même personne.")
 def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle, h, blocks = _handle_of(s, ctx)

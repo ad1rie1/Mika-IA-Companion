@@ -64,8 +64,6 @@ from mika.kernel.inspect import (
     Fields,
     InspectContext,
     Meter,
-    Nav,
-    NavItem,
     Note,
     Pager,
     Param,
@@ -453,7 +451,8 @@ class ReadArgs(BaseModel):
 EPISODES = [Kind.REPLY, Kind.INITIATIVE, *WORKING]
 
 
-@RSS.tool("rss_list", description=phrase("rss.tools.list.description"), args=ListArgs, bundle=BUNDLE,
+@RSS.tool("rss_list", description=phrase("rss.tools.list.description"),
+          label=phrase("rss.tools.list.label"), args=ListArgs, bundle=BUNDLE,
           episodes=EPISODES)
 async def rss_list(args: ListArgs, ctx: Any) -> Any:
     port = ctx.ports.get("feeds")
@@ -468,7 +467,8 @@ async def rss_list(args: ListArgs, ctx: Any) -> Any:
         for e in items)
 
 
-@RSS.tool("rss_read", description=phrase("rss.tools.read.description"), args=ReadArgs,
+@RSS.tool("rss_read", description=phrase("rss.tools.read.description"),
+          label=phrase("rss.tools.read.label"), args=ReadArgs,
           bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=3, owner_only=True)
 async def rss_read(args: ReadArgs, ctx: Any) -> Any:
     port = ctx.ports.get("feeds")
@@ -528,7 +528,8 @@ def _feeds_note(port: Any, p: RssParams) -> Note:
     if port is None:
         return Note("Flux non configurés : aucun lecteur de flux n'est branché.", tone="muted")
     if not port.configured():
-        return Note("Aucun flux n'est suivi : ajoute des adresses dans les réglages des flux.", tone="muted")
+        return Note("Aucun flux n'est suivi : ajoute leurs adresses dans Réglages › Flux suivis, en haut à droite.",
+                    tone="muted")
     return Note(f"Relevés toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée ; elle ne remarque "
                 f"que ce qui touche ses centres d'intérêt ({p.noticed_per_poll} titres au plus par relevé, "
                 f"à partir d'une pertinence de {p.notice_from:.2f}).", tone="ok")
@@ -708,7 +709,8 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stat("remarqués aujourd'hui", sum(1 for e in window if e.at >= today)),
         Stat("dernier titre remarqué", When(last) if last else "jamais"),
     ))
-    blocks: list[Block] = [Nav((NavItem("Configurer le plugin", Ref("local", "/inspecteur/reglages/flux", "Configurer le plugin")),)), _feeds_note(port, p), stats]
+    # ses réglages (les flux suivis) : derrière la roue de Ses sens, en haut à droite (ADR 0206)
+    blocks: list[Block] = [_feeds_note(port, p), stats]
     if port is not None:
         blocks.append(_entries(s, ctx, port, words))
         blocks.append(Disclosure("État des abonnements", (_followed(port, s, health),), open=bool(broken)))

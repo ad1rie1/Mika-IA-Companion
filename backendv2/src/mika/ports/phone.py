@@ -8,26 +8,19 @@ la porte juge le reste (propriétaire, plugin actif, forme du lot, cadence) avan
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-#: ce que dit la porte
-ACCEPTED, FORBIDDEN, DISABLED, INVALID, BUSY = "accepted", "forbidden", "disabled", "invalid", "busy"
+from mika.ports.gate import ACCEPTED as ACCEPTED
+from mika.ports.gate import DISABLED as DISABLED
+from mika.ports.gate import FORBIDDEN as FORBIDDEN
+from mika.ports.gate import GateResult
+
 #: les applis dont le téléphone lit les messages (le nom qu'il leur donne)
 APPS = frozenset({"whatsapp", "whatsapp_business", "messages", "samsung_messages"})
 #: ce que le téléphone dit d'une réponse proposée : partie, la personne a écrit autre chose, copiée (l'action
 #: « Répondre » n'existait plus), ignorée, échouée
 SENT, OTHER, COPIED, IGNORED, FAILED = "sent", "other", "copied", "ignored", "failed"
 RESULTS = frozenset({SENT, OTHER, COPIED, IGNORED, FAILED})
-
-
-@dataclass(frozen=True, slots=True)
-class GateResult:
-    outcome: str
-    message: str = ""
-    data: Mapping[str, Any] = field(default_factory=dict)
-    retry_after: int = 0
 
 
 class PhoneGate(Protocol):

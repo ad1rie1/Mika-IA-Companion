@@ -254,7 +254,9 @@ def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeyp
     monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
     data, dest = tmp_path / "data", tmp_path / "archives"
     live(data, talk=False)
-    assert backup.overview(data) == {"archives": []}  # jamais sauvegardée
+    fresh = backup.overview(data)
+    assert {k: v for k, v in fresh.items() if k != "place"} == {"archives": []}  # jamais sauvegardée
+    assert callable(fresh["place"])  # la place se mesure à la demande : jamais pour l'accueil
     made = backup.backup(data, dest, keep=3, now=datetime(2026, 9, 30, 3, 0, tzinfo=UTC))
     seen = backup.overview(data)
     last = seen["sauvegarde"]
@@ -271,6 +273,33 @@ def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeyp
         backup.verify(forged, record=data)
     failed = backup.recorded(data)["verification"]
     assert failed["ok"] is False and failed["erreur"] and backup.recorded(data)["sauvegarde"] == last
+
+
+def test_the_console_sees_each_base_and_folder_and_what_the_backup_does_with_it(tmp_path, monkeypatch):
+    """Système › Stockage et sauvegardes (C9-10, audit du 2026-11-05) : une ligne par base et par dossier du dossier de
+    données — sa place (une base avec son journal d'écriture), ce qu'il garde, ce que la sauvegarde en fait (d'après
+    ``SKIPPED`` et ``SKIPPED_DIRS``) ; sous MariaDB, ses bases sont sur le serveur, sans taille de fichier."""
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    monkeypatch.delenv("MIKA_DATABASE_URL", raising=False)
+    data = tmp_path / "data"
+    live(data, talk=False)
+    (data / "pieces" / "bea").mkdir(parents=True)
+    (data / "pieces" / "bea" / "devis.pdf").write_bytes(b"x" * 3000)
+    (data / "cartes").mkdir()
+    (data / "cartes" / "lieux.db").write_bytes(b"y" * 500)
+    (data / ".avant-restauration-20260930").mkdir()
+    rows = {r["nom"]: r for r in backup.overview(data)["place"]()}
+    assert rows["mind.db"]["sauvegarde"] == "oui" and rows["mind.db"]["octets"] > 0
+    assert "journal" in rows["mind.db"]["garde"]
+    assert rows["views.db"]["sauvegarde"] == "jetable"
+    assert rows["pieces"]["dossier"] and rows["pieces"]["octets"] == 3000 and rows["pieces"]["sauvegarde"] == "oui"
+    assert rows["cartes"]["sauvegarde"] == "réextrait" and rows["cartes"]["octets"] == 500
+    assert rows[".avant-restauration-20260930"]["sauvegarde"] == "mis de côté"
+    assert datadir.LOCK_NAME not in rows and not any(n.endswith(("-wal", "-shm")) for n in rows)
+    monkeypatch.setenv("MIKA_DATABASE_URL", "mariadb+pymysql://mika@localhost/")
+    served = [r for r in backup.place(data) if r["serveur"]]
+    assert [r["nom"] for r in served] == ["mind", "mail", "feeds", "teams", "views"]
+    assert all(r["octets"] is None for r in served) and served[-1]["sauvegarde"] == "jetable"
 
 
 def test_a_restore_under_a_running_mika_is_refused_and_touches_nothing(tmp_path, monkeypatch):

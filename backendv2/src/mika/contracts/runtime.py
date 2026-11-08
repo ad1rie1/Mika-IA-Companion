@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
+from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.codec import canonical_json
+from mika.kernel.events import Content, Draft, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.guards import Guard
+from mika.vocab.access import CARD, can_approve
+from mika.vocab.episodes import is_work_target
 
 OWNER = "runtime"
 #: dans les arguments d'un effet proposé (ADR 0064) : l'adresse de la personne qui en décide **dans le chat** (une
@@ -254,3 +261,62 @@ class PendingEffectView:
 
 #: Les effets proposés qui attendent un accord, du plus ancien au plus récent.
 PENDING_EFFECTS = FactKey("runtime.pending_effects", type=tuple)
+
+# ── L'appel sur accord et son échéance (ADR 0211) ─────────────────────────
+# La part pure de ce que ``mcp`` et ``forge`` proposent, et du refus au nom du délai qu'ils partagent avec ``teams``.
+# Ce qui agit (proposer, attendre la décision, émettre) reste à chacun : un contrat n'agit pas.
+
+#: une carte d'accord dans la conversation vaut tant ; un accord de l'opérateur, tant
+CARD_TTL = 10 * MINUTE
+OPERATOR_TTL = DAY
+#: en mode pro, l'attente d'une carte dans la boucle (ADR 0165) dure son délai, plus de quoi laisser passer le refus au
+#: nom du délai
+EXPIRY_GRACE_S = 60.0
+#: qui signe un refus faute d'accord à temps
+EXPIRER = "délai"
+#: l'état d'une demande d'appel (une réponse Teams a les siens, ceux d'un brouillon : ADR 0211)
+WAITING, APPROVED, REFUSED, EXPIRED, ANSWERED, FAILED = "attend", "acceptée", "refusée", "expirée", "rendue", "ratée"
+FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
+
+
+def approval_route(episode: Any, audience: Any, level: str) -> tuple[str, bool]:
+    """Où va un appel sur accord : à qui le dire, et si une carte le lui demande dans la conversation — à la personne
+    en face (``carte``), ou à sa propriétaire quand c'est elle en face (``toi``). Sinon, l'opérateur décide ; au
+    travail, la cible est un but ou un projet, pas une personne : rien à lui dire."""
+    target = (episode.target if episode is not None else None) or ""
+    target = "" if is_work_target(target) else target
+    return target, bool(target) and can_approve(audience) and (level == CARD or bool(audience.owner))
+
+
+def call_digest(args: Mapping[str, Any], pinned: Iterable[str]) -> str:
+    """L'empreinte de ce qui partirait : ``pinned`` (ce qui fait l'appel, à chaque propriétaire le sien) et qui décide.
+    C'est elle que la carte (ou l'opérateur) approuve : un argument changé n'est pas le même accord."""
+    return hashlib.sha256(canonical_json({k: args.get(k) for k in (*pinned, DECIDER)}).encode()).hexdigest()[:32]
+
+
+def call_request(call: Mapping[str, Any], pinned: Iterable[str], *, request: str, target: str, in_chat: bool,
+                 now: int) -> dict[str, Any]:
+    """Les arguments d'un appel proposé : ``call`` (ce qui est propre à son propriétaire), à qui le dire, qui en décide,
+    jusqu'à quand, et l'empreinte de ce qui est montré (``_apercu``, ``runtime.decisions``)."""
+    payload: dict[str, Any] = {
+        **call, "request": request, "target": target, "approval": "conversation" if in_chat else "operateur",
+        EXPIRES: now + (CARD_TTL if in_chat else OPERATOR_TTL)}
+    if in_chat:
+        payload[DECIDER] = target
+    payload["_apercu"] = call_digest(payload, pinned)
+    return payload
+
+
+def still_pending(proposal: int) -> Guard:
+    """Le refus au nom du délai ne vaut que si personne n'a décidé entre-temps."""
+    return Guard("encore en attente", reads=(PENDING_EFFECTS,),
+                 predicate=lambda view, n=proposal: any(p.proposal == n for p in view.get(PENDING_EFFECTS)))
+
+
+def expiry_draft(note: str, *, proposal: int, capability: str, owner: str, args_json: str, context: str,
+                 about: tuple[str, ...] = ()) -> Draft[EffectResolved]:
+    """Le refus au nom du délai, à émettre sous ``still_pending``. ``note`` : ce qu'on en lira (``approvals.no_answer``,
+    une phrase de sa voix) ; une décision par proposition, celle-ci comme une autre (sa clé d'unicité)."""
+    return EFFECT_RESOLVED.draft(proposal=proposal, approved=False, by=EXPIRER, note=Content.of(note),
+                                 capability=capability, owner=owner, args_json=args_json, context=context,
+                                 about=about, dedupe_key=f"décision:{proposal}")

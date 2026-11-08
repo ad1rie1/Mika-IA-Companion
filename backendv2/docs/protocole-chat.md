@@ -3,8 +3,8 @@
 Ce document est pour qui écrit un client de conversation : le frontend web, l'application Android
 (`frontend/Android/`), un client natif quelconque. Les décisions et leurs raisons sont les ADR 0038, 0051, 0056,
 0062 et 0077 de [`decisions.md`](decisions.md) ; le code fait foi dans
-[`adapters/web/app.py`](../src/mika/adapters/web/app.py) (routes, session), [`adapters/web/protocol.py`](../src/mika/adapters/web/protocol.py)
-(trames, limites) et [`adapters/web/hub.py`](../src/mika/adapters/web/hub.py) (qui reçoit quoi). Le monde 3D a son
+[`adapters/web/app.py`](../src/mika/adapters/web/app.py) (routes), [`adapters/web/session.py`](../src/mika/adapters/web/session.py)
+(session, CSRF), [`adapters/web/protocol.py`](../src/mika/adapters/web/protocol.py) (trames, limites) et [`adapters/web/hub.py`](../src/mika/adapters/web/hub.py) (qui reçoit quoi). Le monde 3D a son
 propre protocole : [`protocole-monde.md`](protocole-monde.md).
 
 ## 1. S'authentifier
@@ -121,7 +121,7 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 | `verdict` | `message_id`, `verdict` (`ok` \| `ko` \| vide), `comment?` | juger une de ses réponses (ADR 0113) ; opératrice authentifiée seulement |
 | `strand` | `id`, `title`, `description`, `archived` | régler un de ses fils de travail (ADR 0164) ; opératrice authentifiée seulement |
-| `strand_history` | `id`, `before?` | les messages d'un de ses fils de travail (ADR 0164) ; opératrice authentifiée seulement |
+| `strand_history` | `id`, `before?` | relire un fil, par pages : `id` vide, le fil avec elle (ADR 0215), pour toute connexion authentifiée ; sinon un de ses fils de travail (ADR 0164), opératrice authentifiée seulement |
 
 `chat` :
 
@@ -138,7 +138,8 @@ Le serveur laisse de même environ cinq minutes au pong de ses propres pings Web
 - `attachments` (clé absente s'il n'y en a pas) : 5 au plus, 5 Mio chacun ; `data` en base64 **sans retour à la
   ligne** (le serveur décode strictement ; un préfixe `data:…;base64,` est toléré). Les images sont décrites, l'audio
   transcrit, les documents lus ; puis les octets sont **gardés** côté serveur (ADR 0106 : relus de près, reliés à ce
-  qu'elle en retient, oubliés avec la personne) — rien ne change pour le client, qui ne reçoit pas de clé. Une trame
+  qu'elle en retient, oubliés avec la personne) — le client ne reçoit pas de clé à l'envoi ; le fil relu lui donne de
+  quoi reprendre sa propre copie (ADR 0215, § 6). Une trame
   entière ne dépasse pas ~34 Mio (et OkHttp n'en envoie pas plus de 16 Mio d'un coup).
 - `mode` (clé absente d'ordinaire) : `"pro"` demande une réponse de travail (ADR 0116, ci-dessous). Toute autre
   valeur vaut « absent ». Honoré seulement sur une connexion **authentifiée d'opératrice** ; ailleurs, le message est
@@ -214,13 +215,16 @@ reçue, une décision à la fois — au-delà du débit, une trame est jetée sa
 (booléen). Le dernier réglage vaut ; un fil peut se régler avant son premier message. Réponse : `strand_result` ; la
 liste `strands` suit, à tous ses écrans d'opératrice.
 
-`strand_history` (ADR 0164) : les 200 derniers messages du fil `id` avant `before` (un identifiant de message ; absent :
-les plus récents), pour un écran qui ouvre un fil sans en avoir les messages. Réponse : un `history` de mode `strand`.
+`strand_history` : les 200 derniers messages d'un fil avant `before` (un identifiant de message ; absent : les plus
+récents), pour un écran qui relit un fil sans en avoir les messages. Avec `id` vide (ADR 0215), c'est le fil avec elle
+— sa conversation à toi, jamais celle d'un autre compte : c'est la session qui dit de qui il s'agit, et aucun champ ne
+peut désigner quelqu'un d'autre. Avec un `id`, c'est un de ses fils de travail (ADR 0164), pour une opératrice
+seulement. Réponse : un `history` de mode `strand`, avec `strand` (le fil relu, vide pour le fil avec elle) et `more`.
 
 `verdict` (ADR 0113) : son opératrice dit si une de ses réponses était adaptée (`ok`) ou non (`ko`), et, si elle veut,
 ce qu'elle aurait dû dire ou pourquoi (`comment`, 2 000 caractères au plus) ; un `verdict` vide retire l'avis. Le
-dernier avis vaut. Il passe par le chemin des actions de la console (`transcript.juger`, audité). Réponse :
-`verdict_result`.
+dernier avis vaut. Il passe par le chemin des actions de la console (`transcript.juger`, audité sous
+`moi.transcript.juger` : depuis son espace). Réponse : `verdict_result`.
 
 ## 4. Ce que le serveur envoie
 
@@ -308,13 +312,14 @@ répondre — réessaie ».
 
 - `mode` : `initial` (à l'ouverture, ou `reset`) ou `catchup` (réponse à `sync`, ou les messages d'une rafale et la
   question d'un tour posé d'un autre appareil, juste avant la `speech` qui y répond) ; `strand` : la réponse à
-  `strand_history`, avec `strand` (le fil) et `more` (il en reste de plus anciens) — son `last_id` n'est pas un
-  curseur.
+  `strand_history`, avec `strand` (le fil, vide pour le fil avec elle) et `more` (il en reste de plus anciens) — son
+  `last_id` n'est pas un curseur.
 - `initial` et `catchup` portent tout le compte, fils de travail compris : une ligne d'un fil de travail porte
   `strand` (ADR 0164) ; le client la range dans ce fil. Un seul curseur suffit donc à tout rattraper.
 - `ts` en **millisecondes** depuis l'époque Unix.
 - `text` d'un message de la personne : ce qu'elle a tapé ; ses fichiers par leur nom et leur sorte (`image`,
-  `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
+  `audio`, `file`), et, une fois gardés, de quoi les reprendre (`id`, `mime`, `size`, `url`, `available`, § 6, ADR
+  0215). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
 - Une ligne d'elle jugée, **pour une connexion d'opératrice seulement** : `verdict` (`ok` \| `ko`) et `verdict_note`
   (ce qu'elle aurait dû dire, ou vide) — absents sinon (ADR 0113).
 - Une ligne d'elle porte `notes` comme la `speech` (absente s'il n'y en a pas, ADR 0119, 0196).
@@ -515,7 +520,7 @@ de Messages et les pousse au serveur. Les deux routes passent sous le jeton de l
   n'existait plus : le texte a été copié), `ignored` ou `failed`. `reason` : un code (`no_action`,
   `send_error`). Seul le premier sort compte. Réponse : `{"ok": true, "settled", "unknown"}`.
 
-## 6. Les fichiers qu'elle envoie
+## 6. Les fichiers
 
 Chaque entrée d'`attachments` d'un message de Mika :
 
@@ -525,15 +530,21 @@ Chaque entrée d'`attachments` d'un message de Mika :
 | `name`, `mime`, `size` | ce qu'elle a envoyé (`size` en octets) |
 | `kind` | `image` ou `file` |
 | `url` | `/files/<id>`, relatif au serveur |
-| `available` | faux une fois retiré par la rétention (un an, ou au-delà d'un volume par personne) |
+| `available` | faux une fois retiré : par la rétention (un an, ou au-delà d'un volume par personne), ou par un opérateur depuis la console (ADR 0205) |
 
 Le `mime` est celui qu'elle a déclaré (`text/x-python`, `text/markdown`…) : il sert à choisir l'application qui
 l'ouvrira. Les fichiers d'une personne qu'on fait oublier disparaissent avec ses lignes du fil (ils ne sont pas
 « retirés » : ils n'existent plus). Une trame sans texte (silence, sommeil, réponse impossible) et une pensée à voix
 haute portent `attachments: []`.
 
+Une entrée d'`attachments` d'un message **de la personne** porte son `name` et son `kind` ; une pièce gardée
+(ADR 0106) y ajoute, une fois lue, `id`, `mime`, `size`, `url` et `available`, les mêmes champs que ci-dessus : c'est
+sa propre copie (ADR 0215). Une pièce pas encore lue, ou d'un message d'avant, n'a que son nom. `available` faux : ses
+octets ont été retirés (la place, ou un opérateur). L'ADR 0106 (« elle ne renvoie jamais une pièce reçue ») vise les
+outils de Mika, pas cette copie.
+
 `GET /files/<id>` avec le jeton (ou la session d'un navigateur) — seulement pour un fichier parti avec un de ses
-messages, dans le fil de ce compte : 200 en pièce jointe
+messages, dans le fil de ce compte, ou une pièce que ce compte lui a envoyée : 200 en pièce jointe
 (`Content-Disposition: attachment; filename*=UTF-8''…`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`,
 `Content-Security-Policy: sandbox; default-src 'none'`) ; 404 pour un fichier inconnu **ou** qui n'est pas à toi (la même réponse) ; 410
 pour un fichier retiré (ou dont les octets manquent) ; 401 sans compte (y compris un jeton posé à côté d'une

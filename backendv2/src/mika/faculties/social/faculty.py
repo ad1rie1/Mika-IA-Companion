@@ -21,7 +21,6 @@ from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
-from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable, key_concerns
 from mika.vocab.temperament import Temperament, around, lerp, shift
@@ -610,10 +609,6 @@ def _mentioned(s: SocialState, e, cx) -> SocialState:
     for person in e.data.about:
         mentions = mentions.set(person, mentions.get(person, 0) + 1)
     return replace(s, mentions=mentions)
-
-
-#: une personne nommée avec hostilité (« Bruno m'a trahie ») n'est pas pour autant de son entourage
-_HOSTILE = frozenset({Emotion.ANGRY, Emotion.DISGUSTED, Emotion.FRUSTRATED, Emotion.JEALOUS})
 
 
 @SOCIAL.reducer(memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.EVENT_NOTED, memory_c.REINFORCED,

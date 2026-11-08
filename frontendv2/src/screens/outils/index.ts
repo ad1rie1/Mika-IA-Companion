@@ -1,44 +1,56 @@
 /**
  * L'écran « Outils » (ADR 0187) : ce que Mika peut faire pour toi. « Tes droits » est la matrice même du moteur
- * (`GET /api/moi/rights`), ressource par ressource ; « Services », ceux dont elle se sert pour toi et ceux que tu as
- * branchés ; « Accords » dit où se décident ses cartes d'accord (le chat). La forme : `maquette/ecrans/outils.js`.
+ * (`GET /api/moi/rights`), ressource par ressource — son chapeau dit où se décident tes accords (le chat) et où se
+ * relisent ses brouillons (Teams, Mail) ; « Services », ceux dont elle se sert pour toi, ceux que tu as branchés et
+ * ceux qu'on te partage. La forme : `maquette/ecrans/outils.js` ; l'onglet « Accords » attend une route qui rende les
+ * cartes et les décisions (ADR 0209).
  */
-import type { Service } from "../../api/mcp";
+import { apiUrl } from "../../api/moi";
 import type { Rights } from "../../api/rights";
 import { $, h, on } from "../../shell/dom";
 import { closeModal, openMenu, openModal } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
+import { askMika } from "../parametres/account";
 import { errorBlock, loadingBlock } from "../parametres/kit";
 import * as store from "../parametres/store";
-import { stateWords, servedOf, shareWords } from "../parametres/words";
+import { shareWords } from "../parametres/words";
 import {
+  askFor,
+  canalPickMarkup,
   columns,
-  KEEP_WORDS,
+  FIRST_CANAL,
+  labelOf,
   legendMarkup,
   navMarkup,
+  receivedWords,
   resourcesOf,
   selectMarkup,
+  serviceRows,
+  servicesMarkup,
   tableMarkup,
   toolDetailMarkup,
-  toolLabel,
   whyMarkup,
   type MatrixResource,
   type Ownership,
+  type ServiceRow,
 } from "./matrix";
 
 const ID = "outils";
+/** Une page de la console, telle que le moteur la donne à une opératrice : rien d'autre ne s'ouvre d'ici. */
+const CONSOLE_PAGE = /^\/inspecteur\/[\w\-/]*(\?[\w=%.\-&]*)?$/;
 
 class OutilsScreen {
   private readonly tabs: ScreenTab[] = [
     { id: "droits", title: "Tes droits" },
     { id: "services", title: "Services" },
-    { id: "accords", title: "Accords" },
   ];
   private body: HTMLElement | null = null;
   private ctx: ScreenContext | null = null;
   private query = "";
+  /** Sur un téléphone, le canal dont la colonne se lit (ADR 0209). */
+  private canal = FIRST_CANAL;
   private painted = "";
 
   constructor(private readonly shell: Shell) {
@@ -68,14 +80,12 @@ class OutilsScreen {
       store.boxes.load(force),
       store.teamsAccounts.load(force),
       store.services.load(force),
-      store.shares.load(force),
-      store.me.load(),
     ]);
   }
 
   private stamp(): string {
     return [this.ctx?.tab, this.ctx?.item, store.rights.version, store.boxes.version, store.teamsAccounts.version,
-      store.services.version, store.shares.version, store.me.version].join("|");
+      store.services.version].join("|");
   }
 
   private open(): boolean {
@@ -103,9 +113,7 @@ class OutilsScreen {
       words.set(`teams:${a.key}`, a.level === "proprietaire" ? "à toi" : `partagé avec toi par ${a.owner_name || "quelqu'un"} (${shareWords(a.level).toLowerCase()})`);
     }
     for (const s of store.services.value?.items ?? []) words.set(`mcp:${s.name}`, "ton service");
-    for (const r of store.shares.value?.received ?? []) {
-      if (r.kind === "mcp") words.set(`mcp:${r.key}`, `partagé avec toi par ${r.owner_name} (${shareWords(r.level).toLowerCase()})`);
-    }
+    for (const r of store.services.value?.received ?? []) words.set(`mcp:${r.name}`, receivedWords(r));
     return { words };
   }
 
@@ -128,10 +136,6 @@ class OutilsScreen {
     const ctx = this.ctx;
     if (!body || !ctx) return;
     this.painted = this.stamp();
-    if (ctx.tab === "accords") {
-      body.innerHTML = this.accordsMarkup();
-      return;
-    }
     const rights = store.rights.value;
     if (!rights) {
       body.innerHTML = store.rights.error ? errorBlock(store.rights.error, "Impossible de lire tes droits") : loadingBlock();
@@ -147,11 +151,11 @@ class OutilsScreen {
     const chosen = selected && all.some((r) => r.key === selected) ? selected : null;
     const shown = chosen ? all.filter((r) => r.key === chosen) : all;
     const cols = columns(rights.canals, rights.moments);
-    const tables = shown.map((r) => tableMarkup(r, cols, this.query)).join("");
+    const tables = shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("");
     return `<div class="split mx-split"><aside class="pane">${navMarkup(all, chosen)}</aside>
       <section class="pane"><div class="pane-scroll mx-main" data-mx-main>
-        ${selectMarkup(all, chosen)}
-        <div class="mx-top"><p class="lede">Ce que Mika peut faire pour toi, ressource par ressource : chaque case est la décision même de ses règles, pour toi, selon par où tu lui parles et quand. Clique une case pour savoir pourquoi.</p>
+        <div class="mx-picks">${selectMarkup(all, chosen)}${canalPickMarkup(rights.canals, this.canal)}</div>
+        <div class="mx-top"><p class="lede">Ce que Mika peut faire pour toi, ressource par ressource : chaque case est la décision même de ses règles, pour toi, selon par où tu lui parles et quand. Clique une case pour savoir pourquoi. Tes accords se décident dans le chat ; ce qu'elle prépare se relit dans <a href="#teams/brouillons">Teams</a> et dans <a href="#mail/messages">Mail</a>.</p>
           ${legendMarkup()}</div>
         <div data-mx-tables>${tables || this.nothingFound()}</div></div></section></div>`;
   }
@@ -160,66 +164,14 @@ class OutilsScreen {
     return `<div class="empty">${ico("search")}<b>Aucun outil</b><p>${this.query.trim() ? `Rien ne correspond à « ${h(this.query)} ».` : "Rien ici."}</p></div>`;
   }
 
-  /** Les lignes de « Services » : ceux dont elle se sert pour toi (la matrice), et ceux que tu as branchés. */
-  private serviceRows(): { key: string; name: string; resource?: MatrixResource; own?: Service }[] {
-    const outside = this.resources().filter((r) => r.group === "services" || r.group === "apps");
-    const own = store.services.value?.items ?? [];
-    const rows: { key: string; name: string; resource?: MatrixResource; own?: Service }[] = outside.map((r) => {
-      const name = r.key.replace(/^[a-z]+:/, "");
-      return { key: r.key, name, resource: r, own: r.group === "services" ? own.find((s) => s.name === name) : undefined };
-    });
-    for (const s of own) if (!rows.some((r) => r.own === s)) rows.push({ key: `mcp:${s.name}`, name: s.name, own: s });
-    return rows;
+  /** Les lignes de « Services » : ceux dont elle se sert pour toi (la matrice), ceux que tu as branchés, et ceux
+   *  qu'on te partage (`matrix.ts::serviceRows`). */
+  private serviceRows(): ServiceRow[] {
+    return serviceRows(this.resources(), store.services.value?.items ?? [], store.services.value?.received ?? []);
   }
 
   private servicesMarkup(): string {
-    const rows = this.serviceRows();
-    const meName = store.me.value?.name ?? "";
-    const body = rows
-      .map(({ key, name, resource, own }) => {
-        const open = resource ? resource.tools.filter((t) => Object.values(t.cells).some((c) => c && c.level !== "non")).length : 0;
-        const keeps = new Set<string>();
-        for (const t of resource?.tools ?? []) for (const c of Object.values(t.cells)) if (c && c.level !== "non") keeps.add(KEEP_WORDS[c.keep] ?? c.keep);
-        const app = resource?.group === "apps";
-        const where = own ? `<span class="mono">${h(own.url)}</span>` : h(app ? "app de la Forge" : resource?.sub || "un service de Mika");
-        const [stateCls, stateText] = own ? stateWords(own.state) : ["", ""];
-        const state = own
-          ? `<span class="tag ${stateCls}">${h(stateText)}</span>${own.detail ? `<div class="tiny muted">${h(own.detail)}</div>` : ""}`
-          : `<span class="muted">—</span>`;
-        const served = own ? servedOf(own.tools) : null;
-        const tools = resource
-          ? `${open} / ${resource.tools.length}`
-          : served ? `${served.served} / ${served.total}` : "—";
-        const review = served && served.review ? ` <span class="tag warn">${served.review} à regarder</span>` : "";
-        const who = own
-          ? own.access.map((a) => (a.who === meName ? "toi" : a.who)).filter(Boolean).join(", ") || "—"
-          : "—";
-        const keep = own
-          ? [...new Set(own.access.map((a) => a.keep_words).filter(Boolean))].join(", ") || "—"
-          : [...keeps].filter((k) => k !== "rien").join(", ") || "rien";
-        const title = resource?.title ?? `Service « ${name} »`;
-        return `<tr><td><div class="row nowrap">${ico(app ? "code" : name === "web" ? "globe" : "server", "sm")}<b>${h(title)}</b>${own ? '<span class="tag accent">à toi</span>' : ""}</div></td>
-          <td class="small">${where}</td><td class="small text-2">${h(own?.purpose || "—")}</td><td>${state}</td>
-          <td class="num nowrap">${h(tools)}${review}</td><td class="small">${h(who)}</td><td class="small">${h(keep)}</td>
-          <td class="actions nowrap">${resource ? `<a class="btn xs ghost" href="#${ID}/droits/${encodeURIComponent(key)}">Ses droits</a>` : ""}${own ? ` <a class="btn xs" href="#parametres/mcp/${encodeURIComponent(name)}">Régler</a>` : ""}</td></tr>`;
-      })
-      .join("");
-    const table = rows.length
-      ? `<div class="mx-scroll"><table class="tbl svc-tbl"><thead><tr><th>Service</th><th>Où</th><th>À quoi il lui sert</th><th>État</th><th>Outils pour toi</th><th>Avec qui</th><th>Ce qu'elle en garde</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`
-      : `<div class="empty">${ico("server")}<b>Aucun service pour toi</b><p>Tu n'as branché aucun service, et aucun de ceux de Mika ne t'est ouvert.</p></div>`;
-    const plugged = store.services.value?.items.length ?? 0;
-    return `<div class="fill-scroll"><div class="page-pad">
-      <p class="lede">Les services d'où viennent ses outils « venus d'ailleurs » : des serveurs MCP et les apps de la Forge. Elle s'en sert pour toi selon leurs lignes d'accès. Tu branches les tiens dans <a href="#parametres/mcp">Paramètres › Services MCP</a>.</p>
-      ${table}
-      <p class="small muted tbl-help">« Outils pour toi » : ceux qu'au moins une case de tes droits lui ouvre${plugged ? " ; pour un service à toi pas encore servi, ceux que tu as choisis" : ""}.</p></div></div>`;
-  }
-
-  private accordsMarkup(): string {
-    return `<div class="fill-scroll"><div class="page-pad accords">
-      <p class="lede">Les cartes d'accord des services et des apps : seuls leurs boutons décident. Les réponses Teams et les mails qu'elle prépare se relisent dans <a href="#teams/brouillons">Teams</a> et dans <a href="#mail/messages">Mail</a>.</p>
-      <div class="acc-note">${ico("shield")}<div class="grow"><b>Tes accords se décident dans le chat</b>
-        <p class="small text-2">Quand Mika veut se servir d'un outil qui demande ton accord, une carte arrive au-dessus du champ du chat, avec Accepter et Refuser. Cet écran ne les relit pas encore, ni l'historique de ce que tu as décidé.</p></div>
-        <a class="btn sm primary" href="#chat">${ico("chat", "sm")}Ouvrir le chat</a></div></div></div>`;
+    return servicesMarkup(this.serviceRows(), ID);
   }
 
   // ── La barre de titre ──────────────────────────────────────────────
@@ -229,7 +181,8 @@ class OutilsScreen {
       return `<label class="search mx-search">${ico("search", "sm")}<input type="search" data-q placeholder="Chercher un outil…" value="${h(this.query)}" aria-label="Chercher un outil"></label>`;
     }
     if (ctx.tab === "services") {
-      return `<a class="btn primary" href="#parametres/mcp">${ico("plus", "sm")}<span class="lbl">Brancher un service</span></a>`;
+      // la route d'action ouvre la fenêtre même, dans Paramètres (et l'adresse y redevient celle de l'onglet)
+      return `<a class="btn primary" href="#parametres/mcp/+brancher">${ico("plus", "sm")}<span class="lbl">Brancher un service</span></a>`;
     }
     return "";
   }
@@ -244,6 +197,10 @@ class OutilsScreen {
     on(section, "[data-res-select]", "change", (_e, s) => {
       const key = (s as HTMLSelectElement).value;
       this.shell.go(key ? `#${ID}/droits/${encodeURIComponent(key)}` : `#${ID}/droits`);
+    });
+    on(section, "[data-mx-canal]", "change", (_e, s) => {
+      this.canal = (s as HTMLSelectElement).value || FIRST_CANAL;
+      this.repaintTables();
     });
     on(section, "[data-cell]", "click", (e, b) => {
       e.stopPropagation();
@@ -272,7 +229,7 @@ class OutilsScreen {
     const selected = this.ctx?.item ?? null;
     const shown = selected && all.some((r) => r.key === selected) ? all.filter((r) => r.key === selected) : all;
     const cols = columns(rights.canals, rights.moments);
-    box.innerHTML = shown.map((r) => tableMarkup(r, cols, this.query)).join("") || this.nothingFound();
+    box.innerHTML = shown.map((r) => tableMarkup(r, cols, this.query, this.canal)).join("") || this.nothingFound();
   }
 
   private find(resKey: string, toolName: string) {
@@ -293,16 +250,17 @@ class OutilsScreen {
     const [canal, moment] = key.split("/");
     const canalLabel = rights.canals.find((c) => c.key === canal)?.label ?? canal;
     const momentLabel = rights.moments.find((m) => m.key === moment)?.label ?? moment;
-    openMenu(button, [{ html: whyMarkup(found.tool, cell, canalLabel, momentLabel) }], { align: "left" });
+    // la ligne même et sa page dans la console : le moteur ne les donne qu'à une opératrice
+    const href = found.res.href && CONSOLE_PAGE.test(found.res.href) ? apiUrl(found.res.href) : "";
+    openMenu(button, [{ html: whyMarkup(found.tool, cell, canalLabel, momentLabel, href) }], { align: "left" });
   }
 
   private detail(resKey: string, toolName: string): void {
     const rights = store.rights.value;
     const found = this.find(resKey, toolName);
     if (!rights || !found) return;
-    const label = toolLabel(found.tool.description, found.tool.name);
     const el = openModal({
-      title: label,
+      title: labelOf(found.tool),
       size: "narrow",
       body: toolDetailMarkup(found.res, found.tool, rights),
       foot: `<span class="grow"></span><button class="btn" type="button" data-close>Fermer</button>
@@ -310,26 +268,21 @@ class OutilsScreen {
     });
     el.querySelector("[data-demander]")?.addEventListener("click", () => {
       closeModal();
-      this.shell.go("#chat");
-      // le champ du chat, une fois l'écran dessiné : la demande y est posée, à relire avant d'envoyer
-      window.setTimeout(() => {
-        const input = document.querySelector<HTMLTextAreaElement>("[data-chat-input]");
-        if (!input || input.disabled) return;
-        input.value = `Tu peux te servir de « ${label} » pour moi ?`;
-        input.focus();
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }, 80);
+      // la demande posée dans le champ du chat, à relire avant d'envoyer (la même aide que Paramètres › Compte)
+      askMika(this.shell, askFor(found.tool));
     });
   }
 
+  /** La palette (Ctrl K) : les outils des familles, des services et des apps, chacun une fois — un compte n'en
+   *  recopie aucun. */
   private searchEntries(): PaletteEntry[] {
     const out: PaletteEntry[] = [];
     for (const r of this.resources()) {
       for (const t of r.tools) {
         out.push({
           group: "Outils",
-          title: toolLabel(t.description, t.name),
-          sub: `${r.title} · ${t.name}`,
+          title: labelOf(t),
+          sub: r.title,
           icon: "tools",
           route: `#${ID}/droits/${encodeURIComponent(r.key)}`,
         });

@@ -7,8 +7,8 @@
   ``mika.ports.maps``) : le navigateur ne joint jamais un autre hôte que ce serveur.
 - **Tes voyages** : les tiens seulement — un voyage d'une autre personne n'existe pas (le même 404). Ce qu'on y fait
   passe par les actions du plugin ``trips`` (``call.act``), au nom de qui est connecté : journalisées, dédoublonnées
-  (``Idempotency-Key``) et auditées comme dans la console. Ce qu'elle y a ajouté porte ``"by": "mika"``, ce que tu y
-  as fait ``"toi"``.
+  (``Idempotency-Key``) comme dans la console, auditées depuis son espace (``moi.<action>``). Ce qu'elle y a ajouté
+  porte ``"by": "mika"``, ce que tu y as fait ``"toi"``.
 
 Le contrat, route par route : ``docs/protocole-moi.md``, § 10.
 """
@@ -20,7 +20,7 @@ import dataclasses
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -36,7 +36,7 @@ from mika.plugins.trips import Stop, Trip, TripsState, days_of, geo
 from mika.plugins.trips.tools import along_points, place_items, stop_point
 from mika.ports.maps import AVOIDS, MODES, ROUTE_POINTS_MAX, MapsUnavailable, PlaceHit, RouteLeg, RouteResult
 from mika.runtime.effects import with_content
-from mika.runtime.operations import Outcome, perform
+from mika.runtime.operations import SPACE, Outcome, perform
 
 CARTE = "/carte"
 VOYAGES = "/voyages"
@@ -48,9 +48,17 @@ CORRIDOR_MIN, CORRIDOR_MAX, CORRIDOR = 200, 50_000, 5_000
 HERS, YOURS = c.BY_HER, "toi"
 
 NOT_PLUGGED = "La carte n'est pas branchée sur ce serveur."
-NO_PLACES = "L'index des lieux n'est pas construit : Réglages › Canaux › Lieux et adresses (mika carte lieux)."
-NO_ADDRESSES = "Les adresses ne sont pas branchées : Réglages › Canaux › Lieux et adresses."
-NO_ROUTING = "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires."
+#: ce qui n'est pas prêt : ce que la personne en lit, puis ce qu'une opératrice en lit. Une personne n'a pas la
+#: console : ce qui manque et où le régler ne se dit qu'à qui peut le faire
+NOT_READY = {
+    "places": ("La recherche de lieux n'est pas encore prête sur ce serveur.",
+               "L'index des lieux n'est pas construit : Réglages › Carte et téléphone › Lieux et adresses "
+               "(mika carte lieux)."),
+    "addresses": ("La recherche d'adresses n'est pas encore prête sur ce serveur.",
+                  "Les adresses ne sont pas branchées : Réglages › Carte et téléphone › Lieux et adresses."),
+    "routing": ("Les itinéraires ne sont pas encore prêts sur ce serveur.",
+                "Les itinéraires ne sont pas réglés : Réglages › Carte et téléphone › Itinéraires."),
+}
 _DIGITS = re.compile(r"^\d{1,18}$")
 
 
@@ -65,7 +73,8 @@ def _maps(call: Call, need: str = "") -> Any:
         raise Denied(503, NOT_PLUGGED)
     if (need == "places" and not port.places_ready()) or (need == "addresses" and not port.addresses_ready()) \
             or (need == "routing" and not port.routing_ready()):
-        raise Denied(503, {"places": NO_PLACES, "addresses": NO_ADDRESSES, "routing": NO_ROUTING}[need])
+        person, operator = NOT_READY[need]
+        raise Denied(503, operator if call.me.operator else person)
     return port
 
 
@@ -472,8 +481,9 @@ async def stop_change(call: Call) -> dict[str, Any]:
         answer = done(await call.act("trips.deplacer_arret", move))
     if note is not None:
         nonce = call.nonce()
-        # deux gestes d'un même envoi : chacun sa clé, sinon le second passerait pour le premier redit
-        answer = done(await perform(call.kernel, "trips.noter_arret", note, by=call.me.handle,
+        # deux gestes d'un même envoi : chacun sa clé, sinon le second passerait pour le premier redit ; audité comme
+        # ``call.act`` le fait, depuis son espace
+        answer = done(await perform(call.kernel, "trips.noter_arret", note, by=call.me.handle, via=SPACE,
                                     nonce=f"{nonce}:note" if nonce and move is not None else nonce))
     return answer
 
@@ -563,26 +573,40 @@ async def trip_along(call: Call) -> dict[str, Any]:
     return {"places": [_hit(h) for h in hits[:limit]], "route": routed}
 
 
-async def trip_gpx(call: Call) -> Response:
-    """Le voyage en GPX (``adapters.maps.gpx``) : ses arrêts, et le tracé quand les itinéraires le calculent."""
-    trip = _trip(call)
-    texts = _texts(call, _refs(trip))
+async def gpx_document(port: Any, trip: Trip, content: Callable[[list[str]], Mapping[str, str]],
+                       outbound: Callable[[], None]) -> str:
+    """Le voyage en GPX (``adapters.maps.gpx``) : ses arrêts, et le tracé quand les itinéraires le calculent (sinon,
+    ou en panne, ses arrêts seuls). ``content`` lit ses textes au magasin ; ``outbound``, appelé avant de joindre le
+    serveur d'itinéraires, y compte la demande dans la borne du compte qui la fait (``OUTBOUND``) et lève au-delà —
+    jamais facultatif : la console sert le même document, sur la fiche de la personne, dans la même borne (ADR 0204)."""
+    texts = content(_refs(trip))
     stops = [(texts.get(s.name_ref, ""), p.lat, p.lon) for s in trip.stops if (p := stop_point(s, texts)) is not None]
     track: list[geo.Point] = []
-    port = call.port("maps")
     if port is not None and port.routing_ready() and len(stops) >= 2:
-        call.outbound()
+        outbound()
         try:
             track = await geo.line_of_async(await geo.chain(port, [(lat, lon) for _, lat, lon in stops],
                                                             mode=trip.mode, avoid=frozenset(trip.avoid)))
         except MapsUnavailable:
             track = []  # les arrêts seuls : le GPX reste utile
     # un long tracé s'écrit hors de la boucle d'événements (des centaines de milliers de points sur un long voyage)
-    body = gpx(texts.get(trip.title_ref, ""), stops, track) if len(track) <= geo.LINE_KEPT * 4 else \
-        await asyncio.to_thread(gpx, texts.get(trip.title_ref, ""), stops, track)
+    title = texts.get(trip.title_ref, "")
+    return gpx(title, stops, track) if len(track) <= geo.LINE_KEPT * 4 else \
+        await asyncio.to_thread(gpx, title, stops, track)
+
+
+def gpx_response(trip: Trip, body: str) -> Response:
+    """Le GPX d'un voyage, en pièce jointe ``voyage-<id>.gpx``, jamais gardé en cache."""
     return Response(body, media_type="application/gpx+xml",
                     headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                              "Content-Disposition": f'attachment; filename="voyage-{trip.id}.gpx"'})
+
+
+async def trip_gpx(call: Call) -> Response:
+    """Le voyage en GPX : ses arrêts, et le tracé quand les itinéraires le calculent."""
+    trip = _trip(call)
+    return gpx_response(trip, await gpx_document(call.port("maps"), trip, lambda refs: _texts(call, refs),
+                                                 call.outbound))
 
 
 def routes(api: MeApi) -> list[Route]:

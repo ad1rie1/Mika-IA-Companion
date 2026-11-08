@@ -241,25 +241,6 @@ async def believe(kernel: Kernel, text: str, about: Iterable[str], *, sensitivit
     return await _append(kernel, draft, dedupe_key)
 
 
-async def attest(kernel: Kernel, item: int, told_by: Iterable[str], *, origin: str = memory_c.TOLD,
-                 confidence: float = 0.8, heard_by: Iterable[str] | None = None, sensitivity: int | None = None,
-                 secret: bool = False, dedupe_key: str | None = None) -> int:
-    """Un témoignage de plus sur une croyance de sa mémoire (ADR 0080) : ``told_by`` le lui a dit aussi, avec ses
-    propres droits (qui l'a entendu, sensibilité, secret)."""
-    if origin not in (memory_c.TOLD, memory_c.OBSERVED, memory_c.INFERRED):
-        raise ValueError(f"origine inconnue : « {origin} » (told, observed ou inferred)")
-    told = _people(kernel, told_by, "told_by")
-    if not told:
-        raise NotAPerson("un témoignage dit qui le lui a dit (« told_by » vide)")
-    heard = told if heard_by is None else _people(kernel, heard_by, "heard_by")
-    level = _level(sensitivity, has_person=True, secret=secret)
-    draft = memory_c.ATTESTED.draft(
-        item=_replaced(kernel, item, memory_c.BELIEF), told_by=told, heard_by=heard, source=told[0], origin=origin,
-        confidence=_unit(confidence, "confiance"), sensitivity=level, secret=bool(secret), call_id=ARCHIVE,
-        dedupe_key=dedupe_key)
-    return await _append(kernel, draft, dedupe_key)
-
-
 async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int, *, all_day: bool = True,
                      sensitivity: int | None = None, importance: float = memory_c.IMPORTANT_MOMENT,
                      festive: bool = False, ongoing: bool = False, told_by: Iterable[str] = (),

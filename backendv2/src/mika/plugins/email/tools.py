@@ -217,7 +217,7 @@ class TidyArgs(BaseModel):
     folder: str = Field(default="", max_length=300, description=phrase("email.tools.tidy.folder"))
 
 
-@EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
+@EMAIL.tool("email_accounts", description=phrase("email.tools.accounts.description"), label=phrase("email.tools.accounts.label"), args=NoArgs, bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
 async def email_accounts(args: NoArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
     if refused is not None:
@@ -236,7 +236,8 @@ async def email_accounts(args: NoArgs, ctx: Any) -> Any:
     return "\n".join(lines)
 
 
-@EMAIL.tool("email_list", description=phrase("email.tools.list.description"), args=ListArgs,
+@EMAIL.tool("email_list", description=phrase("email.tools.list.description"),
+            label=phrase("email.tools.list.label"), args=ListArgs,
             bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box)
 async def email_list(args: ListArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -291,7 +292,8 @@ def _twin(m: Any) -> str:
     return phrase("email.tools.twin") if getattr(m, "twin", False) else ""
 
 
-@EMAIL.tool("email_search", description=phrase("email.tools.search.description"), args=SearchArgs,
+@EMAIL.tool("email_search", description=phrase("email.tools.search.description"),
+            label=phrase("email.tools.search.label"), args=SearchArgs,
             bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box, max_calls_per_episode=4)
 async def email_search(args: SearchArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -310,7 +312,8 @@ async def email_search(args: SearchArgs, ctx: Any) -> Any:
     return "\n".join(t for t in (phrase("email.tools.data"), *lines, where, covered) if t)
 
 
-@EMAIL.tool("email_contacts", description=phrase("email.tools.contacts.description"), args=ContactsArgs,
+@EMAIL.tool("email_contacts", description=phrase("email.tools.contacts.description"),
+            label=phrase("email.tools.contacts.label"), args=ContactsArgs,
             bundle=BUNDLE, episodes=EPISODES, owner_only=True, owned=owns_a_box, max_calls_per_episode=4)
 async def email_contacts(args: ContactsArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -329,7 +332,8 @@ def _quoted(text: str) -> str:
     return cite(text, BODY_SHOWN)
 
 
-@EMAIL.tool("email_read", description=phrase("email.tools.read.description"), args=ReadArgs, bundle=BUNDLE,
+@EMAIL.tool("email_read", description=phrase("email.tools.read.description"),
+            label=phrase("email.tools.read.label"), args=ReadArgs, bundle=BUNDLE,
             episodes=EPISODES, max_calls_per_episode=5, owner_only=True, owned=owns_a_box)
 async def email_read(args: ReadArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -375,7 +379,8 @@ def _asker(ctx: Any) -> tuple[str, ...]:
     return (target,) if target and is_identifiable(target) and not is_work_target(target) else ()
 
 
-@EMAIL.tool("email_draft", acts=True, description=phrase("email.tools.draft.description"), args=DraftArgs,
+@EMAIL.tool("email_draft", acts=True, description=phrase("email.tools.draft.description"),
+            label=phrase("email.tools.draft.label"), args=DraftArgs,
             bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True, owned=owns_a_box_to_prepare)
 async def email_draft(args: DraftArgs, ctx: Any) -> Any:
     port, refused = _port(ctx, SHARE_PREPARE)
@@ -514,7 +519,8 @@ async def _gesture(port: Any, ref: str, action: str, folder: str) -> str:
     return str(await port.move(ref, folder))
 
 
-@EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"), args=TidyArgs,
+@EMAIL.tool("email_tidy", acts=True, description=phrase("email.tools.tidy.description"),
+            label=phrase("email.tools.tidy.label"), args=TidyArgs,
             bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=6, owner_only=True, owned=owns_a_box_to_use)
 async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
     port, refused = _port(ctx, SHARE_USE)

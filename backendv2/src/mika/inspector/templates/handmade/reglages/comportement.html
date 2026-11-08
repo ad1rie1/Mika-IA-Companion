@@ -18,7 +18,9 @@
         {% if families %}
         <div class="regx-families">
           {% for fam in families %}
-          <section class="regx-family" aria-label="{{ fam.title }}">
+          {# son ancre : le fil d'Ariane d'une page de faculté y mène (« Réglages / Paramètres avancés / Émotions »,
+             ``Pages.trail``, ADR 0202) #}
+          <section class="regx-family" id="famille-{{ fam.title|lower|replace(' ', '-') }}" aria-label="{{ fam.title }}">
             <h3 class="now-subhead first">{{ fam.title }}</h3>
             <ul class="regx-facs" role="list">
               {% for f in fam["items"] %}

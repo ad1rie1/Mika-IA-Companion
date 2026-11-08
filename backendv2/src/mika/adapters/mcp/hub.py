@@ -182,8 +182,8 @@ class McpHub:
         address = spec.url.strip() if not spec.local else " ".join((spec.command, *spec.args)).strip()
         return ServerStatus(
             name=server, kind=spec.transport, enabled=spec.enabled, ready=not problems, state=state, detail=detail,
-            purpose=spec.purpose, when_to_use=spec.when_to_use, address=address[:300], access=rows, default=default,
-            in_hand=spec.in_hand,
+            purpose=spec.purpose, when_to_use=spec.when_to_use, address=address[:300], owner=spec.owner, access=rows,
+            default=default, in_hand=spec.in_hand,
             server_name=info.name if info else "", server_version=info.version if info else "",
             protocol=info.protocol if info else "", instructions=info.instructions if info else "",
             live=st.live, reviews=reviews, last_ok_at=st.last_ok_at, last_error_at=st.last_error_at,

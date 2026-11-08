@@ -73,7 +73,7 @@ def test_what_is_not_plugged_says_so(world):  # noqa: F811
     assert places.status_code == 503 and "Lieux et adresses" in places.json()["error"]
     route = client.get(CARTE + f"/itineraire?points={LAC}")
     assert route.status_code == 503
-    assert route.json()["error"] == "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires."
+    assert route.json()["error"] == "Les itinéraires ne sont pas réglés : Réglages › Carte et téléphone › Itinéraires."
     assert client.get(CARTE + "/adresses?q=Place de la Concorde").status_code == 503
     assert maps.calls == []  # rien n'est parti
     live.kernel.ports.pop("maps")
@@ -81,6 +81,27 @@ def test_what_is_not_plugged_says_so(world):  # noqa: F811
     assert bare["places"] == {"ready": False, "count": 0, "built": 0} and bare["categories"] == []
     unplugged = client.get(CARTE + "/lieux?q=Annecy")
     assert unplugged.status_code == 503 and unplugged.json()["error"] == "La carte n'est pas branchée sur ce serveur."
+
+
+def test_a_person_reads_what_is_not_ready_never_where_to_set_it(world):  # noqa: F811
+    """Une personne n'a pas la console : ce 503 lui dit que ça n'est pas prêt, sans consigne qu'elle ne peut pas suivre.
+    Une opératrice, sur les mêmes routes, lit ce qui manque et où le régler."""
+    client, live, maps = plugged(world, FakeMaps(places_on=False, addresses_on=False, routing_on=False))
+    routes = (CARTE + "/lieux?q=Annecy", CARTE + "/adresses?q=Place de la Concorde",
+              CARTE + f"/itineraire?points={LAC}")
+    told = [client.get(path) for path in routes]
+    assert [r.status_code for r in told] == [503] * 3
+    assert all("Réglages › Carte et téléphone" in r.json()["error"] for r in told)
+    assert "mika carte lieux" in told[0].json()["error"]
+    second_person(client, live)
+    login(client, "lea")
+    read = [client.get(path) for path in routes]
+    assert [r.status_code for r in read] == [503] * 3
+    assert [r.json()["error"] for r in read] == [
+        "La recherche de lieux n'est pas encore prête sur ce serveur.",
+        "La recherche d'adresses n'est pas encore prête sur ce serveur.",
+        "Les itinéraires ne sont pas encore prêts sur ce serveur."]
+    assert maps.calls == []
 
 
 def test_places_addresses_routes_and_orders_come_from_this_server(world):  # noqa: F811

@@ -19,10 +19,12 @@ import time
 from mika.adapters.teams import TeamsConfig
 from mika.app.settings import TEAMS_KEYS_KEY
 from mika.app.teams import digest
+from mika.contracts import runtime as rt
 from mika.plugins.teams import params_of
 from mika.ports.teams import Draft
 from mika.runtime.operations import perform
 from tests.protocol.test_drawn_pages import drawn
+from tests.protocol.test_moi_mail import journal
 from tests.protocol.test_teams_web import DM, batch, headers, new_key
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -80,7 +82,7 @@ def test_two_keys_two_accounts_each_sees_only_its_own(world):  # noqa: F811
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(mine)).status_code == 202
     assert params_of(live.kernel.mind.frame()).accounts_off == ("bea_t",)
     # retirer la clé de Béa ne ferme que sa porte
-    client.portal.call(live.teams.revoke_key, "bea_t", "test")
+    client.portal.call(live.teams.revoke_key, "bea_t")
     assert client.get("/api/teams/outbox", headers=headers(hers)).status_code == 401
     assert client.get("/api/teams/outbox", headers=headers(mine)).status_code == 200
     # un compte retiré des réglages emporte sa clé
@@ -137,6 +139,9 @@ def test_the_console_reads_by_owner_then_by_account(world):  # noqa: F811
                                                  {"_fixes": ["compte"], "compte": ["inconnu"]}, by="user_1",
                                                  nonce="cle-x"))
     assert not refused.ok and "inconnu" in refused.message
+    # le refus dit où déclarer un compte : Teams › Paramètres, derrière la roue de Teams (ADR 0206) — pas l'ancienne
+    # adresse sous Réglages, que le menu n'a plus (la même phrase répond à ``mika teams key``)
+    assert "Teams › Paramètres" in refused.message and "Réglages" not in refused.message
     # une conversation de Béa a sa fiche, sous son compte
     fiche = drawn(client, f"/inspecteur/fiche/conversation_teams/bea_t~{BEA_DM}")
     assert "Tu viens ?" in fiche and "On se voit à 14 h ?" not in fiche
@@ -179,3 +184,23 @@ def test_a_persons_fiche_has_its_teams_tab_only_when_an_account_is_hers(world): 
     you = drawn(client, "/inspecteur/fiche/person/user_1?onglet=teams")
     assert "principal" in you and "Teams de Béa" not in you
     assert "onglet=teams" not in drawn(client, f"/inspecteur/fiche/person/{cam.handle}")
+
+
+def test_the_console_takes_a_key_back_and_its_audit_says_who(world):  # noqa: F811
+    """K0-26 : ``revoke_key`` ne reçoit plus qui retire la clé ; le geste de la console reste au journal à son nom."""
+    client, live, _ = world
+    bootstrap(client)
+    two_accounts(client, live)
+    key = new_key(client, live, "bea_t")
+
+    def take_back(nonce: str):
+        return client.portal.call(lambda: perform(live.kernel, "teams.retirer_cle",
+                                                  {"_fixes": ["compte"], "compte": ["bea_t"]}, by="user_1",
+                                                  nonce=nonce))
+
+    assert take_back("retrait").ok
+    assert client.get("/api/teams/outbox", headers=headers(key)).status_code == 401
+    assert not take_back("encore").ok  # il n'y a plus de clé
+    done = [(e.data.action, e.data.by, e.data.outcome) for e in journal(live, rt.OPERATED)
+            if e.data.action == "teams.retirer_cle"]
+    assert ("teams.retirer_cle", "user_1", "done") in done

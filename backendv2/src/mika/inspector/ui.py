@@ -23,6 +23,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mika.adapters.web.accounts import Account, Accounts
 from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.session import CSRF_COOKIE, SESSION_COOKIE
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.inspector import render
@@ -36,6 +37,7 @@ from mika.inspector.catalog import (
     SettingsTab,
     builtin_keys,
     destinations,
+    menu_place,
 )
 from mika.inspector.framed import Documents
 from mika.inspector.names import Names
@@ -49,11 +51,9 @@ from mika.runtime.effects import with_content
 from mika.runtime.inspection import Inspection
 
 PREFIX = render.PREFIX
-CSRF_COOKIE = "csrftoken"
-SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "52"
+ASSET_VERSION = "56"
 
 log = logging.getLogger("mika.console")
 
@@ -135,6 +135,13 @@ class InspectorDeps:
     #: (``app/handmade/approval_sources.py``) — la boîte et le brouillon d'un mail, la conversation Teams, le service,
     #: le projet, la personne ; rien : la demande ne dit pas sa source
     approval_sources: Callable[..., Sequence[tuple[str, str]]] | None = None
+    #: ce que les tableaux de droits montrent et qu'un plugin ou une faculté possède (``app/handmade/access.py``) : les
+    #: personnes qu'une ligne peut nommer, ``fn(ui) -> [{key, name}]`` ; les instances de chaque type de canal,
+    #: ``fn(ui) -> {type: [(clé, nom)]}`` ; l'adresse de la fiche d'une famille d'outils venue d'ailleurs, ``fn(lot)``
+    #: (vide : aucune) — l'inspecteur ne lit pas ces réglages et ne nomme pas ces plugins
+    nameable: Callable[..., list[dict[str, str]]] | None = None
+    canal_instances: Callable[..., dict[str, list[tuple[str, str]]]] | None = None
+    family_href: Callable[[str], str] | None = None
 
 
 def wants_table(query: Mapping[str, str]) -> bool:
@@ -392,7 +399,8 @@ class UI:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
         (l'accueil en fait des cadres qui mènent à la bonne page). ``distinct`` : chaque chose une fois (l'accueil) —
         la file « À valider » par son seul « Tout ce qui attend », sans ses onglets ni les vues qui montrent les mêmes
-        demandes (``InspectorDeps.queue.covers``, ADR 0177)."""
+        demandes (``InspectorDeps.queue.covers``, ADR 0177) ; son total dit alors ce qu'il compte, onglet par onglet
+        (« courriers à envoyer : 3 · identités à confirmer : 1 »)."""
         covered: set[str] = set()
         queue = self.deps.queue
         if distinct and queue is not None:
@@ -402,16 +410,23 @@ class UI:
         for g in self.deps.navigation:
             for d in g.items:
                 base = f"{PREFIX}/{d.key}"
+                found: list[dict[str, Any]] = []
+                parts: list[tuple[str, int]] = []  # ses onglets couverts : ce que compte son total
                 for key in builtin_keys(d, self.builtins):
                     b = self.builtins.get(key)
                     if b is None or b.badge is None:
                         continue
-                    if f"{base}/{b.slug}" in covered:
-                        continue
                     n = int(b.badge(self) or 0)
+                    if f"{base}/{b.slug}" in covered:
+                        if n:
+                            parts.append((b.title, n))
+                        continue
                     if n:
-                        out.append({"label": f"{d.label} › {b.title}", "count": n, "hint": "",
-                                    "href": f"{base}/{b.slug}"})
+                        found.append({"label": f"{d.label} › {b.title}", "count": n, "hint": "",
+                                      "href": f"{base}/{b.slug}"})
+                for item in found if parts else ():
+                    item["hint"] = self._made_of(parts, item["count"])
+                out += found
                 for v in self.inspection.in_section(d.key):
                     if f"{base}/{v.name}" in covered:
                         continue
@@ -421,11 +436,20 @@ class UI:
                                     "hint": got[1] if len(got) > 1 else "", "href": f"{base}/{v.name}"})
         return out
 
+    @staticmethod
+    def _made_of(parts: Sequence[tuple[str, int]], total: int) -> str:
+        """Ce que compte un total, onglet par onglet (« courriers à envoyer : 3 · identités à confirmer : 1 ») ; ce
+        qu'aucun onglet ne garde (un appel d'outil, une commande d'un projet…), en « autres demandes »."""
+        rest = total - sum(n for _, n in parts)
+        said = [f"{title[:1].lower()}{title[1:]} : {n}" for title, n in parts]
+        return " · ".join(said + ([f"autres demandes : {rest}"] if rest > 0 else []))
+
     def nav(self, active: str, path: str, *, tab: bool = True) -> list[dict[str, Any]]:
         """Le menu de l'opératrice : résout la rubrique la plus précise, y compris sur les fiches.
 
         Un lien vers une destination porte ses onglets, ceux de sa barre (ADR 0178) : la rubrique les montre en
-        colonnes, et l'onglet de la page courante s'y allume (``tab`` : pas sur une fiche, qui n'est pas un onglet).
+        colonnes, et l'onglet de la page courante s'y allume (``tab`` : pas sur une fiche, qui n'est pas un onglet) ;
+        une rubrique dont les liens se rangent en colonnes (Système, ADR 0202) en fait autant de groupes de pages.
         Les nombres restent sur les entrées et leurs onglets :
         deux vues peuvent montrer une même demande. Le groupe signale sa présence sans additionner ces nombres.
         """
@@ -433,14 +457,9 @@ class UI:
                  for li, link in enumerate(group.items)]
 
         def locate(target: str) -> tuple[int, int] | None:
-            matches = [(len(route), gi, li) for gi, li, link in links
-                       for route in (link.target, *link.also)
-                       if target == route or (route and (target.startswith(route + "/")
-                                                         or target.startswith(route + "-")))]
-            if not matches:
-                return None
-            _, gi, li = max(matches)
-            return gi, li
+            # le lien le plus précis, celui de la rubrique où vit la page à précision égale (le fil en part aussi)
+            got = menu_place(self.deps.menu, self.deps.navigation, target)
+            return (got[0], got[1]) if got is not None else None
 
         here = path.split("?", 1)[0].rstrip("/")
         current = locate(here.removeprefix(PREFIX).strip("/"))
@@ -473,6 +492,8 @@ class UI:
                 items.append({"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon,
                               "hint": link.hint, "on": on, "badge": badges.get((gi, li), 0), "tabs": tabs,
                               "current": on and not any(t["on"] for t in tabs)})
+            if any(link.column for link in group.items):
+                items = self._in_columns(group, items, tab)
             label = self.her_name() if group.her else group.label
             groups.append({"label": label, "short": label if group.her else (group.short or group.label),
                            "question": group.question, "icon": group.icon, "items": items,
@@ -480,6 +501,31 @@ class UI:
                            "active": current is not None and current[0] == gi,
                            "badge": any(i["badge"] for i in items)})
         return groups
+
+    @staticmethod
+    def _in_columns(group: MenuGroup, items: list[dict[str, Any]], tab: bool) -> list[dict[str, Any]]:
+        """Les liens d'une rubrique rangés en colonnes (``MenuLink.column``, Système, ADR 0202) : chaque colonne se
+        montre comme une destination à onglets (ADR 0178) — son nom et ce qu'on y trouve, qui mènent à sa première
+        page, puis ses pages ; la page courante y allume la sienne (``tab``)."""
+        hints = dict(group.columns)
+        out: list[dict[str, Any]] = []
+        column = ""
+        for link, it in zip(group.items, items, strict=True):
+            if not link.column:
+                out.append(it)
+                column = ""
+                continue
+            if link.column != column:
+                column = link.column
+                out.append({"label": column, "href": it["href"], "icon": it["icon"], "hint": hints.get(column, ""),
+                            "on": False, "badge": 0, "tabs": [], "current": False})
+            head = out[-1]
+            head["tabs"].append({"label": it["label"], "href": it["href"], "on": it["on"] and tab,
+                                 "badge": it["badge"]})
+            head["on"] = head["on"] or it["on"]
+            head["badge"] += it["badge"]
+            head["current"] = head["on"] and not any(t["on"] for t in head["tabs"])
+        return out
 
     @staticmethod
     def _columns(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
@@ -518,13 +564,18 @@ class UI:
             out.append({"label": "Modèles", "text": "aucun", "dot": "danger", "href": f"{PREFIX}/reglages/fournisseurs"})
         out.append({"label": "Heure", "text": datetime.fromtimestamp(self.now() / US, self.tz).strftime("%H:%M"),
                     "optional": True})
+        for vital in out:
+            # ce qu'en dit la pastille d'état : une émotion se nomme elle-même (« curieuse »), une valeur avec son nom
+            # (« énergie 53 % ») — l'intensité d'une émotion reste dans le panneau des vitaux
+            label = vital["label"]
+            vital["short"] = vital.get("short") or f"{label[:1].lower()}{label[1:]} {vital['text']}"
         return out
 
     @staticmethod
     def _vital(label: str, v: Vital) -> dict[str, Any]:
         return {"label": label, "text": v.text, "dot": render.tone(v.tone) if v.tone else "",
                 "hint": v.hint, "href": render.href(v.href) if v.href else "",
-                "swatch": v.swatch.key if v.swatch else "",
+                "swatch": v.swatch.key if v.swatch else "", "short": v.swatch.text if v.swatch else "",
                 "ratio": None if v.ratio is None else round(min(1.0, max(0.0, v.ratio)), 3)}
 
     # ── rendu ──
@@ -545,7 +596,7 @@ class UI:
         menu_tab = ctx.pop("menu_tab", True)
         html = env.get_template(name).render(
             title=title, csrf=token, nav=self.nav(active, menu_path, tab=menu_tab), vitals=self.vitals(), her=self.her_name(), posted=request.method == "POST",
-            who=account.display_name if account else "", **ctx)
+            who=account.display_name if account else "", me_href=self.account_href(account), **ctx)
         response = HTMLResponse(html, status_code=status)
         if not request.cookies.get(CSRF_COOKIE):
             response.set_cookie(CSRF_COOKIE, token, httponly=False, samesite="lax", secure=self.cookie_secure)
@@ -566,6 +617,12 @@ class UI:
     def operator(self, request: Request) -> Account | None:
         acc = self.deps.accounts.session(request.cookies.get(SESSION_COOKIE))
         return acc if acc is not None and acc.operator else None
+
+    @staticmethod
+    def account_href(account: Account | None) -> str:
+        """La fiche d'un compte (Réglages › Comptes, ``?compte=<id>``) : « Mon compte », dans le menu du compte —
+        son mot de passe, ses applications, ses sessions. Vide sans compte."""
+        return f"{PREFIX}/reglages/comptes?compte={account.id}" if account is not None else ""
 
     async def form(self, request: Request) -> dict[str, Any] | None:
         """Le formulaire, si son jeton correspond au cookie ; sinon ``None``."""

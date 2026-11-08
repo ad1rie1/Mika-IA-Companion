@@ -55,7 +55,6 @@ Label = Annotated[str, StringConstraints(pattern=r"^[^\x00-\x1f\x7f]{1,60}$", st
 
 MIKA = "mika"
 PLAYER_PREFIX = "player:"
-NPC_PREFIX = "npc:"
 
 
 def player(handle: str) -> str:

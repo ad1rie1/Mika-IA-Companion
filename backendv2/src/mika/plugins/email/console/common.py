@@ -8,14 +8,14 @@ adresse, sinon une empreinte stable.
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
 from mika.contracts import email as c
 from mika.contracts import self_ as self_c
-from mika.kernel.clock import MINUTE, instant
+from mika.kernel.clock import instant
+from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -33,6 +33,7 @@ from mika.kernel.inspect import (
     Workspace,
     is_table_choice,
 )
+from mika.kernel.text import fold  # noqa: F401 — réexportée : les vues du courrier la prennent ici
 from mika.plugins.email import (
     APPROVED,
     FAILED,
@@ -59,16 +60,12 @@ SETTINGS = "/inspecteur/courrier/parametres"
 PAGE = 25
 #: une boîte (réception, envoyés) se lit par douzaine : sa liste tient au-dessus du message ouvert
 BOX_PAGE = 12
-FOLD = 600
 #: au-delà, un identifiant ne tient plus dans une adresse de la console : une empreinte le remplace
 ID_MAX = 200
 DIGEST = "#"
-#: les mails remarqués « aujourd'hui » : jamais plus relus que ceci
-TODAY_MAX = 500
 BATCH = 250
 NO_MAIL = "Aucun mail demandé : choisis-en un dans le courrier."
 UNKNOWN = "Ce mail n'est ni dans la boîte, ni parmi les envoyés, ni dans ce qu'elle a remarqué."
-NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte dans Courrier › Paramètres."
 NO_PORT = "Courrier non configuré : aucune boîte aux lettres n'est branchée."
 #: la réception d'une boîte, quelle que soit sa casse sur le serveur (ADR 0171)
 INBOX = "INBOX"
@@ -88,10 +85,6 @@ def draft_state(state: str) -> tuple[str, str]:
 def clip(text: str, n: int = 120) -> str:
     text = " ".join(str(text).split())
     return text if len(text) <= n else text[: n - 1] + "…"
-
-
-def fold(text: str) -> str:
-    return "".join(ch for ch in unicodedata.normalize("NFKD", str(text).lower()) if not unicodedata.combining(ch))
 
 
 def mail_key(ref: str) -> str:
@@ -205,20 +198,6 @@ def since(ctx: InspectContext, event_type: Any, start: int, cap: int) -> list[An
     return out
 
 
-def box_note(port: Any, p: EmailParams) -> Note:
-    if port is None:
-        return Note(NO_PORT, tone="muted")
-    if not port.accounts():
-        return Note(NOT_CONFIGURED, tone="warn")
-    if not port.configured():
-        return Note("Aucun compte n'est prêt à relever (serveur, utilisateur ou compte inactif) : voir "
-                    "Courrier › Paramètres.", tone="warn")
-    n = sum(1 for a in port.accounts() if a.ready)
-    boxes = "Boîte aux lettres configurée" if n == 1 else f"{n} boîtes aux lettres configurées"
-    return Note(f"{boxes} : relevée(s) toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée "
-                "(« Relever maintenant » pour ne pas attendre).", tone="ok")
-
-
 def edit_account(key: str, back: str = ACCOUNTS) -> Ref:
     """Le lien vers le réglage d'un compte (et le retour au courrier une fois enregistré)."""
     return Ref("local", SETTINGS, "Modifier ce compte",
@@ -300,13 +279,12 @@ def _owners(port: Any, ctx: InspectContext, base: str, frame: Frame | None) -> N
 
 
 def fresh_important(s: EmailState, frame: Frame) -> tuple[int, str]:
-    """Le badge du courrier : les mails importants arrivés récemment qu'elle n'a pas encore lus."""
+    """Le badge du courrier : les mails importants arrivés récemment qu'elle n'a pas encore lus. Son indice dit ce
+    qu'il compte sans redire le nombre, que l'accueil montre juste devant (« 3 · Courrier › Réception · mails
+    importants pas encore lus »)."""
     p = params_of(frame)
     n = sum(1 for m in frame.get(c.UNREAD) if m.importance >= p.mention_from and frame.now - m.at <= p.mention_within_us)
-    return n, "mail(s) important(s) pas encore lu(s)"
-
-
-ACCOUNT_PARAM = Param("compte", "Compte", kind="hidden")
+    return n, agree(n, "mail important pas encore lu", "mails importants pas encore lus")
 
 
 def account_scope(port: Any, ctx: InspectContext) -> str:

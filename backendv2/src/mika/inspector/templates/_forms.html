@@ -36,6 +36,13 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro action_bar(seen, more) -%}
+{# Les commandes d'une page de réglages, dans sa barre de titre (ADR 0176), dessinées comme les actions de toute page
+   (page.html) : la principale — la première déclarée — à droite des autres ; le reste et les dangereuses sous « ⋯ ». #}
+{% for a in seen|reverse %}{{ action_button(a, loop.last) }}{% endfor %}
+{% if more %}<details class="action-overflow"><summary class="btn quiet icon" title="Autres actions" aria-label="Autres actions"><span aria-hidden="true">⋯</span></summary><div class="toolbar action-overflow-panel">{% for a in more %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
+{%- endmacro %}
+
 {% macro described(f) -%}
 {% if f.help or f.error %} aria-describedby="{{ f.id }}{{ '-help' if f.help else '-error' }}{% if f.help and f.error %} {{ f.id }}-error{% endif %}"{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
 {%- endmacro %}

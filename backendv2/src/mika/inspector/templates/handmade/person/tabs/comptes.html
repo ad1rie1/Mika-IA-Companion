@@ -1,0 +1,66 @@
+{# La fiche d'une personne › Comptes (app/handmade/person, ``owned`` ; ADR 0185, 0186, 0188, 0192) : en sous-onglets
+   (ADR 0176), ses boîtes aux lettres et ses comptes Teams (les listes des plugins), puis les services qu'elle a
+   branchés et ses partages — ce qu'elle partage, ce qu'on lui partage —, lus dans les réglages, en lecture seule. Une
+   page plus loin d'une liste rouvre son sous-onglet ; l'ancienne adresse de Teams aussi (``#teams``). La personne se
+   nomme par son nom : « elle », dans la console, c'est Mika. #}
+{% from "handmade/shared/list_macros.html" import entries, facts_card %}
+{% macro tags(items) %}<p class="person-entry-tags">{% for t in items if t %}<span class="now-tag {{ t[1] }}">{{ t[0] }}</span>{% endfor %}</p>{% endmacro %}
+<div class="now-page person-tab">
+  <div class="hm-subtabs" data-subtabs>
+    <nav class="hm-subnav" aria-label="Ses comptes">
+      {% for p in panes %}<a href="#{{ p.id }}">{{ p.label }} <span class="hm-count">{{ p.count }}</span></a>{% endfor %}
+    </nav>
+    <div class="hm-subpanes">
+      {% for p in panes %}
+      <section id="{{ p.id }}" class="stack" data-pane aria-label="{{ p.label }}">
+        {% if p.id == "services" %}
+        <section class="now-card person-list" aria-labelledby="person-services-title">
+          <header class="now-card-head"><h2 id="person-services-title">Les services {{ of }}</h2><span class="person-count now-num">{{ p.count }}</span>
+            <p>Ce que {{ name }} a branché depuis son espace (ADR 0192) : les outils d'un service ne servent qu'avec cette personne, par sa ligne d'accès. Leurs réglages : la fiche de chacun.</p></header>
+          {% if p.services %}
+          <ul class="person-entries">
+            {% for s in p.services %}
+            <li class="{{ 't-muted' if not s.on }}">
+              <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ s.href }}">{{ s.name }}</a></p>{{ tags([("actif", "ok") if s.on else ("inactif", "")]) }}</div></div>
+              {% if s.purpose %}<div class="person-entry-text">{{ s.purpose }}</div>{% endif %}
+              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">où</span> {{ s.where }}</span>{% if s.shared %}<span><span class="k">partagé avec</span> {% for x in s.shared %}<a href="{{ x.person_href }}">{{ x.name }}</a> ({{ x.level }}){{ ", " if not loop.last }}{% endfor %}</span>{% endif %}</p></div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}<p class="now-empty">aucun service branché par {{ name }}.</p>{% endif %}
+        </section>
+        {% elif p.id == "partages" %}
+        <section class="now-card person-list" aria-labelledby="person-given-title">
+          <header class="now-card-head"><h2 id="person-given-title">Ce {{ that }} partage</h2><span class="person-count now-num">{{ p.shares.given|length }}</span>
+            <p>Ses boîtes, ses comptes Teams et ses services, partagés depuis son espace avec une personne qui a un compte, à un niveau : lire ; lire et préparer ; s'en servir (ADR 0188).</p></header>
+          {% if p.shares.given %}
+          <ul class="person-entries dense">
+            {% for x in p.shares.given %}
+            <li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ x.href }}">{{ x.title }}</a></p>{{ tags([(x.kind, ""), (x.level, "info")]) }}</div></div>
+              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">avec</span> <a href="{{ x.person_href }}">{{ x.name }}</a></span></p></div></li>
+            {% endfor %}
+          </ul>
+          {% else %}<p class="now-empty">{{ name }} ne partage rien.</p>{% endif %}
+        </section>
+        <section class="now-card person-list" aria-labelledby="person-received-title">
+          <header class="now-card-head"><h2 id="person-received-title">Ce qu'on partage avec {{ name }}</h2><span class="person-count now-num">{{ p.shares.received|length }}</span>
+            <p>Ce qu'une autre personne lui ouvre, et à quel niveau ; la ressource reste à qui la partage.</p></header>
+          {% if p.shares.received %}
+          <ul class="person-entries dense">
+            {% for x in p.shares.received %}
+            <li><div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title"><a href="{{ x.href }}">{{ x.title }}</a></p>{{ tags([(x.kind, ""), (x.level, "info")]) }}</div></div>
+              <div class="person-entry-foot"><p class="person-entry-facts"><span><span class="k">partagé par</span> {{ x.owner }}</span></p></div></li>
+            {% endfor %}
+          </ul>
+          {% else %}<p class="now-empty">personne ne partage rien avec {{ name }}.</p>{% endif %}
+        </section>
+        {% else %}
+        {% for f in p.facts %}{{ facts_card(f) }}{% endfor %}
+        {% for s in p.lists %}{{ entries(s) }}{% endfor %}
+        {% for n in p.notes %}<p class="person-tab-note {{ n.tone }}">{% if n.title %}<b>{{ n.title }}</b> {% endif %}{{ n.text }}</p>{% endfor %}
+        {% endif %}
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+</div>

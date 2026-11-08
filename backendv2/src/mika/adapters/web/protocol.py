@@ -15,12 +15,11 @@ import binascii
 import json
 import math
 import re
-import time
-from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from mika.adapters.web.gate import SlidingWindow
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -85,22 +84,8 @@ WHERE_ACCURACY_MAX = 100_000
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
 
-class RateLimiter:
-    """Fenêtre glissante : au plus ``n`` événements par ``window`` secondes."""
-
-    def __init__(self, n: int, window: float) -> None:
-        self.n = n
-        self.window = window
-        self._hits: deque[float] = deque()
-
-    def allow(self, now: float | None = None) -> bool:
-        now = time.monotonic() if now is None else now
-        while self._hits and now - self._hits[0] >= self.window:
-            self._hits.popleft()
-        if len(self._hits) >= self.n:
-            return False
-        self._hits.append(now)
-        return True
+#: une cadence, sans clé : une seule fenêtre (``hub.py``, ``adapters/world/server.py`` la lisent sous ce nom)
+RateLimiter = SlidingWindow
 
 
 def sanitize_filename(name: Any) -> str:
@@ -164,17 +149,36 @@ def ack(client_msg_id: str, status: str, rejected: Sequence[dict[str, str]] = ()
     return frame
 
 
-def _shown_attachments(raw: str) -> list[dict[str, str]]:
-    """Les pièces jointes d'un message telles que l'écran les montre : un nom et une sorte, jamais ce qu'elle en a
-    perçu (le contenu d'un document, une description : c'est pour son prompt, pas pour la bulle)."""
+def _attachment_items(raw: str) -> list[dict[str, Any]]:
+    """Les pièces jointes rangées avec un message de la personne (la colonne du fil, un JSON) ; illisibles : aucune."""
     try:
         items = json.loads(raw) if raw else []
     except ValueError:
         return []
-    if not isinstance(items, list):
-        return []
-    return [{"name": sanitize_filename(a.get("name")), "kind": str(a.get("kind") or "file")[:10]}
-            for a in items if isinstance(a, dict)]
+    return [a for a in items if isinstance(a, dict)] if isinstance(items, list) else []
+
+
+def piece_ids(raw: str) -> list[str]:
+    """Les clés des pièces gardées d'un message de la personne (ADR 0106) ; une pièce sans clé n'a pas été gardée."""
+    return [a["file"] for a in _attachment_items(raw) if isinstance(a.get("file"), str)]
+
+
+def _shown_attachments(raw: str, pieces: Mapping[str, SharedMeta] | None = None) -> list[dict[str, Any]]:
+    """Les pièces jointes d'un message telles que l'écran les montre : un nom et une sorte, jamais ce qu'elle en a
+    perçu (le contenu d'un document, une description : c'est pour son prompt, pas pour la bulle). Une pièce gardée que
+    ``pieces`` connaît porte de quoi la récupérer, comme un de ses fichiers à elle (ADR 0215) : c'est la propre copie
+    de la personne. Sans lecture faite, ou oubliée, elle n'a que son nom."""
+    known = pieces or {}
+    out: list[dict[str, Any]] = []
+    for a in _attachment_items(raw):
+        item: dict[str, Any] = {"name": sanitize_filename(a.get("name")), "kind": str(a.get("kind") or "file")[:10]}
+        file = a.get("file")
+        meta = known.get(file) if isinstance(file, str) else None
+        if meta is not None:
+            item |= {"id": meta.id, "mime": str(meta.mime or "")[:100], "size": int(meta.size),
+                     "url": f"{FILES_PATH}{meta.id}", "available": bool(meta.available)}
+        out.append(item)
+    return out
 
 
 #: où se télécharge un fichier qu'elle a envoyé (``GET``, avec le compte de la personne : ADR 0062)
@@ -253,18 +257,19 @@ def sent_ids(raw: str) -> list[str]:
 
 
 def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None, *,
-                 verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None) -> dict[str, Any]:
-    """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte ; pour un des
-    siens, les fichiers qu'elle a envoyés avec (``shared`` : ce que le port en dit — un fichier oublié n'y est
-    plus, et ne se montre plus). ``verdicts`` : une connexion d'opératrice — l'avis qu'elle a donné sur ses
-    réponses (ADR 0113) ; jamais à une autre connexion. ``notes`` : les petites bulles de ce qu'elle a fait en
-    écrivant ses messages (ADR 0119), par référence."""
+                 verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None,
+                 pieces: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+    """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte, et de quoi
+    récupérer celles qu'on a gardées (``pieces``, ADR 0215) ; pour un des siens, les fichiers qu'elle a envoyés avec
+    (``shared`` : ce que le port en dit — un fichier oublié n'y est plus, et ne se montre plus). ``verdicts`` : une
+    connexion d'opératrice — l'avis qu'elle a donné sur ses réponses (ADR 0113) ; jamais à une autre connexion.
+    ``notes`` : les petites bulles de ce qu'elle a fait en écrivant ses messages (ADR 0119), par référence."""
     emotion = emotion_of(row.emotion)
     if row.role == "assistant":
         known = shared or {}
         attachments: list[dict[str, Any]] = [shared_item(known[i]) for i in sent_ids(row.attachments) if i in known]
     else:
-        attachments = _shown_attachments(row.attachments)
+        attachments = _shown_attachments(row.attachments, pieces)
     item = {
         "id": row.id,
         "role": row.role,
@@ -307,16 +312,18 @@ def tools_item(raw: str) -> list[dict[str, Any]]:
 
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
             life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None,
-            verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None) -> dict[str, Any]:
+            verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None,
+            pieces: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
     """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
     garde le fil d'une autre vie (un autre dossier de données) le vide avant de fusionner.
     ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
     des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter. ``shared`` :
-    ce qu'on peut montrer des fichiers qu'elle a envoyés avec ses messages, par identifiant."""
+    ce qu'on peut montrer des fichiers qu'elle a envoyés avec ses messages, par identifiant ; ``pieces`` : de ceux
+    que la personne a envoyés avec les siens, par clé (ADR 0215)."""
     return {
         "type": "history",
         "mode": mode,
-        "messages": [history_item(r, shared, verdicts=verdicts, notes=notes) for r in rows],
+        "messages": [history_item(r, shared, verdicts=verdicts, notes=notes, pieces=pieces) for r in rows],
         "last_id": rows[-1].id if rows else after_id,
         "truncated": bool(truncated),
         "life": life,

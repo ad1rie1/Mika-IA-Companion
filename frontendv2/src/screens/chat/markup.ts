@@ -4,6 +4,7 @@
  * Des fonctions pures qui rendent du HTML : tout texte venu du serveur passe par `h()`, sauf la réponse pro,
  * que `renderProMarkdown` échappe en entier avant de poser ses propres balises.
  */
+import type { HistoryAttachment } from "@web/types";
 import { parseBlocks, parseInline } from "@web/ui/inlineMarkup";
 import { renderProMarkdown } from "@web/ui/proMarkdown";
 import { noteLine } from "@web/ui/messageNotes";
@@ -38,6 +39,7 @@ import type { ApprovalCard, SentFile, ToolUse } from "@web/types";
 import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
+import { replyHash } from "../teams/format";
 
 // ── Petites formes ────────────────────────────────────────────────────
 
@@ -109,24 +111,18 @@ export function inlineHtml(text: string): string {
   return out;
 }
 
-const FILE_NAME = /^[^,/\\[\]]{1,200}\.[A-Za-z0-9]{1,8}$/;
-const IMAGE_NAME = /\.(png|jpe?g|gif|webp|heic|avif|bmp)$/i;
-
 /**
- * Les fichiers d'un message de la personne, tels que le fil les compose (`texte [a.png, b.pdf]`,
- * `chatSync.withAttachments`) : le texte tapé et les noms, pour les montrer en pièces au-dessus de la bulle.
- * Seulement quand chaque nom ressemble à un fichier ; sinon le texte reste tel quel.
+ * Ce que la personne a tapé dans un message : celui qu'elle vient d'envoyer le sait (`matchText`) ; un message relu au
+ * serveur a ses pièces à part, leurs noms repliés en `texte [a.png, b.pdf]` par `chatSync.withAttachments`, qu'on
+ * retire tels quels (ADR 0215). Un message sans pièce connue se lit tel quel, même s'il finit par des crochets.
  */
-export function splitAttachments(text: string): { text: string; files: string[] } {
-  const m = /^([\s\S]*?)(?:^| )\[([^[\]]+)\]$/.exec(text);
-  if (!m) return { text, files: [] };
-  const names = m[2].split(", ");
-  if (!names.every((n) => FILE_NAME.test(n))) return { text, files: [] };
-  return { text: m[1], files: names };
-}
-
-export function isImageName(name: string): boolean {
-  return IMAGE_NAME.test(name);
+export function typedText(msg: Pick<StoredMessage, "text" | "matchText" | "attachments">): string {
+  if (msg.matchText !== undefined) return msg.matchText;
+  const label = (msg.attachments ?? []).map((a) => a.name).join(", ");
+  if (!label) return msg.text;
+  const suffix = `[${label}]`;
+  if (msg.text === suffix) return "";
+  return msg.text.endsWith(` ${suffix}`) ? msg.text.slice(0, -suffix.length - 1) : msg.text;
 }
 
 // ── Les pièces du fil ─────────────────────────────────────────────────
@@ -145,7 +141,8 @@ export interface ThreadView {
   typing: boolean;
   openWork: ReadonlySet<string>;
   verdictErrors: ReadonlyMap<number, string>;
-  truncated: boolean;
+  /** Le haut du fil avec elle : d'autres messages au serveur (`more`), en train de venir (`loading`), ou rien de plus (ADR 0215). */
+  older: "none" | "more" | "loading";
   now: number;
   /** L'adresse du moteur, pour ses fichiers et la console. */
   api: string;
@@ -156,6 +153,22 @@ export interface ThreadView {
    * qui s'ouvrent dans l'écran Carte (`map/cards.ts::miniCard`) ; aucune : rien.
    */
   mapCards?: (msg: StoredMessage) => string;
+  /** Le message que la palette vient de montrer (sa `messageKey`) : surligné un instant. */
+  found?: string;
+}
+
+/**
+ * La clé d'un message dans le fil montré (`data-msg`) : son identifiant, sinon son heure (un message pas encore
+ * accusé). La palette y mène.
+ */
+export function messageKey(msg: StoredMessage): string {
+  return typeof msg.id === "number" ? String(msg.id) : `t${msg.ts}`;
+}
+
+/** Les attributs qui désignent un message dans le fil : sa clé, et sa marque s'il vient d'être trouvé. */
+function msgAttrs(msg: StoredMessage, found: string | undefined): { key: string; found: string } {
+  const key = messageKey(msg);
+  return { key: ` data-msg="${h(key)}"`, found: found !== undefined && found === key ? " found" : "" };
 }
 
 function sysNote(text: string, side: "me" | "her", href?: string, icon: "info" | "alert" | "moon-z" = "info"): string {
@@ -169,18 +182,19 @@ function userStatus(msg: StoredMessage, answered: boolean): string {
   return answered ? ` · ${ico("checks", "xs")} lu` : ` · ${ico("check", "xs")} envoyé`;
 }
 
-function userFiles(names: string[]): string {
-  return names
-    .map((n) => `<div class="msg-file">${ico(isImageName(n) ? "image" : "file")}<b>${h(n)}</b></div>`)
+function userFiles(pieces: readonly HistoryAttachment[]): string {
+  return pieces
+    .map((a) => `<div class="msg-file">${ico(a.kind === "image" ? "image" : "file")}<b>${h(a.name)}</b></div>`)
     .join("");
 }
 
-export function userMessage(msg: StoredMessage, answered: boolean, view: Pick<ThreadView, "api" | "operator">): string {
-  const { text, files } = splitAttachments(msg.text);
+export function userMessage(msg: StoredMessage, answered: boolean, view: Pick<ThreadView, "api" | "operator" | "found">): string {
+  const text = typedText(msg);
   const bubble = text.trim() ? `<div class="bubble">${plainHtml(text)}</div>` : "";
   const failed = msg.status === "failed";
   const meta = `<div class="msg-meta${failed ? " ko" : ""}"${msg.reason ? ` title="${h(msg.reason)}"` : ""}>${h(clock(msg.ts))}${userStatus(msg, answered)}</div>`;
-  let out = `<div class="msg me${msg.status === "pending" ? " pending" : ""}${failed ? " failed" : ""}">${userFiles(files)}${bubble}${meta}</div>`;
+  const at = msgAttrs(msg, view.found);
+  let out = `<div class="msg me${msg.status === "pending" ? " pending" : ""}${failed ? " failed" : ""}${at.found}"${at.key}>${userFiles(msg.attachments ?? [])}${bubble}${meta}</div>`;
   if (msg.note) out += sysNote(msg.note, "me", undefined, "alert");
   if (msg.replyNote) {
     const href = view.operator ? consoleHref(msg.replyHref) : undefined;
@@ -239,7 +253,8 @@ export function mikaMessage(msg: StoredMessage, view: ThreadView, carded: boolea
   let out = "";
   // une réponse pro relue sans sa carte en direct (qui ne survit pas à un rechargement) : ses outils, repliés
   if (pro && !carded && msg.tools?.length) out += historyTools(msg.tools);
-  out += `<div class="msg ${pro ? "pro" : "her"}">${mikaAvatar("sm")}<div class="msg-col">${locationNote(msg)}${bubbles}${files}${maps}
+  const at = msgAttrs(msg, view.found);
+  out += `<div class="msg ${pro ? "pro" : "her"}${at.found}"${at.key}>${mikaAvatar("sm")}<div class="msg-col">${locationNote(msg)}${bubbles}${files}${maps}
     <div class="msg-meta">${h(label)}${judged}</div></div></div>`;
   if (view.operator && msg.verdictNote) out += sysNote(`Ce qu'elle aurait dû dire : ${msg.verdictNote}`, "her");
   const error = typeof msg.id === "number" ? view.verdictErrors.get(msg.id) : undefined;
@@ -282,8 +297,9 @@ export function threadMarkup(view: ThreadView): string {
   const all = view.messages;
   const shownMessages = view.filter ? all.filter(view.filter) : all;
   const out: string[] = [];
-  if (view.truncated && !view.pro) {
-    out.push(`<div class="day"><span>Historique plus ancien tronqué : seuls les derniers messages sont ici</span></div>`);
+  if (view.older !== "none") {
+    const loading = view.older === "loading";
+    out.push(`<div class="chat-older"><button class="btn xs ghost" type="button" data-older${loading ? " disabled" : ""}>${ico("history", "xs")}${loading ? "Chargement…" : "Messages plus anciens"}</button></div>`);
   }
   // ses cartes de travail : repliées au-dessus de leur réponse, après le message de la personne, ou en bas
   const before = new Map<number, string[]>();
@@ -366,13 +382,26 @@ export interface CardKind {
   draft: string;
 }
 
-/** Les cartes qui se décident là où elles partiront (ADR 0191) : un mail de sa boîte, une réponse Teams. */
-export function elsewhere(kind: CardKind | undefined): { href: string; where: string; icon: "mail" | "teams" } | null {
+/** Où se décide une carte qui part ailleurs : l'adresse de son brouillon, le nom de l'écran, son icône. */
+export interface Elsewhere {
+  href: string;
+  where: "Mail" | "Teams";
+  icon: "mail" | "teams";
+}
+
+/**
+ * Les cartes qui se décident là où elles partiront (ADR 0191) : un mail de sa boîte, une réponse Teams. Le lien
+ * ouvre le brouillon même (`#mail/messages/brouillon/<id>`, `#teams/brouillons/<id>`, où Teams le surligne) ; une
+ * réponse Teams sans brouillon nommé, la liste « Ses brouillons ».
+ */
+export function elsewhere(kind: CardKind | undefined): Elsewhere | null {
   if (!kind) return null;
   if (kind.capability === "email.send" && kind.draft) {
     return { href: `#mail/messages/brouillon/${encodeURIComponent(kind.draft)}`, where: "Mail", icon: "mail" };
   }
-  if (kind.capability === "teams.send") return { href: "#teams/brouillons", where: "Teams", icon: "teams" };
+  if (kind.capability === "teams.send") {
+    return { href: kind.draft ? replyHash(kind.draft) : "#teams/brouillons", where: "Teams", icon: "teams" };
+  }
   return null;
 }
 
@@ -389,18 +418,39 @@ export function cardKinds(items: unknown): Map<number, CardKind> {
   return out;
 }
 
-/** Une carte qui se décide ailleurs : un lien, jamais ses boutons. */
-function linkCard(card: ApprovalCard, to: { href: string; where: string; icon: "mail" | "teams" }): string {
+/**
+ * Une carte qui se décide ailleurs : un lien, jamais ses boutons. Une ligne compacte — ce qu'elle a préparé (deux
+ * lignes au plus, le reste en infobulle), où cela se décide, « Ouvrir » sur la même ligne, même sur un téléphone.
+ */
+function linkCard(card: ApprovalCard, to: Elsewhere): string {
   return `<div class="approval link" data-card="${card.id}">
-    <div class="ap-line">${ico(to.icon)}<div class="ap-main"><b>${h(card.title)}</b><span class="ap-meta">Mika a préparé un brouillon : il se relit et se décide dans ${h(to.where)}</span></div>
-      <a class="btn sm primary" href="${h(to.href)}">${ico("chev-right", "sm")}Ouvrir dans ${h(to.where)}</a></div></div>`;
+    <div class="ap-line">${ico(to.icon)}<div class="ap-main"><b title="${h(card.title)}">${h(card.title)}</b><span class="ap-meta">À relire et décider dans ${h(to.where)}</span></div>
+      <a class="btn sm primary" href="${h(to.href)}" aria-label="Ouvrir dans ${h(to.where)}">${ico("chev-right", "sm")}Ouvrir<span class="lbl"> dans ${h(to.where)}</span></a></div></div>`;
+}
+
+/**
+ * Sur un téléphone, deux cartes-liens ou plus se replient sous une ligne (« 2 brouillons à relire · Mail · Teams »),
+ * qui les déplie : sinon elles mangent le fil. Posée juste avant la première ; la feuille (app.css) ne la montre que
+ * sous 760 px, et y cache les cartes-liens qui la suivent tant qu'elle est repliée. Sur un grand écran, rien ne change.
+ */
+function linksSummary(targets: readonly Elsewhere[], open: boolean): string {
+  const places = [...new Set(targets.map((t) => t.where))];
+  const n = targets.length;
+  return `<button class="ap-links" type="button" data-ap-links aria-expanded="${open}">${ico("pen", "sm")}<b>${n} brouillons à relire</b><span class="ap-meta">${h(places.join(" · "))}</span>${ico(open ? "chev-down" : "chev-right", "sm")}</button>`;
 }
 
 /** La bande des cartes, au-dessus du champ : seules ses cartes décident. */
 export function approvalsMarkup(
   state: ApprovalsState,
   now: number,
-  opts: { note: ApprovalNote | null; auto: boolean; open: ReadonlySet<number>; kinds?: ReadonlyMap<number, CardKind> },
+  opts: {
+    note: ApprovalNote | null;
+    auto: boolean;
+    open: ReadonlySet<number>;
+    kinds?: ReadonlyMap<number, CardKind>;
+    /** Sur un téléphone, les cartes-liens dépliées sous leur ligne (`linksSummary`). */
+    linksOpen?: boolean;
+  },
 ): string {
   const out: string[] = [];
   if (opts.note) {
@@ -412,10 +462,17 @@ export function approvalsMarkup(
   if (state.cards.length && opts.auto) {
     out.push(`<div class="ap-offline auto">${ico("bolt", "sm")}<span>« Tout accepter » est allumé : chaque carte acceptable part acceptée.</span></div>`);
   }
-  for (const card of state.cards) {
-    const to = elsewhere(opts.kinds?.get(card.id));
+  const targets = state.cards.map((card) => elsewhere(opts.kinds?.get(card.id)));
+  const links = targets.filter((t): t is Elsewhere => t !== null);
+  let summarized = links.length < 2;
+  state.cards.forEach((card, i) => {
+    const to = targets[i];
+    if (to && !summarized) {
+      out.push(linksSummary(links, opts.linksOpen === true));
+      summarized = true;
+    }
     out.push(to ? linkCard(card, to) : approvalCard(state, card, now, opts.open.has(card.id)));
-  }
+  });
   return out.join("");
 }
 
@@ -427,10 +484,15 @@ export interface ComposerView {
   auto: boolean;
 }
 
+/** L'invite du champ : en mode pro, assez courte pour tenir sur une ligne d'un téléphone. */
+export function composerPlaceholder(pro: boolean): string {
+  return pro ? "Une tâche pour Mika… (/ : commandes)" : "Écrire à Mika…";
+}
+
 export function composerMarkup(view: ComposerView, maxLength: number, accept: string): string {
   return `<div class="composer${view.pro ? " pro" : ""}" data-composer>
     <div class="cmp-attach" data-attach hidden></div>
-    <textarea data-chat-input rows="1" maxlength="${maxLength}" aria-label="Ton message" placeholder="${view.pro ? "Une tâche pour Mika… (/ pour les commandes du fil)" : "Écrire à Mika…"}"></textarea>
+    <textarea data-chat-input rows="1" maxlength="${maxLength}" aria-label="Ton message" placeholder="${h(composerPlaceholder(view.pro))}"></textarea>
     <div class="cmp-bar">
       <button class="btn icon ghost sm" type="button" data-cmp="joindre" title="Joindre des fichiers (5 au plus, 5 Mo chacun)">${ico("clip")}</button>
       <button class="btn icon ghost sm" type="button" data-cmp="emoji" title="Emojis">${ico("smile")}</button>
@@ -444,15 +506,19 @@ export function composerMarkup(view: ComposerView, maxLength: number, accept: st
     </div></div>`;
 }
 
-/** Le bouton « Accords » : un par un, ou tout accepter (ADR 0170). */
+/**
+ * Le bouton « Accords » : un par un, ou tout accepter (ADR 0170). Il garde un mot sur un téléphone, où la barre du
+ * champ cache les libellés (`.lbl`) : un écran tactile ne montre pas `title`, et un bouclier seul ne dit pas qu'il
+ * commande « Tout accepter ».
+ */
 export function accordToggle(auto: boolean): { html: string; title: string } {
   return auto
     ? {
-        html: `${ico("bolt", "sm")}<span class="lbl">Tout accepter</span>`,
+        html: `${ico("bolt", "sm")}<span>Tout accepter</span>`,
         title: "Tout accepter : chaque carte acceptable part acceptée, une à la fois (pour cet onglet). Cliquer pour revenir à « un par un ».",
       }
     : {
-        html: `${ico("shield", "sm")}<span class="lbl">Accords : un par un</span>`,
+        html: `${ico("shield", "sm")}<span class="lbl">Accords : un par un</span><span class="lbl-short">Un par un</span>`,
         title: "Chaque appel extérieur attend ta carte d'accord. Cliquer pour tout accepter (cet onglet seulement).",
       };
 }
@@ -510,26 +576,32 @@ export function strandHead(info: StrandInfo, note: string): string {
 
 // ── Les fichiers échangés ─────────────────────────────────────────────
 
-/** Tous les fichiers du fil chargé : les siens se téléchargent ; les tiens ne se relisent pas ici. */
+function saveLink(url: string, name: string, api: string): string {
+  return `<a class="btn xs" href="${h(api + url)}" download="${h(name)}" target="_blank" rel="noopener">${ico("download", "xs")}Enregistrer</a>`;
+}
+
+/**
+ * Tous les fichiers du fil chargé : les siens et les tiens se téléchargent (ADR 0215 : ta propre copie, tant qu'elle
+ * est gardée). Une pièce sans adresse (pas encore lue, ou d'avant qu'elles se gardent) n'offre rien.
+ */
 export function filesTable(messages: readonly StoredMessage[], api: string, now: number): string {
   const rows: string[] = [];
   for (const m of [...messages].reverse()) {
     const when = dayAndClock(m.ts, now);
     if (m.sender === "vtuber") {
       for (const f of m.files ?? []) {
-        const action = f.available === false
-          ? '<span class="muted">plus disponible</span>'
-          : `<a class="btn xs" href="${h(api + f.url)}" download="${h(f.name)}" target="_blank" rel="noopener">${ico("download", "xs")}Enregistrer</a>`;
+        const action = f.available === false ? '<span class="muted">plus disponible</span>' : saveLink(f.url, f.name, api);
         rows.push(`<tr><td>${ico(f.kind === "image" ? "image" : "file", "sm")} ${h(f.name)}</td><td>Mika</td><td>${h(when)}</td><td class="actions">${action}</td></tr>`);
       }
     } else {
-      for (const name of splitAttachments(m.text).files) {
-        rows.push(`<tr><td>${ico(isImageName(name) ? "image" : "file", "sm")} ${h(name)}</td><td>toi</td><td>${h(when)}</td><td class="actions"><span class="muted">envoyé par toi</span></td></tr>`);
+      for (const a of m.attachments ?? []) {
+        const action = a.available === false ? '<span class="muted">plus disponible</span>' : a.url ? saveLink(a.url, a.name, api) : "";
+        rows.push(`<tr><td>${ico(a.kind === "image" ? "image" : "file", "sm")} ${h(a.name)}</td><td>toi</td><td>${h(when)}</td><td class="actions">${action}</td></tr>`);
       }
     }
   }
   if (!rows.length) {
-    return `<div class="empty">${ico("clip")}<b>Aucun fichier dans ces messages</b><p>Ce qu'elle t'envoie se télécharge d'ici ; ce que tu lui envoies, elle le garde.</p></div>`;
+    return `<div class="empty">${ico("clip")}<b>Aucun fichier dans ces messages</b><p>Ce que vous vous êtes envoyé se télécharge d'ici, tant que c'est gardé.</p></div>`;
   }
   return `<table class="tbl"><thead><tr><th>Fichier</th><th>De</th><th>Quand</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }

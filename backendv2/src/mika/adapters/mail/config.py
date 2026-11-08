@@ -65,7 +65,8 @@ class MailAccount(BaseModel):
         label="Partagée avec", group="La boîte", readonly=True, order=5,
         help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
              "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne la voit sous son propre "
-             "compte.")] = Field(default_factory=dict)
+             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+        Field(default_factory=dict)
     auth: Annotated[Literal["password", "microsoft"], Knob(
         label="Connexion", group="Connexion", choices=AUTHS, advanced=False, order=15,
         help="Hotmail, Outlook.com et Live refusent les mots de passe : choisis alors ton compte Microsoft.")] = \

@@ -1,20 +1,34 @@
 /**
- * Paramètres › Teams : ses comptes Teams (à elle), leur voix — comment Mika y écrit à sa place —, la règle de leur
- * canal (lue dans la matrice des droits), et la clé de leur extension (ADR 0069, 0186) : montrée une seule fois à sa
- * création, retirée d'un clic. Un compte partagé avec elle se montre en lecture.
+ * Paramètres › Teams : ses comptes Teams (à elle), leur voix — comment Mika y écrit à sa place —, comment part ce
+ * qu'elle y prépare (la règle de leur canal, qu'elle règle ici : ADR 0207), la clé de leur extension (ADR 0069, 0186)
+ * — montrée une seule fois à sa création, retirée d'un clic —, et les retirer. Un compte partagé avec elle se montre en
+ * lecture.
+ *
+ * La règle d'envoi d'un compte — Teams ici, une boîte dans `mail.ts` — se dessine et s'enregistre par les mêmes pièces
+ * (`rulesEditor`, `withoutRule`, `ruleUpdate`).
  */
 import { API_BASE } from "@web/network/api";
 import { ApiError } from "../../api/moi";
-import { newExtensionKey, revokeExtensionKey, saveTeamsAccount, type TeamsAccount } from "../../api/settings";
+import type { RuleLine } from "../../api/rights";
+import {
+  newExtensionKey,
+  removeTeamsAccount,
+  revokeExtensionKey,
+  saveSendRules,
+  saveTeamsAccount,
+  type SendChoice,
+  type SendRules,
+  type SendRulesUpdate,
+  type TeamsAccount,
+} from "../../api/settings";
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
-import { rulesMarkup } from "../outils/matrix";
-import { area, backLink, readForm, row, section, showFieldErrors, subTabs, text, toggle } from "./form";
+import { area, backLink, readForm, row, section, seg, select, showFieldErrors, subTabs, text, toggle } from "./form";
 import { ago, confirmModal, copyText, dateWords, failureText, newNonce, toastFailure } from "./kit";
 import type { Host, Page } from "./page";
 import * as store from "./store";
-import { fieldErrors, ofName, shareWords } from "./words";
+import { fieldErrors, ofName, shareWords, type FormValue } from "./words";
 
 const TAB = "#parametres/teams";
 const SUBS = [["compte", "Ton compte Teams"], ["regles", "Comment ça part"], ["extension", "L'extension"]] as const;
@@ -71,6 +85,72 @@ function listView(now: number): string {
   </div>`;
 }
 
+// ── Comment part ce qu'elle prépare (ADR 0207) : la règle d'un de ses comptes, Teams ou boîte ─────
+
+/** Un champ de la règle : `rule.<n>.prepare`, `rule.<n>.reply` — `<n>` sa ligne (à partir de 1), `d` la ligne par
+ *  défaut. Ils partent à part (`saveSendRules`), jamais avec les réglages du compte. */
+const RULE = "rule.";
+const PREPARE = [["oui", "Oui"], ["non", "Non"]] as const;
+/** Comment ça part, dans les mots du moteur (`vocab.access.REPLY_WORDS`). */
+const SENDS = [["accord", "ton accord"], ["seule", "seule"], ["brouillon", "brouillon — c'est toi qui l'envoies"], ["non", "non"]] as const;
+
+export type RulesKind = "mail" | "teams";
+
+/** Les choix de « comment ça part » d'une ligne : le courrier n'a pas de brouillon que tu envoies toi-même (la console
+ *  le grise) — sauf sur une ligne qui l'a déjà, qu'on montre telle qu'elle est. */
+export function sendChoices(kind: RulesKind, current: string): (readonly [string, string])[] {
+  return SENDS.filter(([k]) => k !== "brouillon" || kind === "teams" || current === "brouillon");
+}
+
+function ruleWho(l: RuleLine): string {
+  return [l.who || "Tout le monde", l.when && l.when !== "toujours" ? l.when : ""].filter(Boolean).join(" · ");
+}
+
+/** La règle d'un de ses comptes, à régler : pour chaque ligne et pour le défaut, préparer d'elle-même et comment ça
+ *  part ; qui écrit et l'ordre des lignes restent à la console. */
+export function rulesEditor(rules: SendRules, kind: RulesKind): string {
+  const line = (n: string, l: RuleLine, def = false) =>
+    `<tr${def ? ' class="def"' : ""}><td class="muted">${def ? "—" : h(n)}</td><td>${def ? '<b>Par défaut</b> <span class="small muted">quand aucune ligne au-dessus ne correspond</span>' : h(ruleWho(l))}</td>
+      <td>${seg(`${RULE}${n}.prepare`, PREPARE, l.prepare ? "oui" : "non")}</td>
+      <td>${select(`${RULE}${n}.reply`, sendChoices(kind, l.reply), l.reply, 'class="sm-select"')}</td></tr>`;
+  const rows = rules.lines.map((l, i) => line(String(i + 1), l)).join("");
+  const where = kind === "teams" ? "Teams" : "Mail";
+  const origin = rules.set
+    ? ""
+    : rules.common
+      ? ` Ce compte suit la règle de tout ${kind === "teams" ? "Teams" : "le courrier"}, réglée dans la console : l'enregistrer ici lui en donne une à lui.`
+      : " Elle n'a jamais été réglée : c'est sa règle de départ.";
+  const help = `Lue de haut en bas : la première ligne qui correspond décide. Tu règles ici ce qu'elle prépare d'elle-même et comment ça part ; qui écrit et l'ordre des lignes se règlent dans la console.${kind === "mail" ? " Le courrier n'a pas de brouillon que tu envoies toi-même : « ton accord » en tient lieu." : ""} Ce qu'elle prépare se relit dans ${where}, dans « Ses brouillons ».${origin}`;
+  return `<div class="set-row full"><table class="tbl"><thead><tr><th>#</th><th>${kind === "teams" ? "Qui écrit (ou quelle discussion)" : "Qui écrit (une adresse, un @domaine)"}</th><th>Préparer d'elle-même</th><th>Comment ça part</th></tr></thead>
+    <tbody>${rows}${line("d", rules.default, true)}</tbody></table>
+    <p class="small muted tbl-help">${h(help)}</p>
+    <div class="row tbl-help"><a class="btn xs ghost" href="#outils/droits/${encodeURIComponent(rules.canal)}">${ico("tools", "xs")}Ses outils dans Outils</a></div></div>`;
+}
+
+/** Les changements d'un formulaire sans ceux de la règle, qui partent à part ; `rule` : une case de la règle a bougé. */
+export function withoutRule(changes: Record<string, FormValue>): { rule: boolean; rest: Record<string, FormValue> } {
+  const rest: Record<string, FormValue> = {};
+  let rule = false;
+  for (const [k, v] of Object.entries(changes)) {
+    if (k.startsWith(RULE)) rule = true;
+    else rest[k] = v;
+  }
+  return { rule, rest };
+}
+
+/** Ce qui part au serveur quand une case de la règle a bougé : toute la règle, telle que le formulaire la montre, avec
+ *  l'empreinte de celle qu'on a lue. */
+export function ruleUpdate(rules: SendRules, values: Record<string, FormValue>): SendRulesUpdate {
+  const pick = (n: string, l: RuleLine): SendChoice => {
+    const prepare = values[`${RULE}${n}.prepare`];
+    const reply = values[`${RULE}${n}.reply`];
+    return { prepare: prepare === undefined ? l.prepare : prepare === "oui", reply: typeof reply === "string" && reply ? reply : l.reply };
+  };
+  return { canal: rules.canal, version: rules.version, lines: rules.lines.map((l, i) => pick(String(i + 1), l)), default: pick("d", rules.default) };
+}
+
+// ── La fiche ─────────────────────────────────────────────────────────
+
 function keyRow(key: string, a: TeamsAccount, now: number): string {
   const k = a.extension_key;
   const value = k
@@ -102,19 +182,16 @@ function ficheView(key: string, host: Host, item: string | null, now: number): s
   const sub = (id: string) => ({ sub: id, hidden: active !== id });
   const compte = section(
     "Ton compte Teams",
-    row("Nom affiché", "Comme elle l'appelle (vide : la clé du compte).", text("label", v.label, `placeholder="${h(a.name)}"`)) +
+    row("Nom affiché", "Comme elle l'appelle. Laissé vide, il prend le nom écrit en gris, reçu à sa création.", text("label", v.label, `placeholder="${h(a.key)}"`)) +
       row("Actif", "Décoché : son extension est refusée — rien n'arrive, rien ne part ; ses réglages et sa clé restent.", toggle("enabled", v.enabled)) +
       row("Ton nom", "Comme tes collègues te connaissent (vide : celui que Teams donne). Elle écrit à ta place, à la première personne.", text("display_name", v.display_name, a.self_name ? `placeholder="${h(a.self_name)}"` : "")) +
       row("Ton", "Par exemple : « tutoiement, bref, amical ».", text("tone", v.tone)) +
       row("Consignes", "Ce qu'elle ne doit jamais faire à ta place. Un message reçu, lui, n'est jamais une consigne.", area("instructions", v.instructions)) +
-      row("Signer ses réponses", "Ajoute la signature sous chaque message qu'elle prépare ; « {elle} » y devient son nom.", `${toggle("sign", v.sign)}${text("signature", v.signature)}`),
+      row("Signer ses réponses", "Ajoute la signature sous chaque message qu'elle prépare ; « {elle} » y devient son nom.", `${toggle("sign", v.sign)}${text("signature", v.signature)}`) +
+      row("Retirer ce compte", "Sa clé part avec lui, et ce que son extension avait apporté (conversations, messages, brouillons) s'efface ; ce qu'elle en a appris reste dans sa vie.", `<button class="btn sm danger" type="button" data-act="teams-remove" data-account="${h(key)}">${ico("trash", "sm")}Retirer</button>`),
     sub("compte"),
   );
-  const resource = store.rights.value?.groups.flatMap((g) => g.resources).find((r) => r.key === `teams:${key}`);
-  const rules = resource?.rules
-    ? `<div class="set-row full">${rulesMarkup(resource.rules, "teams", false)}<p class="small muted tbl-help">Elles se règlent dans la console, par un opérateur.</p></div>`
-    : `<div class="set-row full"><p class="small muted">${store.rights.error ? h(failureText(store.rights.error)) : "Chargement de sa règle…"}</p></div>`;
-  const regles = section("Comment part ce qu'elle prépare", rules, { ...sub("regles"), single: true });
+  const regles = section("Comment part ce qu'elle prépare", rulesEditor(cached.value.rules, "teams"), { ...sub("regles"), single: true });
   const extension = section(
     "Brancher l'extension",
     keyRow(key, a, now) +
@@ -156,6 +233,25 @@ async function newKey(key: string, host: Host): Promise<void> {
     const done = await newExtensionKey(key);
     keyModal(done.key);
     await host.reload(store.teamsAccounts, store.teamsSettings);
+  } catch (err) {
+    toastFailure(err);
+  }
+}
+
+async function removeAccount(key: string, host: Host): Promise<void> {
+  const a = own().find((x) => x.key === key);
+  const yes = await confirmModal({
+    title: "Retirer ce compte Teams",
+    text: `Retirer « ${a?.name ?? key} » ? Sa clé part avec lui : son extension sera refusée. Ce qu'elle avait apporté s'efface — ses conversations, ses messages, les brouillons de Mika. Ce que Mika en a appris reste dans sa vie.`,
+    ok: "Retirer",
+    danger: true,
+  });
+  if (!yes) return;
+  try {
+    const done = await removeTeamsAccount(key);
+    toast(done.message || "Compte Teams retiré.", { ico: "trash" });
+    host.go(TAB);
+    await host.reload(store.teamsAccounts, store.teamsSettings, store.shares, store.rights);
   } catch (err) {
     toastFailure(err);
   }
@@ -219,7 +315,7 @@ export const teamsPage: Page = {
   needs: () => [store.teamsAccounts],
   extras(item) {
     const key = target(item);
-    return key && own().some((a) => a.key === key) ? [store.teamsSettings.get(key), store.rights] : [];
+    return key && own().some((a) => a.key === key) ? [store.teamsSettings.get(key)] : [];
   },
   view(item, host) {
     const now = Date.now();
@@ -232,20 +328,28 @@ export const teamsPage: Page = {
     if (name === "teams-add") addModal(host);
     else if (name === "teams-key") void newKey(key, host);
     else if (name === "teams-revoke") void revoke(key, host);
+    else if (name === "teams-remove") void removeAccount(key, host);
     else if (name === "copy") void copyText(el.dataset.copy ?? "").then((ok) => toast(ok ? "Copié." : "Copie refusée.", { ico: "copy" }));
   },
-  async save(form, changes, _values, item, host) {
+  async save(form, changes, values, item, host) {
     const key = form.dataset.account ?? target(item) ?? "";
+    // les réglages du compte d'un côté, sa règle d'envoi de l'autre (ADR 0207)
+    const { rule, rest } = withoutRule(changes);
+    const rules = store.teamsSettings.get(key).value?.rules;
     try {
-      const done = await saveTeamsAccount(changes as Record<string, string | boolean>, key);
-      toast(done.message || "Enregistré.", { ico: "check" });
+      const said: string[] = [];
+      if (Object.keys(rest).length) said.push((await saveTeamsAccount(rest as Record<string, string | boolean>, key)).message);
+      if (rule && rules) said.push((await saveSendRules(ruleUpdate(rules, values))).message);
+      toast(said.filter(Boolean).join(" ") || "Enregistré.", { ico: "check" });
       await host.reload(store.teamsAccounts, store.teamsSettings, store.rights);
       return true;
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fields).length) {
-        const rest = showFieldErrors(form, fieldErrors(err.fields));
-        toast(rest.length ? rest.join(" ; ") : err.message, { ico: "alert", duration: 4200 });
+        const fields = showFieldErrors(form, fieldErrors(err.fields));
+        toast(fields.length ? fields.join(" ; ") : err.message, { ico: "alert", duration: 4200 });
       } else toastFailure(err);
+      // une règle changée ailleurs entre-temps : relue, « Annuler » la remontre telle qu'elle est
+      if (err instanceof ApiError && err.status === 409) void host.reload(store.teamsSettings);
       return false;
     }
   },

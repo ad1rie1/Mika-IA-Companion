@@ -21,7 +21,7 @@ import { mikaAvatar } from "../mika/face";
 import { dreamLabel, driveLabel, momentLabel, placeLabel, sleepLabel } from "../mika/labels";
 import { isAsleep } from "../mika/state";
 import type { MikaSnapshot, MikaStore } from "../mika/store";
-import { facetsOf, percent, statusLine } from "../mika/view";
+import { facetHtml, facetsOf, percent, projectHtml, promiseHtml, statusLine } from "../mika/view";
 import { $, $$, h, initials, isMobile, on } from "./dom";
 import { closeMenu, closeModal, modalOpen, openMenu, toast, type MenuItem } from "./float";
 import { ico, type IconName } from "./icons";
@@ -108,7 +108,10 @@ export class Shell {
     return this.account;
   }
 
-  /** Le compte change de nom (un autre appareil l'a renommé) : le menu suit. */
+  /**
+   * Le compte change de nom — renommé dans Paramètres, ou ailleurs (un autre appareil, la console : `main.ts` le relit
+   * avec les pastilles) : le menu suit.
+   */
   setAccount(account: Account): void {
     this.account = account;
     this.paintAccount();
@@ -138,7 +141,7 @@ export class Shell {
     if (!ctx) return;
     const def = this.screens.get(ctx.screen);
     const head = $(".page-head", ctx.el);
-    if (def && head) head.innerHTML = this.headMarkup(def, ctx);
+    if (def && head) this.paintHead(head, def, ctx);
   }
 
   go(hash: string): void {
@@ -278,6 +281,12 @@ export class Shell {
       <div class="ph-actions">${def.actions ? def.actions(ctx) : ""}</div>`;
   }
 
+  /** La barre de titre, et le nom de ses boutons (`nameTitleButtons`). */
+  private paintHead(head: HTMLElement, def: ScreenDef, ctx: ScreenContext): void {
+    head.innerHTML = this.headMarkup(def, ctx);
+    nameTitleButtons(head);
+  }
+
   private display(): void {
     const route = parseRoute(location.hash, this.shapes());
     const def = this.screens.get(route.screen);
@@ -293,7 +302,7 @@ export class Shell {
     }
     const ctx: ScreenContext = { ...route, el: section };
     this.current = ctx;
-    $(".page-head", section)!.innerHTML = this.headMarkup(def, ctx);
+    this.paintHead($(".page-head", section)!, def, ctx);
     this.corner.park();
     def.render($(".page-body", section)!, ctx);
     this.corner.lodge(section.querySelector("[data-mika-scene]"));
@@ -329,11 +338,7 @@ export class Shell {
     const sections: string[] = [];
     const facets = facetsOf(s.mood);
     if (facets.length) {
-      sections.push(
-        `<div class="sc-sec"><h4>Humeur</h4>${facets
-          .map((f) => `<div class="facet"><span>${h(f.label)}</span><span class="bar"><i style="width:${Math.round(f.value * 100)}%"></i></span><span class="num">${percent(f.value)}</span></div>`)
-          .join("")}</div>`,
-      );
+      sections.push(`<div class="sc-sec"><h4>Humeur</h4>${facets.map(facetHtml).join("")}</div>`);
     }
     const body: string[] = [];
     const moment = s.circadian ? momentLabel(s.circadian.phase) : null;
@@ -369,11 +374,7 @@ export class Shell {
       );
     }
     if (s.commitments.length) {
-      sections.push(
-        `<div class="sc-sec"><h4>Ce qu'elle t'a promis</h4>${s.commitments
-          .map((c) => `<div class="sc-line">${ico("check", "sm")}<span>${h(c)}</span></div>`)
-          .join("")}</div>`,
-      );
+      sections.push(`<div class="sc-sec"><h4>Ce qu'elle t'a promis</h4>${s.commitments.map(promiseHtml).join("")}</div>`);
     }
     if (s.journal) {
       sections.push(
@@ -381,11 +382,7 @@ export class Shell {
       );
     }
     if (s.projects.length) {
-      sections.push(
-        `<div class="sc-sec"><h4>Ses projets avec toi</h4>${s.projects
-          .map((p) => `<div class="sc-line">${ico("code", "sm")}<span>${h(p.title)} ${p.status ? `<span class="tag">${h(p.status)}</span>` : ""}</span></div>`)
-          .join("")}</div>`,
-      );
+      sections.push(`<div class="sc-sec"><h4>Ses projets avec toi</h4>${s.projects.map(projectHtml).join("")}</div>`);
     }
     return `<div class="sc-head">${mikaAvatar("lg", asleep ? "away" : "on")}<div><b>Mika</b>
         <span>${h(line.full)}</span></div>
@@ -547,4 +544,18 @@ export class Shell {
 
 function capital(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+/**
+ * Un bouton de la barre de titre garde son nom sur un téléphone, où base.css cache son libellé (`.lbl`) et ne laisse
+ * que l'icône : il reçoit `title` (l'infobulle) et `aria-label` (le nom qu'un lecteur d'écran annonce), d'après ce
+ * libellé — sauf ceux que l'écran a déjà posés (un `title` qui dit pourquoi un bouton est éteint reste).
+ */
+export function nameTitleButtons(head: ParentNode): void {
+  for (const btn of Array.from(head.querySelectorAll<HTMLElement>(".ph-actions .btn"))) {
+    const label = (btn.querySelector(".lbl")?.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!label) continue;
+    if (!btn.hasAttribute("title")) btn.setAttribute("title", label);
+    if (!btn.hasAttribute("aria-label")) btn.setAttribute("aria-label", label);
+  }
 }

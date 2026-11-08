@@ -57,7 +57,7 @@ def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  
     newer = new_key(client, live)
     assert client.get("/api/teams/outbox", headers=headers(key)).status_code == 401
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 200
-    client.portal.call(live.teams.revoke_key, "principal", "test")
+    client.portal.call(live.teams.revoke_key, "principal")
     assert client.get("/api/teams/outbox", headers=headers(newer)).status_code == 401
     # la clé en clair n'est gardée nulle part dans les réglages
     stored = str(client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings", ()))

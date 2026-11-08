@@ -1,8 +1,9 @@
 """Comptes et sessions, rangés dans ``mind.db`` (sauvegardés avec sa vie).
 
 Mots de passe : ``scrypt`` (sel aléatoire, paramètres dans l'empreinte).
-Sessions : jeton aléatoire opaque, durée bornée. Le premier compte ne se crée
-que tant qu'il n'en existe aucun ; il est opérateur.
+Sessions : jeton aléatoire opaque, durée bornée ; la console les compte par compte
+(``sessions``, ``last_seen``, jamais leur clé) et les ferme d'un coup (``close_sessions``).
+Le premier compte ne se crée que tant qu'il n'en existe aucun ; il est opérateur.
 
 Vérifier un mot de passe coûte **un** scrypt, que le compte existe ou non (le
 leurre est calculé une fois) : la durée ne dit pas qui a un compte. ``verify``
@@ -49,6 +50,7 @@ from typing import Any
 from sqlalchemy import Index, delete, func, select, update
 from sqlalchemy.orm import Mapped, mapped_column
 
+from mika.adapters.web.gate import new_key, token_digest
 from mika.ports.sql import Id, Key, LongText, MindBase, table_args
 
 SESSION_TTL_S = 14 * 24 * 3600
@@ -164,6 +166,14 @@ class ClientToken:
 
 
 @dataclass(frozen=True, slots=True)
+class WebSession:
+    """Une session web ouverte, telle qu'on la montre : quand elle s'est ouverte, quand elle expire — jamais sa clé."""
+
+    created_at: int
+    expires_at: int
+
+
+@dataclass(frozen=True, slots=True)
 class PushRegistration:
     """Où notifier un téléphone (ADR 0077) : son jeton Firebase et la clé (base64) qui scelle ce qui lui part."""
 
@@ -222,10 +232,6 @@ class ClientTokenRow(MindBase):
 
 
 ENTITIES = (AccountRow, SessionRow, ClientTokenRow)
-
-
-def token_digest(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def account_of_handle(handle: str | None) -> int | None:
@@ -346,6 +352,45 @@ class Accounts:
     async def close_session(self, key: str) -> None:
         await self.store.run_mind(lambda sql: sql.execute(delete(SessionRow).where(SessionRow.key == key)))
 
+    def sessions(self, account_id: int) -> list[WebSession]:
+        """Les sessions web encore valides de ce compte, la plus récente d'abord — jamais leur clé."""
+        now = int(time.time())
+        rows = self.store.query_mind(
+            select(SessionRow.created_at, SessionRow.expires_at)
+            .where(SessionRow.account == account_id, SessionRow.expires_at >= now)
+            .order_by(SessionRow.created_at.desc()))
+        return [WebSession(int(r[0]), int(r[1])) for r in rows]
+
+    async def close_sessions(self, account_id: int) -> int:
+        """Ferme toutes les sessions web de ce compte (un navigateur oublié, un portable perdu), sans toucher à ses
+        jetons d'application ; rend combien étaient encore valides. Ses pages se déconnectent à leur requête
+        suivante, ses WebSockets à leur revérification (``CREDENTIAL_CHECK_S``) : rien ne les prévient, comme une
+        déconnexion depuis la console."""
+        now = int(time.time())
+        closed: list[int] = []
+
+        def write(sql: Any) -> None:
+            live = sql.query(select(func.count()).select_from(SessionRow)
+                             .where(SessionRow.account == account_id, SessionRow.expires_at >= now))
+            closed.append(int(live[0][0]) if live else 0)
+            sql.execute(delete(SessionRow).where(SessionRow.account == account_id))
+
+        await self.store.run_mind(write)
+        return closed[0] if closed else 0
+
+    def last_seen(self) -> dict[int, int]:
+        """La dernière connexion de chaque compte (secondes) : l'ouverture de sa session web la plus récente encore
+        gardée, ou le dernier usage d'un de ses jetons, la plus récente des deux. Une session fermée (déconnexion,
+        mot de passe changé, compte désactivé) n'est plus gardée : la date réelle peut être plus récente."""
+        out: dict[int, int] = {}
+        for query in (select(SessionRow.account, func.max(SessionRow.created_at)).group_by(SessionRow.account),
+                      select(ClientTokenRow.account, func.max(ClientTokenRow.last_used))
+                      .where(ClientTokenRow.last_used.is_not(None)).group_by(ClientTokenRow.account)):
+            for account, at in self.store.query_mind(query):
+                if at is not None:
+                    out[int(account)] = max(out.get(int(account), 0), int(at))
+        return out
+
     # ── administration (l'inspecteur) ──
     def all(self) -> list[Account]:
         rows = self._read(lambda s: list(s.scalars(select(AccountRow).order_by(AccountRow.id))))
@@ -419,7 +464,7 @@ class Accounts:
         account = next((a for a in self.all() if a.id == account_id), None)
         if account is None or not account.active:
             raise ValueError("Compte inconnu ou désactivé : pas de jeton.")
-        raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+        raw = new_key(TOKEN_PREFIX)
         clean = " ".join(label.split())[:60]
         now = int(time.time())
         made: list[int] = []

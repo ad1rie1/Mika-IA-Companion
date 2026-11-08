@@ -45,7 +45,7 @@ RESPONSE_MAX_BYTES = 16 * 1024 * 1024
 #: comment chaque mode se dit chez Valhalla
 COSTING = {"voiture": "auto", "velo": "bicycle", "pied": "pedestrian"}
 MODE_FR = {"voiture": "en voiture", "velo": "à vélo", "pied": "à pied"}
-NOT_SET = "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires."
+NOT_SET = "Les itinéraires ne sont pas réglés."
 BUSY = "Le serveur d'itinéraires est très demandé : réessaie dans un instant."
 #: le Valhalla public de FOSSGIS : une demande par seconde au plus, pour tout le processus
 FOSSGIS_PACE = Pace(FOSSGIS_PER_SECOND, wait_max=20.0, busy=BUSY)

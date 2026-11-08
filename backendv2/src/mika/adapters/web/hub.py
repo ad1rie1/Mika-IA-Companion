@@ -360,6 +360,19 @@ class Hub:
             log.warning("fichiers envoyés illisibles (%s) : %r", ", ".join(wanted), exc)
             return []
 
+    def pieces(self, files: Any) -> list[SharedMeta]:
+        """Ce qu'on peut montrer des pièces qu'une personne a envoyées (ADR 0215) ; un port qui ne sait pas le dire,
+        ou qui échoue, n'empêche pas le fil de partir : la pièce reste montrée par son nom."""
+        getter = getattr(self.port, "pieces", None)
+        wanted = tuple(f for f in (files or ()) if isinstance(f, str))
+        if getter is None or not wanted:
+            return []
+        try:
+            return list(getter(wanted))
+        except Exception as exc:  # le fil part quand même, sans le lien vers ces pièces
+            log.warning("pièces reçues illisibles (%s) : %r", ", ".join(wanted), exc)
+            return []
+
     def notes(self, ids: Any) -> list[MessageNote]:
         """Les petites bulles de ce qu'elle a fait en écrivant un message (ADR 0119) ; un port qui ne sait pas le dire,
         ou qui échoue, n'empêche jamais une livraison : le message part sans elles."""
@@ -375,12 +388,15 @@ class Hub:
 
     def history(self, mode: str, rows: Any, *, life: str | None = None, **kw: Any) -> dict[str, Any]:
         """Une trame ``history`` : l'empreinte de sa vie, ce qu'on peut montrer des fichiers qu'elle a envoyés avec
-        ses messages de ce morceau du fil, et les petites bulles de ce qu'elle a fait en les écrivant."""
+        ses messages de ce morceau du fil, des pièces que la personne a envoyées avec les siens (ADR 0215), et les
+        petites bulles de ce qu'elle a fait en les écrivant."""
         ids = [i for r in rows if r.role == "assistant" for i in protocol.sent_ids(r.attachments)]
         shared = {m.id: m for m in self.shared(ids)}
         notes = {n.id: n for n in self.notes(ids)}
+        kept = [f for r in rows if r.role != "assistant" for f in protocol.piece_ids(r.attachments)]
+        pieces = {m.id: m for m in self.pieces(kept)}
         return protocol.history(mode, rows, life=self.life() if life is None else life, shared=shared, notes=notes,
-                                **kw)
+                                pieces=pieces, **kw)
 
     def life(self) -> str:
         """L'empreinte de sa vie, jointe à chaque trame ``history`` (vide si le port ne la connaît pas)."""

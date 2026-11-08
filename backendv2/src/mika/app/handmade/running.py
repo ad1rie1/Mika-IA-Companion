@@ -23,8 +23,7 @@ from mika.vocab.episodes import Kind
 
 #: ce qu'elle fait, dit par un verbe (« elle répond à Adrien »)
 DOING = {Kind.REPLY: "répond à", Kind.INITIATIVE: "écrit d'elle-même à", Kind.STEP: "avance sur",
-         Kind.MURMUR: "murmure à", Kind.JOURNAL: "écrit son journal", Kind.DREAM: "rêve",
-         Kind.NARRATIVE: "relit son récit", Kind.TASK: "prépare en silence", Kind.WORK: "travaille sur",
+         Kind.MURMUR: "murmure à", Kind.TASK: "prépare en silence", Kind.WORK: "travaille sur",
          Kind.JOB: "exécute", Kind.WAKE: "répond à un réveil", Kind.WAKE_JOB: "exécute un réveil"}
 #: au-delà, un épisode ouvert dure plus longtemps que d'habitude
 LONG = 120 * US

@@ -207,7 +207,7 @@
     <string name="settings_push_title">Application fermée</string>
     <string name="settings_push_active">Ses messages t\'arrivent par Firebase, chiffrés pour ce téléphone seul. Aucune connexion ne reste ouverte : la batterie n\'en souffre pas.</string>
     <string name="settings_push_pending">Pas encore actives : le serveur n\'était pas joignable. Ce sera fait à la prochaine ouverture, chez toi.</string>
-    <string name="settings_push_server_without_key">Le serveur n\'a pas encore de clé Firebase (console › Réglages › Canaux › Notifications du téléphone) : tu ne reçois ses messages qu\'en ouvrant l\'application.</string>
+    <string name="settings_push_server_without_key">Le serveur n\'a pas encore de clé Firebase (console › Réglages › Carte et téléphone › Notifications du téléphone) : tu ne reçois ses messages qu\'en ouvrant l\'application.</string>
     <string name="settings_push_unavailable">Cette version de l\'application est construite sans Firebase : tu ne reçois ses messages qu\'en l\'ouvrant.</string>
     <string name="settings_push_retry">Réessayer</string>
     <string name="settings_reads_title">Lui dire quand j\'ai lu</string>

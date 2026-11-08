@@ -76,14 +76,14 @@
   background: var(--surface-2); font-size: 13.5px; }
 .mail-her-kicker { margin: 0; color: var(--muted); font-size: 11.5px; font-weight: 650; letter-spacing: .04em;
   text-transform: uppercase; }
-.mail-her-said { margin: 0; color: var(--text); font-family: var(--now-serif); font-size: 1.02rem; overflow-wrap: anywhere; }
+.mail-her-said { margin: 0; color: var(--text); font-family: var(--display); font-size: 1.02rem; overflow-wrap: anywhere; }
 .mail-her-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; }
 .mail-her-note { margin: 0; color: var(--text-2); }
 .mail-her-more { margin: 0; font-size: 12.5px; }
 .mail-reader-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 14px;
   border-bottom: 1px solid var(--border); }
 .mail-reader-title { display: grid; gap: 6px; min-width: 0; }
-.mail-reader-title h2 { margin: 0; font-family: var(--now-serif); font-size: 1.35rem; font-weight: 600; overflow-wrap: anywhere; }
+.mail-reader-title h2 { margin: 0; font-family: var(--display); font-size: 1.35rem; font-weight: 600; overflow-wrap: anywhere; }
 .mail-reader-title .now-sub { margin: 0; }
 .mail-reader-links { display: flex; flex: none; align-items: center; gap: 14px; margin: 0; font-size: 13px; }
 .mail-close { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--muted);
@@ -99,7 +99,7 @@
 .mail-envelope.waiting { border-left-color: var(--warn); }
 .mail-envelope.check { border-left-color: var(--danger); }
 .mail-envelope-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin: 0; }
-.mail-envelope-subject { margin-right: 4px; color: var(--text); font-family: var(--now-serif); font-size: 1.08rem; font-weight: 600;
+.mail-envelope-subject { margin-right: 4px; color: var(--text); font-family: var(--display); font-size: 1.08rem; font-weight: 600;
   overflow-wrap: anywhere; }
 a.mail-envelope-subject:hover { color: var(--accent); }
 .mail-envelope-facts { display: grid; gap: 4px; margin: 0; }

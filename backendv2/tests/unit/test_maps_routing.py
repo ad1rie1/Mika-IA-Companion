@@ -227,8 +227,10 @@ async def test_arguments_outside_the_port_are_refused(points, mode, avoid):
 async def test_without_routing_nothing_leaves():
     r, _clock = router(lambda request: pytest.fail("rien ne doit partir"), source="aucun")
     assert not r.ready() and r.provider() == ""
-    with pytest.raises(MapsUnavailable, match="Réglages › Canaux › Itinéraires"):
+    with pytest.raises(MapsUnavailable) as caught:
         await r.route([ANNECY, CHAMBERY])
+    # ce qui manque, sans chemin de console : ce mot arrive aux personnes et au modèle
+    assert str(caught.value) == "Les itinéraires ne sont pas réglés."
     with pytest.raises(MapsUnavailable):
         await r.optimize([ANNECY, CHAMBERY])
     own, _clock = router(lambda request: httpx.Response(200, json=trip()), source=VALHALLA,

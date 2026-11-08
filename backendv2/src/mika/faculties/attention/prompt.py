@@ -277,7 +277,8 @@ class NoArgs(BaseModel):
     pass
 
 
-@ATTENTION.tool("attention_thoughts", description=phrase("attention.tools.thoughts.description"), args=NoArgs,
+@ATTENTION.tool("attention_thoughts", description=phrase("attention.tools.thoughts.description"),
+                label=phrase("attention.tools.thoughts.label"), args=NoArgs,
                 bundle="attention", episodes=[Kind.INITIATIVE])
 async def attention_thoughts(args: NoArgs, ctx: Any) -> str:
     """Seulement quand elle prend la parole d'elle-même : en réponse, la section

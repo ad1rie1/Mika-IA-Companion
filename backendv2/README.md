@@ -76,11 +76,12 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   Unity, l'application Android de `frontend/Android/`), avec un compte ; il n'y a
   pas de Telegram (ADR 0060). Un client natif s'authentifie par un jeton de son
   compte : l'application Android l'obtient elle-même par identifiant et mot de
-  passe (`POST /auth/token`), un moteur de jeu le reçoit en ligne de commande
-  (`python -m mika token create <compte> --label …`). L'application Android est
-  une messagerie : Mika peut y écrire la première, application fermée comprise
-  (une notification Firebase), et on peut s'y envoyer des fichiers (ADR 0062,
-  0077, `docs/protocole-chat.md`).
+  passe (`POST /auth/token`), un moteur de jeu le reçoit de la console (Réglages ›
+  Comptes, la page de son compte, « Nouveau jeton », montré une seule fois) ou en
+  ligne de commande (`python -m mika token create <compte> --label …`).
+  L'application Android est une messagerie : Mika peut y écrire la première,
+  application fermée comprise (une notification Firebase), et on peut s'y envoyer
+  des fichiers (ADR 0062, 0077, `docs/protocole-chat.md`).
 - **Lui donner une vie importée** (un rejeu d'archives) : `mika.app.genesis` ajoute
   souvenirs, croyances et moments à l'instant courant d'un noyau démarré, et coupe
   sa vie spontanée le temps du rejeu ; sa nature (`nature: incarnee` dans la

@@ -1,6 +1,7 @@
 /**
- * Paramètres › Compte : son nom (celui sous lequel Mika la connaît), son identifiant, son rôle ; son mot de passe
- * (le changer ferme toutes ses sessions : on se reconnecte) ; le thème de ce navigateur.
+ * Paramètres › Compte : son nom (celui sous lequel Mika la connaît), son identifiant, son rôle, ce qu'elle sait de toi
+ * (« Lui demander » ouvre le chat, la question posée) ; son mot de passe (le changer ferme toutes ses sessions : on se
+ * reconnecte) ; le thème de ce navigateur.
  */
 import type { Me } from "../../api/me";
 import { ApiError } from "../../api/moi";
@@ -8,6 +9,7 @@ import { savePassword, saveName } from "../../api/settings";
 import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
+import type { Shell } from "../../shell/shell";
 import { currentChoice } from "../../shell/theme";
 import { readForm, row, section, seg, showFieldErrors, subTabs, text } from "./form";
 import { failureText } from "./kit";
@@ -32,6 +34,31 @@ function roleHelp(me: Me): string {
 }
 
 export const PASSWORD_HELP = "8 caractères au moins, pas seulement des chiffres, sans ton identifiant dedans.";
+/** La question que « Lui demander » pose dans le chat. */
+export const ASK_ME = "Qu'est-ce que tu sais de moi ?";
+
+/**
+ * Ouvrir le chat avec une question posée dans son champ, à relire avant de l'envoyer : l'aide de « Lui demander », ici
+ * et sur la fiche d'un outil (Outils). Ce qui y était déjà écrit reste, la question vient à la suite. Le champ est
+ * attendu le temps que le chat se dessine (il garde ce qui est écrit quand il se redessine).
+ */
+export function askMika(shell: Shell, question: string): void {
+  shell.go("#chat");
+  let tries = 0;
+  const put = () => {
+    const input = document.querySelector<HTMLTextAreaElement>('.screen[data-screen="chat"]:not([hidden]) [data-chat-input]');
+    if (!input || input.disabled) {
+      if (++tries < 40) window.setTimeout(put, 25);
+      return;
+    }
+    const before = input.value.trim();
+    input.value = before ? `${before}\n${question}` : question;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  window.setTimeout(put, 0);
+}
 /** La borne de `current` et `password` dans l'API (au-delà : 400, jamais coupé). */
 const PASSWORD_MAX = 200;
 
@@ -100,7 +127,7 @@ export const accountPage: Page = {
       row("Nom affiché", "Le nom sous lequel elle te connaît.", text("name", me.name, 'autocomplete="name" maxlength="120"')) +
         row("Identifiant", "Celui de la connexion, sur le web comme sur le téléphone.", `<span class="mono">${h(me.username)}</span><span class="tag">ne change pas</span>`) +
         row("Ton rôle", roleHelp(me), roleTags(me)) +
-        row("Ce qu'elle sait de toi", "Ce qu'elle a retenu de toi se demande à elle, dans le chat.", `<a class="btn xs ghost" href="#chat">${ico("sparkle", "xs")}Lui demander</a>`),
+        row("Ce qu'elle sait de toi", "Ce qu'elle a retenu de toi se demande à elle, dans le chat.", `<button class="btn xs ghost" type="button" data-act="ask-me" title="${h(ASK_ME)}">${ico("sparkle", "xs")}Lui demander</button>`),
       { sub: "compte", hidden: active !== "compte" },
     );
     const security = section(
@@ -116,8 +143,9 @@ export const accountPage: Page = {
     )}</div>`;
     return `<form class="set-page" data-form="compte">${subTabs("compte", SUBS, active)}${account}${security}${looks}</form>`;
   },
-  act(name) {
+  act(name, _el, _item, host) {
     if (name === "password") passwordModal();
+    else if (name === "ask-me") askMika(host.shell, ASK_ME);
   },
   async save(form, changes, _values, _item, host) {
     if (!("name" in changes)) return true;

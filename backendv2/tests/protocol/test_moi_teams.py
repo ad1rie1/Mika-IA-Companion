@@ -5,13 +5,14 @@ accord ; ses décisions sur une réponse de Mika passent par les actions de la c
 from __future__ import annotations
 
 import json
+import time
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.app.moi import form
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.events import Content
-from mika.plugins.teams import TeamsParams
+from mika.plugins.teams import ANSWERED, WRITTEN, TeamsParams
 from mika.ports.teams import Draft as TeamsDraft
 from mika.ports.teams import conversation_key
 from mika.runtime.operations import perform
@@ -173,3 +174,129 @@ def test_an_unchecked_account_takes_no_request_and_says_none_is_under_way(world)
     client.portal.call(live.kernel.set_params, "teams", TeamsParams(enabled=False))
     off = post(client, "/teams/prefill", {"message": message.ref})
     assert off.status_code == 409 and off.json()["error"] == "Teams est désactivé : elle n'y prépare rien."
+
+
+# ── Le nom d'un tête-à-tête (audit du 2026-11-05, F2-01) ──
+
+
+def said(conv: str, author: str, author_id: str, text: str, *, n: int, own: bool = False, title: str = "",
+         kind: str = "dm", ago_ms: int = 0) -> dict:
+    """Un lot de l'extension : un message dans une conversation."""
+    now = int(time.time() * 1000)
+    return {"self": {"id": "8:orgid:adrien", "name": "Adrien"},
+            "conversations": [{"id": conv, "title": title, "kind": kind}],
+            "messages": [{"id": f"{1_759_100_000_000 + n}", "conv": conv, "author": author, "author_id": author_id,
+                          "time": now - ago_ms, "text": text, "own": own, "mentions_me": False}]}
+
+
+def test_a_one_to_one_is_named_after_the_other_person_everywhere(world):  # noqa: F811
+    client, live, key = with_teams(world)
+    other = "19:x7_adrien@unq.gbl.spaces"  # un identifiant qui ne dit pas qui est en face
+    group = "19:equipe@thread.v2"
+    for batch_ in (said(other, "Bérénice Fontaine", "8:orgid:b", "Tu as vu ?", n=1),
+                   said(other, "Adrien", "8:orgid:adrien", "Pas encore.", n=2, own=True),
+                   said(group, "Marc", "8:orgid:m", "Point hebdo demain", n=3, title="Point hebdo", kind="group")):
+        assert client.post("/api/teams/inbox", json=batch_, headers=headers(key)).status_code == 202
+    items = {c["key"]: c for c in client.get(API + "/teams/conversations").json()["items"]}
+    # deux tête-à-tête sans titre de Teams : chacun au nom de l'autre personne (jamais le sien, qui a écrit en dernier)
+    assert items[DM]["title"] == "Alice" and items[other]["title"] == "Bérénice Fontaine"
+    assert items[group]["title"] == "Point hebdo"  # un groupe garde le titre de Teams
+    # le même nom dans le fil, que ses réponses portaient déjà
+    assert client.get(API + f"/teams/thread?conversation={other}").json()["title"] == "Bérénice Fontaine"
+    assert client.get(API + f"/teams/thread?conversation={group}").json()["title"] == "Point hebdo"
+    # et la recherche le trouve, casse et accents ignorés
+    found = client.get(API + "/teams/conversations?q=berenice").json()["items"]
+    assert [c["key"] for c in found] == [other]
+    assert [c["key"] for c in client.get(API + "/teams/conversations?q=hebdo").json()["items"]] == [group]
+    assert client.get(API + "/teams/conversations?q=personne").json()["items"] == []
+
+
+def test_an_untitled_group_is_not_named_after_whoever_spoke_last(world):  # noqa: F811
+    """Un groupe sans titre de Teams ne prend pas le nom de qui y a parlé en dernier : il en changerait à chaque
+    auteur, et se confondrait avec le tête-à-tête de cette personne (relecture du lot L11). Un tête-à-tête dont
+    l'extension n'a pas dit la sorte se reconnaît à son identifiant."""
+    client, live, key = with_teams(world)
+    group = "19:sanstitre@thread.v2"
+    other = "19:y8_adrien@unq.gbl.spaces"
+    for batch_ in (said(group, "Marc", "8:orgid:m", "On fait le point ?", n=1, kind="group"),
+                   said(group, "Bérénice Fontaine", "8:orgid:b", "Oui, demain.", n=2, kind="group"),
+                   said(other, "Bérénice Fontaine", "8:orgid:b", "Tu as vu ?", n=3, kind="other")):
+        assert client.post("/api/teams/inbox", json=batch_, headers=headers(key)).status_code == 202
+    items = {c["key"]: c for c in client.get(API + "/teams/conversations").json()["items"]}
+    assert (items[group]["kind"], items[group]["title"]) == ("group", "")  # le client écrit « (sans titre) »
+    assert (items[other]["kind"], items[other]["title"]) == ("other", "Bérénice Fontaine")
+    assert client.get(API + f"/teams/thread?conversation={group}").json()["title"] == ""
+    assert client.get(API + f"/teams/thread?conversation={other}").json()["title"] == "Bérénice Fontaine"
+    # la recherche trouve la personne dans son tête-à-tête, pas dans le groupe où elle a parlé en dernier
+    assert [c["key"] for c in client.get(API + "/teams/conversations?q=berenice").json()["items"]] == [other]
+
+
+# ── Répondu autrement (ADR 0199, audit du 2026-11-05 Q16) ──
+
+
+def until(check, seconds: float = 5.0):
+    """Ce que ``check`` rend, dès qu'il est vrai (un processus du serveur y travaille, à côté)."""
+    deadline = time.monotonic() + seconds
+    while True:
+        got = check()
+        if got or time.monotonic() > deadline:
+            return got
+        time.sleep(0.05)
+
+
+def reply_of(client, draft: str) -> dict:
+    return next(r for r in client.get(API + "/teams/replies").json()["items"] if r["id"] == draft)
+
+
+def test_your_message_refuses_her_reply_waiting_in_the_discussion(world):  # noqa: F811
+    client, live, key = with_teams(world)
+    draft = propose(client, live)
+    seen = reply_of(client, draft)["preview"]["digest"]
+    assert client.get(API).json()["counts"]["teams"] == 1
+    assert post(client, "/teams/send", {"conversation": DM, "body": "Oui, 14 h."}).status_code == 200
+    # aussitôt : sa réponse ne s'approuve plus — sinon elle partirait après la tienne
+    late = post(client, "/teams/reply/send", {"id": draft, "seen": seen})
+    assert late.status_code == 409, late.text
+    refused = until(lambda: reply_of(client, draft)["state"] == "refuse" and reply_of(client, draft))
+    assert refused, reply_of(client, draft)
+    assert refused["answered"] is True and refused["note"] == ANSWERED  # la carte le dit
+    [decision] = journal(live, rt.EFFECT_RESOLVED)
+    assert not decision.data.approved and decision.data.by == "user_1"
+    assert [w.data.conversation for w in journal(live, WRITTEN)] == [DM]
+    thread = client.get(API + f"/teams/thread?conversation={DM}").json()
+    assert thread["under_way"] is False and client.get(API).json()["counts"]["teams"] == 0
+    # seul ton message part
+    assert [i["text"] for i in client.get("/api/teams/outbox", headers=headers(key)).json()["items"]] == ["Oui, 14 h."]
+    assert client.portal.call(live.kernel.ports["teams"].draft, draft).state == "abandonne"
+
+
+def test_a_message_typed_in_teams_after_hers_refuses_her_waiting_reply(world):  # noqa: F811
+    client, live, key = with_teams(world)
+    draft = propose(client, live)
+    # un vieux message d'Adrien, d'avant la question (un rattrapage) : il n'y répond pas
+    old = said(DM, "Adrien", "8:orgid:adrien", "Salut !", n=7, own=True, ago_ms=3_600_000)
+    assert client.post("/api/teams/inbox", json=old, headers=headers(key)).status_code == 202
+    assert not until(lambda: reply_of(client, draft)["answered"], 0.5)
+    assert reply_of(client, draft)["state"] == "attend"
+    # sa réponse, tapée dans Teams après la question : elle revient dans le fil, la sienne ne partira pas
+    now = said(DM, "Adrien", "8:orgid:adrien", "Oui, 14 h.", n=8, own=True)
+    assert client.post("/api/teams/inbox", json=now, headers=headers(key)).status_code == 202
+    assert until(lambda: reply_of(client, draft)["state"] == "refuse"), reply_of(client, draft)
+    got = reply_of(client, draft)
+    assert got["answered"] is True and got["note"] == ANSWERED
+
+
+def test_a_refusal_note_is_read_by_the_owner_not_through_a_share(world):  # noqa: F811
+    """La note de qui a refusé est gardée à part (l'oubli l'atteint) : « Ses brouillons » la relit pour le propriétaire
+    du compte ; ce qu'il a dit à Mika ne se lit pas par un partage, qui voit seulement qu'elle est refusée."""
+    client, live, _ = with_teams(world)
+    draft = propose(client, live)
+    assert post(client, "/teams/reply/refuse", {"id": draft, "note": "trop sec"}).status_code == 200
+    mine = reply_of(client, draft)
+    assert mine["state"] == "refuse" and mine["note"] == "trop sec" and mine["answered"] is False
+    lea = second_person(client, live)
+    client.portal.call(live.kernel.set_params, "teams",
+                       TeamsParams(shares={"principal": {"personne:" + lea: "preparer"}}))
+    login(client, "lea")
+    shared_ = reply_of(client, draft)
+    assert shared_["state"] == "refuse" and shared_["note"] == ""

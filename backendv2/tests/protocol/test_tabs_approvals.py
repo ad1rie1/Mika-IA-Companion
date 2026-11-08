@@ -86,6 +86,33 @@ def test_everything_to_decide_is_one_queue_with_one_tab_bar(world):  # noqa: F81
     assert "À valider › Courriers à envoyer" not in home and "Identités › Identités à confirmer" not in home
 
 
+def test_each_sort_reads_by_its_short_name_its_sentence_stays_at_hand(world):  # noqa: F811
+    """Dans la file, ses puces et l'historique, une sorte se lit en nom court, sans rien de coupé ; sa phrase entière
+    reste au survol de la file, et dans l'en-tête de la demande ouverte ; l'historique garde sa clé au survol."""
+    client, live, _ = world
+    bootstrap(client)
+    stop(client, live.kernel)
+    kernel = live.kernel
+    sentence = "Lancer une commande avec le réseau dans l'atelier d'un projet."
+    asked = append(client, kernel, [
+        rt.EFFECT_PROPOSED.draft(capability="projects.networked", owner="projects", args_json="{}",
+                                 summary=Content.of("Installer les dépendances")),
+        rt.EFFECT_PROPOSED.draft(capability="projects.push", owner="projects", args_json="{}",
+                                 summary=Content.of("Pousser la branche"))]).seqs
+    page = drawn(client, "/inspecteur/approbations")
+    queue = page.split('class="apv-list"', 1)[1].split("</ol>", 1)[0]
+    assert f'<span class="apv-kind" title="{sentence}">Commande réseau</span>' in queue
+    assert ">Push git</span>" in queue
+    chips = page.split('class="hm-chips apv-kinds"', 1)[1].split("</nav>", 1)[0]
+    assert f'title="{sentence}"' in chips and "Commande réseau" in chips
+    assert f'title="{sentence}">{sentence.rstrip(".")}</span>' in _reader(page)  # l'en-tête de la demande ouverte
+
+    append(client, kernel, [rt.EFFECT_RESOLVED.draft(proposal=asked[0], approved=False, by="user_1",
+                                                     capability="projects.networked", owner="projects")])
+    entry = _entry(drawn(client, "/inspecteur/approbations/historique"), "Installer les dépendances")
+    assert 'title="projects.networked">Commande réseau</span>' in entry
+
+
 def test_a_claim_is_decided_in_the_queue_its_actions_already_oriented(world):  # noqa: F811
     """Une identité à confirmer ne se décide que dans la file (ADR 0180) : où elle en est vers la barre, puis les
     actions de la fiche du moyen de communication, sur leur page et déjà orientées — la preuve choisie par l'adresse,

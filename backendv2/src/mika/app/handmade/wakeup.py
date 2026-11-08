@@ -90,7 +90,7 @@ class WakeupFiche(Overview):
         return draw("tete.html", kicker="Réveil par API", title=key, lede=ep.label, tags=tags, facts=facts)
 
     def links(self, ui: UI, key: str) -> list[tuple[str, str]]:
-        """« Modifier ses réglages » (Réglages › Plugins › Réveils par API), qui ramène ici."""
+        """« Modifier ses réglages » (Réveils par API › Paramètres, ADR 0206), qui ramène ici."""
         if _endpoint(ui, key) is None:
             return []
         return [("Modifier ses réglages", render.href(edit_endpoint(key, fiche_url(KIND, key))))]

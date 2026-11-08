@@ -9,7 +9,7 @@ expire — comme l'appel d'un service extérieur (``plugins/mcp/calls.py``).
 - *La capacité* appelle et garde ce qu'il a rendu le temps qu'il soit journalisé (``ForgePort.keep``) ; *le retour*
   (``came_back``) l'écrit comme un contenu (``forge.answered``, l'oubli l'atteint) et vit ce que l'app a signalé ou
   émis ; la section et l'initiative due le disent à qui l'avait demandé. La section est à elle (ses demandes) : seul ce
-  que l'app a répondu est cité, une donnée — avec les phrases des services (``mcp.section``), une seule maison.
+  que l'app a répondu est cité, une donnée — avec les phrases communes d'un appel sur accord (``approvals``).
 - *L'expiration* : sans accord à temps (10 min dans le chat, un jour pour l'opérateur), refusée au nom du délai.
 - *En mode pro*, une carte dans la conversation s'attend dans la boucle (ADR 0165), comme celle d'un service : l'outil
   rend la décision et ce que l'app a rendu, dit avec sa réponse.
@@ -17,7 +17,6 @@ expire — comme l'appel d'un service extérieur (``plugins/mcp/calls.py``).
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import replace
@@ -27,13 +26,23 @@ from mika.contracts import forge as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts.runtime import (
+    ANSWERED,
+    APPROVED,
+    EXPIRED,
+    EXPIRER,
+    EXPIRY_GRACE_S,
+    FAILED,
+    FINAL,
+    REFUSED,
+    WAITING,
+)
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import DAY, HOUR, MINUTE, US
-from mika.kernel.codec import canonical_json
+from mika.kernel.clock import HOUR, US
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor
+from mika.kernel.guards import Guard, Superseded, floor
 from mika.kernel.operate import Preview
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
@@ -49,53 +58,39 @@ from mika.plugins.forge import (
     trusted,
 )
 from mika.ports.preprocess import cite, inert
-from mika.vocab.access import CARD, can_approve
-from mika.vocab.episodes import CONVERSATIONAL, PRO, Kind, is_work_target
+from mika.vocab.episodes import CONVERSATIONAL, PRO, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
-WAITING, APPROVED, REFUSED, EXPIRED, ANSWERED, FAILED = "attend", "acceptée", "refusée", "expirée", "rendue", "ratée"
-FINAL = frozenset({REFUSED, EXPIRED, ANSWERED, FAILED})
-#: une carte dans la conversation vaut tant ; un accord de l'opérateur, tant ; passé ce délai, l'issue ne se dit plus
-CARD_TTL, OPERATOR_TTL, TOO_LATE = 10 * MINUTE, DAY, 6 * HOUR
-#: en mode pro, l'attente d'une carte dans la boucle (ADR 0165) dure son délai, plus de quoi laisser passer le refus au
-#: nom du délai
-EXPIRY_GRACE_S = 60.0
+#: passé ce délai, l'issue ne se dit plus
+TOO_LATE = 6 * HOUR
+#: ce qui fait un appel : l'empreinte qu'on accepte porte sur ces champs
+PINNED = ("app", "function", "args", "fingerprint")
 #: ce qu'on garde des demandes, d'une réponse (le contenu journalisé), ce que la section en montre
 CALLS_KEPT, ANSWER_KEPT, SHOWN_MAX = 100, 8000, 4
 #: ce qu'une réponse montre d'elle dans la section : tout ce qu'on en garde (ADR 0163)
 SHOWN_CHARS = ANSWER_KEPT
 #: ce que la raison d'un échec montre d'elle
 WHY_CHARS = 300
-#: qui signe un refus faute d'accord à temps
-EXPIRER = "délai"
 PROVENANCE = "forge-call:"
 EVIDENCE = 12.0
 
 
 def call_digest(args: Mapping[str, Any]) -> str:
     """L'empreinte de ce qui partirait : l'app, sa version, ce qu'elle appelle, ses arguments, qui décide."""
-    pinned = {k: args.get(k) for k in ("app", "function", "args", "fingerprint", rt.DECIDER)}
-    return hashlib.sha256(canonical_json(pinned).encode()).hexdigest()[:32]
+    return rt.call_digest(args, PINNED)
 
 
 async def ask(ctx: Any, app: App, name: str, tool: str, function: str, values: Mapping[str, Any],
               level: str) -> ToolResult:
     """Proposer l'appel (rien ne part) et le dire : la carte à la personne en face (``carte``), ou à sa propriétaire
     quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
-    ep, audience = ctx.frame.episode, ctx.frame.audience
-    # au travail, la cible est un but ou un projet, pas une personne : l'opérateur décide
-    target = (ep.target if ep is not None else None) or ""
-    target = "" if is_work_target(target) else target
-    in_chat = bool(target) and can_approve(audience) and (level == CARD or bool(audience.owner))
-    payload: dict[str, Any] = {
-        "app": name, "tool": tool, "function": function, "args": dict(values), "fingerprint": app.fingerprint,
-        "request": f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", "target": target,
-        "approval": "conversation" if in_chat else "operateur",
-        rt.EXPIRES: ctx.frame.now + (CARD_TTL if in_chat else OPERATOR_TTL)}
-    if in_chat:
-        payload[rt.DECIDER] = target
-    payload["_apercu"] = call_digest(payload)
+    ep = ctx.frame.episode
+    target, in_chat = rt.approval_route(ep, ctx.frame.audience, level)
+    payload = rt.call_request({"app": name, "tool": tool, "function": function, "args": dict(values),
+                               "fingerprint": app.fingerprint}, PINNED,
+                              request=f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", target=target,
+                              in_chat=in_chat, now=ctx.frame.now)
     shown = inert(json.dumps(values, ensure_ascii=False, sort_keys=True), 300)
     commit = await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.CALL, owner=FORGE.name, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
@@ -109,8 +104,8 @@ async def ask(ctx: Any, app: App, name: str, tool: str, function: str, values: M
                                   (payload[rt.EXPIRES] - ctx.frame.now) / US + EXPIRY_GRACE_S)
         if decided is not None:
             return _decided(decided.state(FORGE.name).calls[proposal], ctx)
-    who = phrase("mcp.tools.in_chat") if in_chat else phrase("mcp.tools.operator")
-    return ToolResult(content=phrase("mcp.tools.asked", who=who))
+    who = phrase("approvals.in_chat") if in_chat else phrase("approvals.operator")
+    return ToolResult(content=phrase("approvals.asked", who=who))
 
 
 def _settled(frame: Frame, proposal: int) -> bool:
@@ -292,23 +287,24 @@ async def _texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> dict[
 
 
 def line(r: AppCall, texts: Mapping[str, str]) -> str:
-    """Où en est une demande : ses mots à elle (les phrases des services, ``mcp.section``) ; ce que l'app a répondu,
-    cité en dessous — une donnée, jamais une consigne."""
+    """Où en est une demande : ses mots à elle (``approvals.section``) ; ce que l'app a répondu, cité en dessous — une
+    donnée, jamais une consigne."""
     what = phrase("forge.calls.what", tool=inert(r.tool, 80))
     if r.status == WAITING:
-        who = phrase("mcp.section.by_chat") if r.approval == "conversation" else phrase("mcp.section.by_operator")
-        return "- " + phrase("mcp.section.waiting", what=what, who=who)
+        who = (phrase("approvals.section.by_chat") if r.approval == "conversation"
+               else phrase("approvals.section.by_operator"))
+        return "- " + phrase("approvals.section.waiting", what=what, who=who)
     said = texts.get(r.text_ref, "")
     if r.status == ANSWERED:
-        return "- " + phrase("mcp.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
-                                                                          or phrase("mcp.tools.nothing"))
+        return "- " + phrase("approvals.section.answered", what=what) + "\n" + (cite(said, SHOWN_CHARS)
+                                                                          or phrase("approvals.nothing"))
     if r.status == FAILED:
         if not said.strip():
-            return "- " + phrase("mcp.section.failed", what=what)
-        return "- " + phrase("mcp.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
+            return "- " + phrase("approvals.section.failed", what=what)
+        return "- " + phrase("approvals.section.failed_said", what=what) + "\n" + cite(said, WHY_CHARS)
     if r.status == EXPIRED:
-        return "- " + phrase("mcp.section.expired", what=what)
-    return "- " + phrase("mcp.section.refused", what=what)
+        return "- " + phrase("approvals.section.expired", what=what)
+    return "- " + phrase("approvals.section.refused", what=what)
 
 
 @FORGE.section("app_calls", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
@@ -379,14 +375,10 @@ class Expire:
     async def run(self, ctx: Any) -> None:
         now = ctx.frame.now
         for r in [r for r in ctx.state.calls.values() if r.status == WAITING and r.expires and r.expires <= now]:
-            draft = rt.EFFECT_RESOLVED.draft(
-                proposal=r.proposal, approved=False, by=EXPIRER, note=Content.of("pas d'accord dans le délai"),
-                capability=c.CALL, owner=FORGE.name, args_json=r.args_json, context=f"forge:{r.app}",
-                about=(r.target,) if r.target else (), dedupe_key=f"décision:{r.proposal}")
-            pending = Guard("encore en attente", reads=(rt.PENDING_EFFECTS,),
-                            predicate=lambda view, n=r.proposal: any(p.proposal == n
-                                                                     for p in view.get(rt.PENDING_EFFECTS)))
+            draft = rt.expiry_draft(phrase("approvals.no_answer"), proposal=r.proposal, capability=c.CALL,
+                                    owner=FORGE.name, args_json=r.args_json, context=f"forge:{r.app}",
+                                    about=(r.target,) if r.target else ())
             try:
-                await ctx.emit(draft, guard=pending, emitter=rt.OWNER)
-            except Exception:  # noqa: BLE001 — décidée entre-temps : rien à faire
+                await ctx.emit(draft, guard=rt.still_pending(r.proposal), emitter=rt.OWNER)
+            except Superseded:  # décidée entre-temps : rien à faire ; toute autre panne remonte, la santé la voit
                 continue

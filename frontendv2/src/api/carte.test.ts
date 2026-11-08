@@ -74,11 +74,11 @@ describe("l'API de la carte (protocole-moi.md § 10)", () => {
   });
 
   it("ce qui n'est pas branché : le 503 du serveur, en mots", async () => {
-    answer = { status: 503, body: { error: "Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires." } };
+    answer = { status: 503, body: { error: "Les itinéraires ne sont pas encore prêts sur ce serveur." } };
     const failed = await fetchRoute([{ lat: 1, lon: 2 }, { lat: 3, lon: 4 }], "voiture").catch((e: unknown) => e);
     expect(failed).toBeInstanceOf(ApiError);
     expect((failed as ApiError).status).toBe(503);
-    expect((failed as ApiError).message).toBe("Les itinéraires ne sont pas réglés : Réglages › Canaux › Itinéraires.");
+    expect((failed as ApiError).message).toBe("Les itinéraires ne sont pas encore prêts sur ce serveur.");
   });
 
   it("écrit en POST JSON, avec le jeton CSRF et une clé d'envoi", async () => {

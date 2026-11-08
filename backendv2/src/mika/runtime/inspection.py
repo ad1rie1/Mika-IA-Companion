@@ -153,15 +153,18 @@ class Inspection:
             return Note(f"L'en-tête de cette fiche a échoué : {describe_error(out.error)}"[:500], tone="danger")
         return out
 
-    def search(self, kind: str, text: str, limit: int = 20, *, offset: int = 0) -> list[Found]:
+    def search(self, kind: str, text: str, limit: int = 20, *, offset: int = 0,
+               when: Callable[[int], str] = str) -> list[Found]:
+        """Les objets d'un type qui répondent à ``text`` ; ``when`` écrit leurs dates (le sous-titre d'un mail),
+        comme pour ``head`` : la console et la console en MCP passent le leur, jamais l'horodatage brut."""
         spec = self.subject(kind)
         if spec is None or spec.search is None:
             return []
         frame = self.kernel.mind.frame()
         limit = max(1, min(limit, 100))
         offset = max(0, min(offset, 2**63 - 101))
-        out: Any = call(spec.search, frame.state(spec.owner), frame, self.context({"_offset": str(offset)}), text.strip()[:200],
-                        limit, label=f"recherche {kind}")
+        out: Any = call(spec.search, frame.state(spec.owner), frame, self.context({"_offset": str(offset)}, when),
+                        text.strip()[:200], limit, label=f"recherche {kind}")
         return [] if isinstance(out, Failed) else list(out or [])[:limit]
 
     async def download(self, kind: str, key: str, name: str):

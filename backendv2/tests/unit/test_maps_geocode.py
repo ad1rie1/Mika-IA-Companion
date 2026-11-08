@@ -65,8 +65,10 @@ async def test_nothing_leaves_without_the_operator_choosing_it():
     seen: list[httpx.Request] = []
     g = geocoder(lambda r: seen.append(r) or httpx.Response(200, json=CONCORDE), addresses="aucune")
     assert not g.ready()
-    with pytest.raises(MapsUnavailable, match="Réglages › Canaux › Lieux et adresses"):
+    with pytest.raises(MapsUnavailable) as caught:
         await g.search("Place de la Concorde Paris")
+    # ce qui manque, sans chemin de console : ce mot arrive aux personnes et au modèle
+    assert str(caught.value) == "Les adresses ne sont pas réglées."
     assert seen == []
 
 

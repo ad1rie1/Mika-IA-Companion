@@ -16,8 +16,6 @@ from mika.kernel.inspect import (
     Disclosure,
     InspectContext,
     Meter,
-    Nav,
-    NavItem,
     Note,
     Pager,
     Param,
@@ -86,11 +84,11 @@ def _signal(e: Any) -> Row:
                  description="Ce que lui signalent des appareils (une sonnette, une domotique, un script).",
                  params=[Param("appareil", "Appareil", placeholder="nom exact d'un appareil")])
 def _inspect(s: SensorsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    settings = Nav((NavItem("Configurer le plugin", Ref("local", "/inspecteur/reglages/appareils", "Configurer le plugin")),))
+    # leur jeton : derrière la roue de Ses sens, en haut à droite (ADR 0206)
     devices = ctx.tally(c.SENSED, "device")
     if not devices:
-        return [settings, Note("Aucun appareil n’a encore rien signalé. Configure son accès pour recevoir ses premiers signaux.",
-                     tone="muted")]
+        return [Note("Aucun appareil n’a encore rien signalé : donne-leur le jeton de Réglages › Accès des appareils, "
+                     "en haut à droite.", tone="muted")]
     device = ctx.value("appareil") or ""
     before = ctx.int_param("avant", 0) or None
     sensed = ctx.events([c.SENSED], SHOWN, where=("device", device) if device else None, before=before)
@@ -105,7 +103,7 @@ def _inspect(s: SensorsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     # replié, sauf quand les tuiles n'en montrent qu'une partie ou qu'on y tourne les pages
     listing = Disclosure("Tous les appareils", (_devices_table(devices, device, ctx),),
                          open=len(devices) > TILES_SHOWN or ctx.int_param("page_appareils", 1) > 1)
-    return [settings, tiles, listing, Table(
+    return [tiles, listing, Table(
         (Column("quand", "fit"), "appareil", "ce qu'il signale", Column("pertinence", "fit"),
          Column("émotion", "fit"), Column("journal", "fit")),
         tuple(_signal(e) for e in sensed), title=title + (" — plus anciens" if before else ""),

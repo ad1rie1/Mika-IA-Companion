@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass
 from typing import Generic, TypeVar
+
+from mika.kernel.text import fold
 
 T = TypeVar("T")
 
 
 def fold_text(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", str(text).casefold()) if not unicodedata.combining(c))
+    """Le repli d'une valeur quelconque, tel qu'une recherche le compare et que les bases le gardent."""
+    return fold(str(text))
 
 
 #: ce qui entoure un mot cherché sans en faire partie (des guillemets, une ponctuation collée)

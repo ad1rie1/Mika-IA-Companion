@@ -1,6 +1,6 @@
 {# Ce que partagent les onglets de Mémoire (app/handmade/tabs/memory.py, ADR 0177) : les notes de la faculté, le pied
-   d'un élément retenu (vers son origine, son détail replié), l'aide d'une liste. À importer « with context » (le
-   détail d'un élément dessine ses formulaires). #}
+   d'un élément retenu (vers son origine, son détail replié), l'aide d'une liste, l'icône d'un fichier. À importer
+   « with context » (le détail d'un élément dessine ses formulaires). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 
 {% macro notes(list) -%}
@@ -21,4 +21,13 @@
 
 {% macro tags(list) -%}
 {% for b in list %}<span class="now-tag {{ b.tone }}">{{ b.text }}</span>{% endfor %}
+{%- endmacro %}
+
+{# La sorte d'un fichier en icône (une pièce reçue, un fichier envoyé) : une image, un vocal, un document. #}
+{% macro file_icon(kind) -%}
+<svg class="piece-icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+{%- if kind == "image" %}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M4 17.5l5-4.5 3.5 3 3-2.5 4.5 4"/>
+{%- elif kind == "audio" %}<path d="M5 10v4M8.5 7v10M12 4.5v15M15.5 8v8M19 10.5v3"/>
+{%- else %}<path d="M7 3.5h7l4.5 4.5v12.5H7z"/><path d="M14 3.5V8h4.5M9.5 12.5h6M9.5 16h6"/>{% endif -%}
+</svg>
 {%- endmacro %}

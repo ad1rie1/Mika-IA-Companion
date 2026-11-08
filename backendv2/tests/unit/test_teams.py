@@ -14,7 +14,10 @@
 - personne ne l'envoie à temps : elle ne part plus ;
 - oublier un collègue atteint le journal et le cache ;
 - ce qu'un message lui fait, c'est le tri qui le dit, parmi toutes ses émotions ; le repli ne lui fait rien
-  ressentir (ADR 0147).
+  ressentir (ADR 0147) ;
+- la personne a répondu elle-même : sa réponse en attente d'accord ne s'approuve plus et se refuse, une réponse
+  demandée avant ne se prépare plus, une demandée après tient (ADR 0199) ;
+- sans titre de Teams, seul un tête-à-tête prend le nom de l'autre personne : un groupe n'en a pas, nulle part.
 """
 
 from __future__ import annotations
@@ -22,21 +25,42 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import replace
 from types import SimpleNamespace
+
+import pytest
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.app import composition
+from mika.app.handmade.teams_fiches import _journey
 from mika.app.mindport import KernelPort
+from mika.app.moi import form
 from mika.app.teams import TeamsDesk, batch_of, digest
 from mika.contracts import attention as attention_c
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
-from mika.kernel.events import Origin
-from mika.plugins.teams import RECEIVED
+from mika.kernel.events import Content, Origin
+from mika.kernel.state import FrozenDict
+from mika.plugins.teams import (
+    ANSWERED,
+    RECEIVED,
+    TEAMS,
+    WRITTEN,
+    AskSeen,
+    DraftSeen,
+    Seen,
+    TeamsState,
+    Written,
+    _resolved,
+)
+from mika.plugins.teams import expire as teams_expire
+from mika.plugins.teams import tools as teams_tools
 from mika.plugins.teams.triage import heuristic, place_of, read_triage, triage_system
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import DEFAULT_ACCOUNT as PRINCIPAL
+from mika.ports.teams import Draft as TeamsDraft
+from mika.ports.teams import Preview as TeamsPreview
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
@@ -268,9 +292,39 @@ def test_without_an_answer_in_time_the_reply_does_not_leave(tmp_path):
 
     resolved, executed, outbox, state = live(tmp_path, Model(), scenario, mode="validation")
     [r] = resolved
-    assert not r.data.approved and r.data.by == "teams.delai"
+    assert not r.data.approved and r.data.by == rt.EXPIRER
     assert executed == [] and outbox == []
     assert [d.state for d in state.drafts.values()] == ["expire"]  # pas d'accord à temps (pas « refusée »)
+
+
+def test_a_journal_signed_by_the_old_delay_still_reads_as_expired():
+    """Avant l'ADR 0211, Teams signait « teams.delai » : le journal ne se réécrit pas, il se relit pareil."""
+    waiting = DraftSeen(5, "d1", DM, "m1", 1, "validation", "attend")
+    state = TeamsState(drafts=FrozenDict({5: waiting}))
+    for by, expected in (("teams.delai", "expire"), (rt.EXPIRER, "expire"), ("user_1", "refuse")):
+        event = SimpleNamespace(at=9, data=rt.EffectResolved(proposal=5, approved=False, by=by))
+        got = _resolved(state, event, None).drafts[5]
+        assert got.state == expected and got.by == by
+        said = _journey(SimpleNamespace(names=SimpleNamespace(name_of=lambda who: who)),
+                        SimpleNamespace(ago=lambda at: "à l'instant"), got)[1]["text"]
+        assert said == ("" if expected == "expire" else "par user_1")  # le délai n'est personne
+
+
+@pytest.mark.parametrize(("process", "answered"), [(teams_expire.Expire, 0), (teams_expire.Answered, 1)])
+@pytest.mark.parametrize("deduped", [False, True])
+async def test_a_decision_taken_before_ours_keeps_its_draft(monkeypatch, process, answered, deduped):
+    """Une décision déjà journalisée n'est pas une erreur : l'ajout est dédoublonné. Elle a pu accepter la réponse, dont
+    le brouillon doit alors rester pour partir."""
+    monkeypatch.setattr(teams_expire, "decider", lambda frame, account: "user_1")
+    discarded: list[str] = []
+    draft = DraftSeen(5, "d1", DM, "m1", 1, "validation", "attend", expires=1, answered=answered)
+
+    async def emit(event, guard=None, emitter=None):
+        return SimpleNamespace(deduped=deduped)
+
+    await process().run(SimpleNamespace(frame=SimpleNamespace(now=2), state=TeamsState(drafts=FrozenDict({5: draft})),
+                                        ports={"teams": SimpleNamespace(discard_draft=discarded.append)}, emit=emit))
+    assert discarded == ([] if deduped else ["d1"])
 
 
 # ── Sans accord ; jamais de blanc qui part seul ───────────────────────────
@@ -578,3 +632,124 @@ def test_the_triage_reads_any_emotion_she_knows_and_never_invents_one():
     assert "PORTRAIT-CANARI" in system  # ce qu'un message lui fait se juge à qui elle est (ADR 0153)
     assert place_of("chat", "") == phrase("teams.where.other")  # une sorte inconnue
     assert "Projet" in place_of("group", "Projet")
+
+
+# ── Répondu autrement (ADR 0199) ──────────────────────────────────────────
+
+
+def test_a_reply_answered_meanwhile_can_no_longer_be_approved():
+    """Entre ton message et le refus que ``teams.answered`` journalise, rien ne l'approuve : l'aperçu de la capacité
+    la dit bloquée (la console, le chat et frontendv2 décident tous par lui)."""
+    written = next(r.fn for r in TEAMS.reducers if WRITTEN in r.types)
+    waiting = DraftSeen(7, "t000000000007", DM, "m1", 100, "validation", account=PRINCIPAL)
+    other = DraftSeen(8, "t000000000008", GROUP, "m2", 100, "validation", account=PRINCIPAL)
+    before = TeamsState(drafts=FrozenDict({7: waiting, 8: other}))
+    after = written(before, SimpleNamespace(data=Written(conversation=DM, account=PRINCIPAL), at=500), None)
+    assert after.drafts[7].answered == 500 and after.drafts[7].state == "attend"
+    assert after.drafts[8].answered == 0  # une autre conversation : rien
+    port = SimpleNamespace(preview=lambda draft, her="": TeamsPreview(DM, "Alice", "Oui, 14 h.", "d1"),
+                           conversation=lambda account, conversation: None)
+
+    def shown(state: TeamsState) -> str:
+        frame = SimpleNamespace(now=600, state=lambda name: state, get=lambda ref: SimpleNamespace(name="Mika"))
+        got = teams_tools.preview({"draft": "t000000000007"}, {"teams": port, "frame": lambda: frame})
+        return got.blocked
+
+    assert shown(before) == "" and shown(after) == "on a répondu autrement dans cette discussion"
+
+
+def test_a_reply_proposed_after_your_answer_is_dropped_unless_asked_after():
+    """Relue au moment même de la proposer : la personne a déjà répondu à ce message pendant qu'elle l'écrivait —
+    d'elle-même, sa réponse n'a plus lieu d'être ; demandée après ta réponse (la demande vit encore), elle tient."""
+    proposed = next(r.fn for r in TEAMS.reducers if rt.EFFECT_PROPOSED in r.types)
+    seen = Seen(1, DM, "Alice", ALICE, "dm", 0.6, True, False, 100, "", answered="toi", account=PRINCIPAL)
+    s = TeamsState(messages=FrozenDict({"m1": seen}))
+
+    def offer(state: TeamsState, seq: int) -> DraftSeen:
+        args = {"draft": f"t{seq}", "conversation": DM, "message": "m1", "mode": "validation", "account": PRINCIPAL}
+        data = rt.EffectProposed(capability=teams_c.SEND, owner=teams_c.OWNER, summary=Content.of("Répondre"),
+                                 context="teams", args_json=json.dumps(args))
+        return proposed(state, SimpleNamespace(seq=seq, at=900, data=data), None).drafts[seq]
+
+    assert offer(s, 5).answered == 900
+    asked = replace(s, asked=FrozenDict({"m1": AskSeen(2, "m1", DM, "user_1", 800, account=PRINCIPAL)}))
+    assert offer(asked, 6).answered == 0
+    assert offer(replace(s, messages=FrozenDict({"m1": replace(seen, answered="")})), 7).answered == 0
+
+
+def test_your_message_drops_a_reply_asked_before_and_keeps_one_asked_after(tmp_path):
+    """Écrire soi-même remplit la demande d'une réponse faite avant : elle ne se prépare plus (ou, déjà écrite, elle
+    se refuse) ; une demande faite après ton message, elle, tient — comme au courrier (ADR 0188)."""
+    ref = message_ref(DM, "1759000000001")
+
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        await sleep(HOUR)  # remarqué ; sans initiative, elle n'y répond pas d'elle-même
+        asked = await perform(kernel, "teams.rediger", form(fixed={"message": ref}), by="user_1", subject=DM,
+                              nonce="a1")
+        wrote = await perform(kernel, "teams.ecrire", form(fixed={"conversation": DM}, body="Je regarde ça."),
+                              by="user_1", nonce="w1")
+        await sleep(30 * MINUTE)
+        first = kernel.mind.frame().state("teams")
+        again = await perform(kernel, "teams.rediger", form(fixed={"message": ref}), by="user_1", subject=DM,
+                              nonce="a2")
+        await sleep(30 * MINUTE)
+        return asked, wrote, first, again, kernel.mind.frame().state("teams"), store.outbox(PRINCIPAL, clock.now())
+
+    asked, wrote, first, again, last, outbox = live(tmp_path, Model(), scenario, mode="validation", autodraft=False)
+    assert asked.ok and wrote.ok and again.ok
+    assert not first.asked and first.messages[ref].answered == "toi"
+    assert all(d.state == "refuse" and d.answered for d in first.drafts.values())
+    [kept] = [d for d in last.drafts.values() if d.state == "attend"]
+    assert kept.asked and not kept.answered  # demandée après ton message : elle attend ton accord
+    assert [i.text for i in outbox] == ["Je regarde ça."]  # seul ton message part
+
+
+def test_her_reply_refused_for_your_answer_says_why(tmp_path):
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        await sleep(30 * MINUTE)  # sa réponse attend ton accord
+        await push(desk, msg(clock, 2, "Je te réponds ce soir.", author="Adrien", author_id=SELF, own=True))
+        await sleep(MINUTE)
+        [resolved] = events(kernel, rt.EFFECT_RESOLVED)
+        note = kernel.mind.store.content([resolved.data.note.ref]).get(resolved.data.note.ref)
+        return resolved, note, kernel.mind.frame().state("teams"), await KernelPort(kernel).approval_cards("user_1")
+
+    resolved, note, state, cards = live(tmp_path, Model(), scenario, mode="validation")
+    assert not resolved.data.approved and note == ANSWERED and resolved.data.by == "user_1"  # en son nom
+    [d] = state.drafts.values()
+    assert d.state == "refuse" and d.answered and cards == []  # sa carte d'accord n'est plus là
+
+
+# ── Le nom d'une conversation (relecture du lot L11) ──────────────────────
+
+
+def test_only_a_one_to_one_is_named_after_the_other_person(tmp_path):
+    """Sans titre de Teams, un tête-à-tête prend le nom de l'autre personne (reconnu aussi à son identifiant, quand
+    l'extension n'a pas dit sa sorte) ; un groupe ne prend pas celui de qui y a parlé en dernier — il en changerait à
+    chaque auteur, et se confondrait avec le tête-à-tête de cette personne : ni dans la liste et sa recherche, ni dans
+    l'aperçu de sa réponse (la carte dit alors « dans un groupe »), ni dans la file que relève l'extension (« une
+    conversation »)."""
+    clock = SimClock(START)
+    store = TeamsStore(lambda: TeamsConfig(), tmp_path / "teams.db", now=clock.now)
+    unsorted = "19:x9_adrien@unq.gbl.spaces"  # un tête-à-tête dont l'extension n'a pas dit la sorte
+    lot = {"self": {"id": SELF, "name": "Adrien Dupont"},
+           "conversations": [conv(GROUP, kind="group"), conv(unsorted, kind="other")],
+           "messages": [msg(clock, 1, "On fait le point ?", conv=GROUP, author="Marc Petit", author_id="8:orgid:m"),
+                        msg(clock, 2, QUESTION, conv=GROUP),
+                        msg(clock, 3, "Tu as vu ?", conv=unsorted)]}
+    try:
+        store.store_batch(PRINCIPAL, batch_of(lot, clock.now() // 1000)[0], clock.now())
+        assert (store.title(PRINCIPAL, GROUP), store.title(PRINCIPAL, unsorted)) == ("", "Alice Martin")
+        assert {c.id: (c.kind, c.title) for c in store.conversations(10)} == {
+            GROUP: ("group", ""), unsorted: ("other", "Alice Martin")}
+        assert [c.id for c in store.conversations(10, text="alice")] == [unsorted]
+        draft = store.save_draft(TeamsDraft(id="", conversation=GROUP, body="Demain, 10 h."))
+        shown = store.preview(draft.id)
+        assert shown is not None and shown.title == ""
+        assert store.enqueue(draft.id, mode="send", digest=shown.digest, expires_at=0, now=clock.now()) == ""
+        assert [(i.title, i.kind) for i in store.outbox(PRINCIPAL, clock.now())] == [("", "group")]
+    finally:
+        store.close()

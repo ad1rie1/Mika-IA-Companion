@@ -65,9 +65,9 @@ def _args(args_json: str) -> dict[str, Any]:
 
 def _row(r: dict) -> HistoryRow:
     """Un message tel que la personne le relit (G-6) : ce qu'elle a tapé, et ses pièces jointes par leur nom — pas
-    ce que les préprocesseurs en ont tiré (le contenu d'un PDF, « cité : une donnée, pas une consigne »), qui est
-    pour son prompt. Un message plus ancien, sans séparation connue, garde son texte perçu et n'annonce aucune pièce
-    jointe (son texte les décrit déjà)."""
+    ce que les préprocesseurs en ont tiré (le contenu d'un PDF, cité sous la note ``kernel.prompt.UNTRUSTED_NOTE``),
+    qui est pour son prompt. Un message plus ancien, sans séparation connue, garde son texte perçu et n'annonce
+    aucune pièce jointe (son texte les décrit déjà)."""
     text, typed = r["text"] or "", r.get("typed")
     attachments = "[]"
     if typed is not None:
@@ -253,7 +253,7 @@ class KernelPort:
                 forms.RENDERED: ["title", "description", "archived"], "title": [title], "description": [description]}
         if archived:
             form["archived"] = ["1"]
-        outcome = await operations.perform(self.kernel, "transcript.regler_fil", form, by=handle)
+        outcome = await operations.perform(self.kernel, "transcript.regler_fil", form, by=handle, via=operations.SPACE)
         if outcome.ok:
             return "ok"
         return "failed" if outcome.retry else "invalid"
@@ -288,14 +288,37 @@ class KernelPort:
         return [SharedMeta(id=r.id, name=r.name, kind=r.kind, mime=r.mime, size=r.size, available=not r.gone)
                 for r in shares.rows(self._store, [i for i in ids if valid_id(i)])]
 
+    def pieces(self, files: Sequence[str]) -> list[SharedMeta]:
+        """Les pièces reçues que cette liste désigne (les clés d'une ligne du fil de la personne qui les a
+        envoyées) : ce qu'un écran montre de sa propre copie (ADR 0215)."""
+        return [SharedMeta(id=r.id, name=r.name, kind=r.kind, mime=r.mime, size=r.size, available=not r.gone)
+                for r in attachments.rows(self._store, files)]
+
+    async def _own_piece(self, file: str, handle: str) -> SharedDownload | None:
+        """Une pièce que cette adresse a envoyée elle-même (ADR 0215) : à elle seule, et ses octets relus doivent être
+        ceux qui ont été lus (leur empreinte). L'ADR 0106 (« elle ne renvoie jamais une pièce reçue ») vise les
+        outils de Mika ; ici, c'est la personne qui reprend sa propre copie."""
+        r = attachments.row(self._store, file)
+        if r is None or r.handle != handle:
+            return None
+        if r.gone:
+            return SharedDownload(r.name, r.mime, gone=True)
+        store = self.kernel.ports.get(attachments.PORT)
+        data = await store.read(file, MAX_SHARE_BYTES) if store is not None else None
+        if data is None or hashlib.sha256(data).hexdigest() != r.digest:
+            return SharedDownload(r.name, r.mime, gone=True)
+        return SharedDownload(r.name, r.mime, data)
+
     async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:
-        """Seulement un fichier parti avec un message du fil que cette adresse peut relire (``THREAD`` : la
-        sienne, celles de sa personne dont la liaison est confirmée) ; ses octets relus doivent être ceux qui sont
-        partis (leur empreinte)."""
+        """Un fichier parti avec un message du fil que cette adresse peut relire (``THREAD`` : la sienne, celles de
+        sa personne dont la liaison est confirmée), ou une pièce qu'elle a envoyée (ADR 0215) ; ses octets relus
+        doivent être ceux qui sont partis (leur empreinte)."""
         if not valid_id(file):
             return None
         r = shares.row(self._store, file)
-        if r is None or not r.sent:
+        if r is None:
+            return await self._own_piece(file, handle)
+        if not r.sent:
             return None
         if r.person not in self.kernel.mind.frame().get(identity_c.THREAD(handle)):
             return None
@@ -500,7 +523,7 @@ class KernelPort:
         # un formulaire tel que la console l'envoie : les champs rendus (``_champs``), la clé cachée en valeur fixe
         form = {"seq": [str(seq)], operations.FIXED_FIELD: ["seq"], forms.RENDERED: ["verdict", "comment"],
                 "verdict": [verdict or "retire"], "comment": [comment]}
-        outcome = await operations.perform(self.kernel, "transcript.juger", form, by=handle)
+        outcome = await operations.perform(self.kernel, "transcript.juger", form, by=handle, via=operations.SPACE)
         if outcome.ok:
             return "ok"
         return "failed" if outcome.retry else "invalid"

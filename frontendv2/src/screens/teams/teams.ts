@@ -5,7 +5,7 @@
  * brouillons ». Ce qu'un partage ne permet pas n'est pas offert. Le contrat : `protocole-moi.md` § 4.
  */
 import { insertEmoji } from "@web/ui/emojis";
-import { getJson, MOI } from "../../api/moi";
+import type { RuleLine } from "../../api/rights";
 import {
   editReply,
   fetchAccounts,
@@ -24,6 +24,7 @@ import {
   type TeamsMessage,
   type Thread,
 } from "../../api/teams";
+import { ofName } from "../../shared/names";
 import { refreshCounts } from "../../shell/counts";
 import { $, $$, h, isMobile, on } from "../../shell/dom";
 import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../shell/float";
@@ -32,7 +33,8 @@ import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { bindCounts, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
-import { kindLabel, ownBubbles, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
+import { rights } from "../parametres/store";
+import { authorLabel, kindLabel, ownAccount, ownBubbles, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
   conversationRow,
@@ -47,6 +49,9 @@ import {
   type Filter,
   type ThreadView,
 } from "./markup";
+
+/** Pour qui lie une réponse depuis ailleurs (la carte du chat) : `#teams/brouillons/<id>`. */
+export { replyHash } from "./format";
 
 const REFRESH_MS = 20_000;
 const ASK_POLL_MS = 10_000;
@@ -64,17 +69,6 @@ export function conversationHash(key: string): string {
 function sameThread(a: Thread, b: Thread): boolean {
   return JSON.stringify([a.messages, a.replies, a.pending ?? null, a.under_way, a.asked]) ===
     JSON.stringify([b.messages, b.replies, b.pending ?? null, b.under_way, b.asked]);
-}
-
-interface RightsLine {
-  who: string;
-  when: string;
-  prepare: boolean;
-  reply_words: string;
-}
-
-interface RightsReply {
-  groups: { key: string; resources: { key: string; kind?: string; title: string; rules?: { lines: RightsLine[]; default?: RightsLine } }[] }[];
 }
 
 const DISCUSSIONS_SKELETON = `<div class="split tm-split" data-tm-root="discussions"><aside class="pane" data-tm-list>
@@ -140,7 +134,9 @@ export class TeamsScreen {
   private refreshTimer = 0;
   private askTimer = 0;
   private searchTimer = 0;
-  private rights: RightsReply | null = null;
+  /** La réponse que la route désigne dans « Ses brouillons » (`#teams/brouillons/<id>`), et si on y a déjà défilé. */
+  private focusReply = "";
+  private focusShown = false;
 
   constructor(private readonly shell: Shell) {}
 
@@ -175,13 +171,15 @@ export class TeamsScreen {
     return this.mounted === "discussions" && !!this.body;
   }
 
-  /** L'auteur de tes messages, dans ce compte (pour mettre ta mention en valeur). */
+  /** La personne de ce compte, à son nom (pour mettre sa mention en valeur) : la tienne sur un compte à toi ; sur un
+   *  compte qu'on te partage, celle de son propriétaire — jamais ton nom à toi. */
   private selfName(account: string): string {
-    return this.account(account)?.self_name || this.shell.user.displayName || "";
+    const a = this.account(account);
+    return a?.self_name || (ownAccount(a) ? this.shell.user.displayName : a?.owner_name) || "";
   }
 
   private waitingCount(): number {
-    return this.replies.filter((r) => r.state === "attend" && capsOf(this.account(r.account)).decide).length;
+    return this.replies.filter((r) => r.state === "attend" && !r.answered && capsOf(this.account(r.account)).decide).length;
   }
 
   // ── Le cadre ───────────────────────────────────────────────────────
@@ -214,6 +212,7 @@ export class TeamsScreen {
       void this.refresh();
     }
     if (tab === "discussions") this.route(ctx.item);
+    else this.routeReply(ctx.item);
     if (!this.refreshTimer) this.refreshTimer = window.setInterval(() => this.tick(), REFRESH_MS);
   }
 
@@ -341,7 +340,7 @@ export class TeamsScreen {
         this.watchAsk();
         return;
       }
-      const arrived = quiet && !!before && t.replies.some((r) => UNDER_WAY.has(r.state) && !before.replies.some((x) => x.id === r.id));
+      const arrived = quiet && !!before && t.replies.some((r) => UNDER_WAY.has(r.state) && !r.answered && !before.replies.some((x) => x.id === r.id));
       if (arrived) {
         this.asked.delete(key);
         toast("Sa réponse est arrivée : elle t'attend dans la discussion.", { mika: true });
@@ -462,7 +461,7 @@ export class TeamsScreen {
     else {
       const list = this.shownConversations();
       html = list.length
-        ? list.map((c) => conversationRow(c, this.open, now, many, this.account(c.account)?.name ?? c.account)).join("")
+        ? list.map((c) => conversationRow(c, this.open, now, many, this.account(c.account))).join("")
         : this.q
           ? `<div class="empty">${ico("search")}<b>Rien trouvé</b><p>Aucune discussion ne s'appelle « ${h(this.q)} ».</p></div>`
           : `<div class="empty">${ico("teams")}<b>Rien ici</b><p>${this.filter === "tout" ? "L'extension n'a encore vu aucune discussion : installe « Mika · Teams » avec la clé de ton compte (Paramètres › Teams), puis ouvre Teams web." : "Aucune discussion pour ce filtre."}</p></div>`;
@@ -484,6 +483,7 @@ export class TeamsScreen {
       selfName: this.selfName(t.account),
       caps: capsOf(a),
       owner: a?.owner_name ?? "",
+      account: a,
       editing: this.editing,
       // ce que le moteur dit de tes messages en attente (en file, posé, pas parti), puis tes envois d'ici pas encore dits
       pending: ownBubbles(t.pending, this.sent.filter((p) => p.conversation === t.key)),
@@ -518,7 +518,8 @@ export class TeamsScreen {
     }
     const conv = t ?? c!;
     const a = this.account(conv.account);
-    const sub = [kindLabel(conv.kind), this.accounts.length > 1 || (a && a.level !== "proprietaire") ? `compte ${a?.name ?? conv.account}${a && a.level !== "proprietaire" ? ` de ${a.owner_name}` : ""}` : ""].filter(Boolean).join(" · ");
+    const shared = !!a && a.level !== "proprietaire";
+    const sub = [kindLabel(conv.kind), this.accounts.length > 1 || shared ? `compte ${a?.name ?? conv.account}${shared && a.owner_name ? ` ${ofName(a.owner_name)}` : ""}` : ""].filter(Boolean).join(" · ");
     host.innerHTML = `<div class="pane-head thread-head" data-tm-head>${threadHead({ conv: { title: conv.title, kind: conv.kind, key: conv.key }, sub, infoOpen: this.info })}</div>
       <div class="chat-scroll" data-scroll><div class="tm-msgs" data-tm-msgs></div></div>
       <div class="tm-dock" data-tm-dock></div>`;
@@ -657,12 +658,31 @@ export class TeamsScreen {
     }
     const scroll = $(".fill-scroll", this.body)?.scrollTop ?? 0;
     const convs = new Map(this.conversations.map((c) => [c.key, c]));
-    this.body.innerHTML = repliesTable(this.replies, { now: Date.now(), convs, decide: (r) => capsOf(this.account(r.account)).decide });
+    this.body.innerHTML = repliesTable(this.replies, { now: Date.now(), convs, decide: (r) => capsOf(this.account(r.account)).decide, focus: this.focusReply });
     const root = $(".fill-scroll", this.body);
     if (root) {
       root.setAttribute("data-tm-root", "brouillons");
       root.scrollTop = scroll;
     }
+    this.revealReply();
+  }
+
+  /** `#teams/brouillons/<id>` : la réponse désignée se surligne ; `#teams/brouillons`, plus aucune. */
+  private routeReply(item: string | null): void {
+    const id = item ?? "";
+    if (id === this.focusReply) return;
+    this.focusReply = id;
+    this.focusShown = false;
+    if (this.repliesLoaded) this.paintReplies();
+  }
+
+  /** Une fois la liste lue : on défile jusqu'à la réponse désignée (une seule fois), ou on dit qu'elle n'y est plus. */
+  private revealReply(): void {
+    if (!this.focusReply || this.focusShown || !this.repliesLoaded || !this.body) return;
+    this.focusShown = true;
+    const row = $(`[data-reply-row="${CSS.escape(this.focusReply)}"]`, this.body);
+    if (row) row.scrollIntoView({ block: "center" });
+    else toast("Cette réponse n'est plus dans « Ses brouillons ».", { ico: "info" });
   }
 
   // ── Demander, poll ─────────────────────────────────────────────────
@@ -761,6 +781,11 @@ export class TeamsScreen {
       else if (kept !== null) this.typed.set(t.key, kept);
       this.sent.push({ conversation: t.key, text, at: Date.now() });
       toast(done.message || "En file : l'extension de ce compte l'enverra dans Teams.", { ico: "send" });
+      if (t.replies.some((r) => r.state === "attend" && !r.answered)) {
+        // sa réponse qui attendait ici ne partira plus (ADR 0199) : « Ses brouillons » et les pastilles le suivent
+        void this.loadReplies();
+        void refreshCounts();
+      }
       if (this.thread?.key === t.key) {
         this.paintMessages(true);
         // ce que le moteur en dit (en file, puis parti ou pas) remplace aussitôt la bulle d'ici
@@ -928,14 +953,15 @@ export class TeamsScreen {
   // ── « Comment ça part » ────────────────────────────────────────────
 
   private async howItLeaves(anchor: HTMLElement): Promise<void> {
-    try {
-      if (!this.rights) this.rights = await getJson<RightsReply>(`${MOI}/rights`);
-    } catch (err) {
-      toast(errorText(err), { ico: "alert" });
+    // la lecture de tes droits que Paramètres et Outils partagent (`api/rights.ts`, gardée 20 s) : relue si la
+    // dernière a échoué
+    const got = await rights.load(rights.error !== null);
+    if (!got) {
+      toast(errorText(rights.error), { ico: "alert" });
       return;
     }
-    const accounts = this.rights.groups.find((g) => g.key === "accounts")?.resources.filter((r) => r.kind === "teams") ?? [];
-    const line = (l: RightsLine, label?: string) =>
+    const accounts = got.groups.find((g) => g.key === "accounts")?.resources.filter((r) => r.kind === "teams") ?? [];
+    const line = (l: RuleLine, label?: string) =>
       ({ html: `<div class="rule-line"><b>${h(label ?? l.who)}${l.when && l.when !== "toujours" ? ` · ${h(l.when)}` : ""}</b><span>préparer d'elle-même : ${l.prepare ? "oui" : "non"}</span><span>part : ${h(l.reply_words)}</span></div>` }) as MenuItem;
     const items: MenuItem[] = [{ header: "Comment part ce qu'elle prépare" }];
     for (const a of accounts) {
@@ -1031,7 +1057,7 @@ export class TeamsScreen {
     return this.conversations.slice(0, 40).map((c) => ({
       group: "Teams",
       title: c.title || "(sans titre)",
-      sub: c.last ? `${c.last.own ? "Toi" : c.last.author} : ${c.last.text}` : kindLabel(c.kind),
+      sub: c.last ? `${authorLabel(c.last, this.account(c.account))} : ${c.last.text}` : kindLabel(c.kind),
       icon: "teams",
       route: conversationHash(c.key),
     }));

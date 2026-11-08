@@ -57,6 +57,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
 from mika.ports.preprocess import inert
 from mika.vocab.affect import Emotion, named_feeling
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -224,14 +225,6 @@ def _for_owner(frame: Frame) -> bool:
     return here_allowed(frame, BUNDLE)
 
 
-def _ago(us: int) -> str:
-    minutes = max(1, us // MINUTE)
-    if minutes < 120:
-        return phrase("projects.duration.minutes", n=minutes)
-    hours = minutes // 60
-    return phrase("projects.duration.hours", n=hours) if hours < 48 else phrase("projects.duration.days", n=hours // 24)
-
-
 @CAMERA.enricher("views", episodes=[*CONVERSATIONAL, Kind.STEP], deadline_ms=300)
 async def _texts(s: CameraState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, str] | None:
     store = ports.get("store")
@@ -257,7 +250,8 @@ class LookArgs(BaseModel):
     device: str = Field(default="", max_length=40, description=phrase("camera.tools.look.device"))
 
 
-@CAMERA.tool("camera_look", description=phrase("camera.tools.look.description"), args=LookArgs, bundle=BUNDLE,
+@CAMERA.tool("camera_look", description=phrase("camera.tools.look.description"),
+             label=phrase("camera.tools.look.label"), args=LookArgs, bundle=BUNDLE,
              episodes=[Kind.REPLY, *WORKING], max_calls_per_episode=2, owner_only=True)
 async def camera_look(args: LookArgs, ctx: Any) -> Any:
     port, llm = ctx.ports.get("camera"), ctx.ports.get("llm")
@@ -272,7 +266,7 @@ async def camera_look(args: LookArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     p = params(frame.env.params_of("camera", frame.root))
     if frame.now - snap.at > p.fresh_us:  # une image figée n'est pas ce qu'on voit maintenant
-        return ToolResult(ok=False, content=phrase("camera.tools.look.frozen", ago=_ago(frame.now - snap.at),
+        return ToolResult(ok=False, content=phrase("camera.tools.look.frozen", ago=ago_words(frame.now - snap.at),
                                                    device=device))
     resp = await llm.call(request(snap, f"{ctx.call_id}:look", frame))
     seen = read_look(resp.text)
@@ -338,7 +332,7 @@ def _inspect(s: CameraState, frame: Frame, ctx: InspectContext) -> list[Block]:
                            [Note("Caméra non configurée : aucun appareil ne peut lui envoyer d'images.",
                                  tone="muted")])
     blocks.insert(0, Nav((
-        NavItem("Connecter une caméra", Ref("local", "/inspecteur/reglages/appareils", "Accès des appareils")),
+        NavItem("Connecter une caméra", Ref("local", "/inspecteur/sens/parametres-appareils", "Accès des appareils")),
         NavItem("Régler les observations", Ref("local", "/inspecteur/reglages/comportement-camera", "Réglages de la caméra")),)))
     views, shown = paginate(frame.get(c.VIEWS), ctx.pager("page_vus", size=PAGE))
     texts = ctx.store.content([v.summary_ref for v in views if v.summary_ref])

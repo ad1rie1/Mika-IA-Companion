@@ -18,7 +18,6 @@ from __future__ import annotations
 import enum
 import math
 import re
-import unicodedata
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -27,6 +26,7 @@ from types import MappingProxyType
 from typing import Any
 
 from mika.kernel.inspect import Swatch
+from mika.kernel.text import fold as text_fold
 from mika.vocab.phrasebook import phrase, voice_file
 
 Vec3 = tuple[float, float, float]
@@ -468,9 +468,7 @@ class Tag:
 def fold(text: str) -> str:
     """Une clé de comparaison : minuscules sans accents, espaces, tirets et
     apostrophes en ``_``."""
-    decomposed = unicodedata.normalize("NFKD", text.strip().lower())
-    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"[\s\-'’]+", "_", plain).strip("_")
+    return re.sub(r"[\s\-'’]+", "_", text_fold(text.strip())).strip("_")
 
 
 def emotion_named(name: str | None) -> Emotion | None:

@@ -26,7 +26,7 @@
 .parole-step.last::before { background: var(--accent-soft); color: var(--accent); }
 .parole-step.last::after { display: none; }
 .parole-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 1px 0 0; }
-.parole-step-title { font-family: var(--now-serif); font-size: 1.05rem; font-weight: 600; }
+.parole-step-title { font-family: var(--display); font-size: 1.05rem; font-weight: 600; }
 .parole-step .person-meta { margin: 0; }
 .parole-step .hm-code { max-height: 20em; }
 .parole-sent { justify-self: start; max-width: 100%; white-space: pre-line;

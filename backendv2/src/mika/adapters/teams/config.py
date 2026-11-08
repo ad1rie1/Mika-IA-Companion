@@ -1,4 +1,4 @@
-"""Ce qu'un opérateur règle de Teams (Réglages › Plugins › Teams) : s'il est branché, et ses comptes (ADR 0186) —
+"""Ce qu'un opérateur règle de Teams (Teams › Paramètres, ADR 0206) : s'il est branché, et ses comptes (ADR 0186) —
 chacun à quelqu'un (toi, elle, une personne qui a un compte), avec sa façon d'y écrire. La clé de l'extension d'un
 compte se génère à part (seule son empreinte est gardée, dans les réglages : ``Settings.teams_keys``).
 
@@ -44,7 +44,8 @@ class TeamsAccount(BaseModel):
         label="Partagé avec", group="Le compte", readonly=True, order=5,
         help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
              "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne le voit sous son propre "
-             "compte.")] = Field(default_factory=dict)
+             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+        Field(default_factory=dict)
     display_name: Annotated[str, Knob(
         label="Son nom", group="Écrire", advanced=False, order=20,
         help="Comme ses collègues connaissent la personne de ce compte (vide : celui que Teams donne). Elle écrit à "
@@ -95,7 +96,7 @@ class TeamsConfig(BaseModel):
     accounts: Annotated[dict[str, TeamsAccount], Knob(
         label="Comptes", advanced=False, order=10, key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE,
         help=f"Chaque Teams qu'une extension lui apporte : à qui il est, comment elle y écrit. Sa clé d'extension se "
-             f"crée dans Relations & échanges › Teams › Extension. La clé d'un compte est un nom court "
+             f"crée dans l'onglet Extension de Teams. La clé d'un compte est un nom court "
              f"({ACCOUNT_KEY_RULE}).")] = Field(default_factory=dict)
 
     @model_validator(mode="before")

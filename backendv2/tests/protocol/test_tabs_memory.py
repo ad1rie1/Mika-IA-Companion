@@ -195,7 +195,8 @@ def test_a_new_memory_says_each_tab_is_empty(world):  # noqa: F811
     _life(client, live)
     for tab, says in (("croyances", "pas encore de croyance."), ("promesses", "pas encore de promesse."),
                       ("moments", "pas encore de moment noté."), ("recues", "aucune pièce reçue."),
-                      ("recues", "aucune pièce gardée."), ("voir-venir", "aucun moment constaté encore."),
+                      ("recues", "aucune pièce gardée."), ("envoyes", "elle n'a encore envoyé aucun fichier."),
+                      ("voir-venir", "aucun moment constaté encore."),
                       ("consolidation", "pas encore de relecture.")):
         page = drawn(client, f"/inspecteur/memoire/{tab}")
         assert f'data-tab="memoire/{tab}"' in page and says in page, tab

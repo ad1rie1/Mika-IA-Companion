@@ -358,12 +358,6 @@ def bond_at(bond: float, dt_us: int, p: AffectParams) -> float:
     return bond * math.exp(-math.log(2.0) * dt_us / max(1, p.bond_half_life_us))
 
 
-def person_home(anchor: Vec3 | None, common: Vec3, p: AffectParams) -> Vec3:
-    """Le repos propre d'une personne : le repos commun, plus une part de ce
-    que la relation a installé."""
-    return common if anchor is None else A.add(common, A.scale(anchor, p.anchor_weight))
-
-
 def new_stance(t: int, p: AffectParams, cw: Clockwork) -> Stance:
     """Une posture neuve commence au repos, pas à l'origine."""
     return Stance(Osc(common_home(t, p, cw), ZERO, t))
@@ -403,11 +397,6 @@ def forgive(st: Stance, share: float, at: int) -> Stance:
 def push_stance(st: Stance, target: Vec3, gain: float) -> Stance:
     moved = ratchet(st.position, target, gain)
     return replace(st, gap=A.sub(moved, st.rest.position))
-
-
-def stance_target(st: Stance, emotion: Emotion, intensity: float) -> Vec3:
-    """Sur le rayon qui va de son repos envers la personne vers l'émotion."""
-    return A.lerp(st.rest.position, A.ANCHORS[emotion], max(0.0, min(1.0, intensity)))
 
 
 def stance_target_of(st: Stance, declared: Declared) -> Vec3:

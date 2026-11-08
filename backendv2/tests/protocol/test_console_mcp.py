@@ -55,7 +55,8 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     live.mcp._connect = lambda name, spec: HttpTransport(spec.url, headers=spec.headers(), client=transport)
     # brancher : le jeton scellé, jamais réaffiché ; un nom mal formé refusé
     page = html_of(client.get(SETTINGS))
-    assert "Outils extérieurs" in page
+    # ses réglages vivent dans Ses outils, derrière sa roue (ADR 0206) : l'ancienne adresse y mène
+    assert "<h1>Paramètres des services</h1>" in page and "un serveur MCP" in page
     rule = "des minuscules, chiffres et _ (24 au plus), en commençant par une lettre"
     assert f"Le nom sous lequel les autres réglages le désignent : {rule}." in \
         html_of(client.get(SETTINGS, params={"enregistrement": "servers", "cle": "", "nouveau": "1"}))

@@ -43,7 +43,9 @@ class Shaped(Drawn):
 
     def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:
-        return self.draw(ui, items, query, forms or {}) if self.forms else self.draw(ui, items, query)
+        # ``Forms`` est un ``dict`` : vide (aucune action dans les blocs), il garde son jeton
+        return self.draw(ui, items, query, forms if forms is not None else {}) if self.forms \
+            else self.draw(ui, items, query)
 
 
 DRAWN: dict[str, Drawn] = {
@@ -85,6 +87,6 @@ DRAWN: dict[str, Drawn] = {
     # Réglages : les chiffres et les groupes au-dessus du formulaire des paramètres de chaque faculté (son panneau,
     # dans le même vocabulaire), la vue d'ensemble, les comptes, le journal des modifications, qui peut quoi
     **settings.TABS,
-    "reglages/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False),
+    "reglages/droits": Shaped(rights.page, "handmade/tools.css", "handmade/rights.css", panel=False, forms=True),
     # l'accueil est une page à lui (home.py) ; la Forge garde ses contrats d'interface
 }

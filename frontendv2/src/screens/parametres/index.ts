@@ -2,7 +2,8 @@
  * L'écran « Paramètres » (ADR 0187) : ce que la personne connectée règle pour elle-même — son compte, ses boîtes, ses
  * comptes Teams, ses téléphones, ses partages et ses services MCP —, par l'API par personne (`protocole-moi.md`
  * § 5, 7, 8 ; `app/moi/shares.py`). La forme : `maquette/ecrans/parametres.js`. Chaque onglet est une page
- * (`account.ts`, `mail.ts`…) ; ici, la lecture, le dessin, la barre d'enregistrement et les sous-onglets.
+ * (`account.ts`, `mail.ts`…) ; ici, la lecture, le dessin, la barre d'enregistrement, les sous-onglets et les routes
+ * d'action (`#parametres/mcp/+brancher` : l'onglet, puis la fenêtre que son bouton ouvre).
  */
 import { $, $$, on } from "../../shell/dom";
 import type { PaletteEntry } from "../../shell/palette";
@@ -22,6 +23,23 @@ import { teamsPage } from "./teams";
 
 const ID = "parametres";
 const PAGES: Page[] = [accountPage, mailPage, teamsPage, phonesPage, sharesPage, mcpPage];
+/**
+ * Les routes d'action, par onglet : `#parametres/<onglet>/+<geste>` ouvre l'onglet, puis la fenêtre que son bouton
+ * ouvre (son `data-act`), sur le sous-onglet qui le porte — ce qu'un bouton d'un autre écran ou la palette promet, le
+ * clic le fait. L'adresse redevient celle de l'onglet : revenir en arrière ou recharger ne rouvre rien.
+ */
+export const ACTION_ROUTES: Record<string, Record<string, { act: string; sub?: string }>> = {
+  compte: { "mot-de-passe": { act: "password", sub: "securite" } },
+  partages: { partager: { act: "share-new" } },
+  mcp: { brancher: { act: "mcp-plug" } },
+};
+
+/** Le geste d'une route d'action (`+brancher` sur l'onglet `mcp`) ; `null` : un objet ordinaire, ou rien. */
+export function routeAction(tab: string | null, item: string | null): { act: string; sub?: string } | null {
+  if (!tab || !item?.startsWith("+")) return null;
+  return ACTION_ROUTES[tab]?.[item.slice(1)] ?? null;
+}
+
 const TABS = [
   { id: "compte", title: "Compte" },
   { id: "comptes-mail", title: "Comptes mail" },
@@ -35,6 +53,8 @@ class ParametresScreen {
   private body: HTMLElement | null = null;
   private ctx: ScreenContext | null = null;
   private painted = "";
+  /** Le geste d'une route d'action, à faire une fois l'onglet lu et dessiné. */
+  private pending: { tab: string; act: string } | null = null;
   private readonly subs = new Map<string, string>();
   private readonly bar: SaveBar;
   private readonly host: Host;
@@ -127,8 +147,28 @@ class ParametresScreen {
   private render(body: HTMLElement, ctx: ScreenContext): void {
     this.body = body;
     this.ctx = ctx;
+    const action = routeAction(ctx.tab, ctx.item);
+    if (ctx.item?.startsWith("+")) {
+      // une route d'action : l'onglet se montre tel quel, et l'adresse redevient la sienne (sans redessiner l'écran)
+      ctx.item = null;
+      history.replaceState(null, "", `#${ID}/${ctx.tab ?? ""}`);
+      this.shell.refreshHead();
+    }
+    this.pending = action && ctx.tab ? { tab: ctx.tab, act: action.act } : null;
+    if (action?.sub && ctx.tab) this.subs.set(ctx.tab, action.sub);
     this.paint();
-    void this.ensure();
+    void this.ensure().then(() => this.runPending());
+  }
+
+  /** Le geste d'une route d'action, une fois l'onglet lu : sa fenêtre s'ouvre, comme au clic de son bouton. */
+  private runPending(): void {
+    const pending = this.pending;
+    this.pending = null;
+    const page = this.page();
+    if (!pending || !page?.act || !this.open() || this.ctx?.tab !== pending.tab) return;
+    const el = document.createElement("button");
+    el.dataset.act = pending.act;
+    page.act(pending.act, el, null, this.host);
   }
 
   private paint(): void {
@@ -209,10 +249,11 @@ class ParametresScreen {
 
   private searchEntries(): PaletteEntry[] {
     const out: PaletteEntry[] = [
-      { group: "Paramètres", title: "Changer le mot de passe", sub: "Compte", icon: "key", route: `#${ID}/compte` },
+      // un geste promis s'ouvre au clic : sa route d'action (`ACTION_ROUTES`)
+      { group: "Paramètres", title: "Changer le mot de passe", sub: "Compte", icon: "key", route: `#${ID}/compte/+mot-de-passe` },
       { group: "Paramètres", title: "Télécharger l'application Android", sub: "Téléphones", icon: "download", route: `#${ID}/telephones` },
-      { group: "Paramètres", title: "Partager une boîte ou un service", sub: "Partages", icon: "users", route: `#${ID}/partages` },
-      { group: "Paramètres", title: "Brancher un service MCP", sub: "Services MCP", icon: "plug", route: `#${ID}/mcp` },
+      { group: "Paramètres", title: "Partager une boîte ou un service", sub: "Partages", icon: "users", route: `#${ID}/partages/+partager` },
+      { group: "Paramètres", title: "Brancher un service MCP", sub: "Services MCP", icon: "plug", route: `#${ID}/mcp/+brancher` },
     ];
     for (const p of PAGES) out.push(...(p.search?.() ?? []));
     return out;

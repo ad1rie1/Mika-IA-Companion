@@ -4,7 +4,7 @@
    pages se lisent en sous-onglets (base.css : hm-subtabs, ADR 0176). */
 .rights-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px;
   margin-bottom: 14px; }
-.rights-head h2, .rights-who-about h2 { margin: 0 0 4px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.rights-head h2, .rights-who-about h2 { margin: 0 0 4px; font-family: var(--display); font-size: 1.24rem; font-weight: 600; }
 .rights-head p { margin: 0; max-width: 76ch; color: var(--text-2); font-size: 13.5px; }
 
 /* ── La légende des tons ─────────────────────────────────────────────────────── */
@@ -90,11 +90,12 @@
 .access-canal-entry .access-card { padding: 0; border: 0; }
 .access-tool.sub { padding-left: 22px; color: var(--text-2); }
 /* dans un sous-onglet, la place est comptée (la colonne des sous-onglets en prend) : les en-têtes passent à la ligne,
-   « qui » ne prend que ce qu'il montre, les menus se serrent — le tableau tient sans défiler à 1440 px */
+   « qui » ne prend que ce qu'il montre (« Tout le monde » sur une ligne) ; un menu, lui, garde toute sa valeur
+   (tools.css) — s'il le faut, le tableau défile dans sa carte plutôt que de la couper. À 1440 px, le tableau d'une
+   famille à son minimum vital tient sans défiler ; celui d'un canal où elle parle défile un peu. */
 .hm-subpanes .access-table thead th { white-space: normal; vertical-align: bottom; }
 .hm-subpanes .access-table th, .hm-subpanes .access-table td { padding-left: 4px; padding-right: 4px; }
-.hm-subpanes .access-table td:nth-child(2) { min-width: 150px; }
-.hm-subpanes .access-select { min-width: 108px; }
+.hm-subpanes .access-table td:nth-child(2) { min-width: 140px; }
 
 /* Outils › Ce qu'elle peut faire : une famille, ses outils décrits (le nom, lit ou agit, ce qu'il fait, en colonnes),
    son tableau ; dans son sous-onglet, le tableau ouvert sous la liste */

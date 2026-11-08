@@ -22,12 +22,10 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import func, select
-
 from mika.contracts import runtime as rt
 from mika.inspector import names, render
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.episode_overview import PREVIEW_SPEECHES
+from mika.inspector.pages.episode_overview import summary
 from mika.inspector.pages.journal import EPISODE_TABS, _events, episode_tab
 from mika.inspector.pages.why import (
     _decoded,
@@ -40,9 +38,7 @@ from mika.inspector.pages.why import (
 )
 from mika.inspector.ui import PREFIX
 from mika.kernel.clock import US
-from mika.kernel.forms import show_duration
 from mika.kernel.inspect import Ref, money_fr, num_fr
-from mika.ports.journal import JournalEvent
 from mika.runtime.boundary import Failed, call
 from mika.runtime.traces import TRUNCATION_MARK
 
@@ -115,35 +111,25 @@ def _speech(ui: Any, e: Any) -> dict[str, Any]:
 
 
 def _resume(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any) -> dict[str, Any]:
+    """Le résumé dessiné : ce que lit ``episode_overview.summary`` (le même que ses blocs), en tuiles et en bulles,
+    plus ce que seule la page dessinée montre (ses appels de modèle, ses outils)."""
     started, ended = info["started"], info["ended"]
-    e = JournalEvent
-    counts = dict(ui.kernel.mind.store.query_mind(
-        select(e.type, func.count()).where(e.correlation == corr).group_by(e.type)))
-    speeches = counts.get(rt.UTTERANCE.name, 0)
-    label, tone = names.outcome(ended.data.outcome, ended.data.kind) if ended else ("ouvert", "warn")
-    detail = names.detail(ended.data.detail or ended.data.guard) if ended else (
-        "Aucune fin n’est enregistrée : il peut être encore en cours, ou avoir été coupé.")
-    if started and ended:
-        span = max(0, ended.at - started.at)
-        duration = "< 1 s" if span < US else show_duration(span)
-    else:
-        duration = "—"
+    said = summary(ui, corr, dict(info))
     calls = _llm_calls(ui, corr, CALLS_COUNTED)
     trace = trace_of(ui, corr)
     tool_calls = len([t for t in (trace or {}).get("tool_calls") or () if isinstance(t, dict)])
-    latest = ui.inspection.context().events([rt.UTTERANCE], PREVIEW_SPEECHES, correlations=[corr])
     href = {s: f"{PREFIX}/episode/{quote(corr, safe='')}?onglet={s}" for s, _t in EPISODE_TABS}
     return {
-        "kind": info["kind"], "outcome": {"text": label, "tone": tone}, "detail": detail,
+        "kind": info["kind"], "outcome": {"text": said.outcome, "tone": said.tone}, "detail": said.detail,
         "to": ui.names.who((started.data.target if started else None) or (ended.data.target if ended else None)),
-        "began": ui.when_long(started.at) if started else "", "open": ended is None,
+        "began": ui.when_long(started.at) if started else "", "open": said.open,
         "trigger": _trigger(ui, started),
-        "speeches": [_speech(ui, s) for s in reversed(latest)], "speech_count": speeches,
+        "speeches": [_speech(ui, s) for s in reversed(said.latest)], "speech_count": said.speeches,
         "tiles": [
-            {"label": "Durée", "value": duration, "sub": "du début à la fin" if started and ended else "fin ou début absent"},
-            {"label": "Paroles produites", "value": num_fr(speeches), "sub": "dans le journal", "href": href["dit"]},
-            {"label": "Événements", "value": num_fr(sum(counts.values())), "sub": "dans cet épisode",
-             "href": href["deroule"]},
+            {"label": "Durée", "value": said.duration, "sub": said.duration_said},
+            {"label": "Paroles produites", "value": num_fr(said.speeches), "sub": "dans le journal",
+             "href": href["dit"]},
+            {"label": "Événements", "value": num_fr(said.events), "sub": "dans cet épisode", "href": href["deroule"]},
             {"label": "Appels de modèle", "value": num_fr(len(calls)),
              "sub": money_fr(sum(c.cost_usd for c in calls)) if calls else "aucun", "href": href["appels"]},
             {"label": "Outils appelés", "value": num_fr(tool_calls) if trace else "—",

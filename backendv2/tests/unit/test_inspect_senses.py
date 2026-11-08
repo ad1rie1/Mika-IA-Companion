@@ -223,7 +223,6 @@ def test_every_sense_view_is_declared_placed_and_clean_on_a_fresh_kernel_without
         assert (declared[key].title, declared[key].subject, declared[key].section) == (title, "mail", "")
         assert [n.text for n in notes(clean(shown_[key]))] == ["Aucun mail demandé : choisis-en un dans le courrier."]
     assert ("email", "mail") not in declared  # l'ancienne vue cachée : remplacée par la fiche
-    assert declared["email", "message"].subject_param == "id"
     assert {p.name: p.kind for p in declared["email", "reception"].typed} == {
         "compte": "hidden", "dossier": "hidden", "etat": "select", "de": "search", "q": "search"}
     assert {p.name for p in declared["rss", "flux"].typed} == {"flux", "q"}
@@ -349,8 +348,9 @@ def test_the_mail_view_filters_pages_and_opens_each_mail_as_a_fiche(tmp_path):
     assert (len(first.rows), first.pager.total, first.pager.pages) == (3, 4, 2)
     assert len(second.rows) == 1 and far.pager.number == 2 and far.rows == second.rows
     assert not {shown(r.cells[0]) for r in first.rows} & {shown(r.cells[0]) for r in second.rows}
-    # le badge : un mail important, frais, pas encore lu
-    assert got["badge"] == (1, "mail(s) important(s) pas encore lu(s)")
+    # le badge : un mail important, frais, pas encore lu ; son indice est accordé au compte sans le redire, car
+    # l'accueil montre le nombre juste devant (audit du 2026-11-05, C1-10 et sa relecture)
+    assert got["badge"] == (1, "mail important pas encore lu")
     # la fiche : l'en-tête
     head = got["head"]
     assert isinstance(head, Head) and head.key == "<m1@exemple.fr>" and head.title == "Urgent : ton dossier"

@@ -21,9 +21,11 @@ puis les données denses en listes serrées, lisibles en colonnes.
 - Appels et coûts : le bandeau des échecs, les chiffres, le coût et les appels de quatorze jours en barres (les échecs
   en rouge) ; puis en sous-onglets où va le coût (par rôle, par modèle, par fournisseur), tous les appels, le détail
   jour par jour.
-- Stockage et sauvegardes : le bandeau des sauvegardes s'il y a lieu, les chiffres, puis côte à côte ce que garde
-  ``mind`` (une barre par table) et les sauvegardes (la dernière, sa vérification, les archives).
-- Actions des opérateurs : un fil jour par jour — l'heure, qui, l'action, sur quoi, l'issue ; ses événements en liens.
+- Stockage et sauvegardes : le bandeau des sauvegardes s'il y a lieu, les chiffres, puis côte à côte ses bases et ses
+  dossiers (la place de chacun, ce qu'il garde, ce que la sauvegarde en fait) au-dessus de ce que garde ``mind`` (une
+  barre par table), et les sauvegardes (la dernière, sa vérification, les archives).
+- Gestes audités : un fil jour par jour — l'heure, qui, le geste, d'où (la console, son espace, la ligne de
+  commande), sur quoi, l'issue ; ses événements en liens.
 - Toutes les vues : en sous-onglets, par destination, sur les fiches, par faculté, et celles qui sont cachées.
 - Diagnostic avancé : en sous-onglets, l'ensemble des tranches (la plus récemment modifiée d'abord), puis une faculté
   par sous-onglet — ses faits lus maintenant, sa tranche en JSON, repliée.
@@ -49,7 +51,7 @@ from markupsafe import Markup
 from mika.app.handmade.tabs import Got, Line, Tab, anchored, blank, instant, raw_lines, rest, subpanes
 from mika.app.handmade.tabs.decisions import by_day
 from mika.inspector import names, render
-from mika.inspector.pages.system import backup_state
+from mika.inspector.pages.system import OPERATIONS_TITLE, PLACES_TITLE, backup_state
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, US
 from mika.kernel.codec import to_plain
@@ -502,14 +504,18 @@ def stockage(got: Got) -> Markup | None:
     tone, said = backup_state(got.ui)
     band = _band(tone, f"Sauvegardes : {said}.") if tone in ("warn", "danger") else None
     archives = got.table("Archives")
+    places = got.table(PLACES_TITLE)
     return got.draw("handmade/system/stockage.html", band=band, bases=bases, kept=kept, tables=tables,
+                    places=places, place_items=[{"name": x.text("nom"), "size": x.text("place"),
+                                                 "what": x.text("ce qu'il garde"), "kept": x.get("sauvegarde") or {}}
+                                                for x in got.lines(PLACES_TITLE)],
                     saves=(saves or {}).get("items", []), last=got.fields("La dernière sauvegarde"),
                     archives=archives, archive_items=[{"name": x.text("archive"), "size": x.text("taille"),
                                                        "when": x.get("écrite")} for x in got.lines("Archives")],
                     notes=got.notes(), saved=saves is not None)
 
 
-# ── Actions des opérateurs ────────────────────────────────────────────────
+# ── Gestes audités ────────────────────────────────────────────────────────
 
 
 def _operation(got: Got, line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -517,18 +523,17 @@ def _operation(got: Got, line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
     outcome = line.get("issue") or {}
     seqs = [s.strip() for s in line.text("événements").split(",") if s.strip().isdigit()]
     return {"at": at, "hm": _hm(got, at), "when": line.get("quand"), "action": line.text("action"),
-            "by": line.text("par"), "on": None if blank(line.get("sur")) else line.get("sur"),
+            "by": line.text("par"), "from": line.text("depuis"), "on": None if blank(line.get("sur")) else line.get("sur"),
             "outcome": outcome, "key": line.text("action (clé)"), "href": line.href,
             "events": [{"n": s, "href": f"{PREFIX}/evenement/{s}"} for s in seqs]}
 
 
 def operations(got: Got) -> Markup | None:
-    """Système › Actions des opérateurs : un fil jour par jour, qui a fait quoi, sur quoi, avec quelle issue."""
-    t = got.table("Ce que les opérateurs ont fait")
+    """Système › Gestes audités : un fil jour par jour, qui a fait quoi, d'où, sur quoi, avec quelle issue."""
+    t = got.table(OPERATIONS_TITLE)
     if t is None:
         return None
-    items = [_operation(got, x, r) for x, r in zip(got.lines("Ce que les opérateurs ont fait"), raw_lines(got, t),
-                                                   strict=False)]
+    items = [_operation(got, x, r) for x, r in zip(got.lines(OPERATIONS_TITLE), raw_lines(got, t), strict=False)]
     outcomes = Counter((x["outcome"].get("text", ""), x["outcome"].get("tone", "")) for x in items)
     who = Counter(x["by"] for x in items)
     return got.draw("handmade/system/operations.html", t=t, days=by_day(got, items),

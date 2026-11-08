@@ -5,7 +5,11 @@
  */
 import { h, hue, initials } from "../../shell/dom";
 import type { IconName } from "../../shell/icons";
-import { MAIL_LIMITS, type MailBox, type MailFull, type Person } from "../../api/mail";
+import { MAIL_LIMITS, PIECE_LIMITS, type MailBox, type MailFull, type Person } from "../../api/mail";
+import { ofName } from "../../shared/names";
+
+/** « de Léa », « d'Adrien » : commun à Mail et à Teams (`shared/names.ts`), réexporté pour l'écran Mail. */
+export { ofName };
 
 // ── Les niveaux (ADR 0188) ────────────────────────────────────────────
 
@@ -35,14 +39,6 @@ export function levelTag(level: string): string {
 /** Le prénom : « Adrien Moreau » → « Adrien ». */
 export function firstName(full: string): string {
   return String(full || "").trim().split(/\s+/)[0] ?? "";
-}
-
-/** « de Léa », « d'Adrien », « d'Hélène ». */
-export function ofName(name: string): string {
-  const n = String(name || "").trim();
-  if (!n) return "";
-  const first = n.normalize("NFD").replace(/\p{M}/gu, "")[0]?.toLowerCase() ?? "";
-  return "aeiouyh".includes(first) ? `d'${n}` : `de ${n}`;
 }
 
 /** Le nom qu'on montre d'une boîte : la sienne, son nom ; partagée, « Boîte de Léa » (ADR 0188), son nom en plus si
@@ -204,6 +200,7 @@ export function recipientsText(people: readonly Person[], max: number = MAIL_LIM
 export interface OutgoingText {
   to: string;
   cc: string;
+  bcc: string;
   subject: string;
   body: string;
 }
@@ -212,19 +209,58 @@ export interface OutgoingText {
  * Un mail prêt à partir, dans les bornes de l'API ; sinon pourquoi il ne peut pas partir tel quel (une phrase à dire
  * sous le formulaire). Le serveur refuserait de toute façon : rien ne part coupé.
  */
-export function outgoingText(v: { to: readonly Person[]; cc: readonly Person[]; subject: string; body: string }): { mail: OutgoingText | null; problem: string } {
+export function outgoingText(v: { to: readonly Person[]; cc: readonly Person[]; bcc?: readonly Person[]; subject: string; body: string }): { mail: OutgoingText | null; problem: string } {
   const max = MAIL_LIMITS;
   const to = recipientsText(v.to);
   const cc = recipientsText(v.cc);
+  const bcc = recipientsText(v.bcc ?? []);
   const crowded = (field: string) =>
     `Trop de destinataires dans « ${field} » : même sans leurs noms, leurs adresses dépassent ${thousands(max.recipients)} caractères. Envoie-le en plusieurs fois.`;
   if (to === null) return { mail: null, problem: crowded("À") };
   if (cc === null) return { mail: null, problem: crowded("Cc") };
+  if (bcc === null) return { mail: null, problem: crowded("Cci") };
   const subject = chars(v.subject);
   if (subject > max.subject) return { mail: null, problem: `L'objet est trop long : ${thousands(max.subject)} caractères au plus (il en a ${thousands(subject)}).` };
   const body = chars(v.body);
   if (body > max.body) return { mail: null, problem: `Le message est trop long : ${thousands(max.body)} caractères au plus (il en a ${thousands(body)}).` };
-  return { mail: { to, cc, subject: v.subject, body: v.body }, problem: "" };
+  return { mail: { to, cc, bcc, subject: v.subject, body: v.body }, problem: "" };
+}
+
+// ── Les pièces d'un mail qu'on écrit ──────────────────────────────────
+
+/** Ce qu'il faut savoir d'un fichier joint (un `File` du navigateur). */
+export interface Piece {
+  name: string;
+  size: number;
+}
+
+const inMegabytes = (bytes: number) => `${bytes / (1024 * 1024)} Mo`;
+
+/**
+ * Ceux de `picked` qui s'ajoutent à `current` dans les bornes de l'API (`PIECE_LIMITS`) ; `problem` dit le premier
+ * refus (les autres fichiers choisis passent quand même). Le même fichier choisi deux fois (nom et taille) ne compte
+ * qu'une fois. `carried` : les pièces d'origine d'un transfert, qui comptent dans le nombre et le total.
+ */
+export function addPieces<T extends Piece>(current: readonly T[], picked: readonly T[], carried: readonly Piece[] = []): { pieces: T[]; problem: string } {
+  const pieces = [...current];
+  let total = [...carried, ...pieces].reduce((sum, p) => sum + p.size, 0);
+  const also = carried.length ? ", celles du mail d'origine comprises" : "";
+  let problem = "";
+  for (const file of picked) {
+    if (pieces.some((p) => p.name === file.name && p.size === file.size)) continue;
+    let refused = "";
+    if (!file.size) refused = `« ${file.name} » est vide.`;
+    else if (file.size > PIECE_LIMITS.each) refused = `« ${file.name} » est trop grosse : ${inMegabytes(PIECE_LIMITS.each)} par pièce.`;
+    else if (pieces.length + carried.length >= PIECE_LIMITS.count) refused = `Un mail porte au plus ${PIECE_LIMITS.count} pièces${also}.`;
+    else if (total + file.size > PIECE_LIMITS.total) refused = `Ces pièces sont trop lourdes pour un seul mail : ${inMegabytes(PIECE_LIMITS.total)} en tout${also}.`;
+    if (refused) {
+      problem ||= refused;
+      continue;
+    }
+    pieces.push(file);
+    total += file.size;
+  }
+  return { pieces, problem };
 }
 
 // ── Le texte ──────────────────────────────────────────────────────────
@@ -238,7 +274,7 @@ function fold(text: string): string {
     .toLowerCase();
 }
 
-/** Reste-t-il un « [À COMPLÉTER » (sous toutes ses graphies, comme `ports/mail.py::to_fill`) ? */
+/** Reste-t-il un « [À COMPLÉTER » (sous toutes ses graphies, comme `ports/drafts.py::to_fill`) ? */
 export function toFill(...texts: string[]): boolean {
   return texts.some((t) => TO_FILL.test(fold(t)));
 }

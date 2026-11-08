@@ -43,6 +43,7 @@ from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.faculty import proving_tools
 from mika.kernel.frame import Audience, EpisodeRef, Frame
+from mika.kernel.inspect import size_fr
 from mika.kernel.state import FrozenDict
 from mika.plugins.forge import (
     INSTALL,
@@ -56,6 +57,7 @@ from mika.plugins.forge import (
     forge_write,
     guide,
     install_draft,
+    schema_text,
     written_draft,
 )
 from mika.plugins.forge import (
@@ -876,3 +878,10 @@ def test_an_address_shown_in_an_error_or_the_journal_never_carries_its_query():
     assert shown_url("https://api.exemple.fr/v1/cours?apikey=SECRET&d=EUR") == "https://api.exemple.fr/v1/cours?…"
     assert shown_url("https://moi:motdepasse@exemple.fr/flux#x") == "https://exemple.fr/flux?…"
     assert shown_url("https://exemple.fr/flux") == "https://exemple.fr/flux"
+
+
+def test_the_size_of_her_base_reads_like_any_other_size():
+    """Une taille se dit partout pareil (``kernel.inspect.size_fr``), ici dans ce qu'elle lit de sa base."""
+    head = schema_text({"engine": "sqlite", "size": 1536, "max": 5 * 1024 * 1024}).splitlines()[0]
+    assert size_fr(1536) in head and size_fr(5 * 1024 * 1024) in head
+    assert size_fr(0) in schema_text({"engine": "sqlite"})  # une base vide : rien, pas « 1 Ko »

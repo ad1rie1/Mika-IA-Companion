@@ -56,7 +56,7 @@ def something_to_doubt(audience: Any) -> bool:
 IDENTITY.bundle(BUNDLE, phrase("identity.tools.bundle"))
 
 
-@IDENTITY.tool("identity_whoami_with", description=phrase("identity.tools.whoami.description"), args=NoArgs, bundle=READ_BUNDLE, episodes=CONVERSATIONAL)
+@IDENTITY.tool("identity_whoami_with", description=phrase("identity.tools.whoami.description"), label=phrase("identity.tools.whoami.label"), args=NoArgs, bundle=READ_BUNDLE, episodes=CONVERSATIONAL)
 async def whoami_with(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)
     if not target:
@@ -71,7 +71,8 @@ async def whoami_with(args: NoArgs, ctx: Any) -> str:
     return "\n".join(lines)
 
 
-@IDENTITY.tool("identity_doubt", description=phrase("identity.tools.doubt.description"), args=DoubtArgs, bundle=BUNDLE,
+@IDENTITY.tool("identity_doubt", description=phrase("identity.tools.doubt.description"),
+               label=phrase("identity.tools.doubt.label"), args=DoubtArgs, bundle=BUNDLE,
                episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def doubt(args: DoubtArgs, ctx: Any) -> str:
     target = _target(ctx)
@@ -85,7 +86,8 @@ async def doubt(args: DoubtArgs, ctx: Any) -> str:
     return phrase("identity.tools.doubt.done")
 
 
-@IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"), args=NoArgs,
+@IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"),
+               label=phrase("identity.tools.forget.label"), args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def forget_binding(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)

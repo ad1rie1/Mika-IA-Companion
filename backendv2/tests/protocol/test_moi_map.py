@@ -8,12 +8,17 @@ import gzip
 import os
 import re
 
+from pmtiles.tile import Compression
+
 from mika.adapters.maps import FILE, MapConfig, MapsDesk, PlacesConfig, RoutingConfig
 from tests.protocol.test_moi_mail import API, login, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 from tests.unit.test_maps import LILLE, TILES, archive
 
 MAP = API + "/phone/map"
+#: où l'en-tête d'une archive PMTiles (version 3) dit comment ses répertoires sont compressés
+INTERNAL_COMPRESSION = 97
+NOT_READY = "La carte n'est pas encore prête sur ce serveur."
 
 
 def with_map(world):  # noqa: F811
@@ -31,6 +36,37 @@ def test_without_a_map_nothing_loads_and_a_session_is_needed(world):  # noqa: F8
     got = client.get(MAP).json()
     assert got["ready"] is False and "plan dessiné" in got["reason"]
     assert client.get(MAP + "/tiles/0/0/0").status_code == 404
+
+
+def test_a_server_without_a_map_says_so_to_everyone(world):  # noqa: F811
+    """Rien de réglé n'est pas une panne, et cela ne demande rien à personne : tout le monde le lit."""
+    client, live, _ = world
+    bootstrap(client)
+    second_person(client, live)
+    login(client, "lea")
+    assert "plan dessiné" in client.get(MAP).json()["reason"]
+
+
+def test_a_person_reads_that_the_map_is_not_ready_never_what_is_wrong_with_it(world):  # noqa: F811
+    """Une personne n'a ni la console ni le serveur : d'une carte réglée qui ne se lit pas, elle lit que ça n'est pas
+    prêt, sans la consigne ni le fichier. Une opératrice, sur les mêmes routes, lit ce qui ne va pas."""
+    client, live = with_map(world)
+    file = live.data / "cartes" / "lille.pmtiles"
+    raw = bytearray(file.read_bytes())
+    raw[INTERNAL_COMPRESSION] = Compression.NONE.value
+    file.write_bytes(raw)
+
+    def said() -> list[str]:
+        got, tile = client.get(MAP).json(), client.get(MAP + "/tiles/0/0/0")
+        assert got["ready"] is False and tile.status_code == 503
+        return [got["reason"], tile.json()["error"]]
+
+    assert all("refaites-la" in text and "deploy/README.md" in text for text in said())
+    second_person(client, live)
+    login(client, "lea")
+    assert said() == [NOT_READY, NOT_READY]
+    file.unlink()
+    assert said() == [NOT_READY, NOT_READY]
 
 
 def test_its_tiles_come_from_this_server_as_the_archive_keeps_them(world):  # noqa: F811
@@ -118,7 +154,7 @@ def test_the_kernel_has_the_maps_port(world):  # noqa: F811
 
 
 def test_the_console_sets_places_addresses_and_routes(world):  # noqa: F811
-    """Réglages › Canaux : « Lieux et adresses » et « Itinéraires » (ADR 0194) — par défaut rien ne sort ; un
+    """Réglages › Carte et téléphone : « Lieux et adresses », « Itinéraires » (ADR 0194) — par défaut rien ne sort ; un
     Valhalla à soi demande son adresse."""
     client, live, _ = world
     bootstrap(client)

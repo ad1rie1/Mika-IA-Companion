@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import math
 import re
-import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
+
+from mika.kernel.text import fold
 
 #: les tons d'une cellule, d'une ligne, d'une note
 TONES = ("", "info", "ok", "warn", "danger", "muted")
@@ -420,10 +421,6 @@ def is_table_choice(name: str, value: str) -> bool:
     return name.startswith("vue_pg") and name[6:].isdigit() and value == "table"
 
 
-def _fold(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
-
-
 def read_params(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[dict[str, Any], list[str]]:
     """Les valeurs validées des filtres, et ce qu'il faut en dire (une valeur
     inconnue retombe sur le défaut, et le dit)."""
@@ -447,8 +444,8 @@ def read_params(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[dict[st
             if not given:
                 values[p.name] = p.default
                 continue
-            folded = _fold(given)
-            match = next((v for v, label in p.choices if v == given or _fold(label) == folded or _fold(v) == folded),
+            folded = fold(given)
+            match = next((v for v, label in p.choices if v == given or fold(label) == folded or fold(v) == folded),
                          None)
             if match is None:
                 known = ", ".join(label for _, label in p.choices)
@@ -672,6 +669,21 @@ def money_fr(amount: float | None, unit: str = "$") -> str:
         return "—"
     digits = 4 if 0 < abs(amount) < 0.01 else 2
     return f"{num_fr(amount, digits)}{_NNBSP}{unit}"
+
+
+#: une taille, en base 1024 ; au-delà des Go, encore des Go
+_SIZE_UNITS = ("o", "Ko", "Mo", "Go")
+
+
+def size_fr(octets: float | int | None) -> str:
+    """Une taille à la française, en base 1024 : « 512 o », « 1,5 Ko », « 12,3 Mo », « 2 Go ». ``None`` ou non
+    fini : « — »."""
+    if octets is None or isinstance(octets, bool) or not math.isfinite(float(octets)):
+        return "—"
+    value, unit = octets, 0
+    while abs(value) >= 1024 and unit < len(_SIZE_UNITS) - 1:
+        value, unit = value / 1024, unit + 1
+    return f"{num_fr(value)}{_NNBSP}{_SIZE_UNITS[unit]}"
 
 
 def day_fr(year: int, month: int, day: int, weekday: int, *, with_year: bool = False) -> str:

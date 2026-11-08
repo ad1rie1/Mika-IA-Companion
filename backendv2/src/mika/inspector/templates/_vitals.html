@@ -1,6 +1,6 @@
 {# Ses vitaux, dans la pastille d'état de la barre du haut (ADR 0176) ; relus toutes les 10 s (``/_vitals``). Le
-   résumé de la pastille (les deux premiers vitaux déclarés, le nombre d'alertes, la couleur de son humeur) voyage
-   avec eux : le script le recopie dans la pastille. #}
+   résumé de la pastille (les deux premiers vitaux déclarés, dits court et nommés — « curieuse · énergie 53 % » —, le
+   nombre d'alertes, la couleur de son humeur) voyage avec eux : le script le recopie dans la pastille. #}
 {% set lead = vitals[1:3] if vitals else [] %}
-<span class="vitals-digest" hidden data-digest="{{ lead|map(attribute='text')|join(' · ') }}" data-alerts="{{ (vitals or [])|selectattr('dot', 'in', ['warn', 'danger'])|list|length }}" data-mood="{% if lead and lead[0].swatch %}sw-{{ lead[0].swatch }}{% elif vitals %}{{ vitals[0].dot }}{% endif %}"></span>
+<span class="vitals-digest" hidden data-digest="{{ lead|map(attribute='short')|join(' · ') }}" data-alerts="{{ (vitals or [])|selectattr('dot', 'in', ['warn', 'danger'])|list|length }}" data-mood="{% if lead and lead[0].swatch %}sw-{{ lead[0].swatch }}{% elif vitals %}{{ vitals[0].dot }}{% endif %}"></span>
 {% for v in vitals %}<a class="vital{{ ' optional' if v.optional }}"{% if v.href %} href="{{ v.href }}"{% endif %}{% if v.hint %} title="{{ v.hint }}"{% endif %}><span class="vital-label">{{ v.label }}</span>{% if v.swatch %}<span class="swatch sw-{{ v.swatch }}"></span>{% elif v.dot %}<span class="dot {{ v.dot }}"></span>{% endif %}<b>{{ v.text }}</b>{% if v.ratio is defined and v.ratio is not none %} <meter class="vital-meter" min="0" max="1" value="{{ v.ratio }}">{{ (v.ratio * 100)|round|int }} %</meter>{% endif %}</a>{% endfor %}

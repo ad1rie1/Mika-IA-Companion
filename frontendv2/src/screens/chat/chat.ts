@@ -18,6 +18,7 @@ import type {
   AckMessage,
   ApprovalDecision,
   ChatMode,
+  HistoryAttachment,
   HistoryMessage,
   MessageNote,
   SentFile,
@@ -44,6 +45,7 @@ import {
   sentFiles,
   threadOf,
   trimThreads,
+  userAttachments,
   withAttachments,
   writeCache,
   type MessageStatus,
@@ -95,16 +97,19 @@ import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { Account, ScreenContext, ScreenDef, Shell } from "../../shell/shell";
 import type { MikaSnapshot, MikaStore } from "../../mika/store";
-import { facetsOf, percent, statusLine, type LinkState } from "../../mika/view";
+import { facetHtml, facetsOf, promiseHtml, statusLine, type LinkState } from "../../mika/view";
+import { mergeOlder, oldestLoaded, touchesLoaded, UNBOUNDED } from "./older";
 import {
   accordToggle,
   approvalsMarkup,
   attachmentsMarkup,
   cardKinds,
+  dayAndClock,
   elsewhere,
   type CardKind,
   composerMarkup,
   filesTable,
+  messageKey,
   strandHead,
   strandsPane,
   threadMarkup,
@@ -123,6 +128,8 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 /** Les messages gardés par fil, dans l'écran et dans le cache (ceux que le serveur rend à l'ouverture). */
 const MAX_MESSAGES = 50;
+/** Sans réponse au bout de ce temps (une trame ignorée au-delà du débit), le bouton redevient cliquable. */
+const OLDER_WAIT_MS = 10_000;
 /** La longueur maximale d'un message, celle du serveur (`adapters/web/protocol.py::MAX_MESSAGE_CHARS`). */
 export const MAX_MESSAGE_CHARS = 2000;
 const COUNTER_FROM = 1800;
@@ -130,6 +137,12 @@ const COUNTER_FROM = 1800;
 const TYPING_TIMEOUT_MS = 300_000;
 const APPROVAL_NOTE_MS = 6000;
 const STRAND_NOTE_MS = 6000;
+/** Le message que la palette montre reste surligné ce temps-là. */
+const FOUND_MS = 2400;
+/** L'écart entre le haut du champ (et de ses cartes) et le bas des toasts, sur l'écran Chat. */
+const TOAST_GAP_PX = 8;
+/** Dans la palette, le début d'un message ; ce qu'on y trouve plus loin se montre en passage (`palette.ts::excerpt`). */
+const PALETTE_TITLE_CHARS = 70;
 const OFFLINE_NOT_SENT = "Hors ligne : ta décision n'est pas partie. Réessaie à la reconnexion.";
 
 /** Le fil gardé par ce navigateur, pour ce compte seulement. */
@@ -220,7 +233,9 @@ export class ChatScreen {
   private ws: WebSocketClient | null = null;
   private history: StoredMessage[] = [];
   private life = "";
-  private truncated = false;
+  /** Le fil avec elle a-t-il, au serveur, des messages plus anciens que ce qui est chargé ? (ADR 0215) */
+  private moreOlder = false;
+  private olderTimer: number | null = null;
   private readonly cacheKey: string;
   private readonly strandKey: string;
 
@@ -233,6 +248,8 @@ export class ChatScreen {
   private readonly approvalOpen = new Set<number>();
   /** Ce que veut faire chaque carte (sa capacité, son brouillon), relevé dans la trame brute. */
   private cardKinds = new Map<number, CardKind>();
+  /** Sur un téléphone, les cartes-liens (Mail, Teams) dépliées sous leur ligne. */
+  private linksOpen = false;
 
   private work: readonly WorkCard[] = [];
   private readonly openWork = new Set<string>();
@@ -268,6 +285,12 @@ export class ChatScreen {
   /** Le fil suit le bas tant qu'on y est : une image qui se charge, une bulle qui arrive le gardent en vue. */
   private stick = true;
   private resize: ResizeObserver | null = null;
+  /** La hauteur du champ et de ses cartes : les toasts passent au-dessus (`placeToasts`). */
+  private dockWatch: ResizeObserver | null = null;
+  /** Le message que la palette a choisi (sa `messageKey`), à montrer au prochain dessin ; puis celui qu'on surligne. */
+  private showing: string | null = null;
+  private found: string | null = null;
+  private foundTimer: number | null = null;
   /** Sa réponse qui s'écrit bulle par bulle (ADR 0112) : « Mika écrit… » entre deux, sa bouche à chacune. */
   private readonly reveal = new BubbleReveal<StoredMessage>((done) => {
     this.paintThread();
@@ -292,6 +315,7 @@ export class ChatScreen {
     store.subscribe((snap) => this.paintMika(snap));
     onTheme((dark) => this.minis.theme(dark));
     document.addEventListener("keydown", (e) => this.focusOnType(e));
+    addEventListener("resize", () => this.placeToasts());
   }
 
   // ── Le compte et les modes ────────────────────────────────────────
@@ -337,6 +361,7 @@ export class ChatScreen {
     ws.on("connection", (d) => {
       this.approvals = withConnection(this.approvals, d.status);
       if (d.status === "connected") this.autoAccepted.clear();
+      if (d.status !== "connected") this.endOlder();
       this.link =
         d.status === "connected" ? "connected" : d.status === "unauthorized" ? "unauthorized" : d.status === "reconnecting" ? "connecting" : "offline";
       this.store.setLink(this.link);
@@ -368,6 +393,8 @@ export class ChatScreen {
         setMaps(restored, m.sender === "vtuber" ? mapNotes((m as Partial<Kept>).maps) : []);
         restored.files = m.sender === "vtuber" ? sentFiles(m.files) : undefined;
         if (!restored.files?.length) delete restored.files;
+        restored.attachments = m.sender === "user" ? userAttachments(m.attachments) : undefined;
+        if (!restored.attachments?.length) delete restored.attachments;
         restored.strand = strandOf(m.strand);
         if (!restored.strand) delete restored.strand;
         return restored;
@@ -376,7 +403,7 @@ export class ChatScreen {
   }
 
   private persist(): void {
-    write(() => localStorage, this.cacheKey, writeCache(this.life, this.history));
+    write(() => localStorage, this.cacheKey, writeCache(this.life, trimThreads(this.history, MAX_MESSAGES, MAX_STRANDS_CACHED)));
   }
 
   // ── Les trames ────────────────────────────────────────────────────
@@ -453,14 +480,16 @@ export class ChatScreen {
 
   private onHistory(data: HistoryMessage): void {
     if (data.mode === "strand") {
-      // un fil de travail relu (ADR 0164) : des lignes à fusionner, jamais un curseur ni une autre vie
-      this.merge(data.messages ?? [], false, "catchup");
+      // un fil relu : des lignes à fusionner, jamais un curseur ni une autre vie ; le fil avec elle (ADR 0215), ou
+      // un fil de travail (ADR 0164)
+      if (data.strand === "") this.onOlder(data);
+      else this.merge(data.messages ?? [], false, "catchup");
       return;
     }
     let wiped = false;
     if (fromAnotherLife(this.life, data)) {
       this.history = keepAcrossLives(this.history);
-      this.truncated = false;
+      this.moreOlder = false;
       this.work = [];
       wiped = true;
     }
@@ -470,15 +499,62 @@ export class ChatScreen {
 
   private merge(entries: HistoryMessage["messages"], truncated: boolean, mode: "initial" | "catchup", wiped = false): void {
     const before = this.history.length;
-    const result = mergeHistory(this.history, entries, MAX_MESSAGES);
+    const moreBefore = this.moreOlder;
+    // à l'ouverture, ou quand il en manque trop : ce qui est plus vieux qu'une trame qui ne touche rien de chargé ne
+    // se recoud pas, le fil repart des derniers messages (ADR 0215)
+    const seam = mode === "initial" || truncated;
+    const limit = seam && !touchesLoaded(this.history, entries ?? []) ? MAX_MESSAGES : UNBOUNDED;
+    const result = mergeHistory(this.history, entries, limit);
     this.history = result.history;
-    this.truncated = mode === "initial" ? truncated : this.truncated || truncated;
+    if (seam) this.moreOlder = truncated || (entries?.length ?? 0) >= MAX_MESSAGES;
     const mapped = this.mergeMaps(entries);
     const changed = wiped || result.added > 0 || result.adopted > 0 || result.judged > 0 || result.enriched > 0 || mapped > 0;
-    if (!changed && this.history.length === before && !truncated) return;
+    if (!changed && this.history.length === before && !truncated && this.moreOlder === moreBefore) return;
     this.persist();
     this.paintThread();
     if (result.sawReply) this.hideTyping();
+  }
+
+  /** Une page de messages anciens du fil avec elle (ADR 0215) : au-dessus de ce qui est lu, sans bouger la lecture. */
+  private onOlder(data: HistoryMessage): void {
+    const entries = data.messages ?? [];
+    this.stopOlderTimer();
+    this.moreOlder = data.more === true;
+    this.history = mergeOlder(this.history, entries);
+    this.mergeMaps(entries);
+    const scroller = this.body ? $<HTMLElement>("[data-scroll]", this.body) : null;
+    const fromBottom = scroller ? scroller.scrollHeight - scroller.scrollTop : 0;
+    this.paintThread();
+    if (scroller) scroller.scrollTop = scroller.scrollHeight - fromBottom;
+  }
+
+  /** « Messages plus anciens » (ADR 0215) : la page d'avant, une à la fois. */
+  private askOlder(): void {
+    if (this.olderTimer !== null || !this.moreOlder || !this.ws) return;
+    const before = oldestLoaded(this.history);
+    const sent = this.ws.requestStrandHistory({ type: "strand_history", id: "", ...(before !== undefined ? { before } : {}) });
+    if (!sent) {
+      toast("Hors ligne : réessaie quand la connexion est revenue.", { ico: "alert" });
+      return;
+    }
+    this.stick = false;  // on lit vers le haut : rien ne redescend tout seul
+    this.olderTimer = window.setTimeout(() => {
+      this.olderTimer = null;
+      this.paintThread();
+    }, OLDER_WAIT_MS);
+    this.paintThread();
+  }
+
+  private stopOlderTimer(): void {
+    if (this.olderTimer !== null) window.clearTimeout(this.olderTimer);
+    this.olderTimer = null;
+  }
+
+  /** La connexion est tombée : la page demandée ne viendra pas, le bouton redevient cliquable. */
+  private endOlder(): void {
+    if (this.olderTimer === null) return;
+    this.stopOlderTimer();
+    this.paintThread();
   }
 
   /**
@@ -511,6 +587,7 @@ export class ChatScreen {
       status?: MessageStatus;
       matchText?: string;
       localOnly?: boolean;
+      attachments?: HistoryAttachment[];
       inner?: boolean;
       files?: SentFile[];
       reveal?: boolean;
@@ -535,6 +612,7 @@ export class ChatScreen {
       after: opts.localOnly ? cursorOf(this.history) : undefined,
       inner: opts.inner || undefined,
       ...(opts.files?.length ? { files: opts.files } : {}),
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
       ...(opts.notes?.length ? { notes: opts.notes } : {}),
       ...(opts.maps?.length ? { maps: opts.maps } : {}),
@@ -542,7 +620,7 @@ export class ChatScreen {
     };
     this.history.push(stored);
     if (opts.reveal && sender === "vtuber") this.reveal.start(stored, display);
-    this.history = trimThreads(this.history, MAX_MESSAGES, MAX_STRANDS_CACHED);
+    this.history = trimThreads(this.history, UNBOUNDED, MAX_STRANDS_CACHED);
     this.persist();
     this.paintThread(sender === "user");
   }
@@ -658,6 +736,7 @@ export class ChatScreen {
         auto: this.autoAccept,
         open: this.approvalOpen,
         kinds: this.cardKinds,
+        linksOpen: this.linksOpen,
       });
       zone.hidden = !zone.innerHTML.trim();
     }
@@ -1002,7 +1081,8 @@ export class ChatScreen {
     if (this.pending.length) {
       // la même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle
       const display = withAttachments(text, this.pending.map((a) => a.name));
-      this.addMessage(display, "user", { cid, status: "pending", matchText: text, mode: pro, strand });
+      this.addMessage(display, "user", { cid, status: "pending", matchText: text, mode: pro, strand,
+        attachments: this.pending.map((a) => ({ name: a.name, kind: a.type.startsWith("image/") ? "image" : a.type.startsWith("audio/") ? "audio" : "file" })) });
       sent = this.ws.sendChatWithAttachments(text, this.pending, cid, mode, strand);
       this.pending = [];
     } else {
@@ -1070,16 +1150,21 @@ export class ChatScreen {
     if (this.shell.ctx?.screen === "chat") this.shell.refreshHead();
   }
 
-  private toggleMode(): void {
-    this.proPreferred = !this.proPreferred;
-    write(() => localStorage, PRO_KEY, this.proPreferred ? "1" : "0");
+  /** Le mode choisi, retenu par ce navigateur ; un toast le dit. Ne redessine rien. */
+  private setPro(pro: boolean): void {
+    this.proPreferred = pro;
+    write(() => localStorage, PRO_KEY, pro ? "1" : "0");
     this.ensureStrand();
     if (this.proMode) this.askStrandHistory(this.activeStrand);
-    this.shell.refresh();
     toast(
       this.proMode ? "Mode pro : sans son caractère, ses outils en direct, tes fils de travail." : "Retour à la conversation avec Mika.",
       { ico: "terminal" },
     );
+  }
+
+  private toggleMode(): void {
+    this.setPro(!this.proPreferred);
+    this.shell.refresh();
     this.focusInput();
   }
 
@@ -1118,11 +1203,12 @@ export class ChatScreen {
       typing: this.typingThread !== null && this.typingThread === thread,
       openWork: this.openWork,
       verdictErrors: this.verdictErrors,
-      truncated: this.truncated,
+      older: thread !== "" || !this.moreOlder ? "none" : this.olderTimer !== null ? "loading" : "more",
       now: Date.now(),
       api: API_BASE,
       filter: query ? (m) => norm(m.text).includes(query) : undefined,
       mapCards: (m) => this.mapCards(m),
+      found: this.found ?? undefined,
     });
     // ses cartes miniatures : les vivantes se relogent, les nouvelles s'observent
     this.minis.attach(el);
@@ -1175,23 +1261,15 @@ export class ChatScreen {
     const facets = facetsOf(s.mood);
     sections.push(
       `<section><h4>Humeur</h4>${
-        facets.length
-          ? facets
-              .map((f) => `<div class="facet"><span>${h(f.label)}</span><span class="bar"><i style="width:${Math.round(f.value * 100)}%"></i></span><span class="num">${percent(f.value)}</span></div>`)
-              .join("")
-          : `<p class="muted">Elle ne laisse rien paraître pour l'instant.</p>`
+        facets.length ? facets.map(facetHtml).join("") : `<p class="muted">Elle ne laisse rien paraître pour l'instant.</p>`
       }</section>`,
     );
+    // sa forme courte, voulue : deux pensées en simples paragraphes (la carte « Ce qu'elle fait » en montre trois)
     if (s.ruminations.length) {
       sections.push(`<section><h4>Elle repense à…</h4>${s.ruminations.slice(0, 2).map((r) => `<p>${h(r.summary)}</p>`).join("")}</section>`);
     }
     if (s.commitments.length) {
-      sections.push(
-        `<section><h4>Ce qu'elle t'a promis</h4>${s.commitments
-          .slice(0, 5)
-          .map((c) => `<div class="sc-line">${ico("check", "sm")}<span>${h(c)}</span></div>`)
-          .join("")}</section>`,
-      );
+      sections.push(`<section><h4>Ce qu'elle t'a promis</h4>${s.commitments.slice(0, 5).map(promiseHtml).join("")}</section>`);
     }
     body.innerHTML = `${sections.join("")}<button class="btn sm ghost cm-more" type="button" data-more-state>${ico("sparkle", "sm")}Tout ce qu'elle fait</button>`;
   }
@@ -1236,12 +1314,95 @@ export class ChatScreen {
       this.paintMika(this.store.current);
       this.paintApprovals();
       this.followBottom();
+      this.watchDock();
       this.paintThread(true);
       this.applyDraft();
+      this.applyShow();
+      this.placeToasts();
       return;
     }
     this.paintThread();
     this.applyDraft();
+    this.applyShow();
+    this.placeToasts();
+  }
+
+  // ── Les toasts, au-dessus du champ (Q15) ──────────────────────────
+
+  /** Le champ et ses cartes changent de hauteur (une ligne de plus, une carte qui arrive), ou l'écran se cache. */
+  private watchDock(): void {
+    this.dockWatch?.disconnect();
+    const dock = this.body ? $(".chat-dock", this.body) : null;
+    if (!dock) return;
+    this.dockWatch = new ResizeObserver(() => this.placeToasts());
+    this.dockWatch.observe(dock);
+  }
+
+  /**
+   * Sur l'écran Chat, les toasts passent au-dessus du champ et de ses cartes, jamais dessus : on ne les cache pas au
+   * moment d'écrire ou de décider. La variable `--toast-bottom`, posée sur `#toasts`, que base.css et app.css lisent ;
+   * le chat caché, elle s'en va et les toasts reprennent leur place.
+   */
+  private placeToasts(): void {
+    const toasts = document.getElementById("toasts");
+    if (!toasts) return;
+    const dock = this.body ? $(".chat-dock", this.body) : null;
+    if (!dock || !dock.offsetParent) {
+      toasts.style.removeProperty("--toast-bottom");
+      return;
+    }
+    const above = Math.max(0, Math.round(innerHeight - dock.getBoundingClientRect().top)) + TOAST_GAP_PX;
+    toasts.style.setProperty("--toast-bottom", `${above}px`);
+  }
+
+  // ── La palette mène à un message (F1-05) ──────────────────────────
+
+  /**
+   * Montrer un message chargé, choisi dans la palette : son fil, dans le mode qu'il demande (le fil avec elle est caché
+   * en mode pro : on en sort, comme « Demander à Mika » depuis la Carte), la recherche du chat fermée ; au dessin
+   * suivant, le message au milieu du fil, surligné un instant (`applyShow`).
+   */
+  private showMessage(m: StoredMessage): void {
+    const thread = threadOf(m);
+    const pro = thread !== "";
+    if (pro) {
+      this.activeStrand = thread;
+      write(() => localStorage, this.strandKey, thread);
+      this.unreadStrands.delete(thread);
+    }
+    if (pro !== this.proMode) this.setPro(pro);
+    else if (pro) {
+      // déjà en mode pro : un autre fil, comme `selectStrand`, sans prendre la main du champ
+      this.askStrandHistory(thread);
+      this.paintStrands();
+      this.paintTyping();
+    }
+    this.search = null;
+    this.showing = messageKey(m);
+    this.shell.go("#chat");
+  }
+
+  /** Le message choisi dans la palette : au milieu du fil, surligné `FOUND_MS` ; parti entre-temps, un toast le dit. */
+  private applyShow(): void {
+    const key = this.showing;
+    if (key === null || !this.body) return;
+    this.showing = null;
+    const el = $(`[data-msg="${CSS.escape(key)}"]`, this.body);
+    if (!el) {
+      toast("Ce message n'est plus dans la conversation chargée.", { ico: "info" });
+      return;
+    }
+    if (this.foundTimer !== null) window.clearTimeout(this.foundTimer);
+    this.found = key;
+    el.classList.add("found");
+    // le fil ne redescend plus de lui-même : on lit ce message
+    this.stick = false;
+    el.scrollIntoView({ block: "center" });
+    this.foundTimer = window.setTimeout(() => {
+      this.foundTimer = null;
+      this.found = null;
+      this.paintThread();
+    }, FOUND_MS);
   }
 
   /**
@@ -1250,11 +1411,7 @@ export class ChatScreen {
    * était choisi, cède la place.
    */
   prefill(text: string): void {
-    if (this.proMode) {
-      this.proPreferred = false;
-      write(() => localStorage, PRO_KEY, "0");
-      toast("Retour à la conversation avec Mika.", { ico: "terminal" });
-    }
+    if (this.proMode) this.setPro(false);
     this.pendingDraft = text;
     this.shell.go("#chat");
   }
@@ -1275,6 +1432,7 @@ export class ChatScreen {
   }
 
   private mount(section: HTMLElement): void {
+    on(section, "[data-older]", "click", () => this.askOlder());
     on(section, "[data-head]", "click", (_e, b) => {
       if (b.dataset.head === "fichiers") {
         const thread = this.viewThread;
@@ -1339,6 +1497,10 @@ export class ChatScreen {
     });
     on(section, "[data-ap]", "click", (_e, b) => {
       this.decide(Number(b.dataset.id), b.dataset.ap === "accept" ? "accept" : "refuse");
+    });
+    on(section, "[data-ap-links]", "click", () => {
+      this.linksOpen = !this.linksOpen;
+      this.paintApprovals();
     });
     // les dépliants restent comme on les a laissés d'un rendu à l'autre (`toggle` ne remonte pas : on le capte)
     section.addEventListener(
@@ -1434,18 +1596,31 @@ export class ChatScreen {
       <button class="btn ghost sm" type="button" data-head="fichiers" title="Les fichiers échangés">${ico("clip", "sm")}<span class="lbl">Fichiers</span></button>`;
   }
 
-  private searchEntries(): PaletteEntry[] {
-    const main = this.history.filter((m) => threadOf(m) === "" && !m.inner).slice(-6).reverse();
-    const out: PaletteEntry[] = main.map((m) => ({
-      group: "Conversation",
-      title: m.text.replace(/\s+/g, " ").slice(0, 70),
-      sub: `${m.sender === "user" ? "Toi" : "Mika"} · ${new Date(m.ts).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`,
+  /** Un message chargé, dans la palette : son début en titre, tout son texte où chercher ; le choisir y mène. */
+  private messageEntry(m: StoredMessage, group: string, where: string, now: number): PaletteEntry {
+    const text = m.text.replace(/\s+/g, " ").trim();
+    const title = text.length > PALETTE_TITLE_CHARS ? `${text.slice(0, PALETTE_TITLE_CHARS - 1).trimEnd()}…` : text;
+    return {
+      group,
+      title,
+      sub: [m.sender === "user" ? "Toi" : "Mika", where, dayAndClock(m.ts, now)].filter(Boolean).join(" · "),
+      text,
       icon: "chat",
-      action: () => {
-        if (this.proMode) this.toggleMode();
-        this.shell.go("#chat");
-      },
-    }));
+      action: () => this.showMessage(m),
+    };
+  }
+
+  /**
+   * Ce que la palette cherche ici : tous les messages chargés, en entier (sans rien de tapé, elle montre les six plus
+   * récents de la conversation) ; pour une opératrice, ses fils de travail, puis leurs messages.
+   */
+  private searchEntries(): PaletteEntry[] {
+    const now = Date.now();
+    const loaded = this.history.filter((m) => !m.inner && m.text.trim());
+    const out: PaletteEntry[] = loaded
+      .filter((m) => threadOf(m) === "")
+      .reverse()
+      .map((m) => this.messageEntry(m, "Conversation", "", now));
     if (this.operator) {
       for (const s of this.allStrands) {
         out.push({
@@ -1461,6 +1636,10 @@ export class ChatScreen {
             this.shell.go("#chat");
           },
         });
+      }
+      const inStrands = loaded.filter((m) => threadOf(m) !== "").sort((a, b) => b.ts - a.ts);
+      for (const m of inStrands) {
+        out.push(this.messageEntry(m, "Fils de travail", `« ${strandLabel(this.strandInfo(threadOf(m)))} »`, now));
       }
     }
     return out;

@@ -112,7 +112,7 @@ class Atelier:
     async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
         if not self.token:
             return RunResult(("git", "push"), None, refused="pas d'envoi : aucun jeton : règle-le dans "
-                                                            "Réglages › Canaux › Dépôts git")
+                                                            "Connexions › Dépôts Git")
         self.pushed.append((project, url, branch))
         self.pushed_shas.append(sha)
         return RunResult(("git", "push", url, branch), 0, stderr=f"To {url}\n * [new branch] HEAD -> {branch}\n")

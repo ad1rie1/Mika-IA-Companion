@@ -31,14 +31,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import hashlib
 import hmac
 import json
 import logging
 import secrets
-import time
-from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
@@ -65,11 +62,21 @@ from mika.adapters.web.accounts import (
     Accounts,
     password_problems,
 )
+from mika.adapters.web.gate import KEY_MAX, SlidingWindow, matches, token_digest
 from mika.adapters.web.hub import WS_UNAUTHORIZED, Conn, Hub
+from mika.adapters.web.session import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    account_of,
+    bearer,
+    csrf_header_ok,
+    native_token,
+)
 from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
+from mika.ports import gate as gate_p
 from mika.ports import phone as phone_p
 from mika.ports import teams as teams_p
 from mika.ports import wakeup as wakeup_p
@@ -80,8 +87,8 @@ from mika.vocab.people import clean_display_name, client_claim_allowed
 
 log = logging.getLogger("mika.web")
 
-SESSION_COOKIE = "sessionid"
-CSRF_COOKIE = "csrftoken"
+#: une fenêtre d'échecs ou d'essais par clé (l'API par personne, la console et leurs tests la lisent sous ce nom)
+LoginThrottle = SlidingWindow
 #: les origines du frontend en développement (Vite) ; ``--origin`` les remplace
 DEV_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173", "http://127.0.0.1:4173")
 #: au-delà, des messages attendent déjà leur tour sur cette connexion : refusé (« saturée »)
@@ -96,7 +103,7 @@ SAFE_MIMES = frozenset({"text/plain", "text/markdown", "text/csv", "application/
 #: plus tant d'octets, 413 au-delà — ni Starlette ni uvicorn ne bornent un corps
 BODY_MAX_BYTES = 64 * 1024
 #: un appareil (``/api/perceptions``) : tant de signaux par fenêtre (secondes) ; les appareils retenus sont bornés
-#: comme les adresses de ``LoginThrottle`` (un nom d'appareil se choisit librement)
+#: comme les adresses d'une ``SlidingWindow`` (un nom d'appareil se choisit librement)
 SENSED_RATE = (30, 60.0)
 #: les en-têtes qu'un mandataire pose ; sans ``--behind-proxy``, ils trahissent un mandataire non déclaré
 PROXY_HEADERS = (b"x-forwarded-for", b"x-real-ip", b"forwarded", b"via")
@@ -105,9 +112,10 @@ _PROXY_SAID: set[str] = set()  # l'avertissement du mandataire non déclaré : u
 #: et les échecs d'authentification tolérés par IP
 WAKE_MAX_BYTES = 512 * 1024
 WAKE_FAILURES = (20, 60.0)
-#: ce que dit chaque issue d'un appel de réveil, en HTTP
-WAKE_STATUS = {wakeup_p.ACCEPTED: 202, wakeup_p.IGNORED: 200, wakeup_p.UNKNOWN: 401, wakeup_p.DISABLED: 403,
-               wakeup_p.INVALID: 400, wakeup_p.BUSY: 429, wakeup_p.REFUSED: 409}
+#: ce que dit chaque issue d'une porte, en HTTP (admis : 202 quand ce qu'on reçoit se traitera plus tard, ``gate_reply``)
+GATE_STATUS = {gate_p.ACCEPTED: 200, gate_p.IGNORED: 200, gate_p.INVALID: 400, gate_p.UNKNOWN: 401,
+               gate_p.FORBIDDEN: 403, gate_p.DISABLED: 403, gate_p.MISSING: 404, gate_p.CONFLICT: 409,
+               gate_p.REFUSED: 409, gate_p.BUSY: 429}
 #: ce que les services de webhooks envoient (ADR 0117), le premier présent l'emporte : la clé recopiée telle quelle
 #: (le « secret token » de GitLab), la signature du corps par la clé, l'évènement, l'identifiant de la livraison (qui
 #: sert de clé d'idempotence : une livraison rejouée rend le même appel)
@@ -124,15 +132,11 @@ def first_header(headers: Any, names: tuple[str, ...], limit: int = 200) -> str:
         if value:
             return value[:limit]
     return ""
-#: l'extension Teams (ADR 0069) : la taille d'un lot au plus, les échecs de clé tolérés par IP, et chaque issue en HTTP
+#: l'extension Teams (ADR 0069) : la taille d'un lot au plus, les échecs de clé tolérés par IP
 TEAMS_MAX_BYTES = 512 * 1024
 #: un lot du téléphone (ADR 0120), au plus : 200 messages de 4 000 caractères
 PHONE_MAX_BYTES = 2 * 1024 * 1024
-PHONE_STATUS = {phone_p.ACCEPTED: 200, phone_p.FORBIDDEN: 403, phone_p.DISABLED: 403, phone_p.INVALID: 400,
-                phone_p.BUSY: 429}
 TEAMS_FAILURES = (20, 60.0)
-TEAMS_STATUS = {teams_p.ACCEPTED: 200, teams_p.UNKNOWN: 401, teams_p.DISABLED: 403, teams_p.INVALID: 400,
-                teams_p.BUSY: 429, teams_p.MISSING: 404, teams_p.CONFLICT: 409}
 #: les origines d'une extension de navigateur : une page web ne peut pas s'en réclamer
 EXTENSION_ORIGINS = ("chrome-extension://", "moz-extension://")
 
@@ -161,83 +165,31 @@ class WebConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-class LoginThrottle:
-    """Fenêtres glissantes d'échecs par clé ; les clés vides sont oubliées, et la
-    mémoire est bornée (un balayage d'adresses ne la fait pas grossir sans fin)."""
-
-    MAX_KEYS = 10_000
-
-    def __init__(self, n: int, window: float, *, monotonic: Callable[[], float] = time.monotonic) -> None:
-        self.n = n
-        self.window = window
-        self._now = monotonic
-        self._fails: dict[str, deque[float]] = {}
-
-    def _prune(self, key: str, now: float) -> deque[float] | None:
-        q = self._fails.get(key)
-        if q is None:
-            return None
-        while q and now - q[0] >= self.window:
-            q.popleft()
-        if not q:
-            del self._fails[key]
-            return None
-        return q
-
-    def blocked(self, key: str) -> bool:
-        q = self._prune(key, self._now())
-        return q is not None and len(q) >= self.n
-
-    def fail(self, key: str) -> None:
-        now = self._now()
-        if len(self._fails) >= self.MAX_KEYS:
-            for k in list(self._fails):
-                self._prune(k, now)
-            while len(self._fails) >= self.MAX_KEYS:  # encore plein : les plus anciennes clés partent
-                del self._fails[next(iter(self._fails))]
-        self._fails.setdefault(key, deque()).append(now)
-
-    def forgive(self, key: str) -> None:
-        """Rendre un essai compté d'avance (``fail`` avant de vérifier, pour que des essais lancés ensemble ne
-        passent pas tous la porte avant le premier échec) quand il a réussi."""
-        q = self._fails.get(key)
-        if q:
-            q.pop()
-            if not q:
-                del self._fails[key]
-
-    def __len__(self) -> int:
-        return len(self._fails)
-
-
-def bearer(header: str | None) -> str:
-    """Le jeton d'un en-tête ``Authorization: Bearer …`` (vide sans en-tête, ou pour un autre schéma)."""
-    scheme, _, value = (header or "").strip().partition(" ")
-    return value.strip() if scheme.lower() == "bearer" else ""
-
-
 class PayloadTooLarge(Exception):
     """Un corps au-delà de sa borne : la route répond 413 (``too_large``, posé par ``create_app`` pour les routes
     ordinaires ; les portes des services le font elles-mêmes, avec leurs en-têtes)."""
 
 
-async def read_bounded(request: Request, limit: int) -> bytes:
-    """Le corps d'une requête, borné à ``limit`` octets : un ``Content-Length`` au-delà, ou un flux (un envoi par
-    morceaux, sans longueur annoncée) qui le dépasse, lèvent ``PayloadTooLarge`` avant d'avoir tout gardé."""
+async def bounded_stream(request: Request, limit: int) -> AsyncGenerator[bytes, None]:
+    """Le corps d'une requête, morceau par morceau, borné à ``limit`` octets : un ``Content-Length`` au-delà, ou un flux
+    (un envoi par morceaux, sans longueur annoncée) qui le dépasse, lèvent ``PayloadTooLarge``."""
     try:
         size = int(request.headers.get("content-length") or 0)
     except ValueError:
         size = 0
     if size > limit:
         raise PayloadTooLarge
-    chunks: list[bytes] = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
         if total > limit:
             raise PayloadTooLarge
-        chunks.append(chunk)
-    return b"".join(chunks)
+        yield chunk
+
+
+async def read_bounded(request: Request, limit: int) -> bytes:
+    """Le corps d'une requête, tout entier, borné à ``limit`` octets (``bounded_stream`` : rien de trop n'est gardé)."""
+    return b"".join([chunk async for chunk in bounded_stream(request, limit)])
 
 
 async def too_large(request: Request, exc: Exception) -> Response:
@@ -289,12 +241,15 @@ def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts, *, code
     }
 
 
-def native_token(headers: Any) -> str:
-    """Le jeton porteur d'un client natif : seulement **sans** ``Origin`` (avec une, c'est un navigateur, et seule
-    sa session compte — une page ne peut pas faire valoir un jeton volé à côté de ses cookies)."""
-    if headers.get("origin") is not None:
-        return ""
-    return bearer(headers.get("authorization"))
+def gate_reply(got: gate_p.GateResult, headers: dict[str, str], *, accepted: int = 200) -> JSONResponse:
+    """Ce qu'une porte a décidé, en HTTP : ce qu'elle rend si elle admet (``accepted`` : son statut), son message sinon,
+    et l'attente d'un refus de cadence."""
+    status = accepted if got.outcome == gate_p.ACCEPTED else GATE_STATUS.get(got.outcome, 400)
+    if got.outcome == gate_p.BUSY and got.retry_after:
+        headers = {**headers, "Retry-After": str(got.retry_after)}
+    if status < 300:
+        return JSONResponse({"ok": True, **got.data}, status_code=status, headers=headers)
+    return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
 
 
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
@@ -304,26 +259,12 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                teams: teams_p.TeamsGate | None = None, push_ready: Callable[[], bool] | None = None,
                phone: phone_p.PhoneGate | None = None) -> Starlette:
     cfg = cfg or WebConfig()
-    by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
-    by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
-    wake_failures = LoginThrottle(*WAKE_FAILURES)
-    teams_failures = LoginThrottle(*TEAMS_FAILURES)
+    by_name = SlidingWindow(cfg.login_failures, cfg.login_window_s)
+    by_ip = SlidingWindow(cfg.login_ip_failures, cfg.login_window_s)
+    wake_failures = SlidingWindow(*WAKE_FAILURES)
+    teams_failures = SlidingWindow(*TEAMS_FAILURES)
     accounts.on_revoke.append(lambda account_id: hub.revoke(account=account_id))
     accounts.on_token_revoke.append(lambda token_id: hub.revoke(session=f"{TOKEN_KEY}{token_id}"))
-
-    def account_of(request: Request) -> Account | None:
-        """Le compte d'une requête : son jeton de client natif (sans ``Origin``), sinon sa session. Les routes qui
-        écrivent exigent en plus le jeton CSRF, qu'un client natif n'a pas : rien n'est élargi."""
-        token = native_token(request.headers)
-        if token:
-            found = accounts.token(token)
-            return found[0] if found is not None else None
-        return accounts.session(request.cookies.get(SESSION_COOKIE))
-
-    def csrf_ok(request: Request) -> bool:
-        cookie = request.cookies.get(CSRF_COOKIE, "")
-        header = request.headers.get("x-csrftoken", "")
-        return bool(cookie) and secrets.compare_digest(cookie, header)
 
     def with_csrf(request: Request, response: Response) -> Response:
         if not request.cookies.get(CSRF_COOKIE):
@@ -359,11 +300,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             if found is not None:
                 report |= {"client": accounts.token_client(found[1]), "token_id": found[1]}
             return JSONResponse(report, headers={"Cache-Control": "no-store"})
-        return with_csrf(request, JSONResponse(_whoami(account_of(request), cfg, accounts,
+        return with_csrf(request, JSONResponse(_whoami(account_of(request, accounts), cfg, accounts,
                                                        code_required=bootstrap_code_required(request, cfg))))
 
     async def login(request: Request) -> Response:
-        if not csrf_ok(request):
+        if not csrf_header_ok(request):
             return csrf_refused()
         data = await body(request)
         username = str(data.get("username") or "").strip()
@@ -381,7 +322,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return await logged_in(request, account)
 
     async def bootstrap(request: Request) -> Response:
-        if not csrf_ok(request):
+        if not csrf_header_ok(request):
             return csrf_refused()
         if accounts.count() > 0:
             return JSONResponse({"error": "Un compte existe déjà : connecte-toi."}, status_code=409)
@@ -407,7 +348,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         """Le client l'appelle en GET avec l'en-tête CSRF (contrat inchangé) : la méthode
         reste permise, le jeton devient exigé — une image ou un lien d'une autre page
         ne déconnecte plus personne."""
-        if not csrf_ok(request):
+        if not csrf_header_ok(request):
             return csrf_refused()
         key = request.cookies.get(SESSION_COOKIE)
         if key:
@@ -503,9 +444,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
 
     async def pending_decision(request: Request) -> Response:
         # un client natif pose lui-même cookie et en-tête : le double CSRF ne prouve rien pour lui, il n'écrit pas ici
-        if native_token(request.headers) or not csrf_ok(request):
+        if native_token(request.headers) or not csrf_header_ok(request):
             return csrf_refused()
-        account = account_of(request)
+        account = account_of(request, accounts)
         if account is None:
             return JSONResponse({"error": "Authentification requise."}, status_code=401)
         if not account.operator:
@@ -524,7 +465,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         await hub.refresh_panels()  # chacun voit la file d'approbation à jour
         return JSONResponse({"ok": True, "status": status})
 
-    downloads: dict[int, protocol.RateLimiter] = {}
+    downloads = SlidingWindow(*FILES_RATE)  # une fenêtre par compte
 
     async def shared_file(request: Request) -> Response:
         """Un fichier qu'elle a envoyé (ADR 0062) : à qui il est parti (un jeton de l'application, sans ``Origin`` ;
@@ -533,13 +474,10 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         file = request.path_params["file"]
         if not valid_id(file):
             return JSONResponse({"error": "Fichier introuvable."}, status_code=404)
-        account = account_of(request)
+        account = account_of(request, accounts)
         if account is None:
             return JSONResponse({"error": "Authentification requise."}, status_code=401)
-        limiter = downloads.get(account.id)
-        if limiter is None:
-            limiter = downloads[account.id] = protocol.RateLimiter(*FILES_RATE)
-        if not limiter.allow():
+        if not downloads.allow(key=str(account.id), n=FILES_RATE[0]):
             return JSONResponse({"error": "Trop de téléchargements."}, status_code=429, headers={"Retry-After": "60"})
         got = await port.shared_file(file, handle=account.handle)
         if got is None:
@@ -552,7 +490,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
             "Content-Security-Policy": "sandbox; default-src 'none'"})
 
-    sensed = LoginThrottle(*SENSED_RATE)  # une fenêtre par appareil, autant d'appareils au plus que d'adresses
+    sensed = SlidingWindow(*SENSED_RATE)  # une fenêtre par appareil, autant d'appareils au plus que d'adresses
 
     async def perceptions(request: Request) -> Response:
         """Un appareil signale quelque chose : ``{"device", "text", "pertinence", "emotion", "sensitivity"}``.
@@ -560,12 +498,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         gardée, celle du jeton présenté lui est comparée)."""
         expected = sensor_digest() if sensor_digest is not None else ""
         given = bearer(request.headers.get("authorization"))
-        by_token = bool(expected) and bool(given) \
-            and hmac.compare_digest(hashlib.sha256(given.encode()).hexdigest(), expected)
+        by_token = bool(given) and matches(token_digest(given), expected)
         if not by_token:
-            if not csrf_ok(request):
+            if not csrf_header_ok(request):
                 return csrf_refused()
-            account = account_of(request)
+            account = account_of(request, accounts)
             if account is None:
                 return JSONResponse({"error": "Authentification requise."}, status_code=401)
             if not account.operator:
@@ -618,14 +555,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             name=request.path_params["name"][:60], key=bearer(h.get("authorization")) or first_header(h, WAKE_KEY_HEADERS),
             body=raw, data=data, signature=first_header(h, WAKE_SIGNATURE_HEADERS),
             event=first_header(h, WAKE_EVENT_HEADERS, 60), idempotency=first_header(h, WAKE_DELIVERY_HEADERS)))
-        if got.outcome == wakeup_p.UNKNOWN:
+        if got.outcome == gate_p.UNKNOWN:
             wake_failures.fail(f"ip:{ip}")
-        status = WAKE_STATUS.get(got.outcome, 400)
-        if got.outcome == wakeup_p.BUSY and got.retry_after:
-            headers["Retry-After"] = str(got.retry_after)
-        if status in (200, 202):
-            return JSONResponse({"ok": True, "call": got.call}, status_code=status, headers=headers)
-        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+        return gate_reply(got, headers, accepted=202)
 
     async def teams_call(request: Request, kind: str) -> Response:
         """L'extension Teams (ADR 0069) : ``POST /api/teams/inbox`` (un lot de messages), ``GET /api/teams/outbox``
@@ -644,7 +576,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429,
                                 headers={**headers, "Retry-After": "60"})
         key = bearer(request.headers.get("authorization"))
-        if not key.startswith(teams_p.KEY_PREFIX) or len(key) > 200:  # sans clé valable, le corps n'est pas lu
+        if not key.startswith(teams_p.KEY_PREFIX) or len(key) > KEY_MAX:  # sans clé valable, le corps n'est pas lu
             teams_failures.fail(f"ip:{ip}")
             return JSONResponse({"error": "Clé refusée."}, status_code=401, headers=headers)
         data: Any = {}
@@ -665,15 +597,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             got = await teams.outbox(key)
         else:
             got = await teams.ack(key, request.path_params["item"][:40], data)
-        if got.outcome == teams_p.UNKNOWN:
+        if got.outcome == gate_p.UNKNOWN:
             teams_failures.fail(f"ip:{ip}")
-        status = TEAMS_STATUS.get(got.outcome, 400)
-        if got.outcome == teams_p.BUSY and got.retry_after:
-            headers["Retry-After"] = str(got.retry_after)
-        if status == 200:
-            return JSONResponse({"ok": True, **got.data}, status_code=202 if kind == "inbox" else 200,
-                                headers=headers)
-        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+        return gate_reply(got, headers, accepted=202 if kind == "inbox" else 200)
 
     async def teams_inbox(request: Request) -> Response:
         return await teams_call(request, "inbox")
@@ -706,16 +632,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=headers)
         handle = found[0].handle
         got = await (phone.inbox(handle, data) if kind == "inbox" else phone.settled(handle, data))
-        if got.outcome == phone_p.ACCEPTED:
+        if got.outcome == gate_p.ACCEPTED:
             # admis par la porte : son dernier usage noté (un téléphone qui ne fait que pousser ses messages dit quand
             # on l'a vu, ADR 0190) — jamais avant qu'elle l'ait admis
             await accounts.use_token(native_token(request.headers))
-        status = PHONE_STATUS.get(got.outcome, 400)
-        if got.outcome == phone_p.BUSY and got.retry_after:
-            headers["Retry-After"] = str(got.retry_after)
-        if status == 200:
-            return JSONResponse({"ok": True, **got.data}, headers=headers)
-        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+        return gate_reply(got, headers)
 
     async def phone_inbox(request: Request) -> Response:
         return await phone_call(request, "inbox")
@@ -1181,18 +1102,23 @@ class _Session:
             await self.hub.push_strands(self.conn.handle)
 
     async def strand_history(self, frame: dict[str, Any]) -> None:
-        """Les messages d'un de ses fils de travail (ADR 0164), pour un écran qui l'ouvre sans les avoir : les plus
-        récents avant ``before`` (tous s'il est absent). Une opératrice authentifiée seulement."""
-        strand = protocol.strand_id(frame.get("id"))
+        """Les messages d'un fil, pour un écran qui les relit : les plus récents avant ``before`` (tous s'il est
+        absent). ``id`` vide : le fil avec elle, sa propre conversation, pour toute connexion authentifiée (ADR 0215) ;
+        sinon un de ses fils de travail (ADR 0164), pour une opératrice authentifiée seulement. Toujours celui de
+        cette connexion : le compte vient de la session, jamais de la trame."""
+        raw = frame.get("id")
+        main = raw == ""
+        strand = "" if main else protocol.strand_id(raw)
+        allowed = self.conn.authenticated and self.account is not None if main else self._judges()
         history = getattr(self.port, "strand_history", None)
-        if strand is None or history is None or not self._judges() or not self._session_valid():
+        if strand is None or history is None or not allowed or not self._session_valid():
             return
         try:
             before = int(frame["before"]) if frame.get("before") is not None else None
         except (TypeError, ValueError):
             before = None
         rows, more = history(self.conn.handle, strand, before, protocol.HISTORY_MAX)
-        await self.send(self.hub.history("strand", rows, life=self.hub.life(), verdicts=True)
+        await self.send(self.hub.history("strand", rows, life=self.hub.life(), verdicts=self._judges())
                         | {"strand": strand, "more": more})
 
     def _judges(self) -> bool:

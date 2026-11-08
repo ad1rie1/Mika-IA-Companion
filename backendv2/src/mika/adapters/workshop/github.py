@@ -1,7 +1,7 @@
 """L'hôte GitHub d'un dépôt distant, lu par son API (ADR 0183) : la tête d'une branche, ses derniers commits, les
 issues et pull requests ouvertes — pour la console, en lecture seule.
 
-- **Le jeton** est celui des dépôts git (Réglages › Connexions › Dépôts git). Il n'est montré à ``api.github.com``
+- **Le jeton** est celui des dépôts git (Connexions › Dépôts Git). Il n'est montré à ``api.github.com``
   que si ``github.com`` est parmi ses hôtes autorisés ; sans lui, un dépôt public se lit quand même (GitHub borne
   alors les lectures anonymes à soixante par heure).
 - **Rien ne s'y égare** : ni redirection suivie, ni réponse de plus de ``MAX_BYTES``, un délai court (la page
@@ -75,7 +75,7 @@ class Refused(Exception):
 
 def _refusal(status: int, headers: httpx.Headers) -> str:
     if status == 401:
-        return "GitHub refuse le jeton : vérifie-le dans Réglages › Connexions › Dépôts git"
+        return "GitHub refuse le jeton : vérifie-le dans Connexions › Dépôts Git"
     if status in (403, 429) and headers.get("x-ratelimit-remaining") == "0":
         return ("GitHub limite les lectures pour l'instant (sans jeton : soixante par heure) : réessaie plus tard, ou "
                 "règle un jeton")

@@ -121,8 +121,6 @@ CONTEXT_SPAN_US = HOUR
 #: sujet du message (« samedi », « Moustache ») : un plongement multilingue rapproche volontiers « samedi »
 #: de « hier soir » ; le mot lui-même ne trompe pas
 LEXICAL_BONUS = 0.35
-#: le fil que le prompt montre déjà (l'enrichissement de ``transcript``) : ses tours portent leur ``id``
-SHOWN_THREAD = "thread"
 #: un échange encore à l'écran (sans fil connu) ne se répète pas
 RECENT_EXCHANGE_US = 10 * MINUTE
 #: un moment dont elles viennent de reparler (``moment_followed`` : en mots, pas seulement montré) reste sous ses
@@ -1339,16 +1337,6 @@ def _memories(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
 def _shared(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     recall = enrich.get("recall")
     return _body(recall, frame, witness=True) if recall else None
-
-
-def shown_since(enrich: Mapping[str, Any]) -> int | None:
-    """Le plus ancien message que le fil montré contient (son résumé compris) :
-    ce qui suit est déjà sous ses yeux, mot pour mot. L'enrichissement est une
-    vue (``key``, ``turns``, ``current``) ; un tuple de tours reste accepté."""
-    view = enrich.get(SHOWN_THREAD)
-    turns = getattr(view, "turns", view) or ()
-    ids = [t.id for t in turns if (getattr(t, "id", 0) or 0) > 0]  # 0 : un tour sans repère
-    return min(ids) if ids else None
 
 
 @MEMORY.section("past_exchanges", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,

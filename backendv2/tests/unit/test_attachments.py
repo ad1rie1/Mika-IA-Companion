@@ -27,7 +27,7 @@ from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.app.mindport import KernelPort
 from mika.contracts import attachments as c
 from mika.contracts import memory as mc
-from mika.contracts.runtime import AttachmentMeta
+from mika.contracts.runtime import OPERATED, AttachmentMeta
 from mika.faculties.attachments.faculty import (
     MIB,
     MISSING,
@@ -39,6 +39,7 @@ from mika.faculties.attachments.faculty import (
     files_table,
     links_table,
 )
+from mika.faculties.attachments.inspect import REMOVE
 from mika.faculties.memory.extraction import (
     Extraction,
     Line,
@@ -51,6 +52,7 @@ from mika.faculties.memory.extraction import (
 from mika.kernel.events import Content, Origin
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import Studied
+from mika.runtime.operations import perform
 from mika.sim.clock import run_virtual
 from mika.vocab.privacy import INTERNAL, Sensitivity
 from tests.fixtures.mika import boot, build, connect, said
@@ -331,6 +333,43 @@ def test_the_place_is_counted_per_person_all_her_handles_together():
     # Alice (deux adresses, 18 Mio pour 10) perd ses deux plus anciennes ; Bob (6 Mio) rien
     assert due == [("mobile_2", c.BUDGET, ("c" * 32,)), ("user_2", c.BUDGET, ("a" * 32,))]
     assert due_expiries(state, frame, AttachmentsParams()) == []  # 2 Gio : tout tient, pour toujours
+
+
+def test_an_operator_removes_one_piece_its_bytes_go_and_what_she_read_stays(tmp_path):
+    """Retirer une pièce à l'unité, depuis la console (ADR 0205 ; audit du 2026-11-05, C9-11) : le même retrait que la
+    rétention, sa raison « operator » — ses octets s'effacent ; sa ligne, ce qu'elle y a lu et ses liens restent, et
+    elle la rouvre encore en mots (sans pouvoir la regarder de nouveau) ; l'autre pièce ne bouge pas ; c'est audité ;
+    une pièce déjà retirée ne se retire plus."""
+
+    async def scenario(kernel, store, reader):
+        _seq, [file] = await send(kernel, "user_2", "mon chat", ("chat.jpg", "image/jpeg", PHOTO))
+        _seq, [other] = await send(kernel, "user_2", "mon ticket", ("ticket.png", "image/png", TICKET))
+        await kernel.mind.append([mc.BELIEVED.draft(
+            text=Content.of("Alice a un chat", level=2), about=("user_2",), sensitivity=2, told_by=("user_2",),
+            heard_by=("user_2",), pieces=(file,))], emitter="memory", correlation="relecture", origin=Origin.PROCESS)
+        done = await perform(kernel, REMOVE, {}, by="user_1", subject=file)
+        await asyncio.sleep(1)  # l'effet efface les octets après le commit
+        again = await perform(kernel, REMOVE, {}, by="user_1", subject=file)
+        opened = await call(kernel, "attachment_open", "user_2", piece="chat.jpg")
+        t = files_table()
+        lines = kernel.mind.store.query_mind(select(t.c.id, t.c.stored, t.c.reason, t.c.seen).order_by(t.c.seq))
+        kept = [v.file for v in kernel.mind.frame().state(c.OWNER).kept.get("user_2", ())]
+        audit = [e.data for e in journal(kernel, OPERATED) if e.data.action == REMOVE]
+        return (file, other, done, again, journal(kernel, c.EXPIRED), dict(store.blobs), lines, links_rows(kernel),
+                opened, kept, audit)
+
+    file, other, done, again, expired, blobs, lines, links, opened, kept, audit = live(tmp_path, scenario)
+    assert done.ok and "« chat.jpg » retirée" in done.message
+    [e] = expired
+    assert (e.data.files, e.data.handle, e.data.reason) == ((file,), "user_2", c.OPERATOR)
+    assert blobs == {other: TICKET}  # ses octets seuls sont partis
+    assert lines == [(file, 0, c.OPERATOR, SEEN), (other, 1, None, SEEN)]  # sa ligne et ce qu'elle y a lu restent
+    assert [(f, by) for f, _item, by in links] == [(file, c.BY_REREAD)]  # son lien aussi
+    assert opened.ok and SEEN in opened.content and "Tu ne l'as plus sous la main" in opened.content
+    assert kept == [other]  # la tranche ne la garde plus (la place, la rétention)
+    assert [(a.by, a.subject_kind, a.subject, a.outcome, a.seqs) for a in audit][0] == \
+        ("user_1", "piece", file, "done", (e.seq,))
+    assert not again.ok  # déjà retirée : l'action n'est plus offerte
 
 
 def test_forgetting_a_person_erases_her_pieces_their_links_and_their_vectors(tmp_path):

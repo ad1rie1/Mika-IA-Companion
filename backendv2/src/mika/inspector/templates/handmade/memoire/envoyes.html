@@ -1,0 +1,43 @@
+{# Elle › Mémoire › Fichiers envoyés (app/handmade/tabs/memory.py, ADR 0205) : ce qu'elle a envoyé, à tout le monde,
+   une entrée par fichier, du plus récent au plus ancien — sa sorte en icône, son nom vers sa fiche, pour qui, sa
+   taille, quand elle l'a préparé, son origine (écrit, dessiné, un fichier de projet) ; le message qui l'a emporté (un
+   fichier « pas parti » n'en a pas) ; le télécharger, le retirer (confirmé : ses octets s'effacent, sa ligne reste,
+   « retiré par un opérateur »). Un fichier retiré s'estompe. La pagination de la faculté. #}
+{% import "handmade/shared/tab.html" as tab with context %}
+{% import "handmade/memoire/macros.html" as mem with context %}
+{% from "handmade/shared/list_macros.html" import row_action %}
+<div class="now-page memories pieces" data-tab="memoire/envoyes">
+  {{ mem.notes(notes) }}
+  {% if t %}
+  <div class="now-card" id="{{ t.id }}">
+    {{ tab.head(t.title, "sent-title", t.count, list=t) }}
+    {% if items %}
+    <ul class="memories-list" role="list">
+      {% for x in items %}
+      <li class="memories-item piece k-{{ x.kind }}{{ ' faded' if x.gone }}">
+        <span class="piece-icon" title="{{ x.sort }}">{{ mem.file_icon(x.kind) }}</span>
+        <div class="piece-main">
+          <p class="piece-name">{{ tab.cell(x.name) }}{% if x.state %} <span class="now-tag {{ x.state.tone }}">{{ x.state.text }}</span>{% endif %}</p>
+          <p class="memories-meta">
+            <span>{{ x.sort }}</span><span class="now-num">{{ x.size }}</span>
+            {% if x.to %}<span>pour {{ tab.cell(x.to) }}</span>{% endif %}
+            {% if x.at %}<span class="memories-when">préparé {{ tab.cell(x.at) }}</span>{% endif %}
+            {% if x.origin %}<span>{{ tab.cell(x.origin) }}</span>{% endif %}
+          </p>
+          {% if x.message or x.download or x.remove %}
+          <div class="memories-foot">
+            {% if x.message %}<span>parti avec le message {{ tab.cell(x.message) }}</span>{% endif %}
+            {% if x.download %}<a class="piece-download" href="{{ x.download.href }}">Télécharger</a>{% endif %}
+            {% if x.remove %}{{ row_action(x.remove) }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ tab.empty(t.empty) }}{% endif %}
+    {{ tab.pager(t) }}
+    {{ mem.help(t, items) }}
+  </div>
+  {% endif %}
+</div>

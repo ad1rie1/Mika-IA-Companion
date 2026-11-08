@@ -12,7 +12,10 @@ suite : c'est lui qui les demande).
 entière et exacte, un argument par ligne, avec l'état de l'atelier (son commit,
 ce qui n'est pas enregistré) ; l'accord épingle cet aperçu, et si l'atelier a
 changé entre-temps, rien ne part. Ses raisons sont montrées comme **ses mots**,
-pas comme une description de la commande.
+pas comme une description de la commande. Un envoi au dépôt distant se montre
+de même : le dépôt, la branche, le commit épinglé et les enregistrements qui
+partiront (relus dans l'atelier, face à ce que l'hôte dit du distant) ; une
+récupération, ce qui arrivera.
 
 **L'atelier n'a qu'un occupant à la fois** : une commande réseau ne s'approuve
 pas pendant qu'une exécution y travaille ; sans accord requis, elle attend la
@@ -23,8 +26,9 @@ commande, un envoi ou une récupération sont en route.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -43,7 +47,7 @@ from mika.faculties.projects.tools import (
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
 from mika.kernel.operate import Preview
-from mika.ports.workshop import OutsideWorkshop, WorkshopFull, argv_lines, describe
+from mika.ports.workshop import Commit, Hosted, OutsideWorkshop, WorkshopFull, argv_lines, describe
 from mika.vocab.episodes import PROJECT_KINDS, project_of, project_target
 from mika.vocab.phrasebook import phrase
 
@@ -109,7 +113,7 @@ class PushArgs(BaseModel):
     why: str = Field(min_length=1, max_length=400, description=phrase("projects.workshop.push_why"))
 
 
-@PROJECTS.tool("ws_list", description=phrase("projects.workshop.list"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_list", description=phrase("projects.workshop.list"), label=phrase("projects.workshop.list_label"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_list(args: ListArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -122,7 +126,7 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
     return "\n".join(files) if files else phrase("projects.workshop.empty")
 
 
-@PROJECTS.tool("ws_read", description=phrase("projects.workshop.read"), args=ReadArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_read", description=phrase("projects.workshop.read"), label=phrase("projects.workshop.read_label"), args=ReadArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_read(args: ReadArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -134,7 +138,8 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
 
 
-@PROJECTS.tool("ws_write", acts=True, description=phrase("projects.workshop.write"), args=WriteArgs, bundle=BUNDLE,
+@PROJECTS.tool("ws_write", acts=True, description=phrase("projects.workshop.write"),
+               label=phrase("projects.workshop.write_label"), args=WriteArgs, bundle=BUNDLE,
                episodes=RUNS)
 async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
@@ -148,7 +153,7 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     return phrase("projects.workshop.written", path=rel, size=len(args.content))
 
 
-@PROJECTS.tool("ws_edit", acts=True, description=phrase("projects.workshop.edit"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_edit", acts=True, description=phrase("projects.workshop.edit"), label=phrase("projects.workshop.edit_label"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -172,7 +177,7 @@ def program_time_left(ctx: Any) -> float:
     return max(0.0, (run.started + pm.run_programs_us - ctx.frame.now) / 1_000_000)
 
 
-@PROJECTS.tool("ws_run", acts=True, description=phrase("projects.workshop.run"), args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
+@PROJECTS.tool("ws_run", acts=True, description=phrase("projects.workshop.run"), label=phrase("projects.workshop.run_label"), args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
 async def ws_run(args: RunArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -186,7 +191,7 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
     return ToolResult(ok=result.ok, content=describe(result))
 
 
-@PROJECTS.tool("ws_diff", description=phrase("projects.workshop.diff"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_diff", description=phrase("projects.workshop.diff"), label=phrase("projects.workshop.diff_label"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_diff(args: ListArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -223,7 +228,9 @@ def _already(frame: Any, p: Project, argv: list[str]) -> bool:
     return False
 
 
-@PROJECTS.tool("ws_network", acts=True, description=phrase("projects.workshop.network"), args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
+@PROJECTS.tool("ws_network", acts=True, description=phrase("projects.workshop.network"),
+               label=phrase("projects.workshop.network_label"), args=NetworkArgs, bundle=BUNDLE,
+               episodes=RUNS,
                max_calls_per_episode=2)
 async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     got = current(ctx)
@@ -245,7 +252,8 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     return phrase("projects.workshop.proposed")
 
 
-@PROJECTS.tool("project_push", acts=True, description=phrase("projects.workshop.push"), args=PushArgs, bundle=BUNDLE,
+@PROJECTS.tool("project_push", acts=True, description=phrase("projects.workshop.push"),
+               label=phrase("projects.workshop.push_label"), args=PushArgs, bundle=BUNDLE,
                episodes=RUNS, max_calls_per_episode=1)
 async def project_push(args: PushArgs, ctx: Any) -> Any:
     got = current(ctx)
@@ -277,6 +285,10 @@ def _gone(ports: Mapping[str, Any], pid: int) -> str:
     if p is not None and p.status == c.ARCHIVED:
         return "refusé : ce projet est archivé"
     return ""
+
+
+#: pourquoi une demande qui occuperait l'atelier ne s'approuve pas maintenant
+BUSY = "une exécution travaille dans l'atelier : décide quand elle aura fini"
 
 
 def _busy(ports: Mapping[str, Any], pid: int) -> bool:
@@ -312,7 +324,7 @@ async def networked_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -
             + (f", avec {len(dirty)} fichier(s) non enregistré(s) : {shown}" if dirty else "") + ".")
     blocked = _gone(ports, pid).removeprefix("refusé : ")
     if not blocked and _busy(ports, pid):
-        blocked = "une exécution travaille dans l'atelier : décide quand elle aura fini"
+        blocked = BUSY
     return Preview(text, _digest(argv, head, dirty), blocked)
 
 
@@ -335,7 +347,117 @@ async def networked(args: Mapping[str, Any], context: str, ports: Mapping[str, A
     return result.ok, describe(result, 3000)
 
 
-@PROJECTS.capability("push", description="Envoyer l'atelier d'un projet vers son dépôt distant (git push).")
+#: les enregistrements de l'atelier relus pour dire ce qui partira (ou arrivera), et ceux qu'un aperçu montre, au plus
+REMOTE_WINDOW, REMOTE_SHOWN = 200, 20
+#: ce que l'aperçu d'un envoi ou d'une récupération dit (la console de l'opératrice, pas elle)
+REMOTE = {
+    "push": "Pousser le commit {sha}{title} vers {url}, branche {branch}.",
+    "pull": "Récupérer dans l'atelier {url}, branche {branch}, en ligne droite.",
+    "unread": "Le dépôt distant ne se lit pas d'ici : on ne sait pas ce qu'il a déjà.",
+    "last": "Les derniers enregistrements jusqu'à ce commit :",
+    "missing": "Ce commit n'est pas parmi les derniers enregistrements de l'atelier.",
+    "new_branch": "La branche « {branch} » n'existe pas encore sur le dépôt distant : elle recevra toute l'histoire "
+                  "jusqu'à ce commit :",
+    "leaving": "Ce qui partira, les enregistrements que le dépôt distant n'a pas (le plus récent d'abord) :",
+    "pushed": "Le dépôt distant a déjà ce commit : rien de nouveau ne partira.",
+    "diverged": "Le bout de la branche distante ({head}) n'est pas dans l'histoire de ce commit : l'envoi sera "
+                "refusé s'il ne va pas en ligne droite.",
+    "coming": "Ce qui arrivera, les enregistrements que l'atelier n'a pas (le plus récent d'abord) :",
+    "pulled": "L'atelier a déjà le bout de la branche distante : rien de nouveau n'arrivera.",
+    "none": "(aucun dépôt distant)",
+    "no_remote": "aucun dépôt distant n'est réglé",
+}
+
+
+def _place(sha: str, commits: Sequence[Commit]) -> int | None:
+    """La place d'un commit dans une histoire relue, du plus récent (son identifiant entier ou abrégé) ; ``None`` :
+    il n'y est pas."""
+    return next((i for i, k in enumerate(commits) if sha and k.sha and (sha.startswith(k.sha) or
+                                                                        k.sha.startswith(sha))), None)
+
+
+def _listed(said: str, commits: Sequence[Commit]) -> str:
+    """Ce qu'un aperçu dit, puis des enregistrements, un par ligne (« 1a2b3c4 son titre »), les premiers seulement."""
+    lines = [f"- {k.sha[:7]} {k.title}" for k in commits[:REMOTE_SHOWN]]
+    if len(commits) > REMOTE_SHOWN:
+        lines.append(f"- … et {len(commits) - REMOTE_SHOWN} de plus")
+    return "\n".join([said, *lines])
+
+
+async def _remote(ports: Mapping[str, Any], url: str, branch: str) -> Hosted | None:
+    """Ce que l'hôte du dépôt distant en dit (GitHub), ou rien : pas d'hôte qui le lise, ou il n'a pas répondu."""
+    host = ports.get("repo_host")
+    if host is None or not url or not host.handles(url):
+        return None
+    got = await host.read(url, branch)
+    return None if got.error else got
+
+
+def _pin(**what: Any) -> str:
+    raw = json.dumps(what, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _remote_blocked(ports: Mapping[str, Any], pid: int, url: str) -> str:
+    """Pourquoi un envoi ou une récupération ne peut pas partir (vide : il peut)."""
+    return _gone(ports, pid).removeprefix("refusé : ") or ("" if url else REMOTE["no_remote"])
+
+
+async def push_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None:
+    """Exactement ce qui partirait : le dépôt distant, sa branche, le commit épinglé, et les enregistrements que le
+    distant n'a pas encore — relus dans l'atelier jusqu'au bout de la branche distante, tel que l'hôte le dit. Le
+    condensé épingle le tout : si le distant a bougé depuis la lecture, l'accord se relit."""
+    port = ports.get("workshop")
+    pid = args.get("project")
+    if port is None or not isinstance(pid, int):
+        return None
+    url, sha, branch = str(args.get("url") or ""), str(args.get("sha") or ""), str(args.get("branch") or "main")
+    local = await port.commits(pid, REMOTE_WINDOW) if port.exists(pid) else []
+    at = _place(sha, local) if sha else 0
+    upto = local[at:] if at is not None else []
+    hosted = await _remote(ports, url, branch) if upto else None
+    leaving: list[Commit] = []
+    if not upto:
+        said = REMOTE["missing"]
+    elif hosted is None:
+        said = _listed(f"{REMOTE['unread']}\n{REMOTE['last']}", upto)
+    elif not hosted.head:  # la branche n'existe pas encore là-bas : toute l'histoire part
+        leaving = upto
+        said = _listed(REMOTE["new_branch"].format(branch=branch), leaving)
+    elif (end := _place(hosted.head, upto)) is not None:
+        leaving = upto[:end]
+        said = _listed(REMOTE["leaving"], leaving) if leaving else REMOTE["pushed"]
+    else:
+        said = _listed(f"{REMOTE['diverged'].format(head=hosted.head[:7])}\n{REMOTE['last']}", upto)
+    head = REMOTE["push"].format(sha=sha[:12] or (upto[0].sha if upto else ""),
+                                 title=f" (« {upto[0].title} »)" if upto else "", url=url or REMOTE["none"],
+                                 branch=branch)
+    return Preview(f"{head}\n\n{said}", _pin(url=url, branch=branch, sha=sha, remote=hosted.head if hosted else None,
+                                             leaving=[k.sha for k in leaving]), _remote_blocked(ports, pid, url))
+
+
+async def pull_preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None:
+    """Exactement ce qui arriverait : le dépôt distant, sa branche, et les enregistrements que l'atelier n'a pas encore
+    (les derniers que l'hôte montre, jusqu'au premier que l'atelier connaît). Le condensé épingle l'atelier et le
+    distant tels qu'on les a lus ; une exécution qui travaille dans l'atelier bloque, comme pour la capacité."""
+    port = ports.get("workshop")
+    pid = args.get("project")
+    if port is None or not isinstance(pid, int):
+        return None
+    url, branch = str(args.get("url") or ""), str(args.get("branch") or "main")
+    local = await port.commits(pid, REMOTE_WINDOW) if port.exists(pid) else []
+    hosted = await _remote(ports, url, branch)
+    coming = [] if hosted is None else \
+        list(itertools.takewhile(lambda k: _place(k.sha, local) is None, hosted.commits))
+    said = REMOTE["unread"] if hosted is None else _listed(REMOTE["coming"], coming) if coming else REMOTE["pulled"]
+    blocked = _remote_blocked(ports, pid, url) or (BUSY if _busy(ports, pid) else "")
+    return Preview(f"{REMOTE['pull'].format(url=url or REMOTE['none'], branch=branch)}\n\n{said}",
+                   _pin(url=url, branch=branch, head=local[0].sha if local else "",
+                        remote=hosted.head if hosted else None), blocked)
+
+
+@PROJECTS.capability("push", description="Envoyer l'atelier d'un projet vers son dépôt distant (git push).",
+                     preview=push_preview)
 async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
     pid = _project_of(args, context)
@@ -348,7 +470,8 @@ async def push(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
     return result.ok, describe(result, 3000)
 
 
-@PROJECTS.capability("pull", description="Récupérer l'histoire du dépôt distant dans l'atelier (en ligne droite).")
+@PROJECTS.capability("pull", description="Récupérer l'histoire du dépôt distant dans l'atelier (en ligne droite).",
+                     preview=pull_preview)
 async def pull(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("workshop")
     pid = _project_of(args, context)

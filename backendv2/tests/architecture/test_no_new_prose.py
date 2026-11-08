@@ -39,7 +39,10 @@ CEILING = {
     "faculties/goals/work.py": 6,  # « pourquoi pas maintenant » (console)
     "faculties/identity/detection.py": 2,  # listes de mots (détecteur)
     "faculties/presence/__init__.py": 2,  # panneau de console
-    "faculties/projects/atelier.py": 13,  # résumés d'effets que l'opératrice approuve
+    # résumés d'effets que l'opératrice approuve ; +9 le 2026-11-05 : l'aperçu d'un envoi au dépôt distant et d'une
+    # récupération (``REMOTE`` : où, quel commit, ce qui partira ou arrivera), lu par l'opératrice dans « À valider »
+    # avant son accord, pas par elle (audit du 2026-11-05, C1-07)
+    "faculties/projects/atelier.py": 22,
     "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
     # raisons de clôture, gardées au journal ; règle de project_steer (console) ; +1 le 2026-10-25 : la description
     # de la capacité projects.steer, piloter sur ton accord (console, ADR 0133)
@@ -56,11 +59,11 @@ CEILING = {
     # la voix, forge.guide.veille)
     "plugins/forge/guide.py": 11,
     "plugins/forge/views.py": 6,  # rendus de console, aussi lus par forge_test — à migrer
-    "plugins/forge/calls.py": 2,  # capacité forge.call et note d'un refus au délai (console, ADR 0133)
+    "plugins/forge/calls.py": 1,  # capacité forge.call (console, ADR 0133)
     # la règle de draw, ce que le gestionnaire revérifie (console, « vérifié à l'exécution » ; ADR 0148)
     "plugins/imaging/tools.py": 1,
     "plugins/mcp/__init__.py": 1,  # aperçu d'une capacité (console)
-    "plugins/mcp/calls.py": 5,  # capacité et résumé (console)
+    "plugins/mcp/calls.py": 4,  # capacité et résumé (console)
     "plugins/rss/__init__.py": 16,  # panneaux de console
     "plugins/sensors/__init__.py": 6,  # panneaux de console
     "plugins/wakeup/prompt.py": 6,  # « pourquoi pas maintenant » (console)

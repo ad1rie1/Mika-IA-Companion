@@ -28,7 +28,7 @@
 .handle-why dt { color: var(--muted); }
 .handle-why dd { margin: 0; color: var(--text-2); }
 
-.handle-steps > summary { cursor: pointer; font-family: var(--now-serif); font-size: 14px; font-weight: 600; }
+.handle-steps > summary { cursor: pointer; font-family: var(--display); font-size: 14px; font-weight: 600; }
 .handle-steps-list { display: grid; gap: 6px; margin: 12px 0; padding-left: 20px; font-size: 13.5px; }
 .handle-steps-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .handle-step { min-width: 170px; color: var(--muted); }

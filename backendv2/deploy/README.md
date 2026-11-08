@@ -269,7 +269,7 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    client_max_body_size 6m;                          # un dépôt de fichier dans la console
+    client_max_body_size 52m;                         # un dépôt de fichier, un mail et ses pièces (50 Mo, ADR 0214)
     proxy_read_timeout 330s;                          # « Rejouer avec… », 300 s au plus
 }
 ```
@@ -347,8 +347,9 @@ tout marche, mais l'application ne reçoit que ce qu'elle trouve en s'ouvrant.
      `firebase-service-account.json` :
      `sudo install -o mika -g mika -m 600 <fichier>.json /var/lib/mika/firebase-service-account.json`.
      Il est relu à chaque envoi (pas de redémarrage) et la sauvegarde l'emporte ;
-   - ou le coller tel quel dans la console de Mika, **Réglages › Tous les réglages › Canaux › Notifications du
-     téléphone** : chiffré (`secret.key` ou `MIKA_SECRET_KEY`), jamais réaffiché. Collé, il passe devant le fichier.
+   - ou le coller tel quel dans la console de Mika, **Réglages › Tous les réglages › Carte et téléphone ›
+     Notifications du téléphone** : chiffré (`secret.key` ou `MIKA_SECRET_KEY`), jamais réaffiché. Collé, il passe
+     devant le fichier.
 
    La page dit d'où vient la clé, le projet, combien de téléphones sont notifiables, ce
    qui est parti et le dernier échec. Ne laisse jamais ce fichier dans le dépôt.
@@ -389,9 +390,9 @@ mika carte polices                                  # → cartes/assets (fonts/,
 
 Serveur en marche, sans risque : l'archive neuve ne remplace l'ancienne qu'entière, et le serveur la rouvre de
 lui-même. Une autre zone : `--zone ouest,sud,est,nord` (en degrés) et `--sortie cartes/<nom>.pmtiles` ; chaque zoom de
-moins divise la taille par quatre environ. Puis, dans la console, Réglages › Canaux › Carte de sa position : « Un
-fichier PMTiles sur ce serveur », `cartes/france.pmtiles` ; la page dit sa taille, ses zooms et sa zone. Pour la
-mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde.
+moins divise la taille par quatre environ. Puis, dans la console, Réglages › Carte et téléphone › Carte de sa
+position : « Un fichier PMTiles sur ce serveur », `cartes/france.pmtiles` ; la page dit sa taille, ses zooms et sa
+zone. Pour la mettre à jour, relancer `mika carte extraire` de temps en temps. `cartes/` n'entre dans aucune sauvegarde.
 
 Un serveur de carte à part (un `pmtiles serve`, une archive sur un stockage, un serveur `{z}/{x}/{y}` au schéma
 Protomaps ou d'images) se règle au même endroit : ce serveur le joint seul, sans rien de la personne, et en relaie
@@ -415,7 +416,7 @@ million de tuiles au zoom 15) : 2 978 370 lieux en 2 min 10 s, 467 Mo de mémoir
 le portable, compter davantage de temps, la même mémoire ; ou le construire sur un PC et le copier dans `cartes/`. La
 fin de la sortie dit combien de lieux par catégorie et les sortes laissées de côté les plus fréquentes.
 
-Puis, dans la console, Réglages › Canaux :
+Puis, dans la console, Réglages › Carte et téléphone :
 
 - **Lieux et adresses** : l'index (`cartes/lieux.db` par défaut) et les adresses — « La Géoplateforme de l'IGN »
   (la Base Adresse Nationale) : ce serveur ne lui envoie que le texte cherché, jamais la position de la personne.
@@ -486,8 +487,8 @@ sudo systemctl daemon-reload && sudo systemctl start valhalla
 curl -s http://127.0.0.1:8002/status                # sa version : il répond
 ```
 
-Puis, dans la console, Réglages › Canaux › Itinéraires : « Un Valhalla à toi », `http://127.0.0.1:8002`, et son débit
-(10 demandes par seconde par défaut). Pour le mettre à jour : reconstruire sur le PC de temps en temps, recopier,
+Puis, dans la console, Réglages › Carte et téléphone › Itinéraires : « Un Valhalla à toi », `http://127.0.0.1:8002`,
+et son débit (10 demandes par seconde par défaut). Pour le mettre à jour : reconstruire sur le PC de temps en temps, recopier,
 `sudo systemctl restart valhalla`.
 
 ## Surveiller

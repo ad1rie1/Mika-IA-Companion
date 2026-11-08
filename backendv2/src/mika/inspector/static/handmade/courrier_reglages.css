@@ -10,7 +10,7 @@
 .mailset-row + .mailset-row { padding-top: 26px; border-top: 1px solid var(--border); }
 .mailset-row-about { display: grid; gap: 6px; }
 .mailset-row-about h2, .mailset-row-about h3 { display: flex; align-items: center; gap: 8px; margin: 0;
-  font-family: var(--now-serif); font-weight: 600; }
+  font-family: var(--display); font-weight: 600; }
 .mailset-row-about h2 { font-size: 1.35rem; }
 .mailset-row-about h3 { font-size: 1.12rem; }
 .mailset-row-about p { margin: 0; color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
@@ -39,7 +39,7 @@
 .mailset-back { margin: 0; font-size: 13px; }
 .mailset-account { display: grid; gap: 26px; }
 .mailset-account-head { display: grid; gap: 4px; }
-.mailset-account-head h2 { margin: 0; font-family: var(--now-serif); font-size: 1.15rem; font-weight: 600; }
+.mailset-account-head h2 { margin: 0; font-family: var(--display); font-size: 1.15rem; font-weight: 600; }
 .mailset-account-head h2 .mono { font-size: 1.05rem; color: var(--muted); }
 .mailset-account-head p { margin: 0; color: var(--text-2); font-size: 14px; }
 .mailset-actions { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
@@ -52,7 +52,7 @@
 .mailset-box { display: grid; gap: 12px; align-content: start; }
 .mailset-box-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: center; }
 .mailset-initial { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius);
-  background: var(--accent-soft); color: var(--accent); font-family: var(--now-serif); font-size: 1.2rem; font-weight: 600; }
+  background: var(--accent-soft); color: var(--accent); font-family: var(--display); font-size: 1.2rem; font-weight: 600; }
 .mailset-box-name { min-width: 0; }
 .mailset-box-name h3 { margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
 .mailset-box-name h3 a { color: var(--text); }
@@ -78,7 +78,6 @@
 .mailset-params-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
 .mailset-param { display: grid; gap: 6px; align-content: start; min-width: 0; }
 .mailset-param .field { margin: 0; }
-.mailset-param .field input:not([type="checkbox"]):not([type="range"]) { max-width: 200px; }
 .mailset-param.is-overridden { margin: -10px; padding: 10px; border-radius: var(--radius);
   background: color-mix(in srgb, var(--warn-bg) 60%, transparent); }
 .mailset-param-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; color: var(--muted);
@@ -132,21 +131,12 @@
 /* la barre d'enregistrement des paramètres généraux : seulement sur l'une de leurs sections */
 .mailset-tabs:not(:has(.mailset-params .mailset-row:not(#ailleurs):target)) .mailset-params > .mailset-actions { display: none; }
 .mailset-panes .mailset-params { display: grid; gap: 16px; }
-/* une ligne par réglage : son nom et son aide à gauche, sa valeur à droite */
+/* une ligne par réglage, en colonnes quand la place le permet : la ligne elle-même est celle de console.css */
 .mailset-panes .mailset-params-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 0 36px; }
 .mailset-panes .mailset-param { padding: 10px 0; border-top: 1px solid var(--border); }
-.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) { grid-template-columns: minmax(0, 1fr) minmax(130px, 40%);
-  column-gap: 16px; align-items: center; }
-.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > :is(input, select) { grid-column: 2; grid-row: 1 / span 3; width: 100%; }
-.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > :is(label, .label, .help) { grid-column: 1; }
-.mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > .error { grid-column: 1 / -1; }
 @media (max-width: 900px) {
   .mailset-tabs { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .mailset-nav { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
   .mailset-nav-title { flex-basis: 100%; }
   .mailset-nav a { border: 1px solid var(--border); }
-}
-@media (max-width: 700px) {
-  .mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) { grid-template-columns: minmax(0, 1fr); }
-  .mailset-panes .mailset-param > .field:not(:has(textarea, .check-list, .slider)) > * { grid-column: 1 !important; grid-row: auto !important; }
 }

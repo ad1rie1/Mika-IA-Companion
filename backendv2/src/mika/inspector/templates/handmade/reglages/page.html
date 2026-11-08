@@ -1,15 +1,55 @@
-{# Une page de réglages (pages/reglages.py), dans le vocabulaire des pages dessinées (ADR 0121) : ses faits en ligne,
-   ses enregistrements en cartes, son formulaire en carte (ses groupes, ses options avancées repliées), ses commandes,
-   son document entier. Champs, noms et boutons : ceux de la console. #}
+{# Une page de réglages (pages/settings_form.py), dans le vocabulaire des pages dessinées (ADR 0121) : ses faits en
+   ligne (un renvoi y est un lien), ses enregistrements en cartes, son formulaire en carte (ses groupes, ses options
+   avancées repliées), son document entier. Ses commandes sont ses actions, dans la barre de titre (``head_extra``,
+   ADR 0176). Champs, noms et boutons : ceux de la console. #}
 {% from "_forms.html" import field %}
 {% from "handmade/shared/drawn.html" import sober with context %}
 {% from "handmade/reglages/enregistrements.html" import records %}
+{% from "_navigation.html" import pager as pages %}
+{# le contrôle seul d'une ligne de correspondance, dans sa cellule : son nom est l'en-tête de sa ligne #}
+{% macro control(r) -%}
+{% if r.kind == "select" %}
+<select name="{{ r.path }}" id="{{ r.id }}" aria-labelledby="{{ r.id }}-nom"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' disabled' if r.readonly }}{{ ' required' if r.required and not r.readonly }}>
+  {% if not r.required and '' not in r.choices|map('first')|list %}<option value="">—</option>{% endif %}
+  {% for v, l in r.choices %}<option value="{{ v }}"{{ ' selected' if v == r.value }}>{{ l }}</option>{% endfor %}
+</select>
+{% else %}<input name="{{ r.path }}" id="{{ r.id }}" value="{{ r.value }}" aria-labelledby="{{ r.id }}-nom"{% if r.error %} aria-invalid="true" aria-describedby="{{ r.id }}-error"{% endif %}{{ ' readonly' if r.readonly }}>{% endif %}
+{% if r.error %}<span class="error" id="{{ r.id }}-error">{{ r.error }}</span>{% endif %}
+{%- endmacro %}
+{# ce que donne une ligne de correspondance (ce qui sert vraiment ce rôle) : un texte, une étiquette, une précision #}
+{% macro cell(c) -%}
+{% if c.tag %}<span class="now-tag {{ c.tone }}">{{ c.text }}</span>{% else %}<span class="{{ 'mono' if c.mono }}{{ ' now-muted' if c.tone == 'muted' }}">{{ c.text }}</span>{% endif %}
+{% if c.sub %}<span class="mapping-sub">{{ c.sub }}</span>{% endif %}
+{% if c.note %} <span class="now-tag warn">{{ c.note }}</span>{% endif %}
+{%- endmacro %}
 {% macro groups(list) -%}
 {% for g in list %}
 <fieldset class="group hm-group">
   {% if g.title %}<legend>{{ g.title }}</legend>{% endif %}
   {% for f in g.fields %}
-    {% if f.kind == "mapping" %}
+    {% if f.kind == "mapping" and f.table %}
+    {# une correspondance décrite (Qui sert quoi, Où elles écrivent) : une table, sa liste dans une colonne, ce qu'elle
+       donne à côté — un seul formulaire, un seul Enregistrer (ADR 0176) #}
+    {% set t = f.table %}
+    <div class="field mapping mapping-described table-block{{ ' has-error' if f.error }}">
+      <input type="hidden" name="_champs" value="{{ f.path }}">
+      <span class="label" id="{{ f.id }}-titre">{{ t.title or f.label }}</span>
+      {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}
+      <div class="hm-table-wrap"><table class="hm-table mapping-table" aria-labelledby="{{ f.id }}-titre">
+        <thead><tr><th scope="col">{{ t.key }}</th>{% for h in t.before %}<th scope="col">{{ h }}</th>{% endfor %}<th scope="col">{{ t.choice }}</th>{% for h in t.after %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for r in f.rows %}<tr{% if r.tone %} class="t-{{ r.tone }}"{% endif %}>
+          <th scope="row" id="{{ r.id }}-nom">{{ r.label }}</th>
+          {% for c in r.before %}<td>{{ cell(c) }}</td>{% endfor %}
+          <td class="mapping-choice{{ ' has-error' if r.error }}">{{ control(r) }}</td>
+          {% for c in r.after %}<td>{{ cell(c) }}</td>{% endfor %}
+        </tr>{% endfor %}
+        </tbody>
+      </table></div>
+      <div class="hm-pager single">{{ pages(t.pager) }}</div>
+      {% if f.error %}<span class="error">{{ f.error }}</span>{% endif %}
+    </div>
+    {% elif f.kind == "mapping" %}
     <div class="field mapping{{ ' has-error' if f.error }}">
       <input type="hidden" name="_champs" value="{{ f.path }}">
       <span class="label">{{ f.label }}</span>
@@ -42,14 +82,14 @@
 <div class="settings stack now-page">
 {% for s in sections %}
 <section class="settings-section stack" id="section-{{ s.key }}">
-  {% if s.facts %}<p class="person-entry-facts hm-settings-facts">{% for k, v in s.facts %}<span><span class="k">{{ k }}</span> {{ v }}</span>{% endfor %}</p>{% endif %}
+  {% if s.facts %}<p class="person-entry-facts hm-settings-facts">{% for k, v, href in s.facts %}<span><span class="k">{{ k }}</span> {% if href %}<a href="{{ href }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</span>{% endfor %}</p>{% endif %}
   {% for m in s.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
 
   {% if s.record %}{% set rec = s.record %}
   <form method="post" action="{{ action }}" class="form now-card hm-form record-form" id="enregistrement">
     {# Entrée enregistre, jamais « charger la liste » (le premier bouton d'un formulaire est son défaut) #}
     <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
-    <h2 class="hm-form-title">{{ 'Ajouter' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h2>
+    {# son titre est celui de la page (« Fournisseur « apercu » ») : la carte ne le répète pas #}
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
     {% if rec.back %}<input type="hidden" name="_retour" value="{{ rec.back }}">{% endif %}
@@ -89,22 +129,6 @@
       <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>{% endif %}</div>
   </form>
   {% if s.aside %}<aside class="hm-split-side" aria-label="À côté du formulaire">{{ s.head }}</aside></div>{% endif %}
-  {% endif %}
-
-  {% if s.commands %}
-  <div class="now-card hm-commands">
-    <header class="now-card-head"><h2>Commandes</h2></header>
-    <div class="commands">
-    {% for c in s.commands %}
-      <form method="post" action="{{ action }}" class="inline"{% if c.confirm %} data-confirm="{{ c.confirm }}"{% endif %}>
-        <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
-        <input type="hidden" name="_commande" value="{{ c.key }}">
-        <button class="btn{{ ' danger' if c.danger else ' quiet' }}">{{ c.title }}</button>
-      </form>
-    {% endfor %}
-    </div>
-    {% for c in s.commands if c.confirm %}<p class="now-sub">{{ c.title }} : {{ c.confirm[:1]|lower }}{{ c.confirm[1:] }}</p>{% endfor %}
-  </div>
   {% endif %}
 
   {% if s.yaml %}

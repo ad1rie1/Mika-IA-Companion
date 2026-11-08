@@ -13,12 +13,10 @@ l'est, et c'est l'empreinte du jeton présenté qu'on lui compare.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import re
-import secrets
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -35,6 +33,7 @@ from mika.adapters.mail.oauth import Grant
 from mika.adapters.maps import MapConfig, PlacesConfig, RoutingConfig
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
+from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
@@ -126,11 +125,6 @@ NO_TABLE = (OperationalError, ProgrammingError)
 
 
 _SAID_OPEN: set[str] = set()  # les fichiers de clé déjà signalés lisibles par d'autres
-
-
-def token_digest(token: str) -> str:
-    """L'empreinte d'un jeton porteur (SHA-256, en hexadécimal) : ce qu'on garde, ce qu'on compare."""
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def push_key_file(data: Path) -> str:
@@ -694,7 +688,7 @@ class Settings:
 
     async def new_sensors_token(self) -> str:
         """Un jeton neuf (l'ancien ne vaut plus) ; montré une fois, seule son empreinte est gardée."""
-        token = secrets.token_urlsafe(32)
+        token = new_key()
         await self._put(SENSORS_KEY, {"digest": token_digest(token)})
         return token
 
@@ -705,7 +699,7 @@ class Settings:
     async def new_console_mcp_token(self) -> str:
         """Un jeton neuf pour ``/mcp/console`` (l'ancien ne vaut plus) ; montré une fois, seule son empreinte est
         gardée."""
-        token = secrets.token_urlsafe(32)
+        token = new_key()
         data = {k: v for k, v in dict(self._get(CONSOLE_MCP_KEY) or {}).items() if k != "token_sealed"}
         await self._put(CONSOLE_MCP_KEY, {**data, "digest": token_digest(token)})
         return token
@@ -772,8 +766,8 @@ class Settings:
         entries = self.lent()
         if name not in entries:
             raise ValueError("point inconnu : déclare-le d'abord")
-        token = LENT_PREFIX + secrets.token_urlsafe(32)
-        entries[name] = {**entries[name], "digest": hashlib.sha256(token.encode()).hexdigest(),
+        token = new_key(LENT_PREFIX)
+        entries[name] = {**entries[name], "digest": token_digest(token),
                          "hint": token[:len(LENT_PREFIX) + 4], "token_by": by[:80], "token_at": int(at)}
         await self._put(LENT_KEY, entries)
         return token

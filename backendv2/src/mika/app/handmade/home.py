@@ -1,9 +1,10 @@
 """L'accueil, dessiné à la main (ADR 0121) : ce que l'opératrice regarde en ouvrant la console.
 
 Trois questions, dans cet ordre : qu'est-ce qui m'attend ? (les priorités de l'onglet « À traiter » : une réponse qui
-échoue, ce qui attend un accord, un processus en panne, une sauvegarde à faire, un contrôle de santé) — comment
-va-t-elle ? (son humeur en mots, son corps, ses besoins, qui est là, lus comme « En ce moment ») — qu'a-t-elle fait
-aujourd'hui ? (la journée en chiffres, ses derniers épisodes). Les courbes de la journée sont sur « En ce moment ».
+échoue, ce qui attend un accord, un processus en panne, une sauvegarde à faire, un contrôle de santé — une ligne par
+page où décider) — comment va-t-elle ? (son humeur en mots, son corps, ses besoins, qui est là, lus comme « En ce
+moment ») — qu'a-t-elle fait aujourd'hui ? (la journée en chiffres, ses derniers épisodes). Les courbes de la journée
+sont sur « En ce moment ».
 
 Les données restent celles de la console : les onglets de l'accueil (``inspector.pages.home``) et les lectures
 d'« En ce moment » (``handmade.now``). Elle se relit seule (``handmade/live.js``) ; une partie qui échoue tait sa
@@ -38,8 +39,8 @@ FRAGMENT = f"{PREFIX}/_accueil"
 EPISODES_SHOWN = 8
 #: ses derniers épisodes, en lignes : ce qu'il était en titre, son issue, sa cible, son détail, l'heure à droite
 EPISODE_ROLES = Roles(title="épisode", badges=("issue",), body=("détail",), time="quand")
-#: un contrôle de santé qui ne va pas : sa page
-HEALTH = f"{PREFIX}/systeme/sante"
+#: une alerte sans page à elle : la santé générale
+HEALTH = tabs.HEALTH_HREF
 
 
 def _text(value: Any) -> str:
@@ -63,12 +64,13 @@ def priorities(blocks: Sequence[Any]) -> dict[str, Any]:
 #: la gravité d'une priorité : la plus grave l'emporte quand deux mènent à la même page
 SEVERITY = {"danger": 0, "warn": 1, "info": 2}
 #: ce que dit un badge qui n'en sait pas plus
-VAGUE = "à regarder"
+VAGUE = tabs.VAGUE
 
 
 def _merged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Une ligne par page où décider : un badge (« Système › Processus »), son cadre (« Processus en échec ») et un
-    contrôle de santé disent souvent la même chose ; la plus grave reste, et à gravité égale, la plus précise."""
+    """Une ligne par page où décider : un badge (« Système › File de sortie »), son cadre (« Processus en échec ») et
+    un contrôle de santé, qui mène à la même page (« 2 abandonnés en 24 h »), disent souvent la même panne ; la plus
+    grave reste, et à gravité égale, la plus précise."""
     best: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for r in rows:

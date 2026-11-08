@@ -8,10 +8,11 @@ nommé, ADR 0185) sont alors les siennes.
 
 Rien ici ne recopie une règle. Une ressource est à quelqu'un selon ses paramètres journalisés (``owners``) ; ce qu'on y
 fait passe par les actions que la console déclare (``runtime.operations.perform``), au nom de la personne (``by``) :
-journalisées, dédoublonnées et auditées comme dans la console. Ce qui se règle (son compte, ses boîtes, ses comptes
-Teams, ses services, ses partages) s'écrit dans les réglages du serveur et s'audite ; une création redite avec la même
-clé d'envoi ne refait rien (``Call.once``). Une ressource qui n'est pas à elle n'existe pas : le même 404 qu'une
-ressource inconnue. Le contrat, route par route : ``docs/protocole-moi.md``.
+journalisées et dédoublonnées comme dans la console, auditées depuis son espace (``moi.<action>``, ``via=SPACE``). Ce
+qui se règle (son compte, ses boîtes, ses comptes Teams, ses services, ses partages) s'écrit dans les réglages du
+serveur et s'audite (``moi.<geste>``) ; une création redite avec la même clé d'envoi ne refait rien (``Call.once``).
+Une ressource qui n'est pas à elle n'existe pas : le même 404 qu'une ressource inconnue. Le contrat, route par route :
+``docs/protocole-moi.md``.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -37,13 +40,15 @@ from mika.adapters.web.app import (
     SESSION_COOKIE,
     LoginThrottle,
     PayloadTooLarge,
+    bounded_stream,
     native_token,
     read_bounded,
 )
 from mika.contracts import identity as identity_c
 from mika.kernel.forms import RENDERED, errors_fr
+from mika.ports.mail import PIECES_MAX, PIECES_TOTAL_MAX, File
 from mika.runtime.bootstrap import Kernel
-from mika.runtime.operations import FIXED_FIELD, Outcome, perform
+from mika.runtime.operations import FIXED_FIELD, SPACE, Outcome, perform
 
 #: où vit l'API
 PREFIX = "/api/moi"
@@ -57,8 +62,11 @@ PASSWORD_TRIES = (5, 60.0)
 PROBES = (30, 60.0)
 #: ce qui fait sortir une demande vers un service du dehors pour la carte (un itinéraire, une adresse, un ordre,
 #: un GPX) : au plus tant par compte dans la fenêtre. Le serveur d'itinéraires public (une demande par seconde pour
-#: tout ce serveur) reste ainsi à tous, et à ses outils à elle : une seule personne ne le tient pas.
+#: tout ce serveur) reste ainsi à tous, et à ses outils à elle : une seule personne ne le tient pas. Le GPX qu'un
+#: opérateur tire de la console compte dans la borne de son compte, la même (``spend``, ADR 0204).
 OUTBOUND = (20, 60.0)
+#: une demande de trop vers le serveur d'itinéraires (``OUTBOUND``), dans l'écran Carte comme dans la console
+ROUTES_BUSY = "Trop de trajets demandés d'affilée : attends une minute."
 #: une adresse cherchée, à la Géoplateforme (qui en permet 50 par seconde) : au plus tant par compte dans la fenêtre —
 #: une saisie en cours en demande plusieurs, sans priver qui que ce soit du serveur d'itinéraires
 ADDRESSES = (60, 60.0)
@@ -66,6 +74,10 @@ ADDRESSES = (60, 60.0)
 OWN_MAX = 10
 #: les créations dont on garde la réponse, pour qu'une création redite avec la même clé ne refasse rien
 CREATED_MAX = 512
+#: un envoi avec ses fichiers (``upload``), corps entier : ses pièces, et de quoi porter ses champs et ses délimiteurs
+UPLOAD_BODY_MAX = PIECES_TOTAL_MAX + 1024 * 1024
+#: les champs d'un envoi avec ses fichiers : ceux d'un mail, avec de la marge (chacun est borné par ``Call.arg``)
+UPLOAD_FIELDS = 32
 
 
 class Denied(Exception):
@@ -94,6 +106,16 @@ def refused(exc: Exception) -> Denied:
     else:
         said = (str(exc).splitlines() or [""])[0]
     return Denied(400, said[:300] or "Réglage refusé.")
+
+
+def spend(throttle: LoginThrottle, account: Account) -> bool:
+    """Une demande de plus pour ce compte dans ``throttle`` ; faux, sans rien compter, s'il est à sa borne. La clé est
+    le compte : l'écran Carte et la console (le GPX d'un voyage, ADR 0204) usent ainsi la même borne ``OUTBOUND``."""
+    key = f"compte:{account.id}"
+    if throttle.blocked(key):
+        return False
+    throttle.fail(key)
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,13 +182,16 @@ def done(outcome: Outcome, **more: Any) -> dict[str, Any]:
 class Call:
     """Ce qu'une route reçoit : la requête, qui la fait, le noyau, et le corps JSON lu (``{}`` pour une lecture)."""
 
-    __slots__ = ("request", "me", "kernel", "data", "api")
+    __slots__ = ("request", "me", "kernel", "data", "api", "files")
 
-    def __init__(self, request: Request, me: Me, kernel: Kernel, data: dict[str, Any], api: MeApi) -> None:
+    def __init__(self, request: Request, me: Me, kernel: Kernel, data: dict[str, Any], api: MeApi,
+                 files: tuple[File, ...] = ()) -> None:
         self.request = request
         self.me = me
         self.kernel = kernel
         self.data = data
+        #: les fichiers d'un envoi en multipart (``upload``), tels qu'ils sont arrivés : l'action qui les joint les juge
+        self.files = files
         #: l'API (ses comptes, ses origines, où est l'application du téléphone)
         self.api = api
 
@@ -224,8 +249,10 @@ class Call:
         return f"moi:{self.me.handle}:{cleaned}" if cleaned else ""
 
     async def act(self, key: str, values: dict[str, list[str]], *, subject: str = "") -> Outcome:
-        """Une action déclarée par une faculté, au nom de qui est connecté (``by`` : son adresse)."""
-        return await perform(self.kernel, key, values, by=self.me.handle, subject=subject, nonce=self.nonce())
+        """Une action déclarée par une faculté, au nom de qui est connecté (``by`` : son adresse), auditée comme faite
+        depuis son espace (``moi.<action>``)."""
+        return await perform(self.kernel, key, values, by=self.me.handle, subject=subject, nonce=self.nonce(),
+                             via=SPACE, files=self.files)
 
     async def once(self, make: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         """Une création qui ne passe pas par une action (une boîte, un compte Teams, un service) : redite avec la même
@@ -254,16 +281,41 @@ class Call:
 
     def outbound(self, *, addresses: bool = False) -> None:
         """Une demande de la carte qui sort vers un service du dehors : bornée par compte, 429 au-delà — le serveur
-        d'itinéraires public est à tous (``OUTBOUND``) ; une adresse a sa propre borne, plus large (``ADDRESSES``)."""
-        key = f"compte:{self.me.account.id}"
-        throttle = self.api.address_tries if addresses else self.api.outbound
-        if throttle.blocked(key):
+        d'itinéraires public est à tous (``OUTBOUND``, que la console use aussi) ; une adresse a sa propre borne, plus
+        large (``ADDRESSES``)."""
+        if not spend(self.api.address_tries if addresses else self.api.outbound, self.me.account):
             raise Denied(429, "Trop d'adresses cherchées d'affilée : attends une minute." if addresses else
-                         "Trop de trajets demandés d'affilée : attends une minute.")
-        throttle.fail(key)
+                         ROUTES_BUSY)
 
 
 Handler = Callable[[Call], Awaitable[Any]]
+
+
+def _is_multipart(request: Request) -> bool:
+    return request.headers.get("content-type", "").lower().startswith("multipart/form-data")
+
+
+async def read_upload(request: Request) -> tuple[dict[str, Any], tuple[File, ...]]:
+    """Un envoi en ``multipart/form-data`` : ses champs, comme un corps JSON, et ses fichiers. Le corps est borné pendant
+    qu'il arrive (``PayloadTooLarge``), et les fichiers attendent sur le disque le temps de le lire. Ce qu'ils valent
+    (taille, nombre, nom, sorte) se juge dans l'action qui les joint."""
+    parser = MultiPartParser(request.headers, bounded_stream(request, UPLOAD_BODY_MAX), max_files=PIECES_MAX + 1,
+                             max_fields=UPLOAD_FIELDS)
+    try:
+        form_data = await parser.parse()
+    except (MultiPartException, ValueError):  # une erreur de ``python-multipart`` est une ValueError
+        raise Denied(400, f"Cet envoi n'a pas pu être lu : un formulaire abîmé, ou plus de {PIECES_MAX} pièces.") from None
+    try:
+        data: dict[str, Any] = {}
+        files: list[File] = []
+        for name, value in form_data.multi_items():
+            if isinstance(value, UploadFile):
+                files.append(File(value.filename or "", value.content_type or "", await value.read()))
+            else:  # un formulaire écrit ses fins de ligne en CRLF : un champ se compte comme en JSON
+                data[name] = value.replace("\r\n", "\n")
+    finally:
+        await form_data.close()
+    return data, tuple(files)
 
 
 class MeApi:
@@ -314,15 +366,17 @@ class MeApi:
         return bool(cookie) and secrets.compare_digest(cookie, header)
 
     def route(self, path: str, handler: Handler, *, write: bool = False,
-              raw: bool = False) -> Route:
-        """Une route : ``write`` — un POST, qui exige le jeton CSRF et lit un corps JSON ; ``raw`` — le gestionnaire
-        rend lui-même sa réponse (un fichier, un cadre)."""
+              raw: bool = False, upload: bool = False) -> Route:
+        """Une route : ``write`` — un POST, qui exige le jeton CSRF et lit un corps JSON ; ``upload`` — ce corps peut
+        aussi être un ``multipart/form-data`` : ses champs valent ceux du JSON, ses fichiers vont à ``Call.files``
+        (ADR 0214) ; ``raw`` — le gestionnaire rend lui-même sa réponse (un fichier, un cadre)."""
 
         async def endpoint(request: Request) -> Response:
             account = self.account(request)
             if account is None:
                 return JSONResponse({"error": "Authentification requise."}, status_code=401, headers=NO_STORE)
             data: dict[str, Any] = {}
+            files: tuple[File, ...] = ()
             if write:
                 if native_token(request.headers):
                     # un client natif ne fait que lire : son jeton porteur et un CSRF qu'il poserait lui-même ne
@@ -332,15 +386,20 @@ class MeApi:
                 if not self.csrf_ok(request):
                     return JSONResponse({"error": "Requête refusée (CSRF)."}, status_code=403, headers=NO_STORE)
                 try:
-                    parsed = json.loads(await read_bounded(request, BODY_MAX_BYTES) or b"{}")
+                    if upload and _is_multipart(request):
+                        parsed, files = await read_upload(request)
+                    else:
+                        parsed = json.loads(await read_bounded(request, BODY_MAX_BYTES) or b"{}")
                 except PayloadTooLarge:
                     return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=NO_STORE)
+                except Denied as exc:
+                    return JSONResponse({"error": exc.message}, status_code=exc.status, headers=NO_STORE)
                 except (ValueError, RecursionError):
                     parsed = None
                 if not isinstance(parsed, dict):
                     return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=NO_STORE)
                 data = parsed
-            req = Call(request, me_of(self.kernel.mind.frame(), account), self.kernel, data, self)
+            req = Call(request, me_of(self.kernel.mind.frame(), account), self.kernel, data, self, files)
             try:
                 got = await handler(req)
             except Denied as exc:

@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EMPTY_MIKA, withInnerState, withMood, type MikaState } from "./state";
-import { doingWords, faceOf, facetsOf, percent, statusLine } from "./view";
+import {
+  doingWords,
+  faceOf,
+  facetHtml,
+  facetsOf,
+  percent,
+  projectHtml,
+  promiseHtml,
+  startVrmWhenShown,
+  statusLine,
+  type MediaWatch,
+} from "./view";
 
 const NOW = new Date(2026, 10, 4, 14, 20).getTime();
 
@@ -129,5 +140,79 @@ describe("faceOf", () => {
     expect(faceOf(mika({}, { emotion: "jealous", emotion_intensity: 0.8 }), false, all).portrait).toBe("neutral");
     // sans manifeste, on ne sait pas ce qui manque : l'humeur telle quelle
     expect(faceOf(mika({}, { emotion: "jealous", emotion_intensity: 0.8 }), false, null).portrait).toBe("jealous");
+  });
+});
+
+describe("les lignes de « Ce qu'elle fait » et de sa colonne du chat", () => {
+  it("une facette : son nom échappé, sa barre et son nombre bornés de même", () => {
+    expect(facetHtml({ emotion: "curious", label: "Curieuse <b>", value: 0.624 })).toBe(
+      '<div class="facet"><span>Curieuse &lt;b&gt;</span><span class="bar"><i style="width:62%"></i></span><span class="num">62 %</span></div>',
+    );
+    expect(facetHtml({ emotion: "happy", label: "Contente", value: 1.4 })).toContain('style="width:100%"');
+    expect(facetHtml({ emotion: "happy", label: "Contente", value: 1.4 })).toContain("100 %");
+  });
+
+  it("une promesse, échappée", () => {
+    const html = promiseHtml("t'envoyer <la liste>");
+    expect(html).toContain('<div class="sc-line">');
+    expect(html).toContain("<span>t&#39;envoyer &lt;la liste&gt;</span>");
+  });
+
+  it("un projet : son statut en mots ; un statut inconnu n'a pas d'étiquette, jamais la clé anglaise", () => {
+    expect(projectHtml({ title: "Labo de trading", status: "paused" })).toContain('Labo de trading <span class="tag">en pause</span>');
+    expect(projectHtml({ title: "Site de rando", status: "active" })).toContain('<span class="tag">en cours</span>');
+    const unknown = projectHtml({ title: "Le <grenier>", status: "archived" });
+    expect(unknown).toContain("<span>Le &lt;grenier&gt;</span>");
+    expect(unknown).not.toContain("tag");
+    expect(unknown).not.toContain("archived");
+    expect(projectHtml({ title: "Vide", status: "" })).not.toContain("tag");
+  });
+});
+
+describe("sa VRM ne se charge que si son coin se voit", () => {
+  /** Une requête média qu'on fait changer à la main. */
+  function media(narrow: boolean): MediaWatch & { set(narrow: boolean): void; listeners: Set<() => void> } {
+    const listeners = new Set<() => void>();
+    const m = {
+      matches: narrow,
+      listeners,
+      addEventListener: (_type: "change", fn: () => void) => listeners.add(fn),
+      removeEventListener: (_type: "change", fn: () => void) => listeners.delete(fn),
+      set(next: boolean) {
+        m.matches = next;
+        for (const fn of [...listeners]) fn();
+      },
+    };
+    return m;
+  }
+
+  it("sur un grand écran, tout de suite", () => {
+    const start = vi.fn();
+    startVrmWhenShown("", media(false), start);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("sur un téléphone, rien ; la fenêtre élargie, une seule fois", () => {
+    const start = vi.fn();
+    const m = media(true);
+    startVrmWhenShown("?theme=dark", m, start);
+    expect(start).not.toHaveBeenCalled();
+    m.set(true);
+    expect(start).not.toHaveBeenCalled();
+    m.set(false);
+    expect(start).toHaveBeenCalledTimes(1);
+    m.set(true);
+    m.set(false);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(m.listeners.size).toBe(0);
+  });
+
+  it("?vrm=0 la coupe partout", () => {
+    const start = vi.fn();
+    const m = media(true);
+    startVrmWhenShown("?vrm=0", media(false), start);
+    startVrmWhenShown("?vrm=0", m, start);
+    m.set(false);
+    expect(start).not.toHaveBeenCalled();
   });
 });

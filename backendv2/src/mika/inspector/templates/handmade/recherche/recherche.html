@@ -1,12 +1,16 @@
 {# La recherche, dessinée (inspector/pages/subjects.py, ``search_view``) : en sous-onglets (ADR 0176) — « Tout » d'abord,
    chaque sorte de résultat en carte avec ses premiers liens ; puis une section par sorte (les pages de la console, les
-   textes où chercher, les personnes, les projets…), tous ses liens en colonnes et sa pagination. Les sortes sans
-   résultat se disent en une ligne. Aucun style en ligne (CSP). #}
+   réglages, les textes où chercher, les personnes, les projets…), tous ses liens en colonnes et sa pagination. Les
+   sortes sans résultat se disent en une ligne. Les vues brutes des facultés n'y sont pas : un lien y mène (ADR 0202).
+   Aucun style en ligne (CSP). #}
 {% from "_navigation.html" import pager as pages %}
 {% set found = v.groups|selectattr("items")|list %}
 {% set silent = v.groups|rejectattr("items")|list %}
 {% macro items(list) -%}
 {% for i in list %}<li>{% if i.href %}<a href="{{ i.href }}">{{ i.label }}</a>{% else %}<span>{{ i.label }}</span>{% endif %}{% if i.sub %}<span class="search-sub">{{ i.sub }}</span>{% endif %}</li>{% endfor %}
+{%- endmacro %}
+{% macro technical(t) -%}
+{% if t %}<p class="search-silent now-muted"><a href="{{ t.href }}">{{ t.text }}</a> : {{ t.count }} {{ 'vues des facultés portent' if t.count > 1 else 'vue des facultés porte' }} ce mot dans {{ 'leur' if t.count > 1 else 'son' }} titre (Système › Toutes les vues).</p>{% endif %}
 {%- endmacro %}
 <div class="now-page recherche">
   {% if found %}
@@ -28,6 +32,7 @@
           {% endfor %}
         </div>
         {% if silent %}<p class="search-silent now-muted">Rien dans : {% for g in silent %}{{ g.title|lower }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+        {{ technical(v.technical) }}
       </section>
       {% for g in found %}
       <section class="now-card search-group search-pane" id="{{ g.id }}" data-pane aria-label="{{ g.title }}">
@@ -40,5 +45,6 @@
   </div>
   {% else %}
   <section class="now-card"><p class="now-empty">{{ v.note or ('rien ne correspond' if v.q else "tape un nom, un numéro d'événement, un titre") }}</p></section>
+  {{ technical(v.technical) }}
   {% endif %}
 </div>

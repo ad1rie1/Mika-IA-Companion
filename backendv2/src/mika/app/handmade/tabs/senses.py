@@ -10,9 +10,11 @@ dessinés à part (``handmade/senses.py``).
   qu'elle y voit ou pourquoi il a raté.
 - Appareils : ses appareils à gauche (chacun filtre la page), ce qu'ils lui ont signalé à droite.
 
-Les liens de chaque vue vers ses réglages (sa ``Nav``) vont dans la barre de titre, en roue (ADR 0176) ; sa phrase
-d'état (sa ``Note``) ouvre la page. Tout se lit dans les blocs que la vue du plugin déclare : elle reste la source,
-pour la console en MCP comme pour le repli.
+Les réglages de Ses sens (les flux suivis, l'accès des appareils, la transcription) sont derrière la roue de la
+destination, au bout de la barre de titre (ADR 0206) ; les liens d'une vue vers d'autres réglages ou une tâche (sa
+``Nav`` : les paramètres avancés de la caméra, les fournisseurs d'images, connecter une caméra) vont dans la barre de
+titre, avant elle (ADR 0176) ; sa phrase d'état (sa ``Note``) ouvre la page. Tout se lit dans les blocs que la vue du
+plugin déclare : elle reste la source, pour la console en MCP comme pour le repli.
 """
 
 from __future__ import annotations

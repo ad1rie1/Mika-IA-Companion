@@ -80,6 +80,17 @@ export function dreamLabel(kind: string): string {
   return DREAMS[kind] ?? "Un rêve";
 }
 
+/** Le statut d'un de ses projets, tel que le serveur l'envoie (`app/mindport.py` : `active`, `paused`). */
+const PROJECT_STATUSES: ReadonlyMap<string, string> = new Map([
+  ["active", "en cours"],
+  ["paused", "en pause"],
+]);
+
+/** « en cours », « en pause » ; un statut que ce client ne connaît pas ne se montre pas (jamais la clé anglaise). */
+export function projectStatusLabel(status: string | null | undefined): string | null {
+  return PROJECT_STATUSES.get(String(status ?? "").trim().toLowerCase()) ?? null;
+}
+
 /** Le moment de la journée. */
 const MOMENTS: Record<string, string> = {
   morning: "le matin",

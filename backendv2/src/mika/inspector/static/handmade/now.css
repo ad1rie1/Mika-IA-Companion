@@ -88,7 +88,7 @@
 .key-failed { background: var(--danger); }
 
 /* ── Son corps, ses besoins ───────────────────────────────────────────── */
-.now-state { margin: 0; font-family: var(--now-serif); font-size: 1.75rem; font-weight: 600; line-height: 1.1; }
+.now-state { margin: 0; font-family: var(--display); font-size: 1.75rem; font-weight: 600; line-height: 1.1; }
 .now-state span { color: var(--muted); font: 500 14px var(--font); }
 .now-state.asleep { color: color-mix(in srgb, var(--emo-dreamy) 80%, var(--text)); }
 .now-needs { display: grid; gap: 15px; margin: 0; padding: 0; list-style: none; }
@@ -101,7 +101,7 @@
 .now-thoughts { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .now-thoughts li { padding: 11px 13px 12px 15px; border-left: 3px solid var(--sw); border-radius: var(--radius);
   background: color-mix(in srgb, var(--sw) 8%, var(--surface-2)); }
-.now-thoughts li > p:first-child { margin: 0; font-family: var(--now-serif); font-size: 15px; line-height: 1.45; }
+.now-thoughts li > p:first-child { margin: 0; font-family: var(--display); font-size: 15px; line-height: 1.45; }
 .now-thought-meta { margin: 6px 0 9px; color: var(--muted); font-size: 12px; }
 .now-awaited { margin-bottom: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--sw) 35%, var(--border));
   border-radius: var(--radius); background: color-mix(in srgb, var(--sw) 10%, var(--surface)); }
@@ -111,7 +111,7 @@
 .now-awaited-head span { text-transform: none; letter-spacing: 0; }
 .now-dream { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius);
   background: linear-gradient(135deg, color-mix(in srgb, var(--emo-dreamy) 14%, var(--surface)), var(--surface) 70%); }
-.now-dream-text { margin: 0; font-family: var(--now-serif); font-style: italic; line-height: 1.5; }
+.now-dream-text { margin: 0; font-family: var(--display); font-style: italic; line-height: 1.5; }
 
 /* ── Les gens ─────────────────────────────────────────────────────────── */
 .now-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; margin: 0; padding: 0;
@@ -142,7 +142,7 @@
 .now-today li { padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); }
 .now-today a { display: block; color: inherit; }
 .now-today a:hover .now-today-label { color: var(--accent); }
-.now-today-value { display: block; font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; line-height: 1.15; }
+.now-today-value { display: block; font-family: var(--display); font-size: 1.6rem; font-weight: 600; line-height: 1.15; }
 .now-today-label { display: block; color: var(--muted); font-size: 12px; }
 .now-today li.danger { background: var(--danger-bg); }
 .now-today li.danger .now-today-value { color: var(--danger); }

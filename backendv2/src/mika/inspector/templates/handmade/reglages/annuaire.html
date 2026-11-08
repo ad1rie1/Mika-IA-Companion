@@ -1,9 +1,10 @@
-{# Réglages › Tous les réglages (pages/reglages.py), dans le vocabulaire des pages dessinées (ADR 0121) : une carte par
-   rubrique, une ligne par page — son nom, ce qu'on y règle ; les paramètres avancés repliés. #}
+{# Réglages › Tous les réglages (pages/settings_directory.py), dans le vocabulaire des pages dessinées (ADR 0121) : une
+   carte par rubrique, une ligne par page — son nom, ce qu'on y règle en une phrase, et les champs où une recherche a
+   trouvé ses mots ; les paramètres avancés repliés. #}
 {% macro category(g) -%}
 <section class="now-card hm-dir-group" id="{{ g.id }}" aria-labelledby="{{ g.id }}-titre">
   <header class="now-card-head"><h2 id="{{ g.id }}-titre">{{ g.title }}</h2><span class="person-count now-num" title="{{ g['items']|length }} {{ 'page' if g['items']|length == 1 else 'pages' }}">{{ g['items']|length }}</span></header>
-  <ul class="hm-dir-links">{% for item in g['items'] %}<li><a href="{{ item.href }}"><span class="hm-dir-title">{{ item.title }}</span>{% if item.description %}<span class="hm-dir-desc">{{ item.description }}</span>{% endif %}<span class="hm-dir-go" aria-hidden="true">→</span></a></li>{% endfor %}</ul>
+  <ul class="hm-dir-links">{% for item in g['items'] %}<li><a href="{{ item.href }}"><span class="hm-dir-title">{{ item.title }}</span>{% if item.description %}<span class="hm-dir-desc">{{ item.description }}</span>{% endif %}{% if item.fields %}<span class="hm-dir-desc">Trouvé dans : {{ item.fields|join(", ") }}</span>{% endif %}<span class="hm-dir-go" aria-hidden="true">→</span></a></li>{% endfor %}</ul>
 </section>
 {%- endmacro %}
 <div class="settings-directory stack">

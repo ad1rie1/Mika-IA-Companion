@@ -10,7 +10,7 @@
 {% macro steps(heading) -%}
 <ol class="teams-steps" aria-labelledby="{{ heading }}">
   <li><span><b>L'installer</b> dans le navigateur où tu ouvres Teams : <code>chrome://extensions</code>, le mode développeur, puis « Charger l'extension non empaquetée » (le dossier <code>frontend/Extension</code>).</span></li>
-  <li><span><b>Lui donner sa clé</b> : chaque compte a la sienne — déclare le compte dans <a href="{{ PREFIX }}/reglages/teams">Réglages › Plugins › Teams</a>, crée sa clé dans <a href="{{ PREFIX }}/teams/extension">Teams › Extension</a> (« Nouvelle clé »), puis colle l'URL de Mika et la clé dans la fenêtre de l'extension — « Enregistrer », « Tester ».</span></li>
+  <li><span><b>Lui donner sa clé</b> : chaque compte a la sienne — déclare le compte dans <a href="{{ PREFIX }}/teams/parametres">Teams › Paramètres</a> (en haut à droite), crée sa clé dans <a href="{{ PREFIX }}/teams/extension">Teams › Extension</a> (« Nouvelle clé »), puis colle l'URL de Mika et la clé dans la fenêtre de l'extension — « Enregistrer », « Tester ».</span></li>
   <li><span><b>Ouvrir Teams</b> dans ce navigateur, sur ce compte (le recharger s'il l'était déjà) : ce que Teams reçoit arrive ici, sous ce compte.</span></li>
 </ol>
 {%- endmacro %}

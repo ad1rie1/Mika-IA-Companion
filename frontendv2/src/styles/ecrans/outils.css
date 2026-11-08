@@ -9,7 +9,7 @@
 .mx-mini i { font-style: normal; font-size: 10.5px; font-weight: 650; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; display: inline-grid; place-items: center; }
 .mx-mini i.ok { background: var(--ok-soft); color: var(--ok); }
 .mx-mini i.warn { background: var(--warn-soft); color: var(--warn); }
-.mx-nav-help { padding: 12px 12px 0; }
+.mx-nav-help { padding: 4px 12px 8px; }
 .mx-search { width: 260px; }
 .mx-select { display: none; }
 
@@ -52,7 +52,6 @@
 .mx-name:hover .mx-label b { color: var(--accent); }
 .mx-label { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .mx-label b { font-weight: 550; font-size: 13px; line-height: 1.3; }
-.mx-label code { font: 11px var(--mono); color: var(--muted); }
 .mx-cond { color: var(--muted); display: inline-grid; }
 .tool-nat { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; flex: none; }
 .tool-nat.lit { background: var(--info-soft); color: var(--info); }
@@ -77,13 +76,6 @@ button.lv:hover { box-shadow: 0 0 0 1px currentColor; }
 .det-p { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
 .det-p .ico { color: var(--muted); margin-top: 2px; }
 .svc-tbl td { vertical-align: top; }
-.accords .lede { margin-bottom: 14px; }
-.accords .section-title + .tbl { margin-bottom: 18px; }
-.acc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
-.acc { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--warn-line); border-radius: var(--radius); background: var(--raised); }
-.acc > .ico { color: var(--warn); }
-.acc .grow { display: flex; flex-direction: column; }
-.acc.gone { opacity: .4; pointer-events: none; }
 .warn-txt { color: var(--warn); font-weight: 600; }
 
 @media (max-width: 1240px) { .mx-split { grid-template-columns: 210px minmax(0, 1fr); } .mx-search { width: 200px; } }
@@ -96,20 +88,31 @@ button.lv:hover { box-shadow: 0 0 0 1px currentColor; }
 }
 
 /* ── Ce que la maquette ne montrait pas (lot 2, branché sur /api/moi) ───────────────────────────────────────── */
-/* Les accords se décident dans le chat : la note qui y mène, à la place de la liste que l'API ne rend pas. */
-.acc-note { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--warn-line); border-radius: var(--radius); background: var(--raised); }
-.acc-note > .ico { color: var(--warn); flex: none; }
-.acc-note b { display: block; font-weight: 600; margin-bottom: 2px; }
+/* L'onglet « Accords » n'est plus (ADR 0209) : le chapeau de « Tes droits » dit où se décident tes accords. */
 /* Le détail d'un outil : ses cases ouvertes, une par ligne. */
 .modal .det-open li { display: flex; align-items: center; gap: 8px; }
 .modal .det-open li::before { display: none; }
 .modal .det-open li { padding-left: 0; }
 .pq .lv { cursor: default; margin-right: 4px; }
 .mx-main > .mx-top + div { display: flex; flex-direction: column; gap: 22px; }
-@media (max-width: 760px) { .acc-note { flex-wrap: wrap; } .acc-note > .grow { flex: 1 1 calc(100% - 40px); } .acc-note .btn { margin-left: 28px; } }
-/* Les outils qui ne servent à aucun de ces moments : une phrase sous le tableau, pas des lignes de tirets. */
+/* Les outils qui ne servent à aucun de ces moments : une phrase sous le tableau, qui se déplie sur leurs noms. */
 .mx-idle { padding: 8px 14px 10px; border-top: 1px solid var(--border); }
 .mx-res > .mx-head + .mx-idle { border-top: 0; }
-.mx-idle-tool { border: 0; background: none; padding: 0; cursor: pointer; color: inherit; }
-.mx-idle-tool code { font: 11.5px var(--mono); }
-.mx-idle-tool:hover code { color: var(--accent); }
+.mx-idle summary { cursor: pointer; width: fit-content; }
+.mx-idle ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+.mx-idle-tool { border: 0; background: none; padding: 0; cursor: pointer; color: var(--text-2); font: inherit; text-align: left; }
+.mx-idle-tool:hover { color: var(--accent); }
+/* Un compte : ses outils sont ceux de sa famille (un lien vers elle), puis sa règle d'envoi. */
+.mx-family { display: flex; gap: 8px; align-items: flex-start; padding: 10px 14px; }
+.mx-family .ico { color: var(--muted); margin-top: 2px; flex: none; }
+.mx-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.mx-link:hover { text-decoration: underline; }
+/* Sur un téléphone (ADR 0209) : la ressource et le canal se choisissent en haut ; une seule colonne se lit. */
+.mx-picks, .mx-canal-pick { display: none; }
+@media (max-width: 760px) {
+  .mx-picks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .mx-picks .mx-select { flex: 1 1 220px; width: auto; }
+  .mx-canal-pick { display: flex; align-items: center; gap: 6px; flex: 1 1 160px; }
+  .mx-canal-pick select { flex: 1; min-width: 0; }
+  .mx .mx-other { display: none; }
+}

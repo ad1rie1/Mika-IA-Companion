@@ -76,7 +76,12 @@ STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dan
              c.HONORED: "tenue", c.DROPPED: "abandonnée"}
 STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
                c.DROPPED: "muted"}
-ORIGIN_FR = {c.TOLD: "on le lui a dit", c.OBSERVED: "elle l'a vu", c.INFERRED: "elle le déduit"}
+#: d'où elle tient une croyance (``Item.origin``), en une phrase (la colonne « origine ») ; la seule table de ces
+#: mots — ``ORIGIN_SHORT`` en est la forme courte (la fiche d'une personne). Un souvenir né d'un mensonge
+#: (``LIED``) n'est pas une croyance : il a sa mention à lui (``_text``)
+ORIGIN_FR = {c.TOLD: "on le lui a dit", c.OBSERVED: "elle l'a vu", c.INFERRED: "elle le déduit",
+             c.READ: "elle l'a lu"}
+ORIGIN_SHORT = {c.TOLD: "dit", c.OBSERVED: "vu", c.INFERRED: "déduit", c.READ: "lu"}
 #: comment un moment a tourné (ADR 0086), et son ton
 OUTCOME_FR = {c.HAPPENED: ("a eu lieu", "ok"), c.CANCELLED: ("annulé", ""), c.MOVED: ("reporté", "warn"),
               c.UNKNOWN: ("sans nouvelles", "")}

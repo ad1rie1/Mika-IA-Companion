@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import inspect
 import json
 from dataclasses import replace
 
@@ -21,8 +23,8 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Origin
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.plugins.forge import FORGE, written_draft
-from mika.plugins.forge.calls import _section
+from mika.plugins.forge import FORGE, calls, written_draft
+from mika.plugins.forge.calls import _section, call_digest
 from mika.runtime.tools import offer
 from mika.vocab.access import OWNER, PERSON
 from mika.vocab.episodes import PRO, Kind
@@ -58,6 +60,21 @@ def test_lit_is_declared_by_a_boolean():
     assert [(t["name"], t["lit"]) for t in manifest["tools"]] == [("cours", False), ("rien", True)]
     _, problems = read_manifest(MANIFEST.replace("lit: true", "lit: oui"))
     assert any("« lit » : true" in p for p in problems)
+
+
+def test_the_forge_does_not_read_the_phrases_of_another_plugin():
+    """Audit du 2026-11-05, K0-03 : elle lisait ``mcp.tools.*`` et ``mcp.section.*``. Ce que les deux partagent est dans
+    ``approvals`` ; le reste est à elle."""
+    keys = [node.args[0].value for node in ast.walk(ast.parse(inspect.getsource(calls)))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "phrase"]
+    assert keys and {key.split(".")[0] for key in keys} == {"forge", "approvals"}
+
+
+def test_the_digest_of_an_app_call_already_journaled_does_not_change():
+    """L'empreinte d'une carte en attente est au journal : relevée avant son passage au contrat, elle ne bouge pas."""
+    call = {"app": "cours", "function": "tool_cours", "fingerprint": "f1", "args": {"symbole": "ACME"},
+            rt.DECIDER: "user_1"}
+    assert call_digest({**call, "tool": "cours_cours"}) == "fe075908c109f5c331c33ae15ce182f1"
 
 
 @needs_bwrap

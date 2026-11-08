@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from alembic import context
+import sqlalchemy as sa
+from alembic import context, op
 from sqlalchemy import MetaData
 
 from mika.ports.sql import Key
@@ -26,6 +27,17 @@ def _declared(metadata: MetaData) -> Any:
         return table_name is None or table_name in metadata.tables
 
     return include
+
+
+def unfold_ligatures(table: str, *columns: str) -> None:
+    """Déplie « œ » et « æ » dans des colonnes repliées (ADR 0212), en SQL, sans relire les textes. Seules les
+    ligatures sont dépliées : le repli commun change aussi quelques signes hors du français, et une ligne d'avant garde
+    les majuscules de ses signes de compatibilité (« ™ » y reste ``TM``)."""
+    t = sa.table(table, *(sa.column(c) for c in columns))
+    for c in t.c:
+        unfolded = sa.func.replace(sa.func.replace(c, "œ", "oe"), "æ", "ae")
+        op.get_bind().execute(sa.update(t).where(sa.or_(sa.func.instr(c, "œ") > 0, sa.func.instr(c, "æ") > 0))
+                              .values({c.name: unfolded}))
 
 
 def _render(type_: str, obj: Any, autogen_context: Any) -> str | bool:

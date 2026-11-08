@@ -69,9 +69,6 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # 9 : sa propriétaire la touche davantage (``social.WEIGHT``, ADR 0107)
                  # 10 : blessée ou touchée en répondant seulement — une initiative ne lit aucun geste (ADR 0093)
                  state_version=10, retired_params=("declared_window_us",))
-#: ni une connaissance ni une inconnue : sa tendresse s'y cache (le masque, au-dessus du milieu)
-_TENDER_TO = frozenset({social_c.FRIEND, social_c.CLOSE})
-
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})
 

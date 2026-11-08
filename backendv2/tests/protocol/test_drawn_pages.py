@@ -152,14 +152,17 @@ def test_what_she_can_do_is_her_families_and_their_tables(world):  # noqa: F811
 
 
 def test_what_comes_from_elsewhere_is_drawn_as_cards(world):  # noqa: F811
-    """Outils › Venus d'ailleurs : brancher un service et leurs réglages en boutons de la barre de titre (ADR 0176) ;
-    une carte par service branché, une par app — pas les listes génériques de la console."""
+    """Outils › Venus d'ailleurs : brancher un service en bouton de la barre de titre (ADR 0176), leurs réglages
+    derrière la roue de Ses outils (ADR 0206) ; une carte par service branché, une par app — pas les listes
+    génériques de la console."""
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/serveurs")
     head, body = page.split('<div class="page-head-side">')[1].split('<div class="stack">', 1)
     actions = head.split('<div class="action-bar" role="group" aria-label="Actions">')[1].split("</div>")[0]
-    assert "Brancher un service" in actions and "Leurs réglages" in actions
+    assert "Brancher un service" in actions and "Leurs réglages" not in actions
+    gear = head.split('class="action-bar"', 1)[1]
+    assert 'href="/inspecteur/outils/parametres"' in gear and "Paramètres des services" in gear
     assert "Brancher un service</a>" not in body
     assert "Les services branchés" in page and "Les outils de ses apps" in page
     assert "Comprendre cette liste" not in page and "un nouveau service" not in page

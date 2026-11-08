@@ -1,13 +1,53 @@
 /**
  * Les petites formes pures de Teams : l'état d'une réponse de Mika en mots, son mode, les repères de jour du fil, la
- * suite d'un même auteur, une mention mise en valeur. Sans DOM : tout se teste.
+ * suite d'un même auteur, une mention mise en valeur, qui a écrit un message. Sans DOM : tout se teste.
  */
 import { h, norm } from "../../shell/dom";
-import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsMessage, Thread } from "../../api/teams";
+import type { ConversationKind, OwnPending, Reply, ReplyMode, ReplyState, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
 import { clock } from "../chat/markup";
 
 /** Une réponse encore en chemin (une autre ne se prépare pas dans la même conversation). */
 export const UNDER_WAY: ReadonlySet<ReplyState> = new Set<ReplyState>(["attend", "approuve", "en_file", "pose"]);
+
+/** L'adresse d'une de ses réponses dans « Ses brouillons » (`id` : son brouillon) : l'écran l'y montre, surlignée.
+ *  Pure : le chat peut y lier sa carte. */
+export function replyHash(id: string): string {
+  return `#teams/brouillons/${encodeURIComponent(id)}`;
+}
+
+// ── Qui a écrit (un compte à toi, ou qu'on te partage) ──────────────────
+
+/** Ce qu'il faut savoir d'un compte pour dire qui y écrit. */
+export type AccountWho = Pick<TeamsAccount, "level" | "self_name" | "owner_name">;
+
+/** Le compte est-il à toi (le tien, ou « à toi », commun à ses propriétaires) ? Un compte qu'on ne connaît pas ne
+ *  l'est pas : on ne t'attribue jamais un message sans le savoir. */
+export function ownAccount(a: Pick<TeamsAccount, "level"> | null | undefined): boolean {
+  return a?.level === "proprietaire";
+}
+
+/** Un message de toi : écrit par la personne du compte, sur un compte à toi (à droite, comme dans Teams). Sur un
+ *  compte qu'on te partage, la personne du compte est quelqu'un d'autre : son message est à gauche, comme les autres. */
+export function fromYou(m: Pick<TeamsMessage, "own">, a: Pick<TeamsAccount, "level"> | null | undefined): boolean {
+  return m.own && ownAccount(a);
+}
+
+/** Qui a écrit un message, tel qu'on le montre : « Toi » sur un compte à toi ; sur un compte qu'on te partage, la
+ *  personne du compte (son nom dans Teams, à défaut son propriétaire) ; sinon son auteur. */
+export function authorLabel(m: Pick<TeamsMessage, "own" | "author">, a: AccountWho | null | undefined): string {
+  if (!m.own) return m.author || "?";
+  if (ownAccount(a)) return "Toi";
+  return a?.self_name || a?.owner_name || m.author || "?";
+}
+
+// ── Répondu autrement (ADR 0199) ─────────────────────────────────────
+
+/** Les réponses d'elle que le fil montre en carte : celles en chemin ; et celle à laquelle on a répondu autrement,
+ *  tant que rien n'est venu dans le fil depuis (la carte dit qu'elle ne partira pas). `lastAt` : le dernier message
+ *  du fil chargé. */
+export function threadCards(replies: readonly Reply[], lastAt: number): Reply[] {
+  return replies.filter((r) => (r.answered ? Math.max(r.decided_at, r.at) >= lastAt : UNDER_WAY.has(r.state)));
+}
 
 function plain(text: string): string {
   return String(text || "")
@@ -23,8 +63,11 @@ export function retouched(r: Pick<Reply, "edited" | "sent_text" | "body">): bool
   return !!r.sent_text && !!r.body && !plain(r.sent_text).includes(plain(r.body));
 }
 
-/** L'état d'une réponse, en mots, et son ton ; `now` pour le délai d'un accord. */
-export function replyState(r: Pick<Reply, "state" | "edited" | "sent_text" | "body" | "expires">): [string, string] {
+/** L'état d'une réponse, en mots, et son ton ; `now` pour le délai d'un accord. Une réponse à laquelle on a répondu
+ *  autrement n'attend plus rien, même avant que le moteur ne l'ait refusée, et son refus le dit (ADR 0199). */
+export function replyState(r: Pick<Reply, "state" | "edited" | "sent_text" | "body" | "expires" | "answered">): [string, string] {
+  if (r.answered && r.state === "attend") return ["", "répondu autrement"];
+  if (r.answered && r.state === "refuse") return ["", "refusée · répondu autrement"];
   switch (r.state) {
     case "attend":
       return ["warn", r.expires ? `attend ton accord · jusqu'à ${clock(r.expires)}` : "attend ton accord"];

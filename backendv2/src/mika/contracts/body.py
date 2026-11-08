@@ -24,8 +24,6 @@ OWNER = "body"
 
 #: Veto : elle dort.
 ASLEEP = "asleep"
-#: Décalage : elle est fatiguée.
-TIRED = "tired"
 #: Veto : elle vient de se réveiller.
 WAKING = "waking"
 #: Veto : tirée du sommeil en pleine nuit, elle répond (ou dit l'urgent) et se

@@ -24,8 +24,8 @@ from mika.ports.maps import PlaceHit, RouteResult
 
 
 class MapsDesk:
-    """Les lieux, les adresses et les itinéraires, réglés dans la console (Réglages › Canaux : « Lieux et
-    adresses », « Itinéraires »)."""
+    """Les lieux, les adresses et les itinéraires, réglés dans la console (Réglages › Carte et téléphone : « Lieux
+    et adresses », « Itinéraires »)."""
 
     def __init__(self, data: Path, places: Callable[[], PlacesConfig], routing: Callable[[], RoutingConfig], *,
                  transport: httpx.AsyncBaseTransport | None = None, routing_pace: Pace | None = None,

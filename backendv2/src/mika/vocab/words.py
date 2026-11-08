@@ -9,8 +9,9 @@ lecture du ton.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Iterable
+
+from mika.kernel.text import fold
 
 WORD = re.compile(r"[a-z0-9]+")
 
@@ -67,13 +68,6 @@ def banal(text: str, names: Iterable[str] = ()) -> bool:
     plain = BANAL | (CHATTER - {"merci"})  # « Sam m'a dit merci d'avoir été là » dit quelque chose
     return not [w for w in WORD.findall(fold(text)) if len(w) >= 3 and w not in STOPWORDS and w not in plain
                 and w not in named]
-
-
-def fold(text: str) -> str:
-    """Casse et accents repliés ; les ligatures dépliées (« sœur » → « soeur », sinon elle ne recoupait jamais
-    rien : NFKD ne les décompose pas)."""
-    text = text.lower().replace("œ", "oe").replace("æ", "ae")
-    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 def words(text: str, *, min_len: int = 3) -> list[str]:

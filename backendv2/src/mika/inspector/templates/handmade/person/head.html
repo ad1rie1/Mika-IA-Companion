@@ -1,5 +1,6 @@
 {# L'en-tête de la fiche d'une personne (app/handmade/person, ADR 0121), sur tous ses onglets : la console y ajoute ses
-   actions. La personne se nomme par son nom, jamais par un pronom. #}
+   actions. La personne se nomme par son nom, jamais par un pronom. Quand un de ses moyens de communication est un
+   compte, il le dit (utilisateur ou opérateur) et mène à sa page (Réglages › Comptes). #}
 <div class="person-head sw-{{ h.emotion }}">
   <span class="person-avatar" aria-hidden="true">{{ h.initial }}{% if h.online %}<span class="now-presence{{ ' typing' if h.composing }}"></span>{% endif %}</span>
   <div class="person-head-text">
@@ -10,6 +11,6 @@
       {% if h.composing %}<span class="now-tag live">écrit…</span>{% elif h.online %}<span class="now-tag close">en ligne</span>{% endif %}
     </p>
     {% if h.facts %}<p class="person-head-facts">{{ h.facts|join(" · ")|capitalize }}</p>{% endif %}
-    <p class="person-head-links"><a href="{{ h.where_href }}">{{ h.where }}</a><span aria-hidden="true">·</span><a href="{{ h.toward }}">Que ferait-elle envers {{ h.name }} maintenant ?</a></p>
+    <p class="person-head-links"><a href="{{ h.where_href }}">{{ h.where }}</a><span aria-hidden="true">·</span><a href="{{ h.toward }}">Que ferait-elle envers {{ h.name }} maintenant ?</a>{% if h.account %}<span aria-hidden="true">·</span><span>{{ h.account.kind }}{{ ' désactivé' if h.account.off }}</span> <a href="{{ h.account.href }}">Modifier le compte</a>{% endif %}</p>
   </div>
 </div>

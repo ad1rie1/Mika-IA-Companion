@@ -23,7 +23,7 @@ from mika.app.handmade.fiche_parts import STYLES, draw, fact, rendered, shaped, 
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
-from mika.plugins.teams import APPROVED, EXPIRED, EXPIRER, GONE, REFUSED, WAITING, her, latest, under_way
+from mika.plugins.teams import APPROVED, EXPIRED, EXPIRERS, GONE, REFUSED, WAITING, her, latest, under_way
 from mika.plugins.teams.console import KIND_LABEL, MODE_LABEL, STATE_LABEL
 from mika.ports.teams import conversation_key, split_conversation_key, to_fill
 
@@ -63,7 +63,7 @@ def _journey(ui: UI, look: Look, seen: Any) -> list[dict[str, str]]:
     if seen.decided_at:
         note = texts(ui, (seen.note_ref,)).get(seen.note_ref, "(oubliée)") if seen.note_ref else seen.note
         refused = seen.state in (REFUSED, EXPIRED)
-        by = f"par {ui.names.name_of(seen.by) or seen.by}" if seen.by and seen.by != EXPIRER else ""
+        by = f"par {ui.names.name_of(seen.by) or seen.by}" if seen.by and seen.by not in EXPIRERS else ""
         out.append({"what": label if refused else "approuvée", "when": look.ago(seen.decided_at),
                     "text": " — ".join(filter(None, (by, f"« {note} »" if note else ""))),
                     "tone": tone(value) if refused else "ok"})

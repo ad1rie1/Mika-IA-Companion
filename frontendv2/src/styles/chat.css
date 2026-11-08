@@ -22,6 +22,7 @@
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .chat-thread { display: flex; flex-direction: column; gap: 6px; padding: 18px clamp(20px, 3vw, 56px) 10px; }
 .chat-thread.wide { padding: 18px clamp(20px, 3vw, 56px) 10px; }
+.chat-older { display: flex; justify-content: center; margin: 2px 0 8px; }
 .day { display: flex; align-items: center; gap: 12px; margin: 14px 0 6px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 

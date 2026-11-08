@@ -12,8 +12,10 @@ retiré au bout de ``unsent_days`` : un dessin que personne n'a vu ne garde pas 
 
 La tranche garde, par adresse, les fichiers encore gardés (pour la rétention, le quota du jour, la section du
 prompt) ; la projection T0 ``shared_files`` en garde une ligne chacun — nom, taille, sort — que lisent l'écran
-(``MindPort.shared``), le téléchargement et la console. Oublier une personne efface ses lignes, son nom (un
-contenu) et ses octets ; une reconstruction ne fait pas revenir un fichier dont le nom a été oublié.
+(``MindPort.shared``), le téléchargement et la console. Un opérateur peut en retirer un à l'unité depuis la console
+(``shares.retirer``, ``inspect.py``, ADR 0205) : le même ``shares.expired`` que la rétention, sa raison ``operator``.
+Oublier une personne efface ses lignes, son nom (un contenu) et ses octets ; une reconstruction ne fait pas revenir un
+fichier dont le nom a été oublié.
 """
 
 from __future__ import annotations
@@ -321,6 +323,31 @@ def of_people(store: Any, handles: Sequence[str], limit: int, before_at: int | N
         query = query.where(t.c.at < before_at)
     found = store.query_mind(query.order_by(t.c.at.desc(), t.c.id).limit(limit))
     return [_row(r) for r in found]
+
+
+def recent(store: Any, limit: int) -> list[FileRow]:
+    """Les fichiers préparés pour tout le monde, du plus récent au plus ancien (une page)."""
+    if store is None:
+        return []
+    t = table()
+    return [_row(r) for r in store.query_mind(select(*_columns(t)).order_by(t.c.at.desc(), t.c.id).limit(limit))]
+
+
+def count(store: Any, handles: Sequence[str] | None = None) -> int:
+    """Combien de fichiers préparés : pour ces adresses, ou pour tout le monde (``None``)."""
+    if store is None or (handles is not None and not handles):
+        return 0
+    t = table()
+    query = select(func.count()).select_from(t)
+    if handles is not None:
+        query = query.where(t.c.person.in_(list(handles)))
+    return int(store.query_mind(query)[0][0])
+
+
+def holder(state: SharesState, file: str) -> str | None:
+    """L'adresse pour qui ce fichier est encore gardé, ses octets là (``None`` : retiré, ou inconnu) — ce qu'un
+    opérateur peut retirer (ADR 0205)."""
+    return next((target for target, files in state.sent.items() if any(v.file == file for v in files)), None)
 
 
 # ── La rétention ──────────────────────────────────────────────────────────

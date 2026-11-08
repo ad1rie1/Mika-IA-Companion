@@ -20,9 +20,9 @@ from typing import Any
 from mika.contracts import mcp as c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
-from mika.kernel.guards import Guard
+from mika.kernel.guards import Superseded
 from mika.kernel.operate import Preview
-from mika.plugins.mcp import ANSWER_KEPT, ANSWER_LEVELS, EXPIRER, MCP, WAITING, McpState, call_digest
+from mika.plugins.mcp import ANSWER_KEPT, ANSWER_LEVELS, MCP, WAITING, McpState, call_digest
 from mika.ports.mcp import KEEPS
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -81,12 +81,6 @@ async def _came_back(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
                              about=(req.target,) if req.target else (), dedupe_key=f"mcp-rendu:{req.proposal}")]
 
 
-def _still_pending(proposal: int) -> Guard:
-    """Le refus au nom du délai ne vaut que si personne n'a décidé entre-temps."""
-    return Guard("encore en attente", reads=(rt.PENDING_EFFECTS,),
-                 predicate=lambda view, n=proposal: any(p.proposal == n for p in view.get(rt.PENDING_EFFECTS)))
-
-
 @MCP.process("mcp.expire", wake_on=[rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED], lane="background", max_quantum_s=60,
              priority=60)
 class Expire:
@@ -99,12 +93,11 @@ class Expire:
     async def run(self, ctx: Any) -> None:
         now = ctx.frame.now
         for r in [r for r in ctx.state.requests.values() if r.status == WAITING and r.expires and r.expires <= now]:
-            draft = rt.EFFECT_RESOLVED.draft(
-                proposal=r.proposal, approved=False, by=EXPIRER, note=Content.of("pas d'accord dans le délai"),
-                capability=c.CALL, owner=c.OWNER, args_json=r.args_json, context=r.context,
-                about=(r.target,) if r.target else (), dedupe_key=f"décision:{r.proposal}")
+            draft = rt.expiry_draft(phrase("approvals.no_answer"), proposal=r.proposal, capability=c.CALL,
+                                    owner=c.OWNER, args_json=r.args_json, context=r.context,
+                                    about=(r.target,) if r.target else ())
             try:
-                await ctx.emit(draft, guard=_still_pending(r.proposal), emitter=rt.OWNER)
-            except Exception:  # noqa: BLE001 — décidée entre-temps : rien à faire
+                await ctx.emit(draft, guard=rt.still_pending(r.proposal), emitter=rt.OWNER)
+            except Superseded:  # décidée entre-temps : rien à faire ; toute autre panne remonte, la santé la voit
                 continue
 

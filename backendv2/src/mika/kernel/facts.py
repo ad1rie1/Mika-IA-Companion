@@ -63,10 +63,6 @@ FactRef = FactKey[Any] | BoundFact
 Declared = FactKey[Any] | FactFamily[Any, Any]
 
 
-def ref_name(ref: FactRef | Declared) -> str:
-    return ref.name
-
-
 def ref_key(ref: FactRef) -> tuple[str, Hashable]:
     if isinstance(ref, BoundFact):
         return (ref.family.name, ref.arg)

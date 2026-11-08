@@ -11,7 +11,15 @@ un réglage en particulier :
 - un secret ne redescend jamais (vide = inchangé, « effacer » pour le vider) ;
 - un champ ``records`` (des fournisseurs, des boîtes) devient une table paginée
   dont chaque entrée se modifie sur sa propre page ; un champ ``mapping``
-  (rôle → fournisseur) devient une ligne par clé ;
+  (rôle → fournisseur) devient une ligne par clé, qu'on peut laisser vide (« — » :
+  la clé est absente, le rôle retombe sur son repli) ; une correspondance que la
+  section décrit (``describe``, ligne par ligne : ce qui sert vraiment un rôle)
+  devient une table, sa liste dans une colonne et ce qu'elle donne à côté ;
+- les commandes d'une page (un jeton neuf, revenir au fichier) sont ses actions,
+  dans la barre de titre (ADR 0176) : deux en vue au plus, les dangereuses sous
+  « ⋯ », chacune avec sa confirmation ;
+- une page qu'on lit ailleurs que sous Réglages (``SettingsPage.home``) et ses faits
+  qui renvoient à une autre page (un ``Ref`` : un lien) mènent où il faut ;
 - un choix limité est un sélecteur : les choix d'un chargeur (les modèles d'un
   fournisseur) se chargent d'eux-mêmes sur la page d'une entrée existante, ceux
   d'un autre champ (``choices_from`` : le repli parmi les fournisseurs) et ceux
@@ -32,24 +40,26 @@ from __future__ import annotations
 import dataclasses
 import math
 import secrets as _secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
 import yaml
+from markupsafe import Markup
 from pydantic import BaseModel, ValidationError
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Panel, SettingsPage, SettingsSection, SettingsTab
+from mika.inspector.catalog import Builtin, Command, Panel, SettingsPage, SettingsSection, SettingsTab
 from mika.inspector.formview import field_view
 from mika.inspector.pages.reglages import back_to, params_view
 from mika.inspector.ui import PREFIX, secure
+from mika.inspector.ui import env as templates
 from mika.kernel import forms
 from mika.kernel.clock import US
-from mika.kernel.inspect import Pager
+from mika.kernel.inspect import Pager, Ref
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
 
@@ -78,6 +88,10 @@ LOADED_MAX = 500
 STASH = "_reserve"
 STASH_TTL_S = 900
 STASH_MAX = 64
+#: les actions d'une page en vue dans sa barre de titre ; les autres, et les dangereuses, sous « ⋯ » (ADR 0176)
+COMMANDS_SEEN = 2
+#: ce qui précède le nom d'une liste (« Ses autrices ») : le nom d'une de ses entrées s'en passe
+_POSSESSIVES = ("ses ", "leurs ", "mes ", "tes ", "nos ", "vos ", "les ")
 
 
 @dataclass(slots=True)
@@ -183,8 +197,13 @@ def _entry_name(entry: Any) -> str:
     return str(name).strip() if isinstance(name, str) else ""
 
 
-def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str],
-                  prefix: str) -> dict[str, Any]:
+def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[str, str], prefix: str,
+                  describe: Callable[[str, Any], Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """Une correspondance (rôle → fournisseur, flux → autrice) : une ligne par clé. Chaque ligne peut rester vide
+    (« — ») : la clé est alors absente (``forms._read_mapping``) et le rôle retombe sur son repli. La règle de l'ADR
+    0174 (une liste qui ne peut rester vide n'a pas de « — ») ne vaut pas ici : sans elle, la première option était
+    sélectionnée pour chaque clé absente, et l'enregistrement la figeait. ``describe(clé, valeur)`` : ce que donne
+    chaque ligne (ce qui sert vraiment ce rôle) — la correspondance devient une table, sa liste dans une colonne."""
     item = f.item[0] if f.item else None
     current = given.get(f.path) or {}
     keys = f.keys or tuple((k, k) for k in sorted(current))
@@ -197,15 +216,74 @@ def _mapping_view(f: forms.FormField, given: Mapping[str, Any], errors: Mapping[
     rows = []
     for key, label in keys:
         base = item or dataclasses.replace(f, kind="text", item=())
-        sub = dataclasses.replace(base, path=f"{f.path}.{key}", label=label, required=False,
+        sub = dataclasses.replace(base, path=f"{f.path}.{key}", label=label, required=False, nullable=True,
                                   readonly=f.readonly or base.readonly,
                                   kind="select" if (choices or f.choices_from) else base.kind, choices=choices)
         view = field_view(sub, current.get(key), error=errors.get(sub.path, ""), prefix=prefix)
         if view is not None:
             view["nochamp"] = True
+            if describe is not None:
+                about = call(describe, key, current.get(key), label=f"ligne {f.path}.{key}")
+                view["about"] = {} if isinstance(about, Failed) else dict(about or {})
             rows.append(view)
-    return {"kind": "mapping", "path": f.path, "label": f.label, "help": f.help, "rows": rows,
-            "readonly": f.readonly, "error": _error_for(f.path, {k: v for k, v in errors.items() if k == f.path})}
+    out = {"kind": "mapping", "path": f.path, "label": f.label, "help": f.help, "rows": rows,
+           "id": f"{prefix}-{f.path.replace('.', '-')}", "readonly": f.readonly, "table": None,
+           "error": _error_for(f.path, {k: v for k, v in errors.items() if k == f.path})}
+    if describe is not None and rows:
+        out["table"] = _mapping_table(rows)
+    return out
+
+
+def _mapping_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Une correspondance décrite, en table : ses colonnes (celles de la première ligne décrite), et chaque ligne
+    rangée dessous — avant sa liste (``before``), puis après ; une ligne dont la description a échoué dit « — »."""
+    first = next((r["about"] for r in rows if r["about"].get("cells")), {})
+    heads = [(c.get("head", ""), bool(c.get("before"))) for c in first.get("cells", ())]
+    for r in rows:
+        cells = list(r["about"].get("cells") or ())
+        cells += [{"text": "—", "tone": "muted"}] * (len(heads) - len(cells))
+        r["before"] = [c for c, (_h, before) in zip(cells, heads, strict=False) if before]
+        r["after"] = [c for c, (_h, before) in zip(cells, heads, strict=False) if not before]
+        r["tone"] = r["about"].get("tone", "")
+    # une seule page, toujours : une ligne par clé, sans pagination à montrer (``.hm-pager.single``)
+    return {"title": first.get("title", ""), "key": first.get("key_head", ""), "choice": first.get("choice_head", ""),
+            "before": [h for h, before in heads if before], "after": [h for h, before in heads if not before],
+            "pager": render._pager(Pager(size=len(rows), total=len(rows)), {})}
+
+
+def _fact(label: str, value: Any) -> tuple[str, str, str]:
+    """Un fait d'une page : (nom, texte, lien) — un ``Ref`` local renvoie à une autre page de la console (un lien,
+    pas un chemin écrit en texte)."""
+    if isinstance(value, Ref) and value.kind == "local" and value.key.startswith(PREFIX + "/"):
+        return label, value.text, value.key
+    return label, str(value.text if isinstance(value, Ref) else value), ""
+
+
+def _noun(label: str) -> str:
+    """Le nom d'une entrée, tiré de celui de sa liste : « Fournisseurs d'images » → « Fournisseur d'images »,
+    « Ses autrices » → « Autrice »."""
+    words = label.strip()
+    lowered = words.lower()
+    words = next((words[len(p):] for p in _POSSESSIVES if lowered.startswith(p)), words)
+    head, sep, rest = words.partition(" ")
+    if len(head) > 3 and head.endswith("s") and not head.endswith("ss"):
+        head = head[:-1]
+    return head[:1].upper() + head[1:] + sep + rest if head else label
+
+
+def _commands_bar(commands: Sequence[Command], csrf: str, section: str, action: str) -> Markup:
+    """Les commandes d'une page, dans sa barre de titre (ADR 0176) : deux en vue au plus — la première déclarée en
+    avant, à droite —, le reste et les dangereuses sous « ⋯ » ; chacune, un formulaire avec sa confirmation."""
+    def view(c: Command) -> dict[str, Any]:
+        return {"url": action, "csrf": csrf, "nonce": "", "back": "", "subject": "", "title": c.title,
+                "button": c.title, "confirm": c.confirm, "danger": c.danger, "fields": [], "retype": False,
+                "multipart": False, "fixed": [(SECTION, section), (COMMAND, c.key)]}
+
+    calm = [view(c) for c in commands if not c.danger]
+    seen, more = calm[:COMMANDS_SEEN], calm[COMMANDS_SEEN:] + [view(c) for c in commands if c.danger]
+    # dessinées par le gabarit (la principale à droite des autres), jamais assemblées ici : seuls les rendus audités
+    # de l'inspecteur fabriquent du balisage (tests/protocol/test_console_security.py)
+    return templates.get_template("_forms.html").module.action_bar(seen, more)
 
 
 def _grouped(views: Sequence[tuple[forms.FormField, dict[str, Any]]]) -> tuple[list[dict[str, Any]],
@@ -343,11 +421,11 @@ class SettingsForms:
                     loaded[path] = got
         view = self._section_view(s, pg, state, csrf, page, env, editing, loaded, query)
         record = view.get("record")
-        heading = (("Ajouter · " + record["label"]) if record["new"] else
-                   "Modifier · " + (record["key"] or record["label"])) if record else ""
         # une page qui a son gabarit titre elle-même son formulaire : la page garde son titre (Courrier › Paramètres)
         context: dict[str, Any] = {"sections": [view], "action": page_url(page),
-                                   **({} if pg.template else {"page_heading": heading})}
+                                   **({} if pg.template else {"page_heading": record["title"] if record else ""})}
+        if view["commands"]:  # ses actions, dans la barre de titre (ADR 0176) : plus de carte « Commandes »
+            context["head_extra"] = _commands_bar(s.commands, csrf, s.key, page_url(page))
         if pg.params and not record:  # ses paramètres internes, sur la même page (ADR 0173)
             context["params"] = params_view(ui, pg.params, params or {}, self.url(page))
         return Panel(pg.template or "handmade/reglages/page.html", context,
@@ -366,7 +444,8 @@ class SettingsForms:
                                "messages": list(state.messages), "form": None, "records": [], "record": None,
                                "commands": [{"key": c.key, "title": c.title, "confirm": c.confirm,
                                              "danger": c.danger} for c in s.commands] if pg.commands else [],
-                               "facts": list(s.facts()) if s.facts and pg.facts else [], "yaml": None,
+                               "facts": [_fact(k, v) for k, v in s.facts()] if s.facts and pg.facts else [],
+                               "yaml": None,
                                "blocks": render.blocks([*(s.blocks() if s.blocks and pg.blocks else ()),
                                                         *(pg.extra() if pg.extra else ())], env, query),
                                "preview": render.blocks(state.preview, env, query) if state.preview else []}
@@ -400,7 +479,7 @@ class SettingsForms:
                     known = call(s.keys[f.path], label=f"clés de {s.key}.{f.path}")
                     if not isinstance(known, Failed):
                         f = dataclasses.replace(f, keys=tuple(known))
-                placed.append((f, _mapping_view(f, given, state.errors, prefix)))
+                placed.append((f, _mapping_view(f, given, state.errors, prefix, s.describe.get(f.path))))
                 continue
             if f.path in s.choices:
                 f = _with_choices(f, s.choices[f.path](), given.get(f.path))
@@ -506,7 +585,13 @@ class SettingsForms:
         groups, advanced = _grouped(placed)
         label = next((f.label for f in forms.describe(s.model) if f.path == path), path)
         name = state.record_values.get(RECORD_KEY, key)
-        return {"path": path, "label": label, "key": key, "keyed": keyed, "new": entry is None, "stash": state.stash,
+        # son titre : l'entrée elle-même, au singulier (« Fournisseur « apercu » », « Autrice « Mail pro » ») — jamais
+        # le verbe et le nom de la liste (« Ajouter · Fournisseurs »)
+        noun = _noun(label)
+        shown = _entry_name(entry) or (key if keyed else f"n° {int(key) + 1}" if key.isdigit() else key)
+        title = f"{noun} à ajouter" if entry is None else f"{noun} « {shown} »"
+        return {"path": path, "label": label, "title": title, "key": key, "keyed": keyed, "new": entry is None,
+                "stash": state.stash,
                 "name": name, "name_error": state.record_errors.get(RECORD_KEY, ""),
                 "name_rule": forms.record_names(s.model, path)[1], "groups": groups,
                 "advanced": advanced, "open": any(v.get("error") for f, v in placed if f.advanced),
@@ -613,7 +698,7 @@ class SettingsForms:
         if s.adjust is not None:
             new, notes = await s.adjust(new)
         try:
-            problems = await s.save(new, by)
+            problems = await s.save(new)
         except ValueError as exc:
             problems = [str(exc)]
         if problems:

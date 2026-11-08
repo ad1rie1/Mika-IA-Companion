@@ -1,5 +1,5 @@
-"""Ses outils prêtés à un agent (ADR 0122) : des points MCP qu'une opératrice déclare dans la console (Outils › Ce
-qu'elle expose), servis sous ``/mcp/pret/<nom>``.
+"""Ses outils prêtés à un agent (ADR 0122) : des points MCP qu'une opératrice déclare dans la console (Outils › Prêter
+à un agent), servis sous ``/mcp/pret/<nom>``.
 
 Un point prête une liste d'outils, choisis parmi ceux que la porte d'offre lui donne en conversation
 (``runtime.tools.lendable``) — jamais au-delà de ce que le code permet. L'agent agit avec les droits de l'opératrice
@@ -10,13 +10,12 @@ dans la boucle d'outils (``checked_args``), ses écritures portent cette corrél
 s'écrit dans sa vie (``ReadingContext``) : un outil qui voudrait écrire est refusé.
 
 La porte : la boucle locale seulement, un jeton par point (seule son empreinte est gardée), au plus ``PER_MINUTE``
-appels par minute. Un point sans jeton n'existe pas (404).
+appels par minute. Un point sans jeton n'existe pas (404) ; un mauvais jeton, 401 : la boucle locale n'a personne à
+qui cacher un nom (``adapters/web/gate.py``, ADR 0213).
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -24,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer, loopback
+from mika.adapters.web.gate import SlidingWindow, matches, token_digest
 from mika.kernel.clock import US
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
@@ -47,8 +47,6 @@ PREFIX = "/mcp/pret"
 PER_MINUTE = 60
 #: les derniers appels d'un point, gardés pour la console (en mémoire : un redémarrage les oublie)
 RECENT = 30
-#: l'empreinte qu'on compare quand il n'y a rien à comparer (un point inconnu) : le même temps de calcul
-_NOTHING = hashlib.sha256(b"").hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +90,8 @@ class Lending:
     def __init__(self, kernel: Kernel, entries: Callable[[], Mapping[str, Mapping[str, Any]]]) -> None:
         self.kernel = kernel
         self.entries = entries
-        self._minute: dict[str, deque[int]] = {}
+        #: sur l'horloge du noyau, en secondes (comme tout ce que ce point écrit)
+        self._minute = SlidingWindow(PER_MINUTE, 60.0, monotonic=lambda: kernel.mind.clock.now() / US)
         self._recent: dict[str, deque[LentCall]] = {}
 
     def audience(self, handle: str) -> Audience:
@@ -160,17 +159,6 @@ class Lending:
     def _note(self, point: str, tool: str, ok: bool) -> None:
         self._recent.setdefault(point, deque(maxlen=RECENT)).append(LentCall(self.kernel.mind.clock.now(), tool, ok))
 
-    def _admitted(self, point: str) -> bool:
-        """Sous le plafond de la minute (et l'appel compté)."""
-        now = self.kernel.mind.clock.now()
-        window = self._minute.setdefault(point, deque())
-        while window and now - window[0] > 60 * US:
-            window.popleft()
-        if len(window) >= PER_MINUTE:
-            return False
-        window.append(now)
-        return True
-
     def _host(self, scope: Mapping[str, Any]) -> Any:
         if not loopback(scope):
             return 403
@@ -181,10 +169,9 @@ class Lending:
             return 404
         entry = self.entries().get(bits[0])
         expected = str((entry or {}).get("digest") or "")
-        given = hashlib.sha256(bearer(scope).encode()).hexdigest()
-        if not hmac.compare_digest(given, expected or _NOTHING) or not expected:
+        if not matches(token_digest(bearer(scope)), expected):
             return 404 if not expected else 401
-        if not self._admitted(bits[0]):
+        if not self._minute.allow(key=bits[0], n=PER_MINUTE):
             return 429
         return LentHost(self, bits[0], entry or {})
 

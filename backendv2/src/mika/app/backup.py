@@ -258,13 +258,8 @@ def _walk(data: Path) -> tuple[list[Path], list[Path]]:
 
 
 def _members(data: Path) -> list[Path]:
-    """Les fichiers à archiver (les liens symboliques à part : ``_links``)."""
+    """Les fichiers à archiver (les liens symboliques à part : ``_walk``)."""
     return _walk(data)[0]
-
-
-def _links(data: Path) -> list[Path]:
-    """Les liens symboliques à garder comme des liens (leur cible, dans le manifeste)."""
-    return _walk(data)[1]
 
 
 def _safe_rel(rel: str) -> bool:
@@ -470,7 +465,9 @@ def note(data: Path, kind: str, fields: dict[str, Any]) -> None:
 
 def overview(data: Path) -> dict[str, Any]:
     """Pour la console : la dernière sauvegarde, la dernière vérification, et les archives présentes
-    dans le dossier de la dernière sauvegarde (nom, octets, date)."""
+    dans le dossier de la dernière sauvegarde (nom, octets, date) ; ``place`` : de quoi mesurer ce que porte le dossier
+    de données (``place``), appelé par la seule page Stockage et sauvegardes — un parcours du dossier, jamais pour
+    l'accueil."""
     got = recorded(data)
     folder = Path(str((got.get("sauvegarde") or {}).get("dossier") or ""))
     archives: list[dict[str, Any]] = []
@@ -481,7 +478,89 @@ def overview(data: Path) -> dict[str, Any]:
             except OSError:
                 continue
             archives.append({"nom": f.name, "octets": st.st_size, "at": int(st.st_mtime * 1_000_000)})
-    return {**got, "archives": archives}
+    return {**got, "archives": archives, "place": lambda: place(data)}
+
+
+#: ce que garde chaque base et chaque dossier connu du dossier de données, en mots (Système › Stockage et
+#: sauvegardes) ; ce que la sauvegarde en fait se lit dans ``SKIPPED`` et ``SKIPPED_DIRS``
+PLACES: dict[str, str] = {
+    "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
+    "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
+    "mail": "le courrier relevé, avec ses pièces jointes et ses images (ADR 0172)",
+    "teams": "ce que l'extension Teams a apporté, et ce qui doit en repartir",
+    "feeds": "les flux suivis et leurs articles",
+    "forge": "ses apps forgées, leurs versions et leurs bases",
+    "ateliers": "les ateliers de ses projets, avec leur git",
+    "mcp": "les services MCP lancés sur cette machine, chacun dans sa cage",
+    "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne, ADR 0106)",
+    "partages": "les fichiers qu'elle a envoyés (ADR 0062)",
+    "telephone": "l'application Android à installer",
+    "cartes": "la carte de sa position et l'index des lieux (ADR 0193)",
+    "cache": "le modèle de plongements",
+    "claude-code": "les appels de Claude Code d'une installation d'avant",
+    "secret.key": "la clé qui chiffre les secrets des réglages",
+    PUSH_KEY_FILE: "la clé des notifications du téléphone (ADR 0077)",
+    RECORD: "ce qu'ont noté les dernières sauvegardes et vérifications",
+}
+#: pourquoi la sauvegarde laisse un dossier (``SKIPPED_DIRS``)
+LEFT = {"cartes": "réextrait", "cache": "retéléchargé"}
+#: ce que la page ne montre pas : le verrou du serveur, une note de sauvegarde à moitié écrite
+UNSHOWN = frozenset({datadir.LOCK_NAME, "sauvegardes.partial"})
+
+
+def place(data: Path) -> list[dict[str, Any]]:
+    """Ce que porte le dossier de données, une ligne par base et par dossier : ``nom``, ``dossier``, ``octets``
+    (``None`` : une base sur le serveur MariaDB, ADR 0101), ce qu'il ``garde``, et ce que la sauvegarde en fait
+    (``sauvegarde`` : ``oui``, ``jetable`` — il se reconstruit —, ``réextrait``, ``retéléchargé``, ``non``, ou ``mis
+    de côté`` par une restauration). Un parcours du dossier (les liens ne sont pas suivis) : à lire hors de la boucle
+    d'événements."""
+    data = Path(data)
+    out: list[dict[str, Any]] = []
+    if schema.server_url():
+        for key in (*backup_server.KEPT, "views"):
+            out.append({"nom": key, "dossier": False, "octets": None, "serveur": True, "garde": PLACES[key],
+                        "sauvegarde": "jetable" if key == "views" else "oui"})
+    try:
+        entries = sorted(data.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return out
+    bases = {file: key for key, file in schema.FILES.items()}
+    for path in entries:
+        name = path.name
+        if name in UNSHOWN or any(name.endswith(".db" + s) for s in _SQLITE_SIDECARS):
+            continue
+        folder = path.is_dir() and not path.is_symlink()
+        # une base SQLite compte avec son journal d'écriture (``-wal``, ``-shm``)
+        size = _size_of(path) + (sum(_size_of(Path(f"{path}{s}")) for s in _SQLITE_SIDECARS)
+                                 if name.endswith(".db") else 0)
+        if name.startswith("."):
+            kept = "mis de côté" if name.startswith((STAGING, ASIDE, KEPT)) else "non"
+        elif name in SKIPPED:
+            kept = "jetable" if name in schema.FILES.values() else "non"
+        elif name in SKIPPED_DIRS:
+            kept = LEFT.get(name, "non")
+        else:
+            kept = "oui"
+        out.append({"nom": name, "dossier": folder, "octets": size, "serveur": False,
+                    "garde": PLACES.get(bases.get(name, name), ""), "sauvegarde": kept})
+    return out
+
+
+def _size_of(path: Path) -> int:
+    """La place d'un fichier, ou d'un dossier et de tout ce qu'il contient (sans suivre un lien) ; 0 s'il n'existe pas
+    ou ne se lit pas."""
+    try:
+        st = path.lstat()
+    except OSError:
+        return 0
+    if not path.is_dir() or path.is_symlink():
+        return st.st_size
+    total = 0
+    for root, _dirs, files in os.walk(path, onerror=lambda _exc: None):
+        for f in files:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(root, f)).st_size
+    return total
 
 
 def recorded(data: Path) -> dict[str, Any]:

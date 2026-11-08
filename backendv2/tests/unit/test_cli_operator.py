@@ -9,17 +9,21 @@ commande passe désormais par les actions et l'oubli de la console.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 from pathlib import Path
 
 from mika.adapters.store_sql import SqlStore
+from mika.adapters.teams import TeamsConfig
 from mika.app import cli
 from mika.app.console import LABELS
+from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.inspector.names import Names
 from mika.kernel.events import Origin
 from mika.plugins.forge import SWITCHED, WRITTEN
+from mika.runtime import operations
 from mika.sim.clock import run_virtual
 from tests.fixtures import backend
 from tests.fixtures.mika import boot, build, connect, reply, said
@@ -128,8 +132,10 @@ def test_identity_link_goes_through_the_console_action_and_is_audited(tmp_path):
         finally:
             await cli._close(kernel, tmp_path)
 
-    # la console nomme ce qu'a fait la ligne de commande
-    assert asyncio.run(named()) == ("Relier à une personne (ligne de commande)", "Oublier · personne (ligne de commande)")
+    # la console nomme ce qu'a fait la ligne de commande, et dit à part d'où il vient (Système › Gestes audités)
+    assert asyncio.run(named()) == ("Relier à une personne", "Oublier · personne")
+    assert operations.origin("cli.identity.relier", cli.CLI_BY) == operations.origin("identity.relier", cli.CLI_BY) \
+        == operations.CLI
 
     # une adresse qui n'a jamais écrit se relie d'avance, vers une personne connue seulement
     assert asyncio.run(cli.identity_command(tmp_path, "link", "ext_77", "user_2"))["ok"]
@@ -157,3 +163,25 @@ def test_forge_promote_vouches_for_the_version_like_the_console(tmp_path):
     assert sorted(asyncio.run(states())) == ["promoted", "trusted"]
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "cafe"]) == 1  # déjà promue : dit, refusé
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "inconnue"]) == 1
+
+
+def test_a_key_is_taken_back_from_the_command_line(tmp_path):
+    """K0-26 : ``mika teams revoke`` et ``mika wakeup revoke`` retirent la clé ; une seconde fois, il n'y en a plus."""
+
+    async def scene(settings, _store):  # type: ignore[no-untyped-def]
+        await settings.save_teams(TeamsConfig(accounts={"principal": {}}))
+        await settings.save_wakeup(WakeupConfig(endpoints={"serre": WakeEndpoint(label="serre", instructions="x")}))
+
+        def teams(cmd: str) -> object:
+            return cli.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
+
+        def wakeup(cmd: str) -> object:
+            return cli.wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))
+
+        assert (await teams("key"))["ok"] and (await wakeup("key"))["ok"]
+        assert await teams("revoke") == {"ok": True, "compte": "principal"}
+        assert await teams("revoke") == {"ok": False, "compte": "principal"}
+        assert await wakeup("revoke") == {"ok": True, "name": "serre", "revoked": True}
+        assert not (await wakeup("revoke"))["ok"]
+
+    asyncio.run(cli._with_settings(tmp_path, scene))

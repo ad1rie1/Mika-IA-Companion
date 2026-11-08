@@ -4,8 +4,10 @@ qu'elle y prépare ; écrire soi-même, lui demander une réponse, décider des 
 Un compte est à qui est connecté quand il est à son nom (``personne:<clé>``), ou « à toi » et qu'elle est une de ses
 propriétaires (ADR 0186) ; ceux d'elle restent à la console. Une conversation se désigne par son compte et son
 identifiant (``<compte>~<id>``), un message par sa référence ; hors de ses comptes, rien n'existe. Ce qu'elle écrit
-elle-même part par l'extension de son compte, sous son nom, sans accord à demander (``teams.ecrire``) ; ce qu'elle
-décide d'une réponse de Mika passe par les actions de la console, en son nom.
+elle-même part par l'extension de son compte, sous son nom, sans accord à demander (``teams.ecrire``) — et les
+réponses de Mika qui attendaient un accord dans la discussion ne partiront plus : le plugin les refuse, pas cette
+couche (ADR 0199) ; ce qu'elle décide d'une réponse de Mika passe par les actions de la console, en son nom.
+Une conversation s'appelle comme dans Teams, sinon (un tête-à-tête) comme l'autre personne (``port.title``).
 """
 
 from __future__ import annotations
@@ -125,15 +127,26 @@ def message_json(m: Message) -> dict[str, Any]:
             "own": m.own, "mentions_me": m.mentions_me}
 
 
-def _reply_json(call: Call, seen: DraftSeen) -> dict[str, Any]:
-    """Une réponse qu'elle a proposée, et ce qu'elle est devenue ; exactement ce qui partira tant qu'elle attend."""
+def _notes(call: Call, seens: list[DraftSeen]) -> dict[str, str]:
+    """Les notes de qui a décidé, relues d'un coup : elles sont gardées à part (l'oubli les atteint). Seulement sur un
+    compte à qui est connecté : ce que son propriétaire a dit à Mika en refusant ne se lit pas par un partage."""
+    mine = accounts(call)
+    refs = [d.note_ref for d in seens if d.note_ref and mine.get(d.account, (None, ""))[1] == OWN]
+    store = call.port("store") if refs else None
+    return dict(store.content(refs)) if store is not None else {}
+
+
+def _reply_json(call: Call, seen: DraftSeen, notes: dict[str, str]) -> dict[str, Any]:
+    """Une réponse qu'elle a proposée, et ce qu'elle est devenue ; exactement ce qui partira tant qu'elle attend.
+    ``answered`` : la personne du compte a répondu autrement dans la discussion — elle ne partira pas (ADR 0199)."""
     port = call.port("teams")
     kept = port.draft(seen.draft)
     preview = port.preview(seen.draft, her=teams_p.her(call.frame)) if seen.state == WAITING else None
     return {"id": seen.draft, "account": seen.account, "conversation": conversation_key(seen.account, seen.conversation),
             "in_reply_to": seen.message, "state": seen.state, "mode": seen.mode, "at": _ms(seen.at),
-            "decided_at": _ms(seen.decided_at), "by": seen.by, "note": seen.note, "asked": seen.asked,
-            "edited": seen.edited, "expires": _ms(seen.expires),
+            "decided_at": _ms(seen.decided_at), "by": seen.by,
+            "note": (notes.get(seen.note_ref) or "") if seen.note_ref else seen.note, "asked": seen.asked,
+            "edited": seen.edited, "expires": _ms(seen.expires), "answered": bool(seen.answered),
             "title": port.title(seen.account, seen.conversation) if port is not None else "",
             "body": kept.body if kept is not None else "", "sent_text": kept.sent_text if kept is not None else "",
             "to_fill": bool(kept and to_fill(kept.body)),
@@ -145,7 +158,7 @@ def _account_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     keys = call.port("teams_keys")
     key = keys.key_state(a.key) if keys is not None else None
     s = _state(call)
-    waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING) \
+    waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING and not d.answered) \
         if level == OWN or reaches(level, SHARE_PREPARE) else 0
     return {"key": a.key, "name": a.name, "level": level, "enabled": a.enabled, "last_batch": _ms(a.last_batch),
             "self_name": a.self_name, "extension_key": {"hint": key.hint, "created_at": _ms(key.created_at)}
@@ -182,8 +195,10 @@ async def conversations(call: Call) -> dict[str, Any]:
         last = port.thread(conv.account, conv.id, 1)
         level = mine[conv.account][1]
         # sa réponse en chemin : pas pour qui ne fait que lire ce compte (ADR 0188)
+        # (une réponse à laquelle on a répondu autrement n'est plus en chemin : elle va être refusée, ADR 0199)
         pending = next((d for d in s.drafts.values() if d.account == conv.account and d.conversation == conv.id
-                        and d.state in UNDER_WAY), None) if level == OWN or reaches(level, SHARE_PREPARE) else None
+                        and d.state in UNDER_WAY and not d.answered), None) \
+            if level == OWN or reaches(level, SHARE_PREPARE) else None
         out.append({"key": conversation_key(conv.account, conv.id), "account": conv.account, "title": conv.title,
                     "kind": conv.kind, "last_at": _ms(conv.last_at), "messages": conv.messages,
                     "last": {**message_json(last[-1]), "text": _snippet(last[-1].text)} if last else None,
@@ -225,9 +240,12 @@ async def thread(call: Call) -> dict[str, Any]:
         a.account == account and a.conversation == conversation and s.attempts.get(ref, 0) < p.draft_attempts_max
         for ref, a in s.asked.items())
     conv = port.conversation(account, conversation)
-    return {"key": conversation_key(account, conversation), "account": account, "title": conv.title,
-            "kind": conv.kind, "messages": [message_json(m) for m in found], "more": more,
-            "replies": [_reply_json(call, d) for d in replies], "pending": pending[::-1],
+    notes = _notes(call, replies)
+    # son nom, comme dans la liste : celui de Teams, sinon (un tête-à-tête) l'autre personne
+    return {"key": conversation_key(account, conversation), "account": account,
+            "title": port.title(account, conversation), "kind": conv.kind,
+            "messages": [message_json(m) for m in found], "more": more,
+            "replies": [_reply_json(call, d, notes) for d in replies], "pending": pending[::-1],
             "under_way": prepares and under_way(s, account, conversation),
             "asked": asked}
 
@@ -236,9 +254,10 @@ async def replies(call: Call) -> dict[str, Any]:
     """Ses réponses dans tes comptes (ADR 0191), la plus récente d'abord."""
     mine = accounts(call)
     s = _state(call)
-    out = [_reply_json(call, d) for d in sorted(s.drafts.values(), key=lambda d: -d.proposal)
-           if d.account in mine and (mine[d.account][1] == OWN or reaches(mine[d.account][1], SHARE_PREPARE))][:LIMIT]
-    return {"items": out}
+    shown = [d for d in sorted(s.drafts.values(), key=lambda d: -d.proposal)
+             if d.account in mine and (mine[d.account][1] == OWN or reaches(mine[d.account][1], SHARE_PREPARE))][:LIMIT]
+    notes = _notes(call, shown)
+    return {"items": [_reply_json(call, d, notes) for d in shown]}
 
 
 # ── écrire, décider ──
@@ -309,9 +328,10 @@ async def reply_redo(call: Call) -> dict[str, Any]:
 
 
 def count(call: Call) -> int:
-    """Pour la barre du haut : ses réponses qui attendent ta décision."""
+    """Pour la barre du haut : ses réponses qui attendent ta décision (pas une à laquelle on a répondu autrement)."""
     mine = accounts(call)
-    return sum(1 for d in _state(call).drafts.values() if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWN)
+    return sum(1 for d in _state(call).drafts.values()
+               if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWN)
 
 
 def routes(api: MeApi) -> list[Route]:

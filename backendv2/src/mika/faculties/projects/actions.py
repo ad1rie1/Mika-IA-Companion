@@ -159,8 +159,7 @@ def check_remote(url: str) -> str:
     if parts.scheme != "https" or not parts.hostname or any(ch.isspace() for ch in raw):
         raise ValueError("une adresse https, comme https://github.com/compte/depot.git")
     if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Réglages › Canaux › "
-                         "Dépôts git")
+        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Connexions › Dépôts Git")
     if parts.query or parts.fragment or "?" in raw or "#" in raw:
         raise ValueError("une adresse de dépôt, sans « ? » ni « # » (rien de secret ne va dans l'adresse)")
     return raw
@@ -271,7 +270,7 @@ class CreateArgs(BaseModel):
                                         "ton accord. Dans son atelier, elle travaille librement.")] = True
     remote: Annotated[str, Knob(label="Dépôt distant", group="Son dépôt distant", advanced=False, order=90,
                                 help="Facultatif : une adresse https (https://github.com/compte/depot.git). Le jeton "
-                                     "se règle dans Réglages › Canaux › Dépôts git.")
+                                     "se règle dans Connexions › Dépôts Git.")
                       ] = Field(default="", max_length=300)
     branch: Annotated[str, Knob(label="Branche", group="Son dépôt distant", advanced=False, order=91)
                       ] = Field(default="main", max_length=100)
@@ -481,7 +480,7 @@ def _tools(s: ProjectsState, frame: Frame, args: ToolsArgs, ctx: ActionContext) 
 class RemoteArgs(BaseModel):
     remote: Annotated[str, Knob(label="Adresse du dépôt distant", advanced=False, order=1,
                                 help="https://github.com/compte/depot.git — vide : aucun. Le jeton se règle dans "
-                                     "Réglages › Canaux › Dépôts git.")] = Field(default="", max_length=300)
+                                     "Connexions › Dépôts Git.")] = Field(default="", max_length=300)
     branch: Annotated[str, Knob(label="Branche", advanced=False, order=2)] = Field(default="main", max_length=100)
     auto_push: Annotated[bool, Knob(label="Pousser après chaque exécution qui enregistre quelque chose",
                                     advanced=False, order=3,

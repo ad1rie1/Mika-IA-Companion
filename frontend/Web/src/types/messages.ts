@@ -296,7 +296,10 @@ export interface HistoryAttachment {
   name: string;
   /** `image` | `audio` | `file` */
   kind: string;
-  /** Sur un message de Mika : un fichier qu'elle a envoyé (voir `SentFile`). */
+  /**
+   * Un fichier qu'elle a envoyé (voir `SentFile`), ou, sur un message de la
+   * personne, sa propre pièce une fois gardée (ADR 0215).
+   */
   id?: string;
   url?: string;
   mime?: string;
@@ -400,7 +403,7 @@ export interface ToolMessage {
  */
 export interface HistoryMessage {
   type: "history";
-  /** `strand` : la réponse à `strand_history` (ADR 0164) — un fil de travail, pas un curseur. */
+  /** `strand` : la réponse à `strand_history` (ADR 0164, 0215) — un fil relu, pas un curseur. */
   mode: "initial" | "catchup" | "strand";
   messages: HistoryEntry[];
   last_id: number;
@@ -418,7 +421,7 @@ export interface HistoryMessage {
    * l'écran montre.
    */
   reset?: boolean;
-  /** Mode `strand` : le fil de travail relu, et s'il en reste de plus anciens. */
+  /** Mode `strand` : le fil relu (vide : le fil avec elle, ADR 0215), et s'il en reste de plus anciens. */
   strand?: string;
   more?: boolean;
 }
@@ -458,7 +461,7 @@ export interface StrandFrame {
   archived: boolean;
 }
 
-/** Client → serveur : les messages d'un fil de travail, les plus récents avant `before`. */
+/** Client → serveur : les messages d'un fil (`id` vide : le fil avec elle, ADR 0215), les plus récents avant `before`. */
 export interface StrandHistoryFrame {
   type: "strand_history";
   id: string;

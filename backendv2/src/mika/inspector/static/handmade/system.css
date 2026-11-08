@@ -8,7 +8,7 @@
 .sys-summary { display: grid; gap: 12px; }
 .sys-summary-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
 .sys-total { margin: 0; color: var(--text-2); font-size: 14px; }
-.sys-total .now-num { margin-right: 4px; color: var(--text); font-family: var(--now-serif); font-size: 1.7rem; font-weight: 600; }
+.sys-total .now-num { margin-right: 4px; color: var(--text); font-family: var(--display); font-size: 1.7rem; font-weight: 600; }
 .sys-bar { display: block; width: 100%; height: 10px; clip-path: inset(0 round 999px); background: var(--sunken); }
 .sys-bar rect { fill: var(--st); }
 .sys-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; color: var(--text-2); font-size: 13px; }
@@ -23,7 +23,7 @@
 .sys-issues > li:first-child { border-top: 0; }
 .sys-issues code { font-size: 12px; }
 
-.sys-section { margin: 6px 0 12px; font-family: var(--now-serif); font-size: 1.24rem; font-weight: 600; }
+.sys-section { margin: 6px 0 12px; font-family: var(--display); font-size: 1.24rem; font-weight: 600; }
 .sys-columns { columns: 3 290px; column-gap: var(--now-gap); }
 .sys-faculty { break-inside: avoid; margin-bottom: var(--now-gap); padding: 16px 18px; }
 .sys-faculty-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -43,14 +43,14 @@
 .sys-health { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 28px;
   box-shadow: inset 4px 0 0 var(--st); }
 .sys-health-main { flex: 1 1 360px; display: grid; gap: 6px; }
-.sys-health-main h2 { margin: 0; color: color-mix(in srgb, var(--st) 80%, var(--text)); font-family: var(--now-serif);
+.sys-health-main h2 { margin: 0; color: color-mix(in srgb, var(--st) 80%, var(--text)); font-family: var(--display);
   font-size: 1.6rem; font-weight: 600; }
 .sys-health-main .now-sub { margin: 0; }
 .sys-health-stamp { margin: 0; color: var(--muted); font-size: 12.5px; }
 .sys-health-counts { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .sys-health-counts li { display: grid; gap: 2px; min-width: 96px; padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2);
   color: var(--muted); font-size: 12.5px; }
-.sys-health-counts .now-num { color: var(--text); font-family: var(--now-serif); font-size: 1.6rem; font-weight: 600; }
+.sys-health-counts .now-num { color: var(--text); font-family: var(--display); font-size: 1.6rem; font-weight: 600; }
 .sys-health-counts li.warn .now-num { color: var(--warn); } .sys-health-counts li.danger .now-num { color: var(--danger); }
 /* les tuiles d'une rangée ont la même hauteur ; le lien et « Le détail » restent en bas, sur une ligne */
 .sys-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-items: stretch; gap: 12px;
@@ -79,7 +79,7 @@
 .sys-gauge-track, .sys-gauge-fill { fill: none; stroke-width: 10; stroke-linecap: round; }
 .sys-gauge-track { stroke: var(--sunken); }
 .sys-gauge-fill { stroke: var(--pt); }
-.sys-gauge-num { fill: var(--text); font-family: var(--now-serif); font-size: 22px; font-weight: 600; }
+.sys-gauge-num { fill: var(--text); font-family: var(--display); font-size: 22px; font-weight: 600; }
 .sys-gauge figcaption b { color: var(--text); }
 .sys-proj-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px 24px; margin: 0; padding: 0;
   list-style: none; }

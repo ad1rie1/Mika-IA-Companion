@@ -65,6 +65,7 @@ from mika.kernel.faculty import CatchUp, Faculty, ToolResult, ToolSpec, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import floor
+from mika.kernel.inspect import size_fr
 from mika.kernel.operate import Preview
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
@@ -80,6 +81,7 @@ from mika.plugins.forge.views import (
 )
 from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args, ui_load
 from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, SELF, ToolRule
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, hearable
@@ -674,9 +676,8 @@ def _news(s: ForgeState, frame: Frame) -> list[Candidate]:
         address = _address(frame, person) if found else None
         if address is None:
             continue
-        name = frame.get(identity_c.IDENTITY(person)).name
         apps = ", ".join(f"« {s.apps[k].title} »" for k, _ in found)
-        who = f"« {name} »" if name else phrase("projects.caretaker")
+        who = identity_c.keeper_name(frame, person, quoted=True)
         urgent = any(n.urgent for _, n in found)
         brief = phrase("forge.news.alert_brief", apps=apps, who=who) if urgent else \
             phrase("forge.news.brief", apps=apps, who=who)
@@ -717,17 +718,12 @@ def _news_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         text = texts.get(n.summary_ref)
         if not text or not hearable(n.about, n.level, person, aud.level, aud.witness_level, aud.private_ok):
             continue
-        lines.append(phrase("forge.news.line", text=text, ago=_ago(frame.now - n.at)))
+        lines.append(phrase("forge.news.line", text=text, ago=ago_words(frame.now - n.at)))
         refs.append(f"{NEWS_PROVENANCE}{app}:{n.seq}")
         level = max(level, n.level if any(a != person for a in n.about) else 0)
     if not lines:
         return None
     return SectionBody("\n".join(lines), level=level, provenance=tuple(refs))
-
-
-def _ago(us: int) -> str:
-    minutes = max(1, us // MINUTE)
-    return phrase("forge.news.minutes", n=minutes) if minutes < 60 else phrase("forge.news.hours", n=minutes // 60)
 
 
 def wants(patterns: tuple[str, ...], type_name: str) -> bool:
@@ -1007,8 +1003,7 @@ def told_to(frame: Frame, app: App) -> tuple[tuple[str, ...], int]:
 
 
 def _who(frame: Frame, about: tuple[str, ...]) -> str:
-    name = frame.get(identity_c.IDENTITY(about[0])).name if about else ""
-    return f"« {name} »" if name else phrase("projects.caretaker")
+    return identity_c.keeper_name(frame, about[0] if about else "", quoted=True)
 
 
 def calls_today(app: App, now: int) -> int:
@@ -1089,7 +1084,7 @@ def _signals_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> 
     if app is None or not batch:
         return None
     texts = (enrich.get("signals") or {}).get("texts") or {}
-    lines = [phrase("forge.triage.line", n=i, ago=_ago(frame.now - q.at),
+    lines = [phrase("forge.triage.line", n=i, ago=ago_words(frame.now - q.at),
                     pertinence=f"{q.pertinence:.1f}".replace(".", ","), text=texts.get(q.summary_ref, "…"))
              for i, q in enumerate(batch, start=1)]
     rest = len(app.queue) - len(batch)
@@ -1100,11 +1095,11 @@ def _signals_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> 
     levels = [q.level for q in batch]
     for ref, at, level in s.said.get(name, ()):
         if texts.get(ref):
-            lines.append(phrase("forge.triage.told", ago=_ago(frame.now - at), text=texts[ref]))
+            lines.append(phrase("forge.triage.told", ago=ago_words(frame.now - at), text=texts[ref]))
             levels.append(level)
     last = s.news.get(name)
     if last is not None and not last.told and texts.get(last.summary_ref):
-        lines.append(phrase("forge.triage.pending", ago=_ago(frame.now - last.at), text=texts[last.summary_ref]))
+        lines.append(phrase("forge.triage.pending", ago=ago_words(frame.now - last.at), text=texts[last.summary_ref]))
         levels.append(last.level)
     return SectionBody("\n".join(lines), level=max(levels))
 
@@ -1130,7 +1125,8 @@ class SignalsDoneArgs(BaseModel):
     urgent: bool = Field(default=False, description=phrase("forge.triage.urgent"))
 
 
-@FORGE.tool("forge_signals_done", acts=True, description=phrase("forge.triage.description"), args=SignalsDoneArgs,
+@FORGE.tool("forge_signals_done", acts=True, description=phrase("forge.triage.description"),
+            label=phrase("forge.triage.label"), args=SignalsDoneArgs,
             bundle=TRIAGE_BUNDLE, episodes=[Kind.TASK], max_calls_per_episode=1, ends_loop=True)
 async def forge_signals_done(args: SignalsDoneArgs, ctx: Any) -> Any:
     """Son verdict sur le lot lu : ce qu'elle dira (une trouvaille à dire, de son initiative ou à la prochaine
@@ -1213,9 +1209,7 @@ def _may_build(ctx: Any) -> bool:
 
 def _caretaker(frame: Frame) -> str:
     """Qui s'occupe d'elle, par son prénom (jamais « ta propriétaire »)."""
-    names = [frame.get(identity_c.IDENTITY(o)).name for o in frame.get(identity_c.OWNERS)]
-    names = [n for n in names if n]
-    return f"« {names[0]} »" if len(names) == 1 else phrase("projects.caretaker")
+    return identity_c.keepers(frame, quoted=True)
 
 
 def _refused(ctx: Any) -> ToolResult:
@@ -1352,7 +1346,8 @@ def guarded(app: App | None, ports: Mapping[str, Any], info: AppInfo | None) -> 
     return ""
 
 
-@FORGE.tool("forge_list", description=phrase("forge.tools.list.description"), args=NoArgs, bundle=BUNDLE,
+@FORGE.tool("forge_list", description=phrase("forge.tools.list.description"),
+            label=phrase("forge.tools.list.label"), args=NoArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_list(args: NoArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1379,7 +1374,8 @@ def numbered(text: str, offset: int = 1, limit: int = 0) -> tuple[str, int]:
     return "\n".join(f"{offset + i:>6}\t{line}" for i, line in enumerate(shown)), len(lines)
 
 
-@FORGE.tool("forge_read", description=phrase("forge.tools.read.description"), args=ReadArgs,
+@FORGE.tool("forge_read", description=phrase("forge.tools.read.description"),
+            label=phrase("forge.tools.read.label"), args=ReadArgs,
             bundle=BUNDLE, episodes=BUILD, owner_only=True)
 async def forge_read(args: ReadArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1491,7 +1487,8 @@ async def _save(ctx: Any, port: Any, name: str, manifest: str, code: str, asked_
     return _nothing(phrase("forge.tools.write.done", version=version))  # la preuve viendra de son essai
 
 
-@FORGE.tool("forge_write", acts=True, description=phrase("forge.tools.write.description"), args=WriteArgs,
+@FORGE.tool("forge_write", acts=True, description=phrase("forge.tools.write.description"),
+            label=phrase("forge.tools.write.label"), args=WriteArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3, owner_only=True)
 async def forge_write(args: WriteArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1539,7 +1536,8 @@ def _around(text: str, spans: Sequence[tuple[int, int]], margin: int = 2, most: 
     return "\n".join(out)
 
 
-@FORGE.tool("forge_edit", acts=True, description=phrase("forge.tools.edit.description"), args=EditArgs,
+@FORGE.tool("forge_edit", acts=True, description=phrase("forge.tools.edit.description"),
+            label=phrase("forge.tools.edit.label"), args=EditArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_edit(args: EditArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1627,7 +1625,8 @@ def search(sources: Mapping[str, tuple[str, str]], args: SearchArgs,
     return out, found
 
 
-@FORGE.tool("forge_search", description=phrase("forge.tools.search.description"), args=SearchArgs,
+@FORGE.tool("forge_search", description=phrase("forge.tools.search.description"),
+            label=phrase("forge.tools.search.label"), args=SearchArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=8, owner_only=True)
 async def forge_search(args: SearchArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1662,7 +1661,8 @@ async def forge_search(args: SearchArgs, ctx: Any) -> Any:
                     + (f"\n{more}" if more else ""))
 
 
-@FORGE.tool("forge_help", description=phrase("forge.tools.help.description"), args=HelpArgs, bundle=BUNDLE,
+@FORGE.tool("forge_help", description=phrase("forge.tools.help.description"),
+            label=phrase("forge.tools.help.label"), args=HelpArgs, bundle=BUNDLE,
             episodes=BUILD)
 async def forge_help(args: HelpArgs, ctx: Any) -> Any:
     return _nothing(guide.topic(args.sujet))
@@ -1750,7 +1750,8 @@ def stopped(app: App | None) -> str:
     return ""
 
 
-@FORGE.tool("forge_test", acts=True, description=phrase("forge.tools.test.description"), args=TestArgs, bundle=BUNDLE,
+@FORGE.tool("forge_test", acts=True, description=phrase("forge.tools.test.description"),
+            label=phrase("forge.tools.test.label"), args=TestArgs, bundle=BUNDLE,
             episodes=BUILD, max_calls_per_episode=12, owner_only=True)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1829,7 +1830,8 @@ async def _test_view(port: Any, app: str, method: str, raw: dict[str, Any], secr
     return _tested(r, verdict + said, invalid=invalid, made=made)
 
 
-@FORGE.tool("forge_logs", description=phrase("forge.tools.logs.description"), args=AppArgs, bundle=BUNDLE,
+@FORGE.tool("forge_logs", description=phrase("forge.tools.logs.description"),
+            label=phrase("forge.tools.logs.label"), args=AppArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_logs(args: AppArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1838,7 +1840,8 @@ async def forge_logs(args: AppArgs, ctx: Any) -> Any:
     return _nothing("\n".join(port.logs(args.app, 30)) or phrase("forge.tools.logs.empty"))
 
 
-@FORGE.tool("forge_command", acts=True, description=phrase("forge.tools.command.description"), args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
+@FORGE.tool("forge_command", acts=True, description=phrase("forge.tools.command.description"),
+            label=phrase("forge.tools.command.label"), args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
             owner_only=True)
 async def forge_command(args: CommandArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1880,8 +1883,8 @@ DB_SHOWN = 6_000
 
 def schema_text(got: Mapping[str, Any]) -> str:
     """Le schéma d'une base d'app, en lignes."""
-    lines = [phrase("forge.tools.db_schema.head", engine=got.get("engine", "?"), size=_size(got.get("size", 0)),
-                    max=_size(got.get("max", 0)))]
+    lines = [phrase("forge.tools.db_schema.head", engine=got.get("engine", "?"), size=_size(got.get("size")),
+                    max=_size(got.get("max")))]
     for t in got.get("tables", []):
         columns = ", ".join(phrase("forge.tools.db_schema.column", name=c["name"], type=c["type"],
                                    key=phrase("forge.tools.db_schema.key") if c.get("key") else "")
@@ -1894,8 +1897,7 @@ def schema_text(got: Mapping[str, Any]) -> str:
 
 
 def _size(n: Any) -> str:
-    n = int(n or 0)
-    return f"{n / 1_000_000:.1f} Mo".replace(".", ",") if n >= 100_000 else f"{max(1, n // 1000)} Ko"
+    return size_fr(int(n or 0))
 
 
 def rows_text(rows: list[dict[str, Any]]) -> str:
@@ -1912,7 +1914,8 @@ def rows_text(rows: list[dict[str, Any]]) -> str:
     return phrase("forge.tools.db_query.result", count=len(rows), rows="\n".join(shown))
 
 
-@FORGE.tool("forge_db_schema", description=phrase("forge.tools.db_schema.description"), args=AppArgs, bundle=BUNDLE,
+@FORGE.tool("forge_db_schema", description=phrase("forge.tools.db_schema.description"),
+            label=phrase("forge.tools.db_schema.label"), args=AppArgs, bundle=BUNDLE,
             episodes=BUILD, owner_only=True)
 async def forge_db_schema(args: AppArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1924,7 +1927,8 @@ async def forge_db_schema(args: AppArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
 
 
-@FORGE.tool("forge_db_query", description=phrase("forge.tools.db_query.description"), args=DbArgs, bundle=BUNDLE,
+@FORGE.tool("forge_db_query", description=phrase("forge.tools.db_query.description"),
+            label=phrase("forge.tools.db_query.label"), args=DbArgs, bundle=BUNDLE,
             episodes=BUILD, max_calls_per_episode=8, owner_only=True)
 async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -1936,7 +1940,8 @@ async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
 
 
-@FORGE.tool("forge_db_execute", acts=True, description=phrase("forge.tools.db_execute.description"), args=DbArgs,
+@FORGE.tool("forge_db_execute", acts=True, description=phrase("forge.tools.db_execute.description"),
+            label=phrase("forge.tools.db_execute.label"), args=DbArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=6, owner_only=True)
 async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
     port = _port(ctx)

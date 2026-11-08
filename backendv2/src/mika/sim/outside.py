@@ -62,6 +62,8 @@ class FakeMail:
     actions: list[tuple[str, ...]] = field(default_factory=list)
     files: dict[tuple[str, str], File] = field(default_factory=dict)
     outgoing_files: dict[str, tuple[File, ...]] = field(default_factory=dict)
+    #: ses copies cachées, par mail parti (ce qu'il a mis dans l'enveloppe, et que personne d'autre ne voit)
+    outgoing_bcc: dict[str, str] = field(default_factory=dict)
     #: les images intégrées d'un mail, par sa référence : (Content-ID, type, octets)
     inline: dict[str, tuple[tuple[str, str, bytes], ...]] = field(default_factory=dict)
     #: les expéditeurs dont les images distantes s'affichent (ADR 0175)
@@ -256,15 +258,13 @@ class FakeMail:
             return self.outgoing_files[m.message_id][int(part)]
         raise FileNotFoundError("Cette pièce jointe n'est plus disponible.")
 
-    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True):
+    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True, bcc="", files=()):
         m = self.cached_one(ref) or self.sent_mail(ref)
         if m is None:
             raise ValueError("Ce message n'est plus disponible.")
-        files = tuple([await self.file(ref, str(i)) for i, _ in enumerate(getattr(m, 'attachments', ()))]) if attachments else ()
-        mid = await self.send(to, subject, forwarded_text(m, body), by=by, account=m.account, cc=cc)
-        self.outgoing_files[mid] = files
-        self.outgoing[-1] = replace(self.outgoing[-1], attachments=tuple(Attachment(f.name, f.mime, len(f.data)) for f in files))
-        return mid
+        carried = tuple([await self.file(ref, str(i)) for i, _ in enumerate(getattr(m, 'attachments', ()))]) if attachments else ()
+        return await self.send(to, subject, forwarded_text(m, body), by=by, account=m.account, cc=cc, bcc=bcc,
+                               files=(*carried, *files))
 
     # ── dossiers ──
     def folders(self, account: str) -> list[Folder]:
@@ -334,13 +334,20 @@ class FakeMail:
         return compose.preview(draft, self.account(draft.account), parent), parent
 
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "", by: str = "", *,
-                   account: str = "", cc: str = "", quote: bool = False) -> str:
+                   account: str = "", cc: str = "", quote: bool = False, bcc: str = "",
+                   files: tuple[File, ...] = ()) -> str:
         info = self._sender(account, in_reply_to)
         shown, _ = self._preview(Draft("", info.key, to, subject, body, cc, in_reply_to, quote, by))
         if shown.blocked:
             raise RuntimeError(shown.blocked)
         self.sent.append((to, subject, body, in_reply_to))
-        return self._gone(info.key, shown, in_reply_to, by, "")
+        mid = self._gone(info.key, shown, in_reply_to, by, "")
+        if bcc:
+            self.outgoing_bcc[mid] = bcc
+        if files:
+            self.outgoing_files[mid] = files
+            self.outgoing[-1] = replace(self.outgoing[-1], attachments=tuple(Attachment(f.name, f.mime, len(f.data)) for f in files))
+        return mid
 
     def _gone(self, account: str, shown: Preview, in_reply_to: str, by: str, draft: str) -> str:
         message_id = f"<envoi-{len(self.outgoing) + 1}@sim>"

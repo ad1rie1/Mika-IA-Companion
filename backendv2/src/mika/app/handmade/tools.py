@@ -16,7 +16,7 @@ from markupsafe import Markup
 from mika.app.handmade import blocks, columns, reader
 from mika.inspector import render
 from mika.inspector.ui import UI, Drawn, env
-from mika.kernel.inspect import Badge, Fields, Note, Ref, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Fields, Nav, Note, Ref, Row, Table, Text, When
 
 #: la vue de la Forge que « Venus d'ailleurs » montre sous les services : (propriétaire, nom)
 APP_TOOLS = ("forge", "outils_apps")
@@ -36,10 +36,10 @@ class Catalogue(Drawn):
 
 
 class Elsewhere(Drawn):
-    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service, leurs réglages) en boutons de la barre de
-    titre, une carte par service branché (l'onglet du plugin MCP), une carte par app et les outils qu'elle lui donne
-    (la vue de la Forge). Lus dans leurs tableaux, par le nom de leurs colonnes ; un tableau qu'il ne reconnaît pas
-    reste tel quel."""
+    """Outils › Venus d'ailleurs : ce qu'on y fait (brancher un service) en bouton de la barre de titre — leurs
+    réglages sont derrière la roue de Ses outils (ADR 0206) —, une carte par service branché (l'onglet du plugin MCP),
+    une carte par app et les outils qu'elle lui donne (la vue de la Forge). Lus dans leurs tableaux, par le nom de leurs
+    colonnes ; un tableau qu'il ne reconnaît pas reste tel quel."""
 
     styles = ("handmade/tools.css",)
 
@@ -57,12 +57,16 @@ class Elsewhere(Drawn):
         shown = render.Env(when=ui.when, now=ui.now())
         services = _table(rest, SERVED)
         apps = _table(rest, GIVEN)
-        others = [b for b in rest if b is not services and b is not apps]
+        # « À qui » (ADR 0192) : un bouton à choix en tête des services, quand plusieurs personnes en ont branché
+        owners = next((b for b in rest if isinstance(b, Nav) and b.title == OWNERS), None)
+        others = [b for b in rest if b is not services and b is not apps and b is not owners]
         html = Markup(env.get_template("handmade/outils/ailleurs.html").render(
+            owners=[{"text": i.text, "href": render.href(i.href), "on": i.active} for i in owners.items]
+            if owners is not None else [],
             services=_services(services, shown) if services is not None else None,
             apps=_apps(apps) if apps is not None else None,
             services_empty=services.empty if services is not None else "", apps_empty=apps.empty if apps is not None else ""))
-        # brancher un service, leurs réglages : les actions de la page, dans sa barre de titre (ADR 0176)
+        # brancher un service : l'action de la page, dans sa barre de titre (ADR 0176) ; la roue la ferme
         return html + (blocks.page(ui, others, query, forms=forms) or Markup("")), [], blocks.head(links)
 
 
@@ -70,6 +74,8 @@ class Elsewhere(Drawn):
 LIST = "/inspecteur/outils/serveurs"
 #: les colonnes qui font reconnaître les tableaux de la page : les services branchés, les outils de ses apps
 SERVED, GIVEN = "outils servis / proposés", "quand il sert"
+#: le choix de qui sont les services montrés (``plugins/mcp/console.py``)
+OWNERS = "À qui"
 
 
 def _buttons(items: Sequence[Any]) -> tuple[list[tuple[str, str]], list[Any]]:
@@ -104,8 +110,10 @@ def _services(table: Table, shown: render.Env) -> list[dict[str, Any]]:
         given, _, offered = served.partition("/")
         joined = cell(row, "joint")
         notes = [d.text for d in row.detail if isinstance(d, Note)]
+        owner = cell(row, "à qui")
         out.append({
             "name": _text(cell(row, "service")), "href": render.href(row.href) if row.href else "",
+            "owner": _text(owner), "owner_href": render.href(owner) if isinstance(owner, Ref) else "",
             "state": _text(state), "tone": state.tone if isinstance(state, Badge) else "",
             "purpose": _text(cell(row, "à quoi il lui sert")), "where": _text(cell(row, "où")),
             "served": given.strip(), "offered": offered.strip(), "review": int(review) if review.isdigit() else 0,

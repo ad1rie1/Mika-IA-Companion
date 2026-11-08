@@ -10,7 +10,6 @@
   <header class="now-card-head">
     <h2 id="home-attention-title">À regarder maintenant</h2>
     <p>chaque ligne mène là où décider</p>
-    <a class="now-more" href="{{ PREFIX }}/approbations/en_attente">Tout ce qui attend ta décision →</a>
   </header>
   {% if a and a.rows %}
   <ul class="home-priorities">
@@ -44,7 +43,7 @@
     {% set b = now.body %}
     {% if b %}
     <dl class="now-facts home-body">
-      <div><dt>{{ b.state }}</dt><dd>{% if b.since %}depuis {{ b.since }}{% endif %}{% if b.depth %} <span class="now-muted">· {{ b.depth }}</span>{% endif %}</dd></div>
+      <div><dt>État</dt><dd>{{ b.state|lower }}{% if b.since %} · depuis {{ b.since }}{% endif %}{% if b.depth %} <span class="now-muted">· {{ b.depth }}</span>{% endif %}</dd></div>
       <div><dt>Énergie</dt><dd class="home-energy">{{ bar(b.energy_w, "energy") }}<span class="now-num">{{ b.energy }}</span></dd></div>
       <div><dt>Où</dt><dd>{{ b.where }}</dd></div>
       <div><dt>Fait</dt><dd>{% if b.activity %}{{ b.activity.label }}{% else %}<span class="now-muted">rien de particulier</span>{% endif %}</dd></div>
@@ -53,7 +52,10 @@
 
     {% set n = now.needs %}
     {% if n %}
-    <ul class="home-needs" aria-label="Ses besoins">
+    {# ce que mesure le % : leur tension, comme la dit la vue des besoins #}
+    <h3 class="now-subhead home-needs-head" id="home-needs-title">Ses besoins</h3>
+    <p class="home-needs-help">leur tension : elle monte vers 100 % avec le temps, retombe quand le besoin est comblé</p>
+    <ul class="home-needs" aria-labelledby="home-needs-title">
       {% for r in n.rows %}
       <li class="{{ 'dominant' if r.dominant }}"><span>{{ r.label }}</span>{{ bar(r.w, "need n-" ~ r.key) }}<span class="now-num">{{ r.pct }}</span></li>
       {% endfor %}

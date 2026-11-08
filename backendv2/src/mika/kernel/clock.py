@@ -39,10 +39,6 @@ def seconds(t: int) -> float:
     return t / US
 
 
-def of_seconds(s: float) -> int:
-    return round(s * US)
-
-
 def local(t: int, tz: ZoneInfo) -> datetime:
     """L'heure locale d'un instant dans un fuseau (heure d'été comprise)."""
     return as_datetime(t).astimezone(tz)

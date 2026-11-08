@@ -15,6 +15,7 @@ import {
   markToFill,
   ofName,
   outgoingText,
+  addPieces,
   parseAddresses,
   recipientsText,
   replySubject,
@@ -107,7 +108,7 @@ describe("répondre", () => {
 });
 
 describe("« [À COMPLÉTER »", () => {
-  it("se reconnaît sous toutes ses graphies, comme ports/mail.py::to_fill", () => {
+  it("se reconnaît sous toutes ses graphies, comme ports/drafts.py::to_fill", () => {
     expect(toFill("Nous pourrions démarrer le [À COMPLÉTER : date].")).toBe(true);
     expect(toFill("[a completer]")).toBe(true);
     expect(toFill("[ À remplir ]")).toBe(true);
@@ -173,6 +174,40 @@ describe("les bornes d'un envoi : refusé plutôt que coupé (protocole-moi.md �
     // même nues, trop d'adresses : rien ne part
     const crowd = Array.from({ length: 12 }, (_, i) => ({ name: "", address: `personne.tres.longue${i}@entreprise-exemple.test` }));
     expect(recipientsText(crowd)).toBeNull();
+  });
+
+  it("joindre : ce qui tient dans les bornes de l'API, et le premier refus dit (ADR 0214)", () => {
+    const mo = 1024 * 1024;
+    const f = (name: string, size: number) => ({ name, size });
+    const big = addPieces([f("a.pdf", 10)], [f("gros.bin", 25 * mo + 1), f("b.pdf", 20)]);
+    expect(big.pieces.map((p) => p.name)).toEqual(["a.pdf", "b.pdf"]); // le refus ne retient pas les autres
+    expect(big.problem).toBe("« gros.bin » est trop grosse : 25 Mo par pièce.");
+    expect(addPieces([], [f("juste.bin", 25 * mo)]).problem).toBe("");
+    expect(addPieces([f("a.pdf", 10)], [f("a.pdf", 10)])).toEqual({ pieces: [f("a.pdf", 10)], problem: "" }); // le même, une fois
+    expect(addPieces([], [f("vide.txt", 0)]).problem).toBe("« vide.txt » est vide.");
+    const full = Array.from({ length: 10 }, (_, i) => f(`p${i}`, 1));
+    expect(addPieces(full, [f("onze", 1)]).problem).toBe("Un mail porte au plus 10 pièces.");
+    const heavy = addPieces([f("a", 25 * mo), f("b", 25 * mo)], [f("c", 1)]);
+    expect(heavy.pieces).toHaveLength(2);
+    expect(heavy.problem).toBe("Ces pièces sont trop lourdes pour un seul mail : 50 Mo en tout.");
+  });
+
+  it("joindre à un transfert : ses pièces d'origine comptent dans les bornes (ADR 0214)", () => {
+    const mo = 1024 * 1024;
+    const f = (name: string, size: number) => ({ name, size });
+    const nine = Array.from({ length: 9 }, (_, i) => f(`o${i}`, 1));
+    expect(addPieces([], [f("a", 1)], nine).pieces).toHaveLength(1);
+    expect(addPieces([f("a", 1)], [f("b", 1)], nine).problem).toBe("Un mail porte au plus 10 pièces, celles du mail d'origine comprises.");
+    expect(addPieces([], [f("c", 11 * mo)], [f("o", 40 * mo)]).problem).toBe("Ces pièces sont trop lourdes pour un seul mail : 50 Mo en tout, celles du mail d'origine comprises.");
+    expect(addPieces([], [f("c", 10 * mo)], [f("o", 40 * mo)]).problem).toBe("");
+  });
+
+  it("la Cci suit les mêmes bornes que les autres destinataires", () => {
+    const ok = outgoingText({ to: team.slice(0, 1), cc: [], bcc: team.slice(1, 2), subject: "x", body: "y" });
+    expect(ok.mail?.bcc).toBe(addressText(team[1]));
+    expect(outgoingText({ to: team.slice(0, 1), cc: [], subject: "x", body: "y" }).mail?.bcc).toBe("");
+    const crowd = Array.from({ length: 12 }, (_, i) => ({ name: "", address: `personne.tres.longue${i}@entreprise-exemple.test` }));
+    expect(outgoingText({ to: team.slice(0, 1), cc: [], bcc: crowd, subject: "x", body: "y" }).problem).toContain("« Cci »");
   });
 
   it("dit pourquoi un mail ne part pas tel quel, sinon ce qui part", () => {

@@ -4,14 +4,21 @@
  * La ligne d'état suit l'application Android (`StatusLine.kt`), dans la forme de la maquette : un problème
  * de lien d'abord (on ne dit pas « éveillée » de quelqu'un qu'on ne joint pas), puis son sommeil, puis ce
  * qu'elle fait et où (« travaille à son bureau »), puis son humeur quand elle est assez marquée.
+ *
+ * Les lignes que la carte « Ce qu'elle fait » (`shell.ts`) et sa colonne du chat (`chat.ts`) écrivent toutes deux — une
+ * facette, une promesse — ne s'écrivent qu'ici. Et quand sa VRM se charge : seulement si son coin se voit
+ * (`startVrmWhenShown`, sans DOM : la requête média lui est donnée).
  */
 import type { EmotionCategory } from "@web/types";
+import { h } from "../shell/dom";
+import { ico } from "../shell/icons";
 import {
   activityLabel,
   emotionCategory,
   emotionLabel,
   emotionLower,
   placeLabel,
+  projectStatusLabel,
   sleepLabel,
 } from "./labels";
 import { isAsleep, type MikaState, type Mood } from "./state";
@@ -104,6 +111,25 @@ export function percent(value: number): string {
   return `${Math.round(Math.min(1, Math.max(0, value)) * 100)} %`;
 }
 
+// ── Les lignes de « Ce qu'elle fait » et de sa colonne du chat ──────
+
+/** Une facette : son nom, sa barre, son pourcentage (la barre et le nombre bornés de même, 0 à 100 %). */
+export function facetHtml(f: Facet): string {
+  const width = Math.round(Math.min(1, Math.max(0, f.value)) * 100);
+  return `<div class="facet"><span>${h(f.label)}</span><span class="bar"><i style="width:${width}%"></i></span><span class="num">${percent(f.value)}</span></div>`;
+}
+
+/** Une chose qu'elle t'a promise (« Ce qu'elle t'a promis »). */
+export function promiseHtml(text: string): string {
+  return `<div class="sc-line">${ico("check", "sm")}<span>${h(text)}</span></div>`;
+}
+
+/** Un de ses projets avec toi, son statut en mots (« en pause ») ; un statut inconnu n'a pas d'étiquette. */
+export function projectHtml(project: { title: string; status: string }): string {
+  const status = projectStatusLabel(project.status);
+  return `<div class="sc-line">${ico("code", "sm")}<span>${h(project.title)}${status ? ` <span class="tag">${h(status)}</span>` : ""}</span></div>`;
+}
+
 // ── Son visage : quel portrait, quelle aura ─────────────────────────
 
 export type AuraName = "chaude" | "froide" | "crepuscule" | "nuit" | "neutre";
@@ -153,4 +179,32 @@ export function faceOf(state: MikaState, typing: boolean, available: ReadonlySet
   }
   if (tired) return { portrait: pick("tired"), aura: "neutre", asleep: false };
   return { portrait: "neutral", aura: "neutre", asleep: false };
+}
+
+// ── Sa VRM : seulement si son coin se voit ──────────────────────────
+
+/** Ce qu'il faut d'une `matchMedia(…)` : si elle vaut, et l'écouter changer. */
+export interface MediaWatch {
+  readonly matches: boolean;
+  addEventListener(type: "change", listener: () => void): void;
+  removeEventListener(type: "change", listener: () => void): void;
+}
+
+/**
+ * Lancer sa VRM (`start` : three, three-vrm et le modèle, ~100 Mo) seulement si son coin se voit. Sur un téléphone
+ * (`narrow` vaut : `MOBILE_QUERY`), base.css le masque et son portrait paraît seul : rien ne se charge. Une fenêtre qui
+ * s'élargit la lance alors, une seule fois. `?vrm=0` (dans `search`) la coupe partout.
+ */
+export function startVrmWhenShown(search: string, narrow: MediaWatch, start: () => void): void {
+  if (new URLSearchParams(search).get("vrm") === "0") return;
+  if (!narrow.matches) {
+    start();
+    return;
+  }
+  const widened = () => {
+    if (narrow.matches) return;
+    narrow.removeEventListener("change", widened);
+    start();
+  };
+  narrow.addEventListener("change", widened);
 }

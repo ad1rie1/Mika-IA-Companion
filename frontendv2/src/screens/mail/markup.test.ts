@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { MailBox, MailDraft, MailFull, MailRow } from "../../api/mail";
+import type { MailBox, MailDraft, MailFull, MailRow, SentMail } from "../../api/mail";
 import { caps } from "./format";
-import { boxesPane, boxViews, composeForm, countSpan, draftState, folderView, inlineReply, listFoot, mailRow, parseView, readerDraft, readerMail, viewKey, type ReaderView } from "./markup";
+import { boxesPane, boxViews, composeForm, countSpan, draftRow, draftState, folderView, inlineReply, listFilters, pieceChips, listFoot, listHead, listHolds, mailRow, moveTargets, parseView, readerDraft, readerMail, readerTidy, sentRow, viewHolds, viewKey, type ReaderView, type RowView, type Shown } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 
@@ -66,7 +66,7 @@ function view(level: MailBox["level"], extra: Partial<ReaderView> = {}): ReaderV
 
 describe("les vues de la colonne", () => {
   it("se disent et se relisent", () => {
-    for (const key of ["inbox", "flagged", "noticed", "sent", "sent:pro", "drafts", "drafts:pro", "folder:pro:INBOX", "folder:pro:A:B"]) {
+    for (const key of ["inbox", "flagged", "needs_reply", "sent", "sent:pro", "drafts", "drafts:pro", "folder:pro:INBOX", "folder:pro:A:B"]) {
       expect(viewKey(parseView(key))).toBe(key);
     }
     expect(parseView("n'importe quoi")).toEqual({ kind: "inbox" });
@@ -183,9 +183,44 @@ describe("la liseuse respecte le niveau (ADR 0188)", () => {
   });
 });
 
+describe("joindre et copier en cachette (ADR 0214)", () => {
+  const blank = { boxes: [], box: "", to: [], cc: [], subject: "", body: "", attachments: 0, quote: null };
+  it("la fenêtre d'un mail nouveau propose la Cci et le dépôt ; la retouche d'un brouillon, ni l'un ni l'autre", () => {
+    const written = composeForm({ kind: "new", ...blank });
+    expect(written).toContain("data-bcc");
+    expect(written).toContain('data-rcpt="bcc"');
+    expect(written).toContain("data-depot");
+    expect(written).toContain('type="file" multiple hidden data-fichiers');
+    expect(written).toContain("25 Mo par pièce");
+    const edited = composeForm({ kind: "edit", ...blank });
+    expect(edited).not.toContain("data-bcc");
+    expect(edited).not.toContain("data-depot");
+    expect(edited).not.toContain("data-fichiers");
+  });
+  it("une pièce se montre à son nom, échappé, avec sa taille, et se retire à son rang", () => {
+    const html = pieceChips([{ name: "a.pdf", size: 2048 }, { name: "<b>.png", size: 10 }]);
+    expect(html).toContain('data-retirer-piece="0"');
+    expect(html).toContain('data-retirer-piece="1"');
+    expect(html).toContain("&lt;b&gt;.png");
+    expect(html).not.toContain("<b>.png");
+    expect(html).toContain("2 Ko");
+  });
+  it("une réponse a son bouton « Joindre », ses pièces et sa Cci", () => {
+    const start = { all: false, to: [], cc: [], showCc: false, bcc: [], subject: "Re: x", body: "", quote: true, fromDraft: "", filled: "", sending: false, error: "" };
+    const closed = inlineReply({ ...start, showBcc: false, files: [] }, null, true);
+    expect(closed).toContain("data-joindre");
+    expect(closed).toContain('data-act="cci"');
+    expect(closed).not.toContain('data-rcpt="bcc"');
+    const open = inlineReply({ ...start, showBcc: true, files: [new File(["x"], "plan.pdf")] }, null, true);
+    expect(open).toContain('data-rcpt="bcc"');
+    expect(open).not.toContain('data-act="cci"');
+    expect(open).toContain("plan.pdf");
+  });
+});
+
 describe("écrire, dans les bornes de l'API", () => {
   it("le message et l'objet ont leur maxlength, et le compte du message se montre près de sa borne", () => {
-    const reply = inlineReply({ all: false, to: [], cc: [], showCc: false, subject: "Re: x", body: "x".repeat(19_000), quote: true, fromDraft: "", filled: "", sending: false, error: "" }, null, true);
+    const reply = inlineReply({ all: false, to: [], cc: [], showCc: false, bcc: [], showBcc: false, files: [], subject: "Re: x", body: "x".repeat(19_000), quote: true, fromDraft: "", filled: "", sending: false, error: "" }, null, true);
     expect(reply).toContain('maxlength="20000"');
     expect(reply).toMatch(/data-limit="20000"[^>]*>19\u202f000 \/ 20\u202f000</);
     const form = composeForm({ kind: "new", boxes: [], box: "", to: [], cc: [], subject: "", body: "", attachments: 0, quote: null });
@@ -207,6 +242,7 @@ const draft: MailDraft = {
   in_reply_to: "pro:<claire@x>",
   original: { subject: "Re: Présentation", from: "Claire Dubois" },
   to: "claire@x.test",
+  to_people: [{ name: "Claire Dubois", address: "claire@x.test" }],
   cc: "",
   subject: "Re: Présentation",
   body: "Bonjour Claire,\n\nLe [À COMPLÉTER : jour].",
@@ -239,5 +275,103 @@ describe("ses brouillons", () => {
     const html = readerDraft({ ...draft, state: "refuse", note: "trop sec", preview: null, decided_at: NOW }, { now: NOW, box: null, caps: caps("proprietaire"), mobile: false });
     expect(html).toContain("Note : « trop sec »");
     expect(html).not.toContain("data-decide");
+  });
+});
+
+// ── audit du 2026-11-05 (lot L13) ──
+
+function rows(boxes: MailBox[] = [box("pro", "proprietaire")]): RowView {
+  return { now: NOW, selected: "", checked: new Set(), many: false, boxes: new Map(boxViews(boxes, new Set()).map((b) => [b.box.key, b])) };
+}
+
+describe("la colonne : un nom, un sens (ADR 0200)", () => {
+  const pane = (boxes: MailBox[]) => boxesPane({ boxes: boxViews(boxes, new Set()), view: "inbox", unseen: 2, waiting: 0, plugged: true, error: "" });
+  it("« Réponse attendue » dans la colonne ; « Où Mika est passée » reste un filtre de la liste", () => {
+    const html = pane([box("pro", "proprietaire")]);
+    expect(html).toContain('data-vue="needs_reply"');
+    expect(html).toContain("Réponse attendue");
+    expect(html).not.toContain("Où Mika est passée");
+    expect(listFilters("")).toContain("Où Mika est passée");
+  });
+  it("une boîte partagée dit son niveau, et son non-lu à côté", () => {
+    const html = pane([box("perso", "proprietaire"), box("pro", "lire", "Adrien Moreau")]);
+    expect(html).toMatch(/lecture<\/span><span class="cnt" title="Non lus dans sa réception">2<\/span>/);
+  });
+});
+
+describe("à qui l'on a écrit : des noms, l'adresse au survol", () => {
+  it("Envoyés", () => {
+    const s: SentMail = { ref: "pro:<s1>", box: "pro", to: [{ name: "Camille Durand", address: "camille.durand@example.test" }], cc: [], subject: "Dîner", snippet: "À samedi", date: NOW, by: "user_1", draft: "", attachments: 0 };
+    const html = sentRow(s, rows());
+    expect(html).toContain("À Camille Durand");
+    expect(html).toContain('title="camille.durand@example.test"');
+  });
+  it("ses brouillons : le nom que la boîte connaît, sinon l'adresse", () => {
+    expect(draftRow(draft, rows())).toContain("À Claire Dubois");
+    expect(draftRow(draft, rows())).toContain('title="claire@x.test"');
+    const bare = draftRow({ ...draft, to_people: [], preview: null }, rows());
+    expect(bare).toContain("À claire@x.test");
+  });
+});
+
+describe("la liseuse", () => {
+  it("la réponse ouverte : « Préremplir avec Mika » une seule fois, dans sa barre", () => {
+    const composer = inlineReply({ all: false, to: [], cc: [], showCc: false, bcc: [], showBcc: false, files: [], subject: "Re: x", body: "", quote: true, fromDraft: "", filled: "", sending: false, error: "" }, null, true);
+    const html = readerMail(full, view("proprietaire", { composer }), (p) => p);
+    expect(html.match(/data-act="preremplir"/g)).toHaveLength(1);
+    expect(readerMail(full, view("proprietaire"), (p) => p).match(/data-act="preremplir"/g)).toHaveLength(1);
+  });
+  it("« Déplacer » dans la liseuse et sur la sélection (ADR 0200)", () => {
+    expect(readerTidy(full)).toContain('data-act="deplacer"');
+    expect(listHead("Réception", 3, 2)).toContain('data-groupe="move"');
+    const b = box("pro", "proprietaire");
+    // ses dossiers, sauf celui où il est, « Envoyés » et « Brouillons » (les vues de ce qui est parti et de ses brouillons)
+    expect(moveTargets(b, "INBOX").map((f) => f.name)).toEqual(["Archives"]);
+    expect(moveTargets(b, "Archives").map((f) => f.name)).toEqual(["INBOX"]);
+  });
+});
+
+describe("la liseuse quitte une vue qui ne montre plus ce qu'elle lit", () => {
+  const mail = (more: Partial<MailFull> = {}): Shown => ({ kind: "mail", mail: { ...full, ...more }, common: true });
+  it("un brouillon reste dans « Ses brouillons », pas ailleurs", () => {
+    const d: Shown = { kind: "draft", box: "pro" };
+    expect(viewHolds({ kind: "drafts", box: "" }, "", d)).toBe(true);
+    expect(viewHolds({ kind: "drafts", box: "pro" }, "", d)).toBe(true);
+    expect(viewHolds({ kind: "drafts", box: "perso" }, "", d)).toBe(false);
+    expect(viewHolds({ kind: "sent", box: "" }, "", d)).toBe(false);
+  });
+  it("un mail reçu : sa réception, son dossier, ses états — pas « Envoyés » ni « Ses brouillons »", () => {
+    expect(viewHolds({ kind: "inbox" }, "", mail())).toBe(true);
+    expect(viewHolds({ kind: "folder", box: "pro", folder: "INBOX" }, "", mail())).toBe(true);
+    expect(viewHolds({ kind: "folder", box: "pro", folder: "Archives" }, "", mail())).toBe(false);
+    expect(viewHolds({ kind: "flagged" }, "", mail())).toBe(true);
+    expect(viewHolds({ kind: "flagged" }, "", mail({ flagged: false }))).toBe(false);
+    expect(viewHolds({ kind: "needs_reply" }, "", mail({ her: { ...full.her!, read: false } }))).toBe(true);
+    // lu par elle : jamais dans « Réponse attendue »
+    expect(viewHolds({ kind: "needs_reply" }, "", mail())).toBe(false);
+    expect(viewHolds({ kind: "needs_reply" }, "", mail({ her: { ...full.her!, needs_reply: false, read: false } }))).toBe(false);
+    // le drapeau du serveur n'est pas le « lu » de la liste : lu dans un autre client, l'API peut encore le lister
+    // (elle ne le sait qu'à la relève) ; c'est la liste chargée qui tranche
+    expect(viewHolds({ kind: "needs_reply" }, "", mail({ seen: true, her: { ...full.her!, read: false } }))).toBe(true);
+    expect(viewHolds({ kind: "sent", box: "" }, "", mail())).toBe(false);
+    expect(viewHolds({ kind: "drafts", box: "" }, "", mail())).toBe(false);
+    expect(viewHolds({ kind: "sent", box: "pro" }, "", mail({ sent: true }))).toBe(true);
+  });
+  it("le filtre compte, et une boîte partagée en lecture n'est pas dans tes vues communes", () => {
+    expect(viewHolds({ kind: "inbox" }, "unread", mail({ seen: true }))).toBe(false);
+    expect(viewHolds({ kind: "inbox" }, "noticed", mail())).toBe(true);
+    expect(viewHolds({ kind: "inbox" }, "", { kind: "mail", mail: full, common: false })).toBe(false);
+    expect(viewHolds({ kind: "folder", box: "pro", folder: "INBOX" }, "", { kind: "mail", mail: full, common: false })).toBe(true);
+    expect(viewHolds({ kind: "inbox" }, "", { kind: "mail", mail: null, common: true })).toBe(false);
+  });
+  it("la liste chargée tranche : à gauche, il reste ; absent d'une liste entière, il se ferme", () => {
+    const rows = [{ ref: "pro:<a@x>" }, { ref: "pro:<b@x>" }];
+    expect(listHolds("pro:<b@x>", rows, 2)).toBe(true);
+    expect(listHolds("pro:<b@x>", rows, 40)).toBe(true);
+    // remis en non-lu après lecture : l'API ne le liste plus, quoi qu'en dise son drapeau
+    expect(listHolds("pro:<c@x>", rows, 2)).toBe(false);
+    expect(listHolds("pro:<c@x>", [], 0)).toBe(false);
+    // d'autres pages : peut-être plus loin, `viewHolds` a jugé
+    expect(listHolds("pro:<c@x>", rows, 40)).toBe(null);
   });
 });

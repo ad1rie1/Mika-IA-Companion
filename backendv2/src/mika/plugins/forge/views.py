@@ -17,7 +17,6 @@ Tout ce qui ne va pas devient une note en français, jamais une exception.
 from __future__ import annotations
 
 import json
-import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -40,6 +39,7 @@ from mika.kernel.inspect import (
     is_page_param,
     read_params,
 )
+from mika.kernel.text import fold
 from mika.ports.forge import AppInfo, AppViewSpec, CallResult
 from mika.vocab.affect import Emotion
 
@@ -53,10 +53,6 @@ EMOTIONS = frozenset(e.value for e in Emotion)
 #: l'action de la console qui exécute une action d'app
 ACT = "forge.agir"
 INVALID = "Vue invalide"
-
-
-def fold(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", str(text).lower()) if not unicodedata.combining(c))
 
 
 @dataclass(frozen=True, slots=True)

@@ -24,7 +24,7 @@ RESPONSE_MAX_BYTES = 2 * 1024 * 1024
 #: ce qu'est une réponse, en français
 TYPES_FR = {"housenumber": "Adresse", "street": "Rue", "locality": "Lieu-dit", "municipality": "Commune"}
 ADDRESS, CATEGORY = "address", "adresse"
-NOT_SET = "Les adresses ne sont pas réglées : Réglages › Canaux › Lieux et adresses."
+NOT_SET = "Les adresses ne sont pas réglées."
 #: pour tout ce serveur : une seule Géoplateforme, quelle que soit l'adresse réglée
 _PACE = Pace(PER_SECOND, wait_max=3.0, busy="La recherche d'adresses est très demandée : réessaie dans un instant.")
 

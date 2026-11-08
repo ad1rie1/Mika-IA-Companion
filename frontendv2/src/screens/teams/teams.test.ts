@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
-import type { OwnPending, Reply, TeamsMessage, Thread } from "../../api/teams";
-import { caps } from "../mail/format";
-import { dayLabel, fromHer, messageHtml, modeLabel, ownBubbles, pendingNote, replyState, retouched, stillSentHere, threadMarks, withoutSent } from "./format";
-import { dock, repliesTable, replyCard, threadBody, type ThreadView } from "./markup";
+import type { Conversation, OwnPending, Reply, TeamsAccount, TeamsMessage, Thread } from "../../api/teams";
+import { ofName } from "../../shared/names";
+import { caps, ofName as mailOfName } from "../mail/format";
+import {
+  authorLabel,
+  dayLabel,
+  fromHer,
+  fromYou,
+  messageHtml,
+  modeLabel,
+  ownBubbles,
+  pendingNote,
+  replyHash,
+  replyState,
+  retouched,
+  stillSentHere,
+  threadCards,
+  threadMarks,
+  withoutSent,
+} from "./format";
+import { conversationRow, dock, infoPane, repliesTable, replyCard, threadBody, type ThreadView } from "./markup";
 
 const NOW = new Date(2026, 10, 4, 15, 0).getTime();
 const MIN = 60_000;
@@ -35,11 +52,33 @@ function msg(extra: Partial<TeamsMessage>): TeamsMessage {
   return { ref: "t", author: "Marc Delmas", author_id: "8:marc", at: NOW - 30 * MIN, text: "Salut", own: false, mentions_me: false, ...extra };
 }
 
+function account(extra: Partial<TeamsAccount> = {}): TeamsAccount {
+  return {
+    key: "principal",
+    name: "Atelier",
+    level: "proprietaire",
+    enabled: true,
+    last_batch: NOW - MIN,
+    self_name: "Adrien Moreau",
+    extension_key: null,
+    drafts_waiting: 0,
+    owner_name: "",
+    ...extra,
+  };
+}
+
+/** Léa, sur le compte Atelier qu'Adrien lui partage. */
+function shared(level: TeamsAccount["level"] = "lire", extra: Partial<TeamsAccount> = {}): TeamsAccount {
+  return account({ level, owner_name: "Adrien Moreau", ...extra });
+}
+
 const view = (level: string, extra: Partial<ThreadView> = {}): ThreadView => ({
   now: NOW,
   selfName: "Adrien Moreau",
   caps: caps(level),
   owner: level === "proprietaire" ? "" : "Adrien Moreau",
+  // le compte de la discussion : le tien, ou celui qu'Adrien te partage à ce niveau
+  account: level === "proprietaire" ? account() : shared(level as TeamsAccount["level"]),
   editing: "",
   pending: [],
   ...extra,
@@ -249,3 +288,92 @@ describe("ce qui reste du champ une fois le message parti", () => {
     expect(withoutSent("", "Je regarde ça")).toBeNull();
   });
 });
+
+// ── Audit du 2026-11-05 ─────────────────────────────────────────────────
+
+describe("un tête-à-tête a un nom (F2-01)", () => {
+  it("le champ dit où l'on répond, et rien de vide quand la discussion n'a pas de nom", () => {
+    const base = { owner: "", asked: false, underWay: false, canPrefill: true, quiet: "", sending: false, caps: caps("proprietaire"), level: "proprietaire" };
+    expect(dock({ ...base, title: "Alice Fontaine" })).toContain('placeholder="Répondre dans « Alice Fontaine »…"');
+    const blank = dock({ ...base, title: "  " });
+    expect(blank).toContain('placeholder="Répondre…"');
+    expect(blank).not.toContain("« ");
+  });
+});
+
+describe("qui a écrit, sur un compte qu'on te partage (F2-02)", () => {
+  const adrien = msg({ own: true, author: "Adrien Moreau", author_id: "8:a", text: "Oui, je regarde ça ce soir." });
+  it("« Toi » seulement sur un compte à toi ; sinon la personne du compte, ou son propriétaire", () => {
+    expect(authorLabel(adrien, account())).toBe("Toi");
+    expect(authorLabel(adrien, shared())).toBe("Adrien Moreau");
+    expect(authorLabel(adrien, shared("lire", { self_name: "" }))).toBe("Adrien Moreau"); // son propriétaire
+    expect(authorLabel(adrien, null)).toBe("Adrien Moreau"); // un compte inconnu : jamais « Toi »
+    expect(authorLabel(msg({}), shared())).toBe("Marc Delmas");
+    expect(fromYou(adrien, account())).toBe(true);
+    expect(fromYou(adrien, shared("servir"))).toBe(false);
+  });
+  it("la bulle d'Adrien est à gauche, à son nom ; la tienne, à droite", () => {
+    const thread: Thread = { key: "19:marc", account: "principal", title: "Marc Delmas", kind: "dm", messages: [adrien], more: false, replies: [], under_way: false, asked: false };
+    const theirs = threadBody(thread, [], view("lire", { account: shared() }), false);
+    expect(theirs).not.toContain('class="tm-msg me');
+    expect(theirs).toContain("<b>Adrien Moreau</b>");
+    expect(theirs).not.toContain("<b>Toi</b>");
+    const mine = threadBody(thread, [], view("proprietaire", { account: account() }), false);
+    expect(mine).toContain('class="tm-msg me');
+    expect(mine).toContain("<b>Toi</b>");
+  });
+  it("la liste, les participants, et ce qu'on sait de ses réponses en lecture seule", () => {
+    const conv: Conversation = { key: "19:hebdo", account: "principal", title: "Point hebdo", kind: "group", last_at: NOW, messages: 3, last: { ...adrien, text: "J'ajoute le point" }, her: null };
+    expect(conversationRow(conv, "", NOW, false, shared())).toContain("Adrien : J&#39;ajoute le point");
+    expect(conversationRow(conv, "", NOW, false, account())).toContain("Toi : J&#39;ajoute le point");
+    const info = infoPane({ conv, selfName: "Adrien Moreau", people: [{ name: "Adrien Moreau", key: "8:a", own: true, count: 2 }], account: shared(), replies: [], now: NOW });
+    expect(info).toContain("<b>Adrien Moreau</b>");
+    expect(info).not.toContain("<b>Toi</b>");
+    expect(info).toContain("Ses réponses sur ce compte sont l'affaire d&#39;Adrien Moreau.");
+    expect(info).not.toContain("Elle n'a rien préparé");
+    const own = infoPane({ conv, selfName: "Adrien Moreau", people: [{ name: "Adrien Moreau", key: "8:a", own: true, count: 2 }], account: account(), replies: [], now: NOW });
+    expect(own).toContain("<b>Toi</b>");
+    expect(own).toContain("Elle n'a rien préparé dans cette discussion.");
+  });
+  it("« d'Adrien » : un seul `ofName`, que Mail réexporte", () => {
+    expect(ofName("Adrien Moreau")).toBe("d'Adrien Moreau");
+    expect(ofName("Léa")).toBe("de Léa");
+    expect(mailOfName).toBe(ofName);
+  });
+});
+
+describe("« Ses brouillons » sur un téléphone, et la route d'une réponse (F2-06, F1-08)", () => {
+  it("une carte par réponse : ses cellules se nomment, « Comment ça part » peut s'effacer", () => {
+    const html = repliesTable([reply()], { now: NOW, convs: new Map(), decide: () => true });
+    expect(html).toContain('class="tbl tm-replies"');
+    for (const cls of ["tm-r-conv", "tm-r-text", "tm-r-mode", "tm-r-state", "tm-r-when"]) expect(html).toContain(cls);
+  });
+  it("#teams/brouillons/<id> : la réponse désignée est surlignée", () => {
+    expect(replyHash("t0123456789ab")).toBe("#teams/brouillons/t0123456789ab");
+    const html = repliesTable([reply(), reply({ id: "r2" })], { now: NOW, convs: new Map(), decide: () => true, focus: "r2" });
+    expect(html).toContain('data-reply-row="r2" class="focus" aria-current="true"');
+    expect(html).not.toContain('data-reply-row="r1" class="focus"');
+  });
+});
+
+describe("répondu autrement (ADR 0199)", () => {
+  const answered = reply({ state: "refuse", answered: true, decided_at: NOW - 2 * MIN, preview: null, note: "Répondu autrement, dans la discussion même : cette réponse n'a plus lieu d'être." });
+  it("la carte le dit, sans plus rien à décider", () => {
+    const html = replyCard(answered, view("proprietaire"));
+    expect(html).toContain("Répondu autrement, dans la discussion : elle ne partira pas.");
+    expect(html).not.toContain("data-rep=");
+    // même avant que le moteur ne l'ait refusée
+    expect(replyCard(reply({ answered: true }), view("proprietaire"))).not.toContain("data-rep=");
+    expect(replyState(reply({ answered: true }))[1]).toBe("répondu autrement");
+    expect(replyState(answered)[1]).toBe("refusée · répondu autrement"); // « Ses brouillons » le dit, même sans la note
+  });
+  it("le fil la montre tant que rien n'est venu depuis ; « Ses brouillons » ne la fait plus envoyer", () => {
+    expect(threadCards([answered], NOW - 5 * MIN)).toEqual([answered]);
+    expect(threadCards([answered], NOW)).toEqual([]); // ton message est revenu dans le fil, après
+    expect(threadCards([reply({ id: "r9", state: "refuse" })], 0)).toEqual([]);
+    expect(threadCards([reply()], NOW)).toHaveLength(1); // en chemin : toujours
+    const html = repliesTable([reply({ answered: true })], { now: NOW, convs: new Map(), decide: () => true });
+    expect(html).not.toContain('data-rep="envoyer"');
+  });
+});
+

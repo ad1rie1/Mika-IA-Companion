@@ -33,7 +33,7 @@
 </div>
 {% endif %}
 {% if gear and gear|length == 1 %}{% set g = gear[0] %}<a class="btn quiet gear-link{{ ' on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ icon('settings') }}{{ g.title }}</a>
-{% elif gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
+{% elif gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet gear-link" title="Réglages et détails" aria-label="Réglages et détails">{{ icon('settings') }}Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
 {% endmacro %}
 {# Des filtres de petits choix (``quick`` : la période d'Humeur, 24 h ou 7 jours) : des boutons à choix au bout de la
    barre d'onglets, appliqués d'un clic (ADR 0176, la maquette). #}
@@ -41,12 +41,10 @@
 {% if quick %}<div class="tabs-tail">{% for q in quick %}<nav class="seg" aria-label="{{ q.label }}">{% for c in q.choices %}<a href="{{ c.href }}"{% if c.on %} aria-current="true"{% endif %}>{{ c.text }}</a>{% endfor %}</nav>{% endfor %}</div>{% endif %}
 {% endmacro %}
 {% macro head_and_body() %}
-{# le fil d'Ariane : sur une destination, sa rubrique d'abord (« Mika / Humeur et corps », ADR 0176) #}
-{% set rub = ((nav or [])|selectattr('active')|first) if rubric else none %}
-{# une rubrique qui porte le nom de sa destination (« À valider ») ne se dit qu'une fois #}
-{% set rub = none if rub and crumbs and rub.short == crumbs[0][0] else rub %}
-{% set trail = ([(rub.short, '')] if rub else []) + (crumbs or [])|list %}
-{% if trail %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in trail %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">/</span>{% endif %}{% endfor %}</nav>{% endif %}
+{# le fil d'Ariane, tel que la page l'a construit (``Pages.trail``, ADR 0177, 0202) : il part toujours de la rubrique du
+   menu (« Mika / Humeur et corps », « Activité / Projets / n° 257 », « Réglages / Personnage ») ; un retour (la liste
+   d'où l'on vient, ``crumbs_back``) se dit au bout, à part, sans remplacer le chemin #}
+{% if crumbs or crumbs_back %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs or [] %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">/</span>{% endif %}{% endfor %}{% if crumbs_back %}{% if crumbs %}<span aria-hidden="true">·</span>{% endif %}<a href="{{ crumbs_back[1] }}" class="crumbs-back"><span aria-hidden="true">←</span> {{ crumbs_back[0] }}</a>{% endif %}</nav>{% endif %}
 {% if fiche_head %}
 <div class="page-head fiche-head">{{ fiche_head }}<div class="fiche-head-side">{{ head_side() }}</div></div>
 {% else %}

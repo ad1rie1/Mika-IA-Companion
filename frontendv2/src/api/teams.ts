@@ -64,6 +64,7 @@ export interface UnderWay {
 export interface Conversation {
   key: string;
   account: string;
+  /** Son nom : celui de Teams, sinon (un tête-à-tête) l'autre personne ; vide si personne d'autre n'y a écrit. */
   title: string;
   kind: ConversationKind;
   last_at: number;
@@ -99,6 +100,9 @@ export interface Reply {
   edited: boolean;
   /** Une carte d'accord : jusqu'à quand elle vaut (0 : sans délai). */
   expires: number;
+  /** La personne du compte a répondu autrement dans la discussion : elle ne partira pas (ADR 0199) — refusée, ou
+   *  sur le point de l'être ; absent d'un moteur qui ne le dit pas. */
+  answered?: boolean;
   body: string;
   /** Ce qui est vraiment parti. */
   sent_text: string;

@@ -1,6 +1,6 @@
 """Les réveils par API (ADR 0068), côté application : ce que l'opérateur déclare, leurs clés, la porte.
 
-- *Ce que l'opérateur déclare* (Réglages › Plugins › Réveils par API) : un modèle de réglages, un enregistrement
+- *Ce que l'opérateur déclare* (Réveils par API › Paramètres, ADR 0206) : un modèle de réglages, un enregistrement
   par réveil ; le nom est la fin de son URL (``POST /api/wake/<nom>``), il ne change plus une fois créé.
 - *Les clés* : générées ici (``mwk_…``), montrées une seule fois ; seule leur empreinte est gardée (``Settings``).
 - *Le guichet* (le port ``wakeup``) : ce que la console lit et fait (une clé neuve, la retirer).
@@ -20,32 +20,28 @@ import hmac
 import itertools
 import json
 import re
-import secrets
-import time
-from collections import deque
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mika.adapters.web.gate import NOTHING, SlidingWindow, matches, new_key, presented, token_digest
 from mika.contracts import projects as projects_c
 from mika.contracts import wakeup as wakeup_c
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.forms import Knob
-from mika.ports.wakeup import (
+from mika.ports.gate import (
     ACCEPTED,
     BUSY,
     DISABLED,
     IGNORED,
     INVALID,
-    KEY_PREFIX,
     REFUSED,
     UNKNOWN,
-    Endpoint,
+    GateResult,
     KeyState,
-    WakeRequest,
-    WakeResult,
 )
+from mika.ports.wakeup import KEY_PREFIX, Endpoint, WakeRequest
 
 #: le nom d'un réveil : la fin de son URL
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
@@ -71,8 +67,6 @@ EVENT_LINE = "event: {event}"
 KEY, SIGNATURE = "cle", "signature"
 #: une clé d'idempotence, au plus
 IDEMPOTENCY_MAX = 100
-#: l'empreinte qu'on compare quand il n'y a rien à comparer (un réveil inconnu) : le même temps de calcul
-_NOTHING = hashlib.sha256(b"").hexdigest()
 
 
 class WakeEndpoint(BaseModel):
@@ -198,10 +192,6 @@ class WakeupConfig(BaseModel):
         return self
 
 
-def digest(key: str) -> str:
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
 def signature_of(key: str, body: bytes) -> str:
     """La signature d'un corps par une clé : HMAC-SHA256, en hexadécimal (celle de GitHub, Gitea, Forgejo)."""
     return hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
@@ -288,10 +278,6 @@ def call_text(data: Any, ep: WakeEndpoint, event: str = "") -> str:
     return clip(itertools.chain(head, [first], lines), limit)
 
 
-def new_key() -> str:
-    return KEY_PREFIX + secrets.token_urlsafe(32)
-
-
 class WakeupDesk:
     """Le guichet (le port ``wakeup``) et la porte des réveils. ``port`` (le ``KernelPort``) est relié après la
     construction du noyau, qui reçoit ce guichet parmi ses ports."""
@@ -301,9 +287,9 @@ class WakeupDesk:
         self.clock = clock
         self.port: Any = None
         #: ce qu'on ouvre quand il n'y a pas de clé chiffrée (un réveil inconnu, ou qui ne signe pas) : le même chemin
-        self._nothing = settings.box.seal(_NOTHING)
-        #: les appels acceptés de l'heure, par réveil (en mémoire : un redémarrage les oublie)
-        self._hour: dict[str, deque[float]] = {}
+        self._nothing = settings.box.seal(NOTHING)
+        #: les appels acceptés de l'heure, par réveil (en mémoire : un redémarrage les oublie) ; le plafond est le sien
+        self._hour = SlidingWindow(1, 3600.0)
         #: les plafonds se vérifient et l'appel se journalise d'un tenant : deux appels simultanés ne passent pas
         #: tous les deux sous un plafond qui n'en admet qu'un
         self._lock = asyncio.Lock()
@@ -329,25 +315,19 @@ class WakeupDesk:
     async def new_key(self, name: str, by: str) -> str:
         ep = self.settings.wakeup().endpoints.get(name)
         if ep is None:
-            raise ValueError("Réveil inconnu : déclare-le d'abord dans Réglages › Plugins › Réveils par API.")
-        key = new_key()
+            raise ValueError("Réveil inconnu : déclare-le d'abord dans Réveils par API › Paramètres.")
+        key = new_key(KEY_PREFIX)
         # un réveil signé garde aussi sa clé chiffrée : il faut la relire pour vérifier une signature
         sealed = self.settings.box.seal(key) if ep.signed else ""
-        await self.settings.save_wakeup_key(name, digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by,
+        await self.settings.save_wakeup_key(name, token_digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by,
                                             sealed=sealed)
         return key
 
-    async def revoke_key(self, name: str, by: str) -> bool:
+    async def revoke_key(self, name: str) -> bool:
         return await self.settings.revoke_wakeup_key(name)
 
     # ── la porte ──
-    def _recent(self, name: str, now: float) -> deque[float]:
-        window = self._hour.setdefault(name, deque())
-        while window and now - window[0] >= 3600:
-            window.popleft()
-        return window
-
-    async def call(self, req: WakeRequest) -> WakeResult:
+    async def call(self, req: WakeRequest) -> GateResult:
         async with self._lock:
             return await self._call(req)
 
@@ -356,12 +336,11 @@ class WakeupDesk:
         réveil signé, ``SIGNATURE``), sinon pas (``""``). Les deux se vérifient toujours, du même coût : rien ne dit
         si le nom existe, ni s'il signe."""
         wanted = str(stored.get("digest") or "") if ep is not None else ""
-        given = digest(req.key) if req.key.startswith(KEY_PREFIX) and len(req.key) <= 200 else _NOTHING
-        by_key = hmac.compare_digest(given, wanted or _NOTHING) and bool(wanted)
+        by_key = matches(presented(req.key, KEY_PREFIX), wanted)
         sealed = str(stored.get("sealed") or "") if ep is not None and ep.signed else ""
         # une copie qui ne s'ouvre plus (``secret.key`` changée) rend « » : jamais une signature par une clé vide
         secret = self.settings.box.open(sealed or self._nothing)
-        expected = signature_of(secret or _NOTHING, req.body)
+        expected = signature_of(secret or NOTHING, req.body)
         signature = req.signature.strip().lower().removeprefix("sha256=")
         by_signature = hmac.compare_digest(expected.encode(), signature.encode()) and bool(sealed) \
             and secret.startswith(KEY_PREFIX) and bool(signature)
@@ -369,46 +348,44 @@ class WakeupDesk:
             return ""
         return KEY if by_key else SIGNATURE if by_signature else ""
 
-    async def _call(self, req: WakeRequest) -> WakeResult:
+    async def _call(self, req: WakeRequest) -> GateResult:
         name = req.name
         cfg = self.settings.wakeup()
         ep = cfg.endpoints.get(name)
         keys = self.settings.wakeup_keys()  # lues dans tous les cas : le même chemin, que le nom existe ou non
         how = self._admits(req, ep, keys.get(name, {}))
         if not how or ep is None:
-            return WakeResult(UNKNOWN, "Réveil inconnu ou clé refusée.")
+            return GateResult(UNKNOWN, "Réveil inconnu ou clé refusée.")
         if not ep.enabled:
-            return WakeResult(DISABLED, "Ce réveil est désactivé.")
+            return GateResult(DISABLED, "Ce réveil est désactivé.")
         if req.event.strip().lower() in PINGS:
-            return WakeResult(IGNORED, "Rien à faire : c'est un « ping ».")
+            return GateResult(IGNORED, "Rien à faire : c'est un « ping ».", data={"call": None})
         text = call_text(req.data, ep, req.event.strip())
         if not text:
-            return WakeResult(INVALID, f"Un texte (le champ « text »), ou un objet JSON qui apporte quelque chose ; "
+            return GateResult(INVALID, f"Un texte (le champ « text »), ou un objet JSON qui apporte quelque chose ; "
                                        f"un « text » de {ep.max_chars} caractères au plus.")
         if self.port is None:
-            return WakeResult(REFUSED, "Elle n'est pas prête à recevoir des réveils.")
+            return GateResult(REFUSED, "Elle n'est pas prête à recevoir des réveils.")
         # signé, seul le corps est garanti (ni l'en-tête de la livraison, ni l'heure) : son empreinte est la clé
         # d'idempotence — une livraison rejouée, même sous un autre identifiant, rend le même appel
         idempotency = f"corps:{hashlib.sha256(req.body).hexdigest()[:40]}" if how == SIGNATURE else \
             req.idempotency[:IDEMPOTENCY_MAX]
         seen = self.port.wake_seen(name, idempotency)
         if seen is not None:  # un rejeu (le client n'a pas su que c'était reçu) : le même appel, hors plafonds
-            return WakeResult(ACCEPTED, "Déjà reçu.", call=seen)
-        now = time.monotonic()
-        self._hour = {n: w for n, w in self._hour.items() if n in cfg.endpoints}  # les réveils retirés s'oublient
-        window = self._recent(name, now)
-        if len(window) >= ep.per_hour:
-            return WakeResult(BUSY, f"Trop d'appels : {ep.per_hour} par heure au plus.",
-                              retry_after=max(1, int(3600 - (now - window[0]))))
+            return GateResult(ACCEPTED, "Déjà reçu.", data={"call": seen})
+        self._hour.keep(cfg.endpoints)  # les réveils retirés s'oublient
+        if self._hour.blocked(name, n=ep.per_hour):
+            return GateResult(BUSY, f"Trop d'appels : {ep.per_hour} par heure au plus.",
+                              retry_after=self._hour.wait_s(name))
         frame = self.port.kernel.mind.frame()
         if frame.get(wakeup_c.PENDING(name)) >= ep.max_pending:
-            return WakeResult(BUSY, f"Trop d'appels en attente : {ep.max_pending} au plus.", retry_after=60)
+            return GateResult(BUSY, f"Trop d'appels en attente : {ep.max_pending} au plus.", retry_after=60)
         if ep.project_id and frame.get(projects_c.STATUS(ep.project_id)) != projects_c.ACTIVE:
-            return WakeResult(REFUSED, "Le projet de ce réveil n'est pas actif.")
+            return GateResult(REFUSED, "Le projet de ce réveil n'est pas actif.")
         seq = await self.port.wake(name, label=ep.label, text=text, instructions=ep.instructions, plain=ep.plain,
                                    project=ep.project_id, bundles=ep.tools, rouse=ep.rouse, notify=ep.notify,
                                    lifetime_us=ep.lifetime_us, idempotency=idempotency)
         if seq is None:
-            return WakeResult(REFUSED, "L'appel n'a pas pu être journalisé.")
-        window.append(now)
-        return WakeResult(ACCEPTED, "Reçu.", call=seq)
+            return GateResult(REFUSED, "L'appel n'a pas pu être journalisé.")
+        self._hour.fail(name)  # seul un appel journalisé compte dans le plafond
+        return GateResult(ACCEPTED, "Reçu.", data={"call": seq})

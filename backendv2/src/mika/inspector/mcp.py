@@ -24,13 +24,12 @@ souvenir).
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer, loopback
+from mika.adapters.web.gate import matches, token_digest
 from mika.inspector.catalog import Builtin
 from mika.inspector.text import cell, render
 from mika.kernel.clock import US
@@ -205,7 +204,7 @@ class ConsoleHost:
             return "un mot à chercher, s'il te plaît"
         kinds = [kind] if kind else sorted(self.kernel.registry.subjects)
         lines = [f"- fiche:{k}/{f.key} — {f.title}{(' (' + f.subtitle + ')') if f.subtitle else ''}"
-                 for k in kinds for f in self.inspection.search(k, text, 20)]
+                 for k in kinds for f in self.inspection.search(k, text, 20, when=self.when)]
         return "\n".join(lines) or "rien trouvé"
 
     async def _fiche(self, kind: str, key: str, tab: str, params: dict[str, str]) -> Outcome:
@@ -241,7 +240,8 @@ def console_app(kernel: Kernel, digest: Callable[[], str], pages: ConsolePages |
     attendu (jamais le jeton), celle du jeton présenté lui est comparée en temps constant ; sans jeton défini, 404.
     ``pages`` : celles de la console (``inspector.app.assemble``), pour servir aussi ses pages et « pourquoi » ;
     ``served`` : ce qu'une opératrice lui fait servir ; ``network`` : vrai quand elle l'a ouvert au réseau
-    (ADR 0126), le jeton restant exigé."""
+    (ADR 0126), le jeton restant exigé. Sa réponse suit sa porte : seuls la boucle locale ou un jeton d'opérateur y
+    entrent, elle dit donc 404 sans jeton défini (``adapters/web/gate.py``, ADR 0213)."""
     host = ConsoleHost(kernel, pages, served)
 
     def resolve(scope: Mapping[str, Any]) -> Any:
@@ -250,8 +250,7 @@ def console_app(kernel: Kernel, digest: Callable[[], str], pages: ConsolePages |
         expected = digest()
         if not expected:
             return 404
-        given = hashlib.sha256(bearer(scope).encode()).hexdigest()
-        if not hmac.compare_digest(given, expected):
+        if not matches(token_digest(bearer(scope)), expected):
             return 401
         return host
 

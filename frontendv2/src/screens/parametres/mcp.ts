@@ -1,7 +1,8 @@
 /**
  * Paramètres › Services MCP (ADR 0192) : les services qu'elle a branchés — distants, par une adresse https —, à elle
- * seule. En brancher un (il naît avec une seule ligne d'accès, la sienne), le tester, choisir ses outils nouveaux ou
- * changés (coupé, il lit, il agit : ADR 0129), le régler, le retirer ; ses lignes d'accès, en lecture.
+ * seule. En brancher un (il naît avec une seule ligne d'accès, la sienne), le tester, régler chacun de ses outils
+ * (coupé, il lit, il agit : ADR 0129 — un outil nouveau ou changé attend son choix), le régler, le retirer ; ses lignes
+ * d'accès, en lecture. Ceux qu'on lui partage (ADR 0188), en lecture : « Partagé avec toi ».
  */
 import { ApiError } from "../../api/moi";
 import {
@@ -11,6 +12,7 @@ import {
   saveService,
   testService,
   type AccessLine,
+  type ReceivedService,
   type Service,
   type ServiceValues,
   type ToolChoice,
@@ -23,7 +25,7 @@ import { confirmModal, failureText, newNonce, toastFailure } from "./kit";
 import type { Host, Page } from "./page";
 import { openShareModal } from "./shares";
 import * as store from "./store";
-import { CHOICES, fieldErrors, serviceNameProblem, servedOf, stateWords, urlProblem, type FormValue } from "./words";
+import { CHOICES, fieldErrors, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
 
 const TAB = "#parametres/mcp";
 /** Les bornes de l'API pour brancher un service (`app/moi/mcp.py`, en caractères) : au-delà, elle refuse. */
@@ -36,17 +38,20 @@ function list(): Service[] {
   return store.services.value?.items ?? [];
 }
 
-function meName(): string {
-  return store.me.value?.name ?? "";
+/** Ceux qu'on lui partage. */
+function received(): ReceivedService[] {
+  return store.services.value?.received ?? [];
 }
 
-function whoWords(a: AccessLine): string {
-  return a.who === meName() ? "toi" : a.who || "tout le monde";
+/** Qui une ligne désigne : « toi » pour la tienne — l'API le dit (`mine`), jamais un nom comparé (deux personnes
+ *  peuvent porter le même, et le nom d'une identité n'est pas toujours celui du compte). */
+export function whoWords(a: AccessLine): string {
+  return a.mine ? "toi" : a.who || "tout le monde";
 }
 
-/** Avec qui il est partagé : ses lignes d'une autre personne que toi. */
-function sharedWith(s: Service): string {
-  return s.access.map((a) => a.who).filter((w) => w && w !== meName()).join(", ");
+/** Avec qui il est partagé : ses lignes qui ne sont pas la tienne. */
+export function sharedWith(s: Service): string {
+  return s.access.filter((a) => a.who && !a.mine).map((a) => a.who).join(", ");
 }
 
 const LEVEL_CLS: Record<string, string> = { seule: "ok", carte: "warn", toi: "warn", non: "off" };
@@ -76,33 +81,88 @@ function listView(): string {
     ${plugged ? "" : `<div class="info-line small">${ico("info", "sm")}<span>Les services ne sont pas branchés sur ce serveur.</span></div>`}
     ${table}
     <p class="small muted tbl-help">Un service que tu branches ici est distant ; lancer un service sur la machine de Mika reste aux opérateurs, dans la console. Ceux de Mika (le web…) n'apparaissent pas ici : <a href="#outils/services">Outils › Services</a>.</p>
+    ${receivedList()}
   </div>`;
+}
+
+// ── Partagé avec toi ─────────────────────────────────────────────────
+
+/** Ce que son niveau lui ouvre, en une phrase. */
+function receivedSentence(r: ReceivedService): string {
+  const owner = r.owner_name || "Son propriétaire";
+  const what = r.level === "servir"
+    ? "Mika s'en sert pour toi : ses outils qui lisent, et ceux qui agissent."
+    : "Mika s'en sert pour toi, seulement ses outils qui lisent.";
+  return `${owner} te l'a ouvert : ${shareWords(r.level).toLowerCase()}. ${what} Seul son propriétaire le règle.`;
+}
+
+function receivedCard(r: ReceivedService): string {
+  const [cls, state] = stateWords(r.state);
+  const tools = r.tools.length ? `${r.tools.length} outil${r.tools.length > 1 ? "s" : ""} servi${r.tools.length > 1 ? "s" : ""}` : "aucun outil servi";
+  return `<div class="acc-card"><span class="acc-ico c7">${ico("lock")}</span>
+    <div class="grow"><div class="row wrap"><b>${h(r.name)}</b><span class="muted">${h(ofName(r.owner_name || "son propriétaire"))}</span><span class="tag ${cls}">${h(state)}</span><span class="tag">${h(tools)}</span></div>
+      ${r.purpose ? `<p class="small text-2">${h(r.purpose)}</p>` : ""}<p class="small muted">${h(receivedSentence(r))}</p></div>
+    <a class="btn sm" href="${TAB}/${encodeURIComponent(r.name)}">Voir</a></div>`;
+}
+
+export function receivedList(items: readonly ReceivedService[] = received()): string {
+  if (!items.length) return "";
+  return `<h2 class="section-title shared-title">Partagé avec toi <span class="cnt">${items.length}</span></h2>
+    <div class="acc-cards">${items.map(receivedCard).join("")}</div>`;
+}
+
+/** La fiche d'un service qu'on lui partage, en lecture : ses outils servis, et ce que Mika en fait pour elle. */
+export function receivedFiche(r: ReceivedService): string {
+  const [cls, state] = stateWords(r.state);
+  const forYou = (choice: string) => (choice === "action" ? r.line.act_words : r.line.read_words) || "non";
+  const rows = r.tools
+    .map((t) => `<tr><td class="mono small">${h(t.remote)}</td><td class="small">${h(t.description || "—")}</td>
+      <td><span class="tag accent">${h(CHOICES.find(([k]) => k === t.choice)?.[1] ?? t.choice)}</span></td><td class="small">${h(forYou(t.choice))}</td></tr>`)
+    .join("");
+  const table = rows
+    ? `<table class="tbl"><thead><tr><th>Outil</th><th>Ce qu'il fait</th><th>Il</th><th>Pour toi, elle</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<p class="small muted">Son propriétaire n'en sert encore aucun outil.</p>`;
+  return `<div class="set-page">${backLink(TAB, "Services MCP")}
+    <div class="fiche-head"><span class="acc-ico c7">${ico("lock")}</span><div class="grow"><h2>${h(r.name)}</h2><p class="muted">${h(`Service ${ofName(r.owner_name || "son propriétaire")}`)}</p></div><span class="tag ${cls}">${h(state)}</span></div>
+    ${r.purpose ? `<p class="lede">${h(r.purpose)}</p>` : ""}
+    <div class="info-line small">${ico("info", "sm")}<span>${h(receivedSentence(r))} Ce qu'elle en lit, elle le garde : ${h(r.line.keep_words || "rien")}.</span></div>
+    ${section("Ses outils servis", `<div class="set-row full">${table}</div>`, { single: true })}</div>`;
 }
 
 // ── La fiche ─────────────────────────────────────────────────────────
 
-function toolsTable(s: Service): string {
+/**
+ * Ses outils, chacun réglable ici : coupé, il lit, ou il agit (ADR 0129). Un outil déjà choisi montre son choix ; un
+ * outil nouveau ou changé (suspendu tant qu'on ne l'a pas regardé) n'en montre pas — le choisir, même comme avant, le
+ * décide. N'en part que ce qui a bougé (`splitChanges`).
+ */
+export function toolsTable(s: Service): string {
   if (!s.tools.length) {
     return `<div class="set-row full"><p class="small muted">${s.state === "connecte" ? "Ce service ne propose aucun outil." : "Ses outils se lisent quand il répond : teste-le."}</p></div>`;
   }
   const rows = s.tools
     .map((t) => {
       const waiting = t.new || t.changed;
-      const state = t.new ? '<span class="tag info">nouveau</span>' : t.changed ? '<span class="tag warn">changé</span>' : t.choice === "non" ? '<span class="tag">coupé</span>' : '<span class="tag ok">servi</span>';
-      const choice = waiting
-        ? seg(`${TOOL}${t.remote}`, CHOICES, t.new ? "" : t.choice)
-        : `<span class="tag ${t.choice === "non" ? "" : "accent"}">${h(CHOICES.find(([k]) => k === t.choice)?.[1] ?? "—")}</span>`;
+      const before = CHOICES.find(([k]) => k === t.choice)?.[1];
+      const state = t.new
+        ? '<span class="tag info">nouveau</span>'
+        : t.changed
+          ? `<span class="tag warn">changé</span>${before ? `<div class="tiny muted">avant : ${h(before.toLowerCase())}</div>` : ""}`
+          : t.choice === "non"
+            ? '<span class="tag">coupé</span>'
+            : '<span class="tag ok">servi</span>';
+      const choice = seg(`${TOOL}${t.remote}`, CHOICES, waiting ? "" : t.choice);
       return `<tr><td class="mono small">${h(t.remote)}${t.name ? `<div class="tiny muted">${h(t.name)}</div>` : ""}</td><td class="small">${h(t.description || "—")}</td><td>${state}</td><td>${choice}</td></tr>`;
     })
     .join("");
   return `<div class="set-row full"><table class="tbl"><thead><tr><th>Outil</th><th>Ce qu'il fait</th><th>État</th><th>Ton choix</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="small muted tbl-help">Un outil nouveau ou changé attend ton choix : coupé, il lit, ou il agit (ce qu'il change ailleurs, Mika te le demande d'abord). Un choix fait se change dans la console, par un opérateur.</p></div>`;
+    <p class="small muted tbl-help">Chaque outil se règle ici : coupé, il lit, ou il agit (ce qu'il change ailleurs, Mika te le demande d'abord). Un outil nouveau ou changé ne sert pas tant que tu ne l'as pas choisi.</p></div>`;
 }
 
 function accessTable(s: Service): string {
   const lv = (code: string, words: string) => `<span class="lv ${LEVEL_CLS[code] ?? "off"}">${h(words)}</span>`;
   const rows = s.access
-    .map((a, i) => `<tr><td class="muted">${i + 1}</td><td>${h(whoWords(a))}${a.who && a.who !== meName() ? ' <span class="tag accent">partage</span>' : ""}</td><td class="small">${h(a.when || "toujours")}</td>
+    .map((a, i) => `<tr><td class="muted">${i + 1}</td><td>${h(whoWords(a))}${a.who && !a.mine ? ' <span class="tag accent">partage</span>' : ""}</td><td class="small">${h(a.when || "toujours")}</td>
       <td>${lv(a.read, a.read_words)}</td><td>${lv(a.act, a.act_words)}</td><td class="small">${h(a.keep_words)}</td></tr>`)
     .join("");
   const d = s.default;
@@ -116,7 +176,9 @@ function accessTable(s: Service): string {
 function ficheView(name: string, host: Host): string {
   const s = list().find((x) => x.name === name);
   if (!s) {
-    return `<div class="set-page">${backLink(TAB, "Services MCP")}<div class="empty">${ico("server")}<b>Service introuvable</b><p>Il n'est pas parmi les tiens.</p></div></div>`;
+    const shared = received().find((x) => x.name === name);
+    if (shared) return receivedFiche(shared);
+    return `<div class="set-page">${backLink(TAB, "Services MCP")}<div class="empty">${ico("server")}<b>Service introuvable</b><p>Il n'est pas parmi les tiens, ni parmi ceux qu'on te partage.</p></div></div>`;
   }
   const [cls, state] = stateWords(s.state);
   const active = host.sub("mcp", "service");
@@ -242,7 +304,7 @@ export function splitChanges(changes: Record<string, FormValue>): { choices: Rec
 
 export const mcpPage: Page = {
   id: "mcp",
-  needs: () => [store.services, store.me],
+  needs: () => [store.services],
   view(item, host) {
     return item ? ficheView(item, host) : listView();
   },
@@ -279,6 +341,6 @@ export const mcpPage: Page = {
     }
   },
   search() {
-    return list().map((s) => ({ group: "Paramètres", title: `Service « ${s.name} »`, sub: s.purpose, icon: "server" as const, route: `${TAB}/${encodeURIComponent(s.name)}` }));
+    return [...list(), ...received()].map((s) => ({ group: "Paramètres", title: `Service « ${s.name} »`, sub: s.purpose, icon: "server" as const, route: `${TAB}/${encodeURIComponent(s.name)}` }));
   },
 };

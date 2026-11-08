@@ -231,6 +231,11 @@ class ToolSpec:
     #: compte, ADR 0185) : il lui est offert même quand sa famille ne l'ouvre pas — le gestionnaire ne lui montre que
     #: ce qui est à elle ; ``frame`` peut manquer (une console qui juge sans lui : rien n'est à personne)
     owned: Callable[[Any, str, Any], bool] | None = None
+    #: ce qu'il fait, dit en quelques mots à la personne qui lit ses droits (« Te promettre un rappel ») : la
+    #: description est écrite pour le modèle, au « tu » qui la désigne, elle. Écrit dans ``persona/voix.yaml`` à côté
+    #: de sa description, exigé de chaque outil du code (ADR 0208) ; vide pour un outil venu d'ailleurs (un service,
+    #: une app), que sa description nomme. Le dernier champ, avec un défaut : rien ne le construit par position.
+    label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,10 +304,9 @@ class InspectSpec:
     order: int = 100
     #: un onglet de la fiche de ce type d'objet (``person``, ``goal``…)
     subject: str = ""
-    #: l'ancien paramètre qui portait la clé de l'objet (``?handle=``) : redirection
-    subject_param: str = ""
-    #: ce qui demande une action : ``fn(tranche, frame) -> int | (int, texte)`` ; s'il déclare ``ports``, il
-    #: les reçoit en lecture (ce qu'il compte vit hors de la tranche : le magasin)
+    #: ce qui demande une action : ``fn(tranche, frame) -> int | (int, texte)`` ; le texte dit ce que compte le
+    #: nombre sans le redire (l'accueil les montre côte à côte : « 3 · … · attendent ton accord ») ; s'il déclare
+    #: ``ports``, il les reçoit en lecture (ce qu'il compte vit hors de la tranche : le magasin)
     badge: Callable[..., Any] | None = None
     description: str = ""
     #: hors de la navigation (joignable par lien seulement) : sa destination n'en fait pas un onglet
@@ -675,13 +679,14 @@ class Faculty(Generic[S, Pm]):
         deferrable: bool = False,
         needs: str = "",
         owned: Callable[[Any, str, Any], bool] | None = None,
+        label: str = "",
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs, owned=owned,
+                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs, owned=owned, label=label,
                 )
             )
             return fn
@@ -736,7 +741,7 @@ class Faculty(Generic[S, Pm]):
 
     # ── exploitation (la console) ──
     def inspect(self, name: str, *, title: str = "", params: Iterable[tuple[str, str] | Param] = (),
-                section: str = "", order: int = 100, subject: str = "", subject_param: str = "",
+                section: str = "", order: int = 100, subject: str = "",
                 badge: Callable[..., Any] | None = None, description: str = "", hidden: bool = False,
                 shown: Callable[..., Any] | None = None):
         """Une vue de la console : ``fn(tranche, frame, ctx) -> Sequence[Block]``,
@@ -747,7 +752,7 @@ class Faculty(Generic[S, Pm]):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.inspectors.append(InspectSpec(
                 self.name, name, fn, title or name, tuple((p.name, p.label) for p in typed), typed, section,
-                order, subject, subject_param, badge, description, hidden, shown))
+                order, subject, badge, description, hidden, shown))
             return fn
 
         return deco

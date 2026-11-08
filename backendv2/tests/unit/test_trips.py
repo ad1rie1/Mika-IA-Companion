@@ -179,6 +179,47 @@ def test_the_actions_refuse_what_is_not_hers_and_what_goes_beyond(tmp_path, monk
     assert out["hors de la Terre"].errors  # la borne du formulaire
 
 
+def test_an_operator_removes_a_trip_from_its_person_s_fiche_and_does_nothing_else(tmp_path):
+    """La console (ADR 0204) : un opérateur supprime un voyage depuis la fiche de sa personne (``subject``) — ni hors de
+    cette fiche, ni rien d'autre que le supprimer (le voyage se prépare à deux) ; une personne qui n'est pas opératrice,
+    jamais ; chaque geste audité, celui qui supprime au nom de l'opérateur, sur la personne."""
+
+    async def on(kernel, key: str, *, by: str, subject: str, fixed, **values):
+        return await perform(kernel, key, form(fixed, **values), by=by, subject=subject)
+
+    async def scenario(kernel, deliveries):
+        theirs, [stop] = await trip_with_stops(kernel, ("Annecy", 45.8992, 6.1294, 1), by=BEA)
+        mine, _ = await trip_with_stops(kernel)
+        out = {
+            "hors de sa fiche": await on(kernel, "trips.supprimer", by=ADRIEN, subject="", fixed={"trip": theirs}),
+            "sur une autre fiche": await on(kernel, "trips.supprimer", by=ADRIEN, subject=ADRIEN,
+                                            fixed={"trip": theirs}),
+            "le modifier": await on(kernel, "trips.modifier", by=ADRIEN, subject=BEA, fixed={"trip": theirs},
+                                    title="À moi"),
+            "retirer un arrêt": await on(kernel, "trips.retirer_arret", by=ADRIEN, subject=BEA,
+                                         fixed={"trip": theirs, "stop": stop}),
+            "béa, sur la fiche d'adrien": await on(kernel, "trips.supprimer", by=BEA, subject=ADRIEN,
+                                                   fixed={"trip": mine}),
+        }
+        kept = {trip: len(t.stops) for trip, t in state(kernel).trips.items()}
+        done = await on(kernel, "trips.supprimer", by=ADRIEN, subject=BEA, fixed={"trip": theirs})
+        return out, kept, done, state(kernel), journal(kernel, c.REMOVED, rt.OPERATED), theirs, mine
+
+    out, kept, done, s, events, theirs, mine = live(tmp_path, scenario)
+    assert all(not got.ok and got.message == "Ce voyage n'existe pas." for got in out.values()), \
+        {k: v.message for k, v in out.items()}
+    assert kept == {theirs: 1, mine: 0}  # rien n'a bougé
+    assert done.ok and done.message == "Voyage supprimé." and set(s.trips) == {mine}
+    [removed] = [e for e in events if e.type.name == c.REMOVED.name]
+    assert (removed.data.trip, removed.data.person, removed.data.by) == (theirs, BEA, ADRIEN)
+    audits = [e.data for e in events if e.type.name == rt.OPERATED.name]
+    # chaque essai audité, les refus aussi ; la suppression, sur la personne, avec ce qu'elle a écrit
+    assert [(a.by, a.subject, a.outcome) for a in audits if a.action == "trips.supprimer"] == \
+        [(ADRIEN, "", "refused"), (ADRIEN, ADRIEN, "refused"), (BEA, ADRIEN, "refused"), (ADRIEN, BEA, "done")]
+    assert audits[-1].seqs == (removed.seq,)
+    assert [a.outcome for a in audits if a.action in ("trips.modifier", "trips.retirer_arret")] == ["refused"] * 2
+
+
 def test_reordering_a_day_moves_each_stop_once_and_lands_on_the_order(tmp_path):
     assert moves(["a", "b", "c", "d"], ["a", "c", "b", "d"]) == [("c", 1)]
     assert moves(["a", "b", "c"], ["a", "b", "c"]) == []

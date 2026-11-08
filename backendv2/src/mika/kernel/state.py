@@ -130,9 +130,6 @@ def _sort_key(k: Any) -> tuple[str, Any]:
     return (type(k).__name__, k)
 
 
-EMPTY: FrozenDict[Any, Any] = FrozenDict()
-
-
 @dataclass(frozen=True, slots=True)
 class Root:
     """Une racine d'état : immuable, épinglée par les frames.

@@ -10,7 +10,24 @@ import { clock, dayAndClock, shortWhen } from "../chat/markup";
 import { TEAMS_LIMITS, type Conversation, type Reply, type TeamsAccount, type TeamsMessage, type Thread } from "../../api/teams";
 import { ago, avatar, caps, firstName, levelTag, markToFill, type Caps } from "../mail/format";
 import { countSpan } from "../mail/markup";
-import { cardState, fromHer, kindLabel, messageHtml, modeLabel, modeTitle, replyState, retouched, threadMarks, UNDER_WAY, type OwnBubble } from "./format";
+import { ofName } from "../../shared/names";
+import {
+  authorLabel,
+  cardState,
+  fromHer,
+  fromYou,
+  kindLabel,
+  messageHtml,
+  modeLabel,
+  modeTitle,
+  ownAccount,
+  replyState,
+  retouched,
+  threadCards,
+  threadMarks,
+  type AccountWho,
+  type OwnBubble,
+} from "./format";
 
 export type Filter = "tout" | "elle" | "mentions";
 
@@ -34,11 +51,14 @@ function herMark(state: string): string {
   return `<span class="mk">${ico("pen")}${h(label)}</span>`;
 }
 
-export function conversationRow(c: Conversation, selected: string, now: number, many: boolean, accountName: string): string {
+/** Une discussion de la liste ; `account` : son compte (son nom quand il y en a plusieurs, et qui y est « Toi »). */
+export function conversationRow(c: Conversation, selected: string, now: number, many: boolean, account: (AccountWho & Pick<TeamsAccount, "name">) | null): string {
   const last = c.last;
-  const who = last ? (last.own ? "Toi : " : c.kind !== "dm" ? `${firstName(last.author)} : ` : "") : "";
+  // dans un tête-à-tête, l'autre n'a pas besoin d'être nommé ; la personne du compte, si (« Toi », ou son nom sur un
+  // compte qu'on te partage)
+  const who = last ? (last.own ? `${firstName(authorLabel(last, account))} : ` : c.kind !== "dm" ? `${firstName(last.author)} : ` : "") : "";
   const marks = [
-    many ? `<span class="box-mark">${ico("teams", "xs")}${h(accountName)}</span>` : "",
+    many ? `<span class="box-mark">${ico("teams", "xs")}${h(account?.name ?? c.account)}</span>` : "",
     c.her ? herMark(c.her.state) : "",
     last?.mentions_me ? '<span class="badge soft" title="On t\'a mentionné">@</span>' : "",
   ].join("");
@@ -63,6 +83,9 @@ export interface ThreadView {
   selfName: string;
   caps: Caps;
   owner: string;
+  /** Le compte de la discussion : qui y est « Toi » (le tien), ou la personne d'un compte qu'on te partage ; `null`
+   *  (pas encore lu) : personne n'y est « Toi ». */
+  account: AccountWho | null;
   /** La réponse qu'on retouche ici (son identifiant). */
   editing: string;
   /** Ce que tu as écrit et qui n'est pas (encore) dans le fil : en file, en cours d'envoi, posé, ou pas parti
@@ -72,10 +95,12 @@ export interface ThreadView {
 
 function message(m: TeamsMessage, mark: { day: string; suite: boolean }, v: ThreadView, replies: readonly Reply[]): string {
   const day = mark.day ? `<div class="day"><span>${h(mark.day)}</span></div>` : "";
-  const name = m.own ? "Toi" : m.author || "?";
+  const name = authorLabel(m, v.account);
+  // à droite seulement ce que tu as écrit, sur un compte à toi : sur un compte qu'on te partage, c'est son propriétaire
+  const me = fromYou(m, v.account);
   const suite = mark.suite;
-  return `${day}<div class="tm-msg${m.own ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}">
-    ${m.own || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name)}
+  return `${day}<div class="tm-msg${me ? " me" : ""}${suite ? " suite" : ""}${m.mentions_me ? " mention" : ""}">
+    ${me || suite ? '<span class="tm-gut"></span>' : avatar(name, "sm", m.author_id || name)}
     <div class="tm-body">${suite ? "" : `<div class="tm-meta"><b>${h(name)}</b><time title="${h(dayAndClock(m.at, v.now))}">${h(clock(m.at))}</time></div>`}
       ${m.text ? `<div class="tm-txt">${messageHtml(m.text, v.selfName, m.mentions_me)}</div>` : ""}
       ${fromHer(m, replies) ? `<div class="by-mika">${ico("sparkle")}rédigé avec Mika</div>` : ""}</div></div>`;
@@ -91,8 +116,18 @@ function pendingMessage(p: OwnBubble, v: ThreadView): string {
       <div class="tm-pending-note">${ico(p.failed ? "alert" : "clock", "xs")}<span>${h(p.note)}</span>${again}</div></div></div>`;
 }
 
+/** Sa réponse, quand on a répondu autrement dans la discussion (ADR 0199) : elle ne partira pas, et la carte le dit. */
+function answeredCard(r: Reply): string {
+  const text = r.preview?.text ?? r.body;
+  return `<div class="tm-draft done" data-reply-card="${h(r.id)}">
+    <div class="tm-draft-head">${mikaAvatar("xs")}<b>Mika avait préparé une réponse</b><span class="tag">refusée</span><span class="muted small">${h(clock(r.decided_at || r.at))}</span></div>
+    ${text ? `<p class="tm-draft-text">« ${markToFill(h(text)).replace(/\n/g, "<br>")} »</p>` : ""}
+    <p class="tm-draft-why">${ico("check", "xs")}<span>Répondu autrement, dans la discussion : elle ne partira pas.</span></p></div>`;
+}
+
 /** Une réponse d'elle en chemin, dans sa conversation. */
 export function replyCard(r: Reply, v: ThreadView): string {
+  if (r.answered) return answeredCard(r);
   const [tone, label] = cardState(r);
   const waiting = r.state === "attend";
   const text = r.preview?.text ?? r.body;
@@ -125,7 +160,7 @@ export function threadBody(t: Thread, older: readonly TeamsMessage[], v: ThreadV
     : messages.length
       ? '<div class="tm-sys tm-start">Le début de ce que l\'extension a vu de cette discussion</div>'
       : "";
-  const cards = t.replies.filter((r) => UNDER_WAY.has(r.state)).map((r) => replyCard(r, v)).join("");
+  const cards = threadCards(t.replies, messages.length ? messages[messages.length - 1].at : 0).map((r) => replyCard(r, v)).join("");
   const body = messages.length
     ? messages.map((m, i) => message(m, marks[i], v, t.replies)).join("")
     : `<div class="empty tm-empty">${ico("teams")}<b>Rien encore</b><p>L'extension n'a rien vu passer dans cette discussion.</p></div>`;
@@ -172,7 +207,7 @@ export function dock(v: DockView): string {
     return `${asked}<div class="tm-readonly">${ico("lock", "sm")}<span>${h(text)}</span>${v.caps.prepare ? `<button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill && !v.underWay ? "" : ` disabled${v.prefillOff ? ` title="${h(v.prefillOff)}"` : ""}`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}</div>`;
   }
   return `${asked}${quiet}<div class="composer tm-cmp">
-    <textarea rows="2" data-tm-input placeholder="Répondre dans « ${h(v.title)} »…" aria-label="Ton message" maxlength="${TEAMS_LIMITS.body}"></textarea>
+    <textarea rows="2" data-tm-input placeholder="${v.title.trim() ? `Répondre dans « ${h(v.title.trim())} »…` : "Répondre…"}" aria-label="Ton message" maxlength="${TEAMS_LIMITS.body}"></textarea>
     <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-tm="emoji" title="Emojis">${ico("smile")}</button>
       <button class="btn sm mika" type="button" data-tm="preremplir"${v.canPrefill ? "" : ` disabled title="${h(v.prefillOff || "Aucun message reçu à quoi répondre")}"`}>${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>
       <span class="grow"></span>${countSpan("", TEAMS_LIMITS.body)}<span class="small muted cmp-hint">${ico("external", "xs")}partira par l'extension, dans Teams, en ton nom</span>
@@ -189,6 +224,15 @@ export interface InfoView {
   now: number;
 }
 
+/** Un participant vu : « Toi » sur un compte à toi (le rond à ton nom) ; la personne d'un compte qu'on te partage, à
+ *  son nom ; les autres, à leur nom. */
+function participant(p: InfoView["people"][number], v: InfoView): string {
+  const label = authorLabel({ own: p.own, author: p.name }, v.account);
+  const yours = p.own && ownAccount(v.account);
+  const face = yours ? v.selfName || label : label;
+  return `<li>${avatar(face, "sm", yours ? v.selfName || p.key : p.key)}<div><b>${h(label)}</b><small>${p.count} message${p.count > 1 ? "s" : ""} dans ce qui est chargé</small></div></li>`;
+}
+
 export function infoPane(v: InfoView): string {
   const a = v.account;
   const level = a ? levelTag(a.level) : "";
@@ -197,18 +241,24 @@ export function infoPane(v: InfoView): string {
     acc[label] = (acc[label] ?? 0) + 1;
     return acc;
   }, {});
+  // en lecture seule, l'API ne dit rien de ses réponses (ADR 0188) : on n'en sait rien, ce n'est pas qu'il n'y en a pas
+  const hers = a && !caps(a.level).prepare
+    ? `<p class="small muted">Ses réponses sur ce compte sont l'affaire ${h(ofName(a.owner_name) || "de son propriétaire")}.</p>`
+    : Object.keys(states).length
+      ? `<p class="small text-2">${Object.entries(states).map(([k, n]) => `${n} ${h(k)}`).join(" · ")}</p>`
+      : '<p class="small muted">Elle n\'a rien préparé dans cette discussion.</p>';
   return `<div class="pane-head"><h2>Informations</h2><span class="grow"></span>
       <button class="btn icon ghost sm" type="button" data-info title="Fermer">${ico("x", "sm")}</button></div>
     <div class="pane-scroll tm-info-body">
       <h4>Participants vus <span class="cnt">${v.people.length}</span></h4>
-      ${v.people.length ? `<ul class="tm-people">${v.people.map((p) => `<li>${avatar(p.own ? v.selfName || "Toi" : p.name, "sm", p.own ? v.selfName || p.key : p.key)}<div><b>${h(p.own ? "Toi" : p.name)}</b><small>${p.count} message${p.count > 1 ? "s" : ""} dans ce qui est chargé</small></div></li>`).join("")}</ul>` : '<p class="small muted">Personne encore.</p>'}
+      ${v.people.length ? `<ul class="tm-people">${v.people.map((p) => participant(p, v)).join("")}</ul>` : '<p class="small muted">Personne encore.</p>'}
       <h4>La discussion</h4>
       <p class="small text-2">${h(kindLabel(v.conv.kind))} · ${v.conv.messages} message${v.conv.messages > 1 ? "s" : ""} vus par l'extension</p>
       ${a ? `<h4>Le compte</h4>
       <p class="small text-2">${h(a.name)}${a.self_name ? ` · ${h(a.self_name)} dans Teams` : ""}${level ? ` · partagé avec toi par ${h(a.owner_name)} (${h(level)})` : ""}</p>
       <p class="small text-2">${ico("plug", "xs")} Extension : ${a.last_batch ? `dernier lot ${h(ago(a.last_batch, v.now))}` : "jamais branchée"}${a.extension_key ? ` · clé ${h(a.extension_key.hint)}…` : ""}</p>` : ""}
       <h4>Ses réponses ici</h4>
-      ${Object.keys(states).length ? `<p class="small text-2">${Object.entries(states).map(([k, n]) => `${n} ${h(k)}`).join(" · ")}</p>` : '<p class="small muted">Elle n\'a rien préparé dans cette discussion.</p>'}
+      ${hers}
     </div>`;
 }
 
@@ -218,8 +268,12 @@ export interface RepliesView {
   now: number;
   convs: ReadonlyMap<string, Conversation>;
   decide: (r: Reply) => boolean;
+  /** La réponse qu'une route désigne (`#teams/brouillons/<id>`) : surlignée. */
+  focus?: string;
 }
 
+/** « Ses brouillons » : un tableau ; sur un téléphone (sous 760 px), une carte par réponse — sa discussion et son
+ *  état, ce qu'elle a écrit, puis quand et le geste (« Comment ça part » s'y efface). */
 export function repliesTable(items: readonly Reply[], v: RepliesView): string {
   const lede = `<p class="lede">Ce que Mika a préparé ou envoyé dans Teams à ta place, et ce que c'est devenu. Tu relis et tu décides ici. Comment ça part se règle par personne ou par discussion : brouillon posé dans Teams (c'est toi qui l'envoies), ton accord, ou seule.</p>`;
   if (!items.length) {
@@ -236,18 +290,20 @@ export function repliesTable(items: readonly Reply[], v: RepliesView): string {
         r.note ? `note : « ${r.note} »` : "",
         r.state === "parti" && retouched(r) && r.sent_text && r.body ? `elle avait écrit « ${r.body} »` : "",
       ].filter(Boolean);
-      const decide = r.state === "attend" && v.decide(r);
+      // répondu autrement : plus rien à décider, même avant que le moteur ne l'ait refusée (ADR 0199)
+      const decide = r.state === "attend" && !r.answered && v.decide(r);
       const blocked = !!(r.preview?.blocked || r.to_fill);
-      return `<tr data-reply-row="${h(r.id)}"><td><a href="#teams/discussions/${h(encodeURIComponent(r.conversation))}" class="row">${convAvatar(conv)}<b>${h(conv.title)}</b></a></td>
-        <td>« ${markToFill(h(shown))} »<div class="tiny muted">${h(notes.join(" · "))}</div></td>
-        <td class="small" title="${h(modeTitle(r.mode))}">${h(modeLabel(r.mode))}</td>
-        <td><span class="tag ${tone}">${h(label)}</span></td><td class="small nowrap">${h(dayAndClock(r.at, v.now))}</td>
+      const focus = v.focus === r.id ? ' class="focus" aria-current="true"' : "";
+      return `<tr data-reply-row="${h(r.id)}"${focus}><td class="tm-r-conv"><a href="#teams/discussions/${h(encodeURIComponent(r.conversation))}" class="row">${convAvatar(conv)}<b>${h(conv.title)}</b></a></td>
+        <td class="tm-r-text">« ${markToFill(h(shown))} »<div class="tiny muted">${h(notes.join(" · "))}</div></td>
+        <td class="small tm-r-mode" title="${h(modeTitle(r.mode))}">${h(modeLabel(r.mode))}</td>
+        <td class="tm-r-state"><span class="tag ${tone}">${h(label)}</span></td><td class="small nowrap tm-r-when">${h(dayAndClock(r.at, v.now))}</td>
         <td class="actions">${decide ? `<button class="btn xs primary" type="button" data-rep="envoyer" data-id="${h(r.id)}"${blocked || !r.preview ? " disabled" : ""}>Envoyer d'ici</button>
           <button class="btn xs icon ghost" type="button" data-rep="plus" data-id="${h(r.id)}" title="Retoucher, refuser…">${ico("more", "xs")}</button>` : ""}</td></tr>`;
     })
     .join("");
   return `<div class="fill-scroll"><div class="page-pad">${lede}
-    <table class="tbl"><thead><tr><th>Discussion</th><th>Ce qu'elle a écrit</th><th>Comment ça part</th><th>Où ça en est</th><th>Quand</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <table class="tbl tm-replies"><thead><tr><th>Discussion</th><th>Ce qu'elle a écrit</th><th>Comment ça part</th><th>Où ça en est</th><th>Quand</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /** La pastille de l'extension (en haut à droite) : ce que le serveur sait d'elle, son dernier lot. */

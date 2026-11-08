@@ -30,7 +30,6 @@ from mika.plugins.teams import (
     EXPIRED,
     FAILED,
     GONE,
-    KEEPER,
     MODE_OF,
     PLACED,
     QUEUED,
@@ -40,6 +39,7 @@ from mika.plugins.teams import (
     WAITING,
     TeamsState,
     accounts_here,
+    keeper,
     keeper_name,
     mode_of,
     owner_of,
@@ -80,7 +80,7 @@ def voice_text(voice: Voice, mode: str, *, own: bool = False) -> str:
     """Comment écrire dans Teams : à la place de la personne — ou en son nom, dans son propre compte (``own``, ADR
     0186) —, son ton, ses consignes, la signature."""
     # le nom réglé par un opérateur, ou à défaut celui que Teams donne (apporté par l'extension) : inerte
-    name = inert(voice.display_name, 60) or KEEPER
+    name = inert(voice.display_name, 60) or keeper()
     if own:
         lines = [phrase("teams.voice.own")]
     else:

@@ -2,7 +2,7 @@
 
 - la trame ``speech`` porte toujours ``attachments`` : ici, le fichier qu'elle a écrit (nom, sorte, taille,
   adresse de téléchargement, disponible) ;
-- le fil relu (``history``) le rend sous son message à elle ; ceux de la personne gardent ``{name, kind}`` ;
+- le fil relu (``history``) le rend sous son message à elle ; ceux de la personne gardent ``{name, kind}`` (ADR 0215 pour ses pièces gardées) ;
 - ``GET /files/<id>`` : avec le jeton de la personne, ses octets (à télécharger, jamais à afficher, sous une sorte
   sûre) ; avec un autre compte, le même 404 qu'un fichier inconnu ; sans compte, 401 ; un jeton à côté d'une
   ``Origin``, c'est un navigateur — seule sa session compte ; retiré, 410 ; un identifiant malformé, 404 ;

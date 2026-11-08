@@ -20,14 +20,15 @@ Trois projections T0 :
 Les pièces ont leur propre index de vecteurs (``attachment_vectors``) : un texte par pièce — son nom, ce qu'elle y a
 lu, ce qu'elle sait qui va avec. Une pièce gardée le reste (``keep_days`` à 0 : toujours), dans une place bornée par
 personne (``per_person_mb``) : au-delà, les plus anciennes sont retirées — leurs octets s'effacent, ce qu'elle en
-avait lu reste. Oublier une personne efface ses lignes, ses contenus, ses octets et ses vecteurs.
+avait lu reste. Un opérateur peut en retirer une à l'unité depuis la console (``attachments.retirer``,
+``inspect.py``, ADR 0205) : le même ``attachments.expired``, sa raison ``operator``. Oublier une personne efface ses
+lignes, ses contenus, ses octets et ses vecteurs.
 """
 
 from __future__ import annotations
 
 import functools
 import hashlib
-import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
@@ -476,18 +477,6 @@ def carriers(store: Any, file: str) -> list[tuple[int, int, str | None]]:
         select(m.c.message, m.c.at, m.c.room).where(m.c.file == file).order_by(m.c.message))]
 
 
-def files_of_messages(store: Any, seqs: Sequence[int]) -> dict[int, list[str]]:
-    """Message → les pièces qu'il porte, dans l'ordre."""
-    if store is None or not seqs:
-        return {}
-    m = carried_table()
-    out: dict[int, list[str]] = {}
-    for s, f in store.query_mind(select(m.c.message, m.c.file).where(m.c.message.in_(list(seqs)))
-                                 .order_by(m.c.message, m.c.idx)):
-        out.setdefault(int(s), []).append(str(f))
-    return out
-
-
 def links(store: Any, files: Sequence[str]) -> dict[str, list[tuple[int, str]]]:
     """Pièce → ses liens (élément, qui l'a relié), du plus ancien au plus récent."""
     if store is None or not files:
@@ -498,6 +487,13 @@ def links(store: Any, files: Sequence[str]) -> dict[str, list[tuple[int, str]]]:
                                         .order_by(ln.c.at, ln.c.item)):
         out.setdefault(str(f), []).append((int(item), str(by)))
     return out
+
+
+def holder(state: AttachmentsState, file: str) -> str | None:
+    """L'adresse qui garde cette pièce, ses octets là (``None`` : retirée, pas encore lue, ou inconnue) — ce qu'un
+    opérateur peut retirer (ADR 0205)."""
+    return next((handle for handle, files in state.kept.items()
+                 if any(v.file == file and v.stored for v in files)), None)
 
 
 def usage(store: Any) -> dict[str, tuple[int, int]]:
@@ -726,11 +722,3 @@ def file_id(handle: str, data: bytes) -> str:
     """La clé d'une pièce : la même photo renvoyée par la même adresse est la même pièce (une autre adresse en a
     une autre — oublier l'une n'efface pas la pièce de l'autre)."""
     return hashlib.blake2b(f"piece:{handle}:".encode() + hashlib.sha256(data).digest(), digest_size=16).hexdigest()
-
-
-def decode_list(raw: Any) -> list[Any]:
-    try:
-        got = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return []
-    return got if isinstance(got, list) else []

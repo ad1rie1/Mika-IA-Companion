@@ -1,16 +1,32 @@
-"""La console des fichiers envoyés : un onglet « Fichiers » sur la fiche d'une personne, et la fiche d'un fichier
-(d'où un opérateur peut le télécharger)."""
+"""La console des fichiers envoyés : un onglet « Fichiers » sur la fiche d'une personne, leur vue d'ensemble (Mémoire ›
+Fichiers envoyés : ce qu'elle a envoyé à tout le monde), et la fiche d'un fichier, d'où un opérateur peut le
+télécharger ou le retirer (ADR 0205).
+
+Retirer (``shares.retirer``, confirmé, audité comme toute action) fait ce que fait la rétention, pour un seul
+fichier : ``shares.expired``, sa raison ``operator`` ; ses octets s'effacent après le commit, sa ligne reste,
+« retiré par un opérateur ». L'action est posée sur la fiche du fichier (``subject``) ; les onglets dessinés la posent
+aussi sur sa ligne, le fichier pour objet."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select
+from pydantic import BaseModel
 
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import shares as c
-from mika.faculties.shares.faculty import PORT, SHARES, FileRow, SharesState, of_people, row, table
+from mika.faculties.shares.faculty import (
+    PORT,
+    SHARES,
+    FileRow,
+    SharesState,
+    count,
+    holder,
+    of_people,
+    recent,
+    row,
+)
 from mika.faculties.shares.tools import size_words
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -28,22 +44,41 @@ from mika.kernel.inspect import (
     Text,
     When,
 )
+from mika.kernel.operate import ActionContext, Done, Refused
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
 from mika.vocab.people import is_internal
 
 PAGE = 25
 KIND = "partage"
+#: « Retirer » un fichier (ADR 0205) : sur sa fiche, et sur sa ligne dans les onglets dessinés
+REMOVE = "shares.retirer"
+#: ce que dit la ligne d'un fichier qu'un opérateur a retiré
+BY_OPERATOR = "retiré par un opérateur"
+KIND_LABELS = {c.FILE: "document", c.IMAGE: "image"}
+GONE = "Ce fichier n'est plus là : déjà retiré, ou sa personne oubliée."
+CAPTION = ("« pas parti » : un fichier préparé dont le message n'est jamais parti (une réponse supplantée, ou tue) — "
+           "la rétention le retirera. « retiré » : trop vieux, ou la place de la personne dépassée ; « retiré par un "
+           "opérateur » : depuis la console. Ses octets sont effacés, sa ligne reste.")
+
+
+def removal_question(name: str = "") -> str:
+    """La question qui confirme « Retirer » (le nom du fichier, quand la ligne le connaît)."""
+    what = f"« {name} »" if name else "ce fichier"
+    return (f"Retirer {what} ? Ses octets sont effacés : il ne se télécharge plus. Sa ligne reste, « retiré par un "
+            "opérateur ».")
 
 
 def _state(r: FileRow) -> Badge:
     if r.gone:
-        return Badge("retiré", "muted")
+        return Badge(BY_OPERATOR if r.reason == c.OPERATOR else "retiré", "muted")
     if r.sent:
         return Badge("envoyé", "ok")
     return Badge("pas parti", "warn")
 
 
 def _origin(r: FileRow, store: Any, frame: Frame) -> Cell:
+    if r.origin == c.DRAWN:
+        return "dessiné"
     if r.origin != c.PROJECT or r.project is None:
         return "écrit"
     # son titre par le contrat des projets (un projet archivé n'y est plus : son numéro suffit)
@@ -79,10 +114,8 @@ def _files_tab(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]
     if store is None:
         return [Note("Le magasin n'est pas disponible : les fichiers ne se relisent pas.", tone="muted")]
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    t = table()
-    total = int(store.query_mind(select(func.count()).select_from(t).where(t.c.person.in_(handles)))[0][0])
     # sa propre page : l'onglet se lit aussi à côté d'un autre (les pièces reçues, sur la fiche)
-    pager = ctx.pager("page_envoyes", size=PAGE, total=total)
+    pager = ctx.pager("page_envoyes", size=PAGE, total=count(store, handles))
     found = of_people(store, handles, pager.offset + pager.size)[pager.offset:]
     rows = tuple(Row((
         When(r.at), Ref.subject(KIND, r.id, r.name or "(sans nom)"), Text(size_words(r.size)),
@@ -90,10 +123,28 @@ def _files_tab(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]
     ), href=Ref.subject(KIND, r.id, "")) for r in found)
     return [Table((Column("quand", "fit"), "nom", Column("taille", "num"), "origine", Column("message", "fit"),
                    Column("état", "fit"), Column("télécharger", "fit")), rows, title="Fichiers envoyés",
-                  pager=pager, empty="elle ne lui a encore envoyé aucun fichier",
-                  caption="« pas parti » : un fichier préparé dont le message n'est jamais parti (une réponse "
-                          "supplantée, ou tue) — la rétention le retirera. « retiré » : trop vieux, ou la place de "
-                          "la personne dépassée ; ses octets sont effacés.")]
+                  pager=pager, empty="elle ne lui a encore envoyé aucun fichier", caption=CAPTION)]
+
+
+@SHARES.inspect("envoyes", title="Fichiers envoyés", section="memoire", order=26,
+                description="Ce qu'elle a envoyé, à tout le monde : quand, à qui, avec quel message, et s'ils sont "
+                            "encore disponibles. Un fichier se retire à l'unité, sur sa ligne ou sur sa fiche : ses "
+                            "octets s'effacent, sa ligne reste.")
+def _sent(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    store = ctx.store
+    if store is None:
+        return [Note("Le magasin n'est pas disponible : les fichiers ne se relisent pas.", tone="muted")]
+    pager = ctx.pager(size=PAGE, total=count(store))
+    found = recent(store, pager.offset + pager.size)[pager.offset:]
+    rows = tuple(Row((
+        When(r.at), Ref.subject(KIND, r.id, r.name or "(sans nom)"), _who(frame, r.person),
+        KIND_LABELS.get(r.kind, r.kind), Text(size_words(r.size), "num"), _origin(r, store, frame), _message(r),
+        _state(r), _download_link(r) if not r.gone else Text("—", "muted"),
+    ), href=Ref.subject(KIND, r.id, "")) for r in found)
+    return [Table((Column("quand", "fit"), "nom", "pour", Column("sorte", "fit"), Column("taille", "num"), "origine",
+                   Column("message", "fit"), Column("état", "fit"), Column("télécharger", "fit")), rows,
+                  title="Fichiers envoyés", pager=pager, empty="elle n'a encore envoyé aucun fichier",
+                  caption=CAPTION)]
 
 
 @SHARES.subject(KIND, label="Fichier envoyé", plural="Fichiers envoyés")
@@ -129,3 +180,29 @@ async def _download(s: SharesState, frame: Frame, ctx: InspectContext, key: str,
     if data is None:
         return Note("Ce fichier n'est plus disponible.", tone="warn")
     return Download(r.name or "fichier", data)
+
+
+# ── Retirer un fichier (ADR 0205) ─────────────────────────────────────────
+
+
+class NoArgs(BaseModel):
+    """Rien à remplir : la fiche (ou la ligne) dit quel fichier."""
+
+
+def _removable(s: SharesState, frame: Frame, key: str) -> bool:
+    """Un fichier dont les octets sont encore gardés."""
+    return valid_id(key) and holder(s, key) is not None
+
+
+@SHARES.action("retirer", title="Retirer un fichier envoyé", args=NoArgs, emits=[c.EXPIRED], subject=KIND,
+               available=_removable, danger=True, order=90, confirm=removal_question(),
+               description="Ses octets sont effacés : il ne se télécharge plus, ni ici ni par la personne. Sa ligne "
+                           "reste, « retiré par un opérateur ».")
+def _remove(s: SharesState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
+    target = holder(s, ctx.subject) if valid_id(ctx.subject) else None
+    r = row(ctx.store, ctx.subject) if target is not None and ctx.store is not None else None
+    if target is None or r is None or r.gone:
+        raise Refused(GONE)
+    # le même retrait que la rétention, à l'unité : la tranche et la ligne suivent, l'effet efface les octets
+    draft = c.EXPIRED.draft(files=(r.id,), target=target, reason=c.OPERATOR, dedupe_key=f"partage-retire:{r.id}")
+    return Done(drafts=(draft,), message=f"« {r.name or 'fichier'} » retiré : ses octets sont effacés.")

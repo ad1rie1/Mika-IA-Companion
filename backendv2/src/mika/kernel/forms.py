@@ -1050,3 +1050,17 @@ def show_duration(us: int) -> str:
         if count:
             parts.append(f"{count} {name}")
     return sign + (" ".join(parts) or "0 s")
+
+
+def agree(n: int, one: str, many: str) -> str:
+    """Le nom accordé au compte, sans le compte : « mail important », « mails importants » — quand le nombre est
+    déjà dit à côté (la valeur d'un badge, que l'accueil montre devant son indice). Le singulier jusqu'à 1, comme
+    en français."""
+    return one if abs(n) < 2 else many
+
+
+def plural(n: int, one: str, many: str) -> str:
+    """Un compte et son nom accordé (``agree``), plutôt que « mail(s) » : « 0 échec », « 1 mail important »,
+    « 3 mails importants » ; les milliers séparés par une espace fine, comme ``inspect.num_fr``
+    (« 1 200 événements »)."""
+    return f"{n:,}".replace(",", " ") + " " + agree(n, one, many)

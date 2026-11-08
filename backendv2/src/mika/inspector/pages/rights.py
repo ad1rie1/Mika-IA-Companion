@@ -18,7 +18,7 @@ from mika.inspector.pages import canals as canals_page
 from mika.inspector.pages import families as families_page
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.inspect import Block, Note, Ref, Table
-from mika.kernel.rights import Grant, RightsSpec, RuleTable, why_words
+from mika.kernel.rights import Grant, RightsSpec, RuleTable
 from mika.runtime.boundary import Failed, call
 from mika.runtime.tools import allowed, gate_of
 from mika.vocab.access import (
@@ -33,6 +33,7 @@ from mika.vocab.access import (
     canal_words,
     when_words,
     who_words,
+    why_words,
 )
 from mika.vocab.canals import Canals, canal_verdict
 

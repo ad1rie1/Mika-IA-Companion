@@ -8,8 +8,11 @@ comment va-t-elle (sa rubrique, à son nom) ; qui connaît-elle (Relations & éc
 (Activité : ses décisions, ses buts, ses projets ; Outils ; À valider) ; par où perçoit-elle et agit-elle
 (Connexions extérieures) ; que décide-t-on, la machine tient-elle (Réglages, Système). Le menu visible est
 ``app/console_menu.py`` : chaque groupe ci-dessous porte le nom de la rubrique où ses destinations s'y rangent (le
-groupe ne se montre que si une destination n'avait pas de lien au menu). ``docs/console-carte.md`` détaille chaque
-menu.
+groupe ne se montre que si une destination n'avait pas de lien au menu), et une destination porte le nom de son lien
+au menu (ADR 0202 : le menu fait foi, le fil d'Ariane et le titre de l'onglet le reprennent). Les réglages d'un
+plugin vivent dans sa destination, derrière sa roue (``gear``, ADR 0173, 0206 : Courrier, Teams, Ses outils, Ses sens,
+Réveils par API) : des onglets de la console, que ``app/reglages.py`` y pose (``SettingsPage.home``).
+``docs/console-carte.md`` détaille chaque menu.
 """
 
 from __future__ import annotations
@@ -26,8 +29,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     "envoyées et la relecture de ses échanges.", subjects=("piece",)),
     )),
     NavGroup("Relations & échanges", (
+        # un fichier qu'elle a envoyé se lit sur la fiche de sa personne (onglet Fichiers) : sa fiche vit ici
         Destination("personnes", "Personnes", "Les gens qu'elle connaît et ce qui les lie.",
-                    subjects=("person",), lead="Vue d'ensemble"),
+                    subjects=("person", "partage"), lead="Vue d'ensemble"),
         Destination("identites", "Identités", "Qui parle derrière chaque moyen de communication, et ce "
                     "que ça ouvre.",
                     subjects=("handle",)),
@@ -40,17 +44,18 @@ NAVIGATION: tuple[NavGroup, ...] = (
                              "decisions.episodes", "decisions.echeances"),
                     order=("maintenant", "envers", "en_cours", "initiatives", "selections", "episodes",
                            "echeances")),
-        Destination("buts", "Buts", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
+        Destination("buts", "Buts et rappels", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
                     "explorations, où ils en sont.", subjects=("goal",)),
         Destination("projets", "Projets", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
                     "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
                     subjects=("project",)),
     )),
     NavGroup("Outils", (
-        Destination("outils", "Outils", "Ce qu'elle peut faire et avec qui, ses propres outils et leurs droits, ce "
+        Destination("outils", "Ses outils", "Ce qu'elle peut faire et avec qui, ses propres outils et leurs droits, ce "
                     "qui lui vient d'ailleurs (les services branchés, ses apps), et ce que tu prêtes à un agent.",
-                    builtin=("outils.tous", "outils.expose"),
-                    order=("tous", "serveurs", "expose"), subjects=("serveur",)),
+                    # la connexion des services branchés (des serveurs MCP) : en haut à droite (ADR 0206)
+                    builtin=("outils.tous", "outils.expose", "outils.parametres"),
+                    order=("tous", "serveurs", "expose"), subjects=("serveur",), gear=("parametres",)),
     )),
     NavGroup("À valider", (
         # une seule file : ce qui attend une décision, quelle qu'en soit la sorte ; ses onglets (courriers, Teams,
@@ -67,14 +72,22 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     builtin=("courrier.parametres",), gear=("parametres",)),
         Destination("teams", "Teams", "Les conversations Teams que l'extension lui apporte, et les réponses "
                     "qu'elle prépare à ta place : posées, à accepter, parties.",
-                    subjects=("conversation_teams", "reponse_teams")),
+                    subjects=("conversation_teams", "reponse_teams"),
+                    # ses paramètres (« Actif », ses comptes) : en haut à droite, comme le courrier (ADR 0206)
+                    builtin=("teams.parametres",), gear=("parametres",)),
     )),
     NavGroup("Connexions extérieures", (
-        Destination("sens", "Connexions extérieures", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
-                    "(caméra), ce que ses appareils lui signalent."),
+        Destination("sens", "Ses sens", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
+                    "(caméra), ce que ses appareils lui signalent.",
+                    # leurs réglages, derrière une seule roue : les flux suivis, l'accès des appareils, la
+                    # transcription des messages vocaux (ADR 0206)
+                    builtin=("sens.parametres-flux", "sens.parametres-appareils", "sens.parametres-transcription"),
+                    gear=("parametres-flux", "parametres-appareils", "parametres-transcription")),
         Destination("reveils", "Réveils par API", "Les réveils que des systèmes extérieurs lui envoient "
                     "(POST /api/wake/<nom>) : les déclarer, leurs clés, leurs appels et ce qu'ils ont donné.",
-                    subjects=("reveil",)),
+                    subjects=("reveil",),
+                    # leurs réglages (chaque réveil, ses consignes, ses bornes) : en haut à droite (ADR 0206)
+                    builtin=("reveils.parametres",), gear=("parametres",)),
     )),
     NavGroup("Outils", (
         Destination("apps", "Apps forgées", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
@@ -239,6 +252,7 @@ PROCESS_LABELS: dict[str, str] = {
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
+    "teams.answered": "Refuser ses réponses Teams auxquelles on a répondu autrement dans la discussion",
     "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
     "identity.expire": "Oublier les inconnues de passage restées silencieuses",
@@ -350,6 +364,7 @@ EVENT_LABELS: dict[str, str] = {
     "teams.noticed": "Un message Teams remarqué", "teams.sent": "Une réponse Teams partie",
     "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
     "teams.settled": "Une réponse Teams posée, partie ou laissée",
+    "teams.written": "Un message Teams écrit depuis le web, en file pour l'extension",
     "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
     "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
     "memory.relayed_read": "Des messages du téléphone relus",
@@ -363,6 +378,15 @@ BUNDLE_LABELS: dict[str, str] = {
     "mcp.*": "Service « {} »", "forge_apps.*": "Son app « {} »",
 }
 
+#: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
+#: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
+CAPABILITY_LABELS: dict[str, str] = {
+    "email.send": "Mail", "teams.send": "Réponse Teams", "phone.send": "Réponse téléphone",
+    "mcp.call": "Outil extérieur", "forge.call": "Outil d'app", "forge.install": "Version d'app",
+    "projects.networked": "Commande réseau", "projects.push": "Push git", "projects.pull": "Pull git",
+    "projects.steer": "Pilotage de projet",
+}
+
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
-                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS)
+                processes=PROCESS_LABELS, events=EVENT_LABELS, bundles=BUNDLE_LABELS, capabilities=CAPABILITY_LABELS)

@@ -1,9 +1,9 @@
 """Firebase Cloud Messaging, par son API HTTP v1 (ADR 0077).
 
 Ce qui parle à Google au nom du serveur : la clé d'un **compte de service** du projet Firebase (le fichier JSON que
-la console Firebase télécharge), collée dans la console de Mika (Réglages › Canaux › Notifications du téléphone)
-et chiffrée au repos. On en tire un jeton d'accès OAuth 2 — une assertion JWT signée RS256, échangée contre un
-jeton d'une heure, gardé jusqu'à une minute de sa fin. Chaque notification est un message **de données** de
+la console Firebase télécharge), collée dans la console de Mika (Réglages › Carte et téléphone › Notifications du
+téléphone) et chiffrée au repos. On en tire un jeton d'accès OAuth 2 — une assertion JWT signée RS256, échangée
+contre un jeton d'une heure, gardé jusqu'à une minute de sa fin. Chaque notification est un message **de données** de
 priorité haute (pas un message « notification » que le système afficherait lui-même) : l'application le reçoit
 même fermée, le déchiffre et l'affiche.
 

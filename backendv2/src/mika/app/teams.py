@@ -16,38 +16,44 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import re
-import secrets
-import time
-from collections import deque
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from mika.adapters.web.gate import (
+    SlidingWindow,
+    clean_fields,
+    clean_text,
+    matches,
+    new_key,
+    one_line,
+    plausible_ms,
+    presented,
+)
+from mika.adapters.web.gate import token_digest as digest
 from mika.kernel.events import Origin
 from mika.plugins.teams import RECEIVED, SETTLED
-from mika.ports.teams import (
+from mika.ports.gate import (
     ACCEPTED,
     BUSY,
     CONFLICT,
-    CONVERSATION_ID,
     DISABLED,
     INVALID,
-    KEY_PREFIX,
     MISSING,
-    RESULTS,
     UNKNOWN,
     GateResult,
+    KeyState,
+)
+from mika.ports.teams import (
+    CONVERSATION_ID,
+    KEY_PREFIX,
+    RESULTS,
     InboxBatch,
     InboxConversation,
     InboxMessage,
-    KeyState,
 )
 
-#: l'empreinte qu'on compare quand il n'y a rien à comparer (aucune clé) : le même temps de calcul
-_NOTHING = hashlib.sha256(b"").hexdigest()
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
 PER_MINUTE = 240
 #: au journal, ce que devient une réponse que l'extension n'a pas pu faire partir (son détail reste dans le cache)
@@ -55,9 +61,6 @@ FAILED_BY_EXTENSION = "l'extension n'a pas pu la faire partir"
 KINDS = frozenset({"dm", "group", "channel", "meeting", "other", "system"})
 #: un identifiant de message tel que Teams les écrit (des chiffres, ou une empreinte) ; on l'assainit quand même
 _MESSAGE_ID = re.compile(r"^[\w.:@=+/-]{1,200}$")
-#: une date plausible (ms) : ni avant 2015, ni plus d'un jour dans le futur
-_EPOCH_2015_MS = 1_420_070_400_000
-_DAY_MS = 86_400_000
 
 
 class _InMessage(BaseModel):
@@ -96,42 +99,19 @@ class _Inbox(BaseModel):
     messages: list[Any] = Field(default_factory=list, max_length=200)
 
 
-def digest(key: str) -> str:
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
-def new_key() -> str:
-    return KEY_PREFIX + secrets.token_urlsafe(32)
-
-
-def _clean(text: str) -> str:
-    """Un texte sans octet nul ni demi-caractère (une coupe au milieu d'un emoji laisse un « surrogate » seul)."""
-    return text.replace("\x00", "").encode("utf-8", "replace").decode("utf-8")
-
-
-def _flat(text: str, limit: int) -> str:
-    """Un nom ou un titre sur une ligne, sans caractères de contrôle."""
-    return " ".join("".join(ch for ch in _clean(text) if ch.isprintable() or ch == " ").split())[:limit]
-
-
-def _scrub(raw: Any) -> Any:
-    """Les textes d'un élément, réparés avant d'être lus (un demi-caractère ferait refuser l'élément entier)."""
-    return {k: _clean(v) if isinstance(v, str) else v for k, v in raw.items()} if isinstance(raw, dict) else raw
-
-
 def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     try:
-        m = _InMessage.model_validate(_scrub(raw))
+        m = _InMessage.model_validate(clean_fields(raw))
     except ValidationError:
         return None
     if not CONVERSATION_ID.fullmatch(m.conv) or not _MESSAGE_ID.fullmatch(m.id):
         return None
-    if not _EPOCH_2015_MS <= m.time <= now_ms + _DAY_MS:
+    if not plausible_ms(m.time, now_ms):
         return None  # une date invraisemblable
-    text = _clean(m.text)
+    text = clean_text(m.text)
     if not text.strip() and not m.deleted:
         return None
-    return InboxMessage(m.id, m.conv, _flat(m.author, 120), _flat(m.author_id, 200), m.time, text, m.own,
+    return InboxMessage(m.id, m.conv, one_line(m.author, 120), one_line(m.author_id, 200), m.time, text, m.own,
                         m.mentions_me, m.deleted)
 
 
@@ -139,7 +119,7 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
     """Le lot, validé — formes, tailles, identifiants, dates plausibles — et combien de ses éléments ont été écartés
     (un message illisible est laissé de côté, le reste passe). Lève ``ValueError`` si l'enveloppe est illisible."""
     try:
-        got = _Inbox.model_validate({**data, "self": _scrub(data.get("self") or {})})
+        got = _Inbox.model_validate({**data, "self": clean_fields(data.get("self") or {})})
     except ValidationError as exc:
         first = exc.errors()[0] if exc.errors() else {}
         where = ".".join(str(x) for x in first.get("loc", ()))
@@ -148,14 +128,14 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
     conversations = []
     for raw in got.conversations:
         try:
-            c = _InConversation.model_validate(_scrub(raw))
+            c = _InConversation.model_validate(clean_fields(raw))
         except ValidationError:
             dropped += 1
             continue
         if not CONVERSATION_ID.fullmatch(c.id):
             dropped += 1
             continue
-        conversations.append(InboxConversation(c.id, _flat(c.title, 120), c.kind if c.kind in KINDS else "other"))
+        conversations.append(InboxConversation(c.id, one_line(c.title, 120), c.kind if c.kind in KINDS else "other"))
     messages = []
     for raw in got.messages:
         m = _message(raw, now_ms)
@@ -163,8 +143,8 @@ def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
             dropped += 1
             continue
         messages.append(m)
-    return (InboxBatch(_flat(got.self.id, 200), _flat(got.self.name, 120), tuple(conversations), tuple(messages)),
-            dropped)
+    return (InboxBatch(one_line(got.self.id, 200), one_line(got.self.name, 120), tuple(conversations),
+                       tuple(messages)), dropped)
 
 
 class TeamsDesk:
@@ -177,7 +157,7 @@ class TeamsDesk:
         self.store = store
         self.port: Any = None
         #: les requêtes de la minute, par compte (une extension bavarde ne prive pas les autres)
-        self._minute: dict[str, deque[float]] = {}
+        self._minute = SlidingWindow(PER_MINUTE, 60.0)
         #: un lot se range et se journalise d'un tenant : deux lots simultanés ne s'entremêlent pas
         self._lock = asyncio.Lock()
 
@@ -189,24 +169,24 @@ class TeamsDesk:
 
     async def new_key(self, account: str, by: str) -> str:
         if self.settings.teams().account(account) is None:
-            raise ValueError(f"Compte Teams inconnu : « {account[:40]} » — déclare-le d'abord dans Réglages › Plugins "
-                             "› Teams.")
-        key = new_key()
+            raise ValueError(f"Compte Teams inconnu : « {account[:40]} » — déclare-le d'abord dans Teams › Paramètres "
+                             "(en haut à droite).")
+        key = new_key(KEY_PREFIX)
         await self.settings.save_teams_key(account, digest(key), key[:len(KEY_PREFIX) + 4], self.clock(), by)
         return key
 
-    async def revoke_key(self, account: str, by: str) -> bool:
+    async def revoke_key(self, account: str) -> bool:
         return await self.settings.revoke_teams_key(account)
 
     # ── la porte ──
     def _recognized(self, key: str) -> str:
         """Le compte de cette clé (vide : aucun). Chaque clé rangée est comparée, toujours toutes et au moins une, du
         même coût : rien ne dit laquelle a répondu, ni s'il y en a."""
-        given = digest(key) if key.startswith(KEY_PREFIX) and len(key) <= 200 else _NOTHING
+        given = presented(key, KEY_PREFIX)
         stored = [(name, str(k.get("digest") or "")) for name, k in sorted(self.settings.teams_keys().items())]
         found = ""
         for name, wanted in stored or [("", "")]:
-            if hmac.compare_digest(given, wanted or _NOTHING) and wanted and not found:
+            if matches(given, wanted) and not found:
                 found = name
         return found
 
@@ -220,13 +200,8 @@ class TeamsDesk:
             return account, GateResult(DISABLED, "Teams est désactivé dans ses réglages.")
         if account in cfg.accounts and not cfg.accounts[account].enabled:
             return account, GateResult(DISABLED, "Ce compte Teams est désactivé dans ses réglages.")
-        now = time.monotonic()
-        window = self._minute.setdefault(account, deque())
-        while window and now - window[0] >= 60:
-            window.popleft()
-        if len(window) >= PER_MINUTE:
-            return account, GateResult(BUSY, "Trop de requêtes.", retry_after=max(1, int(60 - (now - window[0]))))
-        window.append(now)
+        if not self._minute.allow(key=account):
+            return account, GateResult(BUSY, "Trop de requêtes.", retry_after=self._minute.wait_s(account))
         return account, None
 
     async def inbox(self, key: str, data: Any) -> GateResult:
@@ -272,8 +247,8 @@ class TeamsDesk:
         if result not in RESULTS or not re.fullmatch(r"t[0-9a-f]{12}", item or ""):
             return GateResult(INVALID, "Un accusé : « sending », « placed », « sent » ou « failed », sur un élément de "
                                        "la file.")
-        text = _clean(str(data.get("text") or "")[:8000])
-        reason = _flat(str(data.get("reason") or ""), 200)
+        text = clean_text(str(data.get("text") or "")[:8000])
+        reason = one_line(str(data.get("reason") or ""), 200)
         async with self._lock:
             outcome, done = self.store.settle(item, result, now=self.clock(), text=text, reason=reason,
                                               account=account)

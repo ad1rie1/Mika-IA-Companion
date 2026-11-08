@@ -5,7 +5,9 @@ une sous-commande renommée, un ADR cité qui n'existe pas. Ce test confronte ce
 reste relève de la règle « la doc suit le code, dans le même lot » (``CLAUDE.md``).
 
 - les numéros d'ADR cités par le code et la doc ont leur entrée dans ``docs/decisions.md``, numérotée sans trou ni
-  double, et chaque entrée est sur sa carte ;
+  double (hors les numéros que son en-tête déclare non attribués), et chaque entrée est sur sa carte ;
+- chaque renvoi entre entrées se dit des deux côtés : « Révise X » appelle « Révisée par » (ou « Remplacée par »)
+  dans X, et l'inverse ; une entrée dit chaque mot de renvoi une fois, ses numéros à la suite ;
 - les trames du chat que le serveur émet et lit (lues dans le code par ``ast``) sont celles que décrit
   ``docs/protocole-chat.md`` ;
 - les sous-commandes de la CLI (lues dans l'analyseur lui-même) sont celles de la table d'``ARCHITECTURE.md`` ;
@@ -40,6 +42,12 @@ BASES = (ROOT, PACKAGE, PACKAGE / "app", PACKAGE / "inspector", PACKAGE / "inspe
 IGNORED = frozenset({"identify"})
 
 ENTRY = re.compile(r"^### (\d{4}) — ", re.M)
+#: les numéros sautés, déclarés en tête de ``decisions.md`` : « **Numéros non attribués :** 0167. »
+SKIPPED = re.compile(r"^\*\*Numéros non attribués :\*\* (\d{4}(?:, \d{4})*)\.", re.M)
+#: dans une ligne de renvoi, ses mots et ses numéros, dans l'ordre (« Révise 0020 (en partie). Révisée par 0039. »)
+LINK = re.compile(r"\b(?:Révisée par|Remplacée par|Révise|Remplace)\b|\b\d{4}\b")
+#: le sens d'un renvoi : ce que l'entrée a changé, ou ce qui l'a changée après elle
+FORWARD, BACKWARD = frozenset({"Révise", "Remplace"}), frozenset({"Révisée par", "Remplacée par"})
 CITED = re.compile(r"\bADR (\d{4})\b")
 #: un chemin : des mots, des points, des tirets et des « / », qui finit par une extension connue ou par « / »
 PATH = re.compile(r"`([\w.][\w./-]*/[\w./-]*?(?:\.(?:py|md|json|ya?ml|html|cjs|js|ts|sh|toml|service|timer)|/))"
@@ -62,12 +70,66 @@ def _entries() -> list[str]:
     return ENTRY.findall(_text(DECISIONS))
 
 
+def _skipped() -> set[str]:
+    """Les numéros que l'en-tête déclare non attribués : sautés, ils ne portent aucune entrée."""
+    found = SKIPPED.search(_text(DECISIONS))
+    return set(found.group(1).split(", ")) if found else set()
+
+
+def _links() -> dict[str, dict[str, set[str]]]:
+    """Les renvois de chaque entrée, lus sur ses lignes en italique : ``{"0031": {"Révise": {…}, "Révisée par": …}}``.
+
+    Une même ligne peut porter les deux sens (« *Révise 0020 (en partie). Révisée par 0039.* ») : chaque numéro va au
+    dernier mot de renvoi qui le précède. Une entrée ne dit chaque mot qu'une fois, ses numéros à la suite (« Révisée
+    par 0194, 0197 », jamais une seconde ligne « Révisée par 0197 »).
+    """
+    links: dict[str, dict[str, set[str]]] = {}
+    current: str | None = None
+    said: set[str] = set()
+    for line in _text(DECISIONS).splitlines():
+        if line.startswith("#"):
+            head = ENTRY.match(line)
+            current = head.group(1) if head else None
+            said = set()
+            if current is not None:
+                links[current] = {word: set() for word in FORWARD | BACKWARD}
+        elif current is not None and line.lstrip("*").startswith(("Révis", "Remplac")):
+            assert line.endswith("*"), f"{current} : une ligne de renvoi tient sur une ligne, sinon ses numéros échappent"
+            word = None
+            for token in LINK.findall(line):
+                if not token.isdigit():
+                    assert token not in said, f"{current} : « {token} » se dit une fois, ses numéros à la suite"
+                    said.add(token)
+                    word = token
+                elif word is not None:
+                    links[current][word].add(token)
+    return links
+
+
 # ── les décisions ──
 
 def test_the_decisions_are_numbered_without_gap_or_double():
     numbers = _entries()
+    skipped = _skipped()
     assert len(numbers) == len(set(numbers)), sorted(n for n in set(numbers) if numbers.count(n) > 1)
-    assert sorted(numbers) == [f"{i:04d}" for i in range(1, int(max(numbers)) + 1)]
+    assert not skipped & set(numbers), f"non attribués, mais portés par une entrée : {sorted(skipped & set(numbers))}"
+    assert all(n < max(numbers) for n in skipped), f"un numéro à venir n'est pas sauté : {sorted(skipped)}"
+    assert sorted(numbers) == [n for n in (f"{i:04d}" for i in range(1, int(max(numbers)) + 1)) if n not in skipped]
+
+
+def test_every_revision_is_named_on_both_sides():
+    """« Révise X » appelle, dans X, « Révisée par » ou « Remplacée par » (son remplaçant dit « Révise X
+    (entièrement) ») ; et chacun de ceux-là appelle « Révise » (ou « Remplace ») chez celle qu'il nomme."""
+    links = _links()
+    one_sided = []
+    for number, said in sorted(links.items()):
+        for word in sorted(FORWARD | BACKWARD):
+            answers = BACKWARD if word in FORWARD else FORWARD
+            for other in sorted(said[word]):
+                back = links.get(other)
+                if other == number or back is None or not any(number in back[w] for w in answers):
+                    one_sided.append(f"{number} dit « {word} {other} »")
+    assert not one_sided, one_sided
 
 
 def test_every_decision_is_on_the_map_once():

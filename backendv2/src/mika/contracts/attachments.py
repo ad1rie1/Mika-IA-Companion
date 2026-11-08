@@ -12,8 +12,8 @@ fichiers qu'elle envoie, ADR 0062), sa fiche au journal — son nom et ce qu'ell
   ses pièces sont **en plus**, et il peut y en avoir plusieurs — dans les deux sens : une pièce nourrit plusieurs
   éléments, un élément s'appuie sur plusieurs pièces. Un lien naît de la relecture (``pieces`` des événements de la
   mémoire) ou d'elle-même, plus tard (``attachments.linked``, son outil).
-- ``attachments.expired`` : des pièces retirées (trop vieilles, ou la place d'une personne dépassée) ; leurs octets
-  s'effacent, ce qu'elle en avait lu reste.
+- ``attachments.expired`` : des pièces retirées (trop vieilles, la place d'une personne dépassée, ou un opérateur qui
+  en retire une depuis la console, ADR 0205) ; leurs octets s'effacent, ce qu'elle en avait lu reste.
 """
 
 from __future__ import annotations
@@ -39,9 +39,9 @@ IMAGE, AUDIO, FILE = "image", "audio", "file"
 KINDS = (IMAGE, AUDIO, FILE)
 # qui a fait un lien
 BY_REREAD, BY_HER = "reread", "her"
-# raisons d'un retrait
-RETENTION, BUDGET = "retention", "budget"
-REASONS = (RETENTION, BUDGET)
+# raisons d'un retrait : trop vieille, la place dépassée (la rétention) ; un opérateur, à l'unité (ADR 0205)
+RETENTION, BUDGET, OPERATOR = "retention", "budget", "operator"
+REASONS = (RETENTION, BUDGET, OPERATOR)
 
 
 class Kept(Payload):
@@ -81,7 +81,8 @@ class Linked(Payload):
 
 
 class Expired(Payload):
-    """Des pièces d'une adresse retirées : leurs octets s'effacent, leur ligne et ce qu'elle en a lu restent."""
+    """Des pièces d'une adresse retirées (``reason`` : une des ``REASONS``, ou ``MISSING`` de la faculté, des octets
+    qui manquaient) : leurs octets s'effacent, leur ligne et ce qu'elle en a lu restent."""
 
     files: tuple[str, ...]
     handle: str

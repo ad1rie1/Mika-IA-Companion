@@ -28,7 +28,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, delete, false, func, or_, select, update
+from sqlalchemy import and_, case, delete, false, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from mika.adapters.database import Target, as_target
@@ -99,6 +99,16 @@ _DRAFT = (DraftRow.draft_id, DraftRow.conversation, DraftRow.body, DraftRow.repl
 _DM_SUFFIX = "@unq.gbl.spaces"
 
 
+def _one_to_one(kind: str | None, conversation: str) -> bool:
+    """Un tête-à-tête : le genre que Teams lui donne, ou son identifiant (le suffixe comparé en minuscules)."""
+    return kind == "dm" or conversation.lower().endswith(_DM_SUFFIX)
+
+
+def _is_one_to_one() -> Any:
+    """La même règle dans une requête, sur la conversation qu'elle lit (pareil sur les deux moteurs)."""
+    return or_(ConversationRow.kind == "dm", func.lower(ConversationRow.id).like(f"%{_DM_SUFFIX}"))
+
+
 def _now_us() -> int:
     return time.time_ns() // 1000
 
@@ -134,6 +144,17 @@ def _counted() -> Any:
     """Le nombre de messages d'une conversation (corrélée à la requête qui l'appelle)."""
     return select(func.count(MessageRow.id)).where(MessageRow.account == ConversationRow.account,
                                                    MessageRow.conversation == ConversationRow.id).scalar_subquery()
+
+
+def _named() -> Any:
+    """Le nom d'une conversation (corrélé à la requête qui l'appelle), celui que rend ``title`` : celui de Teams ;
+    sinon, pour un tête-à-tête seulement, le dernier à y avoir écrit qui n'est pas la personne du compte ; sinon
+    rien — dans la requête de la liste, pas une de plus par ligne."""
+    other = (select(MessageRow.author)
+             .where(MessageRow.account == ConversationRow.account, MessageRow.conversation == ConversationRow.id,
+                    MessageRow.own == false(), MessageRow.author != "")
+             .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(1).scalar_subquery())
+    return func.coalesce(func.nullif(ConversationRow.title, ""), case((_is_one_to_one(), other)), "")
 
 
 def _account_key(account: str) -> str:
@@ -355,23 +376,42 @@ class TeamsStore:
     def conversations(self, limit: int, *, text: str = "", accounts: Sequence[str] | None = None) \
             -> list[Conversation]:
         """Les conversations où quelque chose a été écrit (de ces comptes ; ``None`` : de tous), la plus récente
-        d'abord ; ``text`` cherché dans le titre et l'identifiant, casse et accents ignorés (les deux côtés
-        repliés, comparés par ``instr`` : pareil sur les deux moteurs, ``%`` et ``_`` n'y sont que des
-        caractères)."""
+        d'abord, chacune sous son nom (``title`` : celui de Teams, sinon l'autre personne d'un tête-à-tête — rien
+        pour un groupe sans titre —, comme ``title()``) ; ``text`` cherché dans ce nom et l'identifiant, casse et
+        accents ignorés (les deux côtés repliés, comparés par ``instr`` : pareil sur les deux moteurs, ``%`` et ``_``
+        n'y sont que des caractères ; le nom d'un tête-à-tête sans titre de Teams se replie ici, la base ne le garde
+        pas replié).
+
+        ``conversation()``, lui, rend le titre de Teams tel quel : le tri y lit le nom qu'une règle d'envoi peut
+        désigner (``triage.where_of``), pas l'auteur du dernier message."""
         where = [ConversationRow.last_at > 0, *_in_accounts(ConversationRow.account, accounts)]
-        if folded := fold_text(text.strip()):
-            where.append(or_(func.instr(ConversationRow.title_fold, folded) > 0,
-                             func.instr(ConversationRow.id_fold, folded) > 0))
+        named = _named()
         with self._lock, self._session() as s:
-            rows = s.execute(select(*_CONVERSATION, _counted(), ConversationRow.account).where(*where)
+            if folded := fold_text(text.strip()):  # seul un tête-à-tête sans titre a un nom qu'on ne garde pas replié
+                untitled = s.execute(select(ConversationRow.account, ConversationRow.id, named).where(
+                    *where, or_(ConversationRow.title == "", ConversationRow.title.is_(None)), _is_one_to_one())).all()
+                by_account: dict[str, list[str]] = {}
+                for account, cid, name in untitled:
+                    if folded in fold_text(name or ""):
+                        by_account.setdefault(account, []).append(cid)
+                where.append(or_(func.instr(ConversationRow.title_fold, folded) > 0,
+                                 func.instr(ConversationRow.id_fold, folded) > 0,
+                                 *(and_(ConversationRow.account == account, ConversationRow.id.in_(ids))
+                                   for account, ids in by_account.items())))
+            rows = s.execute(select(ConversationRow.id, named, ConversationRow.kind, ConversationRow.last_at,
+                                    _counted(), ConversationRow.account).where(*where)
                              .order_by(ConversationRow.last_at.desc(), ConversationRow.account, ConversationRow.id)
                              .limit(max(0, limit))).all()
         return [_conversation(r) for r in rows]
 
     def _title_in(self, s: Session, account: str, conversation: str) -> str:
         found = self._conversation_in(s, account, conversation)
-        if found is not None and found.title:
+        if found is None:  # inconnue (une conversation part toujours avec ses messages)
+            return ""
+        if found.title:
             return found.title
+        if not _one_to_one(found.kind, found.id):
+            return ""  # un groupe, un canal, une réunion sans titre : jamais le nom de qui y a parlé en dernier
         name = s.scalar(select(MessageRow.author)
                         .where(MessageRow.account == _account_key(account),
                                MessageRow.conversation == fit(conversation, CONVERSATION_MAX),
@@ -380,7 +420,10 @@ class TeamsStore:
         return str(name) if name else ""
 
     def title(self, account: str, conversation: str) -> str:
-        """Le nom d'une conversation : celui de Teams, sinon (un tête-à-tête) l'autre personne."""
+        """Le nom d'une conversation : celui de Teams ; sinon, pour un tête-à-tête seulement, l'autre personne (la
+        dernière à y avoir écrit) ; vide pour un groupe, un canal ou une réunion sans titre — le nom de qui y a parlé
+        en dernier changerait à chaque auteur, et le confondrait avec le tête-à-tête de cette personne. Celui de la
+        liste (``_named``), de l'aperçu, de la file que relève l'extension."""
         with self._lock, self._session() as s:
             return self._title_in(s, account, conversation)
 
@@ -591,8 +634,7 @@ class TeamsStore:
                                          and_(ConversationRow.account == MessageRow.account,
                                               ConversationRow.id == MessageRow.conversation), isouter=True)
                               .where(MessageRow.author_key == key)).all()
-            convs = sorted({(account, conv) for account, conv, kind in pairs
-                            if kind == "dm" or conv.lower().endswith(_DM_SUFFIX)})
+            convs = sorted({(account, conv) for account, conv, kind in pairs if _one_to_one(kind, conv)})
             # les réponses à ses messages, ailleurs (un groupe) : elles citent ce qu'il a écrit
             n = _count(s.execute(delete(DraftRow).where(
                 DraftRow.reply_to.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))

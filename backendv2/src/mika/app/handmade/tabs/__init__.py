@@ -11,6 +11,7 @@ blocs — la vue de la faculté reste la source, pour la console en MCP comme po
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,6 +28,10 @@ from mika.kernel.inspect import Column, Row, Table, When
 NESTED = ("disclosure", "grid", "section", "toolbar")
 #: le titre que la console donne aux colonnes qu'une liste replie dans le détail de ses lignes
 FOLDED = "Informations complémentaires"
+#: un nombre écrit à la française, jusqu'au bout de son mot : son signe (« − » compris), ses milliers (l'espace
+#: insécable, fine ou non, de ``num_fr``), ses décimales
+_NUMBER = re.compile(r"[-+−]?\d+(?:[\u00a0\u202f]\d{3})*(?:[,.]\d+)?(?=\s|$)")
+_PLAIN_NUMBER = str.maketrans({"−": "-", ",": ".", "\u00a0": None, "\u202f": None})
 
 
 def text(c: Mapping[str, Any] | None) -> str:
@@ -109,12 +114,11 @@ def gauge(c: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return {"w": round(100 * c["ratio"], 1), "text": c["text"], "tone": c.get("tone") or ""}
 
 
-def number(c: Mapping[str, Any] | None) -> float | None:
-    """Un nombre écrit à la française dans une cellule (« 0,040 ») ; rien s'il n'y en a pas."""
-    try:
-        return float(text(c).split()[0].replace(",", "."))
-    except (ValueError, IndexError):
-        return None
+def number(c: Mapping[str, Any] | str | None) -> float | None:
+    """Le nombre écrit à la française qui ouvre une cellule rendue, ou un texte (« 0,040 », « −1 234,5 personnes ») ;
+    rien s'il n'y en a pas."""
+    found = _NUMBER.match((c if isinstance(c, str) else text(c)).strip())
+    return float(found.group().translate(_PLAIN_NUMBER)) if found else None
 
 
 def rest(line: Line, shown: Iterable[str] = ()) -> list[dict[str, Any]]:
@@ -294,4 +298,6 @@ class Tab(Drawn):
 
     def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
                forms: Mapping[str, Any] | None = None) -> Any:
-        return self.draw(Got(ui, list(items), query, forms or {}))
+        # les formulaires de la console, même sans aucun pour ses blocs : ``Forms.of`` prépare ceux d'une ligne
+        # (« Retirer » un fichier, ADR 0205) — un ``Forms`` vide est faux, il ne se remplace pas par ``{}``
+        return self.draw(Got(ui, list(items), query, forms if forms is not None else {}))

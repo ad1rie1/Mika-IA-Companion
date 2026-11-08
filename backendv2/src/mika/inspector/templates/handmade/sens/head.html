@@ -1,6 +1,6 @@
 {# La barre de titre d'un onglet des Connexions extérieures, des Réveils et des Apps (app/handmade/tabs/senses.py,
-   ADR 0176, 0177) : les actions de la page en boutons (la première en avant), puis les liens vers ses réglages, en roue,
-   qui ferment la barre. #}
+   ADR 0176, 0177) : les actions de la page en boutons (la première en avant), puis ses liens vers d'autres réglages,
+   en roue ; la roue de la destination (ses propres réglages, ADR 0206) ferme la barre. #}
 {% from "_icons.html" import icon %}
 {% for text, href in primary or [] %}<a class="btn{{ ' quiet' if not loop.first }}" href="{{ href }}">{{ text }}</a>{% endfor %}
 {% for text, href in gear or [] %}<a class="btn quiet gear-link" href="{{ href }}">{{ icon('settings') }}{{ text }}</a>{% endfor %}

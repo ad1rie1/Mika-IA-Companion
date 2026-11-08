@@ -10,7 +10,11 @@
 <div class="now-page">
   <header class="now-head">
     <div>
-      <p class="now-kicker">Relations &amp; échanges</p>
+      {# le fil d'Ariane (ADR 0202), au-dessus du titre et celui de ses autres onglets : la rubrique du menu, puis la
+         destination — sans lien, c'est sa page #}
+      {% set rub = (nav or [])|selectattr("active")|first %}
+      {% set here = (rub["items"]|selectattr("on")|first) if rub else none %}
+      {% if rub %}<nav class="crumbs" aria-label="Fil d'Ariane"><span>{{ rub.short }}</span><span aria-hidden="true">/</span><span>{{ here.label if here else "Personnes" }}</span></nav>{% endif %}
       <h1>Personnes</h1>
       <p class="now-lede">Qui elle connaît, ce que chaque personne est pour elle, ce qu'elle ressent et où elle en est — ce qui attend une réponse, un silence qui pèse.</p>
     </div>

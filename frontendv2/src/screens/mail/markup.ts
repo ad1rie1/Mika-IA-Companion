@@ -7,7 +7,7 @@ import { h } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { mikaAvatar } from "../../mika/face";
 import { dayAndClock, shortWhen, sizeLabel } from "../chat/markup";
-import { MAIL_LIMITS, type Contact, type DraftState, type MailAttachment, type MailBox, type MailDraft, type MailFolder, type MailFull, type MailRow, type MailState, type Person, type SentMail } from "../../api/mail";
+import { MAIL_LIMITS, PIECE_LIMITS, type Contact, type DraftState, type MailAttachment, type MailBox, type MailDraft, type MailFolder, type MailFull, type MailRow, type MailState, type Person, type SentMail } from "../../api/mail";
 import {
   avatar,
   bodyLead,
@@ -28,16 +28,18 @@ import {
   shareSentence,
   textHtml,
   type Caps,
+  type Piece,
 } from "./format";
 
 // ── Les vues de la colonne de gauche ──────────────────────────────────
 
-/** Ce que montre la liste : toutes les réceptions, les suivis, ce qui est parti, ses brouillons, où elle est passée,
- *  ou un dossier d'une boîte. */
+/** Ce que montre la liste : toutes les réceptions, les suivis, ce qui est parti, ses brouillons, ce qui attend une
+ *  réponse selon elle, ou un dossier d'une boîte. « Où Mika est passée » est un filtre d'une réception ou d'un
+ *  dossier, pas une vue de la colonne : un seul nom, un seul sens (ADR 0200). */
 export type View =
   | { kind: "inbox" }
   | { kind: "flagged" }
-  | { kind: "noticed" }
+  | { kind: "needs_reply" }
   | { kind: "sent"; box: string }
   | { kind: "drafts"; box: string }
   | { kind: "folder"; box: string; folder: string };
@@ -55,7 +57,7 @@ export function viewKey(v: View): string {
 }
 
 export function parseView(key: string): View {
-  if (key === "flagged" || key === "noticed" || key === "inbox") return { kind: key };
+  if (key === "flagged" || key === "needs_reply" || key === "inbox") return { kind: key };
   const [kind, ...rest] = key.split(":");
   if (kind === "sent" || kind === "drafts") return { kind, box: rest.join(":") };
   if (kind === "folder" && rest.length >= 2) return { kind, box: rest[0], folder: rest.slice(1).join(":") };
@@ -99,10 +101,20 @@ function orderedFolders(box: MailBox): MailFolder[] {
   return [...box.folders].sort((a, b) => rank(a) - rank(b));
 }
 
+export function folderIcon(f: MailFolder): IconName {
+  return ROLE_ICON[f.role] ?? "folder";
+}
+
+/** Où « Déplacer » range des mails d'une boîte (ADR 0200) : ses dossiers, dans l'ordre de la colonne, sauf celui où ils
+ *  sont déjà, « Envoyés » et « Brouillons » (le client y montre ce qui est parti et ses brouillons à elle). */
+export function moveTargets(box: MailBox, current: string): MailFolder[] {
+  return orderedFolders(box).filter((f) => f.name !== current && f.role !== "sent" && f.role !== "drafts");
+}
+
 export interface BoxesPane {
   boxes: BoxView[];
   view: string;
-  /** Les non-lus de toutes les réceptions. */
+  /** Les non-lus de toutes les réceptions — sans les boîtes qu'on ne te partage qu'en lecture (ADR 0200). */
   unseen: number;
   /** Ses brouillons qui attendent une décision que tu peux prendre. */
   waiting: number;
@@ -121,8 +133,10 @@ function boxBlock(v: BoxView, current: string): string {
   const inbox = inboxOf(b);
   const unseen = inbox?.unseen ?? 0;
   const why = b.error || (!b.ready ? "Sa connexion n'est pas prête." : "");
+  // une boîte partagée dit son niveau, et son non-lu à côté (le sien, pas le tien : il ne compte pas dans tes
+  // réceptions quand on ne te la partage qu'en lecture, ADR 0200)
   const mark = shared
-    ? `<span class="tag" title="Partagée avec toi par ${h(b.owner_name)}">${ico("lock", "xs")}${h(levelTag(b.level))}</span>`
+    ? `<span class="tag" title="Partagée avec toi par ${h(b.owner_name)}">${ico("lock", "xs")}${h(levelTag(b.level))}</span>${unseen ? `<span class="cnt" title="Non lus dans sa réception">${unseen}</span>` : ""}`
     : why
       ? `<a class="mb-err" href="#parametres/comptes-mail" title="${h(why)}">${ico("alert", "xs")}</a>`
       : unseen
@@ -151,7 +165,7 @@ export function boxesPane(p: BoxesPane): string {
   return `<div class="pane-scroll mb-scroll">
     <div class="nav-list">${navButton("inbox", p.view, "Toutes les réceptions", "inbox", p.unseen)}${navButton("flagged", p.view, "Suivis", "star", 0)}${navButton("sent", p.view, "Envoyés", "send", 0)}</div>
     <div class="group-label">Mika</div>
-    <div class="nav-list">${navButton("drafts", p.view, "Ses brouillons", "pen", p.waiting, "mika-link")}${navButton("noticed", p.view, "Où Mika est passée", "eye", 0, "mika-link")}</div>
+    <div class="nav-list">${navButton("drafts", p.view, "Ses brouillons", "pen", p.waiting, "mika-link")}${navButton("needs_reply", p.view, "Réponse attendue", "reply", 0, "mika-link", "Ce qu'elle juge appeler une réponse, dans toutes tes boîtes, tant que ce n'est pas lu")}</div>
     ${p.error ? `<p class="small mb-note">${ico("alert", "xs")}${h(p.error)}</p>` : ""}
     <div class="group-label">Tes boîtes<span class="cnt">${own.length}</span></div>
     ${own.length ? own.map((b) => boxBlock(b, p.view)).join("") : '<p class="small muted mb-note">Aucune boîte à toi.</p>'}
@@ -180,8 +194,8 @@ export function viewTitle(v: View, boxes: readonly BoxView[]): string {
       return "Toutes les réceptions";
     case "flagged":
       return "Suivis";
-    case "noticed":
-      return "Où Mika est passée";
+    case "needs_reply":
+      return "Réponse attendue";
     case "sent":
       return box ? `${box.title} · Envoyés` : "Envoyés";
     case "drafts":
@@ -193,12 +207,56 @@ export function viewTitle(v: View, boxes: readonly BoxView[]): string {
   }
 }
 
+/** Ce que la liseuse montre : un de ses brouillons (sa boîte, s'il est chargé), ou un mail (`null` tant qu'il se
+ *  charge ; `common` : sa boîte compte dans les vues communes, ce qu'une boîte partagée en lecture ne fait pas). */
+export type Shown =
+  | { kind: "draft"; box: string | null }
+  | { kind: "mail"; mail: Pick<MailFull, "box" | "folder" | "seen" | "flagged" | "sent" | "her"> | null; common: boolean };
+
+/** Ce que la liseuse montre est-il de la liste de cette vue, avec son filtre ? Sinon, changer de vue ou de filtre la
+ *  ferme : à droite, rien qui ne soit à gauche ni dans l'adresse. Un mail encore en chargement ne se garde pas.
+ *  Jugé avant que la nouvelle liste arrive, sur ce que l'API dit du mail ; ensuite, la liste chargée tranche
+ *  (`listHolds`). */
+export function viewHolds(v: View, filter: MailState, shown: Shown): boolean {
+  if (shown.kind === "draft") return v.kind === "drafts" && (!v.box || v.box === shown.box);
+  const m = shown.mail;
+  if (!m) return false;
+  const kept = filter === "unread" ? !m.seen : filter === "noticed" ? !!m.her?.noticed : true;
+  switch (v.kind) {
+    case "inbox":
+      return shown.common && m.folder === "INBOX" && kept;
+    case "folder":
+      return v.box === m.box && v.folder === m.folder && kept;
+    case "flagged":
+      return shown.common && m.flagged;
+    case "needs_reply":
+      // la liste (`state=needs_reply`) : jugé appeler une réponse et pas encore lu — par elle, par toi ou ailleurs.
+      // L'API ne dit que « lu par elle » (`her.read`) ; le drapeau du serveur (`seen`) n'est pas ce « lu » (lu dans
+      // un autre client, le serveur ne le sait qu'à la relève ; remis en non-lu, il reste lu). Seul ce qui en sort
+      // à coup sûr ferme ici ; le reste, la liste chargée le dit.
+      return shown.common && !!m.her?.needs_reply && !m.her.read;
+    case "sent":
+      return m.sent && (v.box ? v.box === m.box : shown.common);
+    case "drafts":
+      return false;
+  }
+}
+
+/** La liste d'une vue du serveur vient d'arriver : elle fait foi pour la liseuse. Un mail qu'elle montre reste
+ *  ouvert ; absent d'une liste entière (toute sur cette page), il se ferme ; d'une liste en plusieurs pages, on ne
+ *  sait pas (`null`) : `viewHolds` a jugé. */
+export function listHolds(ref: string, rows: readonly { ref: string }[], total: number): boolean | null {
+  if (rows.some((r) => r.ref === ref)) return true;
+  return rows.length >= total ? false : null;
+}
+
 export function listHead(title: string, total: number, checked: number): string {
   if (checked) {
     return `<b>${checked} choisi${checked > 1 ? "s" : ""}</b><span class="grow"></span>
       <button class="btn xs" type="button" data-groupe="read">${ico("check", "xs")}Lu</button>
       <button class="btn xs icon" type="button" data-groupe="unread" title="Marquer non lus">${ico("mail", "xs")}</button>
       <button class="btn xs" type="button" data-groupe="archive">${ico("archive", "xs")}Archiver</button>
+      <button class="btn xs icon" type="button" data-groupe="move" title="Déplacer dans un dossier">${ico("folder", "xs")}</button>
       <button class="btn xs" type="button" data-groupe="trash" title="Corbeille">${ico("trash", "xs")}</button>
       <button class="btn xs ghost" type="button" data-groupe="none">Annuler</button>`;
   }
@@ -269,13 +327,19 @@ function recipients(people: readonly Person[]): string {
   return names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
 }
 
+/** « À … » d'une ligne : leurs noms, quand la boîte les connaît ; leurs adresses au survol. */
+function toTitle(people: readonly Person[]): string {
+  const addresses = people.map((p) => p.address).filter(Boolean).join(", ");
+  return `<span class="li-title"${addresses ? ` title="${h(addresses)}"` : ""}>À ${h(recipients(people))}</span>`;
+}
+
 export function sentRow(s: SentMail, v: RowView): string {
   const b = v.boxes.get(s.box);
   const first = s.to[0];
   const marks = `${v.many ? boxMark(b) : ""}${s.by ? "" : `<span class="mk">${ico("pen")}envoyé par elle</span>`}`;
   return `<button class="li mrow" type="button" data-mail="${h(s.ref)}" aria-selected="${v.selected === s.ref}">
     <span class="mrow-check"></span><span class="mrow-av">${first ? avatar(personName(first), "sm", first.address) : avatar("?", "sm")}</span>
-    <span class="li-main"><span class="li-top"><span class="li-title">À ${h(recipients(s.to))}</span>${s.attachments ? ico("clip", "xs") : ""}<time>${h(shortWhen(s.date, v.now))}</time></span>
+    <span class="li-main"><span class="li-top">${toTitle(s.to)}${s.attachments ? ico("clip", "xs") : ""}<time>${h(shortWhen(s.date, v.now))}</time></span>
       <span class="li-sub">${h(s.subject || "(sans objet)")}</span><span class="li-snip">${h(s.snippet)}</span>
       ${marks ? `<span class="li-marks">${marks}</span>` : ""}</span></button>`;
 }
@@ -299,11 +363,12 @@ function draftBlocked(d: MailDraft): boolean {
 
 export function draftRow(d: MailDraft, v: RowView): string {
   const [tone, label] = draftState(d);
-  const to = parseAddresses(d.preview?.to || d.to);
+  const parsed = parseAddresses(d.preview?.to || d.to);
+  const to = d.to_people?.length ? d.to_people : parsed.length ? parsed : [{ name: d.to, address: d.to }];
   const b = v.boxes.get(d.box);
   return `<button class="li mrow draft" type="button" data-draft="${h(d.id)}" aria-selected="${v.selected === `brouillon/${d.id}`}">
     <span class="mrow-check"></span><span class="mrow-av">${mikaAvatar("sm")}</span>
-    <span class="li-main"><span class="li-top"><span class="li-title">À ${h(recipients(to.length ? to : [{ name: d.to, address: d.to }]))}</span><time>${h(shortWhen(d.at, v.now))}</time></span>
+    <span class="li-main"><span class="li-top">${toTitle(to)}<time>${h(shortWhen(d.at, v.now))}</time></span>
       <span class="li-sub">${h(d.subject || "(sans objet)")}</span><span class="li-snip">${h(bodyLead(d.body))}</span>
       <span class="li-marks">${v.many ? boxMark(b) : ""}<span class="tag ${tone}">${h(label)}</span>${draftBlocked(d) && d.state === "attend" ? '<span class="tag danger">à compléter</span>' : ""}</span></span></button>`;
 }
@@ -399,7 +464,7 @@ export function readerMail(m: MailFull, v: ReaderView, fileUrl: (part: string) =
         ${canAnswer ? `<button class="btn sm" type="button" data-act="repondre">${ico("reply", "sm")}Répondre</button>
         <button class="btn sm rd-sec" type="button" data-act="tous" title="Répondre à tous">${ico("reply-all", "sm")}<span class="lbl">Répondre à tous</span></button>` : ""}
         ${c.write ? `<button class="btn sm${canAnswer ? " rd-sec" : ""}" type="button" data-act="transferer" title="Transférer">${ico("forward", "sm")}<span class="lbl">Transférer</span></button>` : ""}
-        ${c.prepare && !m.sent ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}Préremplir avec Mika</button>` : ""}
+        ${c.prepare && !m.sent && !v.composer ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}Préremplir avec Mika</button>` : ""}
         <span class="grow"></span>
         ${c.write ? readerTidy(m) : ""}</div>`
       : "";
@@ -446,6 +511,7 @@ export function readerTidy(m: Pick<MailFull, "seen" | "flagged">): string {
   return `<button class="btn sm icon ghost" type="button" data-act="archiver" title="Archiver">${ico("archive", "sm")}</button>
     <button class="btn sm icon ghost" type="button" data-act="lu" title="${m.seen ? "Marquer non lu" : "Marquer comme lu"}">${ico(m.seen ? "mail" : "check", "sm")}</button>
     <button class="btn sm icon ghost${m.flagged ? " on" : ""}" type="button" data-act="suivre" title="${m.flagged ? "Ne plus suivre" : "Suivre"}" aria-pressed="${m.flagged}">${ico("star", "sm")}</button>
+    <button class="btn sm icon ghost" type="button" data-act="deplacer" title="Déplacer dans un dossier">${ico("folder", "sm")}</button>
     <button class="btn sm icon ghost" type="button" data-act="corbeille" title="Corbeille">${ico("trash", "sm")}</button>`;
 }
 
@@ -503,8 +569,29 @@ export function chip(p: Person): string {
   return `<span class="chip" title="${h(p.address)}" data-addr="${h(p.address)}" data-name="${h(p.name)}">${avatar(name, "xs", p.address)}${h(name)}<button type="button" title="Retirer" data-unchip>${ico("x", "xs")}</button></span>`;
 }
 
-export function recipientField(field: "to" | "cc", people: readonly Person[], placeholder: string): string {
-  return `<div class="rcpt" data-rcpt="${field}">${people.map(chip).join("")}<input data-ac placeholder="${h(placeholder)}" autocomplete="off" aria-label="${field === "to" ? "Destinataires" : "Copie"}"></div>`;
+const RECIPIENT_LABEL = { to: "Destinataires", cc: "Copie", bcc: "Copie cachée" } as const;
+
+export function recipientField(field: "to" | "cc" | "bcc", people: readonly Person[], placeholder: string): string {
+  return `<div class="rcpt" data-rcpt="${field}">${people.map(chip).join("")}<input data-ac placeholder="${h(placeholder)}" autocomplete="off" aria-label="${RECIPIENT_LABEL[field]}"></div>`;
+}
+
+/** Les pièces d'un mail qu'on écrit : une puce par fichier, qu'on retire tant qu'il n'est pas parti. */
+export function pieceChips(pieces: readonly Piece[]): string {
+  return pieces
+    .map((p, i) => `<span class="chip piece-chip" title="${h(p.name)}">${ico("clip", "xs")}<span class="ellipsis">${h(p.name)}</span><small>${h(sizeLabel(p.size))}</small><button type="button" title="Retirer ${h(p.name)}" aria-label="Retirer ${h(p.name)}" data-retirer-piece="${i}">${ico("x", "xs")}</button></span>`)
+    .join("");
+}
+
+/** Le champ qu'on déclenche pour choisir des fichiers (invisible : un bouton ou un dépôt le montre). */
+const FILE_INPUT = '<input type="file" multiple hidden data-fichiers aria-label="Joindre des fichiers">';
+
+/** Joindre, dans la fenêtre d'un mail : glisser ou choisir, puis la liste de ce qui partira. */
+function piecesPicker(): string {
+  return `<div class="cf-pieces">
+      <div class="dropzone" data-depot>${ico("upload", "sm")}<span>Glisse des fichiers ici, ou <button class="linkish" type="button" data-joindre>choisis-les</button> · ${PIECE_LIMITS.each / (1024 * 1024)} Mo par pièce</span></div>
+      ${FILE_INPUT}
+      <div class="cf-pieces-list" data-jointes></div>
+    </div>`;
 }
 
 export interface InlineReply {
@@ -514,6 +601,11 @@ export interface InlineReply {
   subject: string;
   cc: Person[];
   showCc: boolean;
+  /** Ses copies cachées (ADR 0214). */
+  bcc: Person[];
+  showBcc: boolean;
+  /** Ce qui part avec elle (ADR 0214). */
+  files: File[];
   body: string;
   quote: boolean;
   /** Le brouillon d'elle repris ici (son identifiant). */
@@ -524,15 +616,17 @@ export interface InlineReply {
 }
 
 export function inlineReply(c: InlineReply, box: BoxView | null, canPrepare: boolean): string {
-  return `<div class="composer rd-reply${c.filled ? " filled" : ""}" data-reply>
+  return `<div class="composer rd-reply${c.filled ? " filled" : ""}" data-reply data-depot>
     <div class="rd-reply-head"><span class="small muted">De</span><span class="small rd-reply-from" title="${box ? h(box.box.address) : ""}">${box ? `${h(box.title)} &lt;${h(box.box.address)}&gt;` : ""}</span>
-      <span class="small muted">À</span>${recipientField("to", c.to, "Ajouter…")}${c.showCc ? "" : '<button class="btn xs ghost" type="button" data-act="cc">Cc</button>'}</div>
+      <span class="small muted">À</span>${recipientField("to", c.to, "Ajouter…")}${c.showCc ? "" : '<button class="btn xs ghost" type="button" data-act="cc">Cc</button>'}${c.showBcc ? "" : '<button class="btn xs ghost" type="button" data-act="cci">Cci</button>'}</div>
     ${c.showCc ? `<div class="rd-reply-head"><span class="small muted">Cc</span>${recipientField("cc", c.cc, "Copie…")}</div>` : ""}
+    ${c.showBcc ? `<div class="rd-reply-head"><span class="small muted">Cci</span>${recipientField("bcc", c.bcc, "Copie cachée…")}</div>` : ""}
     <div class="ac-pop" data-acpop hidden></div>
     ${c.filled ? `<div class="tm-filled">${ico("sparkle", "xs")}${h(c.filled)} — relis avant d'envoyer<button type="button" class="btn xs ghost" data-act="vider">Effacer</button></div>` : ""}
     <textarea rows="5" data-rd-txt placeholder="Ta réponse…" aria-label="Ta réponse" maxlength="${MAIL_LIMITS.body}">${h(c.body)}</textarea>
+    <div class="cf-pieces-list" data-jointes>${pieceChips(c.files)}</div>
     ${c.error ? `<p class="small rd-reply-error">${ico("alert", "xs")}${h(c.error)}</p>` : ""}
-    <div class="cmp-bar">${canPrepare ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}
+    <div class="cmp-bar"><button class="btn icon ghost sm" type="button" data-joindre title="Joindre des fichiers (${PIECE_LIMITS.each / (1024 * 1024)} Mo par pièce)" aria-label="Joindre des fichiers">${ico("clip")}</button>${FILE_INPUT}${canPrepare ? `<button class="btn sm mika" type="button" data-act="preremplir">${ico("sparkle", "sm")}<span class="lbl">Préremplir avec Mika</span></button>` : ""}
       <label class="small muted row cite" title="Citer le mail auquel tu réponds"><input type="checkbox" data-quote${c.quote ? " checked" : ""}><span class="lbl">citer le mail</span></label><span class="grow"></span>
       ${countSpan(c.body, MAIL_LIMITS.body)}
       <button class="btn sm ghost" type="button" data-act="fermer-rep">Annuler</button>
@@ -559,14 +653,18 @@ export function composeForm(f: ComposeForm): string {
     ? `<select data-de aria-label="De">${f.boxes.map((b) => `<option value="${h(b.box.key)}"${b.box.key === f.box ? " selected" : ""}>${h(b.title)} &lt;${h(b.box.address)}&gt;</option>`).join("")}</select>`
     : `<span class="cf-fixed">${h(f.boxes.find((b) => b.box.key === f.box)?.title ?? f.box)} &lt;${h(f.boxes.find((b) => b.box.key === f.box)?.box.address ?? "")}&gt;</span>`;
   const showCc = f.cc.length > 0;
+  // un brouillon d'elle se retouche : il part tel qu'il est lu, sans pièce ni copie cachée
+  const whole = f.kind !== "edit";
   return `<div class="cmp-form" data-compose>
     <div class="cf-row"><span>De</span>${from}<span></span></div>
-    <div class="cf-row"><span>À</span>${recipientField("to", f.to, "Un nom ou une adresse…")}<span class="row">${showCc ? "" : '<button class="btn xs ghost" type="button" data-cc>Cc</button>'}</span></div>
+    <div class="cf-row"><span>À</span>${recipientField("to", f.to, "Un nom ou une adresse…")}<span class="row">${showCc ? "" : '<button class="btn xs ghost" type="button" data-cc>Cc</button>'}${whole ? '<button class="btn xs ghost" type="button" data-bcc>Cci</button>' : ""}</span></div>
     <div class="cf-row" data-ccrow${showCc ? "" : " hidden"}><span>Cc</span>${recipientField("cc", f.cc, "Copie…")}<span></span></div>
+    ${whole ? `<div class="cf-row" data-bccrow hidden><span>Cci</span>${recipientField("bcc", [], "Copie cachée…")}<span></span></div>` : ""}
     <div class="ac-pop" data-acpop hidden></div>
     <label class="cf-row"><span>Objet</span><input data-objet value="${h(f.subject)}" placeholder="Objet" maxlength="${MAIL_LIMITS.subject}"></label>
     <textarea rows="10" data-corps placeholder="${f.kind === "forward" ? "Un mot d'accompagnement (facultatif)…" : "Ton message…"}" aria-label="Le message" maxlength="${MAIL_LIMITS.body}">${h(f.body)}</textarea>
     ${countSpan(f.body, MAIL_LIMITS.body, "cf-count")}
+    ${whole ? piecesPicker() : ""}
     ${f.kind === "forward" && f.attachments ? `<label class="small row cf-check"><input type="checkbox" data-pieces checked>${f.attachments > 1 ? `Joindre ses ${f.attachments} pièces jointes` : "Joindre sa pièce jointe"}</label>` : ""}
     ${f.kind === "forward" ? '<p class="small muted">Le message d\'origine complet suit ton texte.</p>' : ""}
     ${f.quote !== null ? `<label class="small row cf-check"><input type="checkbox" data-citer${f.quote ? " checked" : ""}>Citer le mail auquel il répond</label>` : ""}

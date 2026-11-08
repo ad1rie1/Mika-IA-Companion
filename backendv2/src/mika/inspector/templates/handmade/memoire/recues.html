@@ -1,19 +1,14 @@
-{# Elle › Mémoire › Pièces reçues (app/handmade/tabs/memory.py, ADR 0177, 0182) : la place en chiffres, puis en
-   sous-onglets (ADR 0176) ce qu'on lui a envoyé, une entrée par pièce — sa sorte en icône, son nom vers sa fiche, qui
-   l'a envoyée, sa taille ; ce qu'elle y a lu, cité ; ce qui s'y relie (vers l'onglet « Liens » de sa fiche) ; la
-   télécharger —, et la place de chacun, une jauge par personne (tous ses moyens de communication réunis), de la plus
-   chargée à la moins chargée, chacune vers ses pièces ; au-delà de sa place, la jauge le dit. Une pièce retirée
-   s'estompe : ses octets sont effacés, ce qu'elle en a lu reste. Les paginations de la faculté ; une page plus loin
-   rouvre son sous-onglet, l'ancienne adresse de la place aussi (``#pieces-place``). #}
+{# Elle › Mémoire › Pièces reçues (app/handmade/tabs/memory.py, ADR 0177, 0182, 0205) : la place en chiffres, puis
+   en sous-onglets (ADR 0176) ce qu'on lui a envoyé, une entrée par pièce — sa sorte en icône, son nom vers sa fiche,
+   qui l'a envoyée, sa taille ; ce qu'elle y a lu, cité ; ce qui s'y relie (vers l'onglet « Liens » de sa fiche) ; la
+   télécharger, la retirer (confirmé : ses octets s'effacent, sa ligne et ce qu'elle y a lu restent) —, et la place de
+   chacun, une jauge par personne (tous ses moyens de communication réunis), de la plus chargée à la moins chargée,
+   chacune vers ses pièces ; au-delà de sa place, la jauge le dit. Une pièce retirée s'estompe : ses octets sont
+   effacés, ce qu'elle en a lu reste. Les paginations de la faculté ; une page plus loin rouvre son sous-onglet,
+   l'ancienne adresse de la place aussi (``#pieces-place``). #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/memoire/macros.html" as mem with context %}
-{% macro icon(kind) -%}
-<svg class="piece-icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-{%- if kind == "image" %}<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M4 17.5l5-4.5 3.5 3 3-2.5 4.5 4"/>
-{%- elif kind == "audio" %}<path d="M5 10v4M8.5 7v10M12 4.5v15M15.5 8v8M19 10.5v3"/>
-{%- else %}<path d="M7 3.5h7l4.5 4.5v12.5H7z"/><path d="M14 3.5V8h4.5M9.5 12.5h6M9.5 16h6"/>{% endif -%}
-</svg>
-{%- endmacro %}
+{% from "handmade/shared/list_macros.html" import row_action %}
 <div class="now-page memories pieces" data-tab="memoire/recues">
   {{ mem.notes(notes) }}
   {% if t %}
@@ -31,7 +26,7 @@
           <ul class="memories-list" role="list">
             {% for x in items %}
             <li class="memories-item piece k-{{ x.kind }}{{ ' faded' if x.gone }}">
-              <span class="piece-icon" title="{{ x.sort }}">{{ icon(x.kind) }}</span>
+              <span class="piece-icon" title="{{ x.sort }}">{{ mem.file_icon(x.kind) }}</span>
               <div class="piece-main">
                 <p class="piece-name">{{ tab.cell(x.name) }}{% if x.state %} <span class="now-tag {{ x.state.tone }}">{{ x.state.text }}</span>{% endif %}</p>
                 <p class="memories-meta">
@@ -41,11 +36,12 @@
                 </p>
                 {% if x.seen %}<div class="piece-seen"><span class="now-eyebrow">ce qu’elle y a lu</span><div>{{ tab.cell(x.seen) }}</div></div>
                 {% elif x.unread %}<p class="piece-seen none">Rien n’a pu en être lu.</p>{% endif %}
-                {% if x.links or x.download %}
-                <p class="memories-foot">
+                {% if x.links or x.download or x.remove %}
+                <div class="memories-foot">
                   {% if x.links %}<a href="{{ x.links }}">relié à {{ x.tied }} élément{{ 's' if x.tied > 1 }} de sa mémoire →</a>{% endif %}
                   {% if x.download %}<a class="piece-download" href="{{ x.download.href }}">Télécharger</a>{% endif %}
-                </p>
+                  {% if x.remove %}{{ row_action(x.remove) }}{% endif %}
+                </div>
                 {% endif %}
               </div>
             </li>

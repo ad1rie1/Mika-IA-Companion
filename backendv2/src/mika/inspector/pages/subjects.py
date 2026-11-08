@@ -6,7 +6,6 @@ l'oubli d'un objet qui est un sujet de contenus."""
 from __future__ import annotations
 
 from typing import Any
-from unicodedata import combining, normalize
 from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
@@ -16,18 +15,15 @@ from starlette.routing import Route
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
+from mika.inspector.pages import settings_directory
 from mika.inspector.ui import PREFIX, Forms, secure, wants_table
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Section, Table, Text, is_page_param
+from mika.kernel.text import fold
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
 
 #: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
 SEARCH_PAGE = 25
-
-
-def search_text(text: str) -> str:
-    """La navigation se cherche aussi sans les accents affichés dans ses titres."""
-    return "".join(c for c in normalize("NFD", text.casefold()) if not combining(c))
 
 
 def fiche_url(kind: str, key: str, tab: str = "") -> str:
@@ -56,11 +52,15 @@ def retyped(given: str, shown: str, key: str) -> bool:
 #: la recherche dessinée, et sa feuille
 SEARCH_TEMPLATE = "handmade/recherche/recherche.html"
 SEARCH_STYLES = ("handmade/episode.css",)
+#: les vues brutes des facultés : la recherche y mène, sans les lister (ADR 0202)
+VIEWS = f"{PREFIX}/systeme/vues"
+TECHNICAL = "Chercher dans les vues techniques"
 
 
-def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str) -> dict[str, Any]:
+def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str, technical: int = 0) -> dict[str, Any]:
     """Ce que dessine la recherche : chaque groupe de résultats (ses tableaux de liens) en carte, ses liens et leur
-    détail, sa pagination ; ou ce que dit sa note (rien trouvé, rien demandé)."""
+    détail, sa pagination ; ou ce que dit sa note (rien trouvé, rien demandé). ``technical`` : combien de vues brutes
+    des facultés portent ce mot dans leur titre — un lien vers Système › Toutes les vues, pas une sorte de résultat."""
     def plain(cell: Any) -> str:
         if isinstance(cell, Text):
             return cell.text
@@ -91,7 +91,8 @@ def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str) -> 
                                for x in pager.get("links") or []]}
         groups.append({"title": b.title, "items": items, "empty": b.empty, "pager": pager, "paged": paged, "id": key,
                        "shown": pager["total"] if paged and pager.get("total") else len(items)})
-    return {"q": q, "only": only, "groups": groups, "note": note}
+    return {"q": q, "only": only, "groups": groups, "note": note,
+            "technical": {"count": technical, "href": VIEWS, "text": TECHNICAL} if technical else None}
 
 
 #: les liens d'une pagination (``render.pager_ctx``) qui changent de page
@@ -192,19 +193,9 @@ class Subjects:
         if not isinstance(links, Failed):
             actions += [{"page": href, "title": text} for text, href in links or ()]
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
-        crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
-            ([] if home and home.label == spec.plural else [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")])
-        # le fil d'Ariane d'une fiche (ADR 0176, la maquette) : sa rubrique, sa destination, l'objet par son numéro
-        # (« Activité / Projets / n° 257 ») ; un retour nommé le remplace
-        rubric = True
-        if key.isdigit():
-            crumbs.append((f"n° {key}", ""))
-        if isinstance(head, Head) and head.back:
-            crumbs, rubric = [(head.back.text or "Retour", render.href(head.back))], False
         back = request.query_params.get("retour", "")
         from_list = back.startswith(PREFIX + "/") and "//" not in back and "\\" not in back and len(back) < 2000
-        if from_list:
-            crumbs, rubric = [("Retour à la liste", back)], False
+        crumbs, returning, menu_path = self.trail(key, head, home, back if from_list else "")
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
         if kind == "person" and isinstance(head, Head):
@@ -215,9 +206,9 @@ class Subjects:
         return self.pages.render_page(
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
-            crumbs=crumbs, rubric=rubric, tabs=tab_list, gear=gear, blocks=blocks,
+            crumbs=crumbs, crumbs_back=returning, tabs=tab_list, gear=gear, blocks=blocks,
             # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
-            menu_path=crumbs[0][1] if crumbs else "",
+            menu_path=menu_path,
             # l'onglet du menu ne s'allume que pour la liste d'où l'on vient, pas pour la destination de la fiche
             menu_tab=from_list,
             view_description=overview.description if shown is not None and current is None else
@@ -230,6 +221,35 @@ class Subjects:
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             console_blocks=current is not None and current.owner in self.ui.deps.plain_owners,
             keep=(("onglet", current.name),) if current is not None else ())
+
+    def home_trail(self, kind: str) -> list[tuple[str, str]]:
+        """Le fil d'une page qui accompagne une fiche (un oubli refusé, un document parti) : la destination où vit ce
+        type d'objet, depuis sa rubrique ; la fiche se rejoint par le retour, dit à part."""
+        home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
+        return self.pages.trail(home.key) if home is not None else []
+
+    def trail(self, key: str, head: Any, home: Any,
+              listed: str) -> tuple[list[tuple[str, str]], tuple[str, str] | None, str]:
+        """Le fil d'Ariane d'une fiche (ADR 0177, 0202) : sa rubrique, sa destination, l'objet par son numéro
+        (« Activité / Projets / n° 257 »), ou par son nom quand il n'en a pas d'autre que sa clé (son titre est sa
+        clé : « Outils / Ses outils / web », comme un outil), par le constructeur de toute la console
+        (``Pages.trail``) ; un objet que son titre nomme autrement (une personne, un mail) s'arrête à sa destination,
+        sa clé interne ne se dit pas. Un retour ne le remplace pas : celui que déclare la faculté (``Head.back``)
+        devient le lien de la destination quand il y mène (la liste filtrée d'où vient un mail), et se dit à part sinon
+        (« ← Ses pièces », sur la fiche d'une personne) ; la liste d'où l'on vient (``listed``, ``?retour=``) se dit à
+        part, « ← Retour à la liste ». Rend aussi la page que le menu allume : cette liste, sinon le retour déclaré qui
+        mène à la destination, sinon la destination."""
+        own = [(f"n° {key}", "")] if key.isdigit() else \
+            [(key, "")] if isinstance(head, Head) and head.title == key else []
+        declared = head.back if isinstance(head, Head) else None
+        target = render.href(declared) if declared is not None else ""
+        base = f"{PREFIX}/{home.key}" if home is not None else ""
+        path = target.split("#", 1)[0].split("?", 1)[0]
+        within = bool(base) and (path == base or path.startswith(base + "/"))
+        crumbs = self.pages.trail(home.key, *own, link=target if within else "") if home is not None else own
+        returning = ("Retour à la liste", listed) if listed else \
+            (declared.text or "Retour", target) if declared is not None and not within else None
+        return crumbs, returning, listed or (target if within else base)
 
     @staticmethod
     def tab_bar(request: Request, kind: str, key: str, tabs: Any, current: Any, head: Any,
@@ -272,71 +292,90 @@ class Subjects:
             param = "avant_" + kind
             ctx = self.ui.inspection.context(request.query_params)
             offset = max(0, ctx.int_param(param, 0))
-            found = self.ui.inspection.search(kind, q, SEARCH_PAGE + 1, offset=offset)
+            # leurs dates écrites comme partout dans la console (le sous-titre d'un mail), jamais l'horodatage brut
+            found = self.ui.inspection.search(kind, q, SEARCH_PAGE + 1, offset=offset, when=self.ui.when)
             if found or only or offset:
                 pager = Pager(param=param, older=((param, str(offset + SEARCH_PAGE)),) if len(found) > SEARCH_PAGE else ())
                 blocks.append(Table((spec.label.lower(), "détail"), tuple(
                     Row((Ref.subject(kind, f.key, f.title), f.subtitle or "—"), href=Ref.subject(kind, f.key, ""))
                     for f in found[:SEARCH_PAGE]), title=spec.plural, pager=pager,
                     empty="Aucun résultat."))
-        if q.isdigit():
-            blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
+        lead: list[Any] = []  # en tête, dans cet ordre : les pages, les réglages, les textes, le journal
+        if q and not only:
+            pages = self.pages_found(q)
+            if pages:
+                lead.append(Table(("page", "rubrique"), pages, title="Pages de la console"))
+            settings = self.settings_found(q)
+            if settings:
+                lead.append(Table(("réglage", "où"), settings, title="Réglages"))
         # les vues qui cherchent dans leurs textes (un filtre « q » : les messages) — la recherche ne lit pas les
         # messages elle-même, elle y mène
         texts = [v for v in self.ui.inspection.views()
                  if q and not v.subject and not v.hidden and any(p == "q" for p, _l in v.params)]
         if texts:
-            blocks.insert(0, Table(("chercher dans", "faculté"), tuple(
+            lead.append(Table(("chercher dans", "faculté"), tuple(
                 (Ref.view(v.owner, v.name, f"« {q} » dans {v.title.lower()}", q=q),
                  Text(self.ui.names.faculty(v.owner), hint=v.owner)) for v in texts), title="Dans les textes"))
-        views = [v for v in self.ui.inspection.views() if q and q.lower() in v.title.lower()]
-        if views:
-            blocks.append(Table(("vue", "faculté"), tuple((Ref.view(v.owner, v.name, v.title),
-                                                          Text(self.ui.names.faculty(v.owner), hint=v.owner))
-                                                         for v in views), title="Vues"))
-        if q and not only:
-            # Les réglages et les pages natives doivent se trouver aussi : ils ne sont pas des sujets.
-            matches = []
-            needle = search_text(q)
-            her = self.ui.her_name()
-            for group in self.ui.deps.menu:
-                label = her if group.her else group.label
-                for link in group.items:
-                    if needle in search_text(f"{label} {link.label}"):
-                        matches.append((Ref("local", f"{PREFIX}/{link.target}", link.label), label or "Accueil"))
-            # la rubrique d'une destination : celle du menu qui y mène (ses groupes de la carte ne se montrent pas)
-            rubric = {}
-            for group in self.ui.deps.menu:
-                for link in group.items:
-                    for route in (link.target, *link.also):
-                        rubric.setdefault(route.split("/", 1)[0], her if group.her else group.label)
-            for group in self.ui.deps.navigation:
-                for dest in group.items:
-                    base = f"{PREFIX}/{dest.key}"
-                    if needle in search_text(dest.label):
-                        matches.append((Ref("local", base, dest.label), rubric.get(dest.key, group.label)))
-                    for slug, title, spec in self.ui.tabs_of(dest):
-                        family = spec.group if isinstance(spec, Builtin) else ""
-                        if needle in search_text(f"{dest.label} {family} {title}"):
-                            matches.append((Ref("local", f"{base}/{slug}", title), " › ".join(filter(None, (dest.label, family)))))
-            if matches:
-                unique = {}
-                for row in matches:
-                    unique.setdefault(row[0].key, row)
-                blocks.insert(0, Table(("page", "rubrique"), tuple(unique.values()), title="Pages de la console"))
+        if q.isdigit():
+            lead.append(Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
+        blocks = lead + blocks
+        # les vues brutes des facultés ne sont plus une sorte de résultat : elles doublaient les pages sous des titres
+        # techniques (ADR 0202) ; un lien mène à Système › Toutes les vues quand l'une porte ce mot dans son titre
+        technical = sum(1 for v in self.ui.inspection.views() if q and fold(q) in fold(v.title))
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
         heading = f"Recherche : « {q} »" if q else "Recherche"
         subtitle = "Retrouve une page, un réglage, une personne, un projet ou un message."
         # dessinée (ADR 0121) : chaque sorte de résultat en carte ; ses blocs au repli
         drawn = None if wants_table(request.query_params) else call(
-            search_view, blocks, dict(request.query_params), q, only, label="recherche dessinée")
+            search_view, blocks, dict(request.query_params), q, only, technical, label="recherche dessinée")
         if isinstance(drawn, dict):
             return self.pages.render_page(request, title="Recherche", heading=heading, active="", blocks=[],
                                           search_q=q, subtitle=subtitle,
                                           panel=Panel(SEARCH_TEMPLATE, {"v": drawn}, styles=SEARCH_STYLES))
+        if technical:
+            blocks.append(Table(("vues techniques",), ((Ref("local", VIEWS, TECHNICAL),),), title="Vues techniques"))
         return self.pages.render_page(request, title="Recherche", heading=heading, active="", blocks=blocks,
                                       search_q=q, subtitle=subtitle)
+
+    def pages_found(self, q: str) -> tuple[tuple[Ref, str], ...]:
+        """Les pages de la console qui répondent à ``q`` (ses liens de menu, ses destinations, leurs onglets) : elles
+        ne sont pas des sujets. Chacune avec le chemin de son fil d'Ariane (ADR 0202) ; une destination, avec sa
+        seule rubrique ; un lien du menu, avec sa rubrique et sa colonne."""
+        matches: list[tuple[Ref, str]] = []
+        needle = fold(q)
+        her = self.ui.her_name()
+        for group in self.ui.deps.menu:
+            label = her if group.her else group.label
+            for link in group.items:
+                if needle in fold(f"{label} {link.column} {link.label}"):
+                    matches.append((Ref("local", f"{PREFIX}/{link.target}", link.label),
+                                    " › ".join(filter(None, (label, link.column))) or "Accueil"))
+        for group in self.ui.deps.navigation:
+            for dest in group.items:
+                base = f"{PREFIX}/{dest.key}"
+                if needle in fold(dest.label):
+                    above = [text for text, _href in self.pages.trail(dest.key)][:-1]
+                    matches.append((Ref("local", base, dest.label), " › ".join(above) or dest.label))
+                for slug, title, spec in self.ui.tabs_of(dest):
+                    family = spec.group if isinstance(spec, Builtin) else ""
+                    if needle in fold(f"{dest.label} {family} {title}"):
+                        path = self.pages.trail(f"{dest.key}/{slug}", title=title, group=family)
+                        matches.append((Ref("local", f"{base}/{slug}", title), " › ".join(t for t, _h in path)))
+        unique: dict[str, tuple[Ref, str]] = {}
+        for row in matches:
+            unique.setdefault(row[0].key, row)
+        return tuple(unique.values())
+
+    def settings_found(self, q: str) -> tuple[Row, ...]:
+        """Les réglages qui répondent à ``q`` (C1-09) : les entrées de l'annuaire (Réglages › Tous les réglages),
+        trouvées comme il les trouve — même pliage, le nom et l'aide de chaque champ —, chacune vers sa page, avec le
+        champ où le mot a été trouvé."""
+        rows = []
+        for entry, hits in settings_directory.find(self.ui, q):
+            where = "Trouvé dans : " + ", ".join(hits) if hits else entry.group
+            rows.append(Row((Ref("local", entry.href, entry.title), where), href=Ref("local", entry.href, "")))
+        return tuple(rows)
 
     async def forget(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]
@@ -351,7 +390,8 @@ class Subjects:
         if not retyped(str(data.get("_confirmer", "")), shown, key):
             return self.pages.render_page(request, title="Oubli refusé", active="", status=400,
                                           blocks=[Note(f"Retape « {shown} » pour confirmer.", "danger")],
-                                          crumbs=[("Retour", fiche_url(kind, key))])
+                                          crumbs=self.home_trail(kind), crumbs_back=("Retour à la fiche",
+                                                                                     fiche_url(kind, key)))
         # le même oubli que la ligne de commande : la clé et ses alias (ses adresses, ses noms)
         gone = await operations.forget_subject(self.ui.kernel, kind, key, by=account.handle,
                                                action=f"console.oublier.{kind}")
@@ -364,7 +404,7 @@ class Subjects:
         if not isinstance(result, Download):
             return self.pages.render_page(request, title="Téléchargement indisponible", active="",
                 status=404, blocks=[result if isinstance(result, Note) else Note("Ce document n'est plus disponible.", "warn")],
-                crumbs=[("Retour à la fiche", fiche_url(kind, key))])
+                crumbs=self.home_trail(kind), crumbs_back=("Retour à la fiche", fiche_url(kind, key)))
         name = result.name.replace("\\", "/").rsplit("/", 1)[-1]
         name = "".join(c for c in name if c.isprintable())[:200] or "document"
         return secure(Response(result.data, media_type="application/octet-stream", headers={

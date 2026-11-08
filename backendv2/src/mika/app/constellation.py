@@ -78,7 +78,7 @@ SEARCH_FLOOR = 0.4
 #: la sorte d'épisode d'une parole → l'agent qui parcourt sa mémoire
 AGENTS = {Kind.REPLY: "reponse", Kind.INITIATIVE: "initiative", Kind.MURMUR: "murmure", Kind.STEP: "travail",
           Kind.WORK: "travail", Kind.JOB: "travail", Kind.WAKE: "travail", Kind.WAKE_JOB: "travail",
-          Kind.TASK: "travail", Kind.JOURNAL: "journal", Kind.DREAM: "reve", Kind.NARRATIVE: "recit"}
+          Kind.TASK: "travail"}
 #: les références de provenance qui désignent un point de la carte
 _POINT_REFS = ("memory:", memory_c.VEILED_PROVENANCE, "chunk:")
 _BIRTHS = (memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.PROMISE_NOTICED, memory_c.EVENT_NOTED)

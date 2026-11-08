@@ -1,12 +1,13 @@
 /**
  * Paramètres, par l'API par personne (`protocole-moi.md` § 7, et les listes des § 3 et 4) : son compte, ses boîtes
- * aux lettres et ses comptes Teams. Ce qu'une personne branche est à elle (ADR 0185, 0186) ; un secret ne repart
- * jamais (laissé vide, il reste celui qui est gardé).
+ * aux lettres et ses comptes Teams, et comment part ce que Mika prépare depuis chacun (ADR 0207). Ce qu'une personne
+ * branche est à elle (ADR 0185, 0186) ; un secret ne repart jamais (laissé vide, il reste celui qui est gardé).
  *
  * Les listes des boîtes et des comptes sont lues ici, telles quelles, pour Paramètres et Outils : les écrans Mail et
  * Teams ont leurs propres clients.
  */
 import { getJson, MOI, sendJson, type Done } from "./moi";
+import type { Rules } from "./rights";
 
 // ── Son compte ───────────────────────────────────────────────────────
 
@@ -108,6 +109,8 @@ export interface BoxSettings {
   can_send: boolean;
   microsoft: boolean;
   signin: SignIn | null;
+  /** La règle de son canal : comment part ce qu'elle prépare (ADR 0207). */
+  rules: SendRules;
 }
 
 export function fetchBoxes(): Promise<Boxes> {
@@ -186,6 +189,8 @@ export interface TeamsSettings {
   account: string;
   values: TeamsValues;
   extension_key: ExtensionKey | null;
+  /** La règle de son canal : comment part ce qu'elle prépare (ADR 0207). */
+  rules: SendRules;
 }
 
 export function fetchTeamsAccounts(): Promise<TeamsAccounts> {
@@ -208,4 +213,41 @@ export function newExtensionKey(account: string): Promise<Done & { key: string }
 
 export function revokeExtensionKey(account: string): Promise<Done> {
   return sendJson(`${MOI}/teams/account/revoke`, { account });
+}
+
+/** Retirer un de ses comptes Teams : sa clé part avec lui, et ce que son extension avait apporté (conversations,
+ *  messages, brouillons) s'efface ; ce qu'elle en a appris reste dans sa vie. */
+export function removeTeamsAccount(account: string): Promise<Done> {
+  return sendJson(`${MOI}/teams/account/remove`, { account });
+}
+
+// ── Comment part ce qu'elle prépare (ADR 0207) ───────────────────────
+
+/**
+ * La règle du canal d'un de ses comptes (`courrier:<boîte>`, `teams:<compte>`), telle que le courrier et Teams la
+ * lisent : la sienne, sinon celle de tout le canal (`common`, réglée dans la console), sinon celle de départ.
+ * `version` : son empreinte, à renvoyer pour la changer.
+ */
+export interface SendRules extends Rules {
+  common: boolean;
+  version: string;
+}
+
+/** Ce qu'elle en règle, ligne par ligne et par défaut : préparer d'elle-même, comment ça part. */
+export interface SendChoice {
+  prepare: boolean;
+  /** `seule`, `accord`, `brouillon` (Teams seulement), `non` */
+  reply: string;
+}
+
+export interface SendRulesUpdate {
+  canal: string;
+  version: string;
+  lines: SendChoice[];
+  default: SendChoice;
+}
+
+/** Régler comment part ce qu'elle prépare depuis un de ses comptes ; une règle changée ailleurs entre-temps : 409. */
+export function saveSendRules(update: SendRulesUpdate): Promise<Done> {
+  return sendJson(`${MOI}/rules`, { ...update });
 }

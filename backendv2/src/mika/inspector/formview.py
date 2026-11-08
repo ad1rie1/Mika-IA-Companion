@@ -5,12 +5,31 @@ de valeur rendue (vide = inchangé)."""
 from __future__ import annotations
 
 import dataclasses
+import math
 import secrets as _secrets
 from collections.abc import Callable, Mapping, Sequence
+from decimal import Decimal
 from typing import Any
 
 from mika.kernel import forms
 from mika.kernel.faculty import ActionSpec
+
+#: au-delà de ces puissances de dix, la notation décimale devient illisible (des dizaines de zéros) : la notation
+#: scientifique reste
+_DECIMAL_EXPONENTS = range(-12, 16)
+
+
+def decimal_fr(value: float, digits: int = 6) -> str:
+    """Un réel en notation décimale française, à ``digits`` chiffres significatifs : « 0,00000555975 » et
+    « 1,66667 », jamais « 5.55975e-06 » à côté de bornes écrites « 0,0005 ». ``forms.parse`` le relit tel quel (la
+    virgule y vaut un point)."""
+    if not math.isfinite(value):
+        return str(value)
+    text = f"{value:.{digits}g}"
+    if "e" in text and int(text.split("e")[1]) in _DECIMAL_EXPONENTS:
+        text = format(Decimal(text), "f")
+    return text.replace(".", ",")
+
 
 #: les sortes de champ que le gabarit sait rendre ; les autres deviennent du texte
 TEMPLATE_KINDS = {"bool": "bool", "select": "select", "textarea": "textarea", "lines": "lines", "yaml": "yaml",

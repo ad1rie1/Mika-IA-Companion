@@ -12,6 +12,9 @@
   le panneau) ; ajouter et modifier un compte ont leur page (le panneau seul).
 - Journal des modifications : jour par jour, chaque réglage enregistré (qui, quoi, sur quoi) et chaque journalisation
   des paramètres — celles d'un même moment (le démarrage) réunies en une ligne.
+- Configuration des plugins (``plugins``, l'en-tête dessiné de sa page de réglages) : une ligne par plugin composé — ce
+  qui s'y règle, ses pages de réglages, ses paramètres avancés, où s'en servir —, puis ce qui se branche sans être un
+  plugin ; les lignes viennent d'``app/reglages.py`` (``PLUGINS``), sans pagination.
 
 La vue d'ensemble lit ses facultés dans les paramètres de la console (``ui.deps.parameters``), comme la page de la
 console (``inspector/pages/reglages.py``) qui reste la source : ses blocs disent les chiffres, la liste se dessine par
@@ -27,10 +30,12 @@ from markupsafe import Markup
 
 from mika.app.handmade import Look
 from mika.app.handmade.tabs import Got, Line, Tab, blank, instant, raw_lines, text, tiles
+from mika.inspector import render
+from mika.inspector.formview import decimal_fr
 from mika.inspector.pages.reglages import FACULTY_PAGE, SOURCES_FR, TONES, faculty_url
-from mika.inspector.ui import PREFIX, UI
+from mika.inspector.ui import PREFIX, UI, env
 from mika.kernel.clock import DAY, MINUTE
-from mika.kernel.inspect import Nav, Note, Stats
+from mika.kernel.inspect import Nav, Note, Pager, Stats
 
 STYLES = ("handmade/reglages_onglets.css",)
 #: la page du tempérament (ce que les facultés en dérivent)
@@ -48,8 +53,19 @@ def _sources() -> list[dict[str, str]]:
 
 def _number(value: Any) -> str:
     if isinstance(value, float):
-        return f"{value:.3g}".replace(".", ",")
+        return decimal_fr(value, 3)  # « 0,00000001 », comme les bornes de chaque page de faculté
     return str(value)
+
+
+# ── Configuration des plugins ─────────────────────────────────────────────
+
+
+def plugins(groups: list[dict[str, Any]]) -> Markup:
+    """Réglages › Configuration des plugins : chaque groupe (les plugins, puis ce qui n'en est pas) en table, une ligne
+    par plugin — son nom et ce qui s'y règle, ses pages de réglages, ses paramètres avancés, où s'en servir."""
+    shown = [{**g, "pager": render._pager(Pager(size=len(g["rows"]), total=len(g["rows"])), {})}
+             for g in groups if g["rows"]]  # une page, toujours : sa pagination ne se montre pas (``.hm-pager.single``)
+    return Markup(env.get_template("handmade/reglages/plugins.html").render(groups=shown))
 
 
 # ── Paramètres avancés › Vue d'ensemble ───────────────────────────────────

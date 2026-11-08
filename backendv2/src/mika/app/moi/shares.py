@@ -6,10 +6,16 @@ le monde ». Une boîte ou un compte Teams partagé est rangé avec sa ressource
 (``shares``) : sa règle s'étend à la personne, au niveau donné (lire ; lire et préparer ; s'en servir). Un service
 partagé reçoit une ligne d'accès pour la personne (ADR 0192) — lire : ses outils qui lisent ; s'en servir : aussi ceux
 qui agissent, sur sa demande à elle ; retirer le partage retire la ligne.
+
+Tous se lisent ici (``every_share``), et une seule écriture range celui d'une boîte ou d'un compte Teams
+(``write_share``) : celle de son propriétaire, et celle de l'opérateur qui le retire dans Réglages › Droits › Partages
+(ADR 0210) — seul le propriétaire le donne, jamais la console.
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
@@ -30,6 +36,19 @@ from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE, SHAR
 #: ce qui se partage
 KINDS = ("mail", "teams", "mcp")
 LEVELS = tuple(level for level, _label in SHARES)
+
+
+@dataclass(frozen=True, slots=True)
+class Shared:
+    """Un partage : sa ressource (sa sorte, sa clé, son nom), son propriétaire tel qu'il est rangé (« personne:<clé> »,
+    « elle », vide : toi), la personne qui le reçoit (sa clé) et son niveau."""
+
+    kind: str
+    key: str
+    title: str
+    owner: str
+    person: str
+    level: str
 
 
 def people(call: Call) -> list[dict[str, Any]]:
@@ -61,6 +80,21 @@ def _mcp_shares(spec: Any, owner: str) -> dict[str, str]:
     """Les partages d'un service : ses lignes d'une seule personne, autre que son propriétaire."""
     return {line.who[0]: _mcp_level(line) for line in spec.access
             if len(line.who) == 1 and line.who[0].startswith(PERSON) and line.who[0] != owner}
+
+
+def every_share(settings: Any) -> list[Shared]:
+    """Tous les partages, ressource par ressource : ceux rangés avec chaque boîte et chaque compte Teams, puis les
+    lignes de chaque service qui a un propriétaire — ce que chaque personne lit sous « Partagé avec toi »."""
+    out: list[Shared] = []
+    for kind, accounts in (("mail", settings.email().accounts), ("teams", settings.teams().accounts)):
+        for key, spec in sorted(accounts.items()):
+            out += [Shared(kind, key, spec.label or key, spec.owner, who[len(PERSON):], level)
+                    for who, level in sorted(spec.shares.items())]
+    for name, spec in sorted(settings.mcp().servers.items()):
+        if spec.owner:
+            out += [Shared("mcp", name, name, spec.owner, who[len(PERSON):], level)
+                    for who, level in sorted(_mcp_shares(spec, spec.owner).items())]
+    return out
 
 
 def _not_hers_already(call: Call, owner: str, person: str, level: str) -> None:
@@ -108,33 +142,39 @@ async def list_shares(call: Call) -> dict[str, Any]:
     return {"given": given, "received": received}
 
 
-async def _share_mail(call: Call, settings: Any, key: str, person: str, level: str) -> None:
-    mail_moi.owned(call, key)
-    cfg = settings.email()
-    spec = cfg.accounts.get(key)
-    if spec is None:
-        raise missing()
-    _not_hers_already(call, spec.owner, person, level)
-    who = PERSON + person
-    shares = {k: v for k, v in spec.shares.items() if k != who} | ({who: level} if level else {})
-    try:
-        await settings.save_email(MailConfig(accounts={**cfg.accounts, key: MailAccount.model_validate(
-            {**spec.model_dump(), "shares": shares})}))
-    except ValidationError as exc:
-        raise refused(exc) from None
+def audited_share(kind: str, key: str, person: str) -> dict[str, str]:
+    """L'objet d'un geste sur un partage, celui du propriétaire comme celui de l'opérateur : le partage même, sa ressource
+    et sa personne. Sa sorte n'est pas un sujet de la console : Gestes audités le dit en texte, sans lien. « mail » et
+    « partage » en sont (un message, un fichier envoyé), et leurs fiches ne parlent pas d'un partage."""
+    return {"subject_kind": "ressource_partagee", "subject": f"{kind}:{key}:{person}"}
 
 
-async def _share_teams(call: Call, settings: Any, key: str, person: str, level: str) -> None:
-    teams_moi.owned(call, key)
-    cfg = settings.teams()
-    spec = cfg.accounts.get(key)
-    if spec is None:
-        raise missing()
-    _not_hers_already(call, spec.owner, person, level)
-    who = PERSON + person
-    shares = {k: v for k, v in spec.shares.items() if k != who} | ({who: level} if level else {})
-    account = TeamsAccount.model_validate({**spec.model_dump(), "shares": shares})
-    await settings.save_teams(cfg.model_copy(update={"accounts": {**cfg.accounts, key: account}}))
+async def write_share(settings: Any, reconfigure: Callable[[], Awaitable[Any]] | None, kind: str, key: str, person: str,
+                      level: str, check: Callable[[Any], None] | None = None) -> None:
+    """Le partage d'une boîte ou d'un compte Teams à cette personne, à ce niveau (vide : retiré). Relus puis réécrits
+    d'un seul tenant (``Settings.writing``), avec ce qui en dérive (``shares``, rejournalisé : sa règle s'étend) : un
+    partage retiré ailleurs entre-temps ne revient pas. ``check`` juge la fiche relue, sous le verrou : qui a le droit,
+    c'est à qui appelle de le dire."""
+    async with settings.writing:
+        cfg = settings.email() if kind == "mail" else settings.teams()
+        spec = cfg.accounts.get(key)
+        if spec is None:
+            raise missing()
+        if check is not None:
+            check(spec)
+        who = PERSON + person
+        shares = {k: v for k, v in spec.shares.items() if k != who} | ({who: level} if level else {})
+        try:
+            if kind == "mail":
+                await settings.save_email(MailConfig(accounts={**cfg.accounts, key: MailAccount.model_validate(
+                    {**spec.model_dump(), "shares": shares})}))
+            else:
+                account = TeamsAccount.model_validate({**spec.model_dump(), "shares": shares})
+                await settings.save_teams(cfg.model_copy(update={"accounts": {**cfg.accounts, key: account}}))
+        except ValidationError as exc:
+            raise refused(exc) from None
+        if reconfigure is not None:
+            await reconfigure()
 
 
 async def set_share(call: Call) -> dict[str, Any]:
@@ -161,12 +201,11 @@ async def set_share(call: Call) -> dict[str, Any]:
     if level and person not in {p["person"] for p in people(call)}:
         raise Denied(400, "Un partage va à une personne qui a un compte (pas à toi).", {"person": "personne inconnue"})
     if kind in ("mail", "teams"):
-        # relus puis réécrits d'un seul tenant (``Settings.writing``), avec ce qui en dérive (``shares``, rejournalisé :
-        # sa règle s'étend) — un partage retiré ailleurs entre-temps ne revient pas
-        async with settings.writing:
-            await (_share_mail if kind == "mail" else _share_teams)(call, settings, key, person, level)
-            if call.api.reconfigure is not None:
-                await call.api.reconfigure()
+        def hers(spec: Any) -> None:
+            (mail_moi if kind == "mail" else teams_moi).owned(call, key)
+            _not_hers_already(call, spec.owner, person, level)
+
+        await write_share(settings, call.api.reconfigure, kind, key, person, level, hers)
     else:
         spec_m = mcp_moi.mine(call).get(key)
         if spec_m is None:
@@ -190,7 +229,7 @@ async def set_share(call: Call) -> dict[str, Any]:
         if port is None:
             raise Denied(503, "Les services ne sont pas branchés.")
         await port.settle(key, access)
-    await audit(call.kernel, "moi.partage", by=call.me.handle, subject_kind=kind, subject=key)
+    await audit(call.kernel, "moi.partage", by=call.me.handle, **audited_share(kind, key, person))
     said = "Partage retiré." if not level else f"Partagé avec {_name(call, person)} ({dict(SHARES)[level].lower()})."
     return {"ok": True, "message": said}
 

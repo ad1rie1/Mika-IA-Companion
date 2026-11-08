@@ -23,11 +23,11 @@ from pydantic import BaseModel
 from mika.contracts import identity as identity_c
 from mika.contracts import location as c
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
-from mika.kernel.clock import MINUTE
 from mika.kernel.faculty import Faculty, ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import inert
+from mika.vocab.days import ago_words
 from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
@@ -117,14 +117,6 @@ def offered(audience: Any) -> bool:
         and audience.trust == ChannelTrust.AUTHENTICATED.value
 
 
-def _ago(us: int) -> str:
-    minutes = max(1, us // MINUTE)
-    if minutes < 120:
-        return phrase("projects.duration.minutes", n=minutes)
-    hours = minutes // 60
-    return phrase("projects.duration.hours", n=hours) if hours < 48 else phrase("projects.duration.days", n=hours // 24)
-
-
 def _coords(text: str) -> str:
     lat, _, lon = text.partition(",")
     return f"{lat.strip()}, {lon.strip()}" if lon else text
@@ -134,7 +126,8 @@ class WhereArgs(BaseModel):
     pass
 
 
-@LOCATION.tool("location_where", description=phrase("location.tools.where.description"), args=WhereArgs,
+@LOCATION.tool("location_where", description=phrase("location.tools.where.description"),
+               label=phrase("location.tools.where.label"), args=WhereArgs,
                bundle=BUNDLE, episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True, when=offered)
 async def location_where(args: WhereArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
@@ -153,7 +146,7 @@ async def location_where(args: WhereArgs, ctx: Any) -> Any:
         else phrase("location.tools.where.accuracy_unknown")
     place = label or phrase("location.tools.where.unnamed")
     return ToolResult(content=phrase("location.tools.where.result", place=place, coords=_coords(coords),
-                                     accuracy=accuracy, ago=_ago(frame.now - fix.fixed_at)),
+                                     accuracy=accuracy, ago=ago_words(frame.now - fix.fixed_at)),
                       attach=(c.note_ref(fix.seq),))
 
 

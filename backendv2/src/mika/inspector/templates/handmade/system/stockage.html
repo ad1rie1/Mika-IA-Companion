@@ -1,13 +1,12 @@
 {# Système › Stockage et sauvegardes (app/handmade/tabs/system.py, ADR 0177) : un bandeau si les sauvegardes manquent ou
-   échouent, la bande de chiffres (ses bases, le journal, le dernier instantané) ; puis côte à côte ce que garde sa
-   base de vie (une barre par table) et ses sauvegardes — la dernière, sa vérification, ce qui n'est pas encore
-   sauvegardé, les archives gardées — avec les commandes pour sauvegarder, vérifier, restaurer. #}
+   échouent, la bande de chiffres (ses bases, le journal, le dernier instantané) ; puis côte à côte, à gauche ses bases
+   et ses dossiers (la place de chacun, ce qu'il garde, ce que la sauvegarde en fait ; sous MariaDB, ses bases sont sur
+   le serveur), à droite ses sauvegardes — la dernière, sa vérification, ce qui n'est pas encore sauvegardé, les
+   archives gardées, avec les commandes pour sauvegarder, vérifier, restaurer — au-dessus de ce que garde sa base de vie
+   (une barre par table). Un serveur qui ne mesure pas son dossier : ce que garde sa base à gauche. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/system/tab_macros.html" as sx %}
-<div class="now-page sys sys-store" data-tab="systeme/stockage">
-  {{ sx.band(band) }}
-  {{ tab.block(bases) }}
-  <div class="sys-cols two">
+{% macro kept_card() %}
     <section class="now-card" id="{{ kept.id }}" aria-labelledby="sys-store-kept">
       {{ tab.head(kept.title, "sys-store-kept", none, "Sa vie : à sauvegarder. Les projections jetables vivent à part et se reconstruisent depuis le journal.") }}
       <ul class="sys-store-tables" role="list">
@@ -21,6 +20,8 @@
       </ul>
       {{ tab.pager(kept) }}
     </section>
+{%- endmacro %}
+{% macro saves_card() %}
     <section class="now-card" aria-labelledby="sys-store-saves">
       {{ tab.head("Sauvegardes", "sys-store-saves") }}
       {% if saved %}
@@ -42,5 +43,24 @@
       {% else %}<p class="now-empty">Ce serveur ne note pas ses sauvegardes.</p>{% endif %}
       {{ sx.notes(notes) }}
     </section>
+{%- endmacro %}
+<div class="now-page sys sys-store" data-tab="systeme/stockage">
+  {{ sx.band(band) }}
+  {{ tab.block(bases) }}
+  <div class="sys-cols two">
+    {% if places %}
+    <section class="now-card" id="{{ places.id }}" aria-labelledby="sys-store-places">
+      {{ tab.head(places.title, "sys-store-places", place_items|length, places.caption) }}
+      {% if place_items %}
+      <ul class="sys-rows sys-store-archives sys-store-places" role="list">
+        {% for p in place_items %}<li class="{{ 'is-warn' if p.kept.tone == 'warn' }}"><p class="sys-store-name"><span class="mono">{{ p.name }}</span>{% if p.what and p.what != '—' %}<span class="now-muted">{{ p.what }}</span>{% endif %}</p><span class="now-num">{{ p.size }}</span><span class="now-tag {{ p.kept.tone }}">{{ p.kept.text }}</span></li>{% endfor %}
+      </ul>
+      {% else %}{{ tab.empty(places.empty) }}{% endif %}
+    </section>
+    <div class="sys-cols">{{ saves_card() }}{{ kept_card() }}</div>
+    {% else %}
+    {{ kept_card() }}
+    {{ saves_card() }}
+    {% endif %}
   </div>
 </div>

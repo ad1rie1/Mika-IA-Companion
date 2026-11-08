@@ -14,11 +14,19 @@ TONES = {"ok": "ok", "degraded": "warn", "ko": "danger"}
 CHECKS = {"journal": "Journal d’événements", "slices": "État des facultés", "loops": "Boucles de fonctionnement",
           "projections": "Projections", "processes": "Processus de fond", "outbox": "File de sortie",
           "llm": "Modèles", "lanes": "Files d’attente", "config": "Configuration lisible", "ports": "Branchements"}
+#: la page où regarder ce qu'un contrôle dit (la santé, et l'accueil, qui y mène chaque contrôle qui ne va pas)
 DESTINATIONS = {"journal": "systeme/chronologie", "slices": "systeme/etat", "loops": "systeme/processus",
                 "processes": "systeme/processus", "outbox": "systeme/sorties", "llm": "systeme/passerelle",
                 "lanes": "decisions/en_cours", "config": "reglages/apercu", "ports": "reglages/apercu"}
+#: la page des contrôles eux-mêmes (Système › Santé générale) : celle d'un contrôle sans page à lui
+HEALTH = "systeme/sante"
 #: le titre de la page hors marche ; arrêtée, elle est nommée par sa persona (ADR 0070)
 PHASES = {"starting": "Démarrage en cours", "stopping": "Arrêt en cours", "stopped": "{her} est arrêtée"}
+
+
+def check_href(name: str) -> str:
+    """L'adresse de la page où regarder ce que dit un contrôle (``DESTINATIONS``), la santé générale à défaut."""
+    return "/inspecteur/" + DESTINATIONS.get(name, HEALTH)
 
 
 def health_page(ui: Any) -> dict[str, Any]:
@@ -31,7 +39,7 @@ def health_page(ui: Any) -> dict[str, Any]:
         return Table((Column("Contrôle", role="title"), Column("État", role="badge"), Column("Constat", role="body")), tuple(
             Row((CHECKS.get(c.name, c.name), Badge(STATES.get(c.state, c.state), TONES.get(c.state, "warn")), c.summary),
                 tone=TONES.get(c.state, "warn"),
-                href=Ref("local", "/inspecteur/" + DESTINATIONS[c.name], "") if c.name in DESTINATIONS else None,
+                href=Ref("local", check_href(c.name), "") if c.name in DESTINATIONS else None,
                 detail=(Code("\n".join(c.detail), "Détail du contrôle"),) if c.detail else ()) for c in items),
             title=title, layout=layout, link_label="Ouvrir le diagnostic")
 

@@ -29,7 +29,7 @@
         <div><dt>Son nom dans Teams</dt><dd>{{ tab.cell(facts.get("son nom dans Teams")) }}</dd></div>
         <div><dt>Son identifiant</dt><dd>{{ tab.cell(facts.get("son identifiant Teams")) }}</dd></div>
         <div><dt>Sa clé</dt><dd>{{ tab.cell(facts.get("sa clé")) }}</dd></div>
-        <div><dt>Sa voix, sa signature</dt><dd>{{ tab.cell(facts.get("clé, signature")) }}</dd></div>
+        <div><dt>Sa voix, sa signature</dt><dd>{{ tab.cell(facts.get("sa voix, sa signature")) }}</dd></div>
         <div><dt>Ce qu'elle prépare, comment ça part</dt><dd>{{ tab.cell(facts.get("ce qu'elle prépare, comment ça part")) }}</dd></div>
       </dl>
       {% if keys %}<div class="teams-do">{% for k in keys %}{{ tab.block(k) }}{% endfor %}</div>{% endif %}

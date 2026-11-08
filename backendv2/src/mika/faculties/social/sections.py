@@ -234,7 +234,8 @@ class NoArgs(BaseModel):
     pass
 
 
-@SOCIAL.tool("social_about", description=phrase("social.tools.about.description"), args=NoArgs, bundle="social",
+@SOCIAL.tool("social_about", description=phrase("social.tools.about.description"),
+             label=phrase("social.tools.about.label"), args=NoArgs, bundle="social",
              episodes=CONVERSATIONAL)
 async def social_about(args: NoArgs, ctx: Any) -> str:
     aud = ctx.frame.audience

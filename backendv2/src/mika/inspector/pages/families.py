@@ -1,4 +1,4 @@
-"""Outils › Ses propres outils (ADR 0134) : ses outils internes, famille par famille (un lot), chacune avec son
+"""Outils › Ce qu'elle peut faire (ADR 0134) : ses outils internes, famille par famille (un lot), chacune avec son
 tableau de droits — né du minimum vital que ses outils déclarent (``owner_only``), modifiable, et « Revenir au
 minimum vital ». Les outils venus d'ailleurs (un service, une app) ont leurs tableaux chez leur propriétaire.
 
@@ -8,7 +8,6 @@ Les tableaux se rangent dans les réglages (``Settings.save_family``) ; la porte
 from __future__ import annotations
 
 import secrets as _secrets
-import unicodedata
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -22,6 +21,7 @@ from mika.inspector.ui import PREFIX, secure
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
 from mika.kernel.rights import Rights
+from mika.kernel.text import fold
 from mika.runtime import operations as ops
 from mika.runtime.tools import gate_of
 from mika.vocab.access import (
@@ -73,11 +73,6 @@ def family_rows(args: FamilyArgs, known: list[str]) -> list[ToolRule]:
     sent = args.rows(tools=True, read=args.lecture, act=args.action, keep=args.garde)
     return [ToolRule(who=r["who"], canal=r["canal"], when=r["when"], read=r["read"] or NO, act=r["act"] or NO,
                      keep=r["keep"] or "rien", tools=tuple(t for t in known if t in r["tools"])) for r in sent]
-
-
-def _fold(text: str) -> str:
-    """Sans accents ni majuscules : ce que cherche un opérateur."""
-    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
 
 
 def _values(a: ToolRule) -> dict[str, Any]:
@@ -136,13 +131,13 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
     focus = str(request.query_params.get("famille", "") or "") or lot
     account = ui.operator(request)
     csrf = request.cookies.get("csrftoken", "")
-    terms = _fold(query).split()
+    terms = fold(query).split()
     context = urlencode({k: v for k, v in (("q", query), ("lot", lot)) if v})
     shown = []
     for e in entries(ui):
         if lot and e["key"] != lot:
             continue
-        if terms and not any(all(x in _fold(f"{t['name']} {t['description']} {e['label']}") for x in terms)
+        if terms and not any(all(x in fold(f"{t['name']} {t['description']} {e['label']}") for x in terms)
                              for t in e["tools"]):
             continue
         for x in e["tools"]:
@@ -161,9 +156,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
             "open": e["key"] == focus or bool(terms)})
     registry = ui.kernel.registry
     if lot and not shown and any(s.bundle == lot for s in registry.tools.values()):
-        kind, _, name = lot.partition(".")
-        href = (f"{PREFIX}/fiche/serveur/{name}?onglet=fait" if kind == "mcp" else
-                f"{PREFIX}/fiche/app/{name}?onglet=acces" if kind == "forge_apps" else "")
+        href = ui.deps.family_href(lot) if ui.deps.family_href is not None else ""
         shown.append({"key": lot, "id": lot.replace(".", "-"), "label": ui.names.bundle(lot), "external": True,
                       "href": href, "set": False, "below": "", "reserved": False, "open": True,
                       "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit",

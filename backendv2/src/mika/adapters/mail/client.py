@@ -51,6 +51,8 @@ from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, answer
 from mika.adapters.mail.parse import Part, attachment_files, parse, parse_parts
 from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
+    PIECES_MAX,
+    PIECES_TOTAL_MAX,
     AccountInfo,
     AccountStatus,
     Attachment,
@@ -66,6 +68,9 @@ from mika.ports.mail import (
 )
 
 log = logging.getLogger("mika.mail")
+
+#: l'attente d'une commande SMTP ; l'envoi du mail lui-même a un délai à sa mesure (``compose.transfer_timeout``)
+SMTP_TIMEOUT = 30.0
 
 #: les derniers mails d'un dossier relevé dont on relit les drapeaux (lus ailleurs ?)
 FLAGS_WINDOW = 200
@@ -85,6 +90,17 @@ class ImagesFrom(Protocol):
 
 def _local_tz() -> tzinfo:
     return datetime.now().astimezone().tzinfo or UTC
+
+
+def _check_added_pieces(carried: Sequence[File], added: Sequence[File]) -> None:
+    """Des fichiers ajoutés à un transfert : les bornes d'un mail comptent aussi les pièces qu'il reprend, que seul ce
+    module connaît (ADR 0214)."""
+    way_out = "retire des fichiers, ou transfère-le sans ses pièces."
+    if len(carried) + len(added) > PIECES_MAX:
+        raise ValueError(f"Avec les pièces du mail d'origine, il en porterait plus de {PIECES_MAX} : {way_out}")
+    if sum(len(f.data) for f in (*carried, *added)) > PIECES_TOTAL_MAX:
+        raise ValueError(f"Avec les pièces du mail d'origine, il pèserait plus de "
+                         f"{PIECES_TOTAL_MAX // (1024 * 1024)} Mo : {way_out}")
 
 
 class ImapSmtpMail:
@@ -357,7 +373,9 @@ class ImapSmtpMail:
         if cached is not None:
             return self._cache.one(ref)
         sent = self._cache.sent_one(ref)
-        return parse(raw, account=sent.account if sent else "", complete=True)
+        found = parse(raw, account=sent.account if sent else "", complete=True)
+        # sa source ne porte plus ses pièces (leurs octets sont à part, ADR 0214) : sa ligne les liste
+        return replace(found, attachments=sent.attachments) if sent is not None and sent.attachments else found
 
     async def file(self, ref: str, part: str) -> File:
         if part == "texte":
@@ -371,13 +389,23 @@ class ImapSmtpMail:
                 return kept
         raw = await self._source(ref)
         if part == "source":
-            return File("message.eml", "message/rfc822", raw)
+            return File("message.eml", "message/rfc822", self._with_pieces(ref, raw))
         if not part.isdecimal() or len(part) > 5:
             raise FileNotFoundError("Pièce jointe inconnue.")
         files = attachment_files(raw)
         if int(part) >= len(files):
             raise FileNotFoundError("Cette pièce jointe n'est plus disponible.")
         return files[int(part)]
+
+    def _with_pieces(self, ref: str, raw: bytes) -> bytes:
+        """Un envoi entier : ses pièces, gardées à part (ADR 0214), remises dans sa source ; tel quel s'il en manque une."""
+        sent = self._cache.sent_one(ref)
+        files = self._cache.files(ref, len(sent.attachments)) if sent is not None and sent.attachments else None
+        if not files:
+            return raw
+        msg = BytesParser(policy=policy.default).parsebytes(raw)
+        compose.attach(msg, files)
+        return msg.as_bytes()
 
     async def reread(self, ref: str) -> Mail | None:
         """Relit un mail reçu sur le serveur et le garde entier, pièces comprises (un mail gardé avant qu'elles le
@@ -390,19 +418,23 @@ class ImapSmtpMail:
     def inline_images(self, ref: str) -> tuple[tuple[str, str, bytes], ...]:
         return self._cache.inline(ref)
 
-    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True):
+    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True, bcc="", files=()):
         original = await self.document(ref)
         if original is None:
             raise ValueError("Ce message n'est plus disponible.")
-        files = self._cache.files(ref, len(original.attachments)) if attachments and original.attachments else ()
-        if files is None:  # une pièce n'est pas gardée ici : le message se relit sur le serveur
-            files = attachment_files(await self._source(ref))
+        carried = self._cache.files(ref, len(original.attachments)) if attachments and original.attachments else ()
+        if carried is None:  # une pièce n'est pas gardée ici : le message se relit sur le serveur
+            carried = attachment_files(await self._source(ref))
+            if len(carried) < len(original.attachments):  # un envoi dont les octets ont été cédés (ADR 0214)
+                raise ValueError("Une de ses pièces n'est plus gardée ici : transfère-le sans ses pièces.")
+        if files:  # sans ajout, un transfert reste ce qu'il était, même d'un mail au-delà de ces bornes
+            _check_added_pieces(carried, files)
         key = self._sender_key(original.account, "")
         draft = Draft("", key, to, subject, forwarded_text(original, body), cc=cc, author=by)
         shown, _ = self._preview(draft)
         if shown.blocked:
             raise ValueError(shown.blocked)
-        return await self._deliver(key, shown, None, "", by=by, draft_id="", files=files)
+        return await self._deliver(key, shown, None, "", by=by, draft_id="", files=(*carried, *files), bcc=bcc)
 
     def search(self, text: str, limit: int, *, account: str = "") -> list[Mail]:
         return self._cache.search(text, limit, account=account) if text.strip() else []
@@ -631,7 +663,8 @@ class ImapSmtpMail:
         return self._preview(found)[0] if found is not None else None
 
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "", by: str = "", *,
-                   account: str = "", cc: str = "", quote: bool = False) -> str:
+                   account: str = "", cc: str = "", quote: bool = False, bcc: str = "",
+                   files: tuple[File, ...] = ()) -> str:
         key = self._sender_key(account, in_reply_to)
         if quote and in_reply_to:
             await self.document(in_reply_to)
@@ -640,7 +673,7 @@ class ImapSmtpMail:
         shown, parent = self._preview(draft)
         if shown.blocked:
             raise RuntimeError(shown.blocked)
-        return await self._deliver(key, shown, parent, in_reply_to, by=by, draft_id="")
+        return await self._deliver(key, shown, parent, in_reply_to, by=by, draft_id="", files=files, bcc=bcc)
 
     async def send_draft(self, draft_id: str, *, by: str = "", digest: str = "") -> str:
         draft = self._cache.draft(draft_id)
@@ -659,26 +692,28 @@ class ImapSmtpMail:
         return message_id
 
     async def _deliver(self, key: str, shown: Preview, parent: Mail | None, reply_to: str, *, by: str,
-                       draft_id: str, files: tuple[File, ...] = ()) -> str:
+                       draft_id: str, files: tuple[File, ...] = (), bcc: str = "") -> str:
         acc = self._account(key)
         info = acc.info(key)
         message_id = compose.new_message_id(info)
         msg = compose.message(shown, parent, message_id, when=self._now(), in_reply_to=split_ref(reply_to)[1])
-        for file in files:
-            if file.mime == "message/rfc822":
-                msg.add_attachment(BytesParser(policy=policy.default).parsebytes(file.data), filename=file.name)
-                continue
-            maintype, _, subtype = file.mime.partition('/')
-            msg.add_attachment(file.data, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=file.name)
+        # ce qu'on garde ici : le mail, sans ses pièces (leurs octets vont à part, en morceaux, ADR 0172) ni sa copie
+        # cachée (rien ne la relierait à l'oubli de celui qui la reçoit, ADR 0214)
+        source = msg.as_bytes()
+        if files:  # l'encodage de pièces lourdes ne retient pas tout le serveur
+            await asyncio.to_thread(compose.attach, msg, files)
+        if bcc:
+            msg["Bcc"] = bcc  # ``send_message`` la met dans l'enveloppe et la retire de ce qui part
         token = await self._bearer(key, acc)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._smtp_sync, acc, msg, token)
         # le mail est parti : plus rien ne doit le dire échoué (on le renverrait, et il arriverait deux fois)
         try:
-            self._cache.remember_sent(Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(),
-                                           reply_to, by[:100], key, draft_id, shown.cc[:300],
-                                           tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)),
-                                      msg.as_bytes())
+            await asyncio.to_thread(
+                self._cache.remember_sent,
+                Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(), reply_to, by[:100], key,
+                     draft_id, shown.cc[:300], tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)),
+                source, files)
         except Exception as exc:
             log.warning("courrier : envoi parti mais non retenu (%s)", type(exc).__name__)
         try:  # ranger une copie, marquer « répondu » : jamais au prix de l'envoi
@@ -710,14 +745,15 @@ class ImapSmtpMail:
         if not acc.smtp_host:
             raise RuntimeError("aucun serveur d'envoi configuré")
         if acc.smtp_security == "ssl":
-            server: smtplib.SMTP = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=30,
+            server: smtplib.SMTP = smtplib.SMTP_SSL(acc.smtp_host, acc.smtp_port, timeout=SMTP_TIMEOUT,
                                                     context=ssl.create_default_context())
         else:
-            server = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=30)
+            server = smtplib.SMTP(acc.smtp_host, acc.smtp_port, timeout=SMTP_TIMEOUT)
         try:
             if acc.smtp_security == "starttls":
                 server.starttls(context=ssl.create_default_context())
             _smtp_login(server, acc, token)
+            server.sock.settimeout(compose.transfer_timeout(compose.wire_size(msg), SMTP_TIMEOUT))
             server.send_message(msg)
         finally:
             try:

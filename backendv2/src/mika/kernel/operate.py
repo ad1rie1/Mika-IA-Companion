@@ -44,6 +44,8 @@ class ActionContext:
     ports: Mapping[str, Any] = field(default_factory=dict)
     #: lecture seule : ``query_mind``, ``query_views``, ``content``
     store: Any = None
+    #: les fichiers que ce geste apporte (vide pour un formulaire de la console) : ils ne vont jamais au journal
+    files: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,10 @@ class Decision:
     note: str = ""
     #: le condensé de l'aperçu que l'opérateur a lu (vide : celui de la proposition)
     seen: str = ""
+    #: un refus qui ne vaut que tant que la proposition attend : décidée entre-temps (ailleurs, ou à son échéance),
+    #: elle n'a plus rien à refuser — le runtime l'ignore au lieu de refuser tout le geste, dont le reste s'écrit
+    #: (une réponse déjà partie). Sans effet sur une approbation, qui ne devient jamais sans objet.
+    if_pending: bool = False
 
 
 @dataclass(frozen=True, slots=True)

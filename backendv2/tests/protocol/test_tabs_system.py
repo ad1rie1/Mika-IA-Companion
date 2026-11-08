@@ -210,12 +210,12 @@ def test_storage_flags_a_missing_backup_and_draws_a_bar_per_table(world):  # noq
 def test_operator_actions_read_day_by_day(world):  # noqa: F811
     client, live, _ = world
     kernel = _life(client, live)
-    assert "Aucune action d'opérateur encore" in drawn(client, "/inspecteur/systeme/operations")
+    assert "Aucun geste audité encore" in drawn(client, "/inspecteur/systeme/operations")
     client.portal.call(lambda: operations.audit(kernel, "console.reglages.essai", by="user_1"))
     page = drawn(client, "/inspecteur/systeme/operations")
     feed = page[page.index('class="sys-ops-feed"'):]
     assert "console.reglages.essai" in feed and "faite" in feed and 'href="/inspecteur/evenement/' in feed
-    assert "Sur cette page : <span class=\"now-num\">1</span> action" in page
+    assert "Sur cette page : <span class=\"now-num\">1</span> geste" in page and "depuis la console" in feed
 
 
 def test_every_view_has_its_place(world):  # noqa: F811

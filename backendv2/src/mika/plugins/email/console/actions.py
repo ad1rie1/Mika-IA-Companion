@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import email.utils
+import re
+from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -18,16 +20,22 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import Ref
-from mika.kernel.operate import Done, Refused
-from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, keeper_name
+from mika.kernel.operate import Decision, Done, Refused
+from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, WAITING, EmailState, keeper_name
 from mika.plugins.email.console.common import SECTION, can_send, clip, mail_key, ready, resolve, unread
 from mika.plugins.email.console.mail import _read_draft, apply
-from mika.ports.mail import addresses
+from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, addresses
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Courrier › Paramètres)."
+#: une sorte de fichier qu'un envoi annonce telle quelle : rien de ce qu'un en-tête interpréterait
+_MIME = re.compile(r"[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*")
+#: la sorte d'un fichier qu'on n'annonce pas, ou qui se prendrait pour une structure du mail
+_OPAQUE = "application/octet-stream"
+#: l'aide des copies cachées, sur chaque formulaire qui en a
+_BCC_HELP = "Elles reçoivent le mail sans que les autres le voient. Seule la copie rangée dans « Envoyés » les garde."
 
 
 class WriteArgs(BaseModel):
@@ -36,6 +44,7 @@ class WriteArgs(BaseModel):
     to: Annotated[str, Knob(label="À", help="Une adresse, ou « Nom <adresse> » ; plusieurs, séparées par des "
                                             "virgules.", advanced=False)] = Field(min_length=3, max_length=300)
     cc: Annotated[str, Knob(label="Copie", advanced=False)] = Field(default="", max_length=300)
+    bcc: Annotated[str, Knob(label="Copie cachée", advanced=False, help=_BCC_HELP)] = Field(default="", max_length=300)
     subject: Annotated[str, Knob(label="Objet", advanced=False)] = Field(min_length=1, max_length=200)
     body: Annotated[str, Knob(label="Message", widget="textarea", advanced=False,
                               help="Sans signature : celle de la boîte est ajoutée.")] = \
@@ -45,6 +54,7 @@ class WriteArgs(BaseModel):
 class ReplyArgs(BaseModel):
     to: Annotated[str, Knob(label="À", advanced=False)] = Field(min_length=3, max_length=300)
     cc: Annotated[str, Knob(label="Copie", advanced=False)] = Field(default="", max_length=300)
+    bcc: Annotated[str, Knob(label="Copie cachée", advanced=False, help=_BCC_HELP)] = Field(default="", max_length=300)
     subject: Annotated[str, Knob(label="Objet", advanced=False)] = Field(min_length=1, max_length=200)
     body: Annotated[str, Knob(label="Message", widget="textarea", advanced=False,
                               help="Sans signature : celle de la boîte est ajoutée.")] = \
@@ -62,6 +72,7 @@ class ForwardArgs(BaseModel):
     original: Annotated[str, Knob(label="Message original", widget="hidden")] = Field(min_length=1, max_length=500)
     to: Annotated[str, Knob(label="À", advanced=False)] = Field(min_length=3, max_length=300)
     cc: Annotated[str, Knob(label="Copie", advanced=False)] = Field(default="", max_length=300)
+    bcc: Annotated[str, Knob(label="Copie cachée", advanced=False, help=_BCC_HELP)] = Field(default="", max_length=300)
     subject: Annotated[str, Knob(label="Objet", advanced=False)] = Field(min_length=1, max_length=200)
     body: Annotated[str, Knob(label="Message d'accompagnement", widget="textarea", advanced=False,
                               help="Le message original complet est ajouté après ton texte.")] = Field(default="", max_length=20_000)
@@ -88,12 +99,44 @@ class TidyArgs(BaseModel):
                      Knob(label="Geste", choices=GESTURES, advanced=False)] = "lu"
 
 
-def _check(to: str, cc: str) -> None:
+def _check(to: str, cc: str, bcc: str) -> None:
     bad = {"to": "une adresse, comme nom@exemple.fr"} if not addresses(to) else {}
     if cc and not addresses(cc):
         bad["cc"] = "des adresses, séparées par des virgules"
+    if bcc and not addresses(bcc):
+        bad["bcc"] = "des adresses, séparées par des virgules"
     if bad:
         raise Refused("Adresse invalide.", bad)
+
+
+def _megabytes(size: int) -> str:
+    return f"{size // (1024 * 1024)} Mo"
+
+
+def _mime(raw: str) -> str:
+    """La sorte qu'une pièce annonce, sans ses paramètres ; une sorte illisible, ou une structure de mail
+    (``multipart/``, ``message/``), part en ``application/octet-stream`` : elle est un fichier parmi d'autres."""
+    base = str(raw or "").split(";", 1)[0].strip().lower()
+    return base if _MIME.fullmatch(base) and not base.startswith(("multipart/", "message/")) else _OPAQUE
+
+
+def _pieces(given: Sequence[File]) -> tuple[File, ...]:
+    """Ce que ce geste joint au mail (ADR 0214), prêt à partir, ou refusé ici, d'où que le geste vienne : un nom sans
+    dossier, une sorte sûre, 25 Mo par pièce (ce que le courrier garde d'une pièce, ADR 0172), et un mail qui tient en
+    mémoire le temps de partir."""
+    if len(given) > PIECES_MAX:
+        raise Refused(f"Un mail porte au plus {PIECES_MAX} pièces.", {"files": f"{PIECES_MAX} au plus"})
+    out = []
+    for got in given:
+        name = forms.safe_name(got.name) or "piece-jointe"
+        if len(got.data) > PIECE_MAX:
+            raise Refused(f"« {clip(name)} » est trop grosse : {_megabytes(PIECE_MAX)} par pièce.",
+                          {"files": f"{_megabytes(PIECE_MAX)} par pièce"})
+        out.append(File(name, _mime(got.mime), got.data))
+    if sum(len(f.data) for f in out) > PIECES_TOTAL_MAX:
+        raise Refused(f"Ces pièces sont trop lourdes pour un seul mail : {_megabytes(PIECES_TOTAL_MAX)} en tout.",
+                      {"files": f"{_megabytes(PIECES_TOTAL_MAX)} en tout"})
+    return tuple(out)
 
 
 async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_to: str = "",
@@ -101,14 +144,15 @@ async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_t
     port = ctx.ports.get("mail")
     if not can_send(port):
         raise Refused(NOT_READY)
-    _check(args.to, args.cc)
+    _check(args.to, args.cc, args.bcc)
+    files = _pieces(ctx.files)
     try:
         if original:
             mail_id = await port.forward(original, args.to, args.subject, args.body, cc=args.cc,
-                                         by=ctx.by, attachments=args.attachments)
+                                         by=ctx.by, attachments=args.attachments, bcc=args.bcc, files=files)
         else:
             mail_id = await port.send(args.to, args.subject, args.body, reply_to, by=ctx.by, account=account,
-                                     cc=args.cc, quote=quote)
+                                     cc=args.cc, quote=quote, bcc=args.bcc, files=files)
     except (OSError, RuntimeError, ValueError) as exc:  # une erreur SMTP est une OSError
         raise Refused(f"L'envoi a échoué : {exc}"[:300]) from None
     gone = port.sent_mail(mail_id)
@@ -121,7 +165,8 @@ async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_t
                          bundle=BUNDLE, mail=mail_id, to=args.to[:200], address=first, by=ctx.by,
                          in_reply_to=reply_to, account=gone.account if gone is not None else account,
                          about=tuple(h for h in (c.address_handle(first),) if h), dedupe_key=f"sent:{mail_id}")
-    return Done(drafts=(draft,), message=f"Envoyé à {args.to}. Elle le sait.",
+    joined = f", avec {len(files)} pièce{'s' if len(files) > 1 else ''} jointe{'s' if len(files) > 1 else ''}" if files else ""
+    return Done(drafts=(draft,), message=f"Envoyé à {args.to}{joined}. Elle le sait.",
                 go=Ref.subject("mail", mail_key(mail_id), clip(args.subject)))
 
 
@@ -146,10 +191,26 @@ async def _write(s: EmailState, frame: Frame, args: Any, ctx: Any) -> Done:
 
 
 @EMAIL.action("repondre", title="Répondre", args=ReplyArgs, emits=[c.SENT],
-              description="La réponse part de sa boîte tout de suite ; elle le saura.",
+              description="La réponse part de sa boîte tout de suite ; elle le saura. Ses brouillons qui attendaient "
+                          "pour ce mail sont refusés : rien ne part deux fois.",
               confirm="Envoyer cette réponse depuis sa boîte ?")
 async def _reply(s: EmailState, frame: Frame, args: ReplyArgs, ctx: Any) -> Done:
-    return await _send(frame, ctx, args, reply_to=args.reply_to, quote=args.quote and bool(args.reply_to))
+    """La réponse part ; ses brouillons qui attendaient pour ce mail sont refusés dans le même geste, quel que soit qui
+    répond et d'où (la console, l'espace d'une personne) : une réponse est partie, une seconde ne partira pas
+    (ADR 0188). Elle en lit la raison, dans sa voix (``email.drafts.answered_by_hand``). Un refus ne vaut que tant
+    que le brouillon attend (``if_pending``) : décidé ailleurs pendant l'envoi, il ne retient pas la réponse, déjà
+    partie, qui s'écrit au journal."""
+    waiting = [d for d in s.drafts.values() if args.reply_to and d.mail == args.reply_to and d.state == WAITING]
+    done = await _send(frame, ctx, args, reply_to=args.reply_to, quote=args.quote and bool(args.reply_to))
+    if not waiting:
+        return done
+    port = ctx.ports.get("mail")
+    for d in waiting:
+        port.discard_draft(d.draft)
+    note = phrase("email.drafts.answered_by_hand")
+    return dataclasses.replace(done, decide=tuple(Decision(d.proposal, False, note=note, if_pending=True)
+                                                  for d in waiting),
+                               message=f"{done.message} Son brouillon pour ce mail ne partira pas.")
 
 
 @EMAIL.action("transferer", title="Transférer", args=ForwardArgs, emits=[c.SENT],
