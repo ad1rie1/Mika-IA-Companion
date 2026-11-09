@@ -45,7 +45,7 @@ import { ico, type IconName } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { dayAndClock } from "../chat/markup";
-import * as store from "../parametres/store";
+import * as store from "../../shared/store";
 import { bindCounts, bindPieces, bindRecipients, errorText, openAsk, openCompose, paintPieces, readRecipients, type ComposeValues } from "./compose";
 import { answerable, caps, clip, forwardSubject, newNonce, outgoingText, parseAddresses, personName, replySubject, replyTargets, toFill, type Caps } from "./format";
 import {

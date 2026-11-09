@@ -115,7 +115,7 @@ def _state(r: FileRow) -> Badge:
 def _download_link(r: FileRow) -> Cell:
     if r.gone:
         return Text("—", "muted")
-    return Ref("local", f"/inspecteur/telecharger/{KIND}/{r.id}", "télécharger", (("fichier", r.name),))
+    return Ref.download(KIND, r.id, "télécharger", r.name)
 
 
 def _rows(frame: Frame, store: Any, found: list[FileRow], with_who: bool = True) -> tuple[Row, ...]:

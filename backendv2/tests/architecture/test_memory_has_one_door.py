@@ -65,19 +65,36 @@ def _uses(path: Path) -> Iterator[tuple[int, str]]:
             yield node.lineno, node.value
 
 
-#: nomme ses tables pour les étiqueter dans la console (« Ses souvenirs et ses croyances »), sans en lire une ligne
-LABELS_ONLY = frozenset({SRC / "app" / "handmade" / "system.py"})
+_SYSTEM_TAB = SRC / "app" / "handmade" / "tabs" / "system.py"
+#: nomme deux de ses tables pour les étiqueter dans la console (« Ses souvenirs et ses croyances »), sans en lire une
+#: ligne : ces deux noms seulement, le reste du module (il lit le journal en SQL) reste sous le contrôle
+LABELS_ONLY = frozenset({(_SYSTEM_TAB, "memory_items"), (_SYSTEM_TAB, "memory_told")})
+
+
+def _reads_her_tables(path: Path, used: str) -> bool:
+    return bool(used in TABLE_NAMES or TABLE_TEXT.search(used)) and (path, used) not in LABELS_ONLY
 
 
 def test_no_one_reads_her_tables_behind_her_back():
     offences = []
     for path in _modules(SRC):
-        if _owned(path) or path in LABELS_ONLY:
+        if _owned(path):
             continue
         for line, used in _uses(path):
-            if used in TABLE_NAMES or TABLE_TEXT.search(used):
+            if _reads_her_tables(path, used):
                 offences.append(f"{path.relative_to(ROOT)}:{line} lit {used!r}")
     assert offences == [], "hors de la mémoire, on lit ses vues (contracts.memory) :\n" + "\n".join(offences)
+
+
+def test_a_label_is_excused_not_its_whole_module():
+    """L'exception porte sur une étiquette de ce module, jamais sur le module : une vraie lecture y serait vue."""
+    assert not _reads_her_tables(_SYSTEM_TAB, "memory_items")
+    assert _reads_her_tables(_SYSTEM_TAB, "memory_about")
+    assert _reads_her_tables(_SYSTEM_TAB, "ITEMS_TABLE")
+    assert _reads_her_tables(_SYSTEM_TAB, "SELECT text FROM memory_items")
+    assert _reads_her_tables(SRC / "app" / "handmade" / "home.py", "memory_items")
+    used = {name for _, name in _uses(_SYSTEM_TAB)}
+    assert {name for _, name in LABELS_ONLY} <= used  # une étiquette retirée : son exception part avec elle
 
 
 def test_faculties_and_plugins_read_what_she_still_holds():

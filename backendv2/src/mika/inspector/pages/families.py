@@ -68,6 +68,11 @@ class FamilyArgs(TableArgs):
     defaut_garde: Annotated[str, Knob(label="Par défaut, ce qu'elle en garde")] = "rien"
 
 
+def _tool_href(name: str) -> str:
+    """Un outil, ouvert dans la liste de tous ses outils (son nom encodé : un service extérieur le choisit)."""
+    return f"{BASE}?" + urlencode({"outil": name})
+
+
 def family_rows(args: FamilyArgs, known: list[str]) -> list[ToolRule]:
     """Les lignes du tableau envoyé (``vocab.access.rows_sent``) ; un outil que la famille n'a plus n'est pas gardé."""
     sent = args.rows(tools=True, read=args.lecture, act=args.action, keep=args.garde)
@@ -110,7 +115,7 @@ def entries(ui: Any) -> list[dict[str, Any]]:
             "key": bundle, "id": bundle.replace(".", "-"), "label": ui.names.bundle(bundle), "set": table is not None,
             "reserved": any(s.owner_only for s in specs),
             "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit", "description": s.description,
-                       "href": f"{BASE}?outil={s.name}"} for s in specs],
+                       "href": _tool_href(s.name)} for s in specs],
             "lines": lines, "default": default,
             "columns": [
                 {"key": "lecture", "label": "Un outil qui lit", "kind": "pick", "choices": choices(POLICIES, locked_policies),
@@ -141,7 +146,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
                              for t in e["tools"]):
             continue
         for x in e["tools"]:
-            x["href"] = f"{BASE}?outil={x['name']}" + (f"&{context}" if context else "")
+            x["href"] = _tool_href(x["name"]) + (f"&{context}" if context else "")
         tools = [(x["name"], x["nature"]) for x in e["tools"]]
         rows = rows_of(ui, e["lines"], _values, tools=tools)
         shown.append({**e, "external": False, "t": {
@@ -160,7 +165,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
         shown.append({"key": lot, "id": lot.replace(".", "-"), "label": ui.names.bundle(lot), "external": True,
                       "href": href, "set": False, "below": "", "reserved": False, "open": True,
                       "tools": [{"name": s.name, "nature": "agit" if s.acts else "lit",
-                                 "description": s.description, "href": f"{BASE}?outil={s.name}"}
+                                 "description": s.description, "href": _tool_href(s.name)}
                                 for s in sorted(registry.tools.values(), key=lambda t: t.name) if s.bundle == lot]})
     return Panel("handmade/droits/familles.html", {
         "families": shown, "focus": focus, "locked": account is None, "query": query, "lot": lot,

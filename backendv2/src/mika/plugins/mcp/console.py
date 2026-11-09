@@ -86,9 +86,10 @@ from mika.vocab.episodes import Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import closeness_of, rights_of, tool_allowance
 
-#: leur connexion : dans Ses outils, en haut à droite (ADR 0206)
-SETTINGS = "/inspecteur/outils/parametres"
-LIST = "/inspecteur/outils/serveurs"
+#: leur connexion : une page de réglages, dans Ses outils, en haut à droite (ADR 0206)
+SETTINGS = "serveurs-mcp"
+SERVERS = ("mcp", "serveurs")
+LIST = Ref.view(*SERVERS, "Venus d'ailleurs")
 NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche."
 STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "connecte": "ok", "erreur": "warn",
@@ -140,8 +141,8 @@ def _owners(statuses: Sequence[Any], frame: Frame | None, chosen: str) -> Nav | 
     if len(whose) < 2:
         return None
     order = sorted(whose, key=lambda w: (w != SELF, whose[w].casefold()))
-    return Nav((NavItem("Tout le monde", Ref("local", LIST, ""), active=not chosen),
-                *(NavItem(whose[w], Ref("local", LIST, "", ((WHOSE, w),)), active=chosen == w) for w in order)),
+    return Nav((NavItem("Tout le monde", Ref.view(*SERVERS, ""), active=not chosen),
+                *(NavItem(whose[w], Ref.view(*SERVERS, "", **{WHOSE: w}), active=chosen == w) for w in order)),
                title="À qui")
 
 
@@ -262,18 +263,14 @@ def _fiche(name: str, tab: str = "") -> Ref:
     return Ref.subject("serveur", name, name, tab)
 
 
-def _fiche_url(name: str) -> str:
-    return f"/inspecteur/fiche/serveur/{name}"
+def edit_server(name: str, back: Ref = LIST) -> Ref:
+    return Ref.settings(SETTINGS, "Modifier ses réglages", section="mcp", enregistrement="servers",
+                        cle=name).back_to(back)
 
 
-def edit_server(name: str, back: str = LIST) -> Ref:
-    return Ref("local", SETTINGS, "Modifier ses réglages",
-               (("section", "mcp"), ("enregistrement", "servers"), ("cle", name), ("retour", back)))
-
-
-def add_server(back: str = LIST) -> Ref:
+def add_server() -> Ref:
     """Brancher un service : la page dessinée en trois questions (ADR 0128), dans « Venus d'ailleurs »."""
-    return Ref("local", LIST, "Brancher un service", (("brancher", "1"),))
+    return Ref.view(*SERVERS, "Brancher un service", brancher="1")
 
 
 def state_badge(state: str) -> Badge:
@@ -322,7 +319,7 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
     # brancher un service : trois questions, que la console dessinée met en page (ADR 0128)
     plug = [ActionSlot("mcp.brancher", title="Brancher")] if ctx.params.get("brancher") else []
-    # un lien seul : la console dessinée en fait un bouton (``app/handmade/tools.py::Elsewhere``) ; leurs réglages
+    # un lien seul : la console dessinée en fait un bouton (``app/handmade/tabs/tools.py::elsewhere``) ; leurs réglages
     # sont derrière la roue de Ses outils (ADR 0206)
     return [*plug, Fields((("un nouveau service", add_server()),)),
             *([owners] if owners is not None else []),
@@ -348,8 +345,8 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
     if review:
         badges.append(Badge(f"{review} outil(s) à revoir", "warn"))
     return Head(key=key, title=key, subtitle=st.purpose[:1].upper() + st.purpose[1:], badges=tuple(badges),
-                facts=(("réglages", edit_server(key, _fiche_url(key))),),
-                back=Ref("local", LIST, "Venus d'ailleurs"))
+                facts=(("réglages", edit_server(key, _fiche(key))),),
+                back=LIST)
 
 
 @MCP.search("serveur")
@@ -381,7 +378,7 @@ def _tab_state(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("avec qui", f"{who_said(st, frame)} — jamais dans un salon ni avec une inconnue"),
         ("accès", access_said(st)),
         ("ses outils", "en main" if st.in_hand else "à la demande (elle les cherche par ce qu'ils font)"),
-        ("réglages", edit_server(st.name, _fiche_url(st.name))),
+        ("réglages", edit_server(st.name, _fiche(st.name))),
     ), title="Ce que tu as déclaré", columns=2))
     blocks.append(Fields((
         ("serveur", f"{st.server_name} {st.server_version}".strip() or "—"),
@@ -803,7 +800,7 @@ def _vital(s: McpState, frame: Frame) -> Vital | None:
     broken = [x.name for x in s.servers if x.state == "panne"]
     text = f"{len(broken)} en panne" if broken else f"{n} à revoir"
     return Vital(text, tone, hint=", ".join(broken) or "des outils attendent ton regard",
-                 href=Ref("local", LIST, "Venus d'ailleurs"))
+                 href=LIST)
 
 
 # ── Qui peut quoi, sur la page « Droits » (ADR 0133) ──────────────────────

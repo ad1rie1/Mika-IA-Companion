@@ -15,7 +15,6 @@ import hashlib
 import json
 import re
 import secrets
-import unicodedata
 from typing import Any
 
 from pydantic import ValidationError
@@ -23,13 +22,14 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MICROSOFT, MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
-from mika.app.moi import OWN_MAX, Call, Denied, MeApi, done, form, missing
 from mika.app.moi import mail as mail_moi
 from mika.app.moi import rights as rights_moi
 from mika.app.moi import teams as teams_moi
+from mika.app.moi.api import OWN_MAX, Call, Denied, MeApiBase, done, form, missing
 from mika.app.moi.hosts import LOCAL, local_host
 from mika.contracts import self_ as self_c
 from mika.kernel import forms
+from mika.kernel.text import fold
 from mika.ports.mail import ACCOUNT_KEY
 from mika.runtime.operations import audit
 from mika.vocab.access import MAIL, PERSON, REPLIES, SOURCE_WORDS, SOURCE_WORDS_OTHER, TEAMS, Canal, canal_key
@@ -84,8 +84,7 @@ def _slug(text: str, taken: set[str]) -> str:
     """Une clé neuve (minuscules, chiffres, - ou _) tirée d'un nom ou d'une adresse, suivie d'un suffixe tiré au
     hasard et libre parmi ``taken`` : une clé ne sert jamais deux fois, car le courrier gardé, ses pièces et ce
     qu'elle en sait restent rangés sous la clé d'une boîte retirée (une boîte neuve ne les rouvre pas)."""
-    flat = unicodedata.normalize("NFKD", text.split("@", 1)[0].lower())
-    base = re.sub(r"[^a-z0-9_-]+", "-", "".join(ch for ch in flat if not unicodedata.combining(ch))).strip("-_")[:30]
+    base = re.sub(r"[^a-z0-9_-]+", "-", fold(text.split("@", 1)[0])).strip("-_")[:30]
     base = base if base and ACCOUNT_KEY.fullmatch(base) else "boite"
     while True:
         key = f"{base}-{secrets.token_hex(3)}"
@@ -506,7 +505,7 @@ async def rules_save(call: Call) -> dict[str, Any]:
     return {"ok": True, "message": "Règle d'envoi enregistrée."}
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/account/name", account_name, write=True), r("/account/password", account_password, write=True),
             r("/mail/box", box_get), r("/mail/box/save", box_save, write=True),

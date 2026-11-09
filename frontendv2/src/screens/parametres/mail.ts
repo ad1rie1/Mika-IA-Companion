@@ -37,10 +37,10 @@ import {
   text,
   toggle,
 } from "./form";
-import { ago, clock, confirmModal, failureText, newNonce, personAvatar, toastFailure } from "./kit";
+import { ago, clock, confirmModal, failureText, newNonce, personAvatar, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
 import { openShareModal } from "./shares";
-import * as store from "./store";
+import * as store from "../../shared/store";
 import { rulesEditor, ruleUpdate, withoutRule } from "./teams";
 import {
   authWords,

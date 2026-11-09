@@ -1,4 +1,4 @@
-"""Réglages › Droits, dessiné (ADR 0133, 0134) : ce qu'elle a, ressource par ressource — sa vie interne (ses
+"""Réglages › Droits (ADR 0133, 0134 ; son onglet est dans ``tabs/settings.py``) : ce qu'elle a, ressource par ressource — sa vie interne (ses
 familles d'outils), les apps de la Forge, les services MCP, ses projets, ses canaux, ce que le code fixe —, une
 ressource par sous-onglet (ADR 0176), chaque outil avec sa description, et pour chaque ressource un lien vers **le
 détail de ses accès** : son tableau de règles, lu tel qu'il est écrit, avec « Modifier » vers la page qui le règle et
@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
-from markupsafe import Markup
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
@@ -37,7 +36,7 @@ from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights
 from mika.inspector.pages import tools as catalog
-from mika.inspector.ui import PREFIX, UI, env, secure
+from mika.inspector.ui import PREFIX, UI, secure
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Pager, Ref
 from mika.kernel.rights import Grant
@@ -161,7 +160,7 @@ def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
     return {"tools": tools, "projects": projects, "canal": through, "kind": kind}
 
 
-def _what(g: Grant | None) -> str:
+def what_of(g: Grant | None) -> str:
     """Un droit en une phrase : ses actions et leurs réponses, et la ligne qui en décide."""
     if g is None:
         return "rien ici"
@@ -172,7 +171,7 @@ def _what(g: Grant | None) -> str:
 def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, Any]:
     return {"name": spec.name, "description": spec.description, "nature": "agit" if spec.acts else "lit",
             "href": f"{catalog.BASE}/tous?outil={spec.name}",
-            "exact": _what(got.get(spec.name)) if got is not None else "",
+            "exact": what_of(got.get(spec.name)) if got is not None else "",
             "closed": got is not None and (got.get(spec.name) is None or got[spec.name].closed)}
 
 
@@ -242,7 +241,7 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
                       f"mcp:{b.partition('.')[2]}")
                 for b, specs in sorted(by_bundle.items()) if b.startswith("mcp.")]
     projects_got = got["projects"] if got else {}
-    projects = [entry(t.resource, t.title, t.note, (), t.resource, _what(projects_got.get(t.resource)) if got else "")
+    projects = [entry(t.resource, t.title, t.note, (), t.resource, what_of(projects_got.get(t.resource)) if got else "")
                 for t in tables.values() if t.resource.startswith("project:")]
     canals = [entry(t.resource, t.title, t.note, (), t.resource) for t in tables.values()
               if t.resource.startswith("canal:")]
@@ -258,7 +257,7 @@ def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str
            {"id": "d-canaux", "title": "Canaux", "hint": "par où ça lui arrive : ce que chaque canal laisse au plus",
             "rows": canals, "folds": False}]
     for s in out:
-        s["pager"] = _one_page(len(s["rows"]))
+        s["pager"] = one_page(len(s["rows"]))
     return out
 
 
@@ -267,7 +266,7 @@ def row_id(key: str) -> str:
     return "r-" + _UNSAFE.sub("-", key)
 
 
-def _one_page(rows: int) -> Any:
+def one_page(rows: int) -> Any:
     return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
 
 
@@ -280,7 +279,7 @@ def detail(ui: UI, key: str) -> dict[str, Any] | None:
                         "rows": [(str(i), *r) for i, r in enumerate(t.rows, start=1)], "default": t.default,
                         "floors": t.floors, "note": t.note,
                         "edit": render.href(t.href) if t.href is not None else "",
-                        "pager": _one_page(len(t.rows) + 1)}
+                        "pager": one_page(len(t.rows) + 1)}
     return None
 
 
@@ -370,24 +369,3 @@ def routes(ui: UI) -> list[Route]:
         return await unshare(ui, request)
 
     return [Route(UNSHARE, ui.guarded(post), methods=["POST"])]
-
-
-def page(ui: UI, items: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Markup:
-    """La page : les ressources et leurs outils ; le détail d'une (``?detail=``) ; les droits exacts quand on a choisi
-    qui (``?qui=``) et par quel canal (``?canal=``) ; les partages, et le jeton de leurs formulaires (``forms.csrf``)."""
-    all_whos = whos(ui)
-    who = next((w for w in all_whos if w.key == query.get("qui", "")), None)
-    canal = query.get("canal", "") if query.get("canal", "") in dict(CANAL_CHOICES) else ""
-    got = exact(ui, who, canal) if who is not None and canal else None
-    kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
-    shown = detail(ui, query["detail"]) if query.get("detail") else None
-    listed, given = sections(ui, got, kept), shared(ui)
-    # « Retour » ramène à la ligne de la ressource, dans son sous-onglet
-    back = next((r["id"] for s in listed for r in s["rows"] if shown and r["detail_key"] == query["detail"]), "")
-    return Markup(env.get_template("handmade/droits/page.html").render(
-        whos=[{"key": w.key, "label": w.label, "on": w is who} for w in all_whos],
-        canals=[{"key": k, "label": label, "on": k == canal} for k, label in CANAL_CHOICES],
-        chosen=(who.label if who else "", dict(CANAL_CHOICES).get(canal, "")), got=got,
-        canal_said=_what(got["canal"]) if got else "", sections=listed, kept=kept, back=back,
-        detail=shown, fixed=FIXED, tools=fixed_tools(ui), catalogue=f"{catalog.BASE}/tous",
-        shares=given, shares_pager=_one_page(len(given)), unshare=UNSHARE, csrf=getattr(forms, "csrf", "")))

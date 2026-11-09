@@ -28,7 +28,8 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.adapters.maps import gpx
-from mika.app.moi import Call, Denied, MeApi, done, form, missing
+from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.moi.common import millis
 from mika.contracts import trips as c
 from mika.kernel.events import EventType
 from mika.plugins import trips as trips_p
@@ -60,10 +61,6 @@ NOT_READY = {
                 "Les itinéraires ne sont pas réglés : Réglages › Carte et téléphone › Itinéraires."),
 }
 _DIGITS = re.compile(r"^\d{1,18}$")
-
-
-def _ms(us: int) -> int:
-    return us // 1000 if us else 0
 
 
 def _maps(call: Call, need: str = "") -> Any:
@@ -336,9 +333,9 @@ async def look(call: Call) -> dict[str, Any]:
             points = found.get("points")
             return {"kind": c.NOTE_LOOK, "title": d.query.text, "what": d.what, "route": route, "trip": "",
                     "places": [x for x in points if isinstance(x, dict)] if isinstance(points, list) else [],
-                    "at": _ms(ev.at)}
+                    "at": millis(ev.at)}
         return {"kind": c.NOTE_LOOK, "title": d.query.text, "what": d.what, "places": place_items(d.found.text),
-                "route": None, "trip": "", "at": _ms(ev.at)}
+                "route": None, "trip": "", "at": millis(ev.at)}
     if d.title.text is None or d.places.text is None:
         raise missing()
     line = _json(d.line.text) if d.line is not None else None
@@ -346,7 +343,7 @@ async def look(call: Call) -> dict[str, Any]:
                                 if isinstance(line, dict) else {})} if d.route else None
     trip = trips_p.trip_of(_state(call), call.frame.get, call.me.person, d.trip) if d.trip else None
     return {"kind": c.NOTE_MAP, "title": d.title.text, "what": "", "places": place_items(d.places.text),
-            "route": route, "trip": trip.id if trip is not None else "", "at": _ms(ev.at)}
+            "route": route, "trip": trip.id if trip is not None else "", "at": millis(ev.at)}
 
 
 # ── tes voyages ──
@@ -383,7 +380,7 @@ async def trips_list(call: Call) -> dict[str, Any]:
     texts = _texts(call, [t.title_ref for t in mine])
     return {"trips": [{"id": t.id, "title": texts.get(t.title_ref, ""), "start": t.start, "mode": t.mode,
                        "avoid": list(t.avoid), "days": len(days_of(t)), "stops": len(t.stops),
-                       "updated": _ms(t.updated_at), "mika": t.mika_touched} for t in mine]}
+                       "updated": millis(t.updated_at), "mika": t.mika_touched} for t in mine]}
 
 
 async def trip_read(call: Call) -> dict[str, Any]:
@@ -391,7 +388,7 @@ async def trip_read(call: Call) -> dict[str, Any]:
     texts = _texts(call, _refs(trip))
     first = _start(trip)
     return {"id": trip.id, "title": texts.get(trip.title_ref, ""), "start": trip.start, "mode": trip.mode,
-            "avoid": list(trip.avoid), "updated": _ms(trip.updated_at), "mika": trip.mika_touched,
+            "avoid": list(trip.avoid), "updated": millis(trip.updated_at), "mika": trip.mika_touched,
             "days": [{"n": n, "date": (first + timedelta(days=n - 1)).isoformat() if first else "",
                       "stops": [_stop(s, texts) for s in stops]} for n, stops in days_of(trip)]}
 
@@ -609,7 +606,7 @@ async def trip_gpx(call: Call) -> Response:
                                                  call.outbound))
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     trip, stop = VOYAGES + "/{trip}", VOYAGES + "/{trip}/arrets/{stop}"
     return [r(CARTE, info), r(CARTE + "/lieux", places), r(CARTE + "/adresses", addresses),

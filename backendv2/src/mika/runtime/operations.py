@@ -42,7 +42,7 @@ FIXED_FIELD = "_fixes"
 #: (``console.…`` ; une action déclarée qu'elle fait garde sa clé nue), l'espace d'une personne (``moi.…`` : l'API par
 #: personne, son chat), la ligne de commande (``cli.…``, ou ``by`` : ``CLI_BY``)
 CONSOLE, SPACE, CLI = "console", "moi", "cli"
-#: qui agit depuis la ligne de commande (``app/cli.py``)
+#: qui agit depuis la ligne de commande (``app/cli/``)
 CLI_BY = "ligne de commande"
 
 

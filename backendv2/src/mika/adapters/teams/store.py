@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, case, delete, false, func, or_, select, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from mika.adapters.database import Target, as_target
 from mika.adapters.teams.config import HER, TeamsConfig
@@ -361,6 +361,22 @@ class TeamsStore:
             rows = s.execute(select(*_MESSAGE).where(*where).order_by(MessageRow.at.desc(), MessageRow.id.desc())
                              .limit(max(0, limit))).all()
         return [Message(*r) for r in reversed(rows)]
+
+    def last_messages(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], Message]:
+        """Le dernier message de chacune de ces conversations (compte, identifiant) — celui que rendrait
+        ``thread(…, 1)`` —, en une seule requête quel que soit leur nombre. Une conversation sans message n'y est pas."""
+        asked = {(_account_key(account), fit(cid, CONVERSATION_MAX)): (account, cid) for account, cid in conversations}
+        if not asked:
+            return {}
+        newest = aliased(MessageRow)
+        last = (select(newest.id)
+                .where(newest.account == ConversationRow.account, newest.conversation == ConversationRow.id)
+                .order_by(newest.at.desc(), newest.id.desc()).limit(1).correlate(ConversationRow).scalar_subquery())
+        wanted = or_(*(and_(ConversationRow.account == account, ConversationRow.id == cid) for account, cid in asked))
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_MESSAGE).select_from(ConversationRow)
+                             .join(MessageRow, MessageRow.id == last).where(wanted)).all()
+        return {asked[(m.account, m.conversation)]: m for m in (Message(*r) for r in rows)}
 
     @staticmethod
     def _conversation_in(s: Session, account: str, conversation: str) -> Conversation | None:

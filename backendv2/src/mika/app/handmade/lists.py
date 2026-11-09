@@ -88,8 +88,10 @@ class Roles:
     tiles: bool = False
 
 
-def _text(cell: Mapping[str, Any]) -> str:
-    return str(cell.get("text") or "")
+def text(c: Mapping[str, Any] | None, *, dash: bool = True) -> str:
+    """Le texte d'une cellule rendue (vide : pas de cellule). ``dash`` faux : « — » (rien à dire) se tait aussi."""
+    said = str((c or {}).get("text") or "")
+    return said if dash or said != "—" else ""
 
 
 def _roled(row: dict[str, Any], labels: Sequence[str], roles: Roles) -> None:
@@ -118,7 +120,7 @@ def _title_of(cells: Mapping[str, Mapping[str, Any]], href: str, time: str) -> s
     if own is not None:
         return own
     texts = (k for k, v in cells.items() if k != time and v.get("t") == "text" and v.get("kind") != "num"
-             and _text(v) not in ("", "—"))
+             and text(v) not in ("", "—"))
     links = (k for k, v in cells.items() if v.get("t") == "link")
     return next(texts, None) or next(links, None) or next((k for k in cells if k != time), "")
 
@@ -128,15 +130,15 @@ def listing(table: Table, shown: render.Env, query: Mapping[str, str], name: str
     """Une liste de la faculté, rendue par la console (ses lignes, sa pagination), prête pour une carte.
     ``counter`` : partagé par les listes d'une même page, il leur donne des clés distinctes (leur ancre, leur
     pagination) — dans l'ordre où la console les numérote."""
-    return shaped(render.block(table, shown, query, 0, counter), name, roles)
+    return card(render.block(table, shown, query, 0, counter), name, roles)
 
 
-def shaped(got: dict[str, Any], name: str = "", roles: Roles | None = None) -> dict[str, Any]:
-    """(voir ``shaped_as`` : l'état ordinaire ne se tait que sur la fiche de quelqu'un, ``name`` donné)"""
-    return shaped_as(got, name, roles, quiet=bool(name))
+def card(got: dict[str, Any], name: str = "", roles: Roles | None = None) -> dict[str, Any]:
+    """(voir ``card_as`` : l'état ordinaire ne se tait que sur la fiche de quelqu'un, ``name`` donné)"""
+    return card_as(got, name, roles, quiet=bool(name))
 
 
-def shaped_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *, quiet: bool = False) -> dict[str, Any]:
+def card_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *, quiet: bool = False) -> dict[str, Any]:
     """Une liste déjà rendue par la console, prête pour une carte — sans ce qui ne dit rien sur cette fiche : l'état
     ordinaire, un champ vide, le nom de la personne dont c'est la fiche, une pagination d'une seule page. Une liste
     sans rôles déclarés (un tableau simple) prend ceux de ``roles`` (par défaut : sa première cellule qui est un
@@ -150,9 +152,9 @@ def shaped_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *
     for row in got["rows"]:
         if roles is not None:
             _roled(row, labels, roles)
-        row["badges"] = [b for b in row.get("badges", []) if not (quiet and _text(b).casefold() in ORDINARY)]
-        row["fields"] = [f for f in row.get("fields", []) if _text(f["value"]) not in ("", "—")
-                         and not (f["label"] in WHOSE and name and _text(f["value"]) == name)]
+        row["badges"] = [b for b in row.get("badges", []) if not (quiet and text(b).casefold() in ORDINARY)]
+        row["fields"] = [f for f in row.get("fields", []) if text(f["value"]) not in ("", "—")
+                         and not (f["label"] in WHOSE and name and text(f["value"]) == name)]
         _lift_time(row)
         # le titre (ou la date, le numéro) mène déjà où mène la ligne : pas de second lien
         row["linked"] = any(c.get("t") == "link" and (not row.get("href") or c.get("href") == row["href"])
@@ -160,7 +162,7 @@ def shaped_as(got: dict[str, Any], name: str = "", roles: Roles | None = None, *
     pager = got.get("pager") or {}
     paged = any(pager.get(k) for k in ("prev", "next", "older", "newer"))
     tiles = bool(roles and roles.tiles)
-    dense = not tiles and all(len(_text(b["value"])) <= DENSE for r in got["rows"] for b in r.get("body", []))
+    dense = not tiles and all(len(text(b["value"])) <= DENSE for r in got["rows"] for b in r.get("body", []))
     return {**got, "title": title, "pager": pager if paged else None, "raw_pager": pager or None,
             "tiles": tiles, "dense": dense}
 

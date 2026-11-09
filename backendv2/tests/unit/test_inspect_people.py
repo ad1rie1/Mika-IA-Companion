@@ -60,8 +60,7 @@ OWN_VIEWS = {
     ("identity", "annuaire"): ("Moyens de communication", ("q", "confiance"), "identites"),
     ("identity", "revendications"): ("Identités à confirmer", (), "identites"),
     ("identity", "politique"): ("Règles de divulgation", (), "identites"),
-    ("identity", "personne"): ("Un moyen de communication (ancienne page)", ("handle",), ""),
-    ("social", "liens"): ("Liens", ("q", "proximite", "person"), "personnes"),
+    ("social", "liens"): ("Liens", ("q", "proximite"), "personnes"),
     ("presence", "presents"): ("Présents", (), "personnes"),
     ("transcript", "conversations"): ("Par personne", ("handle", "q"), "fil"),
     ("transcript", "messages"): ("Messages", ("handle", "q", "role"), "fil"),
@@ -232,10 +231,10 @@ def test_each_view_and_tab_is_declared_in_its_place(tmp_path):
                 [(v.owner, v.name) for v in insp.tabs("handle")],
                 insp.subject("person"), insp.subject("handle"), inspection.find(kernel, "identity", "personne"))
 
-    views, person_tabs, handle_tabs, person, handle, legacy = run(tmp_path, scenario)
+    views, person_tabs, handle_tabs, person, handle, old_page = run(tmp_path, scenario)
     for key, expected in OWN_VIEWS.items():
         assert views.get(key) == expected, key
-    assert legacy.hidden
+    assert old_page is None  # l'ancienne page d'une adresse : une redirection vers sa fiche (routes.MOVED_VIEWS)
     # les onglets des autres facultés s'intercalent, les nôtres restent dans cet ordre
     assert [t for t in person_tabs if t in PERSON_TABS] == PERSON_TABS
     assert person_tabs[:2] == PERSON_TABS[:2]
@@ -253,8 +252,8 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
         insp = Inspection(kernel)
         got = {key: show(kernel, *key) for key in OWN_VIEWS}
         # des paramètres qui ne désignent rien, ou qui ressemblent à du SQL
-        got["personne inconnue"] = show(kernel, "identity", "personne", handle="ext_404")
-        got["lien inconnu"] = show(kernel, "social", "liens", person="user_404")
+        got["moyen inconnu"] = show(kernel, "identity", "verdict", subject="ext_404")
+        got["lien inconnu"] = show(kernel, "social", "lien", subject="user_404")
         got["fil inconnu"] = show(kernel, "transcript", "messages", handle="web_404")
         got["recherche piégée"] = show(kernel, "transcript", "messages", q="%' OR 1=1 --_\\")
         got["filtre inconnu"] = show(kernel, "transcript", "messages", role="personne")
@@ -276,14 +275,25 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
     assert table(got[("presence", "presents")], "personne").rows == ()
     assert table(got[("social", "liens")], "personne").rows == ()
     assert titled(got[("identity", "politique")], "Les canaux").rows
-    assert "Choisissez un moyen de communication" in text(got[("identity", "personne")])
-    assert "Moyen de communication inconnu : « ext_404 »" in text(got["personne inconnue"])
-    assert "Aucun lien avec « user_404 »" in text(got["lien inconnu"])
+    assert "Moyen de communication inconnu : « ext_404 »" in text(got["moyen inconnu"])
+    assert "Aucun lien pour l'instant" in text(got["lien inconnu"])
     assert "Aucun message avec « web_404 »" in text(got["fil inconnu"])
     assert table(got["recherche piégée"], "n°").rows == ()
     assert "« personne » inconnu" in text(got["filtre inconnu"])  # une valeur inconnue est dite, pas une erreur
     assert all(v is None for v in heads.values())
     assert searches == {"person": [], "handle": []}
+
+
+def test_the_tabs_of_a_handle_only_open_from_its_fiche(tmp_path):
+    """L'ancien ``?handle=`` n'est plus lu (ADR 0217) : seule la fiche donne leur sujet à ces onglets."""
+
+    async def scenario(kernel):
+        return {name: show(kernel, "identity", name, handle="ext_404")
+                for name in ("verdict", "revendication", "preuves", "autres")}
+
+    for name, blocks in run(tmp_path, scenario).items():
+        assert "Ouvre la fiche" in text(blocks), name
+        assert "ext_404" not in text(blocks), name
 
 
 # ── Les fiches ────────────────────────────────────────────────────────────
@@ -345,11 +355,10 @@ def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymo
         await live(kernel)
         return (show(kernel, "identity", "verdict", subject="user_1"), show(kernel, "identity", "verdict", subject=ANON),
                 show(kernel, "identity", "revendication", subject=ANON),
-                show(kernel, "identity", "preuves", subject=ANON), show(kernel, "identity", "preuves", subject="user_1"),
-                show(kernel, "identity", "personne", handle=ANON))
+                show(kernel, "identity", "preuves", subject=ANON), show(kernel, "identity", "preuves", subject="user_1"))
 
-    alice, anon, claim, ledger_anon, ledger_alice, legacy = run(tmp_path, scenario)
-    for blocks in (alice, anon, claim, ledger_anon, ledger_alice, legacy):
+    alice, anon, claim, ledger_anon, ledger_alice = run(tmp_path, scenario)
+    for blocks in (alice, anon, claim, ledger_anon, ledger_alice):
         assert not failed(blocks)
 
     steps = row_of(titled(alice, "Le verdict"), "certitude enregistrée")
@@ -387,10 +396,6 @@ def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymo
     assert plain(entry["sorte"]) == "revendication" and "vise Alice" in entry["détail"]
     assert isinstance(entry["message"], Ref) and isinstance(entry["quand"], When)
     assert titled(ledger_alice, "Registre des preuves").rows == ()
-    # l'ancienne page d'une adresse mène aux fiches
-    refs = [c for b in legacy if isinstance(b, Fields) for _k, c in b.pairs if isinstance(c, Ref)]
-    assert Ref.subject("handle", ANON, ANON).key in {r.key for r in refs}
-    assert any(r.key == f"person/{ANON}" for r in refs)
 
 
 def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
@@ -615,13 +620,12 @@ def test_links_show_closeness_rhythm_and_profile_and_a_forgotten_profile_shows_a
     async def scenario(kernel):
         await live(kernel)
         before = show(kernel, "social", "liens"), show(kernel, "social", "lien", subject="user_1")
-        legacy = show(kernel, "social", "liens", person="user_1")
         await kernel.forget("user_1")
         after = show(kernel, "social", "liens"), show(kernel, "social", "lien", subject="user_1")
-        return before, legacy, after
+        return before, after
 
-    (listing, detail), legacy, (listing_after, detail_after) = run(tmp_path, scenario)
-    for blocks in (listing, detail, legacy, listing_after, detail_after):
+    (listing, detail), (listing_after, detail_after) = run(tmp_path, scenario)
+    for blocks in (listing, detail, listing_after, detail_after):
         assert not failed(blocks)
     links = table(listing, "personne")
     alice = row_of(links, "user_1")
@@ -636,7 +640,6 @@ def test_links_show_closeness_rhythm_and_profile_and_a_forgotten_profile_shows_a
     assert href.key == "person/user_1" and href.params == (("onglet", "lien"),)
     assert plain(row_of(links, ANON)["ce qu'elle en sait"]) == "pas encore de profil"
     assert "avec douceur" in text(detail) and SUMMARY in text(detail)
-    assert "Ce lien vit désormais sur la fiche" in text(legacy) and SUMMARY in text(legacy)
 
     assert plain(row_of(table(listing_after, "personne"), "user_1")["ce qu'elle en sait"]) == "(oublié)"
     summary = next(b for b in detail_after if isinstance(b, Prose) and b.title == "Ce qu'elle en sait")

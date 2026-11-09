@@ -40,8 +40,8 @@ APPS = {"whatsapp": "WhatsApp", "whatsapp_business": "WhatsApp Business", "messa
 STATES = {c.PREPARED: "préparée", c.OFFERED: "sur le téléphone, attend un geste", "sent": "partie",
           "other": "il a écrit autre chose", "copied": "copiée (plus de notification où répondre)",
           "ignored": "ignorée", "failed": "échec", c.EXPIRED: "expirée (pas de geste à temps)"}
-#: la page de la console où vivent ces messages (son filtre par personne y mène)
-PAGE = "/inspecteur/sens/messages"
+#: la vue de la console où vivent ces messages (son filtre par personne y mène)
+PAGE = ("phone", "messages")
 #: le paramètre qui ne garde qu'une personne
 WHO = "personne"
 
@@ -135,12 +135,12 @@ def _inspect(s: PhoneState, frame: Frame, ctx: InspectContext) -> list[Block]:
                          for m in t[:PER_THREAD]], offers)
     blocks: list[Block] = []
     if len(people) > 1:
-        blocks.append(Nav((NavItem("Tout le monde", Ref("local", PAGE, "Tout le monde"), len(people), not chosen),
-                           *(NavItem(_name(frame, p), Ref("local", PAGE, _name(frame, p), ((WHO, p),)), len(msgs),
+        blocks.append(Nav((NavItem("Tout le monde", Ref.view(*PAGE, "Tout le monde"), len(people), not chosen),
+                           *(NavItem(_name(frame, p), Ref.view(*PAGE, _name(frame, p), **{WHO: p}), len(msgs),
                                      p == chosen) for p, msgs in people.items())), title="Personne"))
     for person, ts in convs.items():
         name = _name(frame, person) if person and not is_internal(person) else "personne"
-        more = Ref("local", PAGE, f"Toutes les conversations de {name} ({len(ts)})", ((WHO, person),)) \
+        more = Ref.view(*PAGE, f"Toutes les conversations de {name} ({len(ts)})", **{WHO: person}) \
             if cut and len(ts) > PER_PERSON else None
         blocks += _conversations(ts[:PER_PERSON] if cut else ts, text, title=f"Le téléphone de {name}", more=more)
     blocks.append(_proposed(offers, frame, text, who=not chosen))

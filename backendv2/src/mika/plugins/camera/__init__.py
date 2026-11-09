@@ -332,8 +332,8 @@ def _inspect(s: CameraState, frame: Frame, ctx: InspectContext) -> list[Block]:
                            [Note("Caméra non configurée : aucun appareil ne peut lui envoyer d'images.",
                                  tone="muted")])
     blocks.insert(0, Nav((
-        NavItem("Connecter une caméra", Ref("local", "/inspecteur/sens/parametres-appareils", "Accès des appareils")),
-        NavItem("Régler les observations", Ref("local", "/inspecteur/reglages/comportement-camera", "Réglages de la caméra")),)))
+        NavItem("Connecter une caméra", Ref.settings("appareils", "Accès des appareils")),
+        NavItem("Régler les observations", Ref.settings("comportement-camera", "Réglages de la caméra")),)))
     views, shown = paginate(frame.get(c.VIEWS), ctx.pager("page_vus", size=PAGE))
     texts = ctx.store.content([v.summary_ref for v in views if v.summary_ref])
     blocks.append(Table(

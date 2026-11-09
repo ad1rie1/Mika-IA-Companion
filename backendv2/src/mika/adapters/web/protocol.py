@@ -181,7 +181,8 @@ def _shown_attachments(raw: str, pieces: Mapping[str, SharedMeta] | None = None)
     return out
 
 
-#: où se télécharge un fichier qu'elle a envoyé (``GET``, avec le compte de la personne : ADR 0062)
+#: où se télécharge un fichier qu'elle a envoyé, ou une pièce que ce compte a envoyée (``GET``, avec le compte de la
+#: personne : ADR 0062, 0215)
 FILES_PATH = "/files/"
 
 

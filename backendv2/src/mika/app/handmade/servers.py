@@ -22,7 +22,7 @@ from mika.inspector import render
 from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview, env
-from mika.kernel.inspect import Pager, When
+from mika.kernel.inspect import Pager, Ref, When
 from mika.plugins.mcp import NO, access_for
 from mika.plugins.mcp.console import (
     KEEP_WORDS,
@@ -198,21 +198,21 @@ class ServerOverview(Overview):
         port = ui.kernel.ports.get("mcp")
         if port is None or port.status(key) is None:
             return []
-        return [("Modifier la connexion", render.href(edit_server(key, fiche_url(KIND, key))))]
+        return [("Modifier la connexion", render.href(edit_server(key, Ref.subject(KIND, key, "")), ui.env()))]
 
     def render(self, ui: UI, key: str) -> Markup | None:
         port = ui.kernel.ports.get("mcp")
         st = port.status(key) if port is not None else None
         if st is None:
             return None
-        shown = render.Env(when=ui.when, now=ui.now())
+        shown = ui.env(ui.when)
         frame = ui.kernel.mind.frame()
 
         def ago(at: int) -> str:
             return render.cell(When(at), shown)["text"] if at else ""
 
         tools_tab, access_tab = fiche_url(KIND, key, "outils"), fiche_url(KIND, key, "fait")
-        settings = render.href(edit_server(key, fiche_url(KIND, key)))
+        settings = render.href(edit_server(key, Ref.subject(KIND, key, "")), shown)
         # la grille de « Ce qu'elle peut faire », ouverte sur la famille de ses outils : là où l'on en retire
         bundles = {ui.kernel.registry.tools[t.name].bundle for t in port.offered()
                    if t.server == key and t.name in ui.kernel.registry.tools}

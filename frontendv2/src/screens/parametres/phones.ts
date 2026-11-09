@@ -8,9 +8,9 @@ import { h } from "../../shell/dom";
 import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { row, section } from "./form";
-import { ago, confirmModal, copyText, dateWords, toastFailure } from "./kit";
+import { ago, confirmModal, copyText, dateWords, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
-import * as store from "./store";
+import * as store from "../../shared/store";
 
 function apkCard(apk: boolean): string {
   const actions = apk

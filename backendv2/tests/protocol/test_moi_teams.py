@@ -12,7 +12,7 @@ from mika.app.moi import form
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.events import Content
-from mika.plugins.teams import ANSWERED, WRITTEN, TeamsParams
+from mika.plugins.teams import ANSWERED, WAITING, WRITTEN, TeamsParams
 from mika.ports.teams import Draft as TeamsDraft
 from mika.ports.teams import conversation_key
 from mika.runtime.operations import perform
@@ -60,6 +60,20 @@ def test_her_accounts_conversations_and_threads(world):  # noqa: F811
     assert thread["messages"][-1]["author"] == "Alice" and not thread["messages"][-1]["own"]
     assert client.get(API + "/teams/thread?conversation=19:ailleurs").status_code == 404
     assert client.get(API).json()["counts"]["teams"] == 0
+
+
+def test_the_list_of_conversations_reads_their_last_messages_in_one_go(world, monkeypatch):  # noqa: F811
+    client, live, _ = with_teams(world)
+    store = live.kernel.ports["teams"]
+    draft = propose(client, live)
+
+    def one_by_one(*args, **kwargs):
+        raise AssertionError("une requête par conversation")
+
+    monkeypatch.setattr(store, "thread", one_by_one)
+    [item] = client.get(API + "/teams/conversations").json()["items"]
+    assert item["last"]["text"] == "On se voit à 14 h ?"  # le dernier message, comme le fil le montrerait
+    assert item["her"] == {"state": WAITING, "draft": draft}  # sa réponse en chemin, toujours là
 
 
 def test_a_person_sees_only_her_own_account(world):  # noqa: F811

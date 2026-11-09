@@ -1,9 +1,9 @@
-{# Système › File de sortie, dessinée (app/handmade/system.py::outbox) : à quoi elle sert et le chemin de ce qui part
+{# Système › File de sortie, dessinée (app/handmade/tabs/system.py::outbox) : à quoi elle sert et le chemin de ce qui part
    (du journal au départ), ce qui est à traiter (relancer, marquer comme vu), ce qui part par sorte, les derniers
    départs (filtrés par état). #}
 {% from "_navigation.html" import pager as pages %}
 {% from "handmade/system/macros.html" import outbox_item %}
-<div class="now-page person-tab sys">
+<div class="now-page person-tab sys" data-tab="systeme/sorties">
   {% if unknown %}<div class="flash warn" role="status">État inconnu : affichage de tous les départs.</div>{% endif %}
   <section class="now-card sys-health sys-out-hero tone-{{ tone }}" aria-labelledby="out-title">
     <div class="sys-health-main">

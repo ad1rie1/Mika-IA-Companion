@@ -1,7 +1,7 @@
-{# Connexions extérieures › Localisation (app/handmade/senses.py, ADR 0119, 0123) : où est chaque personne (tous ses
+{# Connexions extérieures › Localisation (app/handmade/tabs/senses.py, ADR 0119, 0123) : où est chaque personne (tous ses
    téléphones réunis), puis ce que les téléphones lui ont dit. #}
 {% import "handmade/sens/macros.html" as senses %}
-<div class="now-page senses">
+<div class="now-page senses" data-tab="sens/positions">
   {% if empty %}
   <section class="now-card"><p class="now-empty">Aucun téléphone ne lui dit où il est. Dans l'application Android : Paramètres › « Lui dire où je suis ».</p></section>
   {% else %}

@@ -25,9 +25,9 @@ import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { area, backLink, readForm, row, section, seg, select, showFieldErrors, subTabs, text, toggle } from "./form";
-import { ago, confirmModal, copyText, dateWords, failureText, newNonce, toastFailure } from "./kit";
+import { ago, confirmModal, copyText, dateWords, failureText, newNonce, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
-import * as store from "./store";
+import * as store from "../../shared/store";
 import { fieldErrors, ofName, shareWords, type FormValue } from "./words";
 
 const TAB = "#parametres/teams";

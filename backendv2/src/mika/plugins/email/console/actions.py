@@ -22,7 +22,16 @@ from mika.kernel.frame import Frame
 from mika.kernel.inspect import Ref
 from mika.kernel.operate import Decision, Done, Refused
 from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, WAITING, EmailState, keeper_name
-from mika.plugins.email.console.common import SECTION, can_send, clip, mail_key, ready, resolve, unread
+from mika.plugins.email.console.common import (
+    SECTION,
+    can_send,
+    clip,
+    mail_key,
+    ready,
+    resolve,
+    unread,
+    view_link,
+)
 from mika.plugins.email.console.mail import _read_draft, apply
 from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, addresses
 from mika.ports.preprocess import inert
@@ -283,8 +292,7 @@ async def _older(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Don
     except (OSError, RuntimeError, ValueError):
         raise Refused("L'historique n'a pas pu être chargé. Actualise le dossier et vérifie la connexion du compte.") from None
     return Done(message=f"{n} message(s) ancien(s) ajouté(s)." if n else "Tout l'historique disponible de ce dossier est chargé.",
-                go=Ref("local", "/inspecteur/courrier/reception", "Retour au dossier",
-                       (("compte", args.compte), ("dossier", args.dossier))))
+                go=view_link("reception", "Retour au dossier", (("compte", args.compte), ("dossier", args.dossier))))
 
 
 @EMAIL.action("ranger", title="Ranger la sélection", args=TidyArgs, emits=[READ],

@@ -94,7 +94,7 @@ DIFF_SHOWN = 20_000
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
-APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les actions à autoriser")
+APPROVALS = Ref.approvals("ouvrir les actions à autoriser")
 
 #: ``project`` : un ancien projet, d'avant les projets à part (ADR 0031), relu au rejeu
 KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "ancien projet"}

@@ -1,8 +1,8 @@
-{# Conversations › Ses réponses jugées, dessinées (app/handmade/conversations.py) : pour chaque réponse jugée, le
+{# Conversations › Ses réponses jugées, dessinées (app/handmade/tabs/threads.py) : pour chaque réponse jugée, le
    message reçu, sa réponse, ton avis et ce qu'elle aurait dû dire. #}
 {% from "_cells.html" import cell %}
 {% from "_navigation.html" import pager as pages %}
-<div class="now-page person-tab">
+<div class="now-page person-tab" data-tab="fil/jugees">
   {% if verdicts %}
   <ul class="judged-list">
     {% for v in verdicts %}

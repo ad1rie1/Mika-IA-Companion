@@ -65,6 +65,7 @@ from mika.plugins.email.console.common import (
     draft_state,
     mail_key,
     scoped,
+    view_link,
     whose,
     workspace,
 )
@@ -159,8 +160,8 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         facts.append(("proposé", ctx.when(seen.at)))
     return Head(key=key, title=clip(got.subject, 200) if got is not None else "Un brouillon disparu",
                 subtitle=f"à {clip(got.to, 200)}" if got is not None else "", badges=tuple(badges),
-                facts=tuple(facts), back=Ref("local", "/inspecteur/courrier/brouillons", "Retour aux brouillons",
-                                            (("compte", got.account if got else ""),)))
+                facts=tuple(facts), back=view_link("brouillons", "Retour aux brouillons",
+                                              (("compte", got.account if got else ""),)))
 
 
 @EMAIL.search("brouillon")
@@ -363,4 +364,4 @@ def _redo(s: EmailState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
                                 about=(ctx.by,) if ctx.by else ())
     return Done(drafts=(asked,), decide=(Decision(seen.proposal, False, note=f"à reprendre : {args.instruction}"[:500]),),
                 message="Demandé : elle reprendra ce brouillon à son prochain moment de travail.",
-                go=Ref("local", f"/inspecteur/{SECTION}/brouillons", ""))
+                go=view_link("brouillons"))

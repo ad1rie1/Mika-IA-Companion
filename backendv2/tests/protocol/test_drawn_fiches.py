@@ -221,7 +221,7 @@ def test_a_mailbox_shows_its_state_folders_and_how_she_writes_there(world):  # n
     assert 'class="now-page mailvoice"' in voice and "Ce qu'elle lit avant d'écrire" in voice
     assert "Comment elle y écrit" in voice and "en assistante" in voice and "à ta place" in voice  # les trois voix
     assert "<atelier@example.test>" in voice  # l'expéditeur tel qu'il partira
-    assert "pas de signature" in voice and "/inspecteur/reglages/canaux?canal=courrier:pro" in voice
+    assert "pas de signature" in voice and "/inspecteur/reglages/canaux?canal=courrier%3Apro" in voice
 
 
 def test_a_microsoft_mailbox_says_how_to_connect_it(world, monkeypatch):  # noqa: F811

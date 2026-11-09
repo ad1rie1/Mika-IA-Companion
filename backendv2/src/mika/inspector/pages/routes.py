@@ -1,9 +1,9 @@
-"""Les routes de la console : destinations et leurs onglets, vues déclarées,
-épisodes, événements, vitaux, connexion, approbations."""
+"""Les routes de la console : le rendu des destinations et de leurs onglets, des vues déclarées, des épisodes et des
+événements, l'enregistrement des réglages, et la table des routes qui assemble le tout (la connexion : ``auth.py`` ;
+les actions d'opérateur et les approbations : ``actions.py``)."""
 
 from __future__ import annotations
 
-import hmac
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -14,11 +14,11 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.web.accounts import password_problems
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel, destinations, menu_place
-from mika.inspector.formview import action_view, prefilled, visible_fields
-from mika.inspector.pages import accounts, reglages
+from mika.inspector.pages import accounts, params
+from mika.inspector.pages.actions import Actions, per_row, safe_back
+from mika.inspector.pages.auth import Auth
 from mika.inspector.pages.canals import canals_post
 from mika.inspector.pages.episode_drawn import episode_panel
 from mika.inspector.pages.families import families_post
@@ -31,13 +31,12 @@ from mika.inspector.pages.journal import (
     replay_blocks,
     replay_panel,
 )
-from mika.inspector.pages.subjects import Subjects
+from mika.inspector.pages.subjects import Subjects, fiche_url
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.tools import expose_post
 from mika.inspector.pages.why import silence_page, why_page, why_panel
-from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, Forms, secure, wants_table
+from mika.inspector.ui import PREFIX, UI, Forms, wants_table
 from mika.kernel.faculty import InspectSpec
-from mika.kernel.forms import RENDERED, describe
 from mika.kernel.inspect import (
     Filters,
     Note,
@@ -49,7 +48,8 @@ from mika.kernel.inspect import (
 )
 from mika.ports.journal import JournalEvent
 from mika.runtime.boundary import Failed, call
-from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
+
+__all__ = ["Pages", "per_row"]
 
 #: les anciennes adresses de l'inspecteur → la console
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
@@ -77,19 +77,13 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
               # la place de chacun se lit avec les pièces, en sous-onglet (une ancre : « #… », après la requête)
               ("memoire", "place"): "memoire/recues#pieces-place"}
 
+#: les anciennes pages d'un objet (des vues cachées, retirées) : sa fiche, ou sa liste si l'adresse ne le nomme pas
+#: (ADR 0217) — l'ancienne adresse → (la sorte de fiche, le paramètre qui le nommait, la liste)
+MOVED_VIEWS = {"identity/personne": ("handle", "handle", "identites/annuaire"), "forge/app": ("app", "app", "apps")}
 
-#: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
-PANEL_FIELDS_MAX = 2
-
-
-def per_row(spec: Any) -> bool:
-    """Une action qui porte sur une ligne précise (une tâche, une demande) : un champ caché requis que
-    seule la vue qui la pose sait remplir. Elle ne se propose pas en tête de page."""
-    if spec.fields is not None:
-        return False
-    return any(f.kind == "hidden" and f.required for f in describe(spec.args))
-#: un champ « sujet » propose au plus tant d'objets connus
-SUBJECT_CHOICES = 300
+#: l'ancien paramètre d'une liste qui ouvrait le détail d'un objet : sa fiche (ADR 0217) — (destination, onglet) →
+#: (le paramètre, la sorte de fiche, l'onglet de la fiche)
+MOVED_PARAMS = {("personnes", "liens"): ("person", "person", "lien")}
 
 #: les anciens onglets de réglages qui recevaient des enregistrements (« canaux » et « sens » : les anciennes clés des
 #: rubriques Carte et téléphone et Plugins, ADR 0197)
@@ -100,18 +94,11 @@ EPISODES = "decisions/episodes"
 JOURNAL = "systeme/chronologie"
 
 
-def safe_back(target: str) -> str:
-    """Un retour dans la console seulement (jamais une autre adresse)."""
-    if target.startswith(PREFIX + "/") and "//" not in target and "\\" not in target and len(target) < 2000:
-        return target
-    return PREFIX + "/"
-
-
 def dest_url(key: str) -> str:
     return f"{PREFIX}/{key}"
 
 
-class Pages:
+class Pages(Actions):
     def __init__(self, ui: UI) -> None:
         self.ui = ui
         self.dests = destinations(ui.deps.navigation)
@@ -198,84 +185,6 @@ class Pages:
     def back(self, request: Request) -> str:
         return request.url.path + (f"?{request.url.query}" if request.url.query else "")
 
-    def slot_forms(self, request: Request, blocks: Sequence[Any], subject: str) -> dict[str, Any]:
-        """Les formulaires des actions posées dans les blocs (``ActionSlot``), même
-        dans le détail d'une ligne."""
-        out: dict[str, Any] = {}
-        csrf, back = self.ui.csrf(request), self.back(request)
-
-        def walk(items: Sequence[Any]) -> None:
-            for b in items:
-                if b["t"] == "action":
-                    spec = self.ui.inspection.action(b["key"])
-                    if spec is not None and offered(self.ui.kernel, spec, subject):
-                        initial = b["initial"]
-                        dynamic = dynamic_fields(self.ui.kernel, spec, subject, initial) if spec.fields else None
-                        # l'état d'abord, puis ce que la vue pose (une tâche précise, un statut visé)
-                        view = action_view(spec, csrf=csrf, back=back, subject=subject,
-                                           initial={**initial_values(self.ui.kernel, spec, subject), **initial},
-                                           dynamic=dynamic, subjects=self.subject_choices)
-                        if b["title"]:
-                            view["title"] = b["title"]
-                            view["button"] = initial.get("_bouton") or b["title"]
-                        out[b["slot"]] = view
-                elif b["t"] in ("grid", "section", "disclosure", "workspace", "toolbar"):
-                    walk(b.get("sidebar", []) + b["items"])
-                elif b["t"] == "table":
-                    walk([x for r in b["rows"] for x in r["detail"]])
-
-        walk(blocks)
-        return out
-
-    def subject_choices(self, kind: str) -> list[tuple[str, str]]:
-        """Les objets connus d'un type (une personne, un but) : ce qu'un champ « sujet » propose."""
-        return [(f.key, f"{f.title} — {f.subtitle}" if f.subtitle else f.title)
-                for f in self.ui.inspection.search(kind, "", SUBJECT_CHOICES, when=self.ui.when)]
-
-    def head_actions(self, request: Request, *, section: str = "", kind: str = "", subject: str = "") -> list[Any]:
-        """Les actions d'une page : une action courte s'ouvre en panneau ; une action à plus de deux champs a
-        sa propre page (``/action/<clé>``), qui ramène ici."""
-        specs = self.ui.inspection.actions_for(section=section) if section else \
-            self.ui.inspection.actions_for(subject=kind)
-        csrf, back = self.ui.csrf(request), self.back(request)
-        out = []
-        for a in specs:
-            if a.inline or per_row(a) or not offered(self.ui.kernel, a, subject):
-                continue
-            view = action_view(a, csrf=csrf, back=back, subject=subject, subjects=self.subject_choices,
-                               values=initial_values(self.ui.kernel, a, subject))
-            if visible_fields(view) > PANEL_FIELDS_MAX:
-                view["page"] = f"{PREFIX}/action/{quote(a.key, safe='')}?" + urlencode(
-                    {"retour": back, **({"sujet": subject} if subject else {})})
-            out.append(view)
-        return out
-
-    async def action_page(self, request: Request) -> Response:
-        """Une action sur sa propre page : son formulaire en entier, chaque champ expliqué."""
-        key = request.path_params["key"]
-        spec = self.ui.inspection.action(key)
-        subject = request.query_params.get("sujet", "")[:300]
-        back = safe_back(request.query_params.get("retour", ""))
-        if spec is None:
-            return self.render_page(request, title="Action inconnue", active="", status=404,
-                                    blocks=[Note("Cette action n'existe pas.", "warn")])
-        home, crumbs, returning = self.action_trail(spec, back)
-        if not offered(self.ui.kernel, spec, subject):
-            return self.render_page(request, title=spec.title, active=home.key if home else "", status=409,
-                                    crumbs=crumbs, crumbs_back=returning,
-                                    blocks=[Note("Cette action n'est pas possible maintenant (l'objet a changé ?).",
-                                                 "warn")])
-        dynamic = dynamic_fields(self.ui.kernel, spec, subject, {}) if spec.fields else None
-        # l'état d'abord, puis ce que l'adresse demande (le bouton d'une ligne : « la démentir »)
-        asked = prefilled(dynamic if dynamic is not None else describe(spec.args), request.query_params)
-        form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, dynamic=dynamic,
-                           subjects=self.subject_choices,
-                           values={**initial_values(self.ui.kernel, spec, subject), **asked})
-        form["description"] = ""  # dite en sous-titre de la page
-        return self.render_page(request, title=spec.title, heading=spec.title, subtitle=spec.description,
-                                active=home.key if home else "", crumbs=crumbs, crumbs_back=returning, blocks=[],
-                                panel=Panel("handmade/shared/action.html", {"form": form}))
-
     def action_trail(self, spec: Any, back: str) -> tuple[Any, list[tuple[str, str]], tuple[str, str] | None]:
         """Le fil d'une page d'action : la destination de son objet (ou de sa section) depuis sa rubrique, et le
         retour vers la page d'où l'on vient, dit à part (il ne remplace pas le chemin, ADR 0202)."""
@@ -321,6 +230,9 @@ class Pages:
         """Une destination et l'onglet demandé ; ``produced`` remplace le contenu de
         l'onglet (un formulaire refusé qu'on remontre, avec ``status``)."""
         key = key or request.path_params["key"]
+        moved_param = MOVED_PARAMS.get((key, request.path_params.get("tab", "")))
+        if moved_param and not tab and (named := request.query_params.get(moved_param[0])):
+            return RedirectResponse(fiche_url(moved_param[1], named, moved_param[2]), status_code=301)
         moved_tab = MOVED_TABS.get((key, request.path_params.get("tab", "")))
         if moved_tab and not tab:
             query = dict(request.query_params)
@@ -424,6 +336,10 @@ class Pages:
 
     async def view(self, request: Request) -> Response:
         owner, name = request.path_params["owner"], request.path_params["name"]
+        if f"{owner}/{name}" in MOVED_VIEWS:
+            kind, param, listing = MOVED_VIEWS[f"{owner}/{name}"]
+            subject = request.query_params.get(param, "")
+            return RedirectResponse(fiche_url(kind, subject) if subject else f"{PREFIX}/{listing}", status_code=301)
         spec = self.ui.inspection.find(owner, name)
         if spec is None:
             return self.render_page(request, title="Vue inconnue", active="", status=404,
@@ -559,166 +475,9 @@ class Pages:
         return self.render_page(request, title=got["title"], active="systeme", crumbs=crumbs, blocks=got["blocks"],
                                 **where)
 
-    # ── vitaux, connexion ──
+    # ── vitaux ──
     async def vitals(self, request: Request) -> Response:
         return self.ui.fragment("_vitals.html", vitals=self.ui.vitals())
-
-    async def login(self, request: Request) -> Response:
-        """La porte de la console. Sans aucun compte, elle crée le compte opérateur (le même chemin que
-        ``/auth/bootstrap`` : mêmes règles de mot de passe, et seulement tant qu'aucun compte n'existe). Un compte
-        du chat déjà connecté apprend que ce compte n'ouvre pas la console, au lieu d'être renvoyé ici sans un
-        mot."""
-        accounts = self.ui.deps.accounts
-        if accounts.count() == 0:
-            return await self._bootstrap(request)
-        error, username = "", ""
-        if request.method == "GET":
-            current = accounts.session(request.cookies.get(SESSION_COOKIE))
-            if current is not None and current.operator:
-                return secure(RedirectResponse(PREFIX + "/", status_code=303))
-            if current is not None:
-                error = (f"Ce compte ({current.display_name or current.username}) n'ouvre pas la console : "
-                         "demande à un opérateur, ou connecte-toi avec un compte opérateur.")
-        if request.method == "POST":
-            data = await self.ui.form(request)
-            ip = request.client.host if request.client else "?"
-            username = str((data or {}).get("username", "")).strip()[:200]
-            if data is None:
-                error = "Jeton de formulaire invalide : recharge la page."
-            elif self.ui.login_blocked(ip, username):
-                response = self.ui.bare(request, "login.html", "Connexion", status=429,
-                                        error="Trop de tentatives : réessaie dans une minute.", username=username)
-                response.headers["Retry-After"] = "60"
-                return response
-            else:
-                acc = await self.ui.deps.accounts.verify(username, data.get("password", ""))
-                if acc is None or not acc.operator:
-                    self.ui.login_failed(ip, username)
-                    error = "Identifiants invalides, ou compte non opérateur."
-                else:
-                    key = await self.ui.deps.accounts.open_session(acc)
-                    response = RedirectResponse(PREFIX + "/", status_code=303)
-                    response.set_cookie(SESSION_COOKIE, key, httponly=True, samesite="lax",
-                                        secure=self.ui.cookie_secure)
-                    return secure(response)
-        return self.ui.bare(request, "login.html", "Connexion", error=error, username=username)
-
-    async def _bootstrap(self, request: Request) -> Response:
-        """Aucun compte encore : créer le compte opérateur, comme ``/auth/bootstrap`` (``password_problems``,
-        ``Accounts.bootstrap`` qui refuse dès qu'un compte existe — deux onglets ne créent pas deux comptes)."""
-        accounts = self.ui.deps.accounts
-        error, username = "", ""
-        # depuis une autre machine, le code de premier démarrage écrit au journal du serveur est exigé : le premier
-        # arrivé sur le réseau ne devient pas opérateur (audit du 2026-10-26) ; la machine du serveur en est dispensée
-        code_required = bool(self.ui.deps.bootstrap_code) and not _from_this_machine(request)
-        if request.method == "POST":
-            data = await self.ui.form(request)
-            username = str((data or {}).get("username", "")).strip()[:150]
-            password = str((data or {}).get("password", ""))
-            if data is None:
-                error = "Jeton de formulaire invalide : recharge la page."
-            elif code_required and not hmac.compare_digest(str(data.get("code", "")).strip(),
-                                                           self.ui.deps.bootstrap_code):
-                error = "Le code de premier démarrage ne correspond pas (il est dans le journal du serveur)."
-            elif not username:
-                error = "Donne un identifiant."
-            elif password != str(data.get("password2", "")):
-                error = "Les deux mots de passe ne sont pas les mêmes."
-            else:
-                problems = password_problems(password, username)
-                if problems:
-                    error = " ".join(problems)
-                else:
-                    account = await accounts.bootstrap(username, password)
-                    if account is None:  # créé entre-temps (un autre onglet) : se connecter, maintenant
-                        return secure(RedirectResponse(PREFIX + "/connexion", status_code=303))
-                    key = await accounts.open_session(account)
-                    response = RedirectResponse(PREFIX + "/", status_code=303)
-                    response.set_cookie(SESSION_COOKIE, key, httponly=True, samesite="lax",
-                                        secure=self.ui.cookie_secure)
-                    return secure(response)
-        return self.ui.bare(request, "login.html", "Créer le compte opérateur", error=error, bootstrap=True,
-                            code_required=code_required, username=username, status=400 if error else 200)
-
-    async def logout(self, request: Request) -> Response:
-        data = await self.ui.form(request)
-        if data is not None:
-            key = request.cookies.get(SESSION_COOKIE)
-            if key:
-                await self.ui.deps.accounts.close_session(key)
-        response = RedirectResponse(PREFIX + "/connexion", status_code=303)
-        response.delete_cookie(SESSION_COOKIE)
-        return secure(response)
-
-    async def act(self, request: Request) -> Response:
-        """Exécuter une action déclarée : valider, exécuter, revenir (ou remontrer
-        le formulaire avec ses erreurs)."""
-        key = request.path_params["key"]
-        spec = self.ui.inspection.action(key)
-        got = await self.ui.form_lists(request)
-        account = self.ui.operator(request)
-        if spec is None:
-            return self.render_page(request, title="Action inconnue", active="", status=404,
-                                    blocks=[Note("Cette action n'existe pas.", "warn")])
-        if got is None or account is None:
-            return self.render_page(request, title=spec.title, active="", status=403,
-                                    blocks=[Note("Jeton de formulaire invalide : recharge la page.", "danger")])
-        single, lists = got
-        back = safe_back(single.get("_retour", ""))
-        subject = single.get("_sujet", "")
-        outcome = await perform(self.ui.kernel, key, lists, by=account.handle, subject=subject,
-                                nonce=single.get("_op", ""))
-        if not outcome.ok and outcome.errors:
-            fixed = fixed_values(lists)
-            dynamic = dynamic_fields(self.ui.kernel, spec, subject, fixed) if spec.fields else None
-            values = {k: v for k, v in single.items() if not k.startswith("_") and k not in fixed}
-            # un champ affiché mais absent de l'envoi est une case décochée : vide, pas son défaut
-            values.update({path: "" for path in lists.get(RENDERED, []) if path not in values and path not in fixed})
-            form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, initial=fixed,
-                               values=values, errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
-            home, crumbs, returning = self.action_trail(spec, back)
-            return self.render_page(request, title=spec.title, active=home.key if home else "", status=400,
-                                    crumbs=crumbs, crumbs_back=returning,
-                                    blocks=[], head_actions=[], messages=[("danger", outcome.message)],
-                                    panel=Panel("handmade/shared/action.html", {"form": form}))
-        if outcome.show:
-            home, crumbs, returning = self.action_trail(spec, back)
-            return self.render_page(request, title=spec.title, active=home.key if home else "", crumbs=crumbs,
-                                    crumbs_back=returning, blocks=list(outcome.show),
-                                    messages=[(outcome.tone, outcome.message)])
-        token = single.get("_op", "") or key
-        self.ui.flash(token, outcome.tone if outcome.ok else "danger", outcome.message)
-        target = render.href(outcome.go) if outcome.go else back
-        sep = "&" if "?" in target else "?"
-        return RedirectResponse(f"{target}{sep}flash={quote(token, safe='')}", status_code=303)
-
-    async def approve(self, request: Request) -> Response:
-        data = await self.ui.form(request)
-        account = self.ui.operator(request)
-        target = f"{PREFIX}/approbations"
-        if data is None or account is None:
-            return RedirectResponse(target + "?fait=jeton", status_code=303)
-        try:
-            proposal = int(data.get("proposal", "0"))
-        except ValueError:
-            proposal = 0
-        approved = data.get("decision") == "approve"
-        status = await self.ui.deps.port.resolve_effect(proposal, approved, by=account.handle,
-                                                        note=data.get("note", "")[:500], seen=data.get("seen", ""))
-        if status in ("approved", "rejected") and self.ui.deps.after_decision is not None:
-            await self.ui.deps.after_decision()
-        outcome = {"approved": "oui", "rejected": "non", "changed": "change", "blocked": "bloque"}.get(status,
-                                                                                                    "inconnu")
-        # décidée : la suivante de la file s'ouvre ; à relire (l'aperçu a changé, bloquée) : la même
-        again = status in ("changed", "blocked")
-        follow = str(proposal) if again else data.get("suivante", "")
-        query = {"fait": outcome, **({"demande": follow} if follow.isdigit() else {}),
-                 **({"sorte": kind} if (kind := data.get("sorte", "")[:200]) else {})}
-        # l'onglet de la file d'où l'on décide (« Courriers à envoyer ») : on y revient
-        tab = data.get("file", "")
-        if tab and len(tab) <= 40 and tab.replace("_", "").isalnum():
-            target = f"{target}/{tab}"
-        return RedirectResponse(f"{target}?{urlencode(query)}", status_code=303)
 
     async def settings_post(self, request: Request) -> Response:
         """Enregistrer une page de configuration : une section de réglages, les
@@ -730,8 +489,8 @@ class Pages:
                 return response
             produced = await accounts.page(self.ui, request, state)
             return await self.destination(request, key="reglages", tab=tab, produced=produced, status=status)
-        if tab in ("comportement", "parametres") or tab.startswith(reglages.FACULTY_PAGE):
-            response, state, status = await reglages.parametres_post(self.ui, request)
+        if tab in ("comportement", "parametres") or tab.startswith(params.FACULTY_PAGE):
+            response, state, status = await params.parametres_post(self.ui, request)
             if response is not None:
                 return response
             owner = state.get("owner", "")
@@ -742,10 +501,10 @@ class Pages:
                 key, slug = forms_.home(page)
                 return await self.destination(request, key=key, tab=slug, status=status,
                                               produced={"blocks": [], "panel": panel})
-            target = f"{reglages.FACULTY_PAGE}{owner}" if owner and self.ui.builtins.get(
-                f"reglages.{reglages.FACULTY_PAGE}{owner}") else "comportement"
-            got = await reglages.faculty_page(self.ui, request, owner, state) if owner else \
-                {"blocks": reglages.overview(self.ui), "messages": list(state.get("messages", []))}
+            target = f"{params.FACULTY_PAGE}{owner}" if owner and self.ui.builtins.get(
+                f"reglages.{params.FACULTY_PAGE}{owner}") else "comportement"
+            got = await params.faculty_page(self.ui, request, owner, state) if owner else \
+                {"blocks": params.overview(self.ui), "messages": list(state.get("messages", []))}
             return await self.destination(request, key="reglages", tab=target, produced=got, status=status)
         forms_ = self.ui.settings_forms
         if forms_ is not None and tab not in forms_.pages and tab in LEGACY_POSTS:
@@ -780,11 +539,12 @@ class Pages:
 
     def routes(self) -> list[Route]:
         g = self.ui.guarded
+        auth = Auth(self.ui)
         return [
             Route(PREFIX + "/reglages/{tab:str}", g(self.settings_post), methods=["POST"]),
             Route(PREFIX + "/reglages/{tab:str}/etat", g(self.settings_probe)),
-            Route(PREFIX + "/connexion", self.login, methods=["GET", "POST"]),
-            Route(PREFIX + "/deconnexion", self.logout, methods=["POST"]),
+            Route(PREFIX + "/connexion", auth.login, methods=["GET", "POST"]),
+            Route(PREFIX + "/deconnexion", auth.logout, methods=["POST"]),
             Route(PREFIX + "/_vitals", g(self.vitals)),
             Route(PREFIX + "/approbations", g(self.approve), methods=["POST"]),
             Route(PREFIX + "/action/{key:str}", g(self.act), methods=["POST"]),
@@ -809,10 +569,3 @@ class Pages:
             Route(PREFIX + "/{key:str}", g(self.destination)),
             Route(PREFIX + "/{key:str}/{tab:str}", g(self.destination)),
         ]
-
-
-def _from_this_machine(request: Request) -> bool:
-    """La requête vient-elle de la machine du serveur (boucle locale, l'adresse vue par le serveur — derrière un
-    mandataire déclaré, celle du client) ?"""
-    host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost")

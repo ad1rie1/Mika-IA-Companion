@@ -1,11 +1,11 @@
-{# Courrier › Réception, Envoyés (app/handmade/mail.py) : l'espace de travail du plugin — ce qu'on lit, ses comptes et
+{# Courrier › Réception, Envoyés (app/handmade/tabs/mail.py) : l'espace de travail du plugin — ce qu'on lit, ses comptes et
    ses dossiers à côté, ses actions et ses filtres —, la barre qui range ce qu'on a coché, la liste en lignes (une case
    par ligne), et la liseuse du message ouvert : à côté de la liste sur un écran large, dessous sinon (ADR 0175). #}
 {% from "handmade/mail/space.html" import space with context %}
 {% from "handmade/shared/drawn.html" import one with context %}
 {% from "_navigation.html" import pager as pages %}
 {% from "_cells.html" import cell %}
-<div class="now-page person-tab mail{{ ' reading' if reader }}">
+<div class="now-page person-tab mail{{ ' reading' if reader }}" data-tab="{{ tab }}">
 {% call space(side, before) %}
   <div class="mail-stage">
   <div class="mail-panes">

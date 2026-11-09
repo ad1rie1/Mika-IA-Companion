@@ -59,6 +59,8 @@ def target(ref: Ref) -> str:
         return f"parole:{ref.key}"
     if ref.kind == "local" and params:  # une page de la console : ses paramètres sont ceux de l'outil « vue »
         return f"local:{ref.key}" + ("&" if "?" in ref.key else "?") + params
+    if params and ref.kind in ("settings", "approvals", "download"):
+        return f"{ref.kind}:{ref.key}?{params}"
     return f"{ref.kind}:{ref.key}"
 
 

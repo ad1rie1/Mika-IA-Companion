@@ -7,7 +7,6 @@ from __future__ import annotations
 import dataclasses
 import re
 from typing import Annotated, Any
-from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 
@@ -53,7 +52,6 @@ from mika.plugins.email import (
     params_of,
 )
 from mika.plugins.email.console.common import (
-    BOX,
     NO_MAIL,
     PAGE,
     UNKNOWN,
@@ -69,6 +67,7 @@ from mika.plugins.email.console.common import (
     resolve_state,
     state_badge,
     unread,
+    view_link,
 )
 from mika.ports.mail import forward_subject, reply_recipients, reply_subject
 from mika.vocab.affect import emotion_cell
@@ -108,8 +107,7 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         to = sent.to if sent is not None else known.to if known is not None else ""
         facts = (("parti", ctx.when(sent.date) if sent is not None and sent.date else "—"),)
         return Head(key=mail_key(ref), title=title or "(sans objet)", subtitle=f"à {clip(to, 200)}",
-                    badges=(Badge("parti de sa boîte", "info"), author(frame, by, edited=edited)), facts=facts, back=Ref("local", "/inspecteur/courrier/envoyes", "Retour aux envoyés",
-                                        (("compte", sent.account if sent else ""),)), automatic_actions=False)
+                    badges=(Badge("parti de sa boîte", "info"), author(frame, by, edited=edited)), facts=facts, back=view_link("envoyes", "Retour aux envoyés", (("compte", sent.account if sent else ""),)), automatic_actions=False)
     m = port.cached_one(ref) if port is not None else None
     seen = s.mails.get(ref)
     if m is not None:
@@ -182,16 +180,16 @@ def _images(s: EmailState, ctx: InspectContext, port: Any, m: Any) -> tuple[bool
         return True, [Note("Ses images s'affichent pour cette fois.", tone="muted"),
                       ActionSlot("email.images", compact=True)]
     kept = tuple((k, v) for k, v in ctx.params.items() if k not in ("flash", "images"))
-    once = Ref("local", BOX, "Les afficher cette fois", (*kept, ("images", "1"))) if ctx.param("lire") \
-        else Ref.subject("mail", mail_key(m.ref), "Les afficher cette fois", (*kept, ("images", "1")))
+    shown = (*kept, ("images", "1"))
+    once = view_link("reception", "Les afficher cette fois", shown) if ctx.param("lire") \
+        else Ref("subject", f"mail/{mail_key(m.ref)}", "Les afficher cette fois", shown)
     return False, [Note("Ses images distantes sont masquées : les charger dit à l'expéditeur que tu as ouvert ce "
                         "mail.", tone="muted", title="Images masquées"),
                    Nav((NavItem("Les afficher cette fois", once),)), ActionSlot("email.images", compact=True)]
 
 
 def _download_link(ref: str, part: str, label: str) -> Ref:
-    return Ref("local", "/inspecteur/telecharger/mail/" + quote(mail_key(ref), safe=""), label,
-               (("fichier", part),))
+    return Ref.download("mail", mail_key(ref), label, part)
 
 
 @EMAIL.download("mail")

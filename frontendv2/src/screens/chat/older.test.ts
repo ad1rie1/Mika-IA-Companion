@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HistoryEntry } from "@web/types";
-import { mergeHistory, trimThreads, userAttachments, withAttachments, type StoredMessage } from "@web/ui/chatSync";
-import { mergeOlder, oldestLoaded, touchesLoaded, UNBOUNDED } from "./older";
+import { mergeHistory, threadOf, trimThreads, userAttachments, withAttachments, type StoredMessage } from "@web/ui/chatSync";
+import { mergeOlder, mergeSeam, oldestLoaded, touchesLoaded, UNBOUNDED } from "./older";
 
 const NOW = new Date(2026, 10, 4, 14, 20).getTime();
 
@@ -42,6 +42,48 @@ describe("la remontée du fil avec elle (ADR 0215)", () => {
     expect(trimThreads(history, 50, 12)).toHaveLength(50);
     const { history: capped } = mergeHistory([], entries, 50);
     expect(capped).toHaveLength(50);
+  });
+});
+
+describe("une trame qui peut ne rien toucher de chargé (ADR 0215)", () => {
+  const cached = (): StoredMessage[] => Array.from({ length: 50 }, (_, i) => message(i + 1));
+  // tout le compte : trois lignes du fil avec elle au milieu de 47 d'un fil de travail, aucune déjà connue
+  const frame: HistoryEntry[] = Array.from({ length: 50 }, (_, i) => {
+    const id = 1000 + i;
+    return [1010, 1030, 1049].includes(id) ? row(id) : { ...row(id), strand: "devis" };
+  });
+  const main = (history: StoredMessage[]) => history.filter((m) => threadOf(m) === "").map((m) => m.id);
+
+  it("le fil avec elle repart de la trame : aucune ligne ancienne ne reste au-dessus du trou", () => {
+    const { history } = mergeSeam(cached(), frame, 50);
+    expect(main(history)).toEqual([1010, 1030, 1049]);
+    expect(oldestLoaded(history)).toBe(1010);
+    expect(history.filter((m) => m.strand === "devis")).toHaveLength(47);
+  });
+
+  it("une bulle sans identifiant et un fil de travail déjà là survivent à la coupe", () => {
+    const pending: StoredMessage = { text: "en route", sender: "user", ts: NOW, status: "pending", cid: "c1" };
+    const { history } = mergeSeam([message(5, { strand: "autre" }), ...cached(), pending], frame, 50);
+    expect(history.some((m) => m.cid === "c1")).toBe(true);
+    expect(history.some((m) => m.id === 5 && m.strand === "autre")).toBe(true);
+    expect(main(history).filter((id) => id !== undefined)).toEqual([1010, 1030, 1049]);
+  });
+
+  it("une trame qui touche ne coupe rien : les pages déjà remontées restent, au-delà de ce que tient le cache", () => {
+    const loaded = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    const { history } = mergeSeam(loaded, [row(120), row(121)], 50);
+    expect(history).toHaveLength(121);
+    expect(oldestLoaded(history)).toBe(1);
+  });
+
+  it("une ligne déjà connue d'un fil de travail suffit à toucher : tout avait été vu jusqu'à elle", () => {
+    const seen = [...cached(), message(1000, { strand: "devis" })];
+    const { history } = mergeSeam(seen, frame, 50);
+    expect(oldestLoaded(history)).toBe(1);
+  });
+
+  it("une trame sans ligne ne coupe rien", () => {
+    expect(oldestLoaded(mergeSeam(cached(), [], 50).history)).toBe(1);
   });
 });
 

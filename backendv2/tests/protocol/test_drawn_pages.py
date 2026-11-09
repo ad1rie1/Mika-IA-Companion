@@ -4,15 +4,23 @@ console ; un dessin qui échoue rend la main aux blocs."""
 
 from __future__ import annotations
 
+import ast
 import html
+import re
+from pathlib import Path
 
 import pytest
 
-from mika.app.handmade import pages
-from mika.app.handmade.blocks import Blocks
+import mika
+import mika.app.handmade as handmade
+from mika.app.handmade import blocks as drawn_blocks
+from mika.app.handmade import pages, plain
+from mika.app.handmade.lists import text as cell_text
 from mika.app.handmade.tabs import Tab
+from mika.app.handmade.tabs import text as tabs_text
 from mika.contracts import self_
 from mika.kernel.events import Content, VoiceProvenance
+from mika.kernel.inspect import Badge, Ref, Text
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_console_workflows import append
 from tests.protocol.test_now_page import chat
@@ -53,13 +61,58 @@ def test_every_drawn_tab_opens(world, where):  # noqa: F811
     assert page.status_code == 200, where
     ConsoleHTML(page.text).check()
     assert 'class="now-page' in page.text, where  # le dessin, pas le repli sur les blocs
-    if isinstance(pages.DRAWN[where], Tab):
-        assert f'data-tab="{where}"' in page.text, where  # sa forme à lui, même vide
+    assert f'data-tab="{where}"' in page.text, where  # sa forme à lui, même vide
 
 
-def test_no_tab_is_left_block_by_block():
-    """ADR 0177 : chaque onglet d'une destination a sa forme ; aucun n'est plus dessiné bloc par bloc."""
-    assert sorted(k for k, v in pages.DRAWN.items() if isinstance(v, Blocks)) == []
+def test_a_block_is_shaped_under_one_name():
+    """K11-05 : ``shape_block``, sans l'ancien nom ``shape`` qui se confondait avec ``card`` et ``fiche_parts.shaped``."""
+    assert not hasattr(drawn_blocks, "shape")
+
+
+def test_nothing_cites_a_tab_module_that_moved():
+    """Les modules repris dans ``tabs/`` (K0-10) : ni un gabarit, ni une feuille, ni le code ne renvoient à eux. Ce sont
+    justement les commentaires qu'on lit ici, pour savoir où aller : le texte, pas l'arbre du code."""
+    gone = re.compile(r"app/handmade/(?:nights|conversations|mail|running|tools|senses|system)\.py")
+    root = Path(mika.__file__).parent
+    cited = [f"{path.relative_to(root)}:{at}" for path in sorted(root.rglob("*"))
+             if path.suffix in (".py", ".html", ".css", ".js") and "__pycache__" not in path.parts
+             for at, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if gone.search(line)]
+    assert cited == []
+
+
+def test_every_drawn_tab_is_a_tab():
+    """ADR 0177 : chaque onglet d'une destination a sa forme, déclarée dans le module de sa destination (``tabs/``)."""
+    assert sorted(k for k, v in pages.DRAWN.items() if not isinstance(v, Tab)) == []
+
+
+def test_there_is_one_way_to_draw_a_tab():
+    """Un seul adaptateur d'onglet (``tabs.Tab``) : personne d'autre, dans ``app/handmade/``, ne dérive de ``Drawn``."""
+    root = Path(handmade.__file__).parent
+    others = []
+    for path in sorted(root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ClassDef) and any(getattr(b, "id", "") == "Drawn" for b in node.bases):
+                others.append(f"{path.relative_to(root)}::{node.name}")
+    assert others == ["tabs/__init__.py::Tab"]
+
+
+def test_the_text_of_a_cell_is_read_one_way():
+    """Le texte d'une cellule rendue a une seule implémentation (``tabs.text`` est celle de ``lists``) ; « — » se tait
+    sur demande."""
+    assert tabs_text is cell_text
+    assert tabs_text({"text": "—"}) == "—"
+    assert tabs_text({"text": "—"}, dash=False) == ""
+    assert tabs_text({"text": "ok"}, dash=False) == "ok"
+    assert tabs_text(None) == "" and tabs_text({}) == ""
+
+
+@pytest.mark.parametrize(("value", "said"), [
+    (Text("un mot"), "un mot"), (Badge("actif", "ok"), "actif"), (Ref("event", "12", "n° 12"), "n° 12"),
+    (None, ""), ("—", ""), ("écrit", "écrit"), (3, "3"),
+])
+def test_a_declared_value_is_read_one_way(value, said):
+    """Une valeur telle que la faculté l'a déclarée : son texte ; ``None`` et « — » : rien (K11-06)."""
+    assert plain(value) == said
 
 
 def test_processes_put_what_fails_first_with_its_error(world):  # noqa: F811
@@ -85,7 +138,7 @@ def test_a_failing_drawing_gives_back_the_blocks(world, monkeypatch):  # noqa: F
     client, _, _ = world
     bootstrap(client)
 
-    def broken(ui, items, query):
+    def broken(got):
         raise RuntimeError("dessin cassé")
 
     monkeypatch.setattr(pages.DRAWN["fil/jugees"], "draw", broken)

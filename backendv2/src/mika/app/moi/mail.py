@@ -18,18 +18,16 @@ from urllib.parse import quote
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.moi import Call, Denied, MeApi, done, form, missing
+from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.moi.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
 from mika.plugins.email.console.common import important, mail_key
 from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref, to_fill
 from mika.runtime.operations import SPACE, perform
-from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE, reaches
+from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 
-#: le niveau de qui est connecté sur une boîte : la sienne ; sinon, ce qu'on lui en partage (ADR 0188 : ``lire``,
-#: ``preparer``, ``servir``)
-OWN = "proprietaire"
 #: ce que dit une liste : au plus tant de lignes par page
 PAGE_MAX = 100
 #: le début d'un mail dans une liste
@@ -54,24 +52,7 @@ SAFE_MIMES = frozenset({"text/plain", "text/csv", "application/json", "image/png
 
 def boxes(call: Call) -> dict[str, tuple[AccountInfo, str]]:
     """Ses boîtes, par clé : la boîte et son niveau — les siennes, puis celles qu'on lui partage (ADR 0188)."""
-    port = call.port("mail")
-    if port is None:
-        return {}
-    p = email_p.params_of(call.frame)
-    me, mine = call.me, PERSON + call.me.person
-    out: dict[str, tuple[AccountInfo, str]] = {}
-    for a in port.accounts():
-        owner = p.owners.get(a.key, "")
-        if (not owner and me.owner) or owner == mine:
-            out[a.key] = (a, OWN)
-        elif level := p.shares.get(a.key, {}).get(mine, ""):
-            out[a.key] = (a, level)
-    return out
-
-
-def allows(level: str, need: str) -> bool:
-    """Son niveau sur une boîte ouvre-t-il ce geste ? La sienne, tout ; un partage, ce qu'il atteint."""
-    return level == OWN or reaches(level, need)
+    return held_by(call, call.port("mail"), email_p.params_of)
 
 
 #: ce que dit un partage qui n'atteint pas le geste demandé
@@ -81,22 +62,12 @@ TOO_LOW = {SHARE_READ: "Cette boîte t'est partagée en lecture : tu la lis, san
 
 
 def _box(call: Call, key: str, need: str = SHARE_USE) -> AccountInfo:
-    found = boxes(call).get(key)
-    if found is None:
-        raise missing()
-    if not allows(found[1], need):
-        raise Denied(403, TOO_LOW.get(found[1], "Cette boîte ne t'est pas ouverte pour cela."))
-    return found[0]
+    return opened(boxes(call).get(key), need, TOO_LOW, "Cette boîte ne t'est pas ouverte pour cela.")
 
 
 def owned(call: Call, key: str) -> AccountInfo:
     """Une boîte à elle (la régler, décider de ses brouillons) : un partage n'y suffit pas."""
-    found = boxes(call).get(key)
-    if found is None:
-        raise missing()
-    if found[1] != OWN:
-        raise Denied(403, "Seul son propriétaire règle cette boîte et décide de ce qui en part.")
-    return found[0]
+    return only_owner(boxes(call).get(key), "Seul son propriétaire règle cette boîte et décide de ce qui en part.")
 
 
 def _mail_port(call: Call) -> Any:
@@ -158,10 +129,6 @@ def _copies(port: Any, m: Mail) -> tuple[bool, bool]:
 # ── ce qui se montre ──
 
 
-def _ms(us: int) -> int:
-    return us // 1000 if us else 0
-
-
 def _people(field: str, names: dict[str, str] | None = None) -> list[dict[str, str]]:
     """Les personnes d'un en-tête ; un nom absent se complète de ``names`` (les correspondants de la boîte)."""
     known = names or {}
@@ -186,11 +153,6 @@ def _keys(mine: dict[str, tuple[AccountInfo, str]], box: str) -> tuple[str, ...]
     return tuple(key for key, (_, level) in mine.items() if level != SHARE_READ)
 
 
-def _snippet(text: str) -> str:
-    flat = " ".join(str(text).split())
-    return flat if len(flat) <= SNIPPET else flat[: SNIPPET - 1] + "…"
-
-
 def _her(s: EmailState, ref: str, p: Any, level: str = OWN) -> dict[str, Any] | None:
     """Ce qu'elle a fait de ce mail : remarqué, jugé important, lu de son côté (à part de ton non-lu, ADR 0175), une
     réponse qu'elle prépare ou qu'on lui a demandée — sauf pour qui ne fait que lire la boîte (ADR 0188) : les réponses
@@ -211,7 +173,7 @@ def _her(s: EmailState, ref: str, p: Any, level: str = OWN) -> dict[str, Any] | 
 def row(m: Mail, s: EmailState, p: Any, level: str = OWN) -> dict[str, Any]:
     return {"ref": m.ref, "box": m.account, "folder": m.folder,
             "from": {"name": name_of(m.sender) or m.address, "address": m.address}, "to": _people(m.to),
-            "subject": m.subject, "snippet": _snippet(m.body), "date": _ms(m.date), "seen": m.seen,
+            "subject": m.subject, "snippet": snippet(m.body, SNIPPET), "date": millis(m.date), "seen": m.seen,
             "flagged": m.flagged, "answered": m.answered, "attachments": len(m.attachments), "html": m.has_html,
             "bulk": m.bulk, "her": _her(s, m.ref, p, level)}
 
@@ -227,7 +189,7 @@ def _box_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     return {"key": a.key, "name": a.name, "address": a.address, "level": level, "ready": a.ready,
             "voice": a.voice,
             "can_send": a.can_send, "enabled": a.enabled, "signature": a.signature,
-            "last_poll": _ms(status.last_poll), "error": status.error, "folders": folders, "drafts_waiting": waiting,
+            "last_poll": millis(status.last_poll), "error": status.error, "folders": folders, "drafts_waiting": waiting,
             # une boîte partagée se montre à son nom (« Boîte de Léa », ADR 0188)
             "owner_name": email_p.approver_name(call.frame, a.key) if level != OWN else "",
             # « à toi » : commune à ses propriétaires (on ne la leur partage pas : elle est déjà à elles)
@@ -286,14 +248,14 @@ async def message(call: Call) -> dict[str, Any]:
             "images": {"remote": remote, "shown": remote and call.me.owner and port.images_shown(m.address)}}
 
 
-def _frame_csp(api: MeApi, remote: bool) -> str:
+def _frame_csp(api: MeApiBase, remote: bool) -> str:
     """La politique du cadre de la console, posable par le client web (ses origines), pas par une autre page."""
     base = FRAME_CSP_REMOTE if remote else FRAME_CSP
     return base.replace("frame-ancestors 'self'", "frame-ancestors 'self' " + " ".join(api.origins)) \
         if api.origins else base
 
 
-def frame_route(api: MeApi) -> Any:
+def frame_route(api: MeApiBase) -> Any:
     async def frame(call: Call) -> Response:
         """Le HTML d'un mail, purgé, dans son document isolé (ADR 0169) ; ses images distantes seulement si on les a
         permises, pour cette fois (``images=1``) ou pour son expéditeur."""
@@ -348,7 +310,7 @@ async def drafts(call: Call) -> dict[str, Any]:
         preview = port.preview(d.draft) if d.state == WAITING else None
         original = port.cached_one(d.mail) if d.mail else None
         out.append({
-            "id": d.draft, "box": d.account, "state": d.state, "at": _ms(d.at), "decided_at": _ms(d.decided_at),
+            "id": d.draft, "box": d.account, "state": d.state, "at": millis(d.at), "decided_at": millis(d.decided_at),
             "by": d.by, "note": d.note, "in_reply_to": d.mail, "asked": d.asked,
             "voice": mine[d.account][0].voice, "decides": mine[d.account][1] == OWN,
             "original": {"subject": original.subject, "from": name_of(original.sender) or original.address}
@@ -377,8 +339,8 @@ async def sent(call: Call) -> dict[str, Any]:
     items = sorted(found, key=lambda x: -x.date)[:PAGE_MAX]
     names = {key: _names(port, key) for key in {x.account for x in items}}
     return {"items": [{"ref": x.ref, "box": x.account, "to": _people(x.to, names[x.account]),
-                       "cc": _people(x.cc, names[x.account]), "subject": x.subject, "snippet": _snippet(x.body),
-                       "date": _ms(x.date), "by": x.by, "draft": x.draft, "attachments": len(x.attachments)}
+                       "cc": _people(x.cc, names[x.account]), "subject": x.subject, "snippet": snippet(x.body, SNIPPET),
+                       "date": millis(x.date), "by": x.by, "draft": x.draft, "attachments": len(x.attachments)}
                       for x in items]}
 
 
@@ -399,7 +361,7 @@ async def contacts(call: Call) -> dict[str, Any]:
                 max(known.last, c.last))
     ordered = sorted(found.values(), key=lambda c: (-c.last, c.address))[:size]
     return {"items": [{"address": c.address, "name": c.name, "received": c.received, "sent": c.sent,
-                       "last": _ms(c.last)} for c in ordered]}
+                       "last": millis(c.last)} for c in ordered]}
 
 
 # ── écrire, ranger ──
@@ -589,7 +551,7 @@ def count(call: Call) -> int:
                if d.state == WAITING and mine.get(d.account, (None, ""))[1] == OWN)
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/mail/boxes", list_boxes), r("/mail/messages", messages), r("/mail/message", message),
             r("/mail/frame", frame_route(api), raw=True), r("/mail/file", file, raw=True),

@@ -62,7 +62,7 @@ def head_of(ui: UI, got: Head, *, kicker: str, tags: Sequence[dict[str, str]] = 
             facts: Sequence[dict[str, str]] = ()) -> Markup:
     """L'en-tête de la faculté, dessiné : son titre, sa ligne, ses étiquettes et ses faits (un lien reste un lien),
     puis ce que la fiche y ajoute."""
-    shown = render.Env(when=ui.when, now=ui.now())
+    shown = ui.env(ui.when)
     said = []
     for label, value in got.facts:
         c = render.cell(value, shown)
@@ -89,7 +89,7 @@ def rendered(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> list[di
 
 def shaped(item: dict[str, Any]) -> dict[str, Any]:
     """Un bloc rendu, prêt pour le vocabulaire des pages dessinées (une liste en cartes)."""
-    return drawn_blocks.shape(item)
+    return drawn_blocks.shape_block(item)
 
 
 def whole(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any] | None) -> Any:

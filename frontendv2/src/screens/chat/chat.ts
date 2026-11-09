@@ -6,7 +6,9 @@
  *
  * Le comportement est celui du client web (`frontend/Web/src/ui/ChatOverlay.ts`), par les mêmes modules purs
  * (`@web/ui/chatSync`, `approvals`, `toolActivity`, `strands`, `verdicts`, `bubbles`, `messageNotes`) ; le
- * rendu, celui de la maquette (`markup.ts`). Le contrat : `backendv2/docs/protocole-chat.md`.
+ * rendu, celui de la maquette (`markup.ts`). Le contrat : `backendv2/docs/protocole-chat.md`. Ce fichier garde les
+ * trames, l'état du fil et l'orchestration ; les cartes d'accord sont dans `approvals.ts`, les fils de travail et leurs
+ * commandes dans `strands.ts`, le champ et l'envoi dans `composer.ts`.
  *
  * Ses notes de carte (ADR 0196 : `look`, `map`, `trip`) ne passent pas par `@web/ui/messageNotes`, qui ne garde que
  * la bulle 📍 (l'ancien client web les ignore) : elles se lisent ici (`map/notes.ts`), se gardent avec le message
@@ -16,14 +18,11 @@ import { API_BASE } from "@web/network/api";
 import type { WebSocketClient } from "@web/network/WebSocketClient";
 import type {
   AckMessage,
-  ApprovalDecision,
-  ChatMode,
   HistoryAttachment,
   HistoryMessage,
   MessageNote,
   SentFile,
   SpeechMessage,
-  StrandResultMessage,
   Verdict,
   VerdictResultMessage,
 } from "@web/types";
@@ -37,7 +36,6 @@ import {
   markAsleep,
   mergeHistory,
   MAX_STRANDS_CACHED,
-  nextClientMsgId,
   proMode,
   readCache,
   replyText,
@@ -46,117 +44,53 @@ import {
   threadOf,
   trimThreads,
   userAttachments,
-  withAttachments,
   writeCache,
   type MessageStatus,
   type StoredMessage,
 } from "@web/ui/chatSync";
-import {
-  approvalKey,
-  approvalResult,
-  autoAcceptFrame,
-  decisionFrame,
-  EMPTY_APPROVALS,
-  isDecisionTaken,
-  nextRefreshDelay,
-  resultMessage,
-  withApprovals,
-  withConnection,
-  withDecisionSent,
-  withResult,
-  type ApprovalsState,
-} from "@web/ui/approvals";
-import { insertEmoji } from "@web/ui/emojis";
 import { messageNotes } from "@web/ui/messageNotes";
-import {
-  COMMANDS,
-  localStrand,
-  newStrandId,
-  parseCommand,
-  parseStrands,
-  STRAND_DESCRIPTION_MAX,
-  STRAND_TITLE_MAX,
-  strandLabel,
-  strandOf,
-  suggestCommands,
-  unescapeSlash,
-  withLocal,
-  type StrandCommand,
-  type StrandInfo,
-} from "@web/ui/strands";
+import { strandLabel, strandOf, suggestCommands } from "@web/ui/strands";
 import { cardKey, isRunning, toolFrame, toolUses, withAnswer, withToolFrame, type WorkCard } from "@web/ui/toolActivity";
 import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "@web/ui/verdicts";
 import { attributionText, miniCard, pendingMini } from "../../map/cards";
 import { mapInfo } from "../../map/info";
 import { MiniMaps, slotKey } from "../../map/minis";
 import { mapNotes, sameMapNotes, type MapNote } from "../../map/notes";
+import { read, write } from "../../shared/storage";
 import { onTheme } from "../../shell/theme";
 import { $, h, norm, on } from "../../shell/dom";
-import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../shell/float";
+import { closeModal, openModal, toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { Account, ScreenContext, ScreenDef, Shell } from "../../shell/shell";
 import type { MikaSnapshot, MikaStore } from "../../mika/store";
 import { facetHtml, facetsOf, promiseHtml, statusLine, type LinkState } from "../../mika/view";
-import { mergeOlder, oldestLoaded, touchesLoaded, UNBOUNDED } from "./older";
-import {
-  accordToggle,
-  approvalsMarkup,
-  attachmentsMarkup,
-  cardKinds,
-  dayAndClock,
-  elsewhere,
-  type CardKind,
-  composerMarkup,
-  filesTable,
-  messageKey,
-  strandHead,
-  strandsPane,
-  threadMarkup,
-  type ApprovalNote,
-  type PendingAttachment,
-} from "./markup";
+import { ApprovalCards } from "./approvals";
+import { ACCEPTED_TYPES, ChatComposer, MAX_MESSAGE_CHARS } from "./composer";
+import { mergeOlder, mergeSeam, oldestLoaded, UNBOUNDED } from "./older";
+import { composerMarkup, dayAndClock, filesTable, messageKey, threadMarkup } from "./markup";
+import { WorkStrands } from "./strands";
 
-/** Ce que le champ accepte en pièces jointes (les plafonds du serveur, `pipeline/media.py`). */
-const ACCEPTED_TYPES = [
-  "image/jpeg", "image/png", "image/gif", "image/webp",
-  "audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg", "audio/webm",
-  "text/plain", "text/csv", "text/markdown", "application/json",
-  "application/pdf",
-].join(",");
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
-const MAX_ATTACHMENTS = 5;
-/** Les messages gardés par fil, dans l'écran et dans le cache (ceux que le serveur rend à l'ouverture). */
+/**
+ * Par fil, ce que garde le cache du navigateur et ce qu'une trame sans contact laisse en mémoire ; hors de ce cas, la
+ * mémoire n'a pas de borne (ADR 0215). C'est aussi ce que le serveur rend à l'ouverture : une trame aussi longue peut
+ * en laisser de plus anciens.
+ */
 const MAX_MESSAGES = 50;
 /** Sans réponse au bout de ce temps (une trame ignorée au-delà du débit), le bouton redevient cliquable. */
 const OLDER_WAIT_MS = 10_000;
-/** La longueur maximale d'un message, celle du serveur (`adapters/web/protocol.py::MAX_MESSAGE_CHARS`). */
-export const MAX_MESSAGE_CHARS = 2000;
-const COUNTER_FROM = 1800;
 /** « Mika écrit… » ne survit pas plus longtemps sans réponse (le tour entier peut attendre longtemps). */
 const TYPING_TIMEOUT_MS = 300_000;
-const APPROVAL_NOTE_MS = 6000;
-const STRAND_NOTE_MS = 6000;
 /** Le message que la palette montre reste surligné ce temps-là. */
 const FOUND_MS = 2400;
 /** L'écart entre le haut du champ (et de ses cartes) et le bas des toasts, sur l'écran Chat. */
 const TOAST_GAP_PX = 8;
 /** Dans la palette, le début d'un message ; ce qu'on y trouve plus loin se montre en passage (`palette.ts::excerpt`). */
 const PALETTE_TITLE_CHARS = 70;
-const OFFLINE_NOT_SENT = "Hors ligne : ta décision n'est pas partie. Réessaie à la reconnexion.";
 
 /** Le fil gardé par ce navigateur, pour ce compte seulement. */
 export const CACHE_PREFIX = "mika2_chat";
 const PRO_KEY = "mika2_chat_pro";
-/** « Tout accepter » (ADR 0170) : retenu par l'onglet seulement. */
-const AUTO_KEY = "mika2_chat_auto_accept";
-const STRAND_PREFIX = "mika2_chat_strand";
-
-const STRAND_RESULT_NOTES: Record<string, string> = {
-  invalid: "Réglage refusé : un champ est trop long.",
-  forbidden: "Réglage refusé : réservé à une opératrice.",
-  failed: "Le réglage n'a pas abouti — réessaie.",
-};
 
 /** Un message gardé, et ses notes de carte (ADR 0196), qu'il emporte dans le cache du navigateur. */
 type Kept = StoredMessage & { maps?: MapNote[] };
@@ -174,45 +108,9 @@ function setMaps(msg: StoredMessage, maps: MapNote[]): boolean {
   return true;
 }
 
-const EMOJIS = ["😊", "😅", "😂", "🙂", "😉", "😍", "🥲", "😴", "🤔", "😬", "🙏", "👍", "👌", "🔥", "✨", "❤️", "💪", "🎉", "☕", "🌧️", "🚶", "📎", "✅", "❌"];
-
-function read(storage: () => Storage, key: string): string | null {
-  try {
-    return storage().getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function write(storage: () => Storage, key: string, value: string | null): void {
-  try {
-    if (value === null) storage().removeItem(key);
-    else storage().setItem(key, value);
-  } catch {
-    // stockage fermé : le choix vaut pour cette page
-  }
-}
-
 /** Le temps que sa bouche bouge pour une bulle : un peu moins que de la lire à voix haute. */
 export function talkMs(text: string): number {
   return Math.min(5000, Math.max(900, text.length * 45));
-}
-
-/** « 7,2 Mo » — un refus qui donne la taille dit du même coup pourquoi. */
-function megabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Mo`;
-}
-
-function readBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? "");
-      resolve(result.split(",")[1] ?? result);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 /** Supprimer les fils gardés d'un autre compte (un navigateur partagé). */
@@ -237,31 +135,13 @@ export class ChatScreen {
   private moreOlder = false;
   private olderTimer: number | null = null;
   private readonly cacheKey: string;
-  private readonly strandKey: string;
 
-  private approvals: ApprovalsState = EMPTY_APPROVALS;
-  private readonly autoAccepted = new Set<string>();
-  private autoPreferred: boolean;
-  private approvalNote: ApprovalNote | null = null;
-  private approvalNoteTimer: number | null = null;
-  private approvalTimer: number | null = null;
-  private readonly approvalOpen = new Set<number>();
-  /** Ce que veut faire chaque carte (sa capacité, son brouillon), relevé dans la trame brute. */
-  private cardKinds = new Map<number, CardKind>();
-  /** Sur un téléphone, les cartes-liens (Mail, Teams) dépliées sous leur ligne. */
-  private linksOpen = false;
+  private readonly approvalCards: ApprovalCards;
+  private readonly strands: WorkStrands;
+  private readonly composer: ChatComposer;
 
   private work: readonly WorkCard[] = [];
   private readonly openWork = new Set<string>();
-
-  private strands: StrandInfo[] = [];
-  private localStrands: StrandInfo[] = [];
-  private activeStrand: string;
-  private showArchived = false;
-  private strandNote = "";
-  private strandNoteTimer: number | null = null;
-  private readonly unreadStrands = new Set<string>();
-  private readonly strandsAsked = new Set<string>();
 
   private proPreferred: boolean;
   /** Le fil où « Mika écrit… » attend sa réponse (`""` : le fil avec elle) ; `null` : elle n'écrit pas. */
@@ -271,8 +151,6 @@ export class ChatScreen {
   private readonly verdictPending = new Map<number, { verdict?: Verdict; note?: string }>();
   private readonly verdictErrors = new Map<number, string>();
 
-  private pending: PendingAttachment[] = [];
-  private notices: string[] = [];
   private link: LinkState = "connecting";
   private search: string | null = null;
 
@@ -280,8 +158,6 @@ export class ChatScreen {
   private mounted: "ordinary" | "pro" | null = null;
   /** Ses cartes miniatures (ADR 0196) : au plus quatre vraies cartes à la fois, les autres en plan dessiné. */
   private readonly minis = new MiniMaps();
-  /** Une phrase à poser dans le champ au prochain dessin (l'écran Carte : « Demander à Mika »). */
-  private pendingDraft: string | null = null;
   /** Le fil suit le bas tant qu'on y est : une image qui se charge, une bulle qui arrive le gardent en vue. */
   private stick = true;
   private resize: ResizeObserver | null = null;
@@ -306,15 +182,42 @@ export class ChatScreen {
   ) {
     const who = account.personId || account.username;
     this.cacheKey = `${CACHE_PREFIX}:${who}`;
-    this.strandKey = `${STRAND_PREFIX}:${who}`;
     dropForeignCaches(this.cacheKey);
     this.proPreferred = read(() => localStorage, PRO_KEY) === "1";
-    this.autoPreferred = read(() => sessionStorage, AUTO_KEY) === "1";
-    this.activeStrand = strandOf(read(() => localStorage, this.strandKey)) ?? "";
+    this.approvalCards = new ApprovalCards({
+      ws: () => this.ws,
+      body: () => this.body,
+      operator: () => this.operator,
+    });
+    this.strands = new WorkStrands(
+      {
+        ws: () => this.ws,
+        body: () => this.body,
+        proMode: () => this.proMode,
+        history: () => this.history,
+        input: () => this.composer.input(),
+        focusInput: () => this.composer.focusInput(),
+        paintThread: (toBottom) => this.paintThread(toBottom),
+        paintTyping: () => this.paintTyping(),
+        refreshHead: () => this.refreshHead(),
+      },
+      who,
+    );
+    this.composer = new ChatComposer({
+      ws: () => this.ws,
+      body: () => this.body,
+      proMode: () => this.proMode,
+      activeStrand: () => this.strands.activeStrand,
+      onScreen: () => this.shell.ctx?.screen === "chat",
+      addMessage: (text, opts) => this.addMessage(text, "user", opts),
+      runCommand: (command) => this.strands.runCommand(command),
+      noteOpener: (id, text) => this.strands.noteOpener(id, text),
+      showTyping: () => this.showTyping(),
+    });
     this.restore();
     store.subscribe((snap) => this.paintMika(snap));
     onTheme((dark) => this.minis.theme(dark));
-    document.addEventListener("keydown", (e) => this.focusOnType(e));
+    document.addEventListener("keydown", (e) => this.composer.focusOnType(e));
     addEventListener("resize", () => this.placeToasts());
   }
 
@@ -329,13 +232,9 @@ export class ChatScreen {
     return this.operator && this.proPreferred;
   }
 
-  private get autoAccept(): boolean {
-    return this.operator && this.autoPreferred;
-  }
-
   /** Le fil que l'écran montre : en mode pro, le fil de travail actif ; sinon le fil avec elle (`""`). */
   private get viewThread(): string {
-    return this.proMode ? this.activeStrand : "";
+    return this.proMode ? this.strands.activeStrand : "";
   }
 
   /** Oublier le fil de ce navigateur (la déconnexion : un navigateur partagé ne le garde pas). */
@@ -354,18 +253,17 @@ export class ChatScreen {
     ws.on("ack", (d) => this.onAck(d));
     ws.on("history", (d) => this.onHistory(d));
     ws.on("verdict_result", (d) => this.onVerdictResult(d));
-    ws.on("strands", (d) => this.onStrands(d));
-    ws.on("strand_result", (d) => this.onStrandResult(d));
-    ws.on("approvals", (d) => this.onApprovals(d.items));
-    ws.on("approval_result", (d) => this.onApprovalResult(d));
+    ws.on("strands", (d) => this.strands.onStrands(d));
+    ws.on("strand_result", (d) => this.strands.onStrandResult(d));
+    ws.on("approvals", (d) => this.approvalCards.onApprovals(d.items));
+    ws.on("approval_result", (d) => this.approvalCards.onApprovalResult(d));
     ws.on("connection", (d) => {
-      this.approvals = withConnection(this.approvals, d.status);
-      if (d.status === "connected") this.autoAccepted.clear();
+      this.approvalCards.onConnection(d.status);
       if (d.status !== "connected") this.endOlder();
       this.link =
         d.status === "connected" ? "connected" : d.status === "unauthorized" ? "unauthorized" : d.status === "reconnecting" ? "connecting" : "offline";
       this.store.setLink(this.link);
-      this.paintApprovals();
+      this.approvalCards.paintApprovals();
       this.refreshHead();
       if (d.status === "unauthorized") this.failPending("session expirée — reconnecte-toi");
     });
@@ -447,10 +345,7 @@ export class ChatScreen {
       strand,
     });
     if (this.reveal.writing) this.showTyping("");
-    if (strand && strand !== this.viewThread) {
-      this.unreadStrands.add(strand);
-      this.paintStrands();
-    }
+    if (strand && strand !== this.viewThread) this.strands.noteUnread(strand);
     if (!pro) this.store.talk(talkMs(splitBubbles(replyText(data.text))[0] ?? ""));
   }
 
@@ -501,10 +396,9 @@ export class ChatScreen {
     const before = this.history.length;
     const moreBefore = this.moreOlder;
     // à l'ouverture, ou quand il en manque trop : ce qui est plus vieux qu'une trame qui ne touche rien de chargé ne
-    // se recoud pas, le fil repart des derniers messages (ADR 0215)
+    // se recoud pas, le fil avec elle repart de cette trame (ADR 0215)
     const seam = mode === "initial" || truncated;
-    const limit = seam && !touchesLoaded(this.history, entries ?? []) ? MAX_MESSAGES : UNBOUNDED;
-    const result = mergeHistory(this.history, entries, limit);
+    const result = seam ? mergeSeam(this.history, entries ?? [], MAX_MESSAGES) : mergeHistory(this.history, entries, UNBOUNDED);
     this.history = result.history;
     if (seam) this.moreOlder = truncated || (entries?.length ?? 0) >= MAX_MESSAGES;
     const mapped = this.mergeMaps(entries);
@@ -668,294 +562,6 @@ export class ChatScreen {
     if (scroller && this.stick) scroller.scrollTop = scroller.scrollHeight;
   }
 
-  // ── Les cartes d'accord ───────────────────────────────────────────
-
-  private onApprovals(items: unknown): void {
-    this.cardKinds = cardKinds(items);
-    this.approvals = withApprovals(this.approvals, items);
-    const ids = new Set(this.approvals.cards.map((c) => c.id));
-    for (const id of [...this.approvalOpen]) if (!ids.has(id)) this.approvalOpen.delete(id);
-    this.paintApprovals();
-    this.autoAcceptPending();
-  }
-
-  private onApprovalResult(data: unknown): void {
-    const result = approvalResult(data);
-    if (!result) return;
-    this.approvals = withResult(this.approvals, result.id);
-    this.noteApproval(resultMessage(result.status), isDecisionTaken(result.status));
-    this.paintApprovals();
-  }
-
-  private decide(id: number, decision: ApprovalDecision): void {
-    const frame = decisionFrame(this.approvals, id, decision, Date.now());
-    if (!frame) {
-      // un bouton que le minuteur n'avait pas encore éteint : repeindre suffit
-      this.paintApprovals();
-      return;
-    }
-    if (!this.ws?.sendApproval(frame)) {
-      this.noteApproval(OFFLINE_NOT_SENT, false);
-      this.paintApprovals();
-      return;
-    }
-    this.approvals = withDecisionSent(this.approvals, id);
-    this.paintApprovals();
-  }
-
-  /** « Tout accepter » (ADR 0170) : la première carte acceptable part acceptée, une à la fois. */
-  private autoAcceptPending(): void {
-    if (!this.autoAccept || !this.ws) return;
-    // un brouillon de mail ou une réponse Teams se décide là où il partira (ADR 0191) : jamais accepté d'office ici
-    const here = { ...this.approvals, cards: this.approvals.cards.filter((c) => !elsewhere(this.cardKinds.get(c.id))) };
-    const frame = autoAcceptFrame(here, Date.now(), this.autoAccepted);
-    if (!frame || !this.ws.sendApproval(frame)) return;
-    this.autoAccepted.add(approvalKey(frame));
-    this.approvals = withDecisionSent(this.approvals, frame.id);
-    this.paintApprovals();
-  }
-
-  private noteApproval(text: string, ok: boolean): void {
-    if (this.approvalNoteTimer !== null) window.clearTimeout(this.approvalNoteTimer);
-    this.approvalNote = { text, ok };
-    this.approvalNoteTimer = window.setTimeout(() => {
-      this.approvalNoteTimer = null;
-      this.approvalNote = null;
-      this.paintApprovals();
-    }, APPROVAL_NOTE_MS);
-  }
-
-  private paintApprovals(): void {
-    if (this.approvalTimer !== null) window.clearTimeout(this.approvalTimer);
-    this.approvalTimer = null;
-    const now = Date.now();
-    const zone = this.body ? $("[data-approvals]", this.body) : null;
-    if (zone) {
-      zone.innerHTML = approvalsMarkup(this.approvals, now, {
-        note: this.approvalNote,
-        auto: this.autoAccept,
-        open: this.approvalOpen,
-        kinds: this.cardKinds,
-        linksOpen: this.linksOpen,
-      });
-      zone.hidden = !zone.innerHTML.trim();
-    }
-    const delay = nextRefreshDelay(this.approvals.cards, now);
-    if (delay !== null) {
-      this.approvalTimer = window.setTimeout(() => {
-        this.approvalTimer = null;
-        this.paintApprovals();
-      }, delay);
-    }
-  }
-
-  // ── Les fils de travail (ADR 0164) ────────────────────────────────
-
-  private get allStrands(): StrandInfo[] {
-    const all = withLocal(this.strands, this.localStrands);
-    if (this.activeStrand && !all.some((s) => s.id === this.activeStrand)) return [localStrand(this.activeStrand), ...all];
-    return all;
-  }
-
-  private strandInfo(id: string): StrandInfo {
-    return this.allStrands.find((s) => s.id === id) ?? localStrand(id);
-  }
-
-  /** En mode pro, un fil est toujours montré : le dernier choisi, sinon le plus récent, sinon un neuf. */
-  private ensureStrand(): void {
-    if (!this.proMode || this.activeStrand) return;
-    const recent = this.allStrands.find((s) => !s.archived);
-    this.activeStrand = recent?.id ?? newStrandId();
-    write(() => localStorage, this.strandKey, this.activeStrand);
-  }
-
-  private onStrands(raw: unknown): void {
-    this.strands = parseStrands(raw);
-    const known = new Set(this.strands.map((s) => s.id));
-    // un fil ouvert ici et resté vide s'en va, sauf celui qu'on regarde
-    this.localStrands = this.localStrands.filter(
-      (s) => !known.has(s.id) && (s.id === this.activeStrand || this.history.some((m) => m.strand === s.id)),
-    );
-    this.ensureStrand();
-    if (this.proMode) this.askStrandHistory(this.activeStrand);
-    this.paintStrands();
-    this.refreshHead();
-  }
-
-  private onStrandResult(data: StrandResultMessage): void {
-    const note = STRAND_RESULT_NOTES[data.status];
-    if (note) this.noteStrand(note);
-  }
-
-  private selectStrand(id: string): void {
-    this.activeStrand = id;
-    write(() => localStorage, this.strandKey, id);
-    this.unreadStrands.delete(id);
-    this.askStrandHistory(id);
-    this.paintStrands();
-    this.paintThread(true);
-    this.paintTyping();
-    this.focusInput();
-  }
-
-  /** Un fil que le serveur connaît mieux que cet onglet : ses messages, une fois par session. */
-  private askStrandHistory(id: string): void {
-    const info = this.strands.find((s) => s.id === id);
-    if (!info || this.strandsAsked.has(id) || !this.ws) return;
-    const here = this.history.filter((m) => m.strand === id && m.id !== undefined).length;
-    if (info.count <= here) return;
-    if (this.ws.requestStrandHistory({ type: "strand_history", id })) this.strandsAsked.add(id);
-  }
-
-  private openNewStrand(): void {
-    const id = newStrandId();
-    this.localStrands = [localStrand(id), ...this.localStrands];
-    this.selectStrand(id);
-    this.refreshHead();
-    toast("Fil neuf ouvert : rien n'est effacé.", { ico: "threads" });
-  }
-
-  private noteOpener(id: string, text: string): void {
-    const local = this.localStrands.find((s) => s.id === id);
-    if (!local || local.opener) return;
-    this.localStrands = this.localStrands.map((s) => (s.id === id ? { ...s, opener: text } : s));
-    this.paintStrands();
-  }
-
-  private setStrand(change: Partial<Pick<StrandInfo, "title" | "description" | "archived">>): void {
-    const id = this.activeStrand;
-    const next: StrandInfo = { ...this.strandInfo(id), ...change };
-    const sent = this.ws?.sendStrand({
-      type: "strand",
-      id,
-      title: next.title,
-      description: next.description,
-      archived: next.archived,
-    });
-    if (!sent) {
-      this.noteStrand("Hors ligne : le réglage n'est pas parti.");
-      return;
-    }
-    const known = this.strands.some((s) => s.id === id);
-    this.strands = known ? this.strands.map((s) => (s.id === id ? next : s)) : this.strands;
-    this.localStrands = known ? this.localStrands : [next, ...this.localStrands.filter((s) => s.id !== id)];
-    this.paintStrands();
-    this.refreshHead();
-  }
-
-  private runCommand(command: StrandCommand): void {
-    switch (command.name) {
-      case "clear":
-        this.openNewStrand();
-        return;
-      case "rename":
-        if (command.arg) this.setStrand({ title: command.arg.slice(0, STRAND_TITLE_MAX) });
-        else this.editStrand();
-        return;
-      case "describe":
-        if (command.arg) this.setStrand({ description: command.arg.slice(0, STRAND_DESCRIPTION_MAX) });
-        else this.editStrand();
-        return;
-      case "archive":
-        this.setStrand({ archived: true });
-        toast("Fil archivé", { ico: "archive" });
-        return;
-      case "unarchive":
-        this.setStrand({ archived: false });
-        return;
-      case "help":
-        this.commandsMenu();
-        return;
-      case "unknown":
-        this.noteStrand(`Commande inconnue : ${command.typed} — tape /aide.`);
-        return;
-    }
-  }
-
-  private noteStrand(text: string): void {
-    this.strandNote = text;
-    if (this.strandNoteTimer !== null) window.clearTimeout(this.strandNoteTimer);
-    this.strandNoteTimer = window.setTimeout(() => {
-      this.strandNote = "";
-      this.strandNoteTimer = null;
-      this.paintStrands();
-    }, STRAND_NOTE_MS);
-    this.paintStrands();
-  }
-
-  private editStrand(): void {
-    const info = this.strandInfo(this.activeStrand);
-    const el = openModal({
-      title: "Le fil",
-      size: "narrow",
-      body: `<div class="stack"><label class="field"><span>Titre</span><input data-f="title" maxlength="${STRAND_TITLE_MAX}" value="${h(info.title)}" placeholder="${h(strandLabel(info))}"></label>
-        <label class="field"><span>Petite description</span><textarea data-f="description" rows="3" maxlength="${STRAND_DESCRIPTION_MAX}" placeholder="Ce que Mika doit savoir de ce fil, et rien d'autre.">${h(info.description)}</textarea></label></div>`,
-      foot: `<span class="grow"></span><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" data-ok>Enregistrer</button>`,
-    });
-    el.querySelector("[data-ok]")!.addEventListener("click", () => {
-      const title = el.querySelector<HTMLInputElement>('[data-f="title"]')!.value.trim();
-      const description = el.querySelector<HTMLTextAreaElement>('[data-f="description"]')!.value.trim();
-      closeModal();
-      this.setStrand({ title, description });
-    });
-  }
-
-  private commandsMenu(anchor?: HTMLElement | null): void {
-    const at: HTMLElement | null = anchor ?? (this.body ? $<HTMLElement>('[data-cmp="commandes"]', this.body) : null) ?? this.body;
-    if (!at) return;
-    const items: MenuItem[] = [
-      { header: "Commandes du fil" },
-      { label: "/clear — ouvrir un fil neuf", icon: "plus", action: () => this.runCommand({ name: "clear" }) },
-      { label: "/renommer <titre>", icon: "pen", action: () => this.complete("renommer") },
-      { label: "/description <texte>", icon: "threads", action: () => this.complete("description") },
-      { label: "/archiver", icon: "archive", action: () => this.runCommand({ name: "archive" }) },
-      { label: "/desarchiver", icon: "archive", action: () => this.runCommand({ name: "unarchive" }) },
-      { label: "/aide — // en tête envoie un seul /", icon: "info", action: () => toast("// en tête envoie le message avec un seul /.", { ico: "info" }) },
-    ];
-    openMenu(at, items, { align: "left" });
-  }
-
-  /** Le champ prêt pour une commande à argument : « /renommer ». */
-  private complete(word: string): void {
-    const input = this.input();
-    if (!input) return;
-    const c = COMMANDS.find((x) => x.words.includes(word));
-    input.value = c ? `/${c.words[0]}${c.usage.includes("<") ? " " : ""}` : `/${word} `;
-    input.focus();
-  }
-
-  private strandsMenu(anchor: HTMLElement): void {
-    const live = this.allStrands.filter((s) => !s.archived || s.id === this.activeStrand);
-    openMenu(
-      anchor,
-      [
-        { header: "Fils de travail" },
-        ...live.map((s): MenuItem => ({
-          label: strandLabel(s),
-          icon: s.id === this.activeStrand ? "check" : "threads",
-          action: () => this.selectStrand(s.id),
-        })),
-        "sep",
-        { label: "Nouveau fil", icon: "plus", action: () => this.openNewStrand() },
-      ],
-      { align: "left" },
-    );
-  }
-
-  private paintStrands(): void {
-    if (!this.body || !this.proMode) return;
-    const pane = $("[data-strands-pane]", this.body);
-    if (pane) {
-      pane.innerHTML = strandsPane(this.allStrands, this.activeStrand, {
-        showArchived: this.showArchived,
-        unread: this.unreadStrands,
-        now: Date.now(),
-      });
-    }
-    const head = $("[data-strand-head]", this.body);
-    if (head) head.innerHTML = strandHead(this.strandInfo(this.activeStrand), this.strandNote);
-  }
-
   // ── Ses réponses jugées (ADR 0113) ────────────────────────────────
 
   private judge(id: number, verdict: Verdict | "", note?: string): void {
@@ -1013,137 +619,6 @@ export class ChatScreen {
     });
   }
 
-  // ── Les pièces jointes ────────────────────────────────────────────
-
-  private async addFiles(files: FileList | File[]): Promise<void> {
-    const list = Array.from(files);
-    const room = MAX_ATTACHMENTS - this.pending.length;
-    // chaque dépôt raconte son propre sort
-    this.notices = [];
-    const dropped = list.length - room;
-    if (dropped > 0) {
-      this.notices.push(
-        dropped > 1
-          ? `${dropped} fichiers ignorés : ${MAX_ATTACHMENTS} pièces jointes au plus.`
-          : `1 fichier ignoré : ${MAX_ATTACHMENTS} pièces jointes au plus.`,
-      );
-    }
-    for (const file of list.slice(0, Math.max(0, room))) {
-      if (file.size > MAX_FILE_SIZE) {
-        this.notices.push(`${file.name} ignoré : ${megabytes(file.size)} (${megabytes(MAX_FILE_SIZE)} au plus).`);
-        continue;
-      }
-      try {
-        this.pending.push({ name: file.name, type: file.type, size: file.size, data: await readBase64(file) });
-      } catch {
-        this.notices.push(`${file.name} illisible : non joint.`);
-      }
-    }
-    this.paintAttachments();
-  }
-
-  private paintAttachments(): void {
-    const zone = this.body ? $("[data-attach]", this.body) : null;
-    if (!zone) return;
-    zone.innerHTML = attachmentsMarkup(this.pending, this.notices);
-    zone.hidden = !this.pending.length && !this.notices.length;
-  }
-
-  // ── L'envoi ───────────────────────────────────────────────────────
-
-  private input(): HTMLTextAreaElement | null {
-    return this.body ? $<HTMLTextAreaElement>("[data-chat-input]", this.body) : null;
-  }
-
-  private focusInput(): void {
-    this.input()?.focus();
-  }
-
-  private send(): void {
-    const input = this.input();
-    if (!input || !this.ws) return;
-    const typed = input.value.trim();
-    if (!typed && !this.pending.length) return;
-    // en mode pro, une commande (`/clear`…) agit sur les fils et ne part pas
-    const command = this.proMode ? parseCommand(typed) : null;
-    if (command) {
-      this.clearInput(input);
-      this.runCommand(command);
-      return;
-    }
-    const text = this.proMode ? unescapeSlash(typed) : typed;
-    const cid = nextClientMsgId();
-    // le mode et le fil sont pris à l'envoi et voyagent avec la trame
-    const mode: ChatMode = this.proMode ? "pro" : "";
-    const pro = proMode(mode);
-    const strand = pro ? this.activeStrand : undefined;
-    let sent: boolean;
-    if (this.pending.length) {
-      // la même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle
-      const display = withAttachments(text, this.pending.map((a) => a.name));
-      this.addMessage(display, "user", { cid, status: "pending", matchText: text, mode: pro, strand,
-        attachments: this.pending.map((a) => ({ name: a.name, kind: a.type.startsWith("image/") ? "image" : a.type.startsWith("audio/") ? "audio" : "file" })) });
-      sent = this.ws.sendChatWithAttachments(text, this.pending, cid, mode, strand);
-      this.pending = [];
-    } else {
-      this.addMessage(text, "user", { cid, status: "pending", mode: pro, strand });
-      sent = this.ws.sendChat(text, cid, mode, strand);
-    }
-    this.notices = [];
-    this.paintAttachments();
-    this.clearInput(input);
-    if (strand) this.noteOpener(strand, text);
-    // un message resté dans le navigateur n'est pas en train d'être répondu
-    if (sent) this.showTyping();
-  }
-
-  private clearInput(input: HTMLTextAreaElement): void {
-    input.value = "";
-    this.resizeInput(input);
-    this.paintCounter(input);
-    this.ws?.noteComposing("");
-  }
-
-  private resizeInput(input: HTMLTextAreaElement): void {
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
-  }
-
-  private paintCounter(input: HTMLTextAreaElement): void {
-    const counter = this.body ? $("[data-counter]", this.body) : null;
-    if (!counter) return;
-    const n = input.value.length;
-    counter.hidden = n < COUNTER_FROM;
-    counter.textContent = `${n.toLocaleString("fr-FR")} / ${MAX_MESSAGE_CHARS.toLocaleString("fr-FR")}${n >= MAX_MESSAGE_CHARS ? " — la limite" : ""}`;
-  }
-
-  private emojis(anchor: HTMLElement): void {
-    const menu = openMenu(
-      anchor,
-      [{ html: `<div class="emoji-grid">${EMOJIS.map((e) => `<button type="button" data-emo="${e}">${e}</button>`).join("")}</div>` }],
-      { align: "left" },
-    );
-    on(menu, "[data-emo]", "click", (_e, b) => {
-      const input = this.input();
-      if (!input) return;
-      const next = insertEmoji(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, b.dataset.emo ?? "", MAX_MESSAGE_CHARS);
-      if (!next) return;
-      input.value = next.value;
-      input.focus();
-      input.setSelectionRange(next.caret, next.caret);
-      this.ws?.noteComposing(input.value);
-    });
-  }
-
-  /** Taper n'importe où (hors d'un champ) écrit dans le chat, comme dans le client web. */
-  private focusOnType(e: KeyboardEvent): void {
-    if (this.shell.ctx?.screen !== "chat" || e.ctrlKey || e.metaKey || e.altKey) return;
-    const target = e.target as HTMLElement;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) return;
-    if (document.querySelector(".modal-scrim, .menu") || !document.getElementById("palette")?.hidden) return;
-    if (e.key.length === 1) this.focusInput();
-  }
-
   // ── L'écran ───────────────────────────────────────────────────────
 
   private refreshHead(): void {
@@ -1154,8 +629,8 @@ export class ChatScreen {
   private setPro(pro: boolean): void {
     this.proPreferred = pro;
     write(() => localStorage, PRO_KEY, pro ? "1" : "0");
-    this.ensureStrand();
-    if (this.proMode) this.askStrandHistory(this.activeStrand);
+    this.strands.ensureStrand();
+    if (this.proMode) this.strands.askStrandHistory(this.strands.activeStrand);
     toast(
       this.proMode ? "Mode pro : sans son caractère, ses outils en direct, tes fils de travail." : "Retour à la conversation avec Mika.",
       { ico: "terminal" },
@@ -1165,25 +640,7 @@ export class ChatScreen {
   private toggleMode(): void {
     this.setPro(!this.proPreferred);
     this.shell.refresh();
-    this.focusInput();
-  }
-
-  private toggleAuto(): void {
-    this.autoPreferred = !this.autoPreferred;
-    write(() => sessionStorage, AUTO_KEY, this.autoPreferred ? "1" : "0");
-    this.paintComposer();
-    this.paintApprovals();
-    this.autoAcceptPending();
-  }
-
-  private paintComposer(): void {
-    const btn = this.body ? $('[data-cmp="accord"]', this.body) : null;
-    if (!btn) return;
-    const view = accordToggle(this.autoAccept);
-    btn.innerHTML = view.html;
-    btn.title = view.title;
-    btn.classList.toggle("bolt", this.autoAccept);
-    btn.setAttribute("aria-pressed", String(this.autoAccept));
+    this.composer.focusInput();
   }
 
   private paintThread(toBottom = false): void {
@@ -1277,7 +734,7 @@ export class ChatScreen {
   private ordinarySkeleton(): string {
     return `<div class="chat-split"><div class="chat-wrap"><div class="chat-col">
         <div class="chat-scroll" data-scroll><div class="chat-thread" data-thread></div></div>
-        <div class="chat-dock"><div class="ap-zone" data-approvals hidden></div>${composerMarkup({ pro: false, operator: this.operator, auto: this.autoAccept }, MAX_MESSAGE_CHARS, ACCEPTED_TYPES)}</div>
+        <div class="chat-dock"><div class="ap-zone" data-approvals hidden></div>${composerMarkup({ pro: false, operator: this.operator, auto: this.approvalCards.autoAccept }, MAX_MESSAGE_CHARS, ACCEPTED_TYPES)}</div>
       </div></div>
       <aside class="chat-mika" aria-label="Mika">
         <div class="cm-scene" data-mika-scene></div>
@@ -1292,7 +749,7 @@ export class ChatScreen {
         <section class="pane chat-pro">
           <div class="pane-head strand-head" data-strand-head></div>
           <div class="chat-scroll" data-scroll><div class="chat-thread wide" data-thread></div></div>
-          <div class="chat-dock wide"><div class="ap-zone" data-approvals hidden></div>${composerMarkup({ pro: true, operator: this.operator, auto: this.autoAccept }, MAX_MESSAGE_CHARS, ACCEPTED_TYPES)}</div>
+          <div class="chat-dock wide"><div class="ap-zone" data-approvals hidden></div>${composerMarkup({ pro: true, operator: this.operator, auto: this.approvalCards.autoAccept }, MAX_MESSAGE_CHARS, ACCEPTED_TYPES)}</div>
         </section></div>`;
   }
 
@@ -1300,29 +757,29 @@ export class ChatScreen {
     this.body = body;
     const mode = this.proMode ? "pro" : "ordinary";
     if (this.mounted !== mode || !$("[data-thread]", body)) {
-      const draft = this.input()?.value ?? "";
+      const draft = this.composer.input()?.value ?? "";
       body.innerHTML = mode === "pro" ? this.proSkeleton() : this.ordinarySkeleton();
       this.mounted = mode;
-      const input = this.input();
+      const input = this.composer.input();
       if (input && draft) {
         input.value = draft;
-        this.resizeInput(input);
+        this.composer.resizeInput(input);
       }
-      this.paintComposer();
-      this.paintAttachments();
-      this.paintStrands();
+      this.approvalCards.paintToggle();
+      this.composer.paintAttachments();
+      this.strands.paintStrands();
       this.paintMika(this.store.current);
-      this.paintApprovals();
+      this.approvalCards.paintApprovals();
       this.followBottom();
       this.watchDock();
       this.paintThread(true);
-      this.applyDraft();
+      this.composer.applyDraft();
       this.applyShow();
       this.placeToasts();
       return;
     }
     this.paintThread();
-    this.applyDraft();
+    this.composer.applyDraft();
     this.applyShow();
     this.placeToasts();
   }
@@ -1366,15 +823,14 @@ export class ChatScreen {
     const thread = threadOf(m);
     const pro = thread !== "";
     if (pro) {
-      this.activeStrand = thread;
-      write(() => localStorage, this.strandKey, thread);
-      this.unreadStrands.delete(thread);
+      this.strands.adopt(thread);
+      this.strands.markRead(thread);
     }
     if (pro !== this.proMode) this.setPro(pro);
     else if (pro) {
       // déjà en mode pro : un autre fil, comme `selectStrand`, sans prendre la main du champ
-      this.askStrandHistory(thread);
-      this.paintStrands();
+      this.strands.askStrandHistory(thread);
+      this.strands.paintStrands();
       this.paintTyping();
     }
     this.search = null;
@@ -1412,23 +868,8 @@ export class ChatScreen {
    */
   prefill(text: string): void {
     if (this.proMode) this.setPro(false);
-    this.pendingDraft = text;
+    this.composer.setDraft(text);
     this.shell.go("#chat");
-  }
-
-  /** La phrase préremplie, posée dans le champ (après ce qui y était déjà écrit), le curseur au bout. */
-  private applyDraft(): void {
-    const text = this.pendingDraft;
-    const input = this.input();
-    if (text === null || !input) return;
-    this.pendingDraft = null;
-    const before = input.value.trim();
-    input.value = (before ? `${before}\n${text}` : text).slice(0, MAX_MESSAGE_CHARS);
-    this.resizeInput(input);
-    this.paintCounter(input);
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-    this.ws?.noteComposing(input.value);
   }
 
   private mount(section: HTMLElement): void {
@@ -1453,13 +894,7 @@ export class ChatScreen {
       if (target.matches("[data-chat-q]")) {
         this.search = (target as HTMLInputElement).value;
         this.paintThread();
-        return;
       }
-      if (!target.matches("[data-chat-input]")) return;
-      const input = target as HTMLTextAreaElement;
-      this.resizeInput(input);
-      this.paintCounter(input);
-      this.ws?.noteComposing(input.value);
     });
     on(section, "[data-cmp]", "click", (_e, b) => {
       switch (b.dataset.cmp) {
@@ -1467,41 +902,25 @@ export class ChatScreen {
           this.toggleMode();
           break;
         case "accord":
-          this.toggleAuto();
+          this.approvalCards.toggleAuto();
           break;
         case "envoyer":
-          this.send();
+          this.composer.send();
           break;
         case "emoji":
-          this.emojis(b);
+          this.composer.emojis(b);
           break;
         case "commandes":
-          this.commandsMenu(b);
+          this.strands.commandsMenu(b);
           break;
         case "joindre":
           $<HTMLInputElement>("[data-file]", section)?.click();
           break;
       }
     });
-    section.addEventListener("change", (e) => {
-      const target = e.target as HTMLInputElement;
-      if (!target.matches("[data-file]") || !target.files) return;
-      void this.addFiles(target.files).then(() => {
-        target.value = "";
-      });
-    });
-    on(section, "[data-unattach]", "click", (_e, b) => {
-      this.pending.splice(Number(b.dataset.unattach), 1);
-      this.notices = [];
-      this.paintAttachments();
-    });
-    on(section, "[data-ap]", "click", (_e, b) => {
-      this.decide(Number(b.dataset.id), b.dataset.ap === "accept" ? "accept" : "refuse");
-    });
-    on(section, "[data-ap-links]", "click", () => {
-      this.linksOpen = !this.linksOpen;
-      this.paintApprovals();
-    });
+    this.composer.mount(section);
+    this.approvalCards.mount(section);
+    this.strands.mount(section);
     // les dépliants restent comme on les a laissés d'un rendu à l'autre (`toggle` ne remonte pas : on le capte)
     section.addEventListener(
       "toggle",
@@ -1511,27 +930,9 @@ export class ChatScreen {
           if (d.open) this.openWork.add(d.dataset.work);
           else this.openWork.delete(d.dataset.work);
         }
-        if (d.dataset.apMore) {
-          const id = Number(d.dataset.apMore);
-          if (d.open) this.approvalOpen.add(id);
-          else this.approvalOpen.delete(id);
-        }
       },
       true,
     );
-    on(section, "[data-fil]", "click", (_e, b) => this.selectStrand(b.dataset.fil ?? ""));
-    on(section, "[data-archives]", "click", () => {
-      this.showArchived = !this.showArchived;
-      this.paintStrands();
-    });
-    on(section, "[data-fils-mobile]", "click", (_e, b) => this.strandsMenu(b));
-    on(section, "[data-cmd]", "click", (_e, b) => {
-      const cmd = b.dataset.cmd;
-      if (cmd === "nouveau") this.runCommand({ name: "clear" });
-      if (cmd === "renommer") this.editStrand();
-      if (cmd === "archiver") this.runCommand({ name: "archive" });
-      if (cmd === "desarchiver") this.runCommand({ name: "unarchive" });
-    });
     on(section, "[data-verdict]", "click", (_e, b) => {
       this.verdictClick(Number(b.dataset.mid), b.dataset.verdict === "ko" ? "ko" : "ok");
     });
@@ -1545,7 +946,7 @@ export class ChatScreen {
       const input = target as HTMLTextAreaElement;
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
-        this.send();
+        this.composer.send();
         return;
       }
       if (!this.proMode) return;
@@ -1554,32 +955,16 @@ export class ChatScreen {
         const [first] = suggestCommands(input.value);
         if (first) {
           e.preventDefault();
-          this.complete(first.words[0]);
+          this.strands.complete(first.words[0]);
         }
       }
-      if (e.key === "/" && !input.value) window.setTimeout(() => this.commandsMenu(), 0);
-    });
-    // déposer ou coller des fichiers
-    section.addEventListener("dragover", (e) => {
-      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
-    });
-    section.addEventListener("drop", (e) => {
-      if (!e.dataTransfer?.files.length) return;
-      e.preventDefault();
-      void this.addFiles(e.dataTransfer.files);
-    });
-    section.addEventListener("paste", (e) => {
-      const files = Array.from(e.clipboardData?.items ?? [])
-        .filter((it) => it.kind === "file")
-        .map((it) => it.getAsFile())
-        .filter((f): f is File => !!f);
-      if (files.length) void this.addFiles(files);
+      if (e.key === "/" && !input.value) window.setTimeout(() => this.strands.commandsMenu(), 0);
     });
   }
 
   private subtitle(): string {
     if (this.proMode) {
-      const n = this.allStrands.filter((s) => !s.archived).length;
+      const n = this.strands.allStrands.filter((s) => !s.archived).length;
       return `mode pro · ${n} fil${n > 1 ? "s" : ""}`;
     }
     if (this.link === "connected") return "Mika · en ligne";
@@ -1622,24 +1007,23 @@ export class ChatScreen {
       .reverse()
       .map((m) => this.messageEntry(m, "Conversation", "", now));
     if (this.operator) {
-      for (const s of this.allStrands) {
+      for (const s of this.strands.allStrands) {
         out.push({
           group: "Fils de travail",
           title: strandLabel(s),
           sub: s.description,
           icon: "terminal",
           action: () => {
-            this.activeStrand = s.id;
-            write(() => localStorage, this.strandKey, s.id);
+            this.strands.adopt(s.id);
             if (!this.proMode) this.toggleMode();
-            else this.selectStrand(s.id);
+            else this.strands.selectStrand(s.id);
             this.shell.go("#chat");
           },
         });
       }
       const inStrands = loaded.filter((m) => threadOf(m) !== "").sort((a, b) => b.ts - a.ts);
       for (const m of inStrands) {
-        out.push(this.messageEntry(m, "Fils de travail", `« ${strandLabel(this.strandInfo(threadOf(m)))} »`, now));
+        out.push(this.messageEntry(m, "Fils de travail", `« ${strandLabel(this.strands.strandInfo(threadOf(m)))} »`, now));
       }
     }
     return out;

@@ -15,20 +15,20 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade.lists import shaped
+from mika.app.handmade.lists import card
 from mika.inspector import render
-from mika.inspector.ui import UI, Drawn, env
+from mika.inspector.ui import UI, env
 
 
-def shape(d: dict[str, Any], name: str = "") -> dict[str, Any]:
+def shape_block(d: dict[str, Any], name: str = "") -> dict[str, Any]:
     """Un bloc rendu par la console, ses listes prêtes pour une carte (et celles qu'il contient)."""
     if d.get("t") == "table":
-        return shaped(d, name)
+        return card(d, name)
     if d.get("t") in ("disclosure", "grid", "section", "toolbar"):
-        return {**d, "items": [shape(x, name) for x in d.get("items", [])]}
+        return {**d, "items": [shape_block(x, name) for x in d.get("items", [])]}
     if d.get("t") == "workspace":
-        return {**d, "sidebar": [shape(x, name) for x in d.get("sidebar", [])],
-                "items": [shape(x, name) for x in d.get("items", [])]}
+        return {**d, "sidebar": [shape_block(x, name) for x in d.get("sidebar", [])],
+                "items": [shape_block(x, name) for x in d.get("items", [])]}
     return d
 
 
@@ -39,17 +39,17 @@ def tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
 
 
 def page(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], name: str = "", tables: str = "cards",
-         forms: Mapping[str, Any] | None = None) -> Markup | None:
+         forms: Mapping[str, Any] | None = None, tab: str = "") -> Markup | None:
     """Des blocs dessinés ; ``None`` : rien à dessiner. ``forms`` : les formulaires que la console a préparés pour
     leurs actions (par emplacement, avec leur jeton) ; sans eux, une action dit qu'elle n'est pas déclarée ici.
     ``tables`` : une liste en cartes (``cards``), ou en tableau sobre (``table`` : des données d'exploitation, plus
-    lisibles en colonnes)."""
+    lisibles en colonnes). ``tab`` : l'onglet dont ces blocs sont l'état vide, le nom que porte leur racine (ADR 0177)."""
     if not blocks:
         return None
     # numérotées comme la console les numérote sur toute la page : leur ancre, leur pagination, « vue_… »
-    drawn = [shape(d, name) for d in render.blocks(blocks, ui.env(), query)]
+    drawn = [shape_block(d, name) for d in render.blocks(blocks, ui.env(), query)]
     return Markup(env.get_template("handmade/shared/blocks.html").render(blocks=drawn, tables=tables,
-                                                                        forms=forms or {}))
+                                                                        forms=forms or {}, tab=tab))
 
 
 def head(links: Sequence[tuple[str, str]] = (), items: Sequence[Mapping[str, Any]] = (),
@@ -67,21 +67,3 @@ def lift(items: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[di
     (ADR 0176) —, et les autres blocs."""
     bar = next((d for d in items if d.get("t") == "toolbar"), None)
     return (list(bar["items"]) if bar else []), [d for d in items if d is not bar]
-
-
-class Blocks(Drawn):
-    """Un onglet dessiné bloc par bloc : des tuiles, des faits, des listes, un fil, ses formulaires (ceux que la
-    console a préparés, avec leur jeton). Aucun onglet d'une destination n'en reste là (ADR 0177 : chacun a sa
-    forme, ``tabs/``) ; il sert le temps d'en dessiner un.
-    ``tables`` : ses listes en cartes (``cards``), ou en tableaux sobres (``table`` : l'exploitation) ; ``styles`` :
-    la feuille de son panneau, s'il en a un."""
-
-    def __init__(self, tables: str = "cards", *styles: str) -> None:
-        self.tables = tables
-        self.styles = styles
-
-    def render(self, ui: UI, items: Sequence[Any], query: Mapping[str, str],
-               forms: Mapping[str, Any] | None = None) -> Any:
-        drawn = page(ui, items, query, tables=self.tables, forms=forms)
-        # rien à dessiner, mais un panneau qui a sa feuille : dessiné quand même, pour la charger
-        return Markup("") if drawn is None and self.styles else drawn

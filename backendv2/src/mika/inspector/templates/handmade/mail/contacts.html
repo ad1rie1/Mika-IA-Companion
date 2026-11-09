@@ -1,11 +1,11 @@
-{# Courrier › Contacts (app/handmade/mail.py) : dans l'espace du courrier, une ligne par adresse — son initiale, son
+{# Courrier › Contacts (app/handmade/tabs/mail.py) : dans l'espace du courrier, une ligne par adresse — son initiale, son
    nom et son adresse, combien de mails dans chaque sens, le dernier échange —, ses échanges en un clic, et « Écrire »
    (le formulaire que la console a préparé pour cette adresse). #}
 {% from "handmade/mail/space.html" import space with context %}
 {% from "_navigation.html" import pager as pages %}
 {% from "_forms.html" import action_button %}
 {% from "_cells.html" import cell %}
-<div class="now-page person-tab mail mail-contacts-page">
+<div class="now-page person-tab mail mail-contacts-page" data-tab="courrier/contacts">
 {% call space(side, before) %}
     <section class="now-card mail-list" id="{{ table.id }}" aria-labelledby="{{ table.id }}-title">
       <header class="now-card-head"><h2 id="{{ table.id }}-title">{{ table.title }}</h2>{% if table.count is not none %}<span class="person-count now-num">{{ table.count }}</span>{% endif %}</header>

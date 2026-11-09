@@ -23,10 +23,11 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount
-from mika.app.moi import Call, Denied, MeApi, missing, person_of, refused
 from mika.app.moi import mail as mail_moi
 from mika.app.moi import mcp as mcp_moi
 from mika.app.moi import teams as teams_moi
+from mika.app.moi.api import Call, Denied, MeApiBase, missing, person_of, refused
+from mika.app.moi.common import OWN
 from mika.contracts import identity as identity_c
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
@@ -123,7 +124,7 @@ async def list_shares(call: Call) -> dict[str, Any]:
                 spec = cfg.get(key)
                 if spec is None:
                     continue
-                if level == mail_moi.OWN:
+                if level == OWN:
                     given += [{"kind": kind, "key": key, "title": a.name, "person": p[len(PERSON):],
                                "name": _name(call, p[len(PERSON):]), "level": lv} for p, lv in sorted(spec.shares.items())]
                 else:
@@ -234,6 +235,6 @@ async def set_share(call: Call) -> dict[str, Any]:
     return {"ok": True, "message": said}
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/people", list_people), r("/shares", list_shares), r("/shares/set", set_share, write=True)]

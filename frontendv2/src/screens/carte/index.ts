@@ -55,7 +55,7 @@ import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { isDark, onTheme } from "../../shell/theme";
-import { Cached, CachedMap, confirmModal, errorBlock, failureText, loadingBlock, newNonce, toastFailure } from "../parametres/kit";
+import { Cached, CachedMap, confirmModal, errorBlock, failureText, loadingBlock, newNonce, toastFailure } from "../../shared/kit";
 import {
   alongPlace,
   askAboutPlace,

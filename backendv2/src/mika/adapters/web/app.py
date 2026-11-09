@@ -469,8 +469,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
 
     async def shared_file(request: Request) -> Response:
         """Un fichier qu'elle a envoyé (ADR 0062) : à qui il est parti (un jeton de l'application, sans ``Origin`` ;
-        sinon la session du navigateur). Inconnu ou pas à cette personne : le même 404 ; retiré : 410. Jamais
-        rendu dans la page (``attachment``, ``nosniff``, bac à sable), et sous une sorte sûre seulement."""
+        sinon la session du navigateur) ; ou une pièce que ce compte a envoyée (ADR 0215). Inconnu ou pas à cette
+        personne : le même 404 ; retiré : 410. Jamais rendu dans la page (``attachment``, ``nosniff``, bac à sable),
+        et sous une sorte sûre seulement."""
         file = request.path_params["file"]
         if not valid_id(file):
             return JSONResponse({"error": "Fichier introuvable."}, status_code=404)

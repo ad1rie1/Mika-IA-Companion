@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
@@ -107,15 +107,23 @@ def diff_kinds(lines: list[str]) -> list[str]:
     return out
 
 
-def href(ref: Ref) -> str:
-    """L'adresse d'un lien de la console (clés encodées, jamais d'autre hôte)."""
+def _two(key: str) -> str:
+    """Une clé « sorte/clé » en deux segments d'adresse encodés (seule la première barre sépare)."""
+    head, _, tail = key.partition("/")
+    return f"{quote(head, safe='')}/{quote(tail, safe='')}"
+
+
+def href(ref: Ref, env: Env | None = None) -> str:
+    """L'adresse d'un lien de la console (clés encodées, jamais d'autre hôte). ``env`` sait où vivent les vues et les
+    pages de réglages ; sans lui, leur adresse générale, qui y redirige."""
     if ref.kind == "url":
         return safe_url(ref.key)
-    query = ("?" + urlencode(ref.params)) if ref.params else ""
+    params = ref.params if ref.back is None else (*ref.params, ("retour", href(ref.back, env)))
+    query = ("?" + urlencode(params)) if params else ""
     if ref.kind == "local":  # une adresse de la console déjà construite par la console
         if not ref.key.startswith(PREFIX + "/") or "//" in ref.key:
             return ""
-        return ref.key + (("&" if "?" in ref.key else "?") + urlencode(ref.params) if ref.params else "")
+        return ref.key + (("&" if "?" in ref.key else "?") + urlencode(params) if params else "")
     if ref.kind == "episode":
         return f"{PREFIX}/episode/{quote(ref.key, safe='')}{query}"
     if ref.kind == "why":
@@ -123,10 +131,17 @@ def href(ref: Ref) -> str:
     if ref.kind == "event":
         return f"{PREFIX}/evenement/{quote(ref.key, safe='')}"
     if ref.kind == "subject":
-        kind, _, key = ref.key.partition("/")
-        return f"{PREFIX}/fiche/{quote(kind, safe='')}/{quote(key, safe='')}{query}"
-    owner, _, name = ref.key.partition("/")
-    return f"{PREFIX}/facultes/{quote(owner, safe='')}/{quote(name, safe='')}{query}"
+        return f"{PREFIX}/fiche/{_two(ref.key)}{query}"
+    if ref.kind == "download":
+        return f"{PREFIX}/telecharger/{_two(ref.key)}{query}"
+    if ref.kind == "approvals":
+        tab = f"/{quote(ref.key, safe='')}" if ref.key else ""
+        return f"{PREFIX}/approbations{tab}{query}"
+    if ref.kind == "settings":
+        place = env.settings(ref.key) if env is not None and env.settings is not None else ""
+        return (place or f"{PREFIX}/reglages/{quote(ref.key, safe='')}") + query
+    place = env.views.get(ref.key, "") if env is not None else ""
+    return f"{PREFIX}/{place}{query}" if place else f"{PREFIX}/facultes/{_two(ref.key)}{query}"
 
 
 def relative(at: int, now: int) -> str:
@@ -156,11 +171,16 @@ class Env:
     #: l'adresse du cadre isolé d'un document HTML natif (ADR 0169) : sa source, ses images intégrées, et si ses images
     #: distantes se chargent (ADR 0175) ; sans elle, sa version simplifiée
     frame: Callable[[str, tuple[tuple[str, str, bytes], ...], bool], str] | None = None
+    #: où mène le lien d'une vue rangée au menu : « propriétaire/nom » → « destination/onglet » ; une vue cachée n'y
+    #: est pas (elle reste sous ``/facultes/``)
+    views: Mapping[str, str] = field(default_factory=dict, compare=False)
+    #: l'adresse où se lit une page de réglages, d'après son nom (elle peut vivre ailleurs que sous Réglages)
+    settings: Callable[[str], str] | None = None
 
 
 def cell(value: Any, env: Env) -> dict[str, Any]:
     if isinstance(value, Ref):
-        link = href(value)
+        link = href(value, env)
         return {"t": "link", "text": value.text, "href": link, "external": value.kind == "url"} if link else \
             {"t": "text", "text": value.text}
     if isinstance(value, Text):
@@ -302,7 +322,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
             details = (*rich.detail, *((Fields(extra, title="Informations complémentaires", hints=hints),) if extra else ()))
             nested = [0]
             rows.append({"cells": [cell(rich.cells[i], env) for i in visible if i < len(rich.cells)],
-                         "tone": tone(rich.tone), "href": href(rich.href) if rich.href else "",
+                         "tone": tone(rich.tone), "href": href(rich.href, env) if rich.href else "",
                          "detail": [block(x, env, query, depth + 1, nested, f"{key}r{index}_") for x in details]})
             rows[-1]["open"] = _active_page(rows[-1]["detail"])
             if b.layout in ("cards", "feed", "list"):
@@ -354,7 +374,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
     if isinstance(b, Stats):
         return {"t": "stats", "title": b.title, "items": [
             {"label": s.label, "value": cell(s.value, env), "sub": s.sub, "tone": tone(s.tone),
-             "href": href(s.href) if s.href else "",
+             "href": href(s.href, env) if s.href else "",
              "trend": chart_svg(s.trend, env.when, env.stamp) if s.trend is not None else ""} for s in b.items]}
     if isinstance(b, Timeline):
         counter[0] += 1
@@ -363,7 +383,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         return {"t": "timeline", "title": b.title, "empty": b.empty, "pager": _pager(timeline_pager, query),
                 "entries": [{"at": env.when(e.at) if e.at else "", "rel": relative(e.at, env.now) if e.at else "",
                              "title": e.title, "text": e.text, "tone": tone(e.tone),
-                             "href": href(e.href) if e.href else "", "meta": e.meta} for e in entries]}
+                             "href": href(e.href, env) if e.href else "", "meta": e.meta} for e in entries]}
     if isinstance(b, Chart):
         points = [(at, v) for s in b.series for at, v in s.points]
         return {"t": "chart", "title": b.title, "empty": b.empty, "has": bool(points),
@@ -392,7 +412,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
                 "keep": b.keep, "reset": "?" + urlencode(b.keep)}
     if isinstance(b, Nav):
         return {"t": "nav", "title": b.title, "items": [
-            {"text": i.text, "href": href(i.href), "count": "" if i.count is None else str(i.count),
+            {"text": i.text, "href": href(i.href, env), "count": "" if i.count is None else str(i.count),
              "active": i.active, "tone": tone(i.tone)} for i in b.items if isinstance(i, NavItem)]}
     if isinstance(b, ActionSlot):
         return {"t": "action", "key": b.action, "initial": dict(b.initial), "title": b.title, "compact": b.compact, "presentation": b.presentation,

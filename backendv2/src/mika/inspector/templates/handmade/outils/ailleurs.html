@@ -1,9 +1,9 @@
-{# Outils › Venus d'ailleurs (app/handmade/tools.py::Elsewhere) : ce qu'on y fait, en boutons de la barre de titre (la
+{# Outils › Venus d'ailleurs (app/handmade/tabs/tools.py::elsewhere) : ce qu'on y fait, en boutons de la barre de titre (la
    console les y porte) ; une carte par service
    branché (à qui il est, son état, à quoi il lui sert, ses outils servis, ce qui attend ton regard), et « À qui » en
    bouton à choix quand plusieurs personnes en ont branché (ADR 0192) ; une carte par app et les outils qu'elle lui
    donne. #}
-<div class="now-page elsewhere">
+<div class="now-page elsewhere" data-tab="outils/serveurs">
   {% if services is not none %}
   <section class="now-card" aria-labelledby="elsewhere-services">
     <header class="now-card-head">

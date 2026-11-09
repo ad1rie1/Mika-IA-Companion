@@ -1,4 +1,4 @@
-"""Réglages (Droits : ``handmade/rights.py``) : ses onglets, chacun dans sa forme (ADR 0177).
+"""Réglages : ses onglets, chacun dans sa forme (ADR 0177).
 
 - Paramètres avancés › Vue d'ensemble : ses paramètres en chiffres, d'où vient une valeur (les quatre sources, des
   étiquettes que chaque page de faculté reprend) ; puis en sous-onglets les facultés rangées par famille (chacune :
@@ -14,10 +14,12 @@
   des paramètres — celles d'un même moment (le démarrage) réunies en une ligne.
 - Configuration des plugins (``plugins``, l'en-tête dessiné de sa page de réglages) : une ligne par plugin composé — ce
   qui s'y règle, ses pages de réglages, ses paramètres avancés, où s'en servir —, puis ce qui se branche sans être un
-  plugin ; les lignes viennent d'``app/reglages.py`` (``PLUGINS``), sans pagination.
+  plugin ; les lignes viennent d'``app/settings_sections/plugins.py`` (``PLUGINS``), sans pagination.
+- Droits (``handmade/rights.py`` : ce qu'il y a à montrer, ressource par ressource ; ADR 0133, 0134, 0210) : ce qu'elle a,
+  le détail des accès d'une ressource, les droits exacts quand on a choisi qui et par quel canal, les partages.
 
 La vue d'ensemble lit ses facultés dans les paramètres de la console (``ui.deps.parameters``), comme la page de la
-console (``inspector/pages/reglages.py``) qui reste la source : ses blocs disent les chiffres, la liste se dessine par
+console (``inspector/pages/params.py``) qui reste la source : ses blocs disent les chiffres, la liste se dessine par
 famille, sans pagination (une trentaine de facultés).
 """
 
@@ -28,11 +30,11 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look
+from mika.app.handmade import Look, rights
 from mika.app.handmade.tabs import Got, Line, Tab, blank, instant, raw_lines, text, tiles
 from mika.inspector import render
-from mika.inspector.formview import decimal_fr
-from mika.inspector.pages.reglages import FACULTY_PAGE, SOURCES_FR, TONES, faculty_url
+from mika.inspector.pages import tools as catalog
+from mika.inspector.pages.params import FACULTY_PAGE, SOURCES_FR, TONES, faculty_url, slider_influences
 from mika.inspector.ui import PREFIX, UI, env
 from mika.kernel.clock import DAY, MINUTE
 from mika.kernel.inspect import Nav, Note, Pager, Stats
@@ -49,12 +51,6 @@ REFUSED = "Des surcharges enregistrées sont refusées"
 def _sources() -> list[dict[str, str]]:
     """D'où vient une valeur : les quatre sources, dans l'ordre où elles se recouvrent, et leur ton."""
     return [{"word": s, "tone": tone, "text": SOURCES_FR.get(s, s)} for s, tone in TONES.items()]
-
-
-def _number(value: Any) -> str:
-    if isinstance(value, float):
-        return decimal_fr(value, 3)  # « 0,00000001 », comme les bornes de chaque page de faculté
-    return str(value)
 
 
 # ── Configuration des plugins ─────────────────────────────────────────────
@@ -101,11 +97,7 @@ def _families(ui: UI, ps: Any) -> list[dict[str, Any]]:
 
 def _sliders(ui: UI, ps: Any) -> list[dict[str, Any]]:
     """Ce que pilote chaque curseur du tempérament : chaque paramètre, de sa valeur à 0 à sa valeur à 1."""
-    labels, names = ps.slider_labels(), dict(ui.deps.faculty_labels or {})
-    return [{"name": labels.get(slider, slider),
-             "moves": [{"faculty": names.get(owner, owner), "href": faculty_url(owner), "path": path,
-                        "lo": _number(lo), "hi": _number(hi)} for owner, path, lo, hi in moved]}
-            for slider, moved in ps.influences().items()]
+    return slider_influences(ps, dict(ui.deps.faculty_labels or {}))
 
 
 def comportement(got: Got) -> Markup | None:
@@ -159,7 +151,7 @@ def _account(line: Line) -> dict[str, Any]:
             "operator": text(role) == "opérateur", "off": active.get("tone") == "muted", "state": active}
 
 
-def comptes(got: Got) -> Markup | None:
+def accounts(got: Got) -> Markup | None:
     """Comptes : les chiffres, puis un compte par entrée. Ajouter ou modifier un compte : le panneau seul."""
     band, table = got.stats(), got.table("Comptes")
     if band is None or table is None:
@@ -215,9 +207,35 @@ def journal(got: Got) -> Markup | None:
     return got.draw("handmade/reglages/journal.html", t=table, days=days)
 
 
+# ── Droits ────────────────────────────────────────────────────────────────
+
+
+def droits(got: Got) -> Markup:
+    """La page : les ressources et leurs outils ; le détail d'une (``?detail=``) ; les droits exacts quand on a choisi
+    qui (``?qui=``) et par quel canal (``?canal=``) ; les partages, et le jeton de leurs formulaires (``forms.csrf``)."""
+    ui, query, forms = got.ui, got.query, got.forms
+    all_whos = rights.whos(ui)
+    who = next((w for w in all_whos if w.key == query.get("qui", "")), None)
+    canal = query.get("canal", "") if query.get("canal", "") in dict(rights.CANAL_CHOICES) else ""
+    granted = rights.exact(ui, who, canal) if who is not None and canal else None
+    kept = "&".join(f"{k}={v}" for k, v in (("qui", who.key if who else ""), ("canal", canal)) if v)
+    shown = rights.detail(ui, query["detail"]) if query.get("detail") else None
+    listed, given = rights.sections(ui, granted, kept), rights.shared(ui)
+    # « Retour » ramène à la ligne de la ressource, dans son sous-onglet
+    back = next((r["id"] for s in listed for r in s["rows"] if shown and r["detail_key"] == query["detail"]), "")
+    return Markup(env.get_template("handmade/droits/page.html").render(
+        whos=[{"key": w.key, "label": w.label, "on": w is who} for w in all_whos],
+        canals=[{"key": k, "label": label, "on": k == canal} for k, label in rights.CANAL_CHOICES],
+        chosen=(who.label if who else "", dict(rights.CANAL_CHOICES).get(canal, "")), got=granted,
+        canal_said=rights.what_of(granted["canal"]) if granted else "", sections=listed, kept=kept, back=back,
+        detail=shown, fixed=rights.FIXED, tools=rights.fixed_tools(ui), catalogue=f"{catalog.BASE}/tous",
+        shares=given, shares_pager=rights.one_page(len(given)), unshare=rights.UNSHARE, csrf=getattr(forms, "csrf", "")))
+
+
 TABS: dict[str, Any] = {
     "reglages/comportement": Tab(comportement, *STYLES),
     f"reglages/{FACULTY_PAGE}*": Tab(faculte, *STYLES),
-    "reglages/comptes": Tab(comptes, *STYLES),
+    "reglages/comptes": Tab(accounts, *STYLES),
     "reglages/journal": Tab(journal, *STYLES),
+    "reglages/droits": Tab(droits, "handmade/tools.css", "handmade/rights.css", panel=False),
 }

@@ -4,13 +4,13 @@ import { ApiError } from "../../api/moi";
 import type { BoxSettings, SendRules, TeamsSettings } from "../../api/settings";
 import { ASK_ME } from "./account";
 import { ACTION_ROUTES, routeAction } from "./index";
-import { ago, Cached, dateWords, dayWords, remaining } from "./kit";
+import { ago, Cached, dateWords, dayWords, remaining } from "../../shared/kit";
 import { newBoxValues, boxChanges, mailPage, providersFor } from "./mail";
 import { mcpPage, receivedFiche, receivedList, sharedWith, splitChanges, toolsTable, whoWords } from "./mcp";
 import type { Host } from "./page";
 import { phonesPage, phonesView, pushWords } from "./phones";
 import { openOf } from "./shares";
-import * as store from "./store";
+import * as store from "../../shared/store";
 import { rulesEditor, ruleUpdate, sendChoices, teamsPage, withoutRule } from "./teams";
 import {
   boxState,

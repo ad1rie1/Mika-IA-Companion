@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.handmade import Look, read_parts
+from mika.app.handmade import Look, plain, read_parts
 from mika.app.handmade import now as now_page
 from mika.app.handmade.lists import Roles, listing
 from mika.contracts import attention as attention_c
@@ -29,7 +29,7 @@ from mika.inspector import render
 from mika.inspector.pages import home as tabs
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import Note, Stats, Table, Text
+from mika.kernel.inspect import Note, Stats, Table
 from mika.runtime.boundary import Failed, acall
 
 #: l'accueil (la racine de la console et son adresse nommée), et le fragment qu'il relit
@@ -43,16 +43,12 @@ EPISODE_ROLES = Roles(title="épisode", badges=("issue",), body=("détail",), ti
 HEALTH = tabs.HEALTH_HREF
 
 
-def _text(value: Any) -> str:
-    return value.text if isinstance(value, Text) else str(value)
-
-
 def priorities(blocks: Sequence[Any]) -> dict[str, Any]:
     """L'onglet « À traiter » en lignes : une valeur, ce que c'est, pourquoi, où décider ; « tout va bien » à part."""
     rows, calm = [], None
     for b in blocks:
         if isinstance(b, Stats):
-            rows += [{"value": _text(s.value), "label": s.label, "sub": s.sub, "tone": s.tone or "warn",
+            rows += [{"value": plain(s.value), "label": s.label, "sub": s.sub, "tone": s.tone or "warn",
                       "href": render.href(s.href) if s.href else ""} for s in b.items]
         elif isinstance(b, Note) and b.tone == "ok":
             calm = {"title": b.title, "text": b.text}

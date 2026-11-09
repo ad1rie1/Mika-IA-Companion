@@ -1,16 +1,14 @@
 """Le serveur : le noyau réel (horloge, identifiants, magasin, modèles),
 l'adaptateur web par-dessus, un seul processus.
 
-``python -m mika serve --port 8001`` puis, dans ``frontend/Web/`` : ``npm run dev``.
+``python -m mika serve --port 8001`` puis, dans ``frontendv2/`` (le client de tous
+les jours) ou ``frontend/Web/`` (le client 3D) : ``npm run dev``.
 Derrière un mandataire TLS : ``--origin https://mika.example --cookie-secure
 --behind-proxy`` (voir ``deploy/README.md``). Un moteur de jeu se connecte au monde
 sur ``/ws/world`` (ADR 0051) avec un jeton de son compte : ``python -m mika token
 create <compte> --label "Unity"``.
 
-Les journaux ne portent jamais un secret : un jeton passé en paramètre d'URL
-(un flux), un ``Bearer``, un ``Basic``, ses propres jetons (``mw_``, ``mtk_``,
-``mwk_``, ``mlp_``), un ``X-Gitlab-Token``, un ``MYSQL_PWD=`` sont masqués ;
-``httpx``/``httpcore`` ne parlent qu'en avertissement.
+Les journaux ne portent jamais un secret (``logs.py``).
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import secrets
 import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -66,11 +63,12 @@ from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.workshop.github import GitHubRepos
 from mika.adapters.world.server import WorldHub
-from mika.app import backup, composition, datadir, embeddings, reglages, schema, system_mcp
+from mika.app import backup, composition, datadir, embeddings, schema, settings_sections, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
+from mika.app.forge_settings import ForgeSettingsStore
 from mika.app.handmade import access, approval_sources, fiches, handles, projects, rights, servers, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
@@ -79,6 +77,7 @@ from mika.app.handmade.people import PeoplePage
 from mika.app.handmade.person import PersonOverview
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
+from mika.app.logs import RedactingFilter, configure_logging, redact  # noqa: F401 — réexportés pour les tests
 from mika.app.mindport import KernelPort
 from mika.app.moi import MeApi
 from mika.app.moi.phone import APK_NAME
@@ -110,97 +109,6 @@ log = logging.getLogger("mika.server")
 #: fichiers sur des données mobiles —, que le client renvoyait aussitôt. Couvre la plus grande trame admise montée à
 #: 1 Mbit/s, plus un intervalle de ping ; une connexion morte est toujours fermée, seulement plus tard.
 WS_PING_TIMEOUT_S = protocol.MAX_FRAME_BYTES * 8 / 1_000_000 + 20.0
-
-#: ce qu'un journal ne doit jamais montrer
-_SECRETS = (
-    (re.compile(r"([?&](?:token|key|api[_-]?key|access_token|secret|password|passwd|auth|sig|signature)=)"
-                r"[^&\s\"'#]+", re.IGNORECASE), r"\1…"),
-    (re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
-    (re.compile(r"(Basic\s+)[A-Za-z0-9+/=]{16,}", re.IGNORECASE), r"\1…"),
-    # ses propres jetons, par leur préfixe : client natif ``mw_``, extension Teams ``mtk_``, réveil ``mwk_``, prêt
-    # ``mlp_`` (16 caractères au moins après : un ``mw_`` dans un mot reste lisible)
-    (re.compile(r"\b(m(?:w|tk|wk|lp)_)[A-Za-z0-9_-]{16,}"), r"\1…"),
-    (re.compile(r"(X-Gitlab-Token\W{1,4})[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
-    (re.compile(r"(MYSQL_PWD=)[^\s\"'`,;)}\]]+"), r"\1…"),
-)
-
-
-def redact(text: str) -> str:
-    """Le texte d'un journal, secrets masqués."""
-    for pattern, replacement in _SECRETS:
-        text = pattern.sub(replacement, text)
-    return text
-
-
-class RedactingFilter(logging.Filter):
-    """Masque les secrets de chaque enregistrement (posé sur les gestionnaires : tous
-    les journaux y passent, ceux des bibliothèques compris)."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            message = record.getMessage()
-        except (TypeError, ValueError):
-            return True
-        clean = redact(message)
-        if clean != message:
-            record.msg, record.args = clean, None
-        return True
-
-
-def configure_logging(level: int = logging.INFO) -> None:
-    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s : %(message)s")
-    for name in ("httpx", "httpcore"):  # chaque requête, URL comprise (le jeton du robot y est)
-        logging.getLogger(name).setLevel(logging.WARNING)
-    for handler in logging.getLogger().handlers:
-        if not any(isinstance(f, RedactingFilter) for f in handler.filters):
-            handler.addFilter(RedactingFilter())
-
-
-class ForgeSettingsStore:
-    """Le port ``forge_settings`` : ce qu'un opérateur règle pour une app forgée,
-    rangé par ``Settings``. Un secret y est **scellé** (``SecretBox``) et rendu en
-    clair à l'app seulement (``values`` sert ``api.config``) ; une liste y est
-    rangée en lignes. Ce qui n'est plus déclaré par l'app n'est plus rendu."""
-
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.host: ForgeHost | None = None
-
-    def _fields(self, app: str) -> dict[str, Any]:
-        info = self.host.info(app) if self.host is not None else None
-        return {f.path: f for f in info.config_fields} if info is not None else {}
-
-    def values(self, app: str) -> dict[str, Any]:
-        fields = self._fields(app)
-        out: dict[str, Any] = {}
-        for key, value in self.settings.forge_config(app).items():
-            f = fields.get(key)
-            if f is None:
-                continue
-            if f.kind == "secret":
-                out[key] = self.settings.box.open(str(value)) if value else ""
-            elif f.kind == "lines" and isinstance(value, str):
-                out[key] = [line for line in value.split("\n") if line]
-            else:
-                out[key] = value
-        return out
-
-    async def save(self, app: str, values: Mapping[str, Any]) -> None:
-        fields = self._fields(app)
-        clean: dict[str, Any] = {}
-        for key, value in values.items():
-            f = fields.get(key)
-            if f is None or value is None:
-                continue
-            if f.kind == "secret":
-                if value:
-                    clean[key] = self.settings.box.seal(str(value))
-            elif f.kind == "lines":
-                clean[key] = "\n".join(str(v) for v in value) if isinstance(value, list | tuple) else str(value)
-            else:
-                clean[key] = value
-        await self.settings.save_forge_config(app, clean)
-
 
 @dataclass(slots=True)
 class Live:
@@ -402,7 +310,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         return name_of(kernel.mind.root.slices["self"].persona)
 
     # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages (ADR 0166)
-    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings),
+    outside = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her, microsoft=MicrosoftSignIn(settings),
                                  images=settings),
              "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
@@ -410,22 +318,22 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "repo_host": GitHubRepos(settings.git),
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
-    world["shares"] = DiskShares(data / "partages")
+    outside["shares"] = DiskShares(data / "partages")
     # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
-    world[attachments_c.PORT] = DiskShares(data / "pieces")
-    world[attachments_c.VECTORS] = piece_vectors
-    preprocess = world["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
+    outside[attachments_c.PORT] = DiskShares(data / "pieces")
+    outside[attachments_c.VECTORS] = piece_vectors
+    preprocess = outside["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
-    wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
+    wakeups = outside["wakeup"] = WakeupDesk(settings, clock.now)
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
-    teams_store = world["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
+    teams_store = outside["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
     # ses clés, une par compte (ADR 0186) : la console les crée et les retire par ce port
-    teams = world["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
+    teams = outside["teams_keys"] = TeamsDesk(settings, clock.now, teams_store)
     # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
-    phone = world["phone"] = PhoneDesk()
+    phone = outside["phone"] = PhoneDesk()
     # les lieux, les adresses et les itinéraires de l'écran Carte et de ses outils (ADR 0194) : l'index des lieux de
     # ``cartes/``, la Géoplateforme, Valhalla — réglés dans la console, relus à chaque usage
-    maps_desk = world["maps"] = MapsDesk(data, settings.places_config, settings.routing_config)
+    maps_desk = outside["maps"] = MapsDesk(data, settings.places_config, settings.routing_config)
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
@@ -467,10 +375,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             servers[name] = McpServer.model_validate({**servers[name].model_dump(), **changes})
         await settings.save_mcp(McpConfig(servers=servers))
 
-    mcp = world["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
+    mcp = outside["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp", settle=settle_mcp)
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": hub, "activity": hub, "vectors": vectors, **world},
+                                     ports={"delivery": hub, "activity": hub, "vectors": vectors, **outside},
                                      access_tables=settings.access_tables, closeness=social_c.is_close,
                                      authors=settings.author_for, **deps))
 
@@ -591,8 +499,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       bootstrap_code=web.bootstrap_code,
                       after_decision=hub.refresh_panels, reconfigure=live.reconfigure,
                       reports=reports, navigation=NAVIGATION, menu=MENU,
-                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
-                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
+                      sections=settings_sections.sections(live), settings_tabs=settings_sections.RUBRICS,
+                      parameters=settings_sections.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
                       backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
                       overviews={"person": person_overview, servers.KIND: servers.ServerOverview(),

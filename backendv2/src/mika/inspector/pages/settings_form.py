@@ -54,7 +54,7 @@ from starlette.responses import RedirectResponse, Response
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Command, Panel, SettingsPage, SettingsSection, SettingsTab
 from mika.inspector.formview import field_view
-from mika.inspector.pages.reglages import back_to, params_view
+from mika.inspector.pages.params import back_to, params_view
 from mika.inspector.ui import PREFIX, secure
 from mika.inspector.ui import env as templates
 from mika.kernel import forms

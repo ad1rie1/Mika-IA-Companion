@@ -10,7 +10,7 @@ import { mikaAvatar } from "../../mika/face";
 import { h, initials, norm } from "../../shell/dom";
 import { ico, type IconName } from "../../shell/icons";
 import { plainHtml } from "../chat/markup";
-import { ago, clock, dayWords, personAvatar, remaining, shortWhen } from "../parametres/kit";
+import { ago, clock, dayWords, personAvatar, remaining, shortWhen } from "../../shared/kit";
 
 // ── Les mots ─────────────────────────────────────────────────────────
 

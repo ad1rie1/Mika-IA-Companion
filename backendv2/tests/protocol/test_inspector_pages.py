@@ -238,6 +238,26 @@ def test_the_old_forge_settings_address_leads_to_the_apps(world):  # noqa: F811
     assert client.get("/inspecteur/forge", follow_redirects=False).headers["location"] == "/inspecteur/apps"
 
 
+def test_the_old_page_of_an_object_leads_to_its_fiche(world):  # noqa: F811
+    """Les vues cachées gardées pour d'anciens liens sont devenues des redirections, dans la table centrale (ADR 0217)."""
+    client, _, _ = world
+    bootstrap(client)
+    moved = {"/inspecteur/facultes/identity/personne?handle=ext_5": "/inspecteur/fiche/handle/ext_5",
+             "/inspecteur/facultes/identity/personne": "/inspecteur/identites/annuaire",
+             "/inspecteur/facultes/forge/app?app=cafe": "/inspecteur/fiche/app/cafe",
+             "/inspecteur/facultes/forge/app": "/inspecteur/apps",
+             "/inspecteur/personnes/liens?person=user_2": "/inspecteur/fiche/person/user_2?onglet=lien",
+             # une clé qui ressemble à un chemin reste une clé
+             "/inspecteur/facultes/forge/app?app=../../etc": "/inspecteur/fiche/app/..%2F..%2Fetc"}
+    for old, new in moved.items():
+        r = client.get(old, follow_redirects=False)
+        assert r.status_code == 301 and r.headers["location"] == new, old
+    # l'adresse d'avant la vue : l'onglet de la destination, puis la fiche
+    via_view = client.get("/inspecteur/facultes/social/liens?person=user_2", follow_redirects=False)
+    assert via_view.status_code == 303 and via_view.headers["location"] == "/inspecteur/personnes/liens?person=user_2"
+    assert client.get("/inspecteur/personnes/liens", follow_redirects=False).status_code == 200  # la liste reste
+
+
 @pytest.mark.slow
 def test_a_backup_taken_while_she_talks_is_consistent(world, tmp_path):  # noqa: F811
     import threading

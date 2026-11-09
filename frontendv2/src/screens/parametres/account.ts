@@ -12,9 +12,9 @@ import { ico } from "../../shell/icons";
 import type { Shell } from "../../shell/shell";
 import { currentChoice } from "../../shell/theme";
 import { readForm, row, section, seg, showFieldErrors, subTabs, text } from "./form";
-import { failureText } from "./kit";
+import { failureText } from "../../shared/kit";
 import type { Page } from "./page";
-import * as store from "./store";
+import * as store from "../../shared/store";
 import { fieldErrors } from "./words";
 
 const SUBS = [["compte", "Ton compte"], ["securite", "Mot de passe"], ["apparence", "Apparence"]] as const;

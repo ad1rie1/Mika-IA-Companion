@@ -10,10 +10,12 @@ console et dans le journal — ils n'y sont jamais.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import html
 import json
 import re
+from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -324,7 +326,7 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
         seen.append(spec.api_key)
         return [("claude-haiku-4-5", ModelLimits()), ("claude-opus-5", ModelLimits(1_000_000, 128_000))]
 
-    monkeypatch.setattr("mika.app.reglages.list_models", fake_models)
+    monkeypatch.setattr("mika.app.settings_sections.intelligence.list_models", fake_models)
     url = f"{BASE}/fournisseurs"
     page = html_of(client.get(f"{url}?enregistrement=backends&cle=&nouveau=1"))
     assert "Charger la liste" in page
@@ -351,7 +353,7 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     async def broken(spec):
         raise __import__("mika.adapters.llm.models", fromlist=["ListingFailed"]).ListingFailed("hôte injoignable")
 
-    monkeypatch.setattr("mika.app.reglages.list_models", broken)
+    monkeypatch.setattr("mika.app.settings_sections.intelligence.list_models", broken)
     failed = post(client, url, {**backend("local", kind="ollama", model=""), "_charger": "model"})
     assert failed.status_code == 200 and "Liste indisponible" in html_of(failed)
     assert "local" not in client.portal.call(live.settings.llm).backends
@@ -432,3 +434,15 @@ def test_her_authors_say_where_each_writes_and_a_flow_is_given_one(world):  # no
     assert live.settings.author_for("chat").key == "message" and live.settings.author_for("telephone") is None
     gone = post(client, url, {"_section": "autrices", "_supprimer": "authors", "_cle": "teams-pro"})
     assert gone.status_code == 200 and live.settings.author_for("teams") is None
+
+
+def test_the_table_of_what_each_slider_drives_is_built_once():
+    """C7-13 : ce que pilote chaque curseur ne se lit qu'à un endroit (``inspector/pages/params.py``), que la page du
+    tempérament, la vue d'ensemble des paramètres et l'onglet dessiné réutilisent."""
+    root = Path(__file__).resolve().parents[2] / "src" / "mika"
+    readers = sorted(path.relative_to(root).as_posix() for area in ("app", "inspector")
+                     for path in (root / area).rglob("*.py")
+                     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                     and node.func.attr == "influences")
+    assert readers == ["inspector/pages/params.py"]

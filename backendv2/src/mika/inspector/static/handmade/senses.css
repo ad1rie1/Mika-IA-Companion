@@ -1,5 +1,5 @@
 /* Connexions extérieures › Messages du téléphone et Localisation, et leurs onglets sur la fiche d'une personne
-   (app/handmade/senses.py) : le filtre par personne, les conversations repliées, les positions, le journal. */
+   (app/handmade/tabs/senses.py) : le filtre par personne, les conversations repliées, les positions, le journal. */
 .senses { display: grid; gap: 18px; }
 .senses-chips { margin: 0; }
 .senses-when { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }

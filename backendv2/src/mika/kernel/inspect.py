@@ -52,19 +52,32 @@ class Ref:
     ``"view"`` (clé = ``"<propriétaire>/<nom>"``), ``"subject"`` (clé =
     ``"<sorte>/<clé>"``, la fiche d'un objet), ``"why"`` (clé = le seq d'une
     de ses paroles : « pourquoi a-t-elle dit ça ? »), ``"url"`` (http(s)
-    seulement, revérifié au rendu)."""
+    seulement, revérifié au rendu). Ce qui n'est ni une vue ni une fiche se
+    nomme aussi : ``"settings"`` (clé = le nom d'une page de réglages),
+    ``"approvals"`` (clé = un onglet de la file des accords, vide : toute la
+    file), ``"download"`` (clé = ``"<sorte>/<clé>"``, un fichier à télécharger).
+
+    ``"local"`` (clé = une adresse déjà construite) n'est que pour la console :
+    une faculté dit ce qu'elle vise, la console sait où cela vit. ``back`` : la
+    page où revenir une fois celle-ci quittée (un réglage enregistré, une fiche
+    refermée), voir :meth:`back_to`."""
 
     kind: str
     key: str
     text: str
     params: tuple[tuple[str, str], ...] = ()
+    back: Ref | None = None
+
+    def back_to(self, page: Ref) -> Ref:
+        """Le même lien, qui dit où revenir une fois cette page quittée."""
+        return replace(self, back=page)
 
     @staticmethod
     def subject(kind: str, key: str, text: str, tab: str = "") -> Ref:
         return Ref("subject", f"{kind}/{key}", text, (("onglet", tab),) if tab else ())
 
     @staticmethod
-    def view(owner: str, name: str, text: str, **params: str) -> Ref:
+    def view(owner: str, name: str, text: str, /, **params: str) -> Ref:
         return Ref("view", f"{owner}/{name}", text, tuple((k, str(v)) for k, v in params.items()))
 
     @staticmethod
@@ -76,6 +89,21 @@ class Ref:
         """« Pourquoi a-t-elle dit ça ? » : la page qui explique une de ses paroles (le numéro de
         l'événement ``episode.utterance`` — pour un message d'elle dans le fil, son numéro)."""
         return Ref("why", str(seq), text)
+
+    @staticmethod
+    def settings(page: str, text: str, /, **params: str) -> Ref:
+        """Une page de réglages, par son nom : la console sait si elle vit sous Réglages ou ailleurs."""
+        return Ref("settings", page, text, tuple((k, str(v)) for k, v in params.items()))
+
+    @staticmethod
+    def approvals(text: str, queue: str = "", **params: str) -> Ref:
+        """La file « À valider » ; ``queue`` : un de ses onglets."""
+        return Ref("approvals", queue, text, tuple((k, str(v)) for k, v in params.items()))
+
+    @staticmethod
+    def download(kind: str, key: str, text: str, name: str = "") -> Ref:
+        """Un fichier que sert le ``download`` déclaré pour cette sorte d'objet ; ``name`` : lequel de ses fichiers."""
+        return Ref("download", f"{kind}/{key}", text, (("fichier", name),) if name else ())
 
 
 # ── Cellules ──────────────────────────────────────────────────────────────

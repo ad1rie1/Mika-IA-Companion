@@ -15,7 +15,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
-from urllib.parse import quote
 
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
@@ -25,10 +24,11 @@ from mika.contracts import social as social_c
 from mika.faculties.affect import AFFECT
 from mika.faculties.agency import AGENCY
 from mika.faculties.social.inspect import CLOSENESS_FR
+from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Column, Row, Table, pct_fr
+from mika.kernel.inspect import Badge, Ref, Text, pct_fr
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab.people import is_identifiable
@@ -124,22 +124,15 @@ def felt_of(stance: Any) -> dict[str, str] | None:
 def person_href(person: str) -> str:
     """La fiche d'une personne, ouverte sur sa vue d'ensemble (``person/``) ; une adresse qui n'est pas une
     personne n'en a pas."""
-    return f"{PREFIX}/fiche/person/{quote(person, safe='')}" if is_identifiable(person) else ""
+    return fiche_url("person", person) if is_identifiable(person) else ""
 
 
-def columns(table: Table) -> dict[str, int]:
-    """La place de chaque colonne d'une table de la faculté, par son libellé."""
-    return {(c.label if isinstance(c, Column) else str(c)): i for i, c in enumerate(table.columns)}
-
-
-def reader(table: Table) -> Callable[[Row, str], Any]:
-    """Une cellule d'une ligne de cette table, par le libellé de sa colonne (``None`` : pas de telle cellule)."""
-    at = columns(table)
-
-    def cell(row: Row, label: str) -> Any:
-        i = at.get(label)
-        return row.cells[i] if i is not None and i < len(row.cells) else None
-    return cell
+def plain(value: Any) -> str:
+    """Le texte d'une valeur telle que la faculté l'a déclarée (``Text``, ``Badge``, ``Ref`` : leur texte ; un nombre, un
+    texte : lui-même) ; rien à dire (``None``, « — ») : vide."""
+    if isinstance(value, Text | Badge | Ref):
+        return value.text
+    return "" if value in (None, "—") else str(value)
 
 
 @dataclass(slots=True)

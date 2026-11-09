@@ -19,7 +19,7 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade.blocks import head, lift
-from mika.app.handmade.lists import Roles, shaped_as
+from mika.app.handmade.lists import Roles, card_as, text
 from mika.inspector import render
 from mika.inspector.ui import UI, Drawn, env
 from mika.kernel.inspect import Column, Row, Table, When
@@ -32,11 +32,6 @@ FOLDED = "Informations complémentaires"
 #: insécable, fine ou non, de ``num_fr``), ses décimales
 _NUMBER = re.compile(r"[-+−]?\d+(?:[\u00a0\u202f]\d{3})*(?:[,.]\d+)?(?=\s|$)")
 _PLAIN_NUMBER = str.maketrans({"−": "-", ",": ".", "\u00a0": None, "\u202f": None})
-
-
-def text(c: Mapping[str, Any] | None) -> str:
-    """Le texte d'une cellule rendue (vide : pas de cellule)."""
-    return str((c or {}).get("text") or "")
 
 
 def blank(c: Mapping[str, Any] | None) -> bool:
@@ -167,6 +162,20 @@ def _declared(blocks: Sequence[Any]) -> Iterator[Table]:
                 yield from _declared(inner)
 
 
+def raw_table(blocks: Sequence[Any], title: str = "") -> Table | None:
+    """La première liste de ces blocs, telle que la faculté l'a déclarée (ses cellules : un instant, un lien), dont le
+    titre commence par ``title``."""
+    return next((t for t in _declared(blocks) if t.title.startswith(title)), None)
+
+
+def raw_rows(table: Table) -> Iterator[tuple[Row, dict[str, Any]]]:
+    """Chaque ligne d'une liste déclarée, et ses cellules par le libellé de leur colonne."""
+    labels = [c.label if isinstance(c, Column) else str(c) for c in table.columns]
+    for r in table.rows:
+        row = r if isinstance(r, Row) else Row(tuple(r))
+        yield row, dict(zip(labels, row.cells, strict=False))
+
+
 def raw_lines(got: Got, table: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     """Les cellules telles que la faculté les a déclarées (un instant, un lien, une jauge) derrière chaque ligne
     rendue d'une liste, par le libellé de leur colonne : celles de la page montrée, dans le même ordre."""
@@ -175,11 +184,10 @@ def raw_lines(got: Got, table: Mapping[str, Any] | None) -> list[dict[str, Any]]
     found = got.raw_table(str(table.get("title") or ""))
     if found is None:
         return []
-    rows = [r if isinstance(r, Row) else Row(tuple(r)) for r in found.rows]
+    rows = [cells for _row, cells in raw_rows(found)]
     if found.pager is None:  # une liste que le rendu pagine : sa page commence plus loin
         rows = rows[max(0, int((table.get("pager") or {}).get("first") or 1) - 1):]
-    labels = [c.label if isinstance(c, Column) else str(c) for c in found.columns]
-    return [dict(zip(labels, r.cells, strict=False)) for r in rows[:len(table["rows"])]]
+    return rows[:len(table["rows"])]
 
 
 def paged(table: Mapping[str, Any] | None) -> bool:
@@ -258,7 +266,7 @@ class Got:
     def raw_table(self, title: str = "") -> Table | None:
         """La première liste, telle que la faculté l'a déclarée (ses cellules : un instant, un lien), dont le titre
         commence par ``title``."""
-        return next((t for t in _declared(self.raw) if t.title.startswith(title)), None)
+        return raw_table(self.raw, title)
 
     def lines(self, title: str = "") -> list[Line]:
         """Les lignes de la première liste dont le titre commence par ``title``."""
@@ -266,7 +274,7 @@ class Got:
 
     def card(self, table: dict[str, Any] | None, roles: Roles | None = None) -> dict[str, Any] | None:
         """Une liste rendue, prête pour ``entries`` (``handmade/shared/list_macros.html``) : une carte par élément."""
-        return shaped_as(table, roles=roles) if table else None
+        return card_as(table, roles=roles) if table else None
 
     def head(self, links: Sequence[tuple[str, str]] = (), items: Sequence[Mapping[str, Any]] = ()) -> Markup:
         """Les actions de la page, pour sa barre de titre (ADR 0176)."""

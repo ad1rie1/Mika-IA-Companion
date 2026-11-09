@@ -215,5 +215,5 @@ def test_the_reply_form_carries_the_mail_it_answers_without_showing_it():
 
     view_ = action_view(Spec, csrf="t", back="/inspecteur/", initial={"to": "a@b.fr", "subject": "Re: x",
                                                                       "reply_to": "<m1@exemple.fr>"})
-    assert [f["path"] for f in view_["fields"]] == ["to", "cc", "subject", "body", "quote"]
+    assert [f["path"] for f in view_["fields"]] == ["to", "cc", "bcc", "subject", "body", "quote"]
     assert ("reply_to", "<m1@exemple.fr>") in view_["fixed"]

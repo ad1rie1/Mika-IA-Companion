@@ -1,11 +1,11 @@
-{# Courrier › Brouillons (app/handmade/mail.py) : dans l'espace du courrier, ce qui attend ton accord en enveloppes —
+{# Courrier › Brouillons (app/handmade/tabs/mail.py) : dans l'espace du courrier, ce qui attend ton accord en enveloppes —
    l'objet, à qui, depuis quelle boîte et dans quelle voix, en réponse à quoi, d'où il vient, ce qu'il faut vérifier —
    puis ce qui est déjà décidé, en lignes. Chaque liste garde sa pagination. #}
 {% from "handmade/mail/space.html" import space with context %}
 {% from "_navigation.html" import pager as pages %}
 {% from "_cells.html" import cell %}
 {% macro pager_of(t) -%}{% set p = t.pager or {} %}<div class="hm-pager{{ ' single' if not (p.prev or p.next or p.older or p.newer) }}">{{ pages(t.pager) }}</div>{%- endmacro %}
-<div class="now-page person-tab mail mail-drafts-page">
+<div class="now-page person-tab mail mail-drafts-page" data-tab="courrier/brouillons">
 {% call space(side, before) %}
     <section class="now-card mail-drafts" id="{{ waiting.id }}" aria-labelledby="{{ waiting.id }}-title">
       <header class="now-card-head"><h2 id="{{ waiting.id }}-title">{{ waiting.title }}</h2>{% if waiting.count %}<span class="person-count now-num">{{ waiting.count }}</span>{% endif %}</header>

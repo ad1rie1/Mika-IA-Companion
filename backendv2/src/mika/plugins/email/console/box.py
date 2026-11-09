@@ -9,7 +9,6 @@ l'affichage). Un dossier qu'elle ne relève pas se relit à la demande
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlencode
 
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -50,6 +49,7 @@ from mika.plugins.email.console.common import (
     state_badge,
     to_answer,
     unread,
+    view_link,
     whose,
     workspace,
 )
@@ -93,7 +93,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
     if "page" in context_values:
         context_values["page"] = str(pager.number)
     context = tuple(context_values.items())
-    back = "/inspecteur/courrier/reception" + ("?" + urlencode(context) if context else "")
+    back = view_link("reception", "", context)
     rows = []
     for m, seen in page:
         label = port.account(m.account)
@@ -105,7 +105,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
                   Text("★ Suivi · " + ("Non lu" if unread(m, seen) else "Lu")) if m.flagged else state_badge(seen, m, p),
                   her_badge(seen), Badge("réponse attendue", "warn") if to_answer(seen) and not m.answered else None]
         ref = Ref.subject("mail", mail_key(m.ref), m.subject or "(sans objet)")
-        rows.append(Row(tuple(cells), href=Ref(ref.kind, ref.key, ref.text, (*context, ("retour", back)))))
+        rows.append(Row(tuple(cells), href=Ref(ref.kind, ref.key, ref.text, context, back)))
     columns: list[Any] = [Column("Message", role="title"), "Expéditeur", Column("Date", "fit"), Column("État", "fit", role="badge"),
                           Column("Elle", "fit", role="badge"), Column("Son tri", "fit", role="badge")]
     filtered = state or query or sender

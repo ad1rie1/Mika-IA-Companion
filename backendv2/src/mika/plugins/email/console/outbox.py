@@ -35,6 +35,7 @@ from mika.plugins.email.console.common import (
     fold,
     mail_key,
     scoped,
+    view_link,
     whose,
     workspace,
 )
@@ -105,9 +106,9 @@ def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pager = Pager(number=result.number, size=result.size, total=result.total)
     rows = tuple(Row((Text(clip(e["name"], 60) or "—"), Text(e["address"], "mono"), Text(str(e["received"]), "num"),
                       Text(str(e["sent"]), "num"), When(e["last"]) if e["last"] else "—"),
-                     href=Ref("local", f"/inspecteur/{SECTION}/reception", "",
-                              tuple((k, v) for k, v in (("compte", account), ("dossier", "*"), ("de", e["address"]),
-                                                        (WHOSE, whose(ctx))) if v)),
+                     href=view_link("reception", "",
+                                    tuple((k, v) for k, v in (("compte", account), ("dossier", "*"), ("de", e["address"]),
+                                                              (WHOSE, whose(ctx))) if v)),
                      detail=(ActionSlot("email.ecrire", (("to", e["address"]),) + ((("account", account),) if account
                                                                                    else ()),
                                         title=f"Écrire à {e['address']}", compact=True),))

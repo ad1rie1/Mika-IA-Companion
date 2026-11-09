@@ -1,0 +1,491 @@
+"""Réglages › Paramètres avancés : les paramètres internes des facultés, une page
+par faculté, un groupe à la fois ; et Réglages › Historique des réglages, le journal des
+modifications. (Les réglages d'une app forgée vivent sur sa fiche ; les comptes,
+dans ``accounts.py``.)
+
+Tout se lit : chaque paramètre dit ce qu'il fait, sa valeur, d'où elle vient
+(défaut ← tempérament ← réglage ← surcharge), ses bornes et ce qui le pilote.
+Changer une valeur pose une surcharge, bornée et journalisée avec l'opérateur ;
+une valeur égale à celle du tempérament la retire. « Voir l'effet » montre avant
+d'enregistrer ce que changeraient les valeurs tapées à ce qu'elle ferait et se
+dirait maintenant, sans rien écrire (``effect``). Le rangement des facultés en
+familles et leur nom lisible viennent de la composition (``app/console.py``) :
+la console n'en nomme aucune.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import secrets as _secrets
+from collections.abc import Mapping
+from typing import Any
+from urllib.parse import urlencode
+
+from sqlalchemy import and_, func, or_, select
+from starlette.requests import Request
+from starlette.responses import RedirectResponse, Response
+
+from mika.contracts import runtime as rt
+from mika.inspector.catalog import Builtin, Panel
+from mika.inspector.formview import decimal_fr, field_view
+from mika.inspector.pages.decisions import arbiter_diff
+from mika.inspector.pages.system import facts_diff
+from mika.inspector.pages.tabs import TABS
+from mika.inspector.ui import PREFIX, secure
+from mika.kernel import forms
+from mika.kernel.builtin import PARAMS_CHANGED
+from mika.kernel.frame import Frame
+from mika.kernel.inspect import (
+    INT_MAX,
+    Badge,
+    Column,
+    Disclosure,
+    Nav,
+    NavItem,
+    Note,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    cursor_page,
+    describe_error,
+)
+from mika.kernel.text import fold
+from mika.ports.journal import JournalEvent
+from mika.ports.sql import json_field
+from mika.runtime import operations
+from mika.runtime.boundary import Failed, call
+from mika.runtime.params import SHOWN_DIGITS, ParamsOverlay, Planned
+from mika.runtime.params import shown as params_shown
+
+FACULTY_PAGE = "comportement-"
+TONES = {"défaut": "muted", "tempérament": "info", "réglage": "ok", "surcharge": "warn"}
+SOURCES_FR = {"défaut": "valeur par défaut", "tempérament": "dérivée du tempérament",
+              "réglage": "réglée ailleurs (sa persona, ses boîtes aux lettres…)",
+              "surcharge": "surchargée par un opérateur"}
+#: au-delà, une faculté se lit un groupe à la fois
+ONE_PAGE_MAX = 12
+COMPORTEMENT_ORDER = 1000
+#: « Voir l'effet » : la limite de l'aperçu, dite à chaque fois
+NOT_REPLAYED = ("Une lecture de l'instant, rien de plus : ce qui s'est accumulé sous les réglages en vigueur (son "
+                "humeur, ses ancres, la proximité, des besoins déjà montés) n'est pas rejoué, seule la lecture de "
+                "maintenant change. Rien n'a été enregistré ni journalisé, aucun modèle n'a été appelé ; "
+                "« Enregistrer » pose ces valeurs.")
+
+
+def faculty_url(owner: str, **more: str) -> str:
+    query = {k: v for k, v in more.items() if v}
+    return f"{PREFIX}/reglages/{FACULTY_PAGE}{owner}" + (f"?{urlencode(query)}" if query else "")
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", fold(text)).strip("-") or "general"
+
+
+def _value(f: forms.FormField, value: Any) -> str:
+    if value is None:
+        return "—"
+    if f.kind == "bool":
+        return "oui" if value else "non"
+    if f.kind == "lines":
+        return ", ".join(str(v) for v in value) or "—"
+    if f.kind in ("yaml", "records", "mapping"):
+        plain = forms.plain(value)
+        if isinstance(plain, dict):
+            return " · ".join(f"{k} : {v}" for k, v in plain.items()) or "—"
+        if isinstance(plain, list | tuple):
+            return ", ".join(str(v) for v in plain) or "—"
+        return json.dumps(plain, ensure_ascii=False, default=str)
+    text = decimal_fr(value, 4) if f.kind in ("float", "slider") and isinstance(value, float) \
+        else forms.as_text(f, value)
+    label = next((lbl for v, lbl in f.choices if v == text), "")
+    unit = f" {f.unit}" if f.unit and f.kind in ("int", "float", "slider") else ""
+    return (f"{label} ({text})" if label and label != text else text) + unit
+
+
+def _bounds(f: forms.FormField) -> str:
+    if f.lo is None and f.hi is None:
+        return ""
+
+    def show(x: float) -> str:
+        if f.kind == "duration":
+            return forms.show_duration(round(x * forms.UNIT_US[f.unit]))
+        # la notation de la valeur, à côté (« 0,00000001 – 0,0005 », jamais « 1e-08 – 0,0005 »)
+        return decimal_fr(x)
+
+    return f"{show(f.lo) if f.lo is not None else '…'} – {show(f.hi) if f.hi is not None else '…'}"
+
+
+def _num(value: Any) -> str:
+    if isinstance(value, float):
+        return decimal_fr(value, 3)
+    return str(value)
+
+
+def _label_of(ui: Any, owner: str) -> str:
+    return dict(ui.deps.faculty_labels or {}).get(owner, owner)
+
+
+def slider_influences(ps: Any, names: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    """Ce que pilote chaque curseur du tempérament, seule lecture de ``ps.influences()`` : son nom, puis chaque
+    paramètre, de sa valeur à 0 à sa valeur à 1. La faculté se nomme par ``names`` ; sans lui, par sa clé."""
+    labels, names = ps.slider_labels(), names or {}
+    return [{"name": labels.get(slider, slider),
+             "moves": [{"faculty": names.get(owner, owner), "href": faculty_url(owner), "path": path,
+                        "lo": _num(lo), "hi": _num(hi)} for owner, path, lo, hi in moved]}
+            for slider, moved in ps.influences().items()]
+
+
+def influence_rows(ps: Any, names: Mapping[str, str] | None = None, *, nothing: str,
+                   clamp: int) -> tuple[tuple[Text, Text], ...]:
+    """Les lignes de la table « ce que pilote chaque curseur » ; ``nothing`` : ce qu'on dit d'un curseur non branché."""
+    return tuple((Text(s["name"]), Text(" · ".join(f"{m['faculty']} › {m['path']} ({m['lo']} → {m['hi']})"
+                                                   for m in s["moves"]) or nothing,
+                                        "text" if s["moves"] else "muted", clamp=clamp))
+                 for s in slider_influences(ps, names))
+
+
+def param_builtins(parameters: Any, families: Any, labels: Mapping[str, str]) -> dict[str, Builtin]:
+    """Une page de Réglages › Paramètres avancés par faculté qui a des paramètres,
+    rangée par famille (celle que la composition déclare, sinon « Autres »)."""
+    if parameters is None:
+        return {}
+    family_of: dict[str, tuple[int, str]] = {}
+    for i, (family, owners) in enumerate(families or ()):
+        for j, owner in enumerate(owners):
+            family_of[owner] = (i * 20 + j, family)
+    out: dict[str, Builtin] = {}
+    for n, fac in enumerate(parameters.faculties()):
+        rank, family = family_of.get(fac.name, (300 + n, "Autres"))
+        key = f"reglages.{FACULTY_PAGE}{fac.name}"
+        label = labels.get(fac.name, fac.name)
+
+        async def fn(ui: Any, request: Request, _owner: str = fac.name) -> Any:
+            return await faculty_page(ui, request, _owner, {})
+
+        out[key] = Builtin(key, label, fn, group=f"Paramètres avancés · {family}",
+                           order=COMPORTEMENT_ORDER + 1 + rank,
+                           description=f"Les paramètres internes de « {label} » ({fac.name}) : ce que chacun fait, "
+                                       "sa valeur, d'où elle vient. Changer une valeur pose une surcharge bornée et "
+                                       "journalisée.")
+    return out
+
+
+@TABS.tab("reglages.comportement", title="Vue d'ensemble", group="Paramètres avancés", order=COMPORTEMENT_ORDER,
+          description="Chaque faculté règle son comportement par des paramètres internes. Le tempérament en est "
+                      "l'entrée principale ; une surcharge se pose sur la page de la faculté.")
+async def comportement(ui: Any, request: Request) -> Any:
+    owner = request.query_params.get("faculte", "")
+    ps = ui.deps.parameters
+    if owner and ps is not None and ps.plan(owner) is not None:
+        return RedirectResponse(faculty_url(owner), status_code=301)
+    return overview(ui)
+
+
+def overview(ui: Any) -> list[Any]:
+    ps = ui.deps.parameters
+    if ps is None:
+        return [Note("Les paramètres internes ne sont pas disponibles ici.", "muted")]
+    overrides = ps.overrides()
+    rows = []
+    totals = {"params": 0, "surcharges": 0, "derive": 0, "refus": 0}
+    for fac in ps.faculties():
+        p = ps.plan(fac.name)
+        if p is None:
+            continue
+        counts = {s: sum(1 for v in p.sources.values() if v == s) for s in TONES}
+        journaled = ps.journaled(fac.name) is not None
+        n_over = len(overrides.get(fac.name) or {})
+        totals["params"] += len(p.sources)
+        totals["surcharges"] += n_over
+        totals["derive"] += fac.derive is not None
+        totals["refus"] += len(p.refused)
+        rows.append(Row((
+            Ref("local", faculty_url(fac.name), _label_of(ui, fac.name)), Text(fac.name, "mono"),
+            Text(str(len(p.sources)), "num"),
+            Badge(f"{counts['tempérament']} dérivé(s)", "info") if fac.derive is not None else Text("non", "muted"),
+            Badge(str(n_over), "warn") if n_over else Text("—", "muted"),
+            Badge(str(counts["réglage"]), "ok") if counts["réglage"] else Text("—", "muted"),
+            Badge(f"{len(p.refused)} refusée(s)", "danger") if p.refused else Text("—", "muted"),
+            Badge("journalisés", "ok") if journaled else Text("défauts", "muted")),
+            href=Ref("local", faculty_url(fac.name), "")))
+    drive = influence_rows(ps, dict(ui.deps.faculty_labels or {}), nothing="rien encore (non branché)", clamp=400)
+    return [
+        Stats((Stat("Paramètres", totals["params"], sub="dans toutes les facultés"),
+               Stat("Facultés qui dérivent du tempérament", totals["derive"]),
+               Stat("Surcharges posées", totals["surcharges"], tone="warn" if totals["surcharges"] else "",
+                    sub="bornées et journalisées"),
+               Stat("Surcharges refusées", totals["refus"], tone="danger" if totals["refus"] else "",
+                    sub="ignorées : hors bornes ou devenues invalides"))),
+        Note("D'où vient chaque valeur : le défaut de la faculté, puis ce que le tempérament en dérive, puis ce "
+             "qu'un autre réglage fournit (le fuseau de sa persona, les boîtes où elle prépare des réponses), "
+             "puis une surcharge d'opérateur. Ouvre une faculté pour lire et changer ses paramètres.", "info"),
+        Table((Column("faculté"), Column("nom technique", "fit"), Column("paramètres", "num"),
+               "dérive du tempérament", "surcharges", "réglés ailleurs", "refus", "en vigueur"), tuple(rows),
+              title="Les facultés", empty="Aucune faculté n'a de paramètres."),
+        # le détail du tempérament, replié : la page est d'abord la liste des facultés (ADR 0176)
+        Disclosure("Ce que pilote chaque curseur du tempérament",
+                   (Table((Column("curseur", "fit"), "ce qu'il pilote (à 0 → à 1)"), drive),)),
+    ]
+
+
+def _groups_of(fields: list[forms.FormField]) -> list[tuple[str, list[forms.FormField]]]:
+    """Les groupes d'une faculté, dans l'ordre d'apparition (un groupe déclaré en deux
+    morceaux est réuni)."""
+    out: dict[str, list[forms.FormField]] = {}
+    for f in fields:
+        out.setdefault(f.group or "Général", []).append(f)
+    return list(out.items())
+
+
+def back_to(target: str) -> str:
+    """Un retour dans la console seulement (jamais une autre adresse) ; vide sinon."""
+    target = target.strip()
+    if target.startswith(PREFIX + "/") and "//" not in target and "\\" not in target and len(target) < 2000 \
+            and all(ord(ch) >= 32 for ch in target):
+        return target
+    return ""
+
+
+def _moved_by(ps: Any, owner: str) -> dict[str, list[str]]:
+    """Les curseurs du tempérament qui pilotent chaque paramètre de cette faculté."""
+    labels = ps.slider_labels()
+    moved_by: dict[str, list[str]] = {}
+    for slider, moved in ps.influence(owner).items():
+        for path, _lo, _hi in moved:
+            moved_by.setdefault(path, []).append(labels.get(slider, slider))
+    return moved_by
+
+
+def params_view(ui: Any, owner: str, state: Mapping[str, Any], back: str) -> dict[str, Any] | None:
+    """Les paramètres internes d'une faculté, tous ses groupes d'un coup, pour une page qui les règle avec autre chose
+    (Courrier › Paramètres, ADR 0173) : le contexte de leur formulaire, qui revient à ``back`` une fois enregistré.
+    ``None`` : cette faculté n'a pas de paramètres ici."""
+    ps = ui.deps.parameters
+    p = ps.plan(owner) if ps is not None else None
+    if p is None:
+        return None
+    fields = [f for f in ps.fields(owner) if f.kind != "group"]
+    errors: Mapping[str, str] = state.get("errors") or {}
+    return {"owner": owner, "label": _label_of(ui, owner), "action": faculty_url(owner), "back": back,
+            "groups": _param_views(ps, owner, _groups_of(fields), state, _moved_by(ps, owner)),
+            "overridden": sorted(ps.overrides().get(owner) or {}), "messages": list(state.get("messages") or []),
+            "refused": dict(p.refused), "advanced": faculty_url(owner),
+            "general": [m for k, m in errors.items() if not any(k == f.path or k.startswith(f.path + ".")
+                                                                for f in fields)]}
+
+
+def _param_views(ps: Any, owner: str, groups: list[tuple[str, list[forms.FormField]]], state: Mapping[str, Any],
+                 moved_by: Mapping[str, list[str]]) -> list[dict[str, Any]]:
+    """Les groupes de paramètres d'une faculté, prêts pour leur formulaire : chaque paramètre, son champ (ce qui a été
+    tapé, s'il a été refusé), sa valeur, d'où elle vient, ses bornes, s'il est surchargé."""
+    p = ps.plan(owner)
+    flat, natural = forms.flatten(p.value), forms.flatten(p.natural)
+    journaled = ps.journaled(owner)
+    live = forms.flatten(journaled) if journaled is not None else None
+    overrides = ps.overrides().get(owner) or {}
+    errors: Mapping[str, str] = state.get("errors") or {}
+    typed: Mapping[str, Any] = state.get("values") or {}
+    given = {**flat, **typed}
+    views = []
+    for title, fs in groups:
+        items = []
+        for f in fs:
+            source = p.sources.get(f.path, "défaut")
+            meta = {"source": source, "source_label": SOURCES_FR.get(source, source), "tone": TONES.get(source, ""),
+                    "drivers": ", ".join(moved_by.get(f.path, ())), "bounds": _bounds(f), "path": f.path,
+                    "natural": _value(f, natural.get(f.path)) if source == "surcharge" else "",
+                    "pending": _value(f, live.get(f.path)) if live is not None and live.get(f.path) != flat.get(
+                        f.path) else "",
+                    "overridden": any(k == f.path or k.startswith(f.path + ".") for k in overrides)}
+            view = None
+            if f.kind not in ("records", "mapping"):
+                view = field_view(f, given.get(f.path), error=_err(f.path, errors), prefix=f"p-{owner}")
+                raw = given.get(f.path)
+                if view is not None and f.kind in ("float", "slider") and isinstance(raw, float) \
+                        and f.path not in typed:
+                    # 6 chiffres : renvoyé sans y toucher, rien ne change (``params._close``) ; un champ en notation
+                    # décimale française, comme ses bornes — un curseur garde le point qu'attend son contrôle
+                    view["value"] = decimal_fr(raw, SHOWN_DIGITS) if f.kind == "float" else params_shown(raw)
+                if view is not None and f.kind == "duration":
+                    view["placeholder"] = "ex. 10 min, 1 h 30"
+            items.append({"field": view, "label": f.label, "help": f.help, "value": _value(f, flat.get(f.path)),
+                          **meta})
+        views.append({"title": title, "items": items})
+    return views
+
+
+async def faculty_page(ui: Any, request: Request, owner: str, state: Mapping[str, Any]) -> dict[str, Any]:
+    ps = ui.deps.parameters
+    p = ps.plan(owner) if ps is not None else None
+    if p is None:
+        return {"blocks": [Note("Faculté inconnue.", "warn")]}
+    fields = [f for f in ps.fields(owner) if f.kind != "group"]
+    groups = _groups_of(fields)
+    one_page = len(fields) <= ONE_PAGE_MAX or len(groups) <= 1
+    wanted = str(state.get("group") or request.query_params.get("groupe", "") or "")
+    shown = groups if one_page else [next((g for g in groups if _slug(g[0]) == wanted), groups[0])]
+    overrides = ps.overrides().get(owner) or {}
+    counts = {s: sum(1 for v in p.sources.values() if v == s) for s in TONES}
+    blocks: list[Any] = [Stats((
+        Stat("Paramètres", len(fields)),
+        Stat("Dérivés du tempérament", counts["tempérament"], tone="info" if counts["tempérament"] else ""),
+        Stat("Surchargés", len(overrides), tone="warn" if overrides else ""),
+        Stat("Réglés ailleurs", counts["réglage"], sub="en lecture seule ici"),
+    ))]
+    if p.refused:
+        blocks.append(Note("Des surcharges enregistrées sont refusées et ignorées : " + "; ".join(
+            f"{k} ({v})" for k, v in p.refused.items()), "danger"))
+    blocks += list(state.get("preview") or ())
+    if not one_page:
+        current = _slug(shown[0][0])
+        blocks.append(Nav(tuple(NavItem(title, Ref("local", faculty_url(owner, groupe=_slug(title)), title),
+                                        count=len(fs), active=_slug(title) == current)
+                                for title, fs in groups), title="Groupes"))
+    errors: Mapping[str, str] = state.get("errors") or {}
+    views = _param_views(ps, owner, shown, state, _moved_by(ps, owner))
+    panel = Panel("handmade/reglages/parametres.html", {
+        "owner": owner, "label": _label_of(ui, owner), "groups": views, "panel_messages": state.get("messages") or [],
+        "action": faculty_url(owner), "group": _slug(shown[0][0]) if not one_page else "",
+        "overridden": sorted(overrides), "panel_after": True,
+        "general": [m for k, m in errors.items() if not any(k == f.path or k.startswith(f.path + ".")
+                                                            for f in fields)]})
+    return {"blocks": blocks, "panel": panel}
+
+
+def _err(path: str, errors: Mapping[str, str]) -> str:
+    return " ; ".join(m for k, m in errors.items() if k == path or k.startswith(path + "."))
+
+
+async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, dict[str, Any], int]:
+    ps = ui.deps.parameters
+    got = await ui.form_lists(request)
+    account = ui.operator(request)
+    if ps is None or got is None or account is None:
+        return None, {"messages": [("danger", "Jeton de formulaire invalide : recharge la page.")]}, 403
+    data, lists = got
+    owner = data.get("_faculte", "")
+    group = data.get("_groupe", "")
+    back = back_to(data.get("_retour", ""))
+    if ps.plan(owner) is None:
+        return None, {"messages": [("danger", "Faculté inconnue.")]}, 400
+    if data.get("_apercu"):
+        planned_, errors = ps.preview(owner, lists)
+        values, _ = forms.parse(ps.fields(owner), lists, current={})
+        if planned_ is None:
+            return None, {"owner": owner, "group": group, "back": back, "errors": errors, "values": values,
+                          "messages": [("danger", "Pas d'aperçu : corrige les champs signalés.")]}, 400
+        return None, {"owner": owner, "group": group, "back": back, "values": values,
+                      "preview": effect(ui, {owner: planned_})}, 200
+    try:
+        if data.get("_reinitialiser") or data.get("_reinitialiser_chemin"):
+            changed = await ps.reset(owner, data.get("_reinitialiser_chemin", "") or data.get("_chemin", ""))
+            errors: dict[str, str] = {}
+        else:
+            changed, errors = await ps.change(owner, lists)
+    except ValueError as exc:
+        return None, {"owner": owner, "group": group, "back": back, "messages": [("danger", f"Refusé : {exc}")]}, 400
+    if errors:
+        values, _ = forms.parse(ps.fields(owner), lists, current={})
+        return None, {"owner": owner, "group": group, "back": back, "errors": errors, "values": values,
+                      "messages": [("danger", "Rien n'a été enregistré : corrige les champs signalés.")]}, 400
+    if changed:
+        await operations.audit(ui.kernel, f"console.parametres.{owner}", by=account.handle,
+                               subject_kind="faculté", subject=owner)
+    token = _secrets.token_urlsafe(9)
+    label = _label_of(ui, owner)
+    ui.flash(token, "ok" if changed else "info",
+             f"{label} : surcharges enregistrées et journalisées." if changed else "Rien n'a changé.")
+    if back:  # une page qui les règle avec autre chose (Courrier › Paramètres) : on y revient
+        return secure(RedirectResponse(f"{back}{'&' if '?' in back else '?'}flash={token}", status_code=303)), {}, 303
+    return secure(RedirectResponse(faculty_url(owner, groupe=group, flash=token), status_code=303)), {}, 303
+
+
+def effect(ui: Any, planned: Mapping[str, Planned]) -> list[Any]:
+    """« Voir l'effet » : ce qu'elle ferait et ce qu'elle se dirait à cet instant si ``planned`` était en
+    vigueur. Deux cadres sur la même racine, au même instant — l'un avec les paramètres journalisés, l'autre
+    avec ceux-là à leur place (``ParamsOverlay``) — et leur différence. Rien n'est journalisé, aucun modèle
+    n'est appelé, l'arbitre lit sans rien retenir."""
+    kernel = ui.kernel
+    before = kernel.mind.frame()
+    after = Frame(before.root, before.now, ParamsOverlay(before.env, planned))
+
+    def table(frame: Frame) -> list[Any]:
+        return list(kernel.arbiter.rows(frame, record=False))
+
+    old = call(table, before, label="table de l'arbitre (en vigueur)")
+    new = call(table, after, label="table de l'arbitre (aperçu)")
+    out: list[Any] = [Note(NOT_REPLAYED, "info", title="Aperçu : rien n'est enregistré")]
+    if isinstance(old, Failed):
+        out.append(Note(f"La table de l'arbitre ne se lit pas : {describe_error(old.error)}.", "danger"))
+    elif isinstance(new, Failed):
+        out.append(Note(f"La table de l'arbitre ne se lit pas avec ces valeurs : {describe_error(new.error)}.",
+                        "danger"))
+    else:
+        out.append(arbiter_diff(ui, old, new))
+    out.append(facts_diff(kernel, before, after))
+    return out
+
+
+@TABS.tab("reglages.journal", title="Journal des modifications", group="Historique des réglages", order=3000,
+          description="Chaque réglage enregistré depuis la console (qui, quoi, sur quoi — jamais un contenu ni un "
+                      "secret), et chaque journalisation des paramètres (au démarrage, après un changement de "
+                      "persona, de tempérament ou de surcharge).")
+async def journal(ui: Any, request: Request) -> list[Any]:
+    ctx = ui.inspection.context(request.query_params)
+    before = ctx.int_param("avant", 0)
+    # une seule requête, filtrée en SQL, lue avec une ligne de plus : rien ne tombe entre deux pages (deux flux
+    # lus à part puis fusionnés sous un même curseur perdaient ce qui dépassait le plus court). Une action de la
+    # console : son nom commence par ``console.``, comparé tel quel (``LIKE`` ignorerait la casse sous SQLite seul)
+    e = JournalEvent
+    action, outcome = json_field(e.data, "action"), json_field(e.data, "outcome")
+    console = and_(e.type == rt.OPERATED.name, func.substr(action, 1, len(CONSOLE)) == CONSOLE, outcome == "done")
+    seqs = [int(r[0]) for r in ui.kernel.mind.store.query_mind(
+        select(e.seq).where(or_(console, e.type == PARAMS_CHANGED.name), e.seq < (before or INT_MAX))
+        .order_by(e.seq.desc()).limit(JOURNAL_PAGE + 1))]
+    found = sorted((ui.decode(s) for s in ui.kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
+    merged, pager = cursor_page(found, JOURNAL_PAGE, current=before)
+    rows = []
+    for e in merged:
+        if e.type.name == PARAMS_CHANGED.name:
+            rows.append(Row((When(e.at), Badge("paramètres", "info"),
+                             Ref("local", faculty_url(e.data.owner), _label_of(ui, e.data.owner)), "—",
+                             Text(_origin(e.correlation), "muted")), href=Ref("event", str(e.seq), "")))
+        else:
+            rows.append(Row((When(e.at), Badge("opérateur", "ok"), Text(_what(ui, e.data.action), hint=e.data.action),
+                             Text(ui.names.who(e.data.by), hint=e.data.by), Text(e.data.subject or "—", "muted")),
+                            href=Ref("event", str(e.seq), "")))
+    return [Table((Column("quand", "fit"), "sorte", "quoi", "par", "sur / origine"), tuple(rows),
+                  title="Journal des modifications", empty="Rien encore.", pager=pager)]
+
+
+#: le journal des modifications, par page
+JOURNAL_PAGE = 50
+#: le préfixe des actions de la console
+CONSOLE = "console."
+
+
+def _what(ui: Any, action: str) -> str:
+    """Ce qu'un opérateur a changé, en mots : « Réglages · Modèles », « Paramètres · Corps et sommeil »."""
+    parts = action.split(".")
+    forms_ = ui.settings_forms
+    if len(parts) >= 3 and parts[1] == "reglages" and forms_ is not None and parts[2] in forms_.sections:
+        section = forms_.sections[parts[2]]
+        command = next((c.title for c in section.commands if len(parts) > 3 and c.key == parts[3]), "")
+        return f"Réglages · {section.label}" + (f" · {command}" if command else "")
+    if len(parts) >= 3 and parts[1] == "parametres":
+        return f"Paramètres · {_label_of(ui, parts[2])}"
+    return ui.names.action(action)
+
+
+def _origin(correlation: str) -> str:
+    """D'où vient une journalisation des paramètres, en mots."""
+    if not correlation:
+        return "—"
+    return {"params": "le démarrage ou une reconfiguration (persona, tempérament, surcharges)",
+            "persona": "la persona"}.get(correlation, "un réglage d'opérateur" if correlation.startswith("opérateur:")
+                                         else correlation)

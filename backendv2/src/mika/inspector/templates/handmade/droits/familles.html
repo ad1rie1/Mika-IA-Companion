@@ -36,7 +36,7 @@
   {% endfor %}
 </details>
 {%- endmacro %}
-<div class="now-page service">
+<div class="now-page service" data-tab="outils/tous">
   <section class="now-card access-legend" aria-labelledby="families-title">
     <h2 id="families-title">Ses propres outils</h2>
     {% if lot or query %}<p class="server-alert info">{% if lot %}Seulement la famille « {{ lot }} »{% else %}Seulement les familles dont un outil répond à « {{ query }} »{% endif %} · <a href="{{ all_url }}">tout voir</a></p>{% endif %}

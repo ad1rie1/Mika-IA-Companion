@@ -6,7 +6,7 @@
 import type { PaletteEntry } from "../../shell/palette";
 import type { Shell } from "../../shell/shell";
 import type { SaveBar } from "./form";
-import type { Cached, CachedMap } from "./kit";
+import type { Cached, CachedMap } from "../../shared/kit";
 import type { FormValue } from "./words";
 
 export interface Host {

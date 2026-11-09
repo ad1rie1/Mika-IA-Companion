@@ -110,7 +110,7 @@ SUMMARY_CLAMP = 260
 FILE_SHOWN = 60_000
 DIFF_SHOWN = 40_000
 DOWNLOAD_MAX = 20 * 1024 * 1024
-APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les actions à autoriser")
+APPROVALS = Ref.approvals("ouvrir les actions à autoriser")
 
 MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
 MODE_LONG = dict(MODE_CHOICES)
@@ -925,7 +925,7 @@ _TREE_LINE = re.compile(r"^(?P<path>.+) \((?P<size>\d+) o\)$")
 
 
 def _download_link(project: int, path: str) -> Ref:
-    return Ref("local", f"/inspecteur/telecharger/project/{project}", "télécharger", (("fichier", path),))
+    return Ref.download("project", str(project), "télécharger", path)
 
 
 def _folder_ref(p: Project, folder: str, text: str) -> Ref:

@@ -1,4 +1,4 @@
-/* Activité › En cours (app/handmade/running.py) : ce qu'elle fait, ce qui attend, ce qu'elle vient de faire. */
+/* Activité › En cours (app/handmade/tabs/decisions.py) : ce qu'elle fait, ce qui attend, ce qu'elle vient de faire. */
 .running { display: grid; gap: 18px; }
 .running-doing { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .running-doing li { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));

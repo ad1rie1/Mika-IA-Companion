@@ -21,7 +21,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import Integer, String, insert, select
+from sqlalchemy import Integer, String, event, insert, select
 from sqlalchemy.dialects.mysql.mariadb import MariaDBDialect
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -137,6 +137,41 @@ def test_an_overlong_teams_id_is_kept_by_its_digest_and_found_by_the_whole_id(tm
         assert key == teams_fit(author.lower(), AUTHOR_MAX)
         # oublier quelqu'un par son identifiant entier
         assert go(store.forget("teams:" + author)) >= 1 and store.message(message_ref(long_a, "1")) is None
+    finally:
+        store.close()
+
+
+def test_the_last_message_of_each_conversation_comes_in_a_single_query(tmp_path):
+    store = TeamsStore(lambda: TeamsConfig(), tmp_path / "teams.db", now=lambda: NOW)
+    a, b = "19:a@thread.v2", "19:b@thread.v2"
+    long_id = "19:" + "c" * 400 + "@thread.v2"
+    selects: list[str] = []
+
+    def on_statement(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    try:
+        store.store_batch(P, batch(
+            InboxMessage("1", a, "Bob", "8:b", NOW // 1000, "premier"),
+            InboxMessage("2", a, "Bob", "8:b", NOW // 1000 + 5, "dernier de a"),
+            InboxMessage("3", a, "Bob", "8:b", NOW // 1000 + 1, "plus ancien, arrivé après"),
+            InboxMessage("4", b, "Zoé", "8:z", NOW // 1000, "à la même heure"),
+            InboxMessage("5", b, "Zoé", "8:z", NOW // 1000, "à la même heure, rangé après"),
+            InboxMessage("6", long_id, "Bob", "8:b", NOW // 1000, "clé trop longue"),
+            conversations=(InboxConversation(a, "A", "group"), InboxConversation(b, "B", "group"))), NOW)
+        asked = [(P, a), (P, b), (P, long_id), (P, "19:inconnue"), ("ailleurs", a)]
+        event.listen(store._engine, "before_cursor_execute", on_statement)
+        try:
+            got = store.last_messages(asked)
+        finally:
+            event.remove(store._engine, "before_cursor_execute", on_statement)
+        assert len(selects) == 1  # une seule requête, quel que soit leur nombre
+        assert set(got) == {(P, a), (P, b), (P, long_id)}  # sous la clé demandée, même trop longue
+        assert got[(P, a)].text == "dernier de a" and got[(P, b)].text == "à la même heure, rangé après"
+        for (account, conversation), message in got.items():
+            assert [message] == store.thread(account, conversation, 1)
+        assert store.last_messages([]) == {}
     finally:
         store.close()
 

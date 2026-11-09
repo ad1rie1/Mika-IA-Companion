@@ -13,6 +13,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.teams import TeamsConfig
 from mika.app import cli
@@ -27,6 +29,22 @@ from mika.runtime import operations
 from mika.sim.clock import run_virtual
 from tests.fixtures import backend
 from tests.fixtures.mika import boot, build, connect, reply, said
+
+
+def test_every_command_says_what_runs_it(monkeypatch):
+    """Chaque sous-analyseur nomme sa fonction (``set_defaults(run=…)``) : ajouter une commande touche un seul endroit."""
+    caught: list[argparse.ArgumentParser] = []
+
+    def grab(self: argparse.ArgumentParser, *_args: object, **_kwargs: object) -> None:
+        caught.append(self)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", grab)
+    with pytest.raises(SystemExit):
+        cli.main([])
+    commands = next(a for a in caught[0]._actions if isinstance(a, argparse._SubParsersAction)).choices
+    assert len(commands) > 20
+    assert not [name for name, parser in commands.items() if not callable(parser._defaults.get("run"))]
 
 
 def _read(data: Path, sql: str, params: tuple = ()) -> list[tuple]:

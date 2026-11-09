@@ -318,6 +318,11 @@ class TeamsPort(Protocol):
         récent."""
         ...
 
+    def last_messages(self, conversations: Sequence[tuple[str, str]]) -> dict[tuple[str, str], Message]:
+        """Le dernier message de chacune de ces conversations (compte, identifiant), en une seule requête quel que soit
+        leur nombre. Une conversation sans message n'y est pas."""
+        ...
+
     def conversation(self, account: str, conversation: str) -> Conversation | None: ...
 
     def conversations(self, limit: int, *, text: str = "", accounts: Sequence[str] | None = None) \

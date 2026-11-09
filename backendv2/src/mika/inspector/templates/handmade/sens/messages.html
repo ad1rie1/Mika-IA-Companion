@@ -1,7 +1,7 @@
-{# Connexions extérieures › Messages du téléphone (app/handmade/senses.py, ADR 0120, 0123) : le téléphone de chaque
+{# Connexions extérieures › Messages du téléphone (app/handmade/tabs/senses.py, ADR 0120, 0123) : le téléphone de chaque
    personne, ses conversations (un contact, un groupe) en bulles ; les réponses qu'elle a proposées. #}
 {% import "handmade/sens/macros.html" as senses %}
-<div class="now-page senses">
+<div class="now-page senses" data-tab="sens/messages">
   {% if empty %}
   <section class="now-card"><p class="now-empty">Aucun téléphone ne lui a montré de message. Dans l'application Android : Paramètres › « Lui montrer mes messages ».</p></section>
   {% else %}

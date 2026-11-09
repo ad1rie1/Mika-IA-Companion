@@ -18,7 +18,8 @@ from starlette.routing import Route
 from mika.adapters.maps import NONE as NO_MAP
 from mika.adapters.maps import MapUnavailable
 from mika.adapters.web.accounts import CLIENT_MOBILE
-from mika.app.moi import PREFIX, Call, Denied, MeApi, missing
+from mika.app.moi.api import PREFIX, Call, Denied, MeApiBase, missing
+from mika.app.moi.common import millis, snippet
 from mika.contracts import phone as phone_c
 from mika.plugins import location as location_p
 from mika.plugins import phone as phone_p
@@ -33,15 +34,6 @@ APK_NAME = "mika.apk"
 #: d'une carte réglée qui ne se lit pas, ce qu'une personne lit : ce qui ne va pas (un fichier du serveur, une archive
 #: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY`` de ``carte.py``
 MAP_NOT_READY = "La carte n'est pas encore prête sur ce serveur."
-
-
-def _ms(us: int) -> int:
-    return us // 1000 if us else 0
-
-
-def _snippet(text: str) -> str:
-    flat = " ".join(str(text).split())
-    return flat if len(flat) <= SNIPPET else flat[: SNIPPET - 1] + "…"
 
 
 def _state(call: Call) -> PhoneState:
@@ -66,12 +58,12 @@ def _key(m: Msg) -> str:
 
 
 def _message_json(m: Msg, texts: dict[str, str]) -> dict[str, Any]:
-    return {"id": phone_c.message_ref(m.seq), "at": _ms(m.at), "own": m.own,
+    return {"id": phone_c.message_ref(m.seq), "at": millis(m.at), "own": m.own,
             "sender": texts.get(m.name_ref, "") if not m.own else "", "text": texts.get(m.text_ref, "")}
 
 
 def _offer_json(o: Offer, texts: dict[str, str]) -> dict[str, Any]:
-    return {"id": o.seq, "state": o.state, "at": _ms(o.at), "expires": _ms(o.expires), "decided_at": _ms(o.decided_at),
+    return {"id": o.seq, "state": o.state, "at": millis(o.at), "expires": millis(o.expires), "decided_at": millis(o.decided_at),
             "reason": o.reason, "reply_to": phone_c.message_ref(o.reply_to) if o.reply_to else "",
             "text": texts.get(o.body_ref, "")}
 
@@ -104,8 +96,8 @@ async def conversations(call: Call) -> dict[str, Any]:
         title = texts.get(last.title_ref, "") if last.group else ""
         out.append({"key": key, "app": last.source, "app_name": app_name(last.source), "group": last.group,
                     "title": title or (texts.get(who.name_ref, "") if who is not None else ""),
-                    "count": len(ms), "last_at": _ms(last.at),
-                    "last": {**_message_json(last, texts), "text": _snippet(texts.get(last.text_ref, ""))},
+                    "count": len(ms), "last_at": millis(last.at),
+                    "last": {**_message_json(last, texts), "text": snippet(texts.get(last.text_ref, ""), SNIPPET)},
                     "her": {"state": pending[key].state, "id": pending[key].seq} if key in pending else None})
     return {"items": out}
 
@@ -149,7 +141,7 @@ async def position(call: Call) -> dict[str, Any]:
     except ValueError:
         coords = None
     return {"known": True, "coords": coords, "label": texts.get(fix.label_ref, ""), "accuracy_m": fix.accuracy_m,
-            "at": _ms(fix.fixed_at)}
+            "at": millis(fix.fixed_at)}
 
 
 async def apk(call: Call) -> Response:
@@ -269,7 +261,7 @@ def count(call: Call) -> int:
                and o.state == phone_c.OFFERED)
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/phone/conversations", conversations), r("/phone/thread", thread), r("/phone/phones", phones),
             r("/phone/position", position), r("/phone/apk", apk, raw=True), r("/phone/revoke", revoke, write=True),

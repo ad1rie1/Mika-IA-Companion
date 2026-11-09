@@ -136,7 +136,7 @@ def test_the_command_line_declares_shows_and_makes_a_trial_image(tmp_path, capsy
     assert code == 0 and out["backends"]["oa"]["api_key"] == "••••"
 
     real = config_mod.build_gateway
-    monkeypatch.setattr(cli, "build_image_gateway",
+    monkeypatch.setattr(cli.models, "build_image_gateway",
                         lambda cfg, clock: real(cfg, clock, make=lambda n, s: FakeImageBackend(n)))
     code, out = run("essai", "un chat roux", "--out", str(tmp_path / "essai"), "--aspect", "portrait")
     assert code == 0 and out["issue"] == "ok" and out["fournisseur"] == "oa"

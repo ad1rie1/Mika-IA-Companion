@@ -12,6 +12,7 @@ import secrets
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -53,7 +54,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "56"
+ASSET_VERSION = "57"
 
 log = logging.getLogger("mika.console")
 
@@ -364,8 +365,17 @@ class UI:
         fmt = "%H:%M" if span <= 2 * 86_400 * US else "%d/%m"
         return datetime.fromtimestamp(t / US, self.tz).strftime(fmt)
 
-    def env(self) -> render.Env:
-        return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp, frame=self.frame)
+    @cached_property
+    def view_places(self) -> dict[str, str]:
+        """Où mène le lien de chaque vue rangée au menu : « propriétaire/nom » → « destination/onglet »."""
+        return {f"{v.owner}/{v.name}": f"{d.key}/{v.name}" for d in destinations(self.deps.navigation).values()
+                for v in self.inspection.in_section(d.key)}
+
+    def env(self, when: Callable[[int], str] | None = None) -> render.Env:
+        """Ce qu'il faut pour rendre, et où vit chaque page ; ``when`` : l'heure dite autrement qu'en entier."""
+        return render.Env(when=when or self.when_long, now=self.now(), stamp=self.stamp, frame=self.frame,
+                          views=self.view_places,
+                          settings=self.settings_forms.url if self.settings_forms is not None else None)
 
     def frame(self, html: str, images: tuple[tuple[str, str, bytes], ...] = (), remote: bool = False) -> str:
         """L'adresse du cadre où se lit ce document HTML natif, tel qu'il a été écrit (ADR 0169), avec ses images
@@ -549,8 +559,9 @@ class UI:
         states = {"ok": ("ok", "en forme"), "degraded": ("warn", "répond moins bien"), "ko": ("danger", "en panne")}
         dot, text = states.get(report.status, ("muted", report.status))
         out.append({"label": "Santé", "text": text, "dot": dot, "href": f"{PREFIX}/systeme/sante"})
+        shown = self.env()
         for spec, v in self.inspection.vitals():
-            out.append(self._vital(spec.label, v))
+            out.append(self._vital(spec.label, v, shown))
         pending = len(self.kernel.mind.frame().get(rt.PENDING_EFFECTS))
         if pending:
             out.append({"label": "À approuver", "text": str(pending), "dot": "warn",
@@ -572,9 +583,9 @@ class UI:
         return out
 
     @staticmethod
-    def _vital(label: str, v: Vital) -> dict[str, Any]:
+    def _vital(label: str, v: Vital, shown: render.Env | None = None) -> dict[str, Any]:
         return {"label": label, "text": v.text, "dot": render.tone(v.tone) if v.tone else "",
-                "hint": v.hint, "href": render.href(v.href) if v.href else "",
+                "hint": v.hint, "href": render.href(v.href, shown) if v.href else "",
                 "swatch": v.swatch.key if v.swatch else "", "short": v.swatch.text if v.swatch else "",
                 "ratio": None if v.ratio is None else round(min(1.0, max(0.0, v.ratio)), 3)}
 

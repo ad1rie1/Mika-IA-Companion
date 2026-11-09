@@ -9,9 +9,9 @@ import { h } from "../../shell/dom";
 import { closeModal, openModal, toast } from "../../shell/float";
 import { ico, type IconName } from "../../shell/icons";
 import { seg } from "./form";
-import { confirmModal, failureText, personAvatar, toastFailure } from "./kit";
+import { confirmModal, failureText, personAvatar, toastFailure } from "../../shared/kit";
 import type { Host, Page } from "./page";
-import * as store from "./store";
+import * as store from "../../shared/store";
 import { KIND_WORDS, shareLevelsFor, sharePeople, sharePhrase, shareTarget, shareWords } from "./words";
 
 const KIND_ICONS: Record<ShareKind, IconName> = { mail: "mail", teams: "teams", mcp: "server" };

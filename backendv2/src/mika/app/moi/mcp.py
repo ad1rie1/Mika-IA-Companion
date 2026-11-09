@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from starlette.routing import Route
 
 from mika.adapters.mcp.config import McpConfig, McpServer
-from mika.app.moi import OWN_MAX, Call, Denied, MeApi, missing, refused
+from mika.app.moi.api import OWN_MAX, Call, Denied, MeApiBase, missing, refused
 from mika.app.moi.hosts import LOCAL, local_host, url_host
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -264,7 +264,7 @@ async def remove(call: Call) -> dict[str, Any]:
     return {"ok": True, "message": "Service retiré."}
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/mcp/services", services), r("/mcp/plug", plug, write=True), r("/mcp/test", test, write=True),
             r("/mcp/tools", tools, write=True), r("/mcp/save", save, write=True), r("/mcp/remove", remove, write=True)]

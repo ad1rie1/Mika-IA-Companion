@@ -581,12 +581,8 @@ def _apps_where(p: Project, frame: Frame) -> str:
     aud = frame.audience
     if aud is not None and aud.owner:
         return phrase("projects.share.apps", apps=", ".join(
-            f"« {a.title} » ({APP_VIEWS.format(app=quote(a.name, safe=''))})" for a in shown))
+            phrase("projects.share.app_link", title=a.title, app=quote(a.name, safe="")) for a in shown))
     return phrase("projects.share.apps_closed", apps=", ".join(f"« {a.title} »" for a in shown))
-
-
-#: les vues d'une app dans la console
-APP_VIEWS = "/inspecteur/fiche/app/{app}?onglet=vues"
 
 
 def _stall_body(p: Project, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody:

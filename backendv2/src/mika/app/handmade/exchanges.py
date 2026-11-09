@@ -17,26 +17,23 @@ from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look, columns, emotion, reader
+from mika.app.handmade import Look, emotion, plain
+from mika.app.handmade.tabs import raw_rows, raw_table
 from mika.contracts import identity as identity_c
 from mika.inspector import render
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
-from mika.kernel.inspect import Badge, Disclosure, Prose, Row, Stats, Swatch, Table, Text, When
+from mika.kernel.inspect import Badge, Disclosure, Prose, Row, Stats, Swatch, Table, When
 from mika.vocab import affect as A
 
 #: un message plus long se replie (« lire la suite »)
 FOLD_CHARS = 700
-
-
-def _text(cell: Any) -> str:
-    if isinstance(cell, Text):
-        return cell.text
-    return "" if cell is None else str(cell)
+#: le titre de sa liste chez la faculté : sur la fiche d'une personne, sur celle d'un moyen de communication
+TITLE, FIL_TITLE = "Échanges", "Messages"
 
 
 def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
-    table = next((b for b in blocks if isinstance(b, Table) and "texte" in columns(b)), None)
+    table = raw_table(blocks, TITLE) or raw_table(blocks, FIL_TITLE)
     if table is None:
         return None
     look = Look.of(ui, DAY)
@@ -45,30 +42,28 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
     # de communication (``key`` vide), toujours
     several = not key or len(look.frame.get(identity_c.HANDLES(key)) or ()) > 1
 
-    cell = reader(table)
     messages: list[dict[str, Any]] = []
-    for raw in table.rows:  # du plus récent au plus ancien, comme la page de la faculté (ADR 0181)
-        row = raw if isinstance(raw, Row) else Row(tuple(raw))
-        speaker = cell(row, "qui parle")
+    for row, cell in raw_rows(table):  # du plus récent au plus ancien, comme la page de la faculté (ADR 0181)
+        speaker = cell.get("qui parle")
         mine = isinstance(speaker, Badge) and speaker.text == "elle"
-        when = cell(row, "quand")
+        when = cell.get("quand")
         stamp = when.at if isinstance(when, When) else 0
-        felt = cell(row, "émotion")
+        felt = cell.get("émotion")
         e = emotion(felt.key) if isinstance(felt, Swatch) else None
-        full = next((p.text for p in row.detail if isinstance(p, Prose)), "") or _text(cell(row, "texte"))
-        answer = cell(row, "réponse")
-        place = cell(row, "où")
+        full = next((p.text for p in row.detail if isinstance(p, Prose)), "") or plain(cell.get("texte"))
+        answer = cell.get("réponse")
+        place = cell.get("où")
         messages.append({
             "mine": mine, "muted": row.tone == "muted", "day": look.date(stamp) if stamp else "",
             "time": look.hm(stamp) if stamp else "", "text": full, "long": len(full) > FOLD_CHARS,
             "short": full[:FOLD_CHARS].rstrip() + "…" if len(full) > FOLD_CHARS else full,
             "emotion": e.value if e is not None else "", "word": A.FR[e] if e is not None else "",
             "room": str(place) if place and str(place) != "en privé" else "",
-            "who": render.cell(cell(row, "avec"), shown) if several and cell(row, "avec") is not None else None,
+            "who": render.cell(cell["avec"], shown) if several and cell.get("avec") is not None else None,
             "answer": render.cell(answer, shown) if answer not in (None, "") else None,
             "why": render.href(row.href) if row.href else "",
-            "episode": render.cell(cell(row, "épisode"), shown) if cell(row, "épisode") not in (None, "—") else None,
-            "number": render.cell(cell(row, "n°"), shown) if cell(row, "n°") is not None else None,
+            "episode": render.cell(cell["épisode"], shown) if cell.get("épisode") not in (None, "—") else None,
+            "number": render.cell(cell["n°"], shown) if cell.get("n°") is not None else None,
         })
     days = []
     for m in messages:
@@ -76,7 +71,7 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
             days.append({"day": m["day"], "messages": []})
         days[-1]["messages"].append(m)
     stats = next((b for b in blocks if isinstance(b, Stats)), None)
-    counts = [{"label": s.label, "value": _text(s.value)} for s in stats.items] if stats is not None else []
+    counts = [{"label": s.label, "value": plain(s.value)} for s in stats.items] if stats is not None else []
     folded = next((b for b in blocks if isinstance(b, Disclosure)), None)
     summaries = []
     if folded is not None:
@@ -84,7 +79,7 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
         for r in inner.rows if inner is not None else ():
             row = r if isinstance(r, Row) else Row(tuple(r))
             who, upto, text = (row.cells + (None, None, None))[:3]
-            summaries.append({"who": render.cell(who, shown), "upto": render.cell(upto, shown), "text": _text(text)})
+            summaries.append({"who": render.cell(who, shown), "upto": render.cell(upto, shown), "text": plain(text)})
     got = render.block(table, shown, query)
     # la même liste en tableau, filtres gardés : la console la rend (``wants_table``)
     as_table = "?" + urlencode({**{k: v for k, v in query.items() if k != "flash"}, f"vue_{got['id']}": "table"})

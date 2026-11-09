@@ -6,7 +6,7 @@ l'oubli d'un objet qui est un sujet de contenus."""
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -27,8 +27,15 @@ SEARCH_PAGE = 25
 
 
 def fiche_url(kind: str, key: str, tab: str = "") -> str:
-    base = f"{PREFIX}/fiche/{quote(kind, safe='')}/{quote(key, safe='')}"
-    return base + (f"?{urlencode({'onglet': tab})}" if tab else "")
+    """L'adresse de la fiche d'un objet : la seule aide de la console pour l'écrire (``tab`` : l'onglet ouvert)."""
+    return render.href(Ref.subject(kind, key, "", tab))
+
+
+def fiche_key(href: str, kind: str) -> str:
+    """La clé de l'objet dont ce lien ouvre la fiche, si c'est une fiche de cette sorte ; sinon « ». L'inverse de
+    ``fiche_url`` : ce qu'une page dessinée relit au lien rendu par la faculté."""
+    base, path = fiche_url(kind, ""), urlsplit(href).path
+    return unquote(path[len(base):]) if path.startswith(base) else ""
 
 
 def forget_form(ui: Any, request: Request, kind: str, key: str, shown: str = "") -> dict[str, Any]:
@@ -57,7 +64,8 @@ VIEWS = f"{PREFIX}/systeme/vues"
 TECHNICAL = "Chercher dans les vues techniques"
 
 
-def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str, technical: int = 0) -> dict[str, Any]:
+def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str, technical: int = 0,
+                shown: render.Env | None = None) -> dict[str, Any]:
     """Ce que dessine la recherche : chaque groupe de résultats (ses tableaux de liens) en carte, ses liens et leur
     détail, sa pagination ; ou ce que dit sa note (rien trouvé, rien demandé). ``technical`` : combien de vues brutes
     des facultés portent ce mot dans leur titre — un lien vers Système › Toutes les vues, pas une sorte de résultat."""
@@ -79,7 +87,7 @@ def search_view(blocks: list[Any], query: dict[str, str], q: str, only: str, tec
         for raw in b.rows:
             cells = raw.cells if isinstance(raw, Row) else tuple(raw)
             link = cells[0] if cells and isinstance(cells[0], Ref) else None
-            items.append({"label": plain(cells[0]) if cells else "", "href": render.href(link) if link else "",
+            items.append({"label": plain(cells[0]) if cells else "", "href": render.href(link, shown) if link else "",
                           "sub": plain(cells[1]) if len(cells) > 1 else ""})
         # sa section (un sous-onglet, ADR 0176) : sa pagination y ramène
         key = f"r-{len(groups) + 1}"
@@ -242,7 +250,7 @@ class Subjects:
         own = [(f"n° {key}", "")] if key.isdigit() else \
             [(key, "")] if isinstance(head, Head) and head.title == key else []
         declared = head.back if isinstance(head, Head) else None
-        target = render.href(declared) if declared is not None else ""
+        target = render.href(declared, self.ui.env()) if declared is not None else ""
         base = f"{PREFIX}/{home.key}" if home is not None else ""
         path = target.split("#", 1)[0].split("?", 1)[0]
         within = bool(base) and (path == base or path.startswith(base + "/"))
@@ -328,7 +336,7 @@ class Subjects:
         subtitle = "Retrouve une page, un réglage, une personne, un projet ou un message."
         # dessinée (ADR 0121) : chaque sorte de résultat en carte ; ses blocs au repli
         drawn = None if wants_table(request.query_params) else call(
-            search_view, blocks, dict(request.query_params), q, only, technical, label="recherche dessinée")
+            search_view, blocks, dict(request.query_params), q, only, technical, self.ui.env(), label="recherche dessinée")
         if isinstance(drawn, dict):
             return self.pages.render_page(request, title="Recherche", heading=heading, active="", blocks=[],
                                           search_q=q, subtitle=subtitle,

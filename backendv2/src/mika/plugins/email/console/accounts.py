@@ -50,7 +50,7 @@ from mika.vocab.access import PERSON
 from mika.vocab.canals import mail_rule
 
 #: où se règle le tableau d'une boîte (ADR 0134)
-CANALS_PAGE = "/inspecteur/reglages/canaux"
+CANALS_PAGE = "canaux"
 
 FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
 
@@ -79,8 +79,8 @@ def _state(info: AccountInfo, error: str) -> Badge:
     return Badge("prêt", "ok")
 
 
-def _fiche(key: str) -> str:
-    return f"/inspecteur/fiche/compte/{key}"
+def _fiche(key: str, tab: str = "") -> Ref:
+    return Ref.subject("compte", key, "", tab)
 
 
 #: ses règles d'envoi (ADR 0132) : qui, quelle boîte, préparer d'elle-même, comment ça part
@@ -114,8 +114,7 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         + (Fields((("fiche", Ref.subject("compte", a.key, "état, dossiers, tester la connexion")),
                                    ("réglages", edit_account(a.key)))),)))
     blocks: list[Block] = [Fields((("nouvelle boîte", add_account()),
-                                   ("tous les réglages", Ref("local", SETTINGS,
-                                                             "Courrier › Paramètres"))))]
+                                   ("tous les réglages", Ref.settings(SETTINGS, "Courrier › Paramètres"))))]
     blocks.append(Table(("nom", Column("clé", "fit"), "adresse", Column("elle écrit", "fit"), "relevés",
                          Column("état", "fit"), Column("dernier relevé", "fit"), Column("non lus", "num"),
                          Column("réponses préparées", "fit")), tuple(rows), title=f"Comptes ({len(rows)})",
@@ -237,9 +236,9 @@ def _tab_voice(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("ton nom", info.display_name or "—"),
         ("son nom d'expéditrice", info.sender_name or self_c.name_of(frame.get(self_c.PERSONA))),
         ("réponses préparées d'elle-même", "oui" if _prepares(frame, info.key) else "non"),
-        ("pour qui, et comment elles partent", Ref("local", f"{CANALS_PAGE}?canal=courrier:{info.key}",
-                                                   "le tableau de cette boîte (Réglages › Canaux)")),
-        ("modifier", edit_account(info.key, _fiche(info.key) + "?onglet=voix")),
+        ("pour qui, et comment elles partent", Ref.settings(CANALS_PAGE, "le tableau de cette boîte (Réglages › Canaux)",
+                                                            canal=f"courrier:{info.key}")),
+        ("modifier", edit_account(info.key, _fiche(info.key, "voix"))),
     ]
     blocks: list[Block] = [Fields(tuple(pairs), title="Sa voix dans cette boîte", columns=2),
                            Prose(voice_text(info), title="Ce qu'elle lit avant d'écrire depuis cette boîte")]

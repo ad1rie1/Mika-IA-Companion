@@ -308,6 +308,7 @@ def test_remote_images_show_once_or_always_for_a_sender(world):  # noqa: F811
     url = f"/inspecteur/fiche/mail/{key}"
     page = get(client, url)
     assert "Images masquées" in page and "Les afficher cette fois" in page and "Toujours pour cet expéditeur" in page
+    assert f'href="{url}?images=1"' in page  # « cette fois » : le lien de la fiche, pas un onglet illisible
     assert "tracker.example.test" not in framed(client, page)
 
     def frame_of(text):

@@ -1,5 +1,5 @@
-"""Connexions extérieures : ses onglets, chacun dans sa forme (ADR 0177). Localisation et Messages du téléphone sont
-dessinés à part (``handmade/senses.py``).
+"""Connexions extérieures : ses onglets, chacun dans sa forme (ADR 0177). Les onglets de la fiche d'une personne
+(« Son téléphone », « Sa position ») sont dans ``person/senses.py``, sur les mêmes morceaux.
 
 - Flux RSS : où en est le relevé, en une phrase et une bande de chiffres (un flux en panne, en bandeau) ; puis en
   sous-onglets les derniers articles (leur pertinence, leur résumé à lire), ses flux (leur état, leur dernier relevé),
@@ -9,6 +9,11 @@ dessinés à part (``handmade/senses.py``).
 - Dessins : ses dessins en chiffres, puis une entrée par dessin — ce qu'elle a demandé, pour qui, où il en est, ce
   qu'elle y voit ou pourquoi il a raté.
 - Appareils : ses appareils à gauche (chacun filtre la page), ce qu'ils lui ont signalé à droite.
+- Messages du téléphone (ADR 0120, 0123) : personne par personne, conversation par conversation (un contact, un
+  groupe), ses messages en bulles comme dans les Échanges ; les réponses qu'elle a proposées et leur sort.
+- Localisation (ADR 0119, 0123) : une ligne par personne (ses téléphones réunis), puis ce que les téléphones lui ont
+  dit. Ces deux pages se lisent dans la tranche de leur plugin et leurs textes au magasin, comme leurs vues, qui restent
+  leur source pour la console en MCP et le repli (un dessin qui échoue rend la main à leurs blocs).
 
 Les réglages de Ses sens (les flux suivis, l'accès des appareils, la transcription) sont derrière la roue de la
 destination, au bout de la barre de titre (ADR 0206) ; les liens d'une vue vers d'autres réglages ou une tâche (sa
@@ -19,12 +24,13 @@ plugin déclare : elle reste la source, pour la console en MCP comme pour le rep
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade import person_href
+from mika.app.handmade import Look, person_href
 from mika.app.handmade.tabs import (
     Got,
     Line,
@@ -38,6 +44,16 @@ from mika.app.handmade.tabs import (
     text,
     tiles,
 )
+from mika.contracts import location as location_c
+from mika.contracts import phone as phone_c
+from mika.inspector.ui import env
+from mika.kernel.clock import DAY
+from mika.plugins.location.inspect import PAGE as POSITIONS
+from mika.plugins.location.inspect import SHOWN as SAID
+from mika.plugins.location.inspect import by_person
+from mika.plugins.phone.inspect import APPS, FORGOTTEN, PER_PERSON, PER_THREAD, STATES, threads
+from mika.plugins.phone.inspect import PAGE as MESSAGES
+from mika.vocab.people import is_internal
 
 STYLES = ("handmade/senses.css",)
 #: les liens d'une page dans sa barre de titre : ses actions en boutons, ses réglages en roue
@@ -231,9 +247,170 @@ def appareils(got: Got) -> tuple[Markup, list[Any], Markup] | None:
     return _page(html, settings(got))
 
 
+# ── Messages du téléphone et Localisation ─────────────────────────────────
+
+#: le paramètre qui ne garde qu'une personne (le même que celui des vues des plugins)
+WHO = "personne"
+
+
+def slice_of(look: Look, owner: str) -> Any:
+    try:
+        return look.frame.state(owner)
+    except KeyError:  # ce plugin n'est pas composé ici
+        return None
+
+
+def _person(look: Look, person: str) -> dict[str, str]:
+    if not person or is_internal(person):
+        return {"name": "personne", "href": ""}
+    return {"name": look.name(person), "href": look.href(person)}
+
+
+def _when(look: Look, at: int) -> str:
+    """Quand : « aujourd'hui à 14:02 », « hier à 9:10 », sinon « mardi 14 oct. à 18:30 »."""
+    said = look.day(at)
+    return said if said.startswith(("aujourd'hui", "hier")) else f"{look.date(at)} à {look.hm(at)}"
+
+
+def _link(page: str, **params: Any) -> str:
+    """Une page, et ces paramètres en plus de ceux qu'elle a."""
+    return page + ("&" if "?" in page else "?") + urlencode(params) if params else page
+
+
+def _chips(look: Look, page: str, people: Mapping[str, int], chosen: str) -> list[dict[str, Any]]:
+    """Le filtre par personne : tout le monde, puis chacune (son compte)."""
+    if len(people) < 2:
+        return []
+    return [{"text": "Tout le monde", "href": page, "on": not chosen, "count": len(people)},
+            *({"text": look.name(p), "href": f"{page}?" + urlencode({WHO: p}), "on": p == chosen, "count": n}
+              for p, n in people.items())]
+
+
+# ── le téléphone ──
+
+def conversation_of(look: Look, msgs: Sequence[Any], text: Any, owner: str) -> dict[str, Any]:
+    """Une conversation : avec qui, l'appli, son dernier message ; ses messages en bulles, jour par jour. ``owner`` :
+    le nom de la personne dont c'est le téléphone (ce qu'elle a écrit elle-même)."""
+    last = msgs[0]
+    if last.group:
+        label = text(last.title_ref) or "un groupe"
+    else:
+        other = next((m for m in msgs if not m.own and m.name_ref), None)
+        label = text(other.name_ref) if other is not None else "—"
+    days: list[dict[str, Any]] = []
+    for m in reversed(msgs[:PER_THREAD]):  # dans l'ordre où ils ont été écrits
+        day = look.date(m.at)
+        if not days or days[-1]["day"] != day:
+            days.append({"day": day, "messages": []})
+        days[-1]["messages"].append({"mine": m.own, "text": text(m.text_ref) or FORGOTTEN, "time": look.hm(m.at),
+                                     "who": "" if m.own or not m.group else text(m.name_ref)})
+    said = owner if last.own else (text(last.name_ref) or "—")
+    return {"label": label, "group": last.group, "app": APPS.get(last.source, last.source),
+            "preview": f"{said} : {text(last.text_ref) or FORGOTTEN}", "when": _when(look, last.at),
+            "count": len(msgs), "cut": max(0, len(msgs) - PER_THREAD), "days": days}
+
+
+def reader_of(look: Look, msgs: Sequence[Any], offers: Sequence[Any]) -> Any:
+    refs = [r for m in msgs for r in (m.text_ref, m.name_ref, m.title_ref) if r] + [o.body_ref for o in offers]
+    texts = look.texts(refs)
+
+    def text(ref: str) -> str:
+        return texts.get(ref, FORGOTTEN) if ref else ""
+    return text
+
+
+def offers_of(look: Look, offers: Sequence[Any], text: Any) -> list[dict[str, Any]]:
+    return [{"who": _person(look, o.person), "app": APPS.get(o.source, o.source), "text": text(o.body_ref),
+             "state": STATES.get(o.state, o.state) + (f" ({o.reason})" if o.reason else ""),
+             "tone": "ok" if o.state == "sent" else "warn" if o.state == phone_c.OFFERED else
+             "danger" if o.state == "failed" else "", "when": _when(look, o.at)} for o in offers]
+
+
+def messages(got: Got) -> Markup | None:
+    """Connexions extérieures › Messages du téléphone : le téléphone de chaque personne, ses conversations."""
+    look = Look.of(got.ui, DAY)
+    s = slice_of(look, "phone")
+    if s is None:
+        return None
+    if not s.messages and not s.offers:
+        return Markup(env.get_template("handmade/sens/messages.html").render(empty=True))
+    people: dict[str, list[Any]] = {}
+    for m in sorted(s.messages.values(), key=lambda m: -m.seq):
+        people.setdefault(m.person, []).append(m)
+    chosen = str(got.query.get(WHO, ""))
+    chosen = chosen if chosen in people else ""
+    cut = not chosen and len(people) > 1  # tout le monde : quelques conversations par personne
+    shown = {chosen: people[chosen]} if chosen else people
+    convs = {p: threads(msgs) for p, msgs in shown.items()}
+    offers = sorted((o for o in s.offers.values() if not chosen or o.person == chosen), key=lambda o: -o.seq)[:60]
+    text = reader_of(look, [m for ts in convs.values() for t in (ts[:PER_PERSON] if cut else ts)
+                          for m in t[:PER_THREAD]], offers)
+    phones = [{**_person(look, p), "count": len(people[p]),
+               "conversations": [conversation_of(look, t, text, look.name(p)) for t in (ts[:PER_PERSON] if cut else ts)],
+               "more": len(ts) - PER_PERSON if cut and len(ts) > PER_PERSON else 0, "total": len(ts),
+               "only": f"{MESSAGES}?" + urlencode({WHO: p})} for p, ts in convs.items()]
+    return Markup(env.get_template("handmade/sens/messages.html").render(
+        chips=_chips(look, MESSAGES, {p: len(m) for p, m in people.items()}, chosen), phones=phones,
+        offers=offers_of(look, offers, text), who=not chosen))
+
+
+# ── la localisation ──
+
+def _accuracy(m: int) -> str:
+    return f"à {m} m près" if m else "précision inconnue"
+
+
+def fix_of(look: Look, f: Any, texts: Mapping[str, str]) -> dict[str, Any]:
+    return {"place": texts.get(f.label_ref, FORGOTTEN) if f.label_ref else "", "coords": texts.get(f.coords_ref,
+            FORGOTTEN), "accuracy": _accuracy(f.accuracy_m), "when": _when(look, f.fixed_at),
+            "ago": look.ago(f.fixed_at), "handle": f.handle}
+
+
+def said_of(look: Look, query: Mapping[str, str], person: str, page: str) -> dict[str, Any]:
+    """Ce que les téléphones lui ont dit (d'une personne, ou de tous), du plus récent, par pages."""
+    before = int(query.get("avant", 0) or 0) if str(query.get("avant", "")).isdigit() else 0
+    got = look.ui.inspection.context().events([location_c.LOCATED, location_c.CLEARED], SAID,
+                                              before=before or None, where=("person", person) if person else None)
+    entries = []
+    for e in got:
+        d = e.data
+        cleared = e.type.name == location_c.CLEARED.name
+        entries.append({"when": _when(look, e.at), "who": _person(look, d.person), "cleared": cleared,
+                        "place": "" if cleared or d.label is None else (d.label.text or FORGOTTEN),
+                        "coords": "" if cleared else (d.coords.text or FORGOTTEN),
+                        "accuracy": "" if cleared else _accuracy(int(d.accuracy_m))})
+    keep = {k: v for k, v in query.items() if k not in ("avant", "flash", "onglet")}
+    older = _link(page, **keep, avant=got[-1].seq) if len(got) == SAID else ""
+    newer = _link(page, **keep) if before else ""
+    return {"entries": entries, "older": older, "newer": newer}
+
+
+def positions(got: Got) -> Markup | None:
+    """Connexions extérieures › Localisation : où est chaque personne, puis ce que les téléphones lui ont dit."""
+    look, query = Look.of(got.ui, DAY), got.query
+    s = slice_of(look, "location")
+    if s is None:
+        return None
+    if not s.fixes:
+        return Markup(env.get_template("handmade/sens/positions.html").render(
+            empty=True, said=said_of(look, query, "", POSITIONS), who=True))
+    people = by_person(s)
+    chosen = str(query.get(WHO, ""))
+    chosen = chosen if chosen in people else ""
+    shown = {chosen: people[chosen]} if chosen else people
+    texts = look.texts([r for fs in shown.values() for f in fs for r in (f.coords_ref, f.label_ref)])
+    where = [{**_person(look, p), **fix_of(look, fs[0], texts), "phones": len(fs),
+              "others": [fix_of(look, f, texts) for f in fs[1:]]} for p, fs in shown.items()]
+    return Markup(env.get_template("handmade/sens/positions.html").render(
+        chips=_chips(look, POSITIONS, {p: len(fs) for p, fs in people.items()}, chosen), where=where,
+        said=said_of(look, query, chosen, POSITIONS), who=not chosen))
+
+
 TABS: dict[str, Any] = {
     "sens/flux": Tab(flux, *STYLES),
     "sens/camera": Tab(camera, *STYLES),
     "sens/dessins": Tab(dessins, *STYLES),
     "sens/appareils": Tab(appareils, *STYLES),
+    "sens/messages": Tab(messages, *STYLES),
+    "sens/positions": Tab(positions, *STYLES),
 }

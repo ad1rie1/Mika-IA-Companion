@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import unquote
 
 from markupsafe import Markup
 
@@ -32,14 +31,11 @@ from mika.contracts import social as social_c
 from mika.faculties.identity.faculty import handles_of
 from mika.faculties.identity.inspect import TRUST_SHORT, TRUST_TONE, handle_label, principal
 from mika.faculties.social.inspect import CLOSENESS_FR
-from mika.inspector.pages.subjects import fiche_url
-from mika.inspector.ui import PREFIX
+from mika.inspector.pages.subjects import fiche_key, fiche_url
 from mika.kernel.clock import DAY
 from mika.vocab.people import is_identifiable
 
 STYLES = ("handmade/personnes.css",)
-#: la fiche d'une personne, telle qu'un lien de la faculté y mène
-PERSON_LINK = f"{PREFIX}/fiche/person/"
 #: une personne : au plus tant de moyens de communication nommés sur sa ligne (les autres : comptés)
 HANDLES_SHOWN = 4
 #: les échelons de la proximité, du plus proche au plus lointain (les groupes de « Liens »)
@@ -54,10 +50,7 @@ RUNG_TITLES = {social_c.CLOSE: "Proches", social_c.FRIEND: "Amitiés", social_c.
 
 def person_of(c: Mapping[str, Any] | None) -> str:
     """La personne qu'une cellule nomme : la clé de la fiche où son lien mène (vide : ce n'est pas une personne)."""
-    href = str((c or {}).get("href") or "")
-    if not href.startswith(PERSON_LINK):
-        return ""
-    return unquote(href[len(PERSON_LINK):].split("?", 1)[0].split("#", 1)[0])
+    return fiche_key(str((c or {}).get("href") or ""), "person")
 
 
 def _face(look: Look, person: str, online: Mapping[str, dict[str, Any]], c: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -187,16 +180,11 @@ def _channel(said: str) -> str:
     return CHANNELS.get(said, (said or "un canal inconnu",))[0]
 
 
-#: la fiche d'un moyen de communication, telle qu'un lien de la faculté y mène
-HANDLE_LINK = f"{PREFIX}/fiche/handle/"
-
-
 def _handle(look: Look, c: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Un moyen de communication, nommé comme sa fiche le nomme (« Béa · compte ») plutôt que par sa clé."""
-    href = str((c or {}).get("href") or "")
-    if not href.startswith(HANDLE_LINK):
+    key = fiche_key(str((c or {}).get("href") or ""), "handle")
+    if not key:
         return dict(c) if c else None
-    key = unquote(href[len(HANDLE_LINK):].split("?", 1)[0])
     return {**c, "text": handle_label(look.frame.state("identity"), key)}
 
 

@@ -22,9 +22,10 @@ from urllib.parse import urlencode
 from starlette.routing import Route
 
 from mika.app.console import LABELS
-from mika.app.moi import Call, Me, MeApi
 from mika.app.moi import mail as mail_moi
 from mika.app.moi import teams as teams_moi
+from mika.app.moi.api import Call, Me, MeApiBase
+from mika.app.moi.common import OWN
 from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -285,10 +286,10 @@ async def matrix(call_: Call) -> dict[str, Any]:
             *({"key": f"courrier:{key}", "kind": "mail", "title": a.name, "address": a.address,
                "family": "famille:email", "rules": _rules(canals, f"{MAIL}:{key}", name, her, sources)}
               # les siennes seulement : la règle d'une boîte qu'on lui partage est l'affaire de son propriétaire
-              for key, (a, level) in mail_moi.boxes(call_).items() if level == mail_moi.OWN),
+              for key, (a, level) in mail_moi.boxes(call_).items() if level == OWN),
             *({"key": f"teams:{key}", "kind": "teams", "title": a.name, "family": "famille:teams",
                "rules": _rules(canals, f"{TEAMS}:{key}", name, her, sources)}
-              for key, (a, level) in teams_moi.accounts(call_).items() if level == teams_moi.OWN)]},
+              for key, (a, level) in teams_moi.accounts(call_).items() if level == OWN)]},
         *({"key": group, "title": "Services" if group == "services" else "Apps de la Forge", "resources": [
             {"key": resource, "title": _outside_title(resource, apps),
              "description": _outside_about(resource, statuses), "href": href(resource), "tools": list(rows.values())}
@@ -357,5 +358,5 @@ def _person_name(frame: Any) -> Callable[[str], str]:
     return name
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     return [api.route("/rights", matrix)]

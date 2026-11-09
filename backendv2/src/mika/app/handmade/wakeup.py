@@ -93,7 +93,7 @@ class WakeupFiche(Overview):
         """« Modifier ses réglages » (Réveils par API › Paramètres, ADR 0206), qui ramène ici."""
         if _endpoint(ui, key) is None:
             return []
-        return [("Modifier ses réglages", render.href(edit_endpoint(key, fiche_url(KIND, key))))]
+        return [("Modifier ses réglages", render.href(edit_endpoint(key, Ref.subject(KIND, key, "")), ui.env()))]
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:

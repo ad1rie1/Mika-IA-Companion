@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
 
@@ -31,12 +31,11 @@ from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs, text, t
 from mika.app.handmade.tabs.people import person_of
 from mika.contracts.identity import DENIED, VOUCHED
 from mika.inspector.formview import PREFILL
+from mika.inspector.pages.subjects import fiche_key
 from mika.inspector.ui import PREFIX
 from mika.runtime.operations import offered
 
 STYLES = ("handmade/identites.css",)
-#: la fiche d'un moyen de communication, telle qu'un lien de la faculté y mène
-HANDLE_LINK = f"{PREFIX}/fiche/handle/"
 #: d'où reviennent les actions ouvertes depuis la file (ADR 0180)
 CLAIMS = f"{PREFIX}/approbations/identites"
 #: verser une preuve sur un moyen de communication (s'en porter garant, démentir un nom)
@@ -45,10 +44,7 @@ EVIDENCE = "identity.preuve"
 
 def handle_of(c: Mapping[str, Any] | None) -> str:
     """Le moyen de communication qu'une cellule nomme : la clé de la fiche où son lien mène."""
-    href = str((c or {}).get("href") or "")
-    if not href.startswith(HANDLE_LINK):
-        return ""
-    return unquote(href[len(HANDLE_LINK):].split("?", 1)[0].split("#", 1)[0])
+    return fiche_key(str((c or {}).get("href") or ""), "handle")
 
 
 def _split(said: str) -> tuple[str, str]:

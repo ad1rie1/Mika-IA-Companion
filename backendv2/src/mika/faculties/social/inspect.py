@@ -326,7 +326,7 @@ def settable(frame: Frame, person: str) -> bool:
     return frame.get(identity_c.PERSON(person)) == person and bool(frame.get(identity_c.HANDLES(person)))
 
 
-def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, on_fiche: bool = False) -> list[Block]:
+def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> list[Block]:
     p = params(frame.env.params_of("social", frame.root))
     reading = frame.get(c.CONTACT(person))
     profile = s.profiles.get(person)
@@ -349,7 +349,6 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
                Stat("dernier message reçu", _when(reading.last_in)),
                Stat("ses initiatives sans réponse", reading.unanswered))),
         Fields((
-            *((() if on_fiche else (("personne", _ref(frame, person)),))),  # sur sa fiche : pas de lien vers elle-même
             ("jours de contact", f"{reading.days} en tout, {window.days}{recent}" if window else reading.days),
             ("messages reçus", f"{reading.inbound} en tout, {window.messages}{recent}" if window else reading.inbound),
             ("qui ouvre leurs conversations",
@@ -389,7 +388,7 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
         return [Note("Ouvre la fiche d'une personne : Personnes, puis la personne.", tone="muted")]
     if not is_identifiable(person):
         return [Note("Une connexion de passage : aucun lien durable ne s'y attache.", tone="muted")]
-    blocks: list[Block] = (_detail(s, frame, ctx, person, on_fiche=True) if person in _known(s) else
+    blocks: list[Block] = (_detail(s, frame, ctx, person) if person in _known(s) else
                            [Note("Aucun lien pour l'instant : cette personne ne lui a jamais écrit, et rien n'a été "
                                  "déclaré.", tone="muted")])
     if person in _known(s):
@@ -402,18 +401,11 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 SEARCH = Param("q", "nom", placeholder="Alice…")
 LEVEL = Param("proximite", "proximité", kind="select", choices=tuple(CLOSENESS_FR.items()))
-LEGACY = Param("person", "personne", kind="hidden")
 
 
-@SOCIAL.inspect("liens", title="Liens", section="personnes", order=20, params=[SEARCH, LEVEL, LEGACY],
+@SOCIAL.inspect("liens", title="Liens", section="personnes", order=20, params=[SEARCH, LEVEL],
                 description="Chaque lien : sa proximité, son rythme, le silence ; une ligne mène à la fiche.")
 def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    person = str(ctx.value("person") or "")
-    if person:  # l'ancien lien vers le détail d'une personne
-        if person not in _known(s):
-            return [Note(f"Aucun lien avec « {person} » pour l'instant.", tone="muted")]
-        return [Fields((("fiche", _ref(frame, person, "lien")),), title="Ce lien vit désormais sur la fiche"),
-                *_detail(s, frame, ctx, person)]
     p = params(frame.env.params_of("social", frame.root))
     q, level = fold(str(ctx.value("q") or "")), str(ctx.value("proximite") or "")
     people = sorted(_known(s), key=lambda k: (-(s.contacts[k].last_in if k in s.contacts else 0), k))

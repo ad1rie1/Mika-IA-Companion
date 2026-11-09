@@ -96,7 +96,7 @@ def _who(frame: Frame, handle: str) -> Cell:
 
 
 def _download_link(r: FileRow) -> Ref:
-    return Ref("local", f"/inspecteur/telecharger/{KIND}/{r.id}", "télécharger", (("fichier", r.name),))
+    return Ref.download(KIND, r.id, "télécharger", r.name)
 
 
 def _message(r: FileRow) -> Cell:

@@ -1,5 +1,5 @@
-"""Relations & échanges › Conversations : ses onglets dans leur forme (ADR 0177). Ses réponses jugées sont dessinées
-à part (``conversations.py``) ; ici, avec qui elle parle et ce qui attend.
+"""Relations & échanges › Conversations : ses onglets dans leur forme (ADR 0177) : avec qui elle parle, ce qui attend,
+ses réponses jugées.
 
 - **Par personne** (ADR 0181) : comme une messagerie — une ligne par personne, tous ses moyens de communication réunis,
   la conversation la plus récente d'abord : son avatar à la couleur de ce qu'elle ressent envers elle (et sa présence,
@@ -10,6 +10,8 @@
   quand, et depuis combien de temps elle attend (en avant, une attente longue dite) ; sur sa ligne, le message source
   et la conversation avec cette personne. L'aide de la faculté au pied ; la pagination et la bascule « Tableau »
   sont les siennes.
+- **Ses réponses jugées** (ADR 0121) : le message, sa réponse, l'avis de l'opératrice et ce qu'elle aurait dû dire ; son
+  filtre et sa pagination sont ceux de la faculté, une liste qu'il ne reconnaît pas rend la main à ses blocs.
 
 Les données restent celles de la faculté du fil (``transcript``) ; l'instant de chaque question se lit à la liste
 telle qu'elle l'a déclarée (le temps d'attente, pas une date relative).
@@ -21,12 +23,14 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.handmade import Look, person_card, presences, span
-from mika.app.handmade.tabs import Got, Line, Tab, blank, paged, text
+from mika.app.handmade import Look, person_card, plain, presences, span
+from mika.app.handmade.tabs import Got, Line, Tab, blank, paged, raw_rows, text
 from mika.app.handmade.tabs.people import person_of
+from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.ui import env
 from mika.kernel.clock import DAY, HOUR, MINUTE
-from mika.kernel.inspect import Row, When
+from mika.kernel.inspect import Badge, Row, When
 from mika.vocab.people import is_identifiable
 
 STYLES = ("handmade/fil.css",)
@@ -125,7 +129,38 @@ def questions(got: Got) -> Markup | None:
     return got.draw("handmade/conversations/questions.html", t=table, items=items, notes=[], lede=lede)
 
 
+# ── Ses réponses jugées ───────────────────────────────────────────────────
+
+#: le titre de sa liste chez la faculté
+JUDGED = "Ses réponses jugées"
+
+
+def judged(got: Got) -> Markup | None:
+    """Conversations › Ses réponses jugées : le message, sa réponse, ton avis, ce qu'elle aurait dû dire."""
+    table = got.raw_table(JUDGED)
+    if table is None:
+        return None
+    look = Look.of(got.ui, DAY)
+    shown = render.Env(when=got.ui.when_long, now=look.now)
+    verdicts = []
+    for row, cell in raw_rows(table):
+        verdict, when = cell.get("avis"), cell.get("quand")
+        should = plain(cell.get("ce qu'elle aurait dû dire"))
+        verdicts.append({
+            "ok": isinstance(verdict, Badge) and verdict.tone == "ok",
+            "verdict": plain(verdict),
+            "who": render.cell(cell["avec"], shown) if cell.get("avec") is not None else None,
+            "when": f"{look.date(when.at)}, {look.hm(when.at)}" if isinstance(when, When) and when.at else "",
+            "asked": plain(cell.get("on lui avait écrit")), "said": plain(cell.get("sa réponse")),
+            "should": "" if should == "—" else should, "why": render.href(row.href) if row.href else "",
+        })
+    pager = render.block(table, shown, got.query).get("pager")
+    return Markup(env.get_template("handmade/conversations/judged.html").render(
+        verdicts=verdicts, pager=pager, empty=table.empty))
+
+
 TABS: dict[str, Any] = {
+    "fil/jugees": Tab(judged),
     "fil/conversations": Tab(conversations, *STYLES),
     "fil/questions": Tab(questions, *STYLES),
 }

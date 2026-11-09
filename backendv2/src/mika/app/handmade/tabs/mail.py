@@ -19,23 +19,26 @@ page ; leurs formulaires sont ceux que la console prépare, avec leur jeton (pou
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from functools import partial
 from typing import Any
-from urllib.parse import quote, unquote, urlencode, urlsplit
+from urllib.parse import urlencode
 
 from markupsafe import Markup
 
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade import excerpt
 from mika.app.handmade.fiche_parts import side_view
+from mika.app.handmade.tabs import Got, Tab, text
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
-from mika.inspector.ui import PREFIX, UI, Forms, env
+from mika.inspector.pages.subjects import fiche_key, fiche_url
+from mika.inspector.ui import UI, Forms, env
 from mika.kernel.inspect import Head
 from mika.plugins.email import READ_AFTER_S, params_of
 from mika.plugins.email.console.actions import GESTURES
 
-#: la fiche d'un mail : ce que la liseuse ouvre
-FICHE = f"{PREFIX}/fiche/mail/"
+STYLES = ("handmade/mail.css",)
+#: la sorte d'objet d'un mail : la fiche que la liseuse ouvre
+KIND = "mail"
 #: l'onglet de la fiche que la liseuse montre (son propriétaire, son nom)
 MESSAGE = ("email", "message")
 #: le paramètre du message ouvert
@@ -51,12 +54,6 @@ TIDY = "email.ranger"
 HER_TAGS = {"important": "important", "réponse attendue": "réponse attendue"}
 HER_FACTS = {"ce que ça pourrait lui faire": "ce que ça lui fait", "brouillon de réponse": "sa réponse",
              "où il en est": "où elle en est"}
-
-
-def _key(href: str) -> str:
-    """La clé d'un mail, lue au lien de sa fiche."""
-    path = urlsplit(href).path
-    return unquote(path[len(FICHE):]) if path.startswith(FICHE) else ""
 
 
 def _here(query: Mapping[str, str], **change: str) -> str:
@@ -75,7 +72,7 @@ def lines(table: Mapping[str, Any], query: Mapping[str, str]) -> list[dict[str, 
         fields = {f["label"]: f["value"] for f in row.get("fields", [])}
         who = next((fields[w] for w in WHO if w in fields), None)
         when = next((v for v in fields.values() if v.get("t") == "when"), None)
-        key = _key(row.get("href", ""))
+        key = fiche_key(row.get("href", ""), KIND)
         out.append({
             "subject": heading.get("text") or "(sans objet)", "snippet": excerpt(heading.get("secondary") or "", 160),
             "unread": bool(heading.get("emphasis")), "who": (who or {}).get("text", ""),
@@ -98,10 +95,10 @@ def _her(ui: UI, key: str) -> dict[str, Any] | None:
         elif d["t"] == "fields":
             for pair in d.get("pairs", []):
                 label, value = pair["label"], pair["value"]
-                text = str(value.get("text") or "")
-                if label in HER_TAGS and text == "oui":
+                written = text(value)
+                if label in HER_TAGS and written == "oui":
                     facts.append((HER_TAGS[label], None))
-                elif label in HER_FACTS and text not in ("", "—"):
+                elif label in HER_FACTS and written not in ("", "—"):
                     facts.append((HER_FACTS[label], value))
         elif d["t"] == "note" and d.get("tone") in ("info", "warn"):
             notes.append(d["text"])
@@ -139,15 +136,14 @@ def reader(ui: UI, key: str, query: Mapping[str, str], forms: Forms,
     return Markup(env.get_template("handmade/mail/reader.html").render(
         head={"title": head.title, "subtitle": head.subtitle, "badges": [render.cell(b, ui.env()) for b in head.badges],
               "facts": [{"label": k, "value": render.cell(v, ui.env())} for k, v in head.facts]},
-        blocks=[drawn_blocks.shape(d) for d in rendered], forms=forms.of(rendered, key) if isinstance(forms, Forms) else {},
-        fiche=FICHE + quote(key, safe=""), close=_here(query), prev=prev, next=next_, her=_her(ui, key),
+        blocks=[drawn_blocks.shape_block(d) for d in rendered], forms=forms.of(rendered, key) if isinstance(forms, Forms) else {},
+        fiche=fiche_url(KIND, key), close=_here(query), prev=prev, next=next_, her=_her(ui, key),
         read_after=_read_after(ui)))
 
 
-def _space(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> tuple[dict[str, Any] | None, list[Any]]:
+def _space(got: Got) -> tuple[dict[str, Any] | None, list[Any]]:
     """L'espace de travail d'un onglet du plugin, rendu comme la console le numérote, et ses listes."""
-    rendered = render.blocks(blocks, ui.env(), query)
-    space = next((d for d in rendered if d["t"] == "workspace"), None)
+    space = next((d for d in got.items if d["t"] == "workspace"), None)
     return space, [d for d in space["items"] if d["t"] == "table"] if space else []
 
 
@@ -156,18 +152,14 @@ def _cells(table: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, dict[s
     return {c["label"]: v for c, v in zip(table["columns"], row["cells"], strict=False)}
 
 
-def _said(cell: Mapping[str, Any] | None) -> str:
-    """Le texte d'une cellule ; « — » (rien) se tait."""
-    text = str((cell or {}).get("text") or "")
-    return "" if text == "—" else text
-
-
-def box(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
-    """Courrier › Réception, Envoyés : l'espace de travail du plugin, la barre qui range ce qu'on a coché, sa liste en
-    lignes, ce qui suit la liste (remonter plus loin), la liseuse ; écrire et relever, dans la barre de titre."""
-    space, tables = _space(ui, blocks, query)
+def box(got: Got, tab: str) -> Any:
+    """Courrier › Réception, Envoyés (``tab`` : celui des deux, le nom que porte sa racine) : l'espace de travail du
+    plugin, la barre qui range ce qu'on a coché, sa liste en lignes, ce qui suit la liste (remonter plus loin), la
+    liseuse ; écrire et relever, dans la barre de titre."""
+    space, tables = _space(got)
+    ui, query, forms = got.ui, got.query, got.forms
     if space is None or not tables:  # pas de boîte, un compte inconnu : bloc par bloc
-        return drawn_blocks.page(ui, blocks, query, forms=forms)
+        return drawn_blocks.page(ui, got.raw, query, forms=forms, tab=tab)
     table, key = tables[0], query.get(READ, "")
     items = space["items"]
     tidy = next((d for d in items if d["t"] == "action" and d["key"] == TIDY), None)
@@ -175,59 +167,68 @@ def box(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[
     shown = lines(table, query)
     actions, before = drawn_blocks.lift([d for d in items[:at] if d is not tidy])
     page = Markup(env.get_template("handmade/mail/box.html").render(
-        side=space["sidebar"], before=before, after=items[at + 1:], table=table,
+        tab=tab, side=space["sidebar"], before=before, after=items[at + 1:], table=table,
         lines=shown, reader=reader(ui, key, query, forms, shown) if key else "", forms=forms,
         bulk=forms.get(tidy["slot"]) if tidy is not None else None, gestures=GESTURES))
-    return page, [], drawn_blocks.head(items=actions, forms=forms)
+    return page, [], got.head(items=actions)
 
 
 def _draft(table: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
     """Un brouillon de la liste : son objet, à qui, depuis quelle boîte, en réponse à quoi, d'où il vient, son état."""
     cells = _cells(table, row)
     answer = cells.get("En réponse à")
-    box_, _, voice = _said(cells.get("Boîte")).partition(" · ")
+    box_, _, voice = text(cells.get("Boîte"), dash=False).partition(" · ")
     state, check = cells.get("État") or {}, cells.get("À vérifier") or {}
-    return {"subject": _said(cells.get("Objet")) or "(sans objet)", "href": row.get("href", ""),
-            "to": _said(cells.get("À")), "box": box_, "voice": voice,
-            "answer": answer if answer is not None and _said(answer) else None,
-            "origin": _said(cells.get("Origine")), "when": cells.get("Proposé"),
-            "state": state if _said(state) else None, "check": check if _said(check) else None,
+    return {"subject": text(cells.get("Objet"), dash=False) or "(sans objet)", "href": row.get("href", ""),
+            "to": text(cells.get("À"), dash=False), "box": box_, "voice": voice,
+            "answer": answer if answer is not None and text(answer, dash=False) else None,
+            "origin": text(cells.get("Origine"), dash=False), "when": cells.get("Proposé"),
+            "state": state if text(state, dash=False) else None, "check": check if text(check, dash=False) else None,
             "waiting": row.get("tone") == "warn"}
 
 
-def drafts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
+def drafts(got: Got) -> Any:
     """Courrier › Brouillons : ce qui attend ton accord en enveloppes, ce qui est décidé en lignes."""
-    space, tables = _space(ui, blocks, query)
+    space, tables = _space(got)
     if space is None or not tables:  # pas de courrier branché : bloc par bloc
-        return drawn_blocks.page(ui, blocks, query, forms=forms)
+        return drawn_blocks.page(got.ui, got.raw, got.query, forms=got.forms, tab="courrier/brouillons")
     lists = [{**t, "drafts": [_draft(t, r) for r in t["rows"]]} for t in tables]
     actions, before = drawn_blocks.lift([d for d in space["items"] if d["t"] != "table"])
     page = Markup(env.get_template("handmade/mail/drafts.html").render(
         side=space["sidebar"], before=before, waiting=lists[0],
-        done=lists[1] if len(lists) > 1 else None, forms=forms))
-    return page, [], drawn_blocks.head(items=actions, forms=forms)
+        done=lists[1] if len(lists) > 1 else None, forms=got.forms))
+    return page, [], got.head(items=actions)
 
 
 def _contact(table: Mapping[str, Any], row: Mapping[str, Any], forms: Mapping[str, Any]) -> dict[str, Any]:
     """Un contact : son nom (sinon son adresse), son adresse, ses échanges dans chaque sens, le dernier ; « Écrire »."""
     cells = _cells(table, row)
-    address, name = _said(cells.get("adresse")), _said(cells.get("nom"))
+    address, name = text(cells.get("adresse"), dash=False), text(cells.get("nom"), dash=False)
     write = next((forms.get(d["slot"]) for d in row.get("detail", []) if d["t"] == "action"), None)
     return {"name": name or address, "address": address if name else "", "initial": (name or address or "?")[:1].upper(),
-            "received": _said(cells.get("reçus")) or "0", "sent": _said(cells.get("envoyés")) or "0",
-            "last": cells.get("dernier échange") if _said(cells.get("dernier échange")) else None,
+            "received": text(cells.get("reçus"), dash=False) or "0", "sent": text(cells.get("envoyés"), dash=False) or "0",
+            "last": cells.get("dernier échange") if text(cells.get("dernier échange"), dash=False) else None,
             "href": row.get("href", ""), "write": {**write, "title": "Écrire"} if write else None}
 
 
-def contacts(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any]) -> Any:
+def contacts(got: Got) -> Any:
     """Courrier › Contacts : une ligne par adresse, ses échanges en un clic, « Écrire » à côté."""
-    space, tables = _space(ui, blocks, query)
+    space, tables = _space(got)
+    forms = got.forms
     if space is None or not tables:
-        return drawn_blocks.page(ui, blocks, query, forms=forms)
+        return drawn_blocks.page(got.ui, got.raw, got.query, forms=forms, tab="courrier/contacts")
     table = tables[0]
     actions, before = drawn_blocks.lift([d for d in space["items"] if d is not table])
     page = Markup(env.get_template("handmade/mail/contacts.html").render(
         side=space["sidebar"], before=before, table=table,
         people=[_contact(table, r, forms) for r in table["rows"]], forms=forms,
         note=str(table.get("caption") or "").split(". ")[0].rstrip(".")))
-    return page, [], drawn_blocks.head(items=actions, forms=forms)
+    return page, [], got.head(items=actions)
+
+
+TABS: dict[str, Any] = {
+    "courrier/reception": Tab(partial(box, tab="courrier/reception"), *STYLES),
+    "courrier/envoyes": Tab(partial(box, tab="courrier/envoyes"), *STYLES),
+    "courrier/brouillons": Tab(drafts, *STYLES),
+    "courrier/contacts": Tab(contacts, *STYLES),
+}

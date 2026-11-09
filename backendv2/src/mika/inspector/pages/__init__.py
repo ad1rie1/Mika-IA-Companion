@@ -1,5 +1,5 @@
-"""Les pages de la console : les onglets qu'elle fournit elle-même (tableau de
-bord, décisions, approbations, configuration, système) et ses routes."""
+"""Les pages de la console : les onglets qu'elle fournit elle-même (Accueil, À valider,
+Réglages, Système) et ses routes."""
 
 from mika.inspector.pages import (  # noqa: F401 — enregistrement
     accounts,
@@ -8,7 +8,7 @@ from mika.inspector.pages import (  # noqa: F401 — enregistrement
     decisions,
     families,
     home,
-    reglages,
+    params,
     rights,
     settings_directory,
     system,

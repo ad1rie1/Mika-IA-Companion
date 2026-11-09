@@ -157,11 +157,11 @@ class AccountFiche(Overview):
             folders=[{"label": f.label, "name": f.name, "polled": f.polled, "unseen": f.unseen, "total": f.total,
                       "w": round(100 * f.unseen / f.total, 1) if f.total else 0.0,
                       "sync": look.ago(f.last_sync) if f.last_sync else "jamais relu",
-                      "href": render.href(box_link(f.label, account=key, folder=f.name))} for f in folders],
+                      "href": render.href(box_link(f.label, account=key, folder=f.name), ui.env())} for f in folders],
             voice=VOICE_LABEL.get(info.voice, info.voice), sender=info.sender_name or info.display_name,
             signature=bool(info.signature.strip()), voice_tab=fiche_url(ACCOUNT, key, "voix"),
             details=list(info.details), write=[shaped(d) for d in items if d["t"] == "action"],
-            box=render.href(box_link("", account=key)))
+            box=render.href(box_link("", account=key), ui.env()))
 
 
     def _voice(self, ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:

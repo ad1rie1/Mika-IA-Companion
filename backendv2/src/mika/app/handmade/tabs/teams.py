@@ -22,28 +22,24 @@ répond) et sa tranche (une réponse en chemin, ce qui attend ta décision).
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import unquote, urlencode
+from urllib.parse import urlencode
 
 from markupsafe import Markup
 
 from mika.app.handmade import excerpt
 from mika.app.handmade.tabs import Got, Line, Tab, blank, pairs, text
+from mika.inspector.pages.subjects import fiche_key
 from mika.inspector.ui import PREFIX
 from mika.plugins.teams import WAITING, under_way
 from mika.ports.teams import split_conversation_key
 
 STYLES = ("handmade/teams.css",)
 #: les fiches Teams, telles qu'un lien du plugin y mène
-CONVERSATION_LINK = f"{PREFIX}/fiche/conversation_teams/"
-REPLY_LINK = f"{PREFIX}/fiche/reponse_teams/"
+CONVERSATION, REPLY = "conversation_teams", "reponse_teams"
 #: un message cité : au plus tant de lettres
 CITED = 160
 #: la sorte d'une conversation (le mot du plugin) → sa marque
 KINDS = {"tête-à-tête": "dm", "groupe": "group", "canal": "channel", "réunion": "meeting"}
-
-
-def _key(href: str, base: str) -> str:
-    return unquote(href[len(base):].split("?", 1)[0]) if href.startswith(base) else ""
 
 
 def _port(got: Got) -> Any:
@@ -72,7 +68,7 @@ def _navs(got: Got) -> list[dict[str, Any]]:
 
 
 def _conversation(line: Line, port: Any, s: Any) -> dict[str, Any]:
-    account, key = split_conversation_key(_key(line.href, CONVERSATION_LINK))
+    account, key = split_conversation_key(fiche_key(line.href, CONVERSATION))
     last = None
     if port is not None and key:
         thread = port.thread(account, key, 1)
@@ -109,7 +105,7 @@ def conversations(got: Got) -> Markup | None:
 
 
 def _reply(line: Line, port: Any) -> dict[str, Any]:
-    key = _key(line.href, REPLY_LINK)
+    key = fiche_key(line.href, REPLY)
     draft = port.draft(key) if port is not None and key else None
     answered = port.message(draft.reply_to) if draft is not None and draft.reply_to else None
     return {

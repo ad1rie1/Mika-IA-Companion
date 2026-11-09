@@ -32,7 +32,6 @@ from markupsafe import Markup
 
 from mika.app.handmade import MONTHS, WEEKDAYS
 from mika.app.handmade.lists import ORDINARY, forms_for, subject_key
-from mika.app.handmade.nights import day_label
 from mika.app.handmade.tabs import (
     Got,
     Line,
@@ -49,6 +48,7 @@ from mika.app.handmade.tabs import (
     text,
     tiles,
 )
+from mika.app.handmade.tabs.thoughts import day_label
 from mika.faculties.attachments import inspect as received
 from mika.faculties.memory.inspect import ORIGIN_FR
 from mika.faculties.shares import inspect as sent

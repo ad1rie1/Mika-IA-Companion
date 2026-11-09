@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -2415,7 +2415,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 ### 0177 — Chaque onglet a sa forme : plus de rendu bloc par bloc
 
-- Chaque onglet d'une destination a sa page à lui : un module par destination (`app/handmade/tabs/`) déclare ses onglets, chacun avec son gabarit (`templates/handmade/<destination>/`) et sa feuille. Le rendu bloc par bloc (`Blocks`) ne sert plus aucun onglet ; `test_no_tab_is_left_block_by_block` y veille.
+- Chaque onglet d'une destination a sa page à lui : un module par destination (`app/handmade/tabs/`) déclare ses onglets, chacun avec son gabarit (`templates/handmade/<destination>/`) et sa feuille. Le rendu bloc par bloc ne sert plus aucun onglet ; `test_every_drawn_tab_is_a_tab` y veille.
 - Un onglet lit les blocs que sa faculté déclare, rendus une fois et numérotés comme la console les numérote (`Got`) : leurs ancres, leur pagination, la bascule « Tableau » et les jetons de leurs formulaires restent ceux de la console. Il lit aussi les faits d'une faculté quand ses blocs ne disent pas ce que la page montre.
 - La vue de la faculté reste la source : la console en MCP la sert telle quelle, et un onglet qui ne reconnaît pas ses blocs (un titre changé) rend la main à la console. Un onglet dessine aussi son état vide ; sa racine porte son nom (`data-tab`), que `test_every_drawn_tab_opens` vérifie.
 - Les filtres et le panneau d'un onglet restent ceux de la console, sauf s'il les dit lui-même (`Tab(panel=False)`).
@@ -2584,6 +2584,25 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* un partage donne la lecture ou l'usage de la boîte d'une autre, la donnée la plus sensible pour la vie privée. L'opératrice ne pouvait répondre à « qui lit la boîte de qui ? » qu'en ouvrant chaque boîte, sur des clés brutes, et ne pouvait pas couper un partage abusif, alors que la console est l'espace super admin (audit du 2026-11-05, C9-04, décision Q07).
 
 *Révise 0188 (en partie : un opérateur retire un partage qu'il n'a pas donné ; le donner reste au propriétaire).*
+
+### 0216 — Facultés et plugins ne nomment pas les adresses de la console
+
+- Une faculté ou un plugin dit ce qu'il vise par un lien (`Ref`) : une vue, la fiche d'un objet, une page de réglages (`Ref.settings`), la file « À valider » (`Ref.approvals`), un fichier (`Ref.download`). Seule la console, par `render.href`, en fait une adresse : le chemin d'une page, son préfixe et ses onglets n'existent que de son côté.
+- **Où revenir** est un lien aussi : `Ref.back_to(page)`. La console l'écrit dans l'adresse (`retour`) ; `edit_server`, `edit_endpoint` et `edit_account` reçoivent un `Ref`, plus une adresse.
+- **`Ref("local", …)`**, une adresse déjà construite, n'est que pour la console.
+- **Une seule exception** : le lien des vues d'une app (`projects.share.app_link`), que Mika lit dans son prompt et donne à qui s'occupe d'elle. Un prompt ne passe pas par `render.href` : l'adresse fait partie de la phrase, dans sa voix, et un test la confronte à celle que la console écrit.
+- **Deux gardes.** `tests/architecture/test_console_paths.py` refuse, dans `faculties/` et `plugins/`, toute chaîne qui commence par `/inspecteur` et tout `Ref("local", …)` ; la voix ne porte aucune autre adresse. `tests/protocol/test_console_links.py` suit chaque page nommée en toutes lettres : un nom se trompe comme une adresse.
+
+*Pourquoi :* renommer une page de la console obligeait à éditer une vingtaine de fichiers de facultés et de plugins, sans garde, et l'une de ces adresses était déjà morte (audit du 2026-11-05, K11-01, K11-03).
+
+### 0217 — Les anciennes adresses de la console vivent dans une seule table
+
+- Une ancienne adresse se redirige depuis les tables de `inspector/pages/routes.py` : une page ou un onglet (`MOVED`, `MOVED_TABS`), un ancien enregistrement (`LEGACY_POSTS`), l'ancienne page d'un objet (`MOVED_VIEWS` : sa fiche, ou sa liste si l'adresse ne le nomme pas), un paramètre de liste qui ouvrait un objet (`MOVED_PARAMS` : sa fiche).
+- Une faculté ou un plugin ne garde plus de vue pour d'anciens liens : « Un moyen de communication (ancienne page) » (`identity`, `?handle=`), « App forgée » (`forge`, `?app=`) et le paramètre `person` de Liens (`social`) sont devenus des redirections vers la fiche.
+- Les filtres `handle` et `q` de Par personne (`transcript`, ADR 0181) restent : c'est une page vivante, qui les sert encore.
+- Restent hors de ces tables, que la question Q03 ne nommait pas : le repli d'une ligne d'un onglet de fiche sur un paramètre de requête quand la fiche ne donne pas de clé (`?id=` des onglets d'un mail, plugin `email`, qu'un test vérifie ; `?person=` de Synthèse et Moyens de communication, `identity` ; `?handle=` de Fil, `transcript`), et l'ancienne page d'une personne (`app/handmade/person`), qui redirige déjà vers sa fiche. Les onglets d'un moyen de communication de `identity` (Verdict, Revendication, Preuves, Autres) n'ont plus ce repli.
+
+*Pourquoi :* chaque refonte laissait sa trace dans le code du domaine pour servir d'anciens favoris ; que les liens d'avant mènent quelque part est l'affaire de la console (audit du 2026-11-05, K0-28, question Q03).
 
 ## Ce que les sondes et les audits ont fixé
 

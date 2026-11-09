@@ -8,6 +8,7 @@ adresse, sinon une empreinte stable.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -54,9 +55,8 @@ from mika.ports.paging import Page
 from mika.vocab.access import PERSON, SELF
 
 SECTION = "courrier"
-BOX = f"/inspecteur/{SECTION}/reception"
-ACCOUNTS = BOX
-SETTINGS = "/inspecteur/courrier/parametres"
+#: ses boîtes : une page de réglages, dans le Courrier, en haut à droite (ADR 0173)
+SETTINGS = "boites"
 PAGE = 25
 #: une boîte (réception, envoyés) se lit par douzaine : sa liste tient au-dessus du message ouvert
 BOX_PAGE = 12
@@ -198,21 +198,29 @@ def since(ctx: InspectContext, event_type: Any, start: int, cap: int) -> list[An
     return out
 
 
-def edit_account(key: str, back: str = ACCOUNTS) -> Ref:
+def view_link(view: str, text: str = "", params: Iterable[tuple[str, str]] = ()) -> Ref:
+    """Un lien vers une vue du courrier, avec ses paramètres : la console sait où elle vit."""
+    return Ref.view("email", view, text, **dict(params))
+
+
+#: où l'on revient une fois un compte réglé
+ACCOUNTS = view_link("reception")
+
+
+def edit_account(key: str, back: Ref = ACCOUNTS) -> Ref:
     """Le lien vers le réglage d'un compte (et le retour au courrier une fois enregistré)."""
-    return Ref("local", SETTINGS, "Modifier ce compte",
-               (("section", "courrier"), ("enregistrement", "accounts"), ("cle", key), ("retour", back)))
+    return Ref.settings(SETTINGS, "Modifier ce compte", section="courrier", enregistrement="accounts",
+                        cle=key).back_to(back)
 
 
-def add_account(back: str = ACCOUNTS) -> Ref:
-    return Ref("local", SETTINGS, "Ajouter un compte",
-               (("section", "courrier"), ("enregistrement", "accounts"), ("cle", ""), ("nouveau", "1"),
-                ("retour", back)))
+def add_account(back: Ref = ACCOUNTS) -> Ref:
+    return Ref.settings(SETTINGS, "Ajouter un compte", section="courrier", enregistrement="accounts", cle="",
+                        nouveau="1").back_to(back)
 
 
 def box_link(text: str, *, account: str = "", folder: str = "", whose: str = "") -> Ref:
     params = tuple((k, v) for k, v in (("compte", account), ("dossier", folder), (WHOSE, whose)) if v)
-    return Ref("local", BOX, text, params)
+    return view_link("reception", text, params)
 
 
 # ── à qui sont les boîtes montrées (ADR 0185) ──
@@ -264,16 +272,16 @@ def owner_name(frame: Frame | None, owner: str) -> str:
     return (person_name(frame, key) if frame is not None else "") or key
 
 
-def _owners(port: Any, ctx: InspectContext, base: str, frame: Frame | None) -> Nav:
+def _owners(port: Any, ctx: InspectContext, view: str, frame: Frame | None) -> Nav:
     """« Les boîtes de » : tout le monde, toi, elle (toujours : une personne comme les autres, ADR 0184), puis chaque
     personne qui a une boîte, par son nom."""
     every = port.port.accounts() if isinstance(port, Scope) else port.accounts() if port is not None else []
     people = sorted({a.owner for a in every if a.owner.startswith(PERSON)}, key=lambda o: owner_name(frame, o).casefold())
     chosen = whose(ctx)
-    items = [NavItem("Tout le monde", Ref("local", base, ""), active=not chosen)]
+    items = [NavItem("Tout le monde", view_link(view), active=not chosen)]
     for owner in ("", SELF, *people):  # sans chiffre : à côté, les chiffres disent des non-lus
         value = YOURS if not owner else owner
-        items.append(NavItem(owner_name(frame, owner), Ref("local", base, "", ((WHOSE, value),)),
+        items.append(NavItem(owner_name(frame, owner), view_link(view, "", ((WHOSE, value),)),
                              active=chosen == value))
     return Nav(tuple(items), title="Les boîtes de")
 
@@ -319,10 +327,10 @@ def _views(port: Any, ctx: InspectContext, s: EmailState | None, view: str, acco
     def box(text: str, state_: str = "", count: int | None = None) -> NavItem:
         params = keep + ((("etat", state_), ("dossier", "*")) if state_ else ())
         on = view == "reception" and (state == state_ if state_ else state not in VIEWS and folder == INBOX)
-        return NavItem(text, Ref("local", BOX, "", params), count=count or None, active=on)
+        return NavItem(text, view_link("reception", "", params), count=count or None, active=on)
 
     def tab(text: str, slug: str, count: int | None = None) -> NavItem:
-        return NavItem(text, Ref("local", f"/inspecteur/{SECTION}/{slug}", "", keep), count=count or None,
+        return NavItem(text, view_link(slug, "", keep), count=count or None,
                        active=view == slug, tone="warn" if count else "")
 
     return Nav((box("Réception", count=inbox),
@@ -340,13 +348,12 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
     (``scoped``) aux boîtes de qui on a choisi."""
     accounts = port.accounts() if port is not None else []
     account = account_scope(port, ctx)
-    base = f"/inspecteur/{SECTION}/{view}"
-    side: list[Block] = [_owners(port, ctx, base, frame)] if port is not None and (accounts or whose(ctx)) else []
+    side: list[Block] = [_owners(port, ctx, view, frame)] if port is not None and (accounts or whose(ctx)) else []
     side += [_views(port, ctx, state, view, account)] if accounts else []
-    nav = [NavItem("Toutes les boîtes", Ref("local", base, "", kept(ctx)), active=not ctx.param("compte"))]
+    nav = [NavItem("Toutes les boîtes", view_link(view, "", kept(ctx)), active=not ctx.param("compte"))]
     for a in accounts:
         inbox = next((f for f in port.folders(a.key) if f.role == "inbox"), None)
-        nav.append(NavItem(a.name, Ref("local", base, "", (("compte", a.key), *kept(ctx))),
+        nav.append(NavItem(a.name, view_link(view, "", (("compte", a.key), *kept(ctx))),
                            count=inbox.unseen if inbox else None, active=ctx.param("compte") == a.key,
                            tone="" if a.ready else "warn"))
     side.append(Nav(tuple(nav), title="Comptes"))

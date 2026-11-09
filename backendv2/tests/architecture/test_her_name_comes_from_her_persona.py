@@ -79,7 +79,7 @@ def _package_named() -> tuple[tuple[str, int, str], ...]:
 def test_the_policy_sees_the_whole_package_but_the_simulator():
     names = {p.relative_to(PACKAGE).as_posix() for p in _modules()}
     assert {"faculties/memory/extraction.py", "faculties/self/__init__.py", "adapters/mail/compose.py",
-            "app/cli.py"} <= names
+            "app/cli/__init__.py"} <= names
     assert not any(n.startswith("sim/") for n in names)
 
 

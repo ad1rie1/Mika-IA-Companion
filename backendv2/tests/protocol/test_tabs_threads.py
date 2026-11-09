@@ -48,7 +48,7 @@ def test_one_line_per_person_the_latest_first_with_what_waits(world):  # noqa: F
     assert "« CONCERT » a été dit" in concert
     assert "« crêpes » n'a été dit dans aucune conversation" in drawn(client, "/inspecteur/fil/conversations?q=crêpes")
     search = drawn(client, "/inspecteur/recherche?q=concert")
-    assert "transcript/conversations?q=concert" in search and "transcript/messages" not in search
+    assert "fil/conversations?q=concert" in search and "transcript/messages" not in search
 
 
 def test_their_conversation_reads_the_latest_first(world):  # noqa: F811

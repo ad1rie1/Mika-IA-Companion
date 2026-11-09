@@ -13,8 +13,8 @@ import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { askMika } from "../parametres/account";
-import { errorBlock, loadingBlock } from "../parametres/kit";
-import * as store from "../parametres/store";
+import { errorBlock, loadingBlock } from "../../shared/kit";
+import * as store from "../../shared/store";
 import { shareWords } from "../parametres/words";
 import {
   askFor,

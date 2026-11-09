@@ -13,7 +13,7 @@ import { toast } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import { accountPage } from "./account";
 import { formOf, SaveBar } from "./form";
-import { CachedMap, errorBlock, loadingBlock, type Cached } from "./kit";
+import { CachedMap, errorBlock, loadingBlock, type Cached } from "../../shared/kit";
 import { mailPage } from "./mail";
 import { mcpPage } from "./mcp";
 import type { Host, Page } from "./page";

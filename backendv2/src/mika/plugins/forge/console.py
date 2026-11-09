@@ -50,7 +50,6 @@ from mika.kernel.inspect import (
     Note,
     Pager,
     Param,
-    Prose,
     Ref,
     Row,
     Table,
@@ -129,8 +128,6 @@ APPS_PAGE = 25
 LIVED_PAGE = 25
 LOGS_PAGE = 50
 CODE_SHOWN = 20_000
-#: l'ancienne page d'une app ne montre que ses dernières lignes (sa fiche les montre toutes, par pages)
-LOGS_SHOWN = 50
 #: le journal d'une app relu par la console : l'hôte n'en garde pas davantage
 LOGS_READ = 500
 MESSAGE_MAX = 500
@@ -323,7 +320,7 @@ def _head(s: ForgeState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
     # ses pages en onglets ; ses réglages et ce qui est technique derrière la roue (ADR 0104)
     return Head(key, title, subtitle=info.description if info is not None else "", badges=tuple(badges),
                 facts=facts, default_tab="vues" if pages else "etat", action_tabs=("etat", "code"),
-                back=Ref("local", "/inspecteur/apps", "Toutes les apps"), pages=pages, pages_tab="vues",
+                back=Ref.view("forge", "apps", "Toutes les apps"), pages=pages, pages_tab="vues",
                 gear=("reglages", "etat", "code", "base", "journal", "vecu"))
 
 
@@ -431,46 +428,6 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
                   title="Les outils de ses apps", empty="Aucune de ses apps ne lui donne d'outil.",
                   caption="Une app qui a des secrets ne sert en conversation qu'une fois promue ; tu la promeus "
                           "depuis sa fiche (Apps forgées).")]
-
-
-@FORGE.inspect("app", title="App forgée", hidden=True, params=[("app", "app")])
-def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    """L'ancienne page d'une app (les liens anciens y mènent encore) : tout d'un coup, sans rien exécuter."""
-    back = Fields((("retour", Ref("view", "forge/apps", "toutes ses apps")),))
-    name = ctx.param("app")
-    if not APP_NAME.match(name):
-        return [back, Note("Donne le nom d'une app : des minuscules, chiffres et _, commençant par une lettre.",
-                           tone="muted")]
-    port = ctx.ports.get("forge")
-    app = s.apps.get(name)
-    info = port.info(name) if port is not None else None
-    if app is None and info is None:
-        return [back, Note(f"L'app « {name} » n'existe pas.", tone="muted")]
-    blocks: list[Block] = [back, Fields((("sa fiche", _fiche(name, "ouvrir la fiche de l'app")),))]
-    if port is None:
-        blocks.append(Note("Forge non configurée : son manifeste, son code et son journal ne sont pas disponibles.",
-                           tone="muted"))
-    blocks.append(Fields(tuple(_about(name, app, info, port, frame, ctx)), title="L'app"))
-    if info is not None:
-        blocks.append(Table(("réglage", "défaut du manifeste"), tuple((k, _shown(v)) for k, v in info.config),
-                            title="Réglages déclarés", empty="aucun réglage déclaré"))
-    if port is not None:
-        try:
-            source = port.source(name)
-        except ForgeRefused:
-            source = None
-        if source is not None:
-            manifest, code = source
-            blocks.append(Prose(manifest or "(vide)", title="manifest.yaml"))
-            cut = len(code) > CODE_SHOWN
-            blocks.append(Prose(code[:CODE_SHOWN] + (f"\n… (coupé : {len(code)} caractères en tout)" if cut else ""),
-                                title="main.py"))
-        logs = port.logs(name, LOGS_SHOWN)
-        blocks.append(Prose("\n".join(logs), title=f"Son journal ({len(logs)} dernières lignes ; tout son journal, "
-                                                   "par pages, dans l'onglet Journal de sa fiche)") if logs
-                      else Note("Son journal est vide.", tone="muted"))
-    blocks.append(_lived(name, ctx, (TICKED, HANDLED, EMITTED, SWITCHED)))
-    return blocks
 
 
 # ── Les onglets de la fiche ───────────────────────────────────────────────

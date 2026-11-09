@@ -61,7 +61,7 @@
   .expose-facts > div, .expose-list li { grid-template-columns: 1fr; gap: 2px; }
 }
 
-/* Outils › Venus d'ailleurs (app/handmade/tools.py) : ce qu'on y fait, en boutons ; une carte par service, par app. */
+/* Outils › Venus d'ailleurs (app/handmade/tabs/tools.py) : ce qu'on y fait, en boutons ; une carte par service, par app. */
 .elsewhere { display: grid; gap: 18px; }
 .elsewhere-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .elsewhere-item { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); }

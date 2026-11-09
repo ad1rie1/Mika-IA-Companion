@@ -76,7 +76,7 @@ PAGE = 50
 #: la page d'un tableau d'adresses (une fiche n'en montre qu'un)
 HANDLES_PAGE = "page_adresses"
 #: les revendications en attente se décident dans la file « À valider » (ADR 0180), pas dans une page à elles
-CLAIMS_QUEUE = Ref("local", "/inspecteur/approbations/identites", "les identités à confirmer")
+CLAIMS_QUEUE = Ref.approvals("les identités à confirmer", "identites")
 #: Une personne connue seulement de nom (``name:alice``) : pas d'adresse.
 NAMED = "name:"
 
@@ -930,7 +930,7 @@ def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
 
 
 def _handle_of(s: IdentityState, ctx: InspectContext) -> tuple[str, Handle | None, list[Block]]:
-    handle = ctx.subject or ctx.param("handle")
+    handle = ctx.subject
     if not handle:
         return "", None, [Note("Ouvre la fiche d'un moyen de communication : Identités, puis le moyen de communication.", tone="muted")]
     h = s.handles.get(handle)
@@ -1207,23 +1207,3 @@ def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
                 ("en vigueur (comptes d'opérateur compris)", ", ".join(known_as(s, p) for p in frame.get(c.OWNERS))
                  or "aucun")), title="Propriétaires"),
     ]
-
-
-@IDENTITY.inspect("personne", title="Un moyen de communication (ancienne page)", hidden=True,
-                  params=[("handle", "moyen de communication")])
-def _legacy_person(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    """L'ancienne page d'une adresse : ses liens mènent désormais aux fiches."""
-    handle, h, blocks = _handle_of(s, ctx)
-    if h is None:
-        if not handle:
-            return [Note("Choisissez un moyen de communication dans la liste (paramètre « handle »).")]
-        return blocks
-    view = view_of(s, handle, frame.now)
-    return [Fields((("fiche du moyen de communication", handle_ref(s, handle)), ("fiche de la personne", person_ref(s, view.person))),
-                   title="Cette page vit désormais sur les fiches"),
-            _handle_fields(s, frame, handle, h, view), *_verdict(frame, handle, h, view),
-            *_claim(s, h, view, ctx),
-            _handles_table(s, frame, ctx, [k for k in handles_of(s, view.person) if k != handle],
-                           title=f"Les autres moyens de communication de {known_as(s, view.person)}",
-                           empty="aucun autre moyen de communication ne parle pour cette personne"),
-            _ledger(s, handle, ctx)]

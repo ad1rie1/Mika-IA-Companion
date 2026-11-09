@@ -14,6 +14,7 @@ l'onglet « Teams » (``teams``) quand un compte est à elle.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from typing import Annotated, Any
 
@@ -75,9 +76,9 @@ from mika.vocab.privacy import Sensitivity
 SECTION = "teams"
 PAGE = 25
 #: le tableau de canal d'un compte (« teams:<clé> », ADR 0134) : pour qui elle prépare, comment ça part
-CANALS_PAGE = "/inspecteur/reglages/canaux"
-#: ses paramètres (« Actif », ses comptes) : dans Teams, en haut à droite (ADR 0206)
-SETTINGS = f"/inspecteur/{SECTION}/parametres"
+CANALS_PAGE = "canaux"
+#: ses paramètres (« Actif », ses comptes) : une page de réglages, dans Teams, en haut à droite (ADR 0206)
+SETTINGS = "teams"
 NO_PORT = "Teams n'est pas branché ici."
 KIND_LABEL = {"dm": "tête-à-tête", "group": "groupe", "channel": "canal", "meeting": "réunion", "other": "—"}
 STATE_LABEL = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvée", "info"), REFUSED: ("refusée", ""),
@@ -112,6 +113,11 @@ def _to_answer(s: TeamsState, account: str, conversation: str) -> int:
 #: « elle » ; « personne:<clé> » — puis celui qui choisit un compte
 WHOSE, YOURS, ACCOUNT = "qui", "toi", "compte"
 #: les paramètres d'adresse des onglets de Teams
+
+
+def view_link(view: str, text: str = "", params: Iterable[tuple[str, str]] = ()) -> Ref:
+    """Un lien vers un onglet de Teams, avec ses paramètres : la console sait où il vit."""
+    return Ref.view("teams", view, text, **dict(params))
 
 
 def whose(ctx: InspectContext) -> str:
@@ -154,24 +160,24 @@ def kept(ctx: InspectContext, *, account: bool = True) -> tuple[tuple[str, str],
     return tuple((k, ctx.param(k)) for k in names if ctx.param(k))
 
 
-def _navs(port: Any, ctx: InspectContext, frame: Frame, base: str) -> list[Block]:
+def _navs(port: Any, ctx: InspectContext, frame: Frame, view: str) -> list[Block]:
     """« Les comptes de » : tout le monde, toi, elle (toujours : une personne comme les autres, ADR 0184), puis chaque
     personne qui a un compte Teams, par son nom ; puis ses comptes, quand il y en a plusieurs à choisir."""
     every = port.port.accounts() if isinstance(port, Scope) else port.accounts()
     people = sorted({a.owner for a in every if a.owner.startswith(PERSON)},
                     key=lambda o: owner_name(frame, o).casefold())
     chosen = whose(ctx)
-    items = [NavItem("Tout le monde", Ref("local", base, ""), active=not chosen)]
+    items = [NavItem("Tout le monde", view_link(view), active=not chosen)]
     for owner in ("", SELF, *people):  # sans chiffre, comme dans le courrier
         value = YOURS if not owner else owner
-        items.append(NavItem(owner_name(frame, owner), Ref("local", base, "", ((WHOSE, value),)),
+        items.append(NavItem(owner_name(frame, owner), view_link(view, "", ((WHOSE, value),)),
                              active=chosen == value))
     out: list[Block] = [Nav(tuple(items), title="Les comptes de")]
     shown = port.accounts()
     if len(shown) > 1:
         account = ctx.param(ACCOUNT)
-        mine = [NavItem("Tous les comptes", Ref("local", base, "", kept(ctx, account=False)), active=not account)]
-        mine += [NavItem(a.name, Ref("local", base, "", (*kept(ctx, account=False), (ACCOUNT, a.key))),
+        mine = [NavItem("Tous les comptes", view_link(view, "", kept(ctx, account=False)), active=not account)]
+        mine += [NavItem(a.name, view_link(view, "", (*kept(ctx, account=False), (ACCOUNT, a.key))),
                          active=account == a.key, tone="" if a.last_batch else "warn") for a in shown]
         out.append(Nav(tuple(mine), title="Comptes"))
     return out
@@ -198,7 +204,7 @@ def _conversations(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Blo
     port = scoped(ctx.ports.get("teams"), ctx)
     if port is None:
         return [Note(NO_PORT, tone="muted")]
-    navs = _navs(port, ctx, frame, f"/inspecteur/{SECTION}/conversations")
+    navs = _navs(port, ctx, frame, "conversations")
     if not port.accounts():
         return [*navs, _nothing_for(frame, ctx)]
     account = chosen_account(port, ctx)
@@ -235,7 +241,7 @@ def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = scoped(ctx.ports.get("teams"), ctx)
     if port is None:
         return [Note(NO_PORT, tone="muted")]
-    navs = _navs(port, ctx, frame, f"/inspecteur/{SECTION}/reponses")
+    navs = _navs(port, ctx, frame, "reponses")
     if not port.accounts():
         return [*navs, _nothing_for(frame, ctx)]
     account = chosen_account(port, ctx)
@@ -278,7 +284,7 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = scoped(ctx.ports.get("teams"), ctx)
     if port is None:
         return [Note(NO_PORT, tone="muted")]
-    navs = _navs(port, ctx, frame, f"/inspecteur/{SECTION}/extension")
+    navs = _navs(port, ctx, frame, "extension")
     if not port.accounts():
         return [*navs, _nothing_for(frame, ctx)]
     account = chosen_account(port, ctx)
@@ -286,8 +292,7 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         rows = tuple(Row((Text(a.name), Text(owner_name(frame, a.owner)),
                           Text("inactif" if not a.enabled else _key_words(ctx, a.key)),
                           When(a.last_batch) if a.last_batch else "jamais", Text(a.self_name or "pas encore vu")),
-                         href=Ref("local", f"/inspecteur/{SECTION}/extension", a.name,
-                                  (*kept(ctx, account=False), (ACCOUNT, a.key))),
+                         href=view_link("extension", a.name, (*kept(ctx, account=False), (ACCOUNT, a.key))),
                          tone="muted" if not a.enabled else "" if a.last_batch else "warn") for a in port.accounts())
         return [*navs, Table((Column("compte", role="title"), Column("à qui", "fit"), Column("clé", "fit"),
                               Column("dernier envoi", "fit"), Column("son nom dans Teams", "fit")), rows,
@@ -306,12 +311,12 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("messages remarqués (en tête)", sum(1 for m in s.messages.values() if m.account == account)),
         ("sa clé", _key_words(ctx, account)),
         # sa voix et sa signature, réglées dans Teams › Paramètres : ce compte-là, qui ramène ici (ADR 0206)
-        ("sa voix, sa signature", Ref("local", SETTINGS, "Modifier ce compte",
-                                      (("section", SECTION), ("enregistrement", "accounts"), ("cle", account),
-                                       ("retour", f"/inspecteur/{SECTION}/extension?{ACCOUNT}={account}")))),
+        ("sa voix, sa signature", Ref.settings(SETTINGS, "Modifier ce compte", section=SECTION,
+                                               enregistrement="accounts", cle=account).back_to(
+                                                   view_link("extension", "", ((ACCOUNT, account),)))),
         # le tableau de canal de ce compte (ADR 0134 : « Envoyer à ta place » est fondu dans les canaux), comme une boîte
-        ("ce qu'elle prépare, comment ça part", Ref("local", CANALS_PAGE, "le tableau de ce compte (Réglages › Canaux)",
-                                                    (("canal", f"teams:{account}"),))),
+        ("ce qu'elle prépare, comment ça part", Ref.settings(CANALS_PAGE, "le tableau de ce compte (Réglages › Canaux)",
+                                                             canal=f"teams:{account}")),
     ]
     blocks: list[Block] = [*navs, Fields(tuple(pairs), title="L'extension", columns=1),
                            Note("L'extension (frontend/Extension) lit ce que Teams web reçoit dans le navigateur où ce "
@@ -360,10 +365,8 @@ def _person_accounts(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[B
         state = Badge("inactif", "muted") if not a.enabled else Badge("branché", "ok") if plugged else \
             Badge("jamais branché" if _key_state(ctx, a.key) is not None else "clé à créer", "warn")
         rows.append(Row((Text(a.name), state, When(a.last_batch) if a.last_batch else "jamais",
-                         Ref("local", f"/inspecteur/{SECTION}/conversations", "Ses conversations",
-                             ((WHOSE, whose_value), (ACCOUNT, a.key)))),
-                        href=Ref("local", f"/inspecteur/{SECTION}/extension", a.name,
-                                 ((WHOSE, whose_value), (ACCOUNT, a.key))),
+                         view_link("conversations", "Ses conversations", ((WHOSE, whose_value), (ACCOUNT, a.key)))),
+                        href=view_link("extension", a.name, ((WHOSE, whose_value), (ACCOUNT, a.key))),
                         tone="" if plugged else "warn"))
     return [Table((Column("compte", role="title"), Column("état", "fit", role="badge"),
                    Column("dernier envoi de l'extension", "fit"), Column("lire", "fit")), tuple(rows),
@@ -385,7 +388,7 @@ def _conversation_head(s: TeamsState, frame: Frame, ctx: InspectContext, key: st
     return Head(key=key, title=_clip(port.title(account, conversation), 200) or "Une conversation",
                 subtitle=KIND_LABEL.get(found.kind, ""),
                 facts=(("messages", str(found.messages)), ("le dernier", ctx.when(found.last_at))),
-                back=Ref("local", f"/inspecteur/{SECTION}/conversations", "Retour aux conversations"))
+                back=view_link("conversations", "Retour aux conversations"))
 
 
 @TEAMS.inspect("fil", title="Fil", subject="conversation_teams", order=10,
@@ -425,7 +428,7 @@ def _reply_head(s: TeamsState, frame: Frame, ctx: InspectContext, key: str) -> H
     title = _clip(port.title(got.account, got.conversation), 120) if got is not None and port is not None else ""
     return Head(key=key, title=f"Réponse dans « {title or 'une conversation'} »", badges=tuple(badges),
                 facts=(("proposée", ctx.when(seen.at)),) if seen is not None else (),
-                back=Ref("local", f"/inspecteur/{SECTION}/reponses", "Retour aux réponses"))
+                back=view_link("reponses", "Retour aux réponses"))
 
 
 @TEAMS.inspect("reponse", title="Réponse", subject="reponse_teams", order=10,
@@ -571,7 +574,7 @@ def _redo(s: TeamsState, frame: Frame, args: RedoArgs, ctx: Any) -> Done:
                                 about=(ctx.by,) if ctx.by else (), account=seen.account)
     return Done(drafts=(asked,), decide=(Decision(seen.proposal, False, note=f"à reprendre : {args.instruction}"[:500]),),
                 message="Demandé : elle la reprendra à son prochain moment de travail.",
-                go=Ref("local", f"/inspecteur/{SECTION}/reponses", ""))
+                go=view_link("reponses"))
 
 
 @TEAMS.action("rediger", title="Lui demander une réponse", args=AskArgs, emits=[c.DRAFT_ASKED],
@@ -591,7 +594,7 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
                                 instruction=Content.of(instruction, level=int(Sensitivity.PERSONAL)) if instruction
                                 else None, about=(ctx.by,) if ctx.by else (), account=m.account)
     return Done(drafts=(asked,), message="Demandé : elle la préparera à son prochain moment de travail.",
-                go=Ref("local", f"/inspecteur/{SECTION}/reponses", ""))
+                go=view_link("reponses"))
 
 
 class WriteArgs(BaseModel):

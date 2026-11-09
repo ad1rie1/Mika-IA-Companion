@@ -51,7 +51,6 @@ from mika.app.handmade import (
     felt_of,
     live_wait,
     read_parts,
-    senses,
     span,
     unit,
 )
@@ -60,6 +59,7 @@ from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memoire import memory
+from mika.app.handmade.person.senses import phone_tab, position_tab
 from mika.app.handmade.person.voyages import GPX as TRIP_GPX
 from mika.app.handmade.person.voyages import gpx as trip_gpx
 from mika.app.handmade.person.voyages import voyages
@@ -619,7 +619,7 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "boites": owned,
     "teams": drawn(OWNED[1][2], "teams"),
     # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
-    "telephone": senses.phone_tab, "position": senses.position_tab,
+    "telephone": phone_tab, "position": position_tab,
     # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
     "voyages": voyages,
     # le détail de ce que la vue d'ensemble résume : bloc par bloc, ses formulaires laissés à la console

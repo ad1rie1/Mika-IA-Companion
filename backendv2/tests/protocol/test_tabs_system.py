@@ -120,7 +120,8 @@ def test_contributions_give_the_whole_then_one_faculty_per_subtab(world):  # noq
     assert matrix.count('<a href="#ct-') == len(faculties)
     memory = _pane(page, "ct-memory")
     assert "Publie" in memory and "memory.believed" in memory and "Fournit" in memory and "sys-ct-to" in memory
-    assert 'href="/inspecteur/facultes/memory/' in memory  # ses vues mènent à elles
+    assert 'href="/inspecteur/memoire/souvenirs"' in memory  # ses vues mènent à elles, tout droit
+    assert "/facultes/memory/souvenirs" not in memory
 
 
 def test_simulations_put_the_reports_left_and_the_one_read_right(tmp_path):

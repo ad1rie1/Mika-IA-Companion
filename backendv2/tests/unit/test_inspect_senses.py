@@ -30,6 +30,7 @@ from mika.kernel.events import Origin
 from mika.kernel.inspect import (
     Badge,
     Chart,
+    Code,
     Column,
     Disclosure,
     Fields,
@@ -66,9 +67,9 @@ SENSE_VIEWS = {("email", "reception"): ("Réception", "courrier", 10), ("rss", "
                ("camera", "camera"): ("Caméra", "sens", 30), ("sensors", "appareils"): ("Appareils", "sens", 40)}
 #: les onglets de la fiche d'un mail
 MAIL_TABS = {("email", "message"): "Message", ("email", "fil"): "Fil", ("email", "remarque"): "Ce qu'elle en sait"}
-FORGE_VIEWS = {("forge", "apps"): "Apps forgées", ("forge", "app"): "App forgée"}
+FORGE_VIEWS = {("forge", "apps"): "Apps forgées"}
 #: les seules clés de lien de vue que ces vues produisent : jamais un contenu venu d'ailleurs
-VIEW_KEYS = {"forge/app", "forge/apps", "rss/flux", "sensors/appareils"}
+VIEW_KEYS = {"forge/apps", "rss/flux", "sensors/appareils"}
 bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
 
 
@@ -250,18 +251,16 @@ def test_the_forge_views_are_declared_and_clean_on_a_fresh_kernel_without_ports(
     async def scenario(kernel):
         declared = {(v.owner, v.name): v for v in views(kernel)}
         return declared, {key: view(kernel, *key) for key in FORGE_VIEWS}, {
-            "app invalide": view(kernel, "forge", "app", app="../../etc"),
-            "app inconnue": view(kernel, "forge", "app", app="inconnue"),
+            "app invalide": view(kernel, "forge", "etat", subject="../../etc"),
+            "app inconnue": view(kernel, "forge", "etat", subject="inconnue"),
         }
 
     declared, shown_, odd = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), persona_llm=False)
     for key, title in FORGE_VIEWS.items():
         assert declared[key].title == title
         clean(shown_[key])
-    assert dict(declared["forge", "app"].params) == {"app": "app"}
     said = [n for n in notes(shown_["forge", "apps"]) if "non configuré" in n.text]
     assert said and tone(said[0].tone) == "muted"
-    assert "Donne le nom d'une app" in text(shown_["forge", "app"])
     assert "Donne le nom d'une app" in text(clean(odd["app invalide"]))
     assert "n'existe pas" in text(clean(odd["app inconnue"]))
 
@@ -327,7 +326,7 @@ def test_the_mail_view_filters_pages_and_opens_each_mail_as_a_fiche(tmp_path):
     assert inbox.pager.total == 4 and len(inbox.rows) == 4
     by_subject = {shown(r.cells[0]): r for r in inbox.rows}
     urgent, bob = by_subject["Urgent : ton dossier"], by_subject["Arrivé après le relevé"]
-    assert urgent.href.key == "mail/<m1@exemple.fr>" and "retour" in dict(urgent.href.params)
+    assert urgent.href.key == "mail/<m1@exemple.fr>" and urgent.href.back.key == "email/reception"
     assert (urgent.cells[1].text, urgent.cells[2]) == ("Alice", When(start))
     assert urgent.cells[3] == Badge("important, non lu", "warn")
     assert bob.cells[3] == Badge("non lu", "info")
@@ -602,6 +601,8 @@ def tick(api):
         api.signal("le café est en promo", pertinence=0.8, emotion="happy")
     return n
 """
+#: les onglets de la fiche d'une app que ce test lit
+FICHE_TABS = ("etat", "reglages", "code", "journal", "vecu")
 CAFE_MANIFEST = "title: Veille café\nschedule: interval:10m\nconfig:\n  seuil: 12\n  ville: Paris\n  actif: true\n"
 BROKEN = "def tick(api):\n    raise ValueError('la page a changé')\n"
 
@@ -632,8 +633,8 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
         forge.call = refuse
         apps = view(kernel, "forge", "apps")
         link = next(r for r in refs(apps) if r.text == "cafe")
-        cafe = view(kernel, "forge", "app", app="cafe")  # l'ancienne page, gardée pour les anciens liens
-        meteo = view(kernel, "forge", "app", app="meteo")
+        cafe = {tab: view(kernel, "forge", tab, subject="cafe") for tab in FICHE_TABS}  # chaque onglet de sa fiche
+        meteo = {tab: view(kernel, "forge", tab, subject="meteo") for tab in FICHE_TABS}
         return apps, link, cafe, meteo, calls
 
     try:
@@ -642,7 +643,9 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
     finally:
         forge.shutdown()
     assert calls == []
-    for blocks in (apps, cafe, meteo):
+    broken_state = meteo.pop("etat")  # cassée : sa fiche le dit en rouge, c'est sa place
+    assert "Le disjoncteur l'a arrêtée" in text(broken_state) and token not in text(broken_state)
+    for blocks in (apps, *cafe.values(), *meteo.values()):
         clean(blocks)
         assert token not in text(blocks)
     rows = {row(r)[0].text: row(r) for r in table(apps, "Ses apps").rows}
@@ -655,18 +658,20 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
     assert rows["meteo"][6].startswith("échec, ") and "5 échec(s) d'affilée" in rows["meteo"][6]
     assert rows["meteo"][7].startswith("1 (le dernier")  # « mon app ne marche plus » est un signal
     assert link == Ref.subject("app", "cafe", "cafe")  # chaque ligne mène à la fiche de l'app
-    about = fields(cafe, "L'app")
+    about = fields(cafe["etat"], "L'app")
     assert about["titre"] == "Veille café" and about["agenda"] == "interval:10m" and about["état"] == "active"
-    assert dict(table(cafe, "Réglages déclarés").rows) == {"seuil": "12", "ville": "Paris", "actif": "vrai"}
-    prose = {b.title: b.text for b in cafe if isinstance(b, Prose)}
-    assert "title: Veille café" in prose["manifest.yaml"] and "def tick(api)" in prose["main.py"]
-    assert any("relevé n°" in t for title, t in prose.items() if title.startswith("Son journal"))
-    lived = table(cafe, "Ce qu'elle a vécu").rows
-    assert lived and all(r[1] == "tour" and r[2] == "ok" for r in lived) and lived[0][-1].kind == "event"
-    meteo_lived = table(meteo, "Ce qu'elle a vécu").rows
+    assert {row(r)[0]: row(r)[4] for r in table(cafe["reglages"], "Ses réglages").rows} == {
+        "seuil": "12", "ville": "Paris", "actif": "vrai"}
+    code = {b.title: b.text for b in walk(cafe["code"]) if isinstance(b, Code)}
+    assert "title: Veille café" in code["manifest.yaml"] and "def tick(api)" in code["main.py"]
+    assert any("relevé n°" in row(r)[1].text for r in table(cafe["journal"], "Journal de l").rows)
+    lived = table(cafe["vecu"], "Ce qu'elle a vécu").rows
+    ticks = [r for r in lived if r[1] == "tour"]
+    assert ticks and all(r[2] == "ok" for r in ticks) and lived[0][-1].kind == "event"
+    meteo_lived = table(meteo["vecu"], "Ce qu'elle a vécu").rows
     assert ("changement d'état", "broken") in {(r[1], r[2]) for r in meteo_lived}
     assert [r[2] for r in meteo_lived if r[1] == "tour"] == ["échec"] * 5
-    assert fields(meteo, "L'app")["prochain tour"] == "aucun"  # cassée : elle ne tourne plus
+    assert fields(broken_state, "L'app")["prochain tour"] == "aucun"  # cassée : elle ne tourne plus
 
 
 # ── Les appareils ─────────────────────────────────────────────────────────

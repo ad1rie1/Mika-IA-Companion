@@ -7,8 +7,8 @@ from __future__ import annotations
 import dataclasses
 import json
 
-import mika.app.moi as moi
 from mika.app.moi import PROBES, form
+from mika.app.moi import api as moi_api
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
@@ -617,7 +617,7 @@ def test_a_mail_refuses_too_many_or_too_heavy_pieces(world, monkeypatch):  # noq
     monkeypatch.setattr(email_actions, "PIECES_TOTAL_MAX", 8)
     heavy = upload(client, "/mail/send", LETTER, tiny, ("b.txt", b"12345", "text/plain"))
     assert heavy.status_code == 400 and "trop lourdes" in heavy.json()["error"]
-    monkeypatch.setattr(moi, "UPLOAD_BODY_MAX", 64)
+    monkeypatch.setattr(moi_api, "UPLOAD_BODY_MAX", 64)
     assert upload(client, "/mail/send", LETTER, tiny).status_code == 413
     assert box.sent == []
     assert PIECES_TOTAL_MAX == 50 * 1024 * 1024

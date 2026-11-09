@@ -1,6 +1,6 @@
-"""Elle › Pensées (Journal et rêves : ``nights.py``) : ses onglets, chacun dans sa forme (ADR 0177).
+"""Elle › Pensées : ses onglets, chacun dans sa forme (ADR 0177).
 
-Les trois ont la même allure : une bande de chiffres quand la faculté en donne, puis des sous-onglets — ce qui se
+Les trois premiers ont la même allure : une bande de chiffres quand la faculté en donne, puis des sous-onglets — ce qui se
 passe maintenant, son historique (une page plus ancienne ouvre son sous-onglet), et comment ça marche.
 
 - Pensées : ce qui lui trotte dans la tête, la plus forte d'abord — chacune de la couleur de son émotion, ce qu'il
@@ -10,18 +10,27 @@ passe maintenant, son historique (une page plus ancienne ouvre son sous-onglet),
   dosée ; puis tout ce qu'elle a remarqué ; et les règles.
 - Attentes : ce qu'elle attend de qui, le temps écoulé vers l'échéance en jauge (échue : dit) ; puis les attentes
   closes, comblées ou déçues.
+- Journal et rêves : son journal de la nuit en page de carnet, ce qu'elle en raconte à n'importe qui, sa journée en
+  cours telle qu'elle pourra la dire demain ; puis ses nuits, une carte par nuit — son journal et ses rêves ensemble,
+  ce dont elle s'est souvenue au réveil. Le fil « en bref » de la faculté redisait l'historique : il se tait.
 
-Les données restent celles de la faculté de l'attention (ses blocs, ses curseurs au journal).
+Les données restent celles de la faculté de l'attention (ses blocs, ses curseurs au journal) ; celles de Journal et
+rêves, celles de la faculté de soi (son onglet ``nuits`` : ses textes, son historique paginé au journal).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 from markupsafe import Markup
 
+from mika.app.handmade import date_fr
+from mika.app.handmade.lists import listing
 from mika.app.handmade.tabs import Got, Line, Tab, blank, gauge, instant, raw_lines, rest, subpanes, text
+from mika.inspector.ui import env
+from mika.kernel.inspect import Prose
 
 STYLES = ("handmade/pensees.css",)
 #: le curseur de leurs historiques au journal (``faculties/attention/inspect.py``)
@@ -152,8 +161,71 @@ def attentes(got: Got) -> Markup | None:
                     done=[_closed(x) for x in got.lines("Attentes closes")], panes=[p["id"] for p in panes])
 
 
+# ── Journal et rêves ──────────────────────────────────────────────────────
+
+#: les textes de l'onglet, reconnus au début de leur titre : (le début, sa place dans la page)
+TEXTS = (("Journal du ", "journal"), ("Ce qu'elle en raconte", "told"), ("Sa journée en cours", "today"))
+#: ce que dit la colonne « souvenu au réveil » d'un rêve
+REMEMBERED = {"oui": "souvenu au réveil", "non": "oublié au réveil"}
+#: ce que dit la colonne « concerne » quand une nuit ne concerne personne : il se tait
+NOBODY = "personne"
+
+
+def day_label(iso: str) -> str:
+    """« 2026-10-20 » : « lundi 20 oct. » (tel quel s'il n'est pas une date)."""
+    try:
+        d = date.fromisoformat(iso.strip())
+    except ValueError:
+        return iso
+    return date_fr(d)
+
+
+def _day_in(title: str) -> str:
+    """La journée nommée dans un titre de la faculté : « Journal du 2026-10-20, en entier », « … (2026-10-21) »."""
+    for part in title.replace("(", " ").replace(")", " ").replace(",", " ").split():
+        if len(part) == 10 and part[4] == "-" and part[7] == "-":
+            return part
+    return ""
+
+
+def nights(got: Got) -> Markup | None:
+    """Journal et rêves : le journal, ce qu'elle en raconte, sa journée en cours, puis une carte par nuit."""
+    table = got.raw_table()
+    if table is None:
+        return None
+    texts: dict[str, dict[str, str]] = {}
+    for b in got.raw:
+        if isinstance(b, Prose):
+            known = next((place for start, place in TEXTS if b.title.startswith(start)), None)
+            if known is None:
+                return None  # un texte qu'elle ne connaît pas : les blocs de la faculté
+            texts[known] = {"text": b.text, "day": day_label(_day_in(b.title))}
+    history = listing(table, got.env, got.query)
+    # l'historique suit l'ordre d'écriture (un rêve s'écrit à part de son journal) : une carte par nuit, la plus
+    # récente d'abord, son journal puis ses rêves
+    by_night: dict[str, list[dict[str, Any]]] = {}
+    for row in history["rows"]:
+        fields = {f["label"]: f["value"] for f in row["fields"]}
+        kind = (row["badges"] or [{}])[0]
+        remembered = text(fields.get("souvenu au réveil")).casefold()
+        about = fields.get("concerne")
+        by_night.setdefault(text(fields.get("nuit")), []).append({
+            "kind": kind, "journal": text(kind).casefold() == "journal",
+            "text": (row["body"] or [{}])[0].get("value"),
+            "about": about if text(about) not in ("", NOBODY) else None,
+            "remembered": REMEMBERED.get(remembered, ""), "awake": remembered == "oui",
+            "detail": row.get("detail") or [],
+        })
+    groups = [{"label": day_label(night), "entries": sorted(entries, key=lambda e: not e["journal"])}
+              for night, entries in sorted(by_night.items(), reverse=True)]
+    return Markup(env.get_template("handmade/pensees/nuits.html").render(
+        journal=texts.get("journal"), told=texts.get("told"), today=texts.get("today"), groups=groups,
+        history=history, forms={}))
+
+
 TABS: dict[str, Any] = {
     "pensees/pensees": Tab(pensees, *STYLES),
     "pensees/remarque": Tab(remarque, *STYLES),
     "pensees/attentes": Tab(attentes, *STYLES),
+    "pensees/nuits": Tab(nights, "handmade/nights.css"),
 }

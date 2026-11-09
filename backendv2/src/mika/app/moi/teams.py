@@ -16,7 +16,8 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.moi import Call, Denied, MeApi, done, form, missing
+from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.moi.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import UNDER_WAY, WAITING, DraftSeen, TeamsState, latest, under_way
 from mika.ports.teams import (
@@ -31,10 +32,8 @@ from mika.ports.teams import (
     split_conversation_key,
     to_fill,
 )
-from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE, reaches
+from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 
-#: le niveau de qui est connecté sur un compte : le sien ; sinon, ce qu'on lui en partage (ADR 0188)
-OWN = "proprietaire"
 #: ce que dit un partage qui n'atteint pas le geste demandé
 TOO_LOW = {SHARE_READ: "Ce compte t'est partagé en lecture : tu le lis, sans y écrire.",
            SHARE_PREPARE: "Ce compte t'est partagé en lecture et préparation : elle peut t'y préparer des réponses, que "
@@ -50,38 +49,18 @@ SNIPPET = 160
 
 
 def accounts(call: Call) -> dict[str, tuple[AccountInfo, str]]:
-    port = call.port("teams")
-    if port is None:
-        return {}
-    p = teams_p.params_of(call.frame)
-    me, mine = call.me, PERSON + call.me.person
-    out: dict[str, tuple[AccountInfo, str]] = {}
-    for a in port.accounts():
-        owner = p.owners.get(a.key, "")
-        if (not owner and me.owner) or owner == mine:
-            out[a.key] = (a, OWN)
-        elif level := p.shares.get(a.key, {}).get(mine, ""):
-            out[a.key] = (a, level)
-    return out
+    """Ses comptes, par clé : le compte et son niveau — les siens, puis ceux qu'on lui partage (ADR 0188)."""
+    return held_by(call, call.port("teams"), teams_p.params_of)
 
 
 def _level(call: Call, account: str, need: str) -> None:
     """Son niveau sur ce compte ouvre-t-il ce geste ? (sinon : introuvable, ou refusé)"""
-    found = accounts(call).get(account)
-    if found is None:
-        raise missing()
-    if found[1] != OWN and not reaches(found[1], need):
-        raise Denied(403, TOO_LOW.get(found[1], "Ce compte ne t'est pas ouvert pour cela."))
+    opened(accounts(call).get(account), need, TOO_LOW, "Ce compte ne t'est pas ouvert pour cela.")
 
 
 def owned(call: Call, account: str) -> AccountInfo:
     """Un compte à elle (le régler, sa clé, décider de ses réponses) : un partage n'y suffit pas."""
-    found = accounts(call).get(account)
-    if found is None:
-        raise missing()
-    if found[1] != OWN:
-        raise Denied(403, "Seul son propriétaire règle ce compte et décide de ce qui en part.")
-    return found[0]
+    return only_owner(accounts(call).get(account), "Seul son propriétaire règle ce compte et décide de ce qui en part.")
 
 
 def _port(call: Call) -> Any:
@@ -113,17 +92,8 @@ def _state(call: Call) -> TeamsState:
 # ── ce qui se montre ──
 
 
-def _ms(us: int) -> int:
-    return us // 1000 if us else 0
-
-
-def _snippet(text: str) -> str:
-    flat = " ".join(str(text).split())
-    return flat if len(flat) <= SNIPPET else flat[: SNIPPET - 1] + "…"
-
-
 def message_json(m: Message) -> dict[str, Any]:
-    return {"ref": m.ref, "author": m.author, "author_id": m.author_id, "at": _ms(m.at), "text": m.text,
+    return {"ref": m.ref, "author": m.author, "author_id": m.author_id, "at": millis(m.at), "text": m.text,
             "own": m.own, "mentions_me": m.mentions_me}
 
 
@@ -143,10 +113,10 @@ def _reply_json(call: Call, seen: DraftSeen, notes: dict[str, str]) -> dict[str,
     kept = port.draft(seen.draft)
     preview = port.preview(seen.draft, her=teams_p.her(call.frame)) if seen.state == WAITING else None
     return {"id": seen.draft, "account": seen.account, "conversation": conversation_key(seen.account, seen.conversation),
-            "in_reply_to": seen.message, "state": seen.state, "mode": seen.mode, "at": _ms(seen.at),
-            "decided_at": _ms(seen.decided_at), "by": seen.by,
+            "in_reply_to": seen.message, "state": seen.state, "mode": seen.mode, "at": millis(seen.at),
+            "decided_at": millis(seen.decided_at), "by": seen.by,
             "note": (notes.get(seen.note_ref) or "") if seen.note_ref else seen.note, "asked": seen.asked,
-            "edited": seen.edited, "expires": _ms(seen.expires), "answered": bool(seen.answered),
+            "edited": seen.edited, "expires": millis(seen.expires), "answered": bool(seen.answered),
             "title": port.title(seen.account, seen.conversation) if port is not None else "",
             "body": kept.body if kept is not None else "", "sent_text": kept.sent_text if kept is not None else "",
             "to_fill": bool(kept and to_fill(kept.body)),
@@ -159,9 +129,9 @@ def _account_json(call: Call, a: AccountInfo, level: str) -> dict[str, Any]:
     key = keys.key_state(a.key) if keys is not None else None
     s = _state(call)
     waiting = sum(1 for d in s.drafts.values() if d.account == a.key and d.state == WAITING and not d.answered) \
-        if level == OWN or reaches(level, SHARE_PREPARE) else 0
-    return {"key": a.key, "name": a.name, "level": level, "enabled": a.enabled, "last_batch": _ms(a.last_batch),
-            "self_name": a.self_name, "extension_key": {"hint": key.hint, "created_at": _ms(key.created_at)}
+        if allows(level, SHARE_PREPARE) else 0
+    return {"key": a.key, "name": a.name, "level": level, "enabled": a.enabled, "last_batch": millis(a.last_batch),
+            "self_name": a.self_name, "extension_key": {"hint": key.hint, "created_at": millis(key.created_at)}
             if key is not None and level == OWN else None, "drafts_waiting": waiting,
             # un compte partagé se montre à son nom (ADR 0188)
             "owner_name": teams_p.writer_of(call.frame, a.key) if level != OWN else "",
@@ -188,21 +158,23 @@ async def conversations(call: Call) -> dict[str, Any]:
     keys = [account] if account else list(mine)
     if not keys:
         return {"items": []}
-    s = _state(call)
+    # sa réponse en chemin, par conversation (une réponse à laquelle on a répondu autrement n'est plus en chemin : elle
+    # va être refusée, ADR 0199)
+    pending: dict[tuple[str, str], DraftSeen] = {}
+    for d in _state(call).drafts.values():
+        if d.state in UNDER_WAY and not d.answered:
+            pending.setdefault((d.account, d.conversation), d)
+    found = port.conversations(call.number("size", 50, high=LIMIT), text=call.arg("q", limit=100), accounts=keys)
+    lasts = port.last_messages([(conv.account, conv.id) for conv in found])
     out = []
-    for conv in port.conversations(call.number("size", 50, high=LIMIT), text=call.arg("q", limit=100),
-                                   accounts=keys):
-        last = port.thread(conv.account, conv.id, 1)
-        level = mine[conv.account][1]
+    for conv in found:
+        last = lasts.get((conv.account, conv.id))
         # sa réponse en chemin : pas pour qui ne fait que lire ce compte (ADR 0188)
-        # (une réponse à laquelle on a répondu autrement n'est plus en chemin : elle va être refusée, ADR 0199)
-        pending = next((d for d in s.drafts.values() if d.account == conv.account and d.conversation == conv.id
-                        and d.state in UNDER_WAY and not d.answered), None) \
-            if level == OWN or reaches(level, SHARE_PREPARE) else None
+        hers = pending.get((conv.account, conv.id)) if allows(mine[conv.account][1], SHARE_PREPARE) else None
         out.append({"key": conversation_key(conv.account, conv.id), "account": conv.account, "title": conv.title,
-                    "kind": conv.kind, "last_at": _ms(conv.last_at), "messages": conv.messages,
-                    "last": {**message_json(last[-1]), "text": _snippet(last[-1].text)} if last else None,
-                    "her": {"state": pending.state, "draft": pending.draft} if pending is not None else None})
+                    "kind": conv.kind, "last_at": millis(conv.last_at), "messages": conv.messages,
+                    "last": {**message_json(last), "text": snippet(last.text, SNIPPET)} if last is not None else None,
+                    "her": {"state": hers.state, "draft": hers.draft} if hers is not None else None})
     return {"items": out}
 
 
@@ -219,14 +191,14 @@ async def thread(call: Call) -> dict[str, Any]:
     level = accounts(call)[account][1]
     # ses réponses ici, en chemin ou demandées : pas pour qui ne fait que lire ce compte (ADR 0188 : elles sont
     # l'affaire de son propriétaire)
-    prepares = level == OWN or reaches(level, SHARE_PREPARE)
+    prepares = allows(level, SHARE_PREPARE)
     replies = sorted((d for d in s.drafts.values() if d.account == account and d.conversation == conversation),
                      key=lambda d: -d.proposal)[:10] if prepares else []
     # ce que tu as écrit toi-même (ADR 0189) : en file, en cours d'envoi, posé — il revient dans le fil une fois
     # parti ; ce qui n'est pas parti à temps se règle ici, et se montre encore un jour (« pas parti »)
     now = call.kernel.mind.clock.now()
     port.expire_written(account, now)
-    pending = [{"id": d.id, "body": d.body, "at": _ms(d.created), "state": d.state, "by": d.author,
+    pending = [{"id": d.id, "body": d.body, "at": millis(d.created), "state": d.state, "by": d.author,
                 "reason": d.reason}
                for d in port.drafts(LIMIT, accounts=[account])
                # les tiens seulement : sur un compte partagé, celui d'un autre revient dans le fil une fois parti
@@ -255,7 +227,7 @@ async def replies(call: Call) -> dict[str, Any]:
     mine = accounts(call)
     s = _state(call)
     shown = [d for d in sorted(s.drafts.values(), key=lambda d: -d.proposal)
-             if d.account in mine and (mine[d.account][1] == OWN or reaches(mine[d.account][1], SHARE_PREPARE))][:LIMIT]
+             if d.account in mine and allows(mine[d.account][1], SHARE_PREPARE)][:LIMIT]
     notes = _notes(call, shown)
     return {"items": [_reply_json(call, d, notes) for d in shown]}
 
@@ -334,7 +306,7 @@ def count(call: Call) -> int:
                if d.state == WAITING and not d.answered and mine.get(d.account, (None, ""))[1] == OWN)
 
 
-def routes(api: MeApi) -> list[Route]:
+def routes(api: MeApiBase) -> list[Route]:
     r = api.route
     return [r("/teams/accounts", list_accounts), r("/teams/conversations", conversations),
             r("/teams/thread", thread), r("/teams/replies", replies),

@@ -34,9 +34,8 @@ def _inspect(s: ImagingState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("imaging")
     p = params_of(frame)
     blocks: list[Block] = [Nav((
-        NavItem("Brancher un fournisseur", Ref("local", "/inspecteur/reglages/images-fournisseurs",
-                                               "Fournisseurs d'images")),
-        NavItem("Régler ses dessins", Ref("local", "/inspecteur/reglages/comportement-imaging", "Réglages")),))]
+        NavItem("Brancher un fournisseur", Ref.settings("images-fournisseurs", "Fournisseurs d'images")),
+        NavItem("Régler ses dessins", Ref.settings("comportement-imaging", "Réglages")),))]
     if port is None or not getattr(port, "configured", False):
         blocks.append(Note("Aucun fournisseur d'images n'est branché : elle ne dessine pas.", tone="muted"))
     jobs = sorted(s.jobs.values(), key=lambda j: (-j.at, j.job))

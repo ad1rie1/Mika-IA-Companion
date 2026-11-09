@@ -17,8 +17,8 @@ import { openMenu, type MenuItem } from "../../shell/float";
 import { ico } from "../../shell/icons";
 import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
-import { Cached, CachedMap, ago, errorBlock, loadingBlock } from "../parametres/kit";
-import * as store from "../parametres/store";
+import { Cached, CachedMap, ago, errorBlock, loadingBlock } from "../../shared/kit";
+import * as store from "../../shared/store";
 import {
   activePhones,
   composerMarkup,

@@ -31,8 +31,8 @@ from mika.vocab.people import is_internal
 #: une page de ce que les téléphones lui ont dit
 SHOWN = 50
 FORGOTTEN = "(oublié)"
-#: la page de la console où vit la localisation (son filtre par personne y mène)
-PAGE = "/inspecteur/sens/positions"
+#: la vue de la console où vit la localisation (son filtre par personne y mène)
+PAGE = ("location", "positions")
 #: le paramètre qui ne garde qu'une personne
 WHO = "personne"
 
@@ -136,8 +136,8 @@ def _inspect(s: LocationState, frame: Frame, ctx: InspectContext) -> list[Block]
         chosen = ""
     blocks: list[Block] = []
     if len(people) > 1:
-        blocks.append(Nav((NavItem("Tout le monde", Ref("local", PAGE, "Tout le monde"), len(people), not chosen),
-                           *(NavItem(_name(frame, p), Ref("local", PAGE, _name(frame, p), ((WHO, p),)), None,
+        blocks.append(Nav((NavItem("Tout le monde", Ref.view(*PAGE, "Tout le monde"), len(people), not chosen),
+                           *(NavItem(_name(frame, p), Ref.view(*PAGE, _name(frame, p), **{WHO: p}), None,
                                      p == chosen) for p in people)), title="Personne"))
     shown = {chosen: people[chosen]} if chosen else people
     blocks += [_known(frame, _texts(ctx, [f for fs in shown.values() for f in fs]), shown,

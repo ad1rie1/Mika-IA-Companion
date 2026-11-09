@@ -55,9 +55,9 @@ from mika.plugins.wakeup import (
 )
 from mika.plugins.wakeup.prompt import why_waiting
 
-#: leurs réglages : dans Réveils par API, en haut à droite (ADR 0206)
-SETTINGS = "/inspecteur/reveils/parametres"
-LIST = "/inspecteur/reveils"
+#: leurs réglages : une page de réglages, dans Réveils par API, en haut à droite (ADR 0206)
+SETTINGS = "reveils"
+LIST = Ref.view("wakeup", "reveils", "Réveils par API")
 NO_PORT = "Les réveils par API ne sont pas branchés sur ce serveur."
 CALLS_PAGE = 25
 TEXT_SHOWN = 4000
@@ -72,19 +72,14 @@ def _fiche(name: str, tab: str = "") -> Ref:
     return Ref.subject("reveil", name, name, tab)
 
 
-def _fiche_url(name: str) -> str:
-    return f"/inspecteur/fiche/reveil/{name}"
+def edit_endpoint(name: str, back: Ref = LIST) -> Ref:
+    return Ref.settings(SETTINGS, "Modifier ses réglages", section="reveils", enregistrement="endpoints",
+                        cle=name).back_to(back)
 
 
-def edit_endpoint(name: str, back: str = LIST) -> Ref:
-    return Ref("local", SETTINGS, "Modifier ses réglages",
-               (("section", "reveils"), ("enregistrement", "endpoints"), ("cle", name), ("retour", back)))
-
-
-def add_endpoint(back: str = LIST) -> Ref:
-    return Ref("local", SETTINGS, "Déclarer un réveil",
-               (("section", "reveils"), ("enregistrement", "endpoints"), ("cle", ""), ("nouveau", "1"),
-                ("retour", back)))
+def add_endpoint(back: Ref = LIST) -> Ref:
+    return Ref.settings(SETTINGS, "Déclarer un réveil", section="reveils", enregistrement="endpoints", cle="",
+                        nouveau="1").back_to(back)
 
 
 def status_badge(call: Call) -> Badge:
@@ -240,9 +235,9 @@ def _head(s: WakeupState, frame: Frame, ctx: InspectContext, key: str) -> Head |
     if ep.rouse:
         badges.append(Badge("passe outre son sommeil", "warn"))
     return Head(key=key, title=key, subtitle=ep.label, badges=tuple(badges),
-                facts=(("réglages", edit_endpoint(key, _fiche_url(key))),
+                facts=(("réglages", edit_endpoint(key, _fiche(key))),
                        ("adresse", Text(f"POST /api/wake/{key}", "mono"))),
-                back=Ref("local", LIST, "Réveils par API"))
+                back=LIST)
 
 
 @WAKEUP.search("reveil")
@@ -277,7 +272,7 @@ def _tab_state(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]
         ("plafonds", f"{ep.per_hour} appels par heure, {ep.max_pending} en attente, texte de "
                      f"{ep.max_chars} caractères"),
         ("durée de vie d'un appel", f"{max(1, ep.lifetime_us // 3_600_000_000)} h"),
-        ("réglages", edit_endpoint(ep.name, _fiche_url(ep.name))),
+        ("réglages", edit_endpoint(ep.name, _fiche(ep.name))),
     ), title="Ce que tu as déclaré", columns=2))
     if ep.instructions:
         blocks.append(Prose(ep.instructions, title="Ses consignes (elles priment sur ce que l'appel apporte)",

@@ -1,4 +1,4 @@
-/* Système, dessiné (app/handmade/system.py) : les états d'un processus, une barre, ce qui ne va pas, une carte par
+/* Système, dessiné (app/handmade/tabs/system.py) : les états d'un processus, une barre, ce qui ne va pas, une carte par
    faculté. Les couleurs viennent des jetons de la console. */
 .sys { --st-ko: var(--danger); --st-stumbling: var(--warn); --st-held: var(--warn); --st-running: var(--accent);
   --st-ok: color-mix(in srgb, var(--ok) 70%, var(--muted)); --st-never: var(--border-strong); }
@@ -68,7 +68,7 @@
 .sys-check-more summary { cursor: pointer; color: var(--muted); }
 .sys-check-more .hm-error { margin-top: 8px; }
 
-/* Ses projections (app/handmade/system.py::projections) : une jauge, une barre par projection, la quarantaine, les
+/* Ses projections (app/handmade/tabs/system.py::projections) : une jauge, une barre par projection, la quarantaine, les
    vues lentes. Les couleurs d'état ne servent qu'à l'état, toujours avec ses mots. */
 .sys-proj { --pt: var(--ok); }
 .sys-proj .tone-warn { --pt: var(--warn); } .sys-proj .tone-danger { --pt: var(--danger); }
@@ -104,7 +104,7 @@
   .sys-slow li { grid-template-columns: 1fr; }
 }
 
-/* Système › File de sortie (app/handmade/system.py::outbox) : le chemin de ce qui part, ce qui est à traiter, ce qui
+/* Système › File de sortie (app/handmade/tabs/system.py::outbox) : le chemin de ce qui part, ce qui est à traiter, ce qui
    part par sorte (une barre empilée : parti, en route, à traiter, vu), les derniers départs. */
 .sys-out-hero { display: grid; gap: 18px; }
 .sys-out-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none;

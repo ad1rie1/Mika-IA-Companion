@@ -19,7 +19,7 @@ from starlette.staticfiles import StaticFiles
 
 from mika.inspector import catalog
 from mika.inspector.catalog import Builtin
-from mika.inspector.pages import TABS, approvals, reglages
+from mika.inspector.pages import TABS, approvals, params
 from mika.inspector.pages.routes import Pages
 from mika.inspector.pages.settings_form import SettingsForms
 from mika.inspector.pages.why import why_page
@@ -64,7 +64,7 @@ def assemble(deps: InspectorDeps, *, cookie_secure: bool = False) -> tuple[list[
     """Les routes de la console, et ses pages sans requête (ce que sert la console en MCP)."""
     forms = SettingsForms(deps.sections, deps.settings_tabs) if deps.settings_tabs else None
     builtins = {**TABS.items, **approvals.queue_builtins(deps.queue), **(forms.builtins() if forms else {}),
-                **reglages.param_builtins(deps.parameters, deps.param_families, deps.faculty_labels)}
+                **params.param_builtins(deps.parameters, deps.param_families, deps.faculty_labels)}
     catalog.check(deps.navigation, deps.kernel.registry, builtins)
     ui = UI(deps, builtins, cookie_secure=cookie_secure)
     ui.settings_forms = forms
