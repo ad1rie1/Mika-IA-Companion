@@ -8,7 +8,7 @@ import json
 import time
 
 from mika.adapters.teams import TeamsAccount, TeamsConfig
-from mika.app.moi import form
+from mika.app.me import form
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.events import Content

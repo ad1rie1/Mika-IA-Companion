@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import email as c
 from mika.kernel.events import Content
-from mika.kernel.forms import Knob
+from mika.kernel.forms import Knob, agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -55,7 +55,7 @@ from mika.plugins.email import (
     EmailState,
     operator_label,
 )
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     NO_PORT,
     PAGE,
     SECTION,
@@ -69,7 +69,7 @@ from mika.plugins.email.console.common import (
     whose,
     workspace,
 )
-from mika.plugins.email.console.mail import _document
+from mika.plugins.email.inspect.mail import _document
 from mika.ports.mail import to_fill
 from mika.ports.paging import page_slice
 from mika.vocab.privacy import Sensitivity
@@ -80,7 +80,8 @@ def _badge(state: str) -> Badge:
 
 
 def _waiting_count(s: EmailState, frame: Frame) -> tuple[int, str]:
-    return len(frame.get(c.DRAFTS)), "brouillon(s) d'elle à décider"
+    n = len(frame.get(c.DRAFTS))
+    return n, agree(n, "brouillon d'elle à décider", "brouillons d'elle à décider")
 
 
 def _note(d: DraftSeen, ctx: InspectContext) -> str:

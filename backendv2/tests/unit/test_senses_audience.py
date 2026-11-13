@@ -41,7 +41,7 @@ from mika.plugins import rss as rss_plugin
 from mika.plugins.email import EmailParams, EmailState, Seen
 from mika.plugins.email import _asked as asked_reducer
 from mika.plugins.email import _episode as episode_reducer
-from mika.plugins.email.console import mail as console_mail
+from mika.plugins.email.inspect import mail as inspect_mail
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import AccountInfo, Mail
@@ -356,11 +356,11 @@ def test_a_failed_reply_request_can_be_asked_again_but_not_on_a_box_that_cannot_
         return {"mail": NS(cached_one=lambda r: mail if r == ref else None, sent_mail=lambda r: None,
                            account=lambda k: info, accounts=lambda: [info], find_ref=lambda k: None)}
 
-    assert not console_mail._can_ask(s, frame, ref, ports=port(True))  # demandée, en cours : pas deux fois
+    assert not inspect_mail._can_ask(s, frame, ref, ports=port(True))  # demandée, en cours : pas deux fois
     for i in range(EmailParams().draft_attempts_max):  # des tâches qui ne donnent rien
         s = episode_reducer(s, NS(seq=3 + i, at=20, data=NS(kind=Kind.TASK, target=task_target("email", ref),
                                                               reason="")), None)
-    assert console_mail._can_ask(s, frame, ref, ports=port(True))  # close : on peut la relancer
-    assert not console_mail._can_ask(s, frame, ref, ports=port(False))  # une boîte qui ne peut pas envoyer
+    assert inspect_mail._can_ask(s, frame, ref, ports=port(True))  # close : on peut la relancer
+    assert not inspect_mail._can_ask(s, frame, ref, ports=port(False))  # une boîte qui ne peut pas envoyer
     s = asked_reducer(s, NS(seq=9, at=40, data=NS(mail=ref, account="pro", by="user_1", instruction=None)), None)
     assert s.attempts.get(ref, 0) == 0  # relancée : ses essais repartent

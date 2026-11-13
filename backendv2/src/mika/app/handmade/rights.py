@@ -30,8 +30,8 @@ from starlette.routing import Route
 
 from mika.app.handmade.access import people_with_accounts
 from mika.app.handmade.subjects.server import KIND as SERVICE
-from mika.app.moi import Denied, missing
-from mika.app.moi import shares as shares_moi
+from mika.app.me import Denied, missing
+from mika.app.me import shares as shares_moi
 from mika.contracts import forge as forge_c
 from mika.inspector import render
 from mika.inspector.pages import rights

@@ -22,11 +22,11 @@ from starlette.routing import Route
 
 from mika.adapters.mail.config import MICROSOFT, MailAccount, MailConfig
 from mika.adapters.teams import TeamsAccount, TeamsConfig
-from mika.app.moi import mail as mail_moi
-from mika.app.moi import rights as rights_moi
-from mika.app.moi import teams as teams_moi
-from mika.app.moi.api import OWN_MAX, Call, Denied, MeApiBase, done, form, missing
-from mika.app.moi.hosts import LOCAL, local_host
+from mika.app.me import mail as mail_moi
+from mika.app.me import rights as rights_moi
+from mika.app.me import teams as teams_moi
+from mika.app.me.api import OWN_MAX, Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.hosts import LOCAL, local_host
 from mika.contracts import self_ as self_c
 from mika.kernel import forms
 from mika.kernel.text import fold
@@ -452,7 +452,7 @@ def _version(table: CanalTable) -> str:
 
 
 def _rules_json(call: Call, canal: str) -> dict[str, Any]:
-    """La règle d'un de ses comptes, en mots comme dans la matrice (``app/moi/rights.py``) : ses lignes (qui, quand,
+    """La règle d'un de ses comptes, en mots comme dans la matrice (``app/me/rights.py``) : ses lignes (qui, quand,
     préparer d'elle-même, comment ça part), sa ligne par défaut, et son empreinte (``version``)."""
     table, own, common = _canal_table(_settings(call).canals(), canal)
     frame = call.frame

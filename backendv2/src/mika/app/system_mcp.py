@@ -36,6 +36,19 @@ WEB_ACCESS = (AccessRule(who=(OWNER,), when=("conversation",), read="seule", act
               AccessRule(who=(SELF,), canal=(INTERNAL,), read="seule", act="toi", keep="public"))
 
 
+#: ce qu'une personne lit d'un service du système dans Outils (ADR 0219) : son nom, et à quoi il lui sert, à elle — son
+#: ``purpose`` est la ligne du catalogue du modèle, écrite pour Mika et au « tu » qui la désigne (ADR 0209)
+SHOWN = {web.SERVER: ("Le web", "Chercher sur le web et lire des pages, pour toi ou par curiosité : l'actualité, "
+                                "une info à vérifier.")}
+
+
+def shown(frame: Any) -> dict[str, tuple[str, str]]:
+    """Le titre et le but, pour la personne, de chaque service du système offert maintenant (son plugin actif) : un
+    serveur de l'opérateur du même nom s'efface devant lui (``SystemServers.config``)."""
+    on = {web.SERVER: web.params(frame.env.params_of(web.WEB.name, frame.root)).enabled}
+    return {name: SHOWN[name] for name, active in on.items() if active}
+
+
 def spec(s: web.SystemServer) -> McpServer:
     """Son serveur et ses lignes d'accès par défaut ; personne d'autre : la ligne par défaut est fermée."""
     rows = WEB_ACCESS

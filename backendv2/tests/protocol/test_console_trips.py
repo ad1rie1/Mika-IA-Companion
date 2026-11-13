@@ -15,7 +15,7 @@ import html
 import re
 import xml.etree.ElementTree as ET
 
-from mika.app.moi import OUTBOUND, ROUTES_BUSY
+from mika.app.me import OUTBOUND, ROUTES_BUSY
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import trips as c
@@ -104,6 +104,10 @@ def test_her_trips_are_on_her_fiche_and_an_operator_removes_one(world):  # noqa:
     assert (removed.data.trip, removed.data.person, removed.data.by) == (alpes, lea, ADRIEN)
     audit = [e.data for e in journal(live, rt.OPERATED) if e.data.action == "trips.supprimer"]
     assert [(a.by, a.subject, a.outcome, a.seqs) for a in audit] == [(ADRIEN, lea, "done", (removed.seq,))]
+    # Système › Gestes audités dit sur qui par son nom, jamais par sa clé (C9-01)
+    gestures = html.unescape(client.get("/inspecteur/systeme/operations").text)
+    line = next(li for li in gestures.split("<li ") if "Supprimer un voyage" in li).split("</li>", 1)[0]
+    assert "Léa Martin" in line and f">{lea}<" not in line, line
     assert client.get(f"/inspecteur/voyages/{alpes}/gpx").status_code == 404
 
     # elle ne le retrouve plus

@@ -21,11 +21,12 @@ from urllib.parse import urlencode
 
 from starlette.routing import Route
 
+from mika.app import system_mcp
 from mika.app.console import LABELS
-from mika.app.moi import mail as mail_moi
-from mika.app.moi import teams as teams_moi
-from mika.app.moi.api import Call, Me, MeApiBase
-from mika.app.moi.common import OWN
+from mika.app.me import mail as mail_moi
+from mika.app.me import teams as teams_moi
+from mika.app.me.api import Call, Me, MeApiBase
+from mika.app.me.common import OWN
 from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
@@ -33,6 +34,7 @@ from mika.inspector.names import Names
 from mika.inspector.pages.accounts import RIGHTS
 from mika.inspector.pages.tools import condition
 from mika.kernel.frame import Audience
+from mika.plugins import forge as forge_p
 from mika.runtime.boundary import Failed, call
 from mika.runtime.inspection import Inspection
 from mika.runtime.tools import FITS, NEEDS, WHEN, Judged, allowed, gate_of, judge
@@ -258,13 +260,15 @@ async def matrix(call_: Call) -> dict[str, Any]:
                 if judged is None or not judged.offered:
                     row["cells"][f"{c}/{m}"] = _cell(judged, spec)
                     continue
+                # la lecture même de sa ligne : celle de son service, ou celle de son app (de son projet), ADR 0219
                 mirror = _service_allowance(g, offered, statuses, aud, kind, rights, close) if sort == "services" \
-                    else None
+                    else forge_p.resource_allowance(frame, resource, tool, spec.acts, aud, kind)
 
                 def said(level: str, g: Any = g, mirror: Allowance | None = mirror, aud: Audience = aud,
                          kind: str = kind, acts: bool = spec.acts, sort: str = sort) -> str:
-                    # la ligne redite seulement si c'est bien celle qui a décidé ; sinon, ses accès en mots
-                    if mirror is not None and mirror.why == g.why:
+                    # la ligne redite seulement si c'est bien celle qui a décidé (une app y ajoute « (de son
+                    # projet n° 3) ») ; sinon, ses accès en mots
+                    if mirror is not None and (mirror.why == g.why or g.why.startswith(f"{mirror.why} (")):
                         return said_to(mirror, acts, aud, kind, close, sources)
                     return f"{OUTSIDE_WHY[sort]} " + ("ne te l'ouvrent pas" if level == NO else "te l'ouvrent")
 
@@ -274,6 +278,7 @@ async def matrix(call_: Call) -> dict[str, Any]:
     name = _person_name(frame)
     canals = rights.canals or Canals()
     apps = {a.name: a for a in frame.get(forge_c.APPS) or ()}
+    system = system_mcp.shown(frame)
     # la page de la console où se lit le tableau d'une ressource : seulement pour une opératrice
     href = (lambda key: f"{RIGHTS}?{urlencode({'detail': key})}") if me.operator else (lambda _key: "")
     groups = [
@@ -291,8 +296,9 @@ async def matrix(call_: Call) -> dict[str, Any]:
                "rules": _rules(canals, f"{TEAMS}:{key}", name, her, sources)}
               for key, (a, level) in teams_moi.accounts(call_).items() if level == OWN)]},
         *({"key": group, "title": "Services" if group == "services" else "Apps de la Forge", "resources": [
-            {"key": resource, "title": _outside_title(resource, apps),
-             "description": _outside_about(resource, statuses), "href": href(resource), "tools": list(rows.values())}
+            {"key": resource, "title": _outside_title(resource, apps, system),
+             "description": _outside_about(resource, statuses, system), "href": href(resource),
+             "tools": list(rows.values())}
             for resource, rows in sorted(outside[group].items()) if _opens(rows.values())]}
           for _sort, group in OUTSIDE),
     ]
@@ -326,23 +332,29 @@ def _service_allowance(g: Any, offered: Mapping[tuple[str, str], Any], statuses:
                           lambda a: a.concerns(remote), close=close, outside=True)
 
 
-def _outside_title(resource: str, apps: Mapping[str, Any]) -> str:
-    """Le nom d'une ressource d'ailleurs : un service par son nom, une app par son titre quand elle en a un."""
+def _outside_title(resource: str, apps: Mapping[str, Any], system: Mapping[str, tuple[str, str]]) -> str:
+    """Le nom d'une ressource d'ailleurs : un service du système par son titre (« Le web », ADR 0219), un autre
+    service par son nom, une app par son titre quand elle en a un."""
     kind, _, key = resource.partition(":")
     if kind == "forge":
         app = apps.get(key)
         return f"App « {app.title if app is not None and app.title else key} »"
+    if kind == "mcp" and key in system:
+        return system[key][0]
     return {"mcp": f"Service « {key} »", "project": f"Projet n° {key}"}.get(kind, resource)
 
 
-def _outside_about(resource: str, statuses: Mapping[str, Any]) -> str:
-    """À quoi sert un service qu'une personne a branché (``owner``, ADR 0192), tel qu'elle l'a dit (``purpose``) :
-    Paramètres le montre déjà à elle et à qui elle le partage. Rien pour un service de Mika (sans propriétaire : réglé
-    dans la console, ou un service système comme ``web``) : son ``purpose`` est la ligne de son catalogue, écrite pour
-    elle et au « tu » qui la désigne, pas pour la personne (ADR 0209) ; rien pour une app."""
+def _outside_about(resource: str, statuses: Mapping[str, Any], system: Mapping[str, tuple[str, str]]) -> str:
+    """À quoi sert un service, dit à la personne : celui qu'une personne a branché (``owner``, ADR 0192), tel qu'elle
+    l'a dit (``purpose``) — Paramètres le montre déjà à elle et à qui elle le partage ; un service du système, la
+    phrase que la composition écrit pour la personne (``system_mcp.SHOWN``, ADR 0219). Rien pour un service de
+    l'opérateur : son ``purpose`` est la ligne de son catalogue, écrite pour elle et au « tu » qui la désigne, pas pour
+    la personne (ADR 0209) ; rien pour une app."""
     kind, _, key = resource.partition(":")
     status = statuses.get(key) if kind == "mcp" else None
-    return status.purpose if status is not None and status.owner else ""
+    if status is not None and status.owner:
+        return status.purpose
+    return system[key][1] if kind == "mcp" and key in system else ""
 
 
 def _opens(rows: Iterable[Mapping[str, Any]]) -> bool:

@@ -2,7 +2,7 @@
    opérateur ; la page d'un compte, vue d'un objet (ADR 0176) — son nom, ses étiquettes et ses faits sont dans l'en-tête
    de la page (``page_heading``, ``head_badges``, ``facts``) ; ici, le formulaire (qui c'est, ses droits, son mot de
    passe), ses connexions web (« Fermer ses sessions »), ses applications connectées (« Nouveau jeton », « révoquer »)
-   et, une seule fois, le jeton qu'on vient de créer. Sur la liste, les deux boutons d'ajout sont dans la barre de titre
+   et, une seule fois, le jeton qu'on vient de créer (« Copier le jeton », ``data-copy``). Sur la liste, les deux boutons d'ajout sont dans la barre de titre
    (``page_links``, ADR 0176) : rien ici. Champs, noms et boutons : ceux de la console. #}
 {% from "_navigation.html" import pager %}
 {% if mode == "create" %}
@@ -31,7 +31,9 @@
 {% if shown %}
 <section class="now-card account-token" aria-labelledby="acc-token-title">
   <header class="now-card-head"><h2 id="acc-token-title">{{ shown.title }}</h2><p>Montré une seule fois : copie-le maintenant. La console n'en garde que l'empreinte.</p></header>
-  <pre class="hm-code">{{ shown.token }}</pre>
+  <pre class="hm-code" id="acc-token-value">{{ shown.token }}</pre>
+  {# « Copier » : console.js le montre et le fait marcher (``data-copy``) ; sans script, le jeton se sélectionne #}
+  <div class="form-actions"><button type="button" class="btn small" data-copy="acc-token-value" aria-live="polite" hidden>Copier le jeton</button></div>
   <p class="now-sub">{{ shown.use }}</p>
 </section>
 {% endif %}

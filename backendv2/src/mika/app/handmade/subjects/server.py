@@ -20,11 +20,11 @@ from mika.adapters.mcp.system import BY as SYSTEM_BY
 from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
 from mika.inspector import render
 from mika.inspector.pages import tools as catalog
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview, env
 from mika.kernel.inspect import Pager, Ref, When
 from mika.plugins.mcp import NO, access_for
-from mika.plugins.mcp.console import (
+from mika.plugins.mcp.inspect import (
     KEEP_WORDS,
     POLICY_WORDS,
     STATE_TONES,
@@ -144,7 +144,7 @@ def _nature_of(st: Any, remote: str) -> str:
 
 def _tool_url(server: str, remote: str) -> str:
     """Un outil ouvert sur sa ligne, dans « Ses outils »."""
-    return fiche_url(KIND, server, "outils") + "&" + urlencode({"outil": remote}) + "#" + quote(f"outil-{remote}")
+    return subject_url(KIND, server, "outils") + "&" + urlencode({"outil": remote}) + "#" + quote(f"outil-{remote}")
 
 
 def _alerts(st: Any, access_tab: str) -> list[dict[str, str]]:
@@ -211,7 +211,7 @@ class ServerOverview(Overview):
         def ago(at: int) -> str:
             return render.cell(When(at), shown)["text"] if at else ""
 
-        tools_tab, access_tab = fiche_url(KIND, key, "outils"), fiche_url(KIND, key, "fait")
+        tools_tab, access_tab = subject_url(KIND, key, "outils"), subject_url(KIND, key, "fait")
         settings = render.href(edit_server(key, Ref.subject(KIND, key, "")), shown)
         # la grille de « Ce qu'elle peut faire », ouverte sur la famille de ses outils : là où l'on en retire
         bundles = {ui.kernel.registry.tools[t.name].bundle for t in port.offered()
@@ -269,7 +269,7 @@ class ServerOverview(Overview):
             situations=situations, who_pager=render._pager(Pager(size=rows, total=rows), {}),
             technical=technical, log=list(st.log), instructions=st.instructions,
             local=st.kind == "local", address=st.address, settings=settings, tools_tab=tools_tab,
-            calls_tab=fiche_url(KIND, key, "appels"), grid=grid))
+            calls_tab=subject_url(KIND, key, "appels"), grid=grid))
 
     tabs = ("fait", "outils")
 
@@ -330,7 +330,7 @@ class ServerOverview(Overview):
         if not st.live:
             notes.append({"tone": "warn", "text": "La liste de ses outils n'est pas connue : « Tester la connexion » "
                                                   "la charge."})
-        access_tab = fiche_url(KIND, st.name, "fait")
+        access_tab = subject_url(KIND, st.name, "fait")
         return Markup(env.get_template("handmade/outils/outils.html").render(
             access_said=access_said(st), access_tab=access_tab, waiting=waiting,
             decide_form=_form(forms, "mcp.revoir"), notes=notes, alerts=_alerts(st, access_tab), groups=[
@@ -364,4 +364,4 @@ class ServerOverview(Overview):
             rows=rows, default=st.default, policies=POLICY_CHOICES, keeps=KEEP_CHOICES,
             pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
             form=_form(forms, "mcp.acces"), system=system, known=bool(known),
-            alerts=_alerts(st, ""), tools_tab=fiche_url(KIND, st.name, "outils")))
+            alerts=_alerts(st, ""), tools_tab=subject_url(KIND, st.name, "outils")))

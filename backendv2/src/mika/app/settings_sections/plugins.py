@@ -25,11 +25,11 @@ from mika.contracts import wakeup as wakeup_c
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection
 from mika.inspector.pages.params import faculty_url
 from mika.inspector.pages.settings_form import RECORD_KEY
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Ref
-from mika.plugins.email.console.common import VOICE_LABEL
+from mika.plugins.email.inspect.common import VOICE_LABEL
 from mika.vocab.access import PERSON, SELF
 
 if TYPE_CHECKING:
@@ -188,7 +188,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             activity, tone = "Jamais relevée encore", ""
         return {"title": account.label or key, "tags": tags, "lead_label": "Adresse", "lead": account.address or "—",
                 "lead_plain": True, "facts": facts, "activity": activity, "activity_tone": tone,
-                "fiche": fiche_url("compte", key), "box": f"{PREFIX}/courrier/reception?" + urlencode({"compte": key})}
+                "fiche": subject_url("compte", key), "box": f"{PREFIX}/courrier/reception?" + urlencode({"compte": key})}
 
     def mail_facts() -> list[tuple[str, Any]]:
         accounts = settings.email().accounts

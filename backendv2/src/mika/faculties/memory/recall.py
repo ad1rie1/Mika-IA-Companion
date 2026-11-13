@@ -360,7 +360,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     tokens = set(said.split())
     a, i = alias_of(tb.about(), "a"), alias_of(tb.items(), "i")
     rows = store.query_mind(select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
-                            .where(i.c.status == "active", i.c.kind.in_((c.SOUVENIR, c.BELIEF))))
+                            .where(i.c.status == "active", i.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF))))
     raw = {str(k) for (k,) in rows if k}
     by_name: dict[str, set[str]] = {}
     keys_of: dict[str, set[str]] = {}
@@ -403,7 +403,7 @@ def about_named(frame: Frame, store: Any, named: Mapping[str, tuple[str, ...]], 
             continue
         t = tb.items()
         rows = store.query_mind(select(*item_columns())
-                                .where(t.c.kind.in_((c.SOUVENIR, c.BELIEF)), t.c.status == "active", about_any(keys))
+                                .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == "active", about_any(keys))
                                 .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
         items = [Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows]
         items.sort(key=lambda it: (-it.importance * min(1.0, salience(it, frame.now, p)), -it.id))
@@ -515,7 +515,7 @@ def news(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams, 
     since = frame.now - round(p.veiled_fresh_days * DAY)
     t = tb.items()
     ids = [int(i) for (i,) in store.query_mind(
-        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.SOUVENIR, c.BELIEF)),
+        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)),
                              t.c.born_at >= since).order_by(t.c.importance.desc(), t.c.id.desc()).limit(30))]
     found = items_by_id(store, ids)
     return [candidate_of(frame, found[i], person, memo, store) for i in ids
@@ -530,7 +530,7 @@ def veiled_pool(store: Any) -> tuple[int, ...]:
     """Les souvenirs et croyances qui ont une version sans nom (ADR 0091), les plus récents d'abord."""
     t = tb.items()
     return tuple(int(i) for (i,) in store.query_mind(
-        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.SOUVENIR, c.BELIEF)))
+        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)))
         .order_by(t.c.id.desc()).limit(VEILED_POOL)))
 
 
@@ -812,12 +812,12 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             # ce qu'elle a confié d'elle en demandant le silence ne se redit pas à tous (audit du 2026-10-08)
             out.self_said = [it for it in await _self_said(vectors, store, query, p)
                              if verdict_of(frame, it, person, aud, memo, store).ok]
-        near, wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF})
+        near, wider = await search(vectors, query, context, p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF})
         if is_identifiable(person):
             # ce qu'elle a vécu ou appris avec la personne, cherché à part : des souvenirs que l'audience ne peut pas
             # entendre, plus proches de la question, ne le chassent pas des candidats (audit du 2026-10-08)
             own = tuple(sorted({person, ep.target, *frame.get(identity_c.HANDLES(person))}))
-            own_near, own_wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF},
+            own_near, own_wider = await search(vectors, query, context, p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF},
                                                persons=own)
             near, wider = _merged(near, own_near), _merged(wider, own_wider)
         if ep.kind == Kind.REPLY and aud.veiled_level > Sensitivity.ANODYNE and (pool := veiled_pool(store)):
@@ -846,13 +846,13 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     asked: dict[str, tuple[str, ...]] = {}
     close = aud.level >= Sensitivity.PERSONAL
     for item in items.values():
-        if item.status != "active" or item.kind not in (c.SOUVENIR, c.BELIEF):
+        if item.status != "active" or item.kind not in (c.EPISODE_MEMORY, c.BELIEF):
             continue
         if item.valid_until is not None and item.valid_until < now and candidates[item.id] < p.strong_cue:
             continue  # ce qui ne valait que jusqu'à une date passée ne revient plus de lui-même (ADR 0081)
         if item.testimonies:  # sa confiance devant cette audience : ce qu'elle peut en entendre (ADR 0080)
             item = replace(item, confidence=heard_confidence(frame, item, person, aud, memo, store))
-        bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.SOUVENIR else 0.0
+        bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.EPISODE_MEMORY else 0.0
         if dormant(item, now, p, bond) and candidates[item.id] < p.strong_cue:
             continue  # il dort ; seul un indice fort le réveille
         verdict = verdicts.get(item.id) or verdict_of(frame, item, person, aud, memo, store)
@@ -877,7 +877,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     names = {**out.names, **names_of(frame, {o for _, it, v in ranked for o in (*v.others, *it.about)} | set(hidden))}
     out.names = names
     for _score, item, verdict in ranked:
-        bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
+        bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.EPISODE_MEMORY else (out.beliefs, p.max_beliefs)
         # un souvenir se raconte déjà avec ses mots à elle ; une note sur elle n'a personne en face (ADR 0083)
         own = item.empathy if item.kind == c.BELIEF and not item.about_self else ()
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
@@ -1003,7 +1003,7 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
     since = frame.now - round(p.person_recall_days * DAY)
     t = tb.items()
     rows = store.query_mind(select(*item_columns())
-                            .where(t.c.kind.in_((c.SOUVENIR, c.BELIEF)), t.c.status == "active", t.c.born_at >= since,
+                            .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == "active", t.c.born_at >= since,
                                    about_any(handles))
                             .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
     picked: list[tuple[float, Item, Verdict]] = []
@@ -1014,7 +1014,7 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
         verdict = verdict_of(frame, item, person, aud, memo, store)
         if not verdict.ok:
             continue
-        bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.SOUVENIR else 0.0
+        bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.EPISODE_MEMORY else 0.0
         picked.append((item.importance * min(1.0, salience(item, frame.now, p, bond)), item, verdict))
     picked.sort(key=lambda x: (-x[0], -x[1].id))
     taken = {r.item.id for r in (*out.souvenirs, *out.beliefs)}
@@ -1022,7 +1022,7 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
     names = {**out.names, **names_of(frame, {o for _, it, v in picked for o in (*v.others, *it.about)})}
     out.names = names
     for _w, item, verdict in picked[: p.max_person_items]:
-        bucket = out.souvenirs if item.kind == c.SOUVENIR else out.beliefs
+        bucket = out.souvenirs if item.kind == c.EPISODE_MEMORY else out.beliefs
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names)), len(bucket) + 1)
 
 

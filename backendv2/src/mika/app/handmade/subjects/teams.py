@@ -21,11 +21,11 @@ from markupsafe import Markup
 from mika.app.handmade import Look, excerpt
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade.subjects.parts import STYLES, draw, fact, rendered, tag, texts, tone
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.plugins.teams import APPROVED, EXPIRED, EXPIRERS, GONE, REFUSED, WAITING, her, latest, under_way
-from mika.plugins.teams.console import KIND_LABEL, MODE_LABEL, STATE_LABEL
+from mika.plugins.teams.inspect import KIND_LABEL, MODE_LABEL, STATE_LABEL
 from mika.ports.teams import conversation_key, split_conversation_key, to_fill
 
 CONVERSATION = "conversation_teams"
@@ -147,7 +147,7 @@ class ConversationFiche(Overview):
             got = port.draft(d.draft) if d.draft else None
             mine.append({"state": _state_tag(d.state), "when": look.ago(d.at), "asked": d.asked,
                          "text": excerpt(got.body, 220) if got is not None else "(disparue)",
-                         "href": fiche_url(REPLY, d.draft) if d.draft else ""})
+                         "href": subject_url(REPLY, d.draft) if d.draft else ""})
         items = rendered(ui, blocks, query)
         return draw("teams_fil.html", forms=forms or {}, tables="cards", days=_days(look, thread, s),
                     count=len(thread), drafts=mine, under_way=s is not None and under_way(s, account, conversation),
@@ -184,7 +184,7 @@ class ReplyFiche(Overview):
             facts.append(fact("mode", MODE_LABEL.get(seen.mode, seen.mode).split(" — ")[0] or "—"))
         if got is not None:
             facts.append(fact("conversation", title or "ouvrir",
-                              fiche_url(CONVERSATION, conversation_key(got.account, got.conversation))))
+                              subject_url(CONVERSATION, conversation_key(got.account, got.conversation))))
         why = "demandée" if seen is not None and seen.asked else "d'elle-même"
         return draw("tete.html", kicker=f"Réponse Teams · {why}", title=f"Réponse dans « {title or 'une conversation'} »",
                     lede="", tags=tags, facts=facts)
@@ -213,6 +213,6 @@ class ReplyFiche(Overview):
             reason=got.reason, gone=seen is not None and seen.state == GONE,
             steps=_journey(ui, look, seen) if seen is not None else [],
             mode=MODE_LABEL.get(seen.mode, seen.mode) if seen is not None else "",
-            conversation=fiche_url(CONVERSATION, conversation_key(got.account, got.conversation)),
+            conversation=subject_url(CONVERSATION, conversation_key(got.account, got.conversation)),
             actions=[drawn_blocks.shape_block(d) for d in items if d["t"] in ("action", "disclosure")],
             notes=[d for d in items if d["t"] == "note" and not waiting])

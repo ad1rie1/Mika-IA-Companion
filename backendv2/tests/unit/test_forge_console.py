@@ -62,11 +62,13 @@ from mika.plugins.forge import (
     _test_view,
     action_verdict,
     forge_help,
+    resource_allowance,
     trusted,
     written_draft,
 )
 from mika.plugins.forge import TestArgs as ForgeTestArgs
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST, TOPICS
+from mika.plugins.forge.inspect import _app_grants
 from mika.plugins.forge.views import decode_view, is_invalid
 from mika.runtime.inspection import Inspection, find
 from mika.runtime.operations import dynamic_fields, offered, perform
@@ -906,3 +908,26 @@ def test_she_reads_and_writes_the_base_of_her_app_and_the_console_only_reads_it(
     assert tables[0].title == "Ses tables" and {r[0].text for r in tables[0].rows} == {"_kv", "notes"}
     assert [r for t in of(got["lecture"], Table) for r in t.rows if r == ("lait",)]
     assert any("lecture" in n.text for n in of(got["écriture"], Note)) and got["après"] == [{"n": 1}]
+
+
+@needs_bwrap
+def test_the_why_of_an_app_cell_reads_the_very_line_of_the_app(tmp_path):
+    """Q21 (ADR 0219) : le pourquoi d'une case d'app, dans Outils, redit à la personne la part de la ligne qui décide,
+    comme pour un service. ``resource_allowance`` relit la ligne même que ses droits déclarent (``_app_grants`` y
+    ajoute « (de l'app « meteo ») »), sans que l'API recopie la règle du plugin."""
+    async def scenario(kernel, forge, store):
+        await install(kernel, forge, "meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE)
+        frame = kernel.mind.frame()
+        out = []
+        for audience in (Audience(persons=("user_1",), channel="web", public=False), Audience()):
+            for g in _app_grants(frame.state("forge"), frame, Inspection(kernel).context(), audience, Kind.REPLY):
+                acts = dict(g.what).get("agit") is not None
+                out.append((g, resource_allowance(frame, g.resource, g.title, acts, audience, Kind.REPLY)))
+        out.append((None, resource_allowance(frame, "forge:inconnue", "inconnue_x", False, Audience(), Kind.REPLY)))
+        return out
+
+    got = run(tmp_path, scenario)
+    *pairs, (_, unknown) = got
+    assert pairs and unknown is None
+    for g, mirror in pairs:
+        assert mirror is not None and g.why == f"{mirror.why} (de l'app « meteo »)", g

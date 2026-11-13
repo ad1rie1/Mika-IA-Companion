@@ -26,8 +26,8 @@ import pytest
 
 from mika.adapters.web import protocol
 from mika.app.composition import policies
+from mika.app.me import form
 from mika.app.mindport import KernelPort
-from mika.app.moi import form
 from mika.contracts import location as location_c
 from mika.contracts import runtime as rt
 from mika.contracts import trips as c

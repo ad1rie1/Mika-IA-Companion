@@ -5,7 +5,7 @@ décider de ses brouillons.
 Une boîte est à qui est connecté quand elle est à son nom (``personne:<clé>``), ou « à toi » (sans propriétaire
 nommé) et qu'elle est une de ses propriétaires (ADR 0185) ; celles d'elle restent à la console. Un mail, un brouillon,
 un envoi sont à la boîte qu'ils désignent : hors de ses boîtes, rien n'existe. Ce qui se fait passe par les actions du
-courrier (``plugins/email/console``), au nom de la personne — ce qu'elle écrit part tout de suite et elle le sait
+courrier (``plugins/email/inspect``), au nom de la personne — ce qu'elle écrit part tout de suite et elle le sait
 (``email.sent``), comme depuis la console.
 """
 
@@ -18,12 +18,12 @@ from urllib.parse import quote
 from starlette.responses import Response
 from starlette.routing import Route
 
-from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.moi.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
-from mika.plugins.email.console.common import important, mail_key
+from mika.plugins.email.inspect.common import important, mail_key
 from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref, to_fill
 from mika.runtime.operations import SPACE, perform
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
@@ -301,9 +301,14 @@ async def drafts(call: Call) -> dict[str, Any]:
     s = _state(call)
     out = []
     names: dict[str, dict[str, str]] = {}
-    for d in sorted(s.drafts.values(), key=lambda d: (-d.at, -d.proposal)):
-        if d.account not in mine or not allows(mine[d.account][1], SHARE_PREPARE):
-            continue
+    # la note de qui a décidé est gardée à part (l'oubli l'atteint) : relue d'un coup, et seulement sur une boîte à
+    # qui est connecté — ce que son propriétaire a dit à Mika en refusant ne se lit pas par un partage (comme Teams)
+    listed = [d for d in sorted(s.drafts.values(), key=lambda d: (-d.at, -d.proposal))
+              if d.account in mine and allows(mine[d.account][1], SHARE_PREPARE)][:PAGE_MAX]
+    refs = [d.note_ref for d in listed if d.note_ref and mine[d.account][1] == OWN]
+    store = call.port("store") if refs else None
+    notes = dict(store.content(refs)) if store is not None else {}
+    for d in listed:
         if d.account not in names:
             names[d.account] = _names(port, d.account)
         kept = port.draft(d.draft)
@@ -311,7 +316,8 @@ async def drafts(call: Call) -> dict[str, Any]:
         original = port.cached_one(d.mail) if d.mail else None
         out.append({
             "id": d.draft, "box": d.account, "state": d.state, "at": millis(d.at), "decided_at": millis(d.decided_at),
-            "by": d.by, "note": d.note, "in_reply_to": d.mail, "asked": d.asked,
+            "by": d.by, "note": (notes.get(d.note_ref) or "") if d.note_ref else d.note, "in_reply_to": d.mail,
+            "asked": d.asked,
             "voice": mine[d.account][0].voice, "decides": mine[d.account][1] == OWN,
             "original": {"subject": original.subject, "from": name_of(original.sender) or original.address}
             if original is not None else None,
@@ -325,8 +331,6 @@ async def drafts(call: Call) -> dict[str, Any]:
             if preview is not None else None,
             "to_fill": bool(kept and to_fill(kept.subject, kept.body)),
         })
-        if len(out) >= PAGE_MAX:
-            break
     return {"items": out}
 
 

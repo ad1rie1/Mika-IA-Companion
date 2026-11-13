@@ -574,8 +574,10 @@ body.mika-en-grand .sp-static { display: block; }
     -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
   .page-head .subtabs::before { display: none; }
   .ph-title h1 { font-size: 15.5px; }
-  .ph-actions .btn:not(.icon) .lbl { display: none; }
-  .ph-actions .btn:not(.icon):has(.lbl) { width: var(--ctl); padding: 0; }
+  /* la barre de titre seule (`nameTitleButtons` y pose le nom des boutons) : la tête d'une section de Paramètres ou
+     d'une fenêtre garde ses libellés */
+  .page-head .ph-actions .btn:not(.icon) .lbl { display: none; }
+  .page-head .ph-actions .btn:not(.icon):has(.lbl) { width: var(--ctl); padding: 0; }
   .tbl-wrap { overflow-x: auto; }
   .tbl { display: block; overflow-x: auto; white-space: nowrap; }
   .mobile-back { display: inline-flex !important; }

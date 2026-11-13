@@ -102,6 +102,9 @@ class Knob:
     #: ``RECORD_NAME`` (le nom entre dans une URL, dans le nom d'un outil), et ce qu'elle demande, en mots
     key_pattern: re.Pattern[str] | None = None
     key_rule: str = ""
+    #: champ dict[str, Modèle] : le nom d'une de ses entrées, au singulier et avec son article (« un fournisseur »,
+    #: « une autrice ») — son genre, que le nom de la liste ne dit pas : « Ajouter un fournisseur »
+    noun: str = ""
     #: valeurs d'un dict : choisies parmi les clés d'un autre champ dict (chemin relatif au modèle)
     choices_from: str = ""
     #: affiché seulement si le champ ``chemin`` (relatif au modèle) vaut l'une de ces valeurs
@@ -120,6 +123,8 @@ class Knob:
             raise ValueError(f"widget inconnu : « {self.widget} » (attendu : {', '.join(sorted(WIDGETS - {''}))})")
         if self.key_pattern is not None and not self.key_rule:
             raise ValueError("key_pattern sans key_rule : la console doit pouvoir dire la règle des noms")
+        if self.noun and not self.noun.startswith(("un ", "une ")):
+            raise ValueError(f"noun sans son article : « {self.noun} » (attendu : « un … » ou « une … »)")
 
 
 class Upload(BaseModel):
@@ -487,6 +492,13 @@ def record_names(model: type[BaseModel], path: str) -> tuple[re.Pattern[str], st
     if knob.key_pattern is None:
         return RECORD_NAME, RECORD_NAME_RULE
     return knob.key_pattern, knob.key_rule
+
+
+def record_noun(model: type[BaseModel], path: str) -> str:
+    """Le nom d'une entrée d'un champ ``records`` de premier niveau, avec son article (« un fournisseur ») : celui de
+    son ``Knob`` (``noun``) ; vide s'il n'en déclare pas."""
+    info = model.model_fields.get(path)
+    return _knob_of(_expand((*info.metadata, *_unwrap(info.annotation)[1]))).noun if info is not None else ""
 
 
 def _mapping_value(annotation: Any) -> Any:

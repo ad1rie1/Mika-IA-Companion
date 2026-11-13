@@ -201,14 +201,14 @@ class Sort:
         end = instant(datetime.combine(day + timedelta(days=1), time(5), tzinfo=tz))
         t = items()
         rows = store.query_mind(select(t.c.id, t.c.text, t.c.about, t.c.told_by, t.c.heard_by)
-                                .where(t.c.kind == c.SOUVENIR, t.c.status == "active", t.c.born_at >= start,
+                                .where(t.c.kind == c.EPISODE_MEMORY, t.c.status == "active", t.c.born_at >= start,
                                        t.c.born_at < end).order_by(t.c.id.desc()))
         merged: set[int] = set()
         out: list[tuple[int, int]] = []
         for item_id, text, *people in rows:
             if len(out) >= p.night_max_merges or item_id in merged:
                 continue
-            for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}, document=True):
+            for hit, sim in await vectors.search(text, 4, kinds={c.EPISODE_MEMORY}, document=True):
                 if hit == item_id or hit in merged or sim < p.night_merge_similarity or hit > item_id:
                     continue
                 alive = store.query_mind(select(t.c.status, t.c.about, t.c.told_by, t.c.heard_by, t.c.text)

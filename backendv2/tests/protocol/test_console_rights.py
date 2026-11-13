@@ -19,7 +19,7 @@ from mika.contracts import projects as c
 from mika.faculties.identity.faculty import IdentityParams
 from mika.faculties.projects.tools import opened
 from mika.inspector import ui as console_ui
-from mika.inspector.pages import droits_tables, families
+from mika.inspector.pages import families, rights_tables
 from mika.kernel.events import Origin
 from mika.vocab.access import EVERYONE, INTERNAL, OWNER, PERSON, SELF, Table, ToolRule
 from mika.vocab.canals import CanalRule, CanalTable
@@ -241,7 +241,7 @@ def test_the_composition_gives_the_tables_what_they_show(world, monkeypatch):  #
 def test_the_inspector_guesses_nothing_of_the_plugins() -> None:
     """Ni les tableaux de droits ni les familles n'écrivent le nom d'un plugin ou l'adresse de sa fiche, ni ne lisent
     ses réglages : ce qu'import-linter ne voit pas (K0-17)."""
-    for module in (droits_tables, families):
+    for module in (rights_tables, families):
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         written = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
         assert not written & {"mcp", "forge", "forge_apps", "teams", "email", "phone"}, module.__name__

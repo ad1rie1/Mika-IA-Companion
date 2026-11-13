@@ -3,7 +3,7 @@ sans dire de qui il s'agit — à qui n'a aucun lien connu avec la personne (``l
 l'écoute (``Audience.veiled_level``), en réponse seulement, jamais à la place de ce qui peut se dire nommé.
 
 Le rappel lui passe ses candidats (ce que la question réveille, ou, quand on lui demande des nouvelles, ce qui est
-récent) ; le verdict est ``vocab.retelling`` ; le budget : au plus ``veiled_max_shown`` par réponse, et
+récent) ; le verdict est ``memory.retelling`` ; le budget : au plus ``veiled_max_shown`` par réponse, et
 ``veiled_per_person`` par personne et par auditeur sur ``veiled_keep_days`` — un même élément une fois. Ce qu'elle a
 déjà raconté sans nom à quelqu'un lui revient comme tel (« garde-le sans nom »), sous le même verdict (devenu secret,
 ou un lien depuis : plus rien). « Raconté » : sa réponse en a repris les mots (``echoed``) — que son prompt le lui
@@ -27,6 +27,7 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
 from mika.faculties.memory.links import handles_of, links_of, written
+from mika.faculties.memory.retelling import FRAMING, retellable
 from mika.faculties.memory.salience import Item
 from mika.faculties.memory.tables import about, batches, handle_key, items, told_lines
 from mika.kernel.clock import DAY
@@ -37,7 +38,6 @@ from mika.ports.sql import alias_of
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, named_label
 from mika.vocab.phrasebook import phrase
-from mika.vocab.retelling import FRAMING, retellable
 from mika.vocab.words import fold, stems
 
 #: « quoi de neuf ? » : on lui demande des nouvelles (replié, sans accents)
@@ -176,7 +176,7 @@ def choose(frame: Frame, store: Any, candidates: Sequence[Candidate], listener: 
                       level=aud.veiled_level, listener=listener, told_by=cand.told_by, heard_by=cand.heard_by,
                       secret=it.secret, lie=it.origin == c.LIED, between_us=it.between_us,
                       derived=it.internal_only or bool(it.constraints),
-                      claim=it.kind == c.SOUVENIR or it.knowledge_kind == "claim", owners=owners,
+                      claim=it.kind == c.EPISODE_MEMORY or it.knowledge_kind == "claim", owners=owners,
                       importance=it.importance)
         if not retellable(**common, linked=False).ok:  # le lien se cherche seulement s'il reste la seule question
             continue

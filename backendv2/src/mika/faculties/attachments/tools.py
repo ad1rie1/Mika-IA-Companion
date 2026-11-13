@@ -324,7 +324,7 @@ class LinkArgs(BaseModel):
 
 
 #: ce qu'elle peut relier à une pièce : un souvenir, une croyance, un moment de la vie de quelqu'un
-LINKABLE = frozenset({memory_c.SOUVENIR, memory_c.BELIEF, memory_c.EVENT})
+LINKABLE = frozenset({memory_c.EPISODE_MEMORY, memory_c.BELIEF, memory_c.EVENT})
 
 
 async def _element(ctx: Any, here: Here, text: str, among: Sequence[int] | None = None) -> Known | None:

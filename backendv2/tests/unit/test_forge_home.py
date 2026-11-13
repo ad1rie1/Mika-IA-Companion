@@ -63,7 +63,7 @@ from mika.plugins.forge import (
 from mika.plugins.forge import (
     TestArgs as ForgeTestArgs,
 )
-from mika.plugins.forge.guide import VEILLE_CODE, VEILLE_MANIFEST
+from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.runtime.tools import ToolContext, offer
 from mika.sim.clock import SimClock, run_virtual
@@ -240,8 +240,8 @@ class WebApi(FakeApi):
 
 
 def test_the_watch_example_is_valid_and_watches_a_rate():
-    manifest, problems = read_manifest(VEILLE_MANIFEST)
-    code_problems, functions = signatures(VEILLE_CODE)
+    manifest, problems = read_manifest(WATCH_MANIFEST)
+    code_problems, functions = signatures(WATCH_CODE)
     assert problems == [] and code_problems == [] and coherence(manifest, functions) == []
     assert manifest["schedule"] == "cron:0 17 * * 1-5" and manifest["context"] and manifest["timeout"] == 20
     assert manifest["allowed_domains"] == []  # son réseau est libre (ADR 0105) : rien à déclarer
@@ -249,7 +249,7 @@ def test_the_watch_example_is_valid_and_watches_a_rate():
     assert [a["key"] for a in tool["args"]] == ["devise"] and not tool["args"][0]["required"]
     api = WebApi({f["key"]: f["default"] for f in manifest["config_fields"]})
     app: dict = {}
-    exec(compile(VEILLE_CODE, "main.py", "exec"), app)  # noqa: S102 — l'exemple lui-même
+    exec(compile(WATCH_CODE, "main.py", "exec"), app)  # noqa: S102 — l'exemple lui-même
     got = app["tick"](api)
     assert got["ecart"] == 2.82 and api.fetched[0].startswith("https://api.frankfurter.dev/")  # une API ouverte
     assert api.signals and "2.82" in api.signals[0]  # un seuil franchi : elle est prévenue…
@@ -260,7 +260,7 @@ def test_the_watch_example_is_valid_and_watches_a_rate():
     assert other["devise"] == "GBP" and "to=GBP" in api.fetched[-1] and len(api.signals) == 1
     text = guide.topic("veille")
     assert "http_get" in text and "file de l'app" in text and "interval:1h" in text and "tick(api)" in text
-    assert VEILLE_CODE in text and VEILLE_MANIFEST in text  # l'exemple montré est celui qui tourne
+    assert WATCH_CODE in text and WATCH_MANIFEST in text  # l'exemple montré est celui qui tourne
 
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
@@ -296,8 +296,8 @@ def test_forge_test_tries_what_she_wrote_and_its_signals_really_go_to_the_queue(
         await boot(kernel)
         try:
             await connect(kernel, "user_1", "Adrien", operator=True)
-            out = {"écrite": await _her_tool(kernel, "forge_write", {"app": "cours", "manifest": VEILLE_MANIFEST,
-                                                                      "code": VEILLE_CODE}),
+            out = {"écrite": await _her_tool(kernel, "forge_write", {"app": "cours", "manifest": WATCH_MANIFEST,
+                                                                      "code": WATCH_CODE}),
                    "murmure": await _her_tool(kernel, "forge_write", {"app": "murmure", "manifest": FAINT,
                                                                        "code": FAINT_CODE})}
             for method, extra in (("tick", {}), ("context", {}), ("tool_maintenant", {}), ("tool_inconnu", {}),
@@ -360,8 +360,8 @@ def test_writing_an_app_proves_nothing_until_it_has_been_tried(tmp_path):
         try:
             await connect(kernel, "user_1", "Adrien", operator=True)
             here = _same_episode(kernel, "ep-ici")
-            out = {"écrite": await here("forge_write", {"app": "cours", "manifest": VEILLE_MANIFEST,
-                                                         "code": VEILLE_CODE}),
+            out = {"écrite": await here("forge_write", {"app": "cours", "manifest": WATCH_MANIFEST,
+                                                         "code": WATCH_CODE}),
                    "lue": await here("forge_list", {}),
                    "essayée": await here("forge_test", {"app": "cours", "method": "tick"})}
             later = _same_episode(kernel, "ep-plus-tard")
@@ -405,7 +405,7 @@ def test_an_app_written_during_a_run_lives_there_and_its_breakage_asks_for_a_rep
                                           tools=["forge"]), reply)
             pid = events(kernel, c.PROJECT_CREATED)[-1].seq
             run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
-            wrote = await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST, code=VEILLE_CODE), run)
+            wrote = await forge_write(WriteArgs(app="cours", manifest=WATCH_MANIFEST, code=WATCH_CODE), run)
             frame = kernel.mind.frame()
             app = next(a for a in frame.get(forge_c.APPS) if a.name == "cours")
             state_app = frame.state("forge").apps["cours"]
@@ -476,7 +476,7 @@ def test_her_own_project_asks_for_help_too(tmp_path):
 
 # ── Ses actions deviennent de vrais outils (L10) ──────────────────────────
 
-SECRET_MANIFEST = VEILLE_MANIFEST.replace("config:\n", "config:\n  - {key: cle, type: secret, label: Clé}\n")
+SECRET_MANIFEST = WATCH_MANIFEST.replace("config:\n", "config:\n  - {key: cle, type: secret, label: Clé}\n")
 
 
 @needs_bwrap
@@ -491,8 +491,8 @@ def test_each_app_announces_itself_and_its_actions_are_her_tools(tmp_path):
         try:
             await connect(kernel, "user_1", "Adrien", operator=True)
             here = _same_episode(kernel, "ep-ecrire")
-            await here("forge_write", {"app": "cours", "manifest": VEILLE_MANIFEST, "code": VEILLE_CODE})
-            await here("forge_write", {"app": "coffre", "manifest": SECRET_MANIFEST, "code": VEILLE_CODE})
+            await here("forge_write", {"app": "cours", "manifest": WATCH_MANIFEST, "code": WATCH_CODE})
+            await here("forge_write", {"app": "coffre", "manifest": SECRET_MANIFEST, "code": WATCH_CODE})
             registry = kernel.mind.registry
             frame = kernel.mind.frame()
             owner = offer(registry.tools, policies()[Kind.REPLY], Kind.REPLY, ADRIEN, frame=frame)
@@ -784,7 +784,7 @@ def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp
                                                                  else "timeout", target=project_target(pid))],
                                          emitter="runtime", correlation=ctx.episode_id, origin=Origin.KERNEL)
 
-            await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST, code=VEILLE_CODE), run("forge_write"))
+            await forge_write(WriteArgs(app="cours", manifest=WATCH_MANIFEST, code=WATCH_CODE), run("forge_write"))
             failed = run("forge_test")
             out = {"panne": await forge_test(ForgeTestArgs(app="cours", method="tick"), failed)}
             await ended(failed, reported=False)  # son délai passe : rien n'est consommé
@@ -849,11 +849,11 @@ def test_a_view_that_breaks_in_the_console_reaches_the_run_of_its_project(tmp_pa
     host = ForgeHost(tmp_path / "forge")
 
     async def main():
-        await host.write("cours", VEILLE_MANIFEST, VEILLE_CODE)
+        await host.write("cours", WATCH_MANIFEST, WATCH_CODE)
         host.note("cours", "view_releves : enveloppe invalide dans la console — blocks[0].rows : une liste")
         host.note("cours", "view_releves : enveloppe invalide dans la console — blocks[0].rows : une liste")
         seen = host.problems("cours")
-        await host.write("cours", VEILLE_MANIFEST, VEILLE_CODE + "\n")
+        await host.write("cours", WATCH_MANIFEST, WATCH_CODE + "\n")
         return seen, host.problems("cours")
 
     try:

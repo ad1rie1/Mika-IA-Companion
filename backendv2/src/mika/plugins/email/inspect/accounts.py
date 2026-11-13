@@ -33,7 +33,7 @@ from mika.kernel.inspect import (
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import EMAIL, POLL_ASKED, EmailState, params_of
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     NO_PORT,
     SETTINGS,
     VOICE_LABEL,
@@ -52,7 +52,7 @@ from mika.vocab.canals import mail_rule
 #: où se règle le tableau d'une boîte (ADR 0134)
 CANALS_PAGE = "canaux"
 
-FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
+FAILED_SEE_SUBJECT = "Le test a échoué : l'erreur est sur sa fiche (onglet État)."
 
 
 def signin_note(signin: SignIn | None, until: str) -> tuple[str, str] | None:
@@ -79,7 +79,7 @@ def _state(info: AccountInfo, error: str) -> Badge:
     return Badge("prêt", "ok")
 
 
-def _fiche(key: str, tab: str = "") -> Ref:
+def _account_ref(key: str, tab: str = "") -> Ref:
     return Ref.subject("compte", key, "", tab)
 
 
@@ -178,7 +178,7 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
     badges = [_state(info, status.error), Badge(f"elle y écrit {VOICE_LABEL.get(info.voice, info.voice)}", "info")]
     if _prepares(frame, key):
         badges.append(Badge("prépare des réponses d'elle-même", "info"))
-    facts: list[tuple[str, Any]] = [("réglages", edit_account(key, _fiche(key))),
+    facts: list[tuple[str, Any]] = [("réglages", edit_account(key, _account_ref(key))),
                                     ("dernier relevé", ctx.when(status.last_poll) if status.last_poll else "jamais")]
     return Head(key=key, title=info.name, subtitle=info.address, badges=tuple(badges), facts=tuple(facts))
 
@@ -238,7 +238,7 @@ def _tab_voice(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("réponses préparées d'elle-même", "oui" if _prepares(frame, info.key) else "non"),
         ("pour qui, et comment elles partent", Ref.settings(CANALS_PAGE, "le tableau de cette boîte (Réglages › Canaux)",
                                                             canal=f"courrier:{info.key}")),
-        ("modifier", edit_account(info.key, _fiche(info.key, "voix"))),
+        ("modifier", edit_account(info.key, _account_ref(info.key, "voix"))),
     ]
     blocks: list[Block] = [Fields(tuple(pairs), title="Sa voix dans cette boîte", columns=2),
                            Prose(voice_text(info), title="Ce qu'elle lit avant d'écrire depuis cette boîte")]
@@ -269,7 +269,7 @@ async def _test(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Don
         raise Refused("Compte inconnu.")
     ok, said = await port.test(ctx.subject)
     if not ok and port.status(ctx.subject).error:
-        said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
+        said = FAILED_SEE_SUBJECT  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger")
 
 

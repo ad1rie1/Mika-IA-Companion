@@ -4,7 +4,7 @@ Ce document est pour qui écrit le client de tous les jours, `frontendv2/` : ce 
 et seulement à elle — ses boîtes, ses comptes Teams, ses téléphones, ses services, ce qu'on lui partage, ses droits, sa
 carte et ses voyages. Les décisions et leurs raisons sont les ADR 0187 à 0192 de [`decisions.md`](decisions.md) (et,
 pour la carte, 0193 à 0196) ; le code fait foi dans
-[`app/moi/`](../src/mika/app/moi/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
+[`app/me/`](../src/mika/app/me/__init__.py). La conversation reste sur `/ws` ([`protocole-chat.md`](protocole-chat.md)) ;
 la console, celle des opérateurs, voit tout et ne passe pas par ici.
 
 ## 1. Qui demande
@@ -143,8 +143,9 @@ préparer ou t'en servir (`decides` faux : ils attendent l'accord de leur propri
                         "blocked": ""}}]}
 ```
 
-`state` : `attend` (ta décision), `approuve`, `parti`, `refuse`, `echec`. `asked` : on le lui avait demandé (sinon
-d'elle-même). `to_people` : ses destinataires, à leur nom quand la boîte les connaît (`to` reste le texte qu'on
+`state` : `attend` (ta décision), `approuve`, `parti`, `refuse`, `echec`. `note` : ce qu'a dit qui a décidé (gardée à
+part, l'oubli l'atteint), seulement sur une boîte à toi — celle d'un refus par son propriétaire ne se lit pas par un
+partage, comme dans Teams. `asked` : on le lui avait demandé (sinon d'elle-même). `to_people` : ses destinataires, à leur nom quand la boîte les connaît (`to` reste le texte qu'on
 retouche). `original` : le mail auquel il répond (`null` : un mail nouveau, ou plus dans la boîte). `preview`
 (seulement quand il attend) est exactement ce qui partira ; son `digest` se renvoie pour l'envoyer tel qu'il a été
 lu ; `blocked` dit pourquoi il ne peut pas partir tel quel (un `[À COMPLÉTER`).
@@ -341,7 +342,8 @@ la part de la ligne qui te concerne (ADR 0209).
   désigne (toi, ses proches, tout le monde ; elle seule au travail) et quand (« tout le monde, quand elle répond »),
   ou « par défaut : personne » quand aucune ne la désigne ; puis « ce canal le restreint », ou la raison du plafond,
   s'ils ont serré. Jamais un numéro de ligne ni les autres personnes qu'elle nomme. Une case d'un service redit la
-  ligne de son service ; celle d'une app, « les accès de cette app te l'ouvrent » (ou ne te l'ouvrent pas).
+  ligne de son service ; celle d'une app, la ligne de son app ou de son projet (ADR 0219), sinon « les accès de cette
+  app te l'ouvrent » (ou ne te l'ouvrent pas).
   `reason` : ce qui le ferme avant ses lignes — `when` (la condition qu'il déclare sur qui est en face : `why` la
   dit), `needs` (son service n'est pas configuré), `fits` (les accès de sa ressource). `owned` : ouvert parce qu'une
   ressource de l'outil est à toi (une boîte à ton nom, ADR 0185, ou qu'on te partage : `why` le dit).
@@ -357,10 +359,11 @@ la part de la ligne qui te concerne (ADR 0209).
 - Une case `owned` se lit au niveau de ce qui t'est ouvert : un partage « lire » n'ouvre que les outils qui lisent,
   « lire et préparer » aussi celui qui prépare une réponse, « s'en servir » aussi celui qui range.
 - `services`, `apps` : seulement ceux qu'au moins une case t'ouvre ; une app dit son titre. Un service qu'une personne
-  a branché (`owner`, ADR 0192) dit son but (`description`, le `purpose` qu'elle lui a donné). Un service de Mika,
-  sans propriétaire (réglé dans la console, ou un service système comme `web`), n'en dit rien (`description` vide) :
-  son `purpose` est la ligne de son catalogue, écrite pour elle (ADR 0209). Ceux qu'on te partage sans qu'aucune case
-  ne t'en ouvre encore se lisent dans `GET …/mcp/services` (`received`, § 8).
+  a branché (`owner`, ADR 0192) dit son but (`description`, le `purpose` qu'elle lui a donné). Un service du système
+  (`web`, son plugin actif) a un titre et un but écrits pour la personne par la composition (« Le web »,
+  `app/system_mcp.py`, `SHOWN`, ADR 0219). Un service de l'opératrice, sans propriétaire, n'en dit rien (`description`
+  vide) : son `purpose` est la ligne de son catalogue, écrite pour elle (ADR 0209). Ceux qu'on te partage sans
+  qu'aucune case ne t'en ouvre encore se lisent dans `GET …/mcp/services` (`received`, § 8).
 
 ## 7. Paramètres
 

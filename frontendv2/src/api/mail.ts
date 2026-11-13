@@ -6,7 +6,7 @@
 import { apiUrl, getJson, MOI, sendForm, sendJson, type Done } from "./moi";
 
 /**
- * Les bornes des chaînes que l'API reçoit (`app/moi/mail.py`, en caractères) : au-delà, elle refuse (400, avec
+ * Les bornes des chaînes que l'API reçoit (`app/me/mail.py`, en caractères) : au-delà, elle refuse (400, avec
  * `fields: {"<nom>": "N caractères au plus"}`) — elle ne coupe jamais. Le client les tient d'avance (`maxlength`, un
  * envoi trop long ne part pas). `recipients` vaut pour `to`, `cc` et `bcc`.
  */

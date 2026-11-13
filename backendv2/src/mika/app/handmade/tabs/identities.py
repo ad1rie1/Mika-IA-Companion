@@ -31,7 +31,7 @@ from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs, text, t
 from mika.app.handmade.tabs.people import person_of
 from mika.contracts.identity import DENIED, VOUCHED
 from mika.inspector.formview import PREFILL
-from mika.inspector.pages.subjects import fiche_key
+from mika.inspector.pages.subjects import subject_url_key
 from mika.inspector.ui import PREFIX
 from mika.runtime.operations import offered
 
@@ -44,7 +44,7 @@ EVIDENCE = "identity.preuve"
 
 def handle_of(c: Mapping[str, Any] | None) -> str:
     """Le moyen de communication qu'une cellule nomme : la clé de la fiche où son lien mène."""
-    return fiche_key(str((c or {}).get("href") or ""), "handle")
+    return subject_url_key(str((c or {}).get("href") or ""), "handle")
 
 
 def _split(said: str) -> tuple[str, str]:

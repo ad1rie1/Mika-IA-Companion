@@ -1,5 +1,5 @@
 """Une adresse de la console s'écrit d'une seule façon : le contrat ``Ref`` dit ce qu'on vise, ``render.href`` en fait
-une adresse, ``subjects.fiche_url`` est la seule aide pour la fiche d'un objet — et une vue a une adresse, pas un
+une adresse, ``subjects.subject_url`` est la seule aide pour la fiche d'un objet — et une vue a une adresse, pas un
 détour par ``/facultes/``."""
 
 import ast
@@ -13,7 +13,7 @@ from mika.app.handmade.tabs.identities import handle_of
 from mika.app.handmade.tabs.people import person_of
 from mika.inspector import render, text
 from mika.inspector.pages.families import _tool_href
-from mika.inspector.pages.subjects import fiche_key, fiche_url
+from mika.inspector.pages.subjects import subject_url, subject_url_key
 from mika.kernel.inspect import Entry, Nav, NavItem, Ref, Row, Stat, Stats, Table, Timeline
 from mika.vocab.people import EPHEMERAL_PREFIX
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -118,24 +118,24 @@ def test_a_tool_reads_where_these_links_lead(ref, said):
 
 @pytest.mark.parametrize("key", ["adrien", "a b/c?d#e", "INBOX:12@x", "é&=%"])
 def test_a_key_is_read_back_from_its_fiche(key):
-    assert fiche_key(fiche_url("mail", key), "mail") == key
-    assert fiche_key(fiche_url("mail", key, "voix") + "#plus", "mail") == key
+    assert subject_url_key(subject_url("mail", key), "mail") == key
+    assert subject_url_key(subject_url("mail", key, "voix") + "#plus", "mail") == key
 
 
 def test_a_fiche_is_written_as_every_link_writes_it():
-    assert fiche_url("compte", "a b/c", "etat") == render.href(Ref.subject("compte", "a b/c", "", "etat"))
-    assert fiche_url("compte", "a b/c") == "/inspecteur/fiche/compte/a%20b%2Fc"
+    assert subject_url("compte", "a b/c", "etat") == render.href(Ref.subject("compte", "a b/c", "", "etat"))
+    assert subject_url("compte", "a b/c") == "/inspecteur/fiche/compte/a%20b%2Fc"
 
 
 @pytest.mark.parametrize("href", ["", "/inspecteur/fiche/handle/x", "/inspecteur/sens/flux", "https://x.fr/fiche/mail/k"])
 def test_another_address_has_no_key_of_this_kind(href):
-    assert fiche_key(href, "mail") == ""
+    assert subject_url_key(href, "mail") == ""
 
 
 def test_a_drawn_page_reads_who_a_cell_names():
-    assert person_of({"href": fiche_url("person", "user 3") + "?onglet=memoire"}) == "user 3"
-    assert handle_of({"href": fiche_url("handle", "web:x#1")}) == "web:x#1"
-    assert person_of({"href": fiche_url("handle", "web:x")}) == "" and person_of(None) == ""
+    assert person_of({"href": subject_url("person", "user 3") + "?onglet=memoire"}) == "user 3"
+    assert handle_of({"href": subject_url("handle", "web:x#1")}) == "web:x#1"
+    assert person_of({"href": subject_url("handle", "web:x")}) == "" and person_of(None) == ""
 
 
 def test_only_a_person_has_a_person_link():

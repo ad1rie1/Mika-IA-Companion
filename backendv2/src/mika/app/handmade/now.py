@@ -62,9 +62,10 @@ from mika.faculties.goals.inspect import KIND_FR as GOAL_KIND_FR
 from mika.faculties.goals.inspect import STATUS_FR as GOAL_STATUS_FR
 from mika.faculties.needs.inspect import FELT_FR
 from mika.inspector import names, render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
+from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import Ref, money_fr, num_fr, pct_fr
 from mika.runtime.boundary import Failed, call
@@ -336,7 +337,7 @@ def pursuits(look: Look) -> dict[str, Any]:
             "progress": f"{done} / {total} {counted}" if total else "",
             "w": unit(done / total) if total else 0.0,
             "next": (f"prochaine séance {look.day(nxt)}" if nxt > now else "") if nxt else "",
-            "blocked": g.tasks_blocked, "href": fiche_url("goal", str(g.id)),
+            "blocked": g.tasks_blocked, "href": subject_url("goal", str(g.id)),
         })
     agency = frame.get(agency_c.AGENCY)
     holding = agency.refractory_until > now
@@ -565,7 +566,7 @@ def feed(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> list[d
             status = GOAL_STATUS_FR.get(e.data.status, e.data.status)
             entries.append({"at": e.at, "text": f"But {status}", "quote": excerpt(said(e.data.title), 120),
                             "tone": "ok" if e.data.status == goals_c.ACHIEVED else "muted",
-                            "href": fiche_url("goal", str(e.data.goal))})
+                            "href": subject_url("goal", str(e.data.goal))})
     entries.sort(key=lambda x: x["at"], reverse=True)
     out = []
     for x in entries[:FEED_SHOWN]:
@@ -586,11 +587,13 @@ def today(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> list[
     silences = sum(1 for _k, o in ended if o == "abstained")
     failed = {o for _k, o in ended if o in FAILED}
     failures = sum(1 for _k, o in ended if o in FAILED)
-    out = [{"label": "réponses", "value": replies},
-           {"label": "initiatives", "value": initiatives},
-           {"label": "silences choisis", "value": silences},
-           {"label": "pensées nées", "value": sum(1 for e in thoughts if e.at >= midnight)},
-           {"label": "échecs", "value": failures, "tone": "danger" if failures else "",
+    born = sum(1 for e in thoughts if e.at >= midnight)
+    # le nom accordé au nombre, que la carte montre juste devant : « 1 échec », « 0 initiative » (C1-10)
+    out = [{"label": agree(replies, "réponse", "réponses"), "value": replies},
+           {"label": agree(initiatives, "initiative", "initiatives"), "value": initiatives},
+           {"label": agree(silences, "silence choisi", "silences choisis"), "value": silences},
+           {"label": agree(born, "pensée née", "pensées nées"), "value": born},
+           {"label": agree(failures, "échec", "échecs"), "value": failures, "tone": "danger" if failures else "",
             # le filtre des épisodes ne prend qu'une issue : avec des échecs et des délais dépassés, tous
             "href": f"{PREFIX}/decisions/episodes" + (f"?issue={next(iter(failed))}" if len(failed) == 1 else "")
             if failures else ""}]
@@ -598,7 +601,8 @@ def today(look: Look, episodes: Sequence[Any], thoughts: Sequence[Any]) -> list[
     if calls is not None:
         used = call(calls.usage, midnight, label="appels du jour")
         if not isinstance(used, Failed):
-            out.append({"label": "appels de modèle", "value": sum(u.calls for u in used),
+            calls_n = sum(u.calls for u in used)
+            out.append({"label": agree(calls_n, "appel de modèle", "appels de modèle"), "value": calls_n,
                         "sub": money_fr(sum(u.cost_usd for u in used)), "href": f"{PREFIX}/systeme/appels"})
     return out
 

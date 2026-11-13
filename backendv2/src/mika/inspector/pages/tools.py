@@ -231,7 +231,7 @@ def _prompt(ui: Any, s: Situation) -> str:
 async def all_tools(ui: Any, request: Request) -> Any:
     name = str(request.query_params.get("outil", "") or "")
     if name:
-        return _fiche(ui, request, name)
+        return _tool_page(ui, request, name)
     params = _params(ui)
     values, notes = read_params(params, request.query_params)
     query, lot = str(values.get("q") or ""), str(request.query_params.get("lot", "") or "")
@@ -265,7 +265,7 @@ async def all_tools(ui: Any, request: Request) -> Any:
     return {"blocks": blocks, "filters": params, "panel": families.panel(ui, request, query, lot, prompts)}
 
 
-def _fiche(ui: Any, request: Request, name: str) -> Any:
+def _tool_page(ui: Any, request: Request, name: str) -> Any:
     registry = ui.kernel.registry
     context = {k: v for k, v in request.query_params.items() if k in CATALOG_PARAMS or is_table_choice(k, v)}
     # le fil d'Ariane (ADR 0202) : « Outils / Ses outils / <l'outil> », la destination menant à la liste d'où l'on

@@ -283,8 +283,8 @@ DISMISS = "identity.ecarter_nom"
 #: mémoire se lit par plage)
 _NAMED_END = "name;"
 #: ce qu'un nom rattache à une personne : souvenirs, croyances, moments de sa vie
-NAMED_KINDS = (memory_c.SOUVENIR, memory_c.BELIEF, memory_c.EVENT)
-_KINDS_FR = {memory_c.SOUVENIR: ("souvenir", "souvenirs"), memory_c.BELIEF: ("croyance", "croyances"),
+NAMED_KINDS = (memory_c.EPISODE_MEMORY, memory_c.BELIEF, memory_c.EVENT)
+_KINDS_FR = {memory_c.EPISODE_MEMORY: ("souvenir", "souvenirs"), memory_c.BELIEF: ("croyance", "croyances"),
              memory_c.EVENT: ("moment de sa vie", "moments de sa vie")}
 _SENSITIVITY_FR = {Sensitivity.NONE: ("sans rien sur autrui", "sans rien sur autrui"),
                    Sensitivity.ANODYNE: ("anodin", "anodins"), Sensitivity.PERSONAL: ("personnel", "personnels"),

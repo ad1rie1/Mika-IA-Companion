@@ -24,7 +24,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.contracts import teams as c
 from mika.kernel.events import Content
-from mika.kernel.forms import Knob
+from mika.kernel.forms import Knob, agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -99,7 +99,8 @@ def _clip(text: str, n: int) -> str:
 
 
 def _waiting_count(s: TeamsState, frame: Frame) -> tuple[int, str]:
-    return sum(1 for d in s.drafts.values() if d.state == WAITING), "réponse(s) Teams à décider"
+    n = sum(1 for d in s.drafts.values() if d.state == WAITING)
+    return n, agree(n, "réponse Teams à décider", "réponses Teams à décider")
 
 
 def _to_answer(s: TeamsState, account: str, conversation: str) -> int:

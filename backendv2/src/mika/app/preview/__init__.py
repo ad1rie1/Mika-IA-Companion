@@ -37,13 +37,13 @@ from mika.adapters.teams import TeamsAccount, TeamsConfig
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app import schema
-from mika.app.apercu_activity import activity
-from mika.app.apercu_git import URL as REMOTE_URL
-from mika.app.apercu_git import repository
-from mika.app.apercu_inner import inner
-from mika.app.apercu_mail import mailbox
 from mika.app.console import NAVIGATION
-from mika.app.moi import form
+from mika.app.me import form
+from mika.app.preview.activity import activity
+from mika.app.preview.git import URL as REMOTE_URL
+from mika.app.preview.git import repository
+from mika.app.preview.inner import inner
+from mika.app.preview.mail import mailbox
 from mika.app.server import build
 from mika.contracts import attachments as attachments_c
 from mika.contracts import email as email_c
@@ -68,7 +68,7 @@ CONSOLIDATION_WAIT_STEPS = 100
 ORIGIN = "http://localhost:3000"
 HOST = "http://localhost:8001"
 PASSWORD = "une-phrase-de-passe-longue"
-STATIC = Path(__file__).resolve().parent.parent / "inspector" / "static"
+STATIC = Path(__file__).resolve().parents[2] / "inspector" / "static"
 #: le cadre d'un document HTML natif dans une page (ADR 0169)
 FRAME = re.compile(r'src="/inspecteur/document/([0-9a-f]{40})"')
 REPLIES = itertools.cycle([

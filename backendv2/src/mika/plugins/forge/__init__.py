@@ -27,7 +27,7 @@
   projet est à sa propriétaire seule. Sur accord, l'appel est proposé
   (``calls.py``). Une app qui a des secrets ne sert en conversation que
   promue.
-- **La console** (``console.py``) : chaque app a sa fiche (type d'objet
+- **La console** (``inspect.py``) : chaque app a sa fiche (type d'objet
   ``app``) — état, ses vues déclarées rendues depuis le bac à sable (jamais
   journalisées, jamais comptées par le disjoncteur), ses réglages typés, son
   code, son journal, son vécu — et les commandes d'un opérateur. Mika
@@ -1979,14 +1979,30 @@ def app_lines(frame: Frame, app: App | None) -> tuple[tuple[Any, ...], Any]:
     return (view.access, view.default_access) if view is not None else ((), projects_c.CLOSED)
 
 
+def _allowance(frame: Frame, app: App | None, tool: str, acts: bool, audience: Any, kind: str) -> Any:
+    """La ligne de son projet (ou la sienne) qui décide de cet outil d'app (``tool`` : ``<app>_<outil>``) devant qui
+    est en face, à ce moment : sa colonne « lecture » ou « action », serrée par le canal et le plafond (ADR 0134)."""
+    rows, default = app_lines(frame, app)
+    return tool_allowance(rows, default, audience, kind, acts, rights_of(frame.env),
+                          lambda a: not a.tools or tool in a.tools, close=closeness_of(frame.env, frame), outside=True)
+
+
 def app_level(frame: Frame, name: str, tool: str, reads: bool, audience: Any, kind: str) -> tuple[str, str]:
-    """Ce qu'elle fait de cet outil d'app devant qui est en face, à ce moment, et ce qu'elle en garde : la ligne de
-    son projet (ou la sienne) qui le concerne (``tool`` : ``<app>_<outil>``), sa colonne « lecture » ou « action »,
-    serrée par le canal et le plafond (ADR 0134) ; ``non`` sans personne."""
-    rows, default = app_lines(frame, frame.state("forge").apps.get(name))
-    got = tool_allowance(rows, default, audience, kind, not reads, rights_of(frame.env),
-                         lambda a: not a.tools or tool in a.tools, close=closeness_of(frame.env, frame), outside=True)
+    """Ce qu'elle fait de cet outil d'app devant qui est en face, à ce moment, et ce qu'elle en garde (``_allowance``) ;
+    ``non`` sans personne."""
+    got = _allowance(frame, frame.state("forge").apps.get(name), tool, not reads, audience, kind)
     return (got.level, got.keep) if got is not None else (NO, "rien")
+
+
+def resource_allowance(frame: Frame, resource: str, tool: str, acts: bool, audience: Any, kind: str) -> Any:
+    """La lecture même d'une case d'app, pour qu'on redise sa ligne à la personne (ADR 0219) : ``resource`` est celle
+    de ses droits (``forge:<app>``, ou ``project:<n>`` pour une app d'un projet, qui suit les lignes du projet) ;
+    ``None`` sans app ni ligne."""
+    sort, _, key = resource.partition(":")
+    apps = frame.state("forge").apps
+    app = apps.get(key) if sort == "forge" else \
+        next((a for a in apps.values() if str(a.project) == key), None) if sort == "project" else None
+    return _allowance(frame, app, tool, acts, audience, kind) if app is not None else None
 
 
 def app_tool_names(frame: Frame, ports: Mapping[str, Any], project: int) -> list[tuple[str, str]]:
@@ -2282,4 +2298,4 @@ async def _installed(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
 
 # ── La console (fiche d'une app, ses onglets, les commandes d'un opérateur) ; ses appels sur accord ──
 from mika.plugins.forge import calls as calls  # noqa: E402 — s'enregistre sur FORGE
-from mika.plugins.forge import console as console  # noqa: E402 — s'enregistre sur FORGE
+from mika.plugins.forge import inspect as inspect  # noqa: E402 — s'enregistre sur FORGE

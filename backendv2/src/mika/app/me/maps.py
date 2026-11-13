@@ -28,8 +28,8 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from mika.adapters.maps import gpx
-from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.moi.common import millis
+from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.common import millis
 from mika.contracts import trips as c
 from mika.kernel.events import EventType
 from mika.plugins import trips as trips_p
@@ -39,8 +39,8 @@ from mika.ports.maps import AVOIDS, MODES, ROUTE_POINTS_MAX, MapsUnavailable, Pl
 from mika.runtime.effects import with_content
 from mika.runtime.operations import SPACE, Outcome, perform
 
-CARTE = "/carte"
-VOYAGES = "/voyages"
+MAP_PATH = "/carte"
+TRIPS_PATH = "/voyages"
 #: un texte cherché ; combien de lieux au plus ; d'un trajet, à quelle distance chercher (en mètres)
 QUERY_MAX = 200
 LIMIT_MAX = 50
@@ -608,11 +608,11 @@ async def trip_gpx(call: Call) -> Response:
 
 def routes(api: MeApiBase) -> list[Route]:
     r = api.route
-    trip, stop = VOYAGES + "/{trip}", VOYAGES + "/{trip}/arrets/{stop}"
-    return [r(CARTE, info), r(CARTE + "/lieux", places), r(CARTE + "/adresses", addresses),
-            r(CARTE + "/itineraire", itinerary), r(CARTE + "/ordre", best_order), r(CARTE + "/le-long", along),
-            r(CARTE + "/regards/{seq:int}", look),
-            r(VOYAGES, trips_list), r(VOYAGES, trip_create, write=True),
+    trip, stop = TRIPS_PATH + "/{trip}", TRIPS_PATH + "/{trip}/arrets/{stop}"
+    return [r(MAP_PATH, info), r(MAP_PATH + "/lieux", places), r(MAP_PATH + "/adresses", addresses),
+            r(MAP_PATH + "/itineraire", itinerary), r(MAP_PATH + "/ordre", best_order),
+            r(MAP_PATH + "/le-long", along), r(MAP_PATH + "/regards/{seq:int}", look),
+            r(TRIPS_PATH, trips_list), r(TRIPS_PATH, trip_create, write=True),
             r(trip, trip_read), r(trip, trip_change, write=True), r(trip + "/supprimer", trip_remove, write=True),
             r(trip + "/arrets", stop_add, write=True), r(stop, stop_change, write=True),
             r(stop + "/retirer", stop_remove, write=True), r(trip + "/trajet", trip_route),

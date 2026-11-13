@@ -111,7 +111,7 @@ class Canals(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     tables: Annotated[dict[str, CanalTable], Knob(
-        label="Canaux", advanced=False,
+        label="Canaux", noun="un canal", advanced=False,
         help="Le tableau de chaque canal réglé (un type, ou une instance « type:clé ») ; un canal absent a son minimum "
              "vital. Réglés dans Réglages › Canaux.")] = Field(default_factory=dict)
 

@@ -30,7 +30,7 @@ from mika.kernel.inspect import (
     is_table_choice,
 )
 from mika.plugins.email import EMAIL, EmailParams, EmailState, name_of, params_of
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     BOX_PAGE,
     SECTION,
     VIEWS,

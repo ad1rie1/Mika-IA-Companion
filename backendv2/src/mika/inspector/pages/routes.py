@@ -31,7 +31,7 @@ from mika.inspector.pages.journal import (
     replay_blocks,
     replay_panel,
 )
-from mika.inspector.pages.subjects import Subjects, fiche_url
+from mika.inspector.pages.subjects import Subjects, subject_url
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.tools import expose_post
 from mika.inspector.pages.why import silence_page, why_page, why_panel
@@ -161,7 +161,7 @@ class Pages(Actions):
     # ── utilitaires ──
     def tab_badge(self, item: Builtin | InspectSpec) -> int:
         if isinstance(item, Builtin):
-            return int(item.badge(self.ui) or 0) if item.badge else 0
+            return item.badge_of(self.ui)[0]
         b = self.ui.inspection.badge(item)
         return b[0] if b else 0
 
@@ -232,7 +232,7 @@ class Pages(Actions):
         key = key or request.path_params["key"]
         moved_param = MOVED_PARAMS.get((key, request.path_params.get("tab", "")))
         if moved_param and not tab and (named := request.query_params.get(moved_param[0])):
-            return RedirectResponse(fiche_url(moved_param[1], named, moved_param[2]), status_code=301)
+            return RedirectResponse(subject_url(moved_param[1], named, moved_param[2]), status_code=301)
         moved_tab = MOVED_TABS.get((key, request.path_params.get("tab", "")))
         if moved_tab and not tab:
             query = dict(request.query_params)
@@ -339,7 +339,7 @@ class Pages(Actions):
         if f"{owner}/{name}" in MOVED_VIEWS:
             kind, param, listing = MOVED_VIEWS[f"{owner}/{name}"]
             subject = request.query_params.get(param, "")
-            return RedirectResponse(fiche_url(kind, subject) if subject else f"{PREFIX}/{listing}", status_code=301)
+            return RedirectResponse(subject_url(kind, subject) if subject else f"{PREFIX}/{listing}", status_code=301)
         spec = self.ui.inspection.find(owner, name)
         if spec is None:
             return self.render_page(request, title="Vue inconnue", active="", status=404,

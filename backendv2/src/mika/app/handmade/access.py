@@ -9,8 +9,8 @@ from __future__ import annotations
 from mika.contracts import identity as identity_c
 from mika.faculties.identity.faculty import known_as
 from mika.faculties.identity.inspect import people as people_of
-from mika.inspector.pages.droits_tables import Instances, canal_choices, canal_instances, who_choices
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.rights_tables import Instances, canal_choices, canal_instances, who_choices
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI
 from mika.vocab.access import MAIL, PRIVATE, TEAMS, TOGETHER, WEB, canal_key
 from mika.vocab.people import ACCOUNT_PREFIX
@@ -57,7 +57,7 @@ def family_href(bundle: str) -> str:
     vide pour toute autre."""
     kind, _, name = bundle.partition(".")
     fiche = FAMILY_FICHES.get(kind)
-    return fiche_url(fiche[0], name, fiche[1]) if fiche is not None else ""
+    return subject_url(fiche[0], name, fiche[1]) if fiche is not None else ""
 
 
 __all__ = ["canal_choices", "canal_instances", "family_href", "instances_from_settings", "people_with_accounts",

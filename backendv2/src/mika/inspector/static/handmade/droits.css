@@ -91,11 +91,17 @@
 .access-tool.sub { padding-left: 22px; color: var(--text-2); }
 /* dans un sous-onglet, la place est comptée (la colonne des sous-onglets en prend) : les en-têtes passent à la ligne,
    « qui » ne prend que ce qu'il montre (« Tout le monde » sur une ligne) ; un menu, lui, garde toute sa valeur
-   (outils.css) — s'il le faut, le tableau défile dans sa carte plutôt que de la couper. À 1440 px, le tableau d'une
-   famille à son minimum vital tient sans défiler ; celui d'un canal où elle parle défile un peu. */
+   (outils.css), en 13 px, sa flèche plus près du bord ; « ↑ ↓ ✕ » se serrent. À 1440 px, le tableau d'une famille et
+   celui d'un canal où elle parle (neuf colonnes) tiennent sans défiler, boutons compris ; plus étroit, le tableau
+   défile dans sa carte plutôt que de couper un menu. */
 .hm-subpanes .access-table thead th { white-space: normal; vertical-align: bottom; }
-.hm-subpanes .access-table th, .hm-subpanes .access-table td { padding-left: 4px; padding-right: 4px; }
-.hm-subpanes .access-table td:nth-child(2) { min-width: 140px; }
+.hm-subpanes .access-table th, .hm-subpanes .access-table td { padding-left: 3px; padding-right: 3px; }
+.hm-subpanes .access-table td:nth-child(2) { min-width: 120px; }
+.hm-subpanes .access-table .access-select { font-size: 13px; padding-left: 6px; padding-right: 19px;
+  background-position: right 10px center, right 5px center; }
+.hm-subpanes .access-table .access-tools > summary { font-size: 13px; padding-left: 8px; padding-right: 19px;
+  background-position: right 10px center, right 5px center; }
+.hm-subpanes .access-move .btn { min-width: 24px; padding: 0 4px; }
 
 /* Outils › Ce qu'elle peut faire : une famille, ses outils décrits (le nom, lit ou agit, ce qu'il fait, en colonnes),
    son tableau ; dans son sous-onglet, le tableau ouvert sous la liste */

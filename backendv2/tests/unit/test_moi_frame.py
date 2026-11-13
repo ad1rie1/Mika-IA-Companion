@@ -11,13 +11,13 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-import mika.app.moi as moi
-from mika.app.moi import settings as settings_moi
-from mika.app.moi.api import PREFIX, Denied, MeApiBase
-from mika.app.moi.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+import mika.app.me as me
+from mika.app.me import settings as settings_moi
+from mika.app.me.api import PREFIX, Denied, MeApiBase
+from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 
-PACKAGE = Path(moi.__file__).parent
+PACKAGE = Path(me.__file__).parent
 MODULES = sorted(PACKAGE.glob("*.py"))
 IMPORT = (ast.Import, ast.ImportFrom)
 
@@ -36,7 +36,7 @@ def test_the_modules_take_the_frame_from_its_own_module():
     stems = {path.stem for path in MODULES}
     for path in MODULES:
         for node in ast.walk(tree(path)):
-            if isinstance(node, ast.ImportFrom) and node.module == "mika.app.moi":
+            if isinstance(node, ast.ImportFrom) and node.module == "mika.app.me":
                 assert {alias.name for alias in node.names} <= stems, f"{path.name}:{node.lineno}"
 
 
@@ -115,7 +115,7 @@ class Sessions:
 
 
 def client(sessions: Sessions, **cookies: str) -> TestClient:
-    async def ping(call: moi.Call) -> dict[str, str]:
+    async def ping(call: me.Call) -> dict[str, str]:
         return {"handle": call.me.handle}
 
     api = MeApiBase(NS(mind=NS(frame=lambda: NS(get=lambda key: None))), sessions)  # type: ignore[arg-type]

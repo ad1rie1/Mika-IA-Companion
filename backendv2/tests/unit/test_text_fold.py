@@ -41,8 +41,8 @@ from mika.kernel.inspect import Param, read_params, size_fr
 from mika.kernel.prompt import unveiled
 from mika.kernel.state import FrozenDict
 from mika.kernel.text import fold, unaccented
-from mika.plugins.email.console import common as email_console
-from mika.plugins.forge import console as forge_console
+from mika.plugins.email.inspect import common as email_inspect
+from mika.plugins.forge import inspect as forge_inspect
 from mika.plugins.forge import views as forge_views
 from mika.ports.forge import AppViewSpec
 from mika.ports.paging import fold_text, has_words, words_of
@@ -230,7 +230,7 @@ def test_a_size_that_is_not_one_reads_as_a_dash(nothing) -> None:
 # ── la console : ses recherches, ses tailles, ses nombres ─────────────────
 
 
-@pytest.mark.parametrize("module", [email_console, forge_views, forge_console, settings_directory, tools_page, subjects])
+@pytest.mark.parametrize("module", [email_inspect, forge_views, forge_inspect, settings_directory, tools_page, subjects])
 def test_the_searches_of_the_console_fold_like_the_kernel(module) -> None:
     assert module.fold is fold
 
@@ -245,7 +245,7 @@ def test_a_settings_group_keeps_the_word_its_ligature_is_in() -> None:
 
 
 @pytest.mark.parametrize(("module", "copy"), [
-    (forge_console, "_octets"), (projects_inspect, "_size"), (system_page, "_bytes"), (system_page, "_size"),
+    (forge_inspect, "_octets"), (projects_inspect, "_size"), (system_page, "_bytes"), (system_page, "_size"),
 ])
 def test_the_pages_of_the_console_have_no_size_of_their_own(module, copy: str) -> None:
     assert not hasattr(module, copy) and module.size_fr is size_fr
@@ -260,7 +260,7 @@ def test_the_size_of_a_forged_base_reads_like_any_other_size() -> None:
             return {"engine": "sqlite", "size": 0, "max": 1024 ** 3, "views": [], "tables": []}
 
     ctx = SimpleNamespace(subject="essai", ports={"forge": Port()}, param=lambda _name: "")
-    facts = dict(asyncio.run(forge_console._tab_base(SimpleNamespace(apps={}), None, ctx))[0].pairs)
+    facts = dict(asyncio.run(forge_inspect._tab_base(SimpleNamespace(apps={}), None, ctx))[0].pairs)
     assert facts["taille"] == size_fr(0) and facts["plafond"] == size_fr(1024 ** 3)  # c'était « 1 Ko » et « 1073,7 Mo »
 
 

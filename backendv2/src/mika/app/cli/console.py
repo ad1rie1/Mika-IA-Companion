@@ -16,11 +16,11 @@ def _run_serve(args: argparse.Namespace) -> int:
 
 
 def _run_console(args: argparse.Namespace) -> int:
-    from mika.app import apercu  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
+    from mika.app import preview  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
 
     try:
-        pages = apercu.export(args.out)
-    except apercu.ExportFailed as exc:
+        pages = preview.export(args.out)
+    except preview.ExportFailed as exc:
         print(f"Aperçu exporté, sauf : {exc}", file=sys.stderr)
         return 1
     print(f"{len(pages)} pages exportées : {args.out / 'index.html'}")

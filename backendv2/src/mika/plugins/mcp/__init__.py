@@ -448,5 +448,5 @@ class Watch:
 
 
 from mika.plugins.mcp import calls as calls  # noqa: E402
-from mika.plugins.mcp import console as console  # noqa: E402
+from mika.plugins.mcp import inspect as inspect  # noqa: E402
 from mika.plugins.mcp import prompt as prompt  # noqa: E402

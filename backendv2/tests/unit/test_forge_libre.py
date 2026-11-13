@@ -354,7 +354,7 @@ def test_the_guide_shows_tools_that_read_and_a_free_network():
         "symbole", "devise", "jours", "detail", "autres"]
     network = guide.topic("reseau")
     assert "api.http(" in network and "jamais" in network and "5 Mo" in network
-    assert "allowed_domains" not in guide.VEILLE_MANIFEST and "forge_edit" in guide.topic("manifeste")
+    assert "allowed_domains" not in guide.WATCH_MANIFEST and "forge_edit" in guide.topic("manifeste")
 
 
 # ── Ce que son app trouve, elle le dit à qui son projet concerne ──────────
@@ -385,7 +385,7 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
     from mika.kernel.frame import Audience
     from mika.kernel.prompt import UNTRUSTED_NOTE
     from mika.plugins.forge import WriteArgs, _news, concerns, forge_write
-    from mika.plugins.forge.guide import VEILLE_CODE, VEILLE_MANIFEST
+    from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
     from mika.sim.clock import run_virtual
     from mika.vocab.episodes import Kind, project_target
     from tests.fixtures.atelier import Atelier
@@ -406,8 +406,8 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
                                           tools=["forge"]), here)
             pid = events(kernel, projects_c.PROJECT_CREATED)[-1].seq
             run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True), bundles="forge")
-            await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST.replace('"cron:0 17 * * 1-5"', "manual"),
-                                        code=VEILLE_CODE), run)
+            await forge_write(WriteArgs(app="cours", manifest=WATCH_MANIFEST.replace('"cron:0 17 * * 1-5"', "manual"),
+                                        code=WATCH_CODE), run)
             frame = kernel.mind.frame()
             about, level = concerns(frame, frame.state("forge").apps["cours"])
             await kernel.mind.append([forge_c.QUEUED.draft(app="cours", summary=Content.of(text, level=level),

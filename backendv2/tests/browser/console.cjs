@@ -163,6 +163,26 @@ test('compte mobile : les applications ont leur état et une révocation annulab
   assert.equal(await app.locator('.person-entry-tags').getByText('actif', { exact: true }).isVisible(), true);
 });
 
+test('jeton montré une fois : « Copier » le copie, même sur une console servie en HTTP', async t => {
+  const shown = fixture('<main><pre class="hm-code" id="jeton">mw_abcdefghijklmnopqrstuv</pre><div class="form-actions"><button type="button" class="btn small" data-copy="jeton" aria-live="polite" hidden>Copier le jeton</button></div></main>');
+  const page = await open(t, { html: shown });
+  const copy = page.getByRole('button', { name: 'Copier le jeton', exact: true });
+  assert.equal(await copy.isVisible(), true);
+  // servie en HTTP (pas la boucle locale) : pas de presse-papiers du navigateur, le texte sélectionné puis copié
+  assert.equal(await page.evaluate(() => Boolean(window.isSecureContext && navigator.clipboard)), false);
+  await page.evaluate(() => {
+    window.copied = [];
+    document.execCommand = cmd => { window.copied.push([cmd, String(window.getSelection())]); return true; };
+  });
+  await copy.click();
+  assert.deepEqual(await page.evaluate(() => window.copied), [['copy', 'mw_abcdefghijklmnopqrstuv']]);
+  assert.equal(await page.getByRole('button', { name: 'Copié', exact: true }).isVisible(), true);
+  // sans script, le bouton ne promet rien : caché, le jeton reste là à sélectionner
+  const plain = await open(t, { html: shown, javaScriptEnabled: false });
+  assert.equal(await plain.getByRole('button', { name: 'Copier le jeton' }).count(), 0);
+  assert.equal(await plain.locator('#jeton').isVisible(), true);
+});
+
 test('projets : fiches et tableau montrent les mêmes projets, sans JavaScript', async t => {
   const page = await open(t, { file: 'projets.html', javaScriptEnabled: false });
   // dans sa forme (ADR 0177) : une entrée par projet ; en tableau, la liste de la console
@@ -413,6 +433,20 @@ test('toutes les pages exportées : aucun débordement du document à 390 et 144
     }
   }
   assert.deepEqual(overflows, []);
+});
+
+test('réglages › canaux : à 1440 px, chaque tableau tient dans sa carte, ses boutons ↑ ↓ ✕ compris', async t => {
+  const page = await open(t, { file: 'reglages_canaux.html', width: 1440 });
+  // tous les canaux à la fois : chaque sous-onglet montré, chaque exception dépliée
+  const over = await page.evaluate(() => {
+    document.querySelectorAll('[data-pane]').forEach(p => { p.hidden = false; });
+    document.querySelectorAll('details.access-canal-entry').forEach(d => { d.open = true; });
+    const wraps = [...document.querySelectorAll('.access-card .hm-table-wrap')];
+    return { seen: wraps.length, over: wraps.filter(w => w.scrollWidth > w.clientWidth + 1)
+      .map(w => `${w.getAttribute('aria-label')} : ${w.scrollWidth} pour ${w.clientWidth}`) };
+  });
+  assert.ok(over.seen >= 6, `tableaux vus : ${over.seen}`);
+  assert.deepEqual(over.over, []);
 });
 
 test('réglages : catégories accessibles sans JavaScript et recherche des paramètres avancés', async t => {

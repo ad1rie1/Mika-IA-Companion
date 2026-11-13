@@ -3,12 +3,13 @@
 Une heuristique cherche, dans le code des facultés et des greffons, les chaînes qui ressemblent à de la prose
 française (au moins cinq mots, des mots-outils du français). Elle ignore ce qui n'est pas pour elle : les
 docstrings, les journaux techniques, les exceptions de programmation, les libellés des réglages (``Knob``), les
-raisons d'humeur (des codes gardés au journal), les expressions régulières, les fichiers de console et le greffon
-Teams hors de son tri et de ce qu'elle en lit (``voice.py``, migré le 2026-10-28 ; ses autres textes restent à
-migrer : lot 4 de ``docs/audit-2026-10-27-garde-fous.md``).
+raisons d'humeur (des codes gardés au journal), les expressions régulières, les vues de console (``inspect.py``,
+``inspect_<sujet>.py``, un paquet ``inspect/``) et le greffon Teams hors de son tri et de ce qu'elle en lit
+(``voice.py``, migré le 2026-10-28 ; ses autres textes restent à migrer : lot 4 de
+``docs/audit-2026-10-27-garde-fous.md``).
 
 Ce qui reste a été trié pendant la migration : des textes de la console de l'opératrice, des valeurs gardées au
-journal, des listes de mots, un serveur autonome (``plugins/web/serveur.py``) qui ne peut pas lire la voix. Le
+journal, des listes de mots, un serveur autonome (``plugins/web/server.py``) qui ne peut pas lire la voix. Le
 plafond ci-dessous en fixe le nombre **par fichier** : il ne peut que baisser. Une phrase nouvelle qu'elle lit va
 dans ``voix.yaml`` ; un texte de console va dans un fichier de console — ou, s'il faut vraiment, on relève le plafond
 ici en disant pourquoi.
@@ -22,7 +23,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 ROOTS = ("faculties", "plugins")
-SKIPPED_FILES = re.compile(r"(^|/)((inspect|actions|console[^/]*|params|knobs|reglages)\.py$|console/|"
+SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|knobs|reglages)\.py$|inspect/|"
                            r"teams/(?!(triage|voice)\.py$))")
 NOT_FOR_HER = {"debug", "info", "warning", "error", "exception", "critical", "log", "ValueError", "TypeError",
                "RuntimeError", "KeyError", "AssertionError", "Knob", "Setting", "Action", "Panel", "Row", "Column",
@@ -38,6 +39,9 @@ CEILING = {
     "faculties/goals/tools.py": 1,  # aperçu d'une capacité (console)
     "faculties/goals/work.py": 6,  # « pourquoi pas maintenant » (console)
     "faculties/identity/detection.py": 2,  # listes de mots (détecteur)
+    # liste de mots (``FRAMING`` : les tournures d'un récit sans nom, ADR 0092), pas une phrase ; venue de
+    # ``vocab/retelling.py`` le 2026-11-13, qu'un seul propriétaire lisait (audit du 2026-11-05, K0-23)
+    "faculties/memory/retelling.py": 1,
     "faculties/presence/__init__.py": 2,  # panneau de console
     # résumés d'effets que l'opératrice approuve ; +9 le 2026-11-05 : l'aperçu d'un envoi au dépôt distant et d'une
     # récupération (``REMOTE`` : où, quel commit, ce qui partira ou arrivera), lu par l'opératrice dans « À valider »
@@ -49,7 +53,6 @@ CEILING = {
     "faculties/projects/tools.py": 4,
     # « pourquoi pas maintenant » (console) ; +2 le 2026-10-27 : un plan qui attend, une séance de cadrage (ADR 0145)
     "faculties/projects/work.py": 10,
-    "faculties/transcript/__init__.py": 10,  # inspection du fil (console)
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
@@ -67,7 +70,7 @@ CEILING = {
     "plugins/rss/__init__.py": 16,  # panneaux de console
     "plugins/sensors/__init__.py": 6,  # panneaux de console
     "plugins/wakeup/prompt.py": 6,  # « pourquoi pas maintenant » (console)
-    "plugins/web/serveur.py": 30,  # serveur autonome dans sa cage : il ne peut pas lire la voix
+    "plugins/web/server.py": 30,  # serveur autonome dans sa cage : il ne peut pas lire la voix
 }
 
 
@@ -148,3 +151,47 @@ def test_her_voice_is_one_file() -> None:
     persona = SRC.parents[1] / "persona"
     assert (persona / "voix.yaml").is_file()
     assert not (persona / "voix.d").exists(), "persona/voix.d : fusionner ses fragments dans voix.yaml (ADR 0071)"
+
+
+def test_console_views_are_named_inspect() -> None:
+    """Les vues de console d'une faculté ou d'un plugin s'appellent ``inspect`` (``inspect.py``, ``inspect_<sujet>.py``,
+    un paquet ``inspect/``), jamais ``console`` : un seul nom pour une même notion, celui que ``SKIPPED_FILES``
+    reconnaît (audit du 2026-11-05, K11-14)."""
+    named = sorted(str(p.relative_to(SRC)) for root in ROOTS for p in (SRC / root).rglob("console*")
+                   if "__pycache__" not in p.parts)
+    assert not named, "des vues de console sous un autre nom que inspect (ARCHITECTURE.md, « Écrire une faculté ») : " \
+                      + ", ".join(named)
+
+
+#: ce qu'un propriétaire déclare pour la console : vues, fiches et leur recherche, documents, actions, droits,
+#: vitaux, courbes
+CONSOLE_DECORATORS = frozenset({"inspect", "subject", "search", "download", "action", "rights", "vital", "series"})
+CONSOLE_FILES = re.compile(r"(^|/)(inspect(_\w+)?\.py$|inspect/)")
+
+
+def test_console_declarations_live_in_inspect() -> None:
+    """Ce qu'un propriétaire montre à la console se déclare dans ses fichiers ``inspect`` ; ses actions aussi, ou à
+    part dans ``actions.py``. Seul un propriétaire qui tient en un fichier (presence, camera, rss, sensors) les garde
+    dans son ``__init__.py`` (ARCHITECTURE.md, « Écrire une faculté », point 3 ; audit du 2026-11-05, K11-14 : le
+    fil de transcript déclarait encore quatre vues dans son ``__init__.py``, à côté de son ``inspect.py``)."""
+    astray = []
+    for root in ROOTS:
+        for path in sorted((SRC / root).rglob("*.py")):
+            rel = str(path.relative_to(SRC))
+            if "__pycache__" in path.parts or CONSOLE_FILES.search(rel):
+                continue
+            owner = SRC / root / path.relative_to(SRC / root).parts[0]
+            alone = path == owner / "__init__.py" and \
+                [p.name for p in owner.rglob("*.py") if "__pycache__" not in p.parts] == ["__init__.py"]
+            if alone:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                for deco in getattr(node, "decorator_list", ()):
+                    f = deco.func if isinstance(deco, ast.Call) else deco
+                    if not (isinstance(f, ast.Attribute) and f.attr in CONSOLE_DECORATORS):
+                        continue
+                    if f.attr == "action" and path.name == "actions.py":
+                        continue
+                    astray.append(f"{rel}:{deco.lineno} @{ast.unparse(f)}")
+    assert not astray, "de la console déclarée hors de ses fichiers inspect (ARCHITECTURE.md, « Écrire une " \
+                       "faculté », point 3) : " + ", ".join(astray)

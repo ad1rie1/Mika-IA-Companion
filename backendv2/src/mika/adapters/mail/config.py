@@ -228,7 +228,7 @@ class MailConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     accounts: Annotated[dict[str, MailAccount], Knob(
-        label="Comptes", help=f"Chaque boîte qu'elle relève, avec sa façon d'y écrire. La clé est un nom court "
+        label="Comptes", noun="un compte", help=f"Chaque boîte qu'elle relève, avec sa façon d'y écrire. La clé est un nom court "
                               f"({ACCOUNT_KEY_RULE}).", advanced=False, order=10,
         key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE)] = Field(default_factory=dict)
 

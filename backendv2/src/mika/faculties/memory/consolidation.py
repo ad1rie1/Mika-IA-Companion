@@ -763,7 +763,7 @@ async def _drafts(ex: x.Extraction, frame: Frame, state: MemoryState, store: Any
         return True
 
     for s in ex.souvenirs:
-        if not fresh(c.SOUVENIR, s.texte):
+        if not fresh(c.EPISODE_MEMORY, s.texte):
             continue
         if s.sur_elle and conv.relayed:
             continue  # lue ailleurs (ADR 0120), une conversation ne dit rien d'elle : elle n'y était pas
@@ -787,7 +787,7 @@ async def _drafts(ex: x.Extraction, frame: Frame, state: MemoryState, store: Any
         sources, told_by, cited = provenance(cited_seqs)
         sens = x.sensitivity(s.sensibilite, has_person=bool(about or told_by))
         secret = secret_of(s.secret, cited, sens, text)
-        twin = await twin_of(store, vectors, text, c.SOUVENIR, about, p, told_by=told_by, heard_by=heard)
+        twin = await twin_of(store, vectors, text, c.EPISODE_MEMORY, about, p, told_by=told_by, heard_by=heard)
         pieces = x.pieces_of(s.pieces, s.messages, lines)
         if twin is not None:
             drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
@@ -1648,7 +1648,7 @@ def _closed_souvenirs(frame: Frame, store: Any, conv: x.Conversation, items: Seq
     # un souvenir né de l'un de ces messages (``sources`` : une liste JSON, lue par ``json_has`` — ``json_each``
     # n'existe pas sous MariaDB)
     found = store.query_mind(
-        select(t.c.id).where(t.c.kind == c.SOUVENIR, t.c.status == "active", t.c.secret == 0,
+        select(t.c.id).where(t.c.kind == c.EPISODE_MEMORY, t.c.status == "active", t.c.secret == 0,
                              or_(*(json_has(t.c.sources, m) for m in theirs))).order_by(t.c.id))
     return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE), restricts=True)
             for (i,) in found]

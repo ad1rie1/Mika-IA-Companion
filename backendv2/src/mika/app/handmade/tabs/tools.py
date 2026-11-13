@@ -34,7 +34,7 @@ SERVICES = ("mcp", "serveurs")
 SERVED_TABLE, GIVEN_TABLE = "Les services branchés", "Les outils de ses apps"
 #: les colonnes qu'elle lit : les outils servis d'un service, l'état d'une app
 SERVED, GIVEN = "outils servis / proposés", "quand il sert"
-#: le choix de qui sont les services montrés (``plugins/mcp/console.py``)
+#: le choix de qui sont les services montrés (``plugins/mcp/inspect.py``)
 OWNERS = "À qui"
 
 

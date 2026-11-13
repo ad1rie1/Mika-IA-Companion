@@ -20,14 +20,14 @@ import itertools
 import json
 from types import SimpleNamespace as NS
 
-from mika.app.moi import form
+from mika.app.me import form
 from mika.faculties.identity import audience_for
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.rights import Rights
 from mika.plugins.email import EMAIL, READ, SENT_KEPT, answered
 from mika.plugins.email import params_of as email_params
-from mika.plugins.email.console.common import mail_key
+from mika.plugins.email.inspect.common import mail_key
 from mika.plugins.email.tasks import _prepare
 from mika.ports.llm import LLMRequest, LLMResponse
 from mika.ports.mail import AccountInfo, Attachment, Mail

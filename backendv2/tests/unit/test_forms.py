@@ -28,6 +28,7 @@ from mika.kernel.forms import (
     parse,
     parse_duration,
     plural,
+    record_noun,
     show_duration,
     validate,
     visible,
@@ -734,3 +735,13 @@ def test_knob_is_absent_from_the_json_schema():
     plain, knobbed = Plain.model_json_schema(), Knobbed.model_json_schema()
     plain.pop("title"), knobbed.pop("title")
     assert knobbed == plain
+
+
+def test_a_record_list_declares_the_noun_of_its_entries_with_its_article():
+    """« Ajouter un fournisseur » demande le genre du nom, que le nom de la liste ne dit pas (C7-12) : la liste le
+    déclare (``Knob.noun``), toujours avec son article ; une liste qui ne le déclare pas n'en dit rien."""
+    assert record_noun(LLMConfig, "backends") == "un fournisseur"
+    assert record_noun(MailConfig, "accounts") == "un compte"
+    assert record_noun(LLMConfig, "routes") == ""
+    with pytest.raises(ValueError, match="article"):
+        Knob(label="Fournisseurs", noun="fournisseur")

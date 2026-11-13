@@ -16,13 +16,13 @@ Un mail est un texte venu d'ailleurs : il ne s'affiche qu'en texte (cellules,
 
 from __future__ import annotations
 
-from mika.plugins.email.console import accounts as accounts
-from mika.plugins.email.console import actions as actions
-from mika.plugins.email.console import box as box
-from mika.plugins.email.console import drafts as drafts
-from mika.plugins.email.console import mail as mail
-from mika.plugins.email.console import outbox as outbox
-from mika.plugins.email.console.actions import ReplyArgs, WriteArgs
-from mika.plugins.email.console.common import mail_key
+from mika.plugins.email.inspect import accounts as accounts
+from mika.plugins.email.inspect import actions as actions
+from mika.plugins.email.inspect import box as box
+from mika.plugins.email.inspect import drafts as drafts
+from mika.plugins.email.inspect import mail as mail
+from mika.plugins.email.inspect import outbox as outbox
+from mika.plugins.email.inspect.actions import ReplyArgs, WriteArgs
+from mika.plugins.email.inspect.common import mail_key
 
 __all__ = ["ReplyArgs", "WriteArgs", "mail_key"]

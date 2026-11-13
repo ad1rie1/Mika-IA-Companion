@@ -34,6 +34,7 @@ from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.links import links_of
 from mika.faculties.memory.projections import Items, Told
 from mika.faculties.memory.recall import _recall
+from mika.faculties.memory.retelling import retellable
 from mika.faculties.memory.veiled import _veiled, asks_news, echoed
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
@@ -43,7 +44,6 @@ from mika.ports.paging import fold_text
 from mika.ports.sql import upsert
 from mika.vocab import privacy
 from mika.vocab.privacy import ChannelTrust, Sensitivity
-from mika.vocab.retelling import retellable
 from tests.unit.test_audit_regressions import event
 from tests.unit.test_knowledge_coherence import FRAME, Frame, mika_says
 from tests.unit.test_readings import store

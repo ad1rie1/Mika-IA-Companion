@@ -157,8 +157,9 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   qui la concerne ; la ligne même et sa page dans la console, pour une opératrice : ADR 0209). Les chiffres du menu
   comptent des outils, chacun une fois. Ses comptes disent la règle d'envoi qui vaut pour eux, leurs outils sont ceux
   de leur famille. Sur un téléphone, on choisit le canal dont la colonne se lit. « Services » : ceux de Mika qui lui
-  sont ouverts (sans leur but : la ligne de son catalogue, écrite pour elle), les siens et ceux qu'on lui partage (leur
-  état et leur but, même sans case ouverte). Ses accords se décident dans le chat : le chapeau le dit, et l'onglet « Accords » attend une route qui rende ses cartes.
+  sont ouverts (celui du système, « Le web », sous un titre et un but écrits pour elle ; ceux de l'opératrice, sans
+  leur but : la ligne de son catalogue, écrite pour Mika), les siens et ceux qu'on lui partage (leur état et leur but,
+  même sans case ouverte). Le pourquoi d'une case d'app redit la ligne de son app ou de son projet (ADR 0219). Ses accords se décident dans le chat : le chapeau le dit, et l'onglet « Accords » attend une route qui rende ses cartes.
 - **Paramètres** : son compte (nom, mot de passe ; « Lui demander » ouvre le chat, « Qu'est-ce que tu sais de moi ? »
   posé dans le champ), ses boîtes (ajouter, régler, tester, connecter à Microsoft, retirer), ses comptes Teams (les
   régler, la clé de leur extension, montrée une fois, les retirer), et pour chacun comment part ce que Mika y prépare
@@ -172,4 +173,5 @@ Mika n'a qu'un élément (`#mika-corner`) : son visage dans la pastille du haut,
   un onglet, un fil de travail, ou un mot dans tout le texte des messages chargés (le passage trouvé en titre, dix
   résultats par groupe au plus) : choisir un message ouvre son fil et l'y montre, surligné un instant ; le menu du
   compte change le thème et déconnecte. Sur un téléphone, les boutons de la barre de titre, réduits à leur icône,
-  gardent leur nom (`title` et `aria-label`, posés par le cadre d'après leur libellé).
+  gardent leur nom (`title` et `aria-label`, posés par le cadre d'après leur libellé) ; ceux de la tête d'une section
+  de Paramètres ou d'une fenêtre gardent leur libellé.

@@ -41,7 +41,7 @@ from mika.faculties.identity.inspect import (
     why_level,
 )
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview, env
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import Pager
@@ -128,7 +128,7 @@ class HandleOverview(Overview):
         alerts = []
         if view.claim:
             alerts.append({"tone": "warn", "text": f"Elle se présente comme « {view.claim} » : rien ne le confirme "
-                                                   "encore.", "href": fiche_url(KIND, key, "revendication"),
+                                                   "encore.", "href": subject_url(KIND, key, "revendication"),
                            "link": "Ce qui manque pour le croire"})
         if view.bound and view.via == identity_c.VIA_CORROBORATED:
             alerts.append({"tone": "warn", "text": "Lié par recoupement : le fil de ses autres moyens de "
@@ -144,7 +144,7 @@ class HandleOverview(Overview):
                 view.certainty, h.trust, closeness=closeness, warmth=warmth, public=seen_public),
                 "levels": [{"text": LEVEL_FR.get(getattr(d, field), "?"),
                             "tone": LEVEL_TONE.get(getattr(d, field), "")} for _, field, _ in OPENS]})
-        others = [{"label": handle_label(s, k), "href": fiche_url(KIND, k),
+        others = [{"label": handle_label(s, k), "href": subject_url(KIND, k),
                    "trust": TRUST_SHORT[s.handles[k].trust], "tone": TRUST_TONE[s.handles[k].trust]}
                   for k in handles_of(s, view.person) if k != key and k in s.handles]
         return Markup(env.get_template("handmade/identites/adresse.html").render(
@@ -162,7 +162,7 @@ class HandleOverview(Overview):
             if view.first_seen else "—", others=others, jetable=not is_identifiable(key),
             opens=[{"label": label, "hint": hint} for label, _, hint in OPENS], audiences=audiences,
             opens_pager=render._pager(Pager(size=len(OPENS) + 1, total=len(OPENS) + 1), {}),
-            steps=verdict_steps(h, view.certainty), verdict_tab=fiche_url(KIND, key, "verdict")))
+            steps=verdict_steps(h, view.certainty), verdict_tab=subject_url(KIND, key, "verdict")))
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:

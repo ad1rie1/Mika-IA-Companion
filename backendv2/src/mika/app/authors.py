@@ -66,7 +66,7 @@ class Authors(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     authors: Annotated[dict[str, AuthorSpec], Knob(
-        label="Ses autrices", advanced=False, order=10,
+        label="Ses autrices", noun="une autrice", advanced=False, order=10,
         help="Chacune est une façon d'écrire. Le même modèle les sert toutes (le rôle « rendre naturel » de Modèles "
              "de texte).")] = Field(default_factory=dict)
     flows: Annotated[dict[str, str], Knob(

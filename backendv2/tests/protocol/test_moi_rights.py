@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 
-from mika.app.moi.rights import CANALS, MOMENTS, OWNED, WORK
+from mika.app.me.rights import CANALS, MOMENTS, OWNED, WORK
+from mika.app.system_mcp import SHOWN
 from mika.app.system_mcp import spec as system_spec
 from mika.plugins import web
 from mika.plugins.mcp import specs_of
@@ -192,7 +193,8 @@ def test_a_service_says_its_purpose_and_the_line_that_opens_it(world, monkeypatc
 def test_a_service_of_hers_never_shows_the_line_of_her_catalogue(world, monkeypatch):  # noqa: F811
     """Le but d'un service de Mika (sans propriétaire : la recherche web du système, ou un service réglé dans la
     console) est la ligne de son catalogue, écrite pour elle (« un sujet qui te rend curieuse » : « te », c'est
-    elle) : la personne ne le lit pas, ni sous son titre ni dans Services (ADR 0209)."""
+    elle) : la personne ne le lit pas, ni sous son titre ni dans Services (ADR 0209). Le service du système a un titre
+    et un but écrits pour elle, par la composition (F4-12, ADR 0219) ; un service de l'opératrice, rien."""
     client, live, _ = world
     bootstrap(client)
     second_person(client, live)
@@ -212,6 +214,14 @@ def test_a_service_of_hers_never_shows_the_line_of_her_catalogue(world, monkeypa
     login(client, "lea")
     got = client.get(API + "/rights")
     found = resources(got.json(), "services")["mcp:web"]
-    assert found["title"] == "Service « web »" and found["tools"][0]["cells"]["web/reply"]["level"] == "seule"
-    assert found["description"] == ""  # « — » chez elle, tant qu'il n'a pas de but écrit pour la personne
+    assert found["title"] == "Le web" and found["tools"][0]["cells"]["web/reply"]["level"] == "seule"
+    assert found["description"] == SHOWN[web.SERVER][1] and "pour toi" in found["description"]
+    assert served.purpose not in got.text
+    # son plugin coupé, un serveur « web » est celui de l'opératrice : son nom, et rien de son catalogue
+    login(client, "adrien")
+    client.portal.call(live.kernel.set_params, web.WEB.name, web.WebParams(enabled=False))
+    login(client, "lea")
+    got = client.get(API + "/rights")
+    found = resources(got.json(), "services")["mcp:web"]
+    assert (found["title"], found["description"]) == ("Service « web »", "")
     assert served.purpose not in got.text

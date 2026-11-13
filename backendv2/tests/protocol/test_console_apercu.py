@@ -4,7 +4,7 @@ serveur (feuille de style copiée, script retiré)."""
 
 from __future__ import annotations
 
-from mika.app.apercu import export
+from mika.app.preview import export
 from tests.fixtures.console_html import ConsoleHTML
 
 

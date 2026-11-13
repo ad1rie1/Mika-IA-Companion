@@ -73,7 +73,7 @@ class Lies:
         events = {e.seq: e for e in store.get_events(pending)}
         drafts = []
         for seq in pending:
-            draft = self._souvenir(frame, store, seq, events.get(seq))
+            draft = self._episode_memory(frame, store, seq, events.get(seq))
             if draft is None:
                 self.skipped.add(seq)  # effacé (oubli), ou plus rien à citer : rien à retenir
                 continue
@@ -82,7 +82,7 @@ class Lies:
             await ctx.emit(*drafts)
 
     @staticmethod
-    def _souvenir(frame: Frame, store: Any, seq: int, event: Any) -> Any:
+    def _episode_memory(frame: Frame, store: Any, seq: int, event: Any) -> Any:
         if event is None or event.type != rt.UTTERANCE.name:
             return None
         data = json.loads(event.data)

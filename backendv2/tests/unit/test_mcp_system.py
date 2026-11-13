@@ -26,7 +26,7 @@ from mika.app.console import FACULTY_LABELS, PARAM_FAMILIES
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.registry import _decode_params
 from mika.plugins import web
-from mika.plugins.web import serveur
+from mika.plugins.web import server
 from mika.ports.mcp import CLOSE, OWNER
 
 
@@ -79,16 +79,16 @@ def test_its_settings_reach_the_server_through_its_environment():
                       cache_us=0, region="be-fr", safesearch="strict", call_timeout_us=60 * US)
     srv = _system(p).config(McpConfig()).servers["web"]
     env = dict(line.split("=", 1) for line in srv.env)
-    assert serveur.Settings.from_env(env) == serveur.Settings(spacing_s=7, searches_per_minute=5, parallel_pages=2,
-                                                              pause_s=1800, cache_s=0, region="be-fr",
-                                                              safesearch="strict")
+    assert server.Settings.from_env(env) == server.Settings(spacing_s=7, searches_per_minute=5, parallel_pages=2,
+                                                            pause_s=1800, cache_s=0, region="be-fr",
+                                                            safesearch="strict")
     assert srv.timeout_s == 60
 
 
 def test_its_tools_are_approved_on_what_the_server_will_say():
     p = web.WebParams(parallel_pages=3)
     reviews = _system(p).reviews({})["web"]
-    listed = {t.remote: t for t in (live_tool(raw) for raw in serveur.tools(web.settings_of(p)))}
+    listed = {t.remote: t for t in (live_tool(raw) for raw in server.tools(web.settings_of(p)))}
     assert set(reviews) == set(listed) == {"search", "read", "read_pages"}
     for name, review in reviews.items():
         assert review.fingerprint == listed[name].fingerprint  # l'empreinte que le client calculera

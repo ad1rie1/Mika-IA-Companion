@@ -25,15 +25,15 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.moi import carte, mail, mcp, phone, rights, settings, shares, teams
-from mika.app.moi.api import OUTBOUND, PROBES, ROUTES_BUSY, Call, Denied, MeApiBase, form, missing, spend
+from mika.app.me import mail, maps, mcp, phone, rights, settings, shares, teams
+from mika.app.me.api import OUTBOUND, PROBES, ROUTES_BUSY, Call, Denied, MeApiBase, form, missing, spend
 
 __all__ = ["COUNTERS", "MODULES", "OUTBOUND", "PROBES", "ROUTES_BUSY", "Call", "Denied", "MeApi", "form", "missing",
            "spend", "who"]
 
 #: les modules : chacun rend ses routes, et ce qu'il compte pour la barre du haut
 MODULES: tuple[Callable[[MeApiBase], list[Route]], ...] = (mail.routes, teams.routes, phone.routes, rights.routes,
-                                                           settings.routes, mcp.routes, shares.routes, carte.routes)
+                                                           settings.routes, mcp.routes, shares.routes, maps.routes)
 COUNTERS: tuple[tuple[str, Callable[[Call], int]], ...] = (("mail", mail.count), ("teams", teams.count),
                                                             ("phone", phone.count))
 

@@ -580,8 +580,8 @@ def task_message(frame: Frame) -> str:
 
 
 # les contributions : le tri, ses tâches, ses outils, sa voix, l'échéance, la console
-from mika.plugins.teams import console as console  # noqa: E402
 from mika.plugins.teams import expire as expire  # noqa: E402
+from mika.plugins.teams import inspect as inspect  # noqa: E402
 from mika.plugins.teams import tasks as tasks  # noqa: E402
 from mika.plugins.teams import tools as tools  # noqa: E402
 from mika.plugins.teams import triage as triage  # noqa: E402

@@ -6,7 +6,7 @@
   titre) ; ses réglages sont derrière la roue de la destination, qui ferme la barre (Réveils par API › Paramètres,
   ADR 0206).
 
-Tout se lit dans les blocs de la vue du plugin (``plugins/wakeup/console.py``), qui reste la source pour la console en
+Tout se lit dans les blocs de la vue du plugin (``plugins/wakeup/inspect.py``), qui reste la source pour la console en
 MCP et le repli.
 """
 

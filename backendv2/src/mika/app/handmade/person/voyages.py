@@ -6,7 +6,7 @@ confirmée, auditée), le seul geste de la console sur un voyage : il se prépar
 Lu par ``plugins/trips/inspect.py::read`` (la tranche du plugin, ses textes au magasin), comme la vue du plugin, qui
 reste la source de la console en MCP et du repli ; les formulaires sont ceux que la console prépare (``Forms.of``),
 la personne de la fiche pour objet. Le GPX se sert ici (``gpx``, opérateurs seulement) : le même document que l'écran
-Carte donne à la personne (``app/moi/carte.py::gpx_document``), dans la même borne, celle du compte de l'opérateur.
+Carte donne à la personne (``app/me/maps.py::gpx_document``), dans la même borne, celle du compte de l'opérateur.
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
 from mika.adapters.web.app import LoginThrottle
 from mika.app.handmade import Look
-from mika.app.moi import ROUTES_BUSY, spend
-from mika.app.moi.carte import gpx_document, gpx_response
+from mika.app.me import ROUTES_BUSY, spend
+from mika.app.me.maps import gpx_document, gpx_response
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Forms, env, secure
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import ActionSlot
@@ -81,7 +81,7 @@ def voyages(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
             form = {**form, "title": "Supprimer", "button": "Supprimer",
                     "confirm": f"Supprimer « {t.title} » ({stops}) ? {name} ne le retrouvera plus.",
                     # le dernier supprimé, l'onglet n'a plus lieu d'être : la fiche s'ouvre sur sa vue d'ensemble
-                    **({"back": fiche_url("person", key)} if len(trips) == 1 else {})}
+                    **({"back": subject_url("person", key)} if len(trips) == 1 else {})}
         shown.append({
             "id": t.id, "title": t.title, "mode": mode_words(t.mode), "with_her": t.with_her,
             "start": day_words(t.start), "avoid": avoid_words(t.avoid), "stops": stops,

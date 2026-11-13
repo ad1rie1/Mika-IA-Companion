@@ -50,7 +50,7 @@ from mika.kernel.inspect import (
     tone,
     walk_blocks,
 )
-from mika.plugins.email.console import mail_key
+from mika.plugins.email.inspect import mail_key
 from mika.plugins.forge import WRITTEN
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse

@@ -1,4 +1,4 @@
-"""Un fournisseur d'images factice, pour les essais et le simulateur : une petite
+"""Un fournisseur d'images factice, pour les essais : une petite
 image PNG unie dont la couleur dépend du prompt (même prompt, même image), aux
 proportions demandées. Il retient les demandes reçues ; il peut refuser (un mot
 du prompt), tomber en panne ou prendre son temps."""

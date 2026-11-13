@@ -38,7 +38,7 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for
-from mika.plugins.mcp.console import closeness, faces, said_level, serves_nobody, tool_view
+from mika.plugins.mcp.inspect import closeness, faces, said_level, serves_nobody, tool_view
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.ports.mcp import CLOSE, CLOSED, INTERNAL, PERSON, Access
 from mika.ports.mcp import EVERYONE as ALL

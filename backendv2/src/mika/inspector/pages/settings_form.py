@@ -271,6 +271,12 @@ def _noun(label: str) -> str:
     return head[:1].upper() + head[1:] + sep + rest if head else label
 
 
+def _bare(noun: str) -> str:
+    """Le nom déclaré d'une entrée, sans son article, en tête de titre : « un fournisseur » → « Fournisseur »."""
+    words = noun.split(" ", 1)[1] if " " in noun else noun
+    return words[:1].upper() + words[1:]
+
+
 def _commands_bar(commands: Sequence[Command], csrf: str, section: str, action: str) -> Markup:
     """Les commandes d'une page, dans sa barre de titre (ADR 0176) : deux en vue au plus — la première déclarée en
     avant, à droite —, le reste et les dangereuses sous « ⋯ » ; chacune, un formulaire avec sa confirmation."""
@@ -586,10 +592,12 @@ class SettingsForms:
         label = next((f.label for f in forms.describe(s.model) if f.path == path), path)
         name = state.record_values.get(RECORD_KEY, key)
         # son titre : l'entrée elle-même, au singulier (« Fournisseur « apercu » », « Autrice « Mail pro » ») — jamais
-        # le verbe et le nom de la liste (« Ajouter · Fournisseurs »)
-        noun = _noun(label)
+        # le verbe et le nom de la liste (« Ajouter · Fournisseurs ») ; une entrée neuve, « Ajouter un fournisseur »
+        # quand la liste déclare le nom de ses entrées et son genre (``Knob.noun``, ADR 0219), sinon « … à ajouter »
+        declared = forms.record_noun(s.model, path) if s.model is not None else ""
+        noun = _bare(declared) if declared else _noun(label)
         shown = _entry_name(entry) or (key if keyed else f"n° {int(key) + 1}" if key.isdigit() else key)
-        title = f"{noun} à ajouter" if entry is None else f"{noun} « {shown} »"
+        title = (f"Ajouter {declared}" if declared else f"{noun} à ajouter") if entry is None else f"{noun} « {shown} »"
         return {"path": path, "label": label, "title": title, "key": key, "keyed": keyed, "new": entry is None,
                 "stash": state.stash,
                 "name": name, "name_error": state.record_errors.get(RECORD_KEY, ""),

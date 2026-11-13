@@ -8,7 +8,7 @@ import type { Level } from "./mail";
 import { query } from "./mail";
 import { getJson, MOI, sendJson, type Done } from "./moi";
 
-/** Les bornes des chaînes que l'API reçoit (`app/moi/teams.py`, en caractères) : au-delà, elle refuse (400, `fields`). */
+/** Les bornes des chaînes que l'API reçoit (`app/me/teams.py`, en caractères) : au-delà, elle refuse (400, `fields`). */
 export const TEAMS_LIMITS = {
   body: 4000,
   note: 500,

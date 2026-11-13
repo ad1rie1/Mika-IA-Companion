@@ -722,7 +722,8 @@ def test_the_thread_shows_messages_filters_pages_and_unanswered_questions(tmp_pa
 
     waiting = table(got["questions"], "n°")
     assert len(waiting.rows) == 1 and plain(waiting.rows[0].cells[3]).startswith("tu es là ?")
-    assert got["badge"] == (1, "")
+    # le badge dit de qui viennent les questions (C1-10), jamais un « à regarder » muet
+    assert got["badge"] == (1, "d'une personne inconnue")
     exchanges = table(got["exchanges"], "n°")
     assert {r.cells[3].key for r in exchanges.rows} == {"person/user_1"} and exchanges.pager is not None
     assert {r.cells[3].text for r in table(got["handle"], "n°").rows} == {ANON}
@@ -757,5 +758,5 @@ def test_views_stay_bounded_in_a_crowd(tmp_path):
     fil = table(got[("transcript", "messages")], "n°")
     assert len(fil.rows) == 50 and fil.pager is not None and fil.pager.older
     assert len(table(got[("transcript", "questions")], "n°").rows) == 50
-    assert got["badge"] == (210, "")
+    assert got["badge"] == (210, "de 210 personnes inconnues")
     assert len(got["found"]) == 20

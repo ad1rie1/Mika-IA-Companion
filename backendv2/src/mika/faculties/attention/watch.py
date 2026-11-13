@@ -265,7 +265,7 @@ def reminiscence(state: AttentionState, frame: Frame, store: Any, p: Any) -> Dra
         return None
     v = memory_c.KNOWLEDGE
     rows = store.query_mind(memory_c.select_known()
-                            .where(v.c.kind == memory_c.SOUVENIR, v.c.born_at <= frame.now - p.reminisce_min_age_us)
+                            .where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.born_at <= frame.now - p.reminisce_min_age_us)
                             .order_by(v.c.importance.desc(), v.c.id.desc()).limit(REMINISCE_POOL))
     recent = {item for _t, item in state.reminisced}
     pool = [k for k in knowns(rows, memory_c.KNOWN_COLUMNS) if k.id not in recent and k.text.strip()]

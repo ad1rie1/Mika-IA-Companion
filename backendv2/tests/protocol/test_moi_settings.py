@@ -5,7 +5,7 @@ montrée une seule fois ; comment part ce que Mika prépare depuis chacun, qu'el
 from __future__ import annotations
 
 from mika.adapters.mail.config import MailAccount, MailConfig
-from mika.app.moi import settings as settings_moi
+from mika.app.me import settings as settings_moi
 from mika.plugins import email as email_p
 from mika.vocab.canals import CanalRule, CanalTable, mail_rule, teams_rule
 from tests.protocol.test_moi_mail import API, login, post, second_person

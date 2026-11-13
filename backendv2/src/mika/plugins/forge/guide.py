@@ -11,7 +11,7 @@ from mika.vocab.phrasebook import phrase
 
 TOPICS = ("manifeste", "outils", "reseau", "vues", "actions", "reglages", "blocs", "base", "veille", "exemple")
 
-MANIFESTE = """\
+MANIFESTO = """\
 Une app = un manifeste (manifest.yaml) + du code (main.py), écrits ensemble par forge_write.
 
 Une app ne dit rien d'elle-même : ce qu'elle range reste dans sa base. Si quelqu'un doit l'apprendre (une
@@ -61,7 +61,7 @@ Pour changer une app : forge_read (ses lignes numérotées), forge_search (un te
 (remplacer des fragments exacts) — forge_write réécrit tout, c'est pour créer.
 """
 
-VUES = """\
+VIEWS = """\
 Une vue est une page de la console que l'opérateur ouvre sur la fiche de ton app (onglet « Vues »).
 
 Déclaration (au plus 8 vues) :
@@ -123,7 +123,7 @@ forge_test action_releves_ajouter {"ville": "Paris", "temperature": 12} vérifie
 qu'elle rend {ok, message} — le relevé reste dans ta base : retire-le ensuite s'il était inventé.
 """
 
-REGLAGES = """\
+SETTINGS = """\
 Tes réglages sont ce qu'un opérateur peut régler pour ton app, dans la console (onglet « Réglages »),
 même quand elle est cassée. Tu les lis avec api.config(clé, défaut).
 
@@ -141,7 +141,7 @@ montré (la console dit seulement « défini » ou « non défini ») ; toi, tu 
 L'ancienne forme plate (config: {seuil: 3, actif: false}) reste comprise.
 """
 
-BLOCS = """\
+BLOCKS = """\
 L'enveloppe d'une vue : {"version": 2, "blocks": [ … ]} — des objets fermés (un champ inconnu invalide
 la vue), au plus 200 blocs, 8 niveaux, 200 lignes, 30 colonnes, 10 000 caractères par texte,
 300 000 au total, des nombres finis.
@@ -182,8 +182,8 @@ Un instant (at, points d'une courbe) est en microsecondes depuis 1970 : int(time
 """
 
 BASE = phrase("forge.guide.base")  # le texte vit dans sa voix (ADR 0071)
-OUTILS = phrase("forge.guide.outils")
-RESEAU = phrase("forge.guide.reseau")
+TOOLS = phrase("forge.guide.outils")
+NETWORK = phrase("forge.guide.reseau")
 
 
 EXAMPLE_MANIFEST = """\
@@ -292,7 +292,7 @@ def action_releves_vider(api, data):
 #: l'exemple de ``forge_help veille`` (ADR 0104) : une app qui va chercher un cours sur le web à heure fixe — valide
 #: (un test l'écrit, la fait tourner sur un faux réseau, lit son contexte, sa vue et son outil). Sa source est une
 #: API ouverte et documentée, sans clé : celle de Yahoo Finance répondait 429 depuis le portable (ADR 0144)
-VEILLE_MANIFEST = """\
+WATCH_MANIFEST = """\
 title: Suivi d'un cours de change
 description: Le cours de l'euro (taux de la BCE), relevé chaque soir de semaine ; un grand écart me fait signe.
 schedule: "cron:0 17 * * 1-5"
@@ -311,7 +311,7 @@ views:
     label: Cours
 """
 
-VEILLE_CODE = '''\
+WATCH_CODE = '''\
 import json
 import time
 
@@ -370,9 +370,9 @@ def view_cours(api, params):
     ]}
 '''
 
-VEILLE = phrase("forge.guide.veille", manifest=VEILLE_MANIFEST, code=VEILLE_CODE)
+WATCH = phrase("forge.guide.veille", manifest=WATCH_MANIFEST, code=WATCH_CODE)
 
-EXEMPLE = f"""\
+EXAMPLE = f"""\
 Un exemple complet et valide : une vue avec des paramètres, une table paginée, une courbe, des liens vers
 la même vue, et deux actions à champs (dont une dangereuse, confirmée).
 
@@ -381,8 +381,8 @@ manifest.yaml :
 main.py :
 {EXAMPLE_CODE}"""
 
-_TEXTS = {"manifeste": MANIFESTE, "outils": OUTILS, "reseau": RESEAU, "vues": VUES, "actions": ACTIONS,
-          "reglages": REGLAGES, "blocs": BLOCS, "base": BASE, "veille": VEILLE, "exemple": EXEMPLE}
+_TEXTS = {"manifeste": MANIFESTO, "outils": TOOLS, "reseau": NETWORK, "vues": VIEWS, "actions": ACTIONS,
+          "reglages": SETTINGS, "blocs": BLOCKS, "base": BASE, "veille": WATCH, "exemple": EXAMPLE}
 
 
 def topic(name: str) -> str:

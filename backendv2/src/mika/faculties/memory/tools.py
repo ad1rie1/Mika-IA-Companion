@@ -85,9 +85,9 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     seen: set[int] = set()
     k = SEARCH_FIRST
     while not emotions:
-        hits = dict(await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}))
+        hits = dict(await vectors.search(args.query, k, kinds={c.EPISODE_MEMORY, c.BELIEF}))
         if own:
-            for key, sim in await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}, persons=own):
+            for key, sim in await vectors.search(args.query, k, kinds={c.EPISODE_MEMORY, c.BELIEF}, persons=own):
                 hits[key] = max(sim, hits.get(key, sim))
         items = items_by_id(store, [i for i in hits if i not in seen])
         seen |= set(hits)
@@ -131,7 +131,7 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     rows = store.query_mind(
         select(f.c.item, f.c.whose, strongest).select_from(f.join(i, i.c.id == f.c.item))
         .where(f.c.whose.in_(whose), f.c.emotion.in_(emotions), i.c.status == "active",
-               i.c.kind.in_((c.SOUVENIR, c.BELIEF)))
+               i.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)))
         .group_by(f.c.item, f.c.whose).order_by(strongest.desc(), f.c.item, f.c.whose).limit(FEELING_CANDIDATES))
     felt: dict[int, dict[str, float]] = {}
     for i, who, x in rows:

@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 
 from mika.adapters.imaging.config import LiveImaging
-from mika.adapters.imaging.fake import FakeImageBackend
 from mika.adapters.imaging.gateway import ImageGateway
 from mika.adapters.shares import MemoryShares
 from mika.app.composition import policies
@@ -39,6 +38,7 @@ from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
+from tests.fixtures.fake_images import FakeImageBackend
 from tests.fixtures.mika import boot, build, connect, said
 from tests.unit.test_shares import call, journal
 

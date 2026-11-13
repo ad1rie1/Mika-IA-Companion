@@ -438,5 +438,5 @@ async def report_wake(args: ReportArgs, ctx: Any) -> Any:
 
 
 # ses contributions : son prompt et ses candidats, sa console
-from mika.plugins.wakeup import console as console  # noqa: E402
+from mika.plugins.wakeup import inspect as inspect  # noqa: E402
 from mika.plugins.wakeup import prompt as prompt  # noqa: E402

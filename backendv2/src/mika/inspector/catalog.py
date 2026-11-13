@@ -15,6 +15,9 @@ from typing import Any
 
 from mika.kernel.registry import CompositionError
 
+#: ce que rend le badge d'un onglet de la console : un nombre, ou (nombre, indice)
+Badged = int | tuple[int, str]
+
 
 @dataclass(frozen=True, slots=True)
 class Destination:
@@ -86,8 +89,9 @@ class Builtin:
     key: str
     title: str
     fn: Callable[..., Awaitable[Any]]
-    #: ce qui demande une action : ``fn(ui) -> int``
-    badge: Callable[..., int] | None = None
+    #: ce qui demande une action : ``fn(ui) -> int``, ou ``(n, indice)`` comme le badge d'une vue
+    #: (« 2 processus en échec : sommeil, courrier ») ; lu par ``badge_of``
+    badge: Callable[..., Badged] | None = None
     #: la rubrique du sous-menu (destinations ``menu``)
     group: str = ""
     order: int = 100
@@ -97,6 +101,15 @@ class Builtin:
     @property
     def slug(self) -> str:
         return self.key.split(".", 1)[1] if "." in self.key else self.key
+
+    def badge_of(self, ui: Any) -> tuple[int, str]:
+        """Son badge, toujours en couple (n, indice) : 0 sans badge ; un indice vide quand il ne rend qu'un nombre."""
+        if self.badge is None:
+            return 0, ""
+        got = self.badge(ui)
+        if isinstance(got, tuple):
+            return int(got[0] or 0), str(got[1] or "")
+        return int(got or 0), ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,7 +276,7 @@ class Panel:
 class Builtins:
     items: dict[str, Builtin] = field(default_factory=dict)
 
-    def tab(self, key: str, *, title: str, badge: Callable[..., int] | None = None, group: str = "",
+    def tab(self, key: str, *, title: str, badge: Callable[..., Badged] | None = None, group: str = "",
             order: int = 100, description: str = ""):
         def deco(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             if key in self.items:

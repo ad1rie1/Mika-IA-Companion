@@ -19,8 +19,8 @@ from pydantic import ValidationError
 from starlette.routing import Route
 
 from mika.adapters.mcp.config import McpConfig, McpServer
-from mika.app.moi.api import OWN_MAX, Call, Denied, MeApiBase, missing, refused
-from mika.app.moi.hosts import LOCAL, local_host, url_host
+from mika.app.me.api import OWN_MAX, Call, Denied, MeApiBase, missing, refused
+from mika.app.me.hosts import LOCAL, local_host, url_host
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.runtime.operations import audit
@@ -62,7 +62,7 @@ def mine(call: Call) -> dict[str, McpServer]:
 
 def received(call: Call) -> dict[str, tuple[McpServer, str, Any]]:
     """Les services qu'une autre personne lui partage (ADR 0188, 0192), comme Paramètres › Partages les compte
-    (``app/moi/shares.py``) : à quelqu'un d'autre qu'elle, avec une ligne d'accès pour elle seule — celle qu'un partage
+    (``app/me/shares.py``) : à quelqu'un d'autre qu'elle, avec une ligne d'accès pour elle seule — celle qu'un partage
     ajoute. Par nom : le service, son niveau (lire : ses outils qui lisent ; s'en servir : aussi ceux qui agissent) et
     sa ligne."""
     if call.api.settings is None:

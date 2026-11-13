@@ -557,6 +557,37 @@
       r.addEventListener("input", function () { if (out) out.textContent = String(r.value).replace(".", ","); });
     });
 
+    // « Copier » (``data-copy`` : l'id de l'élément dont copier le texte, un jeton montré une seule fois) : le
+    // presse-papiers du navigateur quand la page est sûre (HTTPS, la boucle locale) ; sinon (une console servie en HTTP
+    // sur le réseau), le texte sélectionné puis la copie à l'ancienne. Si rien n'a pu partir, le texte reste
+    // sélectionné : Ctrl C suffit. Sans script, le bouton reste caché et le texte se sélectionne à la main.
+    document.querySelectorAll("button[data-copy]").forEach(function (b) {
+      var source = document.getElementById(b.getAttribute("data-copy"));
+      if (!source) return;
+      var label = b.textContent, timer = 0;
+      b.hidden = false;
+      function say(text) {
+        b.textContent = text;
+        clearTimeout(timer);
+        timer = setTimeout(function () { b.textContent = label; }, 2500);
+      }
+      function byHand() {
+        var range = document.createRange(), sel = window.getSelection();
+        range.selectNodeContents(source);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        var done = false;
+        try { done = document.execCommand("copy"); } catch (e) { done = false; }
+        say(done ? "Copié" : "Sélectionné : Ctrl C pour copier");
+      }
+      b.addEventListener("click", function () {
+        var text = source.textContent;
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(text).then(function () { say("Copié"); }, byHand);
+        } else byHand();
+      });
+    });
+
     // Un mail dans son cadre (ADR 0169) : le cadre prend la hauteur de son contenu. Sans script, il garde sa
     // hauteur fixe et défile.
     var frames = document.querySelectorAll("iframe.document-frame");

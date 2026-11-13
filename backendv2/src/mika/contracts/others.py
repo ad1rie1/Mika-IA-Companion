@@ -125,7 +125,7 @@ class ToneRead(Payload):
 
 class Farewell(Payload):
     """Elle clôt la conversation (« bonne nuit », « à demain », « je file ») : y répondre n'attend rien en retour —
-    reconnu à l'arrivée du message, à sa forme (``vocab.farewell``), ce n'est pas une émotion (ADR 0093)."""
+    reconnu à l'arrivée du message, à sa forme (``others.farewell``), ce n'est pas une émotion (ADR 0093)."""
 
     person: str
     handle: str

@@ -71,7 +71,7 @@ RUNS_PAGE = 25
 RUNS_CURSOR = "avant"
 NIGHTS_CURSOR = "avant_nuits"
 
-KIND_FR = {c.SOUVENIR: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
+KIND_FR = {c.EPISODE_MEMORY: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
 STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "joined": "jointe à une autre", "pending": "en cours",
              c.HONORED: "tenue", c.DROPPED: "abandonnée"}
 STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
@@ -93,7 +93,7 @@ SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): ""
 SEARCH = Param("q", "recherche", placeholder="un mot du texte")
 PERSON = Param("person", "personne", placeholder="un nom ou un moyen de communication")
 READING_HELP = {
-    c.SOUVENIR: "Un souvenir raconte ce qu’elle a retenu. Sa sensibilité et son état restent visibles ; "
+    c.EPISODE_MEMORY: "Un souvenir raconte ce qu’elle a retenu. Sa sensibilité et son état restent visibles ; "
                 "les détails donnent le texte complet et les messages d’origine.",
     c.BELIEF: "Une croyance est ce qu’elle tient pour vrai, pas une preuve. La confiance est son estimation actuelle ; "
               "l’origine distingue ce qu’on lui a dit, ce qu’elle a observé et ce qu’elle déduit.",
@@ -226,7 +226,7 @@ def _status(item: Item, frame: Frame, p: MemoryParams) -> Badge:
     listing = LISTINGS.get(item.kind)
     label = dict(listing.statuses).get(item.status) if listing else None
     label = label or STATUS_FR.get(item.status, item.status)
-    if item.status == "active" and item.kind in (c.SOUVENIR, c.BELIEF) and dormant(item, frame.now, p):
+    if item.status == "active" and item.kind in (c.EPISODE_MEMORY, c.BELIEF) and dormant(item, frame.now, p):
         return Badge(f"{label} (dort)", "muted")
     return Badge(label, STATUS_TONE.get(item.status, ""))
 
@@ -268,7 +268,7 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
         pairs.append(("échéance", When(item.due, relative=False) if item.due else "sans échéance"))
     if item.kind == c.EVENT and item.due:
         pairs.append(("quand", When(item.due, relative=False)))
-    if item.emotion and item.kind != c.SOUVENIR:
+    if item.emotion and item.kind != c.EPISODE_MEMORY:
         pairs.append(("émotion", emotion_cell(item.emotion)))
     pairs += [("vient du message", Ref("event", str(s), f"message n° {s}")) for s in k.sources[:SOURCES_SHOWN]]
     if len(k.sources) > SOURCES_SHOWN:
@@ -291,7 +291,7 @@ class Listing:
     cells: Callable[[Kept, Frame, dict[str, str], MemoryParams], tuple[Cell, ...]]
 
 
-def _souvenir(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+def _episode_memory(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it), _meter(it.importance),
             _meter(salience(it, frame.now, p)), emotion_cell(it.emotion) if it.emotion else None,
@@ -343,12 +343,12 @@ def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> t
 
 
 N = Column("n°", "fit", detail=True)
-SOUVENIRS = Listing(c.SOUVENIR, "Ses souvenirs", "pas encore de souvenir",
-                    (("active", "actif"), ("merged", "fondu dans un autre")),
-                    (N, Column("souvenir", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"), Column("importance", detail=True),
-                     Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
-                                                      "touché ; sous le seuil, il dort", detail=True),
-                     Column("émotion", detail=True), Column("statut", "fit", role="badge"), Column("né", "fit")), _souvenir)
+EPISODE_MEMORIES = Listing(c.EPISODE_MEMORY, "Ses souvenirs", "pas encore de souvenir",
+                           (("active", "actif"), ("merged", "fondu dans un autre")),
+                           (N, Column("souvenir", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"), Column("importance", detail=True),
+                            Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
+                                                             "touché ; sous le seuil, il dort", detail=True),
+                            Column("émotion", detail=True), Column("statut", "fit", role="badge"), Column("né", "fit")), _episode_memory)
 BELIEFS = Listing(c.BELIEF, "Ses croyances", "pas encore de croyance",
                   (("active", "active"), ("superseded", "remplacée")),
                   (N, Column("croyance", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"),
@@ -369,7 +369,7 @@ EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore 
                                                              "sans nouvelles bien après sa date"),
                   Column("se fête", "fit", role="badge", hint="un moment qu'elle souhaite le jour même"),
                   Column("statut", "fit", role="badge"), Column("noté", "fit", detail=True)), _event)
-LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES, EVENTS)}
+LISTINGS = {x.kind: x for x in (EPISODE_MEMORIES, BELIEFS, PROMISES, EVENTS)}
 
 
 def _events_of(s: MemoryState) -> Listing:
@@ -416,11 +416,11 @@ def _params(listing: Listing) -> list[Param]:
     return [SEARCH, Param("status", "statut", "select", listing.statuses), PERSON]
 
 
-@MEMORY.inspect("souvenirs", title="Souvenirs", section="memoire", order=10, params=_params(SOUVENIRS),
+@MEMORY.inspect("souvenirs", title="Souvenirs", section="memoire", order=10, params=_params(EPISODE_MEMORIES),
                 description="Ce qu'elle retient de ses échanges. Cherche un souvenir ou une personne, puis "
                             "ouvre ses détails pour lire le texte entier et retrouver les messages d'origine.")
 def _souvenirs(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    return _list(SOUVENIRS, frame, ctx)
+    return _list(EPISODE_MEMORIES, frame, ctx)
 
 
 @MEMORY.inspect("croyances", title="Croyances", section="memoire", order=20, params=_params(BELIEFS),
@@ -481,7 +481,7 @@ def _volumes(ctx: InspectContext) -> Stats | None:
         return sum(n for (k, st), n in counts.items() if k == kind and (not statuses or st in statuses))
 
     return Stats((
-        Stat("Souvenirs", of(c.SOUVENIR), f"{of(c.SOUVENIR, 'merged')} fondus dans un autre"),
+        Stat("Souvenirs", of(c.EPISODE_MEMORY), f"{of(c.EPISODE_MEMORY, 'merged')} fondus dans un autre"),
         Stat("Croyances", of(c.BELIEF), f"{of(c.BELIEF, 'superseded')} remplacées"),
         Stat("Promesses en cours", of(c.PROMISE, "pending"),
              f"{of(c.PROMISE, c.HONORED)} tenues, {of(c.PROMISE, c.DROPPED)} abandonnées"),
@@ -670,7 +670,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         if _told_exists(ctx.store) else 0
     sections: list[Block] = []
     totals: dict[str, int] = {}
-    for listing in (SOUVENIRS, BELIEFS, PROMISES, _events_of(s)):
+    for listing in (EPISODE_MEMORIES, BELIEFS, PROMISES, _events_of(s)):
         where = [*base, t.c.kind == listing.kind]
         total = _count(ctx.store, where)
         totals[listing.kind] = total
@@ -680,7 +680,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
                               empty="aucun résultat pour cette recherche" if q else listing.nothing, pager=pager,
                               layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind]))
     stats = Stats((
-        Stat("Souvenirs", totals[c.SOUVENIR]),
+        Stat("Souvenirs", totals[c.EPISODE_MEMORY]),
         Stat("Croyances", totals[c.BELIEF]),
         Stat("Promesses", totals[c.PROMISE], f"{sum(1 for x in s.promises.values() if x.to in keys)} en cours"),
         Stat("Moments de sa vie", totals[c.EVENT]),

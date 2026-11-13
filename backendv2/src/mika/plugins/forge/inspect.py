@@ -148,7 +148,7 @@ def _latest(ctx: InspectContext, types: tuple[Any, ...], app: str, n: int) -> li
     return ctx.events(types, n, where=("app", app))
 
 
-def _fiche(name: str, text: str | None = None, tab: str = "") -> Ref | str:
+def _app_ref(name: str, text: str | None = None, tab: str = "") -> Ref | str:
     """Un lien vers la fiche d'une app (un nom invalide n'entre jamais dans un lien)."""
     if not APP_NAME.match(name):
         return text or name
@@ -316,7 +316,7 @@ def _head(s: ForgeState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         ("agenda", (app.schedule if app is not None else info.schedule if info is not None else "") or "manual"),
         ("dernier tour", _last_tick(key, ctx)),
     )
-    pages = tuple(_fiche_view(key, v) for v in info.views) if info is not None and not info.error else ()
+    pages = tuple(_view_ref(key, v) for v in info.views) if info is not None and not info.error else ()
     # ses pages en onglets ; ses réglages et ce qui est technique derrière la roue (ADR 0104)
     return Head(key, title, subtitle=info.description if info is not None else "", badges=tuple(badges),
                 facts=facts, default_tab="vues" if pages else "etat", action_tabs=("etat", "code"),
@@ -382,7 +382,7 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
         count, last = signals.get(name, (0, 0))
         failures = f" ({app.failures} échec(s) d'affilée)" if app is not None and app.failures else ""
         text, tone = _state(app, info, port)
-        link = _fiche(name)
+        link = _app_ref(name)
         out.append(Row((link, _clip(title, 80), version, rule or "manual", Badge(text, tone),
                         "oui" if app is not None and app.promoted else "non", _last_tick(name, ctx) + failures,
                         f"{count} (le dernier : {ctx.when(last)})" if count else "0"),
@@ -421,9 +421,9 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
             given.append((f"{info.name}_pages", f"Lire ses pages : {', '.join(v.label for v in info.views)}.",
                           "view, params"))
         for name, what, args in given:
-            rows.append(Row((_fiche(info.name, info.title or info.name), Text(name, "mono"), Text(what),
+            rows.append(Row((_app_ref(info.name, info.title or info.name), Text(name, "mono"), Text(what),
                              Text(args, "mono"), Badge(state, tone)),
-                            href=_fiche(info.name) if APP_NAME.match(info.name) else None))
+                            href=_app_ref(info.name) if APP_NAME.match(info.name) else None))
     return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "arguments", "quand il sert"), tuple(rows),
                   title="Les outils de ses apps", empty="Aucune de ses apps ne lui donne d'outil.",
                   caption="Une app qui a des secrets ne sert en conversation qu'une fois promue ; tu la promeus "
@@ -502,7 +502,7 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
     return blocks + await render(port, name, info, spec, values, secrets=trusted(app))
 
 
-def _fiche_view(name: str, v: AppViewSpec) -> Ref:
+def _view_ref(name: str, v: AppViewSpec) -> Ref:
     return Ref("subject", f"app/{name}", v.label, (("onglet", "vues"), ("vue", v.key)))
 
 

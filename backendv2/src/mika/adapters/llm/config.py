@@ -273,7 +273,7 @@ class LLMConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     backends: Annotated[dict[str, BackendSpec], Knob(
-        label="Fournisseurs", help="Les services déclarés ; les rôles désignent l'un d'eux par son nom.",
+        label="Fournisseurs", noun="un fournisseur", help="Les services déclarés ; les rôles désignent l'un d'eux par son nom.",
         advanced=False, order=10)] = \
         Field(default_factory=dict)
     #: rôle → nom de fournisseur déclaré

@@ -1,6 +1,6 @@
 """Le plugin ``web`` : chercher sur le web et lire des pages (ADR 0066).
 
-Un plugin **système** sans outil à lui : actif, il apporte au client MCP (ADR 0064) son propre serveur — ``serveur.py``
+Un plugin **système** sans outil à lui : actif, il apporte au client MCP (ADR 0064) son propre serveur — ``server.py``
 à côté, bibliothèque standard seulement, lancé dans sa cage avec le réseau isolé (Internet, jamais cette machine ni
 le réseau local) — dont les outils sont **approuvés d'office** : ``mcp_web_search`` (DuckDuckGo), ``mcp_web_read``
 (une page, par morceaux) et, quand il peut en charger plusieurs à la fois, ``mcp_web_read_pages``. Ils passent par
@@ -10,7 +10,7 @@ Actif, il le dit (``web.available``) : ses centres d'intérêt la mènent au web
 
 Ce module ne parle à aucun serveur : il dit ce que ses paramètres veulent (``system_server``), et la composition
 le donne au client MCP. Les outils annoncés et ceux que le serveur liste viennent d'une seule définition
-(``serveur.tools``) : l'accord d'office porte exactement sur ce qu'il dira.
+(``server.tools``) : l'accord d'office porte exactement sur ce qu'il dira.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from mika.contracts import web as c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
-from mika.plugins.web import serveur as server
+from mika.plugins.web import server
 from mika.vocab.phrasebook import phrase
 
 #: le nom du serveur chez le client MCP : il entre dans le nom de ses outils (``mcp_web_…``) et de son lot
@@ -132,7 +132,7 @@ def server_path() -> Path:
 
 
 def system_server(p: WebParams | None) -> SystemServer | None:
-    """Son serveur, s'il est actif : ``python3 -I serveur.py`` (isolé de tout environnement Python), son dossier
+    """Son serveur, s'il est actif : ``python3 -I server.py`` (isolé de tout environnement Python), son dossier
     partagé en lecture (la cage ne montre rien d'autre), ses réglages dans l'environnement."""
     p = params(p)
     if not p.enabled:

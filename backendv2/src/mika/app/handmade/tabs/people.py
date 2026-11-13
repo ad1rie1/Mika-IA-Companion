@@ -46,7 +46,7 @@ from mika.faculties.identity.inspect import people as everyone_of
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.inspector.catalog import destinations
-from mika.inspector.pages.subjects import fiche_key, fiche_url
+from mika.inspector.pages.subjects import subject_url, subject_url_key
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import num_fr
@@ -189,7 +189,7 @@ class PeoplePage:
 
 def person_of(c: Mapping[str, Any] | None) -> str:
     """La personne qu'une cellule nomme : la clé de la fiche où son lien mène (vide : ce n'est pas une personne)."""
-    return fiche_key(str((c or {}).get("href") or ""), "person")
+    return subject_url_key(str((c or {}).get("href") or ""), "person")
 
 
 def _face(look: Look, person: str, online: Mapping[str, dict[str, Any]], c: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -216,7 +216,7 @@ def _handles(look: Look, person: str) -> tuple[list[dict[str, str]], int]:
     keys = [k for k in handles_of(s, person) if k in s.handles]
     main = principal(s, person)
     keys.sort(key=lambda k: (k != main, -s.handles[k].first_seen, k))
-    out = [{"label": handle_label(s, k), "href": fiche_url("handle", k), "trust": TRUST_SHORT[s.handles[k].trust],
+    out = [{"label": handle_label(s, k), "href": subject_url("handle", k), "trust": TRUST_SHORT[s.handles[k].trust],
             "tone": TRUST_TONE[s.handles[k].trust], "main": k == main and len(keys) > 1}
            for k in keys[:HANDLES_SHOWN]]
     return out, max(0, len(keys) - HANDLES_SHOWN)
@@ -234,8 +234,8 @@ def _listed(look: Look, line: Line, online: Mapping[str, dict[str, Any]]) -> dic
             "certainty": "" if blank(line.get("certitude")) else line.text("certitude"),
             "first": None if blank(line.get("vue pour la première fois")) else line.get("vue pour la première fois"),
             "last": last if last and last.get("t") == "when" else None,
-            "exchanges": fiche_url("person", person, "echanges") if known else "",
-            "link": fiche_url("person", person, "lien") if known else ""}
+            "exchanges": subject_url("person", person, "echanges") if known else "",
+            "link": subject_url("person", person, "lien") if known else ""}
 
 
 def annuaire(got: Got) -> Markup | None:
@@ -321,7 +321,7 @@ def _channel(said: str) -> str:
 
 def _handle(look: Look, c: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Un moyen de communication, nommé comme sa fiche le nomme (« Béa · compte ») plutôt que par sa clé."""
-    key = fiche_key(str((c or {}).get("href") or ""), "handle")
+    key = subject_url_key(str((c or {}).get("href") or ""), "handle")
     if not key:
         return dict(c) if c else None
     return {**c, "text": handle_label(look.frame.state("identity"), key)}

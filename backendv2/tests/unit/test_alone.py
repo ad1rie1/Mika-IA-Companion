@@ -41,7 +41,7 @@ P = AttentionParams()
 
 def row(item: int, text: str, born_at: int, *, importance: float = 0.5, emotion: str = "happy",
         about: tuple[str, ...] = (), secret: bool = False) -> tuple:
-    values = {"id": item, "kind": memory_c.SOUVENIR, "text": text, "about": json.dumps(list(about)),
+    values = {"id": item, "kind": memory_c.EPISODE_MEMORY, "text": text, "about": json.dumps(list(about)),
               "sensitivity": 2 if about else 1, "importance": importance, "confidence": None, "origin": "",
               "source": None, "emotion": emotion, "born_at": born_at, "touched_at": born_at, "status": "active",
               "recipient": None, "due": None, "sources": "[]", "told_by": json.dumps(list(about)),

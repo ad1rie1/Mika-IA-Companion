@@ -16,8 +16,8 @@ from typing import Any
 
 from starlette.routing import Route
 
-from mika.app.moi.api import Call, Denied, MeApiBase, done, form, missing
-from mika.app.moi.common import OWN, allows, held_by, millis, only_owner, opened, snippet
+from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
+from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import UNDER_WAY, WAITING, DraftSeen, TeamsState, latest, under_way
 from mika.ports.teams import (

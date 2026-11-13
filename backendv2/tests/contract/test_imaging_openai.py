@@ -23,11 +23,11 @@ import pytest
 
 from mika.adapters.imaging import openai_images as oi
 from mika.adapters.imaging.errors import ImagingError
-from mika.adapters.imaging.fake import solid_png
 from mika.adapters.imaging.models import ListingFailed, list_image_models
 from mika.adapters.imaging.openai_images import OpenAIImagesBackend
 from mika.adapters.imaging.pricing import price_usd
 from mika.ports.imaging import OK, REFUSED, ImageRequest, Picture
+from tests.fixtures.fake_images import solid_png
 
 KEY = "sk-CANARI-images-42"
 PNG = solid_png(4, 3, (10, 20, 30))

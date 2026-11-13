@@ -30,11 +30,11 @@ from mika.app.handmade import excerpt
 from mika.app.handmade.subjects.parts import side_view
 from mika.app.handmade.tabs import Got, Tab, text
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_key, fiche_url
+from mika.inspector.pages.subjects import subject_url, subject_url_key
 from mika.inspector.ui import UI, Forms, env
 from mika.kernel.inspect import Head
 from mika.plugins.email import READ_AFTER_S, params_of
-from mika.plugins.email.console.actions import GESTURES
+from mika.plugins.email.inspect.actions import GESTURES
 
 STYLES = ("handmade/courrier.css",)
 #: la sorte d'objet d'un mail : la fiche que la liseuse ouvre
@@ -72,7 +72,7 @@ def lines(table: Mapping[str, Any], query: Mapping[str, str]) -> list[dict[str, 
         fields = {f["label"]: f["value"] for f in row.get("fields", [])}
         who = next((fields[w] for w in WHO if w in fields), None)
         when = next((v for v in fields.values() if v.get("t") == "when"), None)
-        key = fiche_key(row.get("href", ""), KIND)
+        key = subject_url_key(row.get("href", ""), KIND)
         out.append({
             "subject": heading.get("text") or "(sans objet)", "snippet": excerpt(heading.get("secondary") or "", 160),
             "unread": bool(heading.get("emphasis")), "who": (who or {}).get("text", ""),
@@ -104,7 +104,7 @@ def _her(ui: UI, key: str) -> dict[str, Any] | None:
             notes.append(d["text"])
     if not (said or facts or notes):
         return None
-    return {"said": said, "facts": facts, "notes": notes, "more": fiche_url("mail", key, "remarque")}
+    return {"said": said, "facts": facts, "notes": notes, "more": subject_url("mail", key, "remarque")}
 
 
 def _read_after(ui: UI) -> int | None:
@@ -137,7 +137,7 @@ def reader(ui: UI, key: str, query: Mapping[str, str], forms: Forms,
         head={"title": head.title, "subtitle": head.subtitle, "badges": [render.cell(b, ui.env()) for b in head.badges],
               "facts": [{"label": k, "value": render.cell(v, ui.env())} for k, v in head.facts]},
         blocks=[drawn_blocks.shape_block(d) for d in rendered], forms=forms.of(rendered, key) if isinstance(forms, Forms) else {},
-        fiche=fiche_url(KIND, key), close=_here(query), prev=prev, next=next_, her=_her(ui, key),
+        fiche=subject_url(KIND, key), close=_here(query), prev=prev, next=next_, her=_her(ui, key),
         read_after=_read_after(ui)))
 
 

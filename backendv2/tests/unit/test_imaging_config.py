@@ -23,7 +23,6 @@ import pytest
 from mika.adapters.imaging import config as config_mod
 from mika.adapters.imaging import pricing as pricing_mod
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig, LiveImaging, build_gateway
-from mika.adapters.imaging.fake import FakeImageBackend, solid_png
 from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
 from mika.adapters.store_sql import SqlStore
@@ -31,6 +30,7 @@ from mika.app import cli
 from mika.app.settings import IMAGING_KEY, SecretBox, Settings
 from mika.kernel.clock import ManualClock
 from mika.ports.imaging import ASPECTS, OK, UNCONFIGURED, ImageRequest, ImageResult, ImageUsage, Picture
+from tests.fixtures.fake_images import FakeImageBackend, solid_png
 
 KEY = "sk-CANARI-images-7"
 

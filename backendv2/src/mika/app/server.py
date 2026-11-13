@@ -78,9 +78,9 @@ from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
 from mika.app.logs import RedactingFilter, configure_logging, redact  # noqa: F401 — réexportés pour les tests
+from mika.app.me import MeApi
+from mika.app.me.phone import APK_NAME
 from mika.app.mindport import KernelPort
-from mika.app.moi import MeApi
-from mika.app.moi.phone import APK_NAME
 from mika.app.paths import PERSONA
 from mika.app.phone import PhoneDesk
 from mika.app.settings import SYSTEM_ACCESS_FIELDS, SecretBox, Settings, push_key_file

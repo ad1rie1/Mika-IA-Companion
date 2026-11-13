@@ -230,7 +230,7 @@ def create_views(sql: Sql, sfx: str) -> None:
                 .where(o.c.status == "superseded", o.c.about_self > 0, n.c.about_self > 0, n.c.status == "active",
                        o.c.internal_only == 0, n.c.internal_only == 0))
     create_view(sql, f"{c.LIVED_VIEW}{sfx}",
-                select(*known, t.c.gist).where(t.c.kind == c.SOUVENIR, t.c.gist != "", held))
+                select(*known, t.c.gist).where(t.c.kind == c.EPISODE_MEMORY, t.c.gist != "", held))
 
 
 def _facets_json(felt: Any) -> str:
@@ -312,7 +312,7 @@ class Items:
                 # la référence de son texte : l'oubli d'une personne rattachée depuis (un renfort) l'atteint aussi
                 upsert(sql, refs(sfx), {"item": e.seq, "ref": d.text.ref}, keys=["item"])
             if name == c.REMEMBERED.name:
-                insert({"id": e.seq, "kind": c.SOUVENIR, "text": d.text.text or "", "about": _keys(d.about),
+                insert({"id": e.seq, "kind": c.EPISODE_MEMORY, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance,
                         "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),

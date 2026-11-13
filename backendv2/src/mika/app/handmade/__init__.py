@@ -24,7 +24,7 @@ from mika.contracts import social as social_c
 from mika.faculties.affect import AFFECT
 from mika.faculties.agency import AGENCY
 from mika.faculties.social.inspect import CLOSENESS_FR
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
@@ -124,7 +124,7 @@ def felt_of(stance: Any) -> dict[str, str] | None:
 def person_href(person: str) -> str:
     """La fiche d'une personne, ouverte sur sa vue d'ensemble (``person/``) ; une adresse qui n'est pas une
     personne n'en a pas."""
-    return fiche_url("person", person) if is_identifiable(person) else ""
+    return subject_url("person", person) if is_identifiable(person) else ""
 
 
 def plain(value: Any) -> str:

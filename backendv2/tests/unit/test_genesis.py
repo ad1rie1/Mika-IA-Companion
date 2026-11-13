@@ -69,7 +69,7 @@ def test_an_archived_memory_is_kept_recalled_and_forgotten_with_the_person(tmp_p
     mine = [r for r in rows if "CANARI-G1" in r["text"]]
     assert again == seq and len(mine) == 1, "une même clé de dédoublonnage n'en fait qu'un"
     row = mine[0]
-    assert row["id"] == seq and row["kind"] == memory_c.SOUVENIR and row["status"] == "active"
+    assert row["id"] == seq and row["kind"] == memory_c.EPISODE_MEMORY and row["status"] == "active"
     assert row["about"] == ["user_2"] and row["told_by"] == ["user_2"] and row["heard_by"] == ["user_2"]
     assert row["sensitivity"] == 2, "une personne en jeu : personnel par défaut, comme à la consolidation"
     assert origin == Origin.GENESIS.value, "venu de ses archives, pas de sa voix ni d'un processus"

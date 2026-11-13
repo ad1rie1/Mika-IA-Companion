@@ -68,7 +68,7 @@ STATUS_WORDS = {WAITING: ("en attente", "info"), RUNNING: ("en cours", "info"), 
 OUTWARD = ("forge", "forge_apps", "email")
 
 
-def _fiche(name: str, tab: str = "") -> Ref:
+def _endpoint_ref(name: str, tab: str = "") -> Ref:
     return Ref.subject("reveil", name, name, tab)
 
 
@@ -150,11 +150,11 @@ def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
         for ep in port.endpoints():
             pending = sum(1 for x in s.calls.values() if x.endpoint == ep.name and x.status in (WAITING, RUNNING))
             last = max((x.at for x in s.calls.values() if x.endpoint == ep.name), default=0)
-            rows.append(Row((_fiche(ep.name), Text(ep.label or "—", clamp=160),
+            rows.append(Row((_endpoint_ref(ep.name), Text(ep.label or "—", clamp=160),
                              Badge("actif", "ok") if ep.enabled else Badge("désactivé", "muted"),
                              Badge("clé définie", "ok") if ep.key is not None else Badge("sans clé", "warn"),
                              Text(str(pending), "num"), When(last) if last else "jamais"),
-                            href=_fiche(ep.name)))
+                            href=_endpoint_ref(ep.name)))
         blocks.append(Table(("réveil", "à quoi il sert", Column("état", "fit"), Column("clé", "fit"),
                              Column("en attente", "num"), Column("dernier appel", "fit")), tuple(rows),
                             title="Réveils", empty="Aucun réveil déclaré : « Déclarer un réveil ».",
@@ -208,7 +208,7 @@ def _calls_table(calls: Any, s: WakeupState, frame: Frame, ctx: InspectContext, 
         episode = Ref("episode", x.episode, "relire") if x.episode else Text("—", "muted")
         cells: tuple[Any, ...] = (When(x.at),)
         if with_endpoint:
-            cells += (_fiche(x.endpoint),)
+            cells += (_endpoint_ref(x.endpoint),)
         cells += (status_badge(x), Text(said or "(oublié)", clamp=140), episode)
         rows.append(Row(cells, tone="danger" if x.status == FAILED else "", detail=tuple(detail)))
     columns: tuple[Any, ...] = (Column("reçu", "fit"),)
@@ -235,7 +235,7 @@ def _head(s: WakeupState, frame: Frame, ctx: InspectContext, key: str) -> Head |
     if ep.rouse:
         badges.append(Badge("passe outre son sommeil", "warn"))
     return Head(key=key, title=key, subtitle=ep.label, badges=tuple(badges),
-                facts=(("réglages", edit_endpoint(key, _fiche(key))),
+                facts=(("réglages", edit_endpoint(key, _endpoint_ref(key))),
                        ("adresse", Text(f"POST /api/wake/{key}", "mono"))),
                 back=LIST)
 
@@ -272,7 +272,7 @@ def _tab_state(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]
         ("plafonds", f"{ep.per_hour} appels par heure, {ep.max_pending} en attente, texte de "
                      f"{ep.max_chars} caractères"),
         ("durée de vie d'un appel", f"{max(1, ep.lifetime_us // 3_600_000_000)} h"),
-        ("réglages", edit_endpoint(ep.name, _fiche(ep.name))),
+        ("réglages", edit_endpoint(ep.name, _endpoint_ref(ep.name))),
     ), title="Ce que tu as déclaré", columns=2))
     if ep.instructions:
         blocks.append(Prose(ep.instructions, title="Ses consignes (elles priment sur ce que l'appel apporte)",

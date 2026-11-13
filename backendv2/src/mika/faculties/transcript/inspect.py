@@ -1,5 +1,9 @@
-"""Deux vues de Conversations, à côté du fil des messages :
+"""Les vues de Conversations :
 
+- **Le fil des messages** : tous les messages (servis en MCP et par leur ancienne adresse, hors du menu depuis
+  l'ADR 0181), les questions sans réponse, les échanges sur la fiche d'une personne, le fil d'un moyen de
+  communication sur sa fiche ; chaque message reçu dit la parole qui l'a réglé, ou pourquoi il est resté sans
+  réponse ;
 - **Par personne** (ADR 0181) : avec qui elle parle — une ligne par personne, tous ses moyens de communication
   réunis, la conversation la plus récente d'abord : par où, le dernier message et qui l'a écrit, combien de messages,
   les questions qui attendent sa réponse ; la ligne mène à leur conversation. Un mot cherché (``q``, là où la
@@ -11,48 +15,433 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, false, func, select
 
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
-from mika.faculties.transcript import (
-    _COLUMNS,
-    FORGOTTEN,
-    HANDLE,
-    INSPECT_CHARS,
-    QUERY,
-    TEXT_CAP,
-    TRANSCRIPT,
-    TranscriptState,
-    _clip,
-    _messages_of,
-    _no_store,
-    _page,
-    _who,
-)
+from mika.faculties.transcript import _COLUMNS, TRANSCRIPT, TranscriptState, _messages_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
     Block,
     Cell,
     Column,
+    Disclosure,
     InspectContext,
+    Note,
+    Pager,
     Param,
     Prose,
     Ref,
     Row,
+    Stat,
+    Stats,
     Table,
     Text,
     When,
+    describe_error,
     paginate,
 )
+from mika.ports.delivery import TOO_LATE
 from mika.ports.paging import fold_text
 from mika.vocab import privacy
+from mika.vocab.affect import emotion_cell
 from mika.vocab.people import fold, is_identifiable, is_internal
+
+# ── Le fil des messages ───────────────────────────────────────────────────
+
+#: Tant de messages par page (curseur « avant ») ; un texte replié au-delà de
+#: tant de caractères, et jamais plus que tant envoyés à la console.
+PAGE = 50
+INSPECT_CHARS = 300
+TEXT_CAP = 4000
+FORGOTTEN = "(oublié)"
+ROLES = (("user", "la personne"), ("assistant", "elle"))
+
+
+def _clip(text: str | None, limit: int = INSPECT_CHARS) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _internal(r: Mapping[str, Any]) -> bool:
+    """Adressé à personne (ou venu de sa propre tuyauterie) : pas un échange."""
+    return not r["person"] or is_internal(r["person"])
+
+
+def _who(frame: Frame, handle: str) -> Cell:
+    """La personne derrière une adresse, en lien vers sa fiche."""
+    if not handle or is_internal(handle):
+        return Text("personne", "muted")
+    person = frame.get(identity_c.PERSON(handle))
+    name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
+    return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
+
+
+def _page(store: Any, clauses: Sequence[Any], before: int | None,
+          size: int = PAGE) -> tuple[list[dict[str, Any]], Pager | None]:
+    """Une page du fil, du plus récent au plus ancien, et le curseur de la suivante."""
+    where = list(clauses)
+    if before:
+        where.append(c.thread_table().c.id < before)
+    found = _messages_of(store, *where, limit=size + 1)
+    rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found[:size]]
+    more = len(found) > size and rows
+    return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else Pager()
+
+
+def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, str]:
+    """L'épisode de chaque réponse (sa corrélation) — et, par elle, celui de la
+    question qu'elle règle."""
+    out: dict[int, str] = {}
+    for r in rows:
+        if r["role"] != "assistant":
+            continue
+        found = ctx.events((rt.UTTERANCE,), 1, before=int(r["id"]) + 1)
+        if found and found[0].seq == r["id"]:
+            out[int(r["id"])] = found[0].correlation
+            if r["reply_to"] is not None:
+                out.setdefault(int(r["reply_to"]), found[0].correlation)
+    return out
+
+
+MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), Column("qui parle", role="title"), "avec",
+                   Column("où", detail=True), Column("texte", role="body"), Column("émotion", detail=True),
+                   "réponse", Column("épisode", detail=True))
+
+
+def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, int]:
+    """Pour chaque message reçu de la page, la parole qui l'a réglé (son n°) : celle qui y répond, ou celle qui
+    répond au dernier message de sa rafale et l'a lu avec (``Utterance.answers``). Absent : encore en attente, ou
+    réglé sans parole (``_silences`` dit pourquoi)."""
+    store = ctx.store
+    asked = [r for r in rows if r["role"] == "user" and not _internal(r)]
+    if store is None or not asked:
+        return {}
+    ids = [int(r["id"]) for r in asked]
+    t = c.thread_table()
+    # par numéro : deux paroles qui répondent au même message, la dernière l'emporte (sur les deux moteurs)
+    out = {int(q): int(a) for a, q in store.query_mind(
+        select(t.c.id, t.c.reply_to).where(t.c.role == "assistant", t.c.reply_to.in_(ids)).order_by(t.c.id))}
+    for r in asked:
+        q = int(r["id"])
+        if q in out:
+            continue
+        # le premier énoncé vers la même adresse, au même endroit, qui répond à un message d'après : il a peut-être
+        # lu celui-ci avec (une rafale reçoit une seule réponse, à son dernier message)
+        later = store.query_mind(
+            select(t.c.id).where(t.c.person == r["person"], t.c.role == "assistant", t.c.id > q, t.c.reply_to > q,
+                                 func.coalesce(t.c.room, "") == (r["room"] or "")).order_by(t.c.id).limit(1))
+        if not later:
+            continue
+        seq = int(later[0][0])
+        found = ctx.events((rt.UTTERANCE,), 1, before=seq + 1)
+        if found and found[0].seq == seq and q in found[0].data.answers:
+            out[q] = seq
+    return out
+
+
+#: une rafale dont le dernier message est sur une autre page : sa fin se cherche parmi tant de messages suivants
+BURST_LOOKUP = 5
+#: comment se dit une fin qui laisse un message sans réponse (le détail d'une panne suit)
+SILENCES = {"abstained": "s'est tue", "failed": "panne", "timeout": "panne : délai dépassé",
+            "interrupted": "interrompue par un arrêt", "superseded": "supplantée", "preempted": "a cédé la place",
+            "cancelled": "annulée"}
+#: une cause tient en tant de caractères dans la colonne « réponse » (sa page la dit en entier)
+CAUSE_CHARS = 80
+
+
+def _ended_leaving(ctx: InspectContext, reply_to: int, q: int) -> Any | None:
+    """La dernière fin d'épisode qui répondait à ``reply_to``, si elle laisse le message ``q`` sans réponse."""
+    found = ctx.events((rt.EPISODE_ENDED,), 1, where=("reply_to", reply_to))
+    return found[0] if found and found[0].data.leaves_unanswered(q) else None
+
+
+def _silences(ctx: InspectContext, rows: Sequence[Mapping[str, Any]], pending: set[int],
+              answers: Mapping[int, int]) -> dict[int, Any]:
+    """Pour chaque message reçu de la page réglé sans parole, la fin d'épisode qui l'a laissé sans réponse
+    (``EpisodeEnded.leaves_unanswered``) ; ``None`` : il ne lui était pas adressé (dans un salon, elle entend tout
+    mais ne répond qu'à ce qui lui parle). Les plus récents d'abord : la fin d'une rafale porte sur son dernier
+    message et règle aussi ceux d'avant. Absent : sa fin n'est pas retrouvée."""
+    store = ctx.store
+    out: dict[int, Any] = {}
+    asked = [r for r in rows if r["role"] == "user" and not _internal(r)
+             and int(r["id"]) not in pending and int(r["id"]) not in answers]
+    for r in sorted(asked, key=lambda r: int(r["id"]), reverse=True):
+        q = int(r["id"])
+        if q in out:
+            continue
+        got = ctx.events((rt.PERCEPTION_RECEIVED,), 1, before=q + 1)
+        if got and got[0].seq == q and not got[0].data.addressed:
+            out[q] = None
+            continue
+        ended = _ended_leaving(ctx, q, q)
+        if ended is None and store is not None:
+            # une rafale dont la fin porte sur un message d'après, de la même adresse au même endroit
+            t = c.thread_table()
+            for (later,) in store.query_mind(
+                    select(t.c.id).where(t.c.person == r["person"], t.c.role == "user", t.c.id > q,
+                                         func.coalesce(t.c.room, "") == (r["room"] or ""))
+                    .order_by(t.c.id).limit(BURST_LOOKUP)):
+                ended = _ended_leaving(ctx, int(later), q)
+                if ended is not None:
+                    break
+        if ended is not None:
+            for seq in ended.data.unanswered or (q,):
+                out.setdefault(int(seq), ended)
+    return out
+
+
+def _cause(outcome: str, detail: str) -> str:
+    """Pourquoi un message est resté sans réponse, en quelques mots : un silence (« s'est tue », ou ce qui l'a fait
+    taire — « s'est ravisée », « allait redire son dernier message »), « trop tard », une panne et son détail
+    (« panne : délai dépassé »)."""
+    detail = " ".join((detail or "").split())
+    if detail.startswith(TOO_LATE):
+        return "trop tard"
+    if outcome == "abstained" and detail:
+        # un silence que le modèle n'a pas rendu se dit en une phrase sur elle (« elle s'est ravisée »)
+        return _clip(detail.removeprefix("elle "), CAUSE_CHARS)
+    head = SILENCES.get(outcome, outcome or "fin inconnue")
+    return _clip(f"{head} : {describe_error(detail)}", CAUSE_CHARS) if detail else head
+
+
+def _answer_cell(r: Mapping[str, Any], pending: set[int], answers: Mapping[int, int],
+                 silences: Mapping[int, Any]) -> Cell:
+    """La colonne « réponse » d'un message reçu : en attente, la parole qui l'a réglé, ou sans réponse — et
+    pourquoi, en mots, avec un lien vers l'explication (« Pourquoi n'a-t-elle pas répondu ? »)."""
+    if r["role"] != "user" or _internal(r):
+        return ""
+    q = int(r["id"])
+    if q in pending:
+        return Badge("en attente", "warn")
+    if q in answers:
+        return Ref.why(answers[q], f"répondue → n° {answers[q]}")
+    if q not in silences:
+        return Text("sans réponse", "muted")
+    ended = silences[q]
+    if ended is None:
+        return Text("sans réponse : ne lui était pas adressé", "muted")
+    return Ref.why(q, f"sans réponse : {_cause(ended.data.outcome, ended.data.detail)}")
+
+
+def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> tuple[Row, ...]:
+    pending = {int(x) for x in frame.get(rt.AWAITING)}
+    episodes = _episodes(ctx, rows)
+    answers = _answers(ctx, rows)
+    silences = _silences(ctx, rows, pending, answers)
+    out = []
+    for r in rows:
+        mine = r["role"] == "assistant"
+        corr = episodes.get(int(r["id"]))
+        if corr is None and silences.get(int(r["id"])) is not None:
+            corr = silences[int(r["id"])].correlation  # l'épisode qui l'a laissé sans réponse
+        out.append(Row((
+            Ref("event", str(r["id"]), str(r["id"])), When(r["at"]),
+            Badge("elle", "info") if mine else Badge("la personne"), _who(frame, r["person"]),
+            f"salon « {r['room']} »" if r["room"] else "en privé",
+            Text((r["text"] or "")[:TEXT_CAP], clamp=INSPECT_CHARS),
+            emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
+            _answer_cell(r, pending, answers, silences),
+            Ref("episode", corr, "épisode") if corr else "—",
+        ), tone="muted" if _internal(r) else "", href=Ref.why(int(r["id"])) if mine and corr else None,
+            detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))
+    return tuple(out)
+
+
+def _summaries(store: Any, s: TranscriptState, frame: Frame, handles: Sequence[str] | None) -> Block | None:
+    folded = [(p, v) for p, v in sorted(s.summaries.items()) if handles is None or p in handles]  # le rendu pagine
+    if not folded:
+        return None
+    texts = store.content([ref for _p, (_upto, ref) in folded if ref])
+    rows = tuple((_who(frame, p), Ref("event", str(upto), str(upto)),
+                  Text(_clip(texts[ref], TEXT_CAP), clamp=INSPECT_CHARS) if texts.get(ref) else FORGOTTEN)
+                 for p, (upto, ref) in folded)
+    return Disclosure(f"Débuts de fil repliés en résumé ({len(rows)})", (
+        Table(("avec", "replié jusqu'au message", "résumé"), rows, title="Fils repliés", empty="aucun fil replié"),))
+
+
+def _no_store() -> list[Block]:
+    return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="muted")]
+
+
+HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice, user_7, ext_42…")
+QUERY = Param("q", "texte", placeholder="un mot…")
+ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
+
+
+# hors de la console (ADR 0181) : Conversations s'ouvre sur les personnes, chaque conversation est sur sa fiche ; la
+# console en MCP la sert encore par son nom, et son ancienne adresse mène à Par personne
+@TRANSCRIPT.inspect("messages", title="Messages", section="fil", order=10, params=[HANDLE, QUERY, ROLE], hidden=True,
+                    description="Tout ce qui a été dit, du plus récent au plus ancien.")
+def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    handle, q, role = str(ctx.value("handle") or ""), str(ctx.value("q") or ""), str(ctx.value("role") or "")
+    t = c.thread_table()
+    clauses: list[Any] = []
+    matched = None
+    if handle:
+        known_handles = sorted({str(r[0]) for r in store.query_mind(select(t.c.person).distinct())} |
+                               set(s.summaries))
+        exact = [h for h in known_handles if h == handle]
+        matched = exact or [h for h in known_handles if handle.casefold() in _who(frame, h).text.casefold()]
+        clauses.append(t.c.person.in_(matched) if matched else false())
+    if q:
+        # le texte replié à l'écriture, comparé en binaire : casse et accents ignorés, pareil sur les deux moteurs
+        clauses.append(func.instr(t.c.folded, fold_text(q)) > 0)
+    if role:
+        clauses.append(t.c.role == role)
+    before = ctx.int_param("avant", 0) or None
+    rows, pager = _page(store, clauses, before)
+    known = bool(matched) or handle in s.last_from or handle in s.last_to or handle in s.summaries
+    if handle and not rows and not known and not before:
+        return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
+    awaiting = frame.get(rt.AWAITING)
+    scope = f" avec « {handle} »" if handle else ""
+    found = f" contenant « {q} »" if q else ""
+    blocks: list[Block] = [
+        Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), title=f"Messages{scope}{found}", pager=pager,
+              layout="feed", link_label="Pourquoi cette réponse ?",
+              empty="aucun message ne correspond" if handle or q or role else "aucun message"),
+    ]
+    if awaiting and not (handle or q or role):
+        blocks.insert(0, Stats((Stat("Questions sans réponse", len(awaiting), tone="warn",
+                                     href=Ref.view("transcript", "questions", "questions")),)))
+    folded = _summaries(store, s, frame, matched) if not (q or role) else None
+    if folded is not None:
+        blocks.append(folded)
+    return blocks
+
+
+#: les questions (les plus récentes) dont le badge lit qui les a posées
+AWAITING_READ = 500
+
+
+def _awaiting(s: TranscriptState, frame: Frame, ports: Mapping[str, Any] | None = None) -> tuple[int, str]:
+    """Le badge des questions sans réponse, et de qui elles viennent (C1-10) : « de Béa et Léa », « d'une personne
+    inconnue » — l'accueil le dit après le nombre, plutôt qu'un « à regarder » ; lu dans le fil."""
+    waiting = sorted((int(x) for x in frame.get(rt.AWAITING)), reverse=True)
+    store = (ports or {}).get("store")
+    if not waiting or store is None:
+        return len(waiting), ""
+    t = c.thread_table()
+    rows = store.query_mind(select(t.c.id, t.c.person).where(t.c.id.in_(waiting[:AWAITING_READ])))
+    asked = dict((int(r[0]), str(r[1] or "")) for r in rows)
+    return len(waiting), _from_whom(frame, [asked[x] for x in waiting if x in asked])
+
+
+def _from_whom(frame: Frame, handles: Sequence[str]) -> str:
+    """« de Béa, Léa et une personne inconnue » : les personnes derrière ces adresses, la plus récente d'abord, trois
+    nommées au plus ; celles qu'elle ne connaît pas, comptées."""
+    known: list[str] = []
+    unknown: set[str] = set()
+    for handle in dict.fromkeys(h for h in handles if h and not is_internal(h)):
+        person = frame.get(identity_c.PERSON(handle)) or handle
+        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
+        if not name:
+            unknown.add(person)
+        elif name not in known:
+            known.append(name)
+    words = known[:3] + ([f"{len(known) - 3} autres"] if len(known) > 3 else [])
+    if unknown:
+        words.append("une personne inconnue" if len(unknown) == 1 else f"{len(unknown)} personnes inconnues")
+    if not words:
+        return ""
+    said = words[0] if len(words) == 1 else ", ".join(words[:-1]) + " et " + words[-1]
+    return ("d'" if said[:1].lower() in "aeiouyhàâéèêëîïôûü" else "de ") + said
+
+
+@TRANSCRIPT.inspect("questions", title="Questions sans réponse", section="fil", order=20, badge=_awaiting,
+                    description="Ce qu'on lui a demandé et à quoi elle n'a pas encore répondu.")
+def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    waiting = sorted((int(x) for x in frame.get(rt.AWAITING)), reverse=True)
+    page, pager = paginate(waiting, ctx.pager(size=PAGE))
+    t = c.thread_table()
+    found = {int(r[0]): r for r in store.query_mind(
+        select(t.c.id, t.c.at, t.c.person, t.c.text).where(t.c.id.in_(list(page))))} if page else {}
+    rows = []
+    for seq in page:
+        r = found.get(seq)
+        link = Ref("event", str(seq), str(seq))
+        if r is None:
+            rows.append(Row((link, "—", Text("—", "muted"), Text(FORGOTTEN, "muted")), href=link))
+            continue
+        rows.append(Row((link, When(r[1]), _who(frame, r[2]), Text(_clip(r[3], TEXT_CAP), clamp=INSPECT_CHARS)),
+                        href=link))
+    return [Table((Column("n°", "fit", detail=True), Column("reçue", "fit"), Column("de", role="title"), Column("texte", role="body")), tuple(rows), pager=pager,
+                  layout="feed", link_label="Voir le message source",
+                  title="Questions sans réponse", empty="aucune question en attente",
+                  caption="Une question reste ici tant qu'aucune réponse ne l'a réglée ; « reçue » dit depuis quand "
+                          "elle attend.")]
+
+
+def _stats(store: Any, handles: Sequence[str]) -> Stats:
+    t = c.thread_table()
+    total, received = store.query_mind(
+        select(func.count(), func.coalesce(func.sum(case((t.c.role == "user", 1), else_=0)), 0))
+        .where(t.c.person.in_(list(handles))))[0]
+    return Stats((Stat("messages", int(total)), Stat("reçus", int(received)),
+                  Stat("envoyés", int(total) - int(received))))
+
+
+@TRANSCRIPT.inspect("echanges", title="Échanges", subject="person", order=40,
+                    description="Ce qu'ils se sont dit, tous ses moyens de communication confondus, du plus récent au "
+                                "plus ancien.")
+def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    person = ctx.subject
+    if not person:
+        return [Note("Ouvre la fiche d'une personne : Personnes, puis la personne.", tone="muted")]
+    if person.startswith("name:"):
+        return [Note("Connue seulement de nom : elle ne lui a jamais écrit.", tone="muted")]
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
+    t = c.thread_table()
+    rows, pager = _page(store, [t.c.person.in_(handles)], ctx.int_param("avant", 0) or None)
+    blocks: list[Block] = [_stats(store, handles),
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Échanges",
+                                 layout="feed", link_label="Pourquoi cette réponse ?",
+                                 empty="aucun échange pour l'instant")]
+    folded = _summaries(store, s, frame, handles)
+    if folded is not None:
+        blocks.append(folded)
+    return blocks
+
+
+@TRANSCRIPT.inspect("fil", title="Fil", subject="handle", order=50,
+                    description="Les messages de ce moyen de communication seulement.")
+def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    handle = ctx.subject or ctx.param("handle")
+    if not handle:
+        return [Note("Ouvre la fiche d'un moyen de communication : Identités et moyens de communication, puis le "
+                     "moyen de communication.", tone="muted")]
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    before = ctx.int_param("avant", 0) or None
+    rows, pager = _page(store, [c.thread_table().c.person == handle], before)
+    if not rows and not before and not (handle in s.last_from or handle in s.last_to):
+        return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
+    blocks: list[Block] = [_stats(store, [handle]),
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Messages",
+                                 layout="feed", link_label="Pourquoi cette réponse ?",
+                                 empty="aucun message")]
+    folded = _summaries(store, s, frame, [handle])
+    if folded is not None:
+        blocks.append(folded)
+    return blocks
+
 
 # ── Par personne ──────────────────────────────────────────────────────────
 

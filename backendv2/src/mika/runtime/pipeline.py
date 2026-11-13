@@ -76,7 +76,7 @@ from mika.ports.llm import (
     ToolDecl,
 )
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.facts import keeps_facts
+from mika.runtime.kept_facts import keeps_facts
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
 from mika.runtime.tools import (
     LoopEvent,

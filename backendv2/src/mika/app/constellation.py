@@ -85,7 +85,7 @@ _BIRTHS = (memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.PROMISE_NOTICED, mem
 _WATCHED = frozenset({rt.UTTERANCE, *_BIRTHS, memory_c.REINFORCED, memory_c.NIGHT_SORTED, memory_c.JOINED,
                       memory_c.CONFRONTED, memory_c.REREAD, self_c.DREAMT, self_c.NARRATED, self_c.JOURNALED,
                       SUBJECT_FORGOTTEN})
-_BIRTH_KIND = {memory_c.REMEMBERED: memory_c.SOUVENIR, memory_c.BELIEVED: memory_c.BELIEF,
+_BIRTH_KIND = {memory_c.REMEMBERED: memory_c.EPISODE_MEMORY, memory_c.BELIEVED: memory_c.BELIEF,
                memory_c.PROMISE_NOTICED: memory_c.PROMISE, memory_c.EVENT_NOTED: memory_c.EVENT}
 
 

@@ -22,7 +22,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.inspect import Ref
 from mika.kernel.operate import Decision, Done, Refused
 from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, WAITING, EmailState, keeper_name
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     SECTION,
     can_send,
     clip,
@@ -32,7 +32,7 @@ from mika.plugins.email.console.common import (
     unread,
     view_link,
 )
-from mika.plugins.email.console.mail import _read_draft, apply
+from mika.plugins.email.inspect.mail import _read_draft, apply
 from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, addresses
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase

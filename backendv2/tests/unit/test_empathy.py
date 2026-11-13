@@ -198,7 +198,7 @@ async def test_what_angers_her_is_found_by_feeling():
         about = (ALICE,) if kind is mc.BELIEVED else ()
         db.put(kind.draft(text=Content.of(text), about=about, told_by=about, heard_by=about, sensitivity=1,
                           felt=felt, empathy=empathy), seq, FRAME.now)
-    vectors = await index(db, [VectorItem(seq, mc.SOUVENIR if kind is mc.REMEMBERED else mc.BELIEF, text, ())
+    vectors = await index(db, [VectorItem(seq, mc.EPISODE_MEMORY if kind is mc.REMEMBERED else mc.BELIEF, text, ())
                                for seq, text, kind, _f, _e in rows])
 
     async def search(**kw):

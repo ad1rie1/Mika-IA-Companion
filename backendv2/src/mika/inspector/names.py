@@ -60,7 +60,7 @@ OPERATED: dict[str, tuple[str, str]] = {"done": ("faite", "ok"), "refused": ("re
                                         "failed": ("échouée", "danger")}
 #: d'où vient un geste audité (``runtime.operations.origin``)
 ORIGINS: dict[str, str] = {ops.CONSOLE: "la console", ops.SPACE: "son espace", ops.CLI: "la ligne de commande"}
-#: ce que la console, l'espace d'une personne (``app/moi/``) et la ligne de commande auditent eux-mêmes
+#: ce que la console, l'espace d'une personne (``app/me/``) et la ligne de commande auditent eux-mêmes
 #: (``operations.audit``), par leur clé ; une action déclarée garde son titre (``ActionSpec.title``), et d'où vient le
 #: geste se dit à part (``ORIGINS``)
 GESTURES: dict[str, str] = {

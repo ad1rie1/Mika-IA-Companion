@@ -262,12 +262,12 @@ def test_her_teams_extension_key_made_from_her_space_says_so(world):  # noqa: F8
 
 
 def test_every_path_of_a_persons_space_says_where_it_comes_from():
-    """Ce que l'espace d'une personne (``app/moi/``, et son chat : ``app/mindport.py``) fait par une action déclarée
+    """Ce que l'espace d'une personne (``app/me/``, et son chat : ``app/mindport.py``) fait par une action déclarée
     passe ``via=SPACE`` (``Call.act`` le fait), et ce qu'il audite lui-même a une clé « moi.… » : sinon Système ›
     Gestes audités range dans « la console » ce qu'une opératrice a fait depuis son espace."""
     unmarked: list[str] = []
     performs = audits = 0
-    for path in [*sorted((SRC / "app" / "moi").glob("*.py")), SRC / "app" / "mindport.py"]:
+    for path in [*sorted((SRC / "app" / "me").glob("*.py")), SRC / "app" / "mindport.py"]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             f = node.func if isinstance(node, ast.Call) else None

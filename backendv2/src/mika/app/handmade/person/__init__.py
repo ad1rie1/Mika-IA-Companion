@@ -64,8 +64,8 @@ from mika.app.handmade.person.voyages import GPX as TRIP_GPX
 from mika.app.handmade.person.voyages import gpx as trip_gpx
 from mika.app.handmade.person.voyages import voyages
 from mika.app.handmade.tabs import anchored
-from mika.app.moi import OUTBOUND
-from mika.app.moi.shares import _mcp_shares as service_shares
+from mika.app.me import OUTBOUND
+from mika.app.me.shares import _mcp_shares as service_shares
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
@@ -83,16 +83,16 @@ from mika.faculties.memory.inspect import ORIGIN_SHORT, SENSITIVITY_FR
 from mika.faculties.social.inspect import CLOSENESS_FR
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.inspect import Fields, Head, Note, Section, Table, num_fr, pct_fr
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
-from mika.plugins.teams.console import ACCOUNT as TEAMS_ACCOUNT
-from mika.plugins.teams.console import SECTION as TEAMS_SECTION
-from mika.plugins.teams.console import WHOSE as TEAMS_WHOSE
-from mika.plugins.teams.console import YOURS
+from mika.plugins.teams.inspect import ACCOUNT as TEAMS_ACCOUNT
+from mika.plugins.teams.inspect import SECTION as TEAMS_SECTION
+from mika.plugins.teams.inspect import WHOSE as TEAMS_WHOSE
+from mika.plugins.teams.inspect import YOURS
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import privacy
@@ -199,7 +199,7 @@ def heading(look: Look, who: Who) -> dict[str, Any]:
         "composing": any(frame.get(presence_c.COMPOSING(h)) for h in who.handles),
         "facts": facts,
         "where": f"{count} moyen{'s' if count > 1 else ''} de communication" + (f" · {view.channel}, {how}" if view.channel else ""),
-        "where_href": fiche_url("person", person, "adresses"),
+        "where_href": subject_url("person", person, "adresses"),
         "toward": f"{PREFIX}/decisions/envers?personne={quote(person, safe='')}",
         # un de ses moyens de communication est un compte : lequel, et sa page (Réglages › Comptes)
         "account": {"kind": "compte opérateur" if account.operator else "compte utilisateur",
@@ -360,9 +360,9 @@ def knows(look: Look, who: Who) -> dict[str, Any]:
     v = memory_c.KNOWLEDGE
     about = memory_c.concerning(v, who.keys)
     beliefs = _known(look, (v.c.kind == memory_c.BELIEF, v.c.status == "active", about), SHOWN)
-    souvenirs = _known(look, (v.c.kind == memory_c.SOUVENIR, v.c.status == "active", about,
+    souvenirs = _known(look, (v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active", about,
                               or_(v.c.origin.is_(None), v.c.origin != memory_c.LIED)), SHOWN)
-    lies = _known(look, (v.c.kind == memory_c.SOUVENIR, v.c.origin == memory_c.LIED, about), SHOWN)
+    lies = _known(look, (v.c.kind == memory_c.EPISODE_MEMORY, v.c.origin == memory_c.LIED, about), SHOWN)
     moments = []
     for ev in frame.get(memory_c.LIFE_EVENTS(person)) or ():
         if ev.ended_at:
@@ -437,7 +437,7 @@ def thread(look: Look, who: Who) -> dict[str, Any]:
                     "emotion": e.value if e is not None else "", "word": A.FR[e] if e is not None else "",
                     "room": bool(room), "unanswered": bool(unanswered and role == "user"),
                     "why": f"{PREFIX}/parole/{n}" if role == "assistant" else ""})
-    return {"messages": out, "all": fiche_url("person", who.person, "echanges")}
+    return {"messages": out, "all": subject_url("person", who.person, "echanges")}
 
 
 # ── ce qui reste en suspens ──
@@ -475,7 +475,7 @@ def pending(look: Look, who: Who) -> dict[str, Any]:
     for g in goals:
         kind = "rêverie" if g.musing else GOAL_KIND_FR.get(g.kind, g.kind)
         out.append({"kind": kind, "text": excerpt(titles.get(g.title_ref), 140),
-                    "note": GOAL_STATUS_FR.get(g.status, g.status), "href": fiche_url("goal", str(g.id)), "tone": ""})
+                    "note": GOAL_STATUS_FR.get(g.status, g.status), "href": subject_url("goal", str(g.id)), "tone": ""})
     check_in = frame.get(others_c.CHECK_IN_AT(person))
     if check_in > now:
         out.append({"kind": "nouvelles", "text": f"Elle prendra de ses nouvelles {look.day(check_in)}", "tone": ""})
@@ -532,7 +532,7 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
     if settings is None:
         return []
     mine = PERSON + who.person
-    return [{"name": name, "href": fiche_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
+    return [{"name": name, "href": subject_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
              "on": spec.enabled, "where": dict(TRANSPORTS).get(spec.transport, spec.transport),
              "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec, mine).items())]}
             for name, spec in sorted(settings.mcp().servers.items()) if spec.owner == mine]
@@ -541,7 +541,7 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
 def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
     """Ce qu'elle partage et ce qu'on lui partage (ADR 0188) : ses boîtes et ses comptes Teams (les partages
     journalisés, ``EmailParams.shares``, ``TeamsParams.shares`` ; une boîte « à toi » est à chacune de ses
-    propriétaires), ses services (une ligne d'accès à une seule personne, ``app/moi/shares.py``). Lecture seule."""
+    propriétaires), ses services (une ligne d'accès à une seule personne, ``app/me/shares.py``). Lecture seule."""
     frame, mine = look.frame, PERSON + who.person
     owner = bool(frame.get(identity_c.IS_OWNER(who.person)))
     given: list[dict[str, Any]] = []
@@ -551,7 +551,7 @@ def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
         return f"{PREFIX}/{TEAMS_SECTION}/extension?" + urlencode({TEAMS_WHOSE: whose or YOURS, TEAMS_ACCOUNT: key})
 
     for kind, of, href, holder in (
-            ("mail", email_p.params_of, lambda key, _whose: fiche_url("compte", key), email_p.approver_name),
+            ("mail", email_p.params_of, lambda key, _whose: subject_url("compte", key), email_p.approver_name),
             ("teams", teams_p.params_of, teams_href, teams_p.writer_of)):
         port = look.ui.kernel.ports.get(kind)
         if port is None:
@@ -566,7 +566,7 @@ def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
                 received.append({**resource, "owner": holder(frame, a.key), "level": LEVEL_FR.get(level, level)})
     settings = look.ui.deps.settings
     for name, spec in sorted(settings.mcp().servers.items()) if settings is not None else ():
-        resource = {"kind": SHARED_KINDS["mcp"], "title": name, "href": fiche_url("serveur", name)}
+        resource = {"kind": SHARED_KINDS["mcp"], "title": name, "href": subject_url("serveur", name)}
         if spec.owner == mine:
             given += [{**resource, **_with(look, x, level)} for x, level in sorted(service_shares(spec, mine).items())]
         elif spec.owner and (level := service_shares(spec, spec.owner).get(mine, "")):
@@ -615,7 +615,8 @@ TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
     "buts": drawn(Roles(title="titre", badges=("sorte", "statut"), time="ouvert"), "buts"),
     "projets": drawn(Roles(title="projet", badges=("mode", "état"), time="ouvert"), "projets"),
     # ses comptes : les boîtes aux lettres et les comptes Teams qui sont à elle (ADR 0185, 0186), réunis (``joined``),
-    # puis ses services et ses partages (ADR 0188, 0192) ; sans boîte, Teams reste un onglet à lui
+    # puis ses services et ses partages (ADR 0188, 0192) ; sans boîte, Teams reste un onglet à lui, sauf si elle a un
+    # service ou un partage (``shows``, ADR 0219) : Comptes les réunit alors
     "boites": owned,
     "teams": drawn(OWNED[1][2], "teams"),
     # ce que son téléphone lui a montré, où il dit qu'elle est (seulement s'il en a dit quelque chose)
@@ -664,7 +665,7 @@ class PersonOverview(Overview):
         who = who_of(look, person)
         parts = tuple((key, lambda lk, fn=fn: fn(lk, who)) for key, fn in PARTS)
         return {"name": who.name, "stamp": look.frame.local(look.now).strftime("%H:%M:%S"),
-                "fiche": fiche_url("person", who.person), "of": elided("de", who.name), "that": elided("que", who.name),
+                "fiche": subject_url("person", who.person), "of": elided("de", who.name), "that": elided("que", who.name),
                 **read_parts(look, parts, f"une personne · {person}")}
 
     @staticmethod
@@ -687,6 +688,17 @@ class PersonOverview(Overview):
         look = Look.of(ui, DAY)
         return Markup(env.get_template("handmade/person/head.html").render(h=heading(look, who_of(look, key))))
 
+    def shows(self, ui: UI, key: str) -> Sequence[str]:
+        """Comptes (``boites``) aussi pour qui n'a pas de boîte à elle mais a branché un service ou partage quelque
+        chose, dans un sens ou dans l'autre (C9-02) : ses sous-onglets Services et Partages sont dessinés ici
+        (``owned``), et le plugin du courrier ne montre l'onglet qu'à qui a une boîte."""
+        if not self.known(ui, key):
+            return ()
+        look = Look.of(ui, DAY)
+        who = who_of(look, key)
+        shared = shares(look, who)
+        return ("boites",) if services(look, who) or shared["given"] or shared["received"] else ()
+
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         draw = TABS.get(tab)
@@ -703,7 +715,7 @@ class PersonOverview(Overview):
 
     async def page(self, request: Request) -> Response:
         """L'ancienne adresse de la page : la fiche, ouverte sur sa vue d'ensemble."""
-        return secure(RedirectResponse(fiche_url("person", request.path_params["key"]), status_code=303))
+        return secure(RedirectResponse(subject_url("person", request.path_params["key"]), status_code=303))
 
     def routes(self, ui: UI, outbound: LoginThrottle | None = None) -> list[Route]:
         """Ses routes. ``outbound`` : la borne des demandes au serveur d'itinéraires, celle de l'écran Carte

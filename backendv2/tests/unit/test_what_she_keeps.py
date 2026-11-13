@@ -223,7 +223,7 @@ def test_a_copied_line_is_not_a_memory_and_a_banality_is_not_kept(tmp_path):
         return kept(kernel)
 
     rows = run(tmp_path, scenario, script)
-    souvenirs = {r["text"]: r for r in rows if r["kind"] == memory_c.SOUVENIR}
+    souvenirs = {r["text"]: r for r in rows if r["kind"] == memory_c.EPISODE_MEMORY}
     beliefs = [r["text"] for r in rows if r["kind"] == memory_c.BELIEF]
     assert not any("Tu as été là" in t for t in souvenirs), "sa propre réplique, recopiée"
     quoted = souvenirs.get("Sam m'a dit : « on l'a endormi. j'étais avec lui jusqu'au bout »")

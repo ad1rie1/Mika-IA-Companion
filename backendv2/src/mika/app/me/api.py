@@ -1,5 +1,5 @@
 """Le cadre de l'API par personne (ADR 0187) : qui est connecté, ce qu'une route reçoit, comment elle refuse, comment
-une route se déclare. Les modules (``mail``, ``teams``…) l'importent d'ici ; le paquet les réunit (``mika.app.moi``).
+une route se déclare. Les modules (``mail``, ``teams``…) l'importent d'ici ; le paquet les réunit (``mika.app.me``).
 
 Qui demande est lu par ``adapters.web.session`` (le jeton d'un client natif sans ``Origin``, sinon la session) : c'est
 la même lecture que le transport web.
@@ -307,7 +307,7 @@ async def read_upload(request: Request) -> tuple[dict[str, Any], tuple[File, ...
 
 class MeApiBase:
     """Le cadre de l'API par personne : ce que toute route a en commun (qui demande, le jeton CSRF, le corps, les bornes
-    par compte). Les routes elles-mêmes viennent des modules, que le paquet réunit (``mika.app.moi.MeApi``)."""
+    par compte). Les routes elles-mêmes viennent des modules, que le paquet réunit (``mika.app.me.MeApi``)."""
 
     def __init__(self, kernel: Kernel, accounts: Accounts, *, origins: Iterable[str] = (),
                  apk: Path | None = None, settings: Any = None,

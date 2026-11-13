@@ -5,7 +5,7 @@
   signalé. La recherche, la pagination et la bascule « Tableau » restent celles de la vue.
 
 Seules les vues propres d'une app (sur sa fiche) gardent le rendu de la console (``plain_owners``) : la liste, elle,
-se dessine. Elle se lit dans les blocs de la vue de la Forge (``plugins/forge/console.py``), qui reste la source.
+se dessine. Elle se lit dans les blocs de la vue de la Forge (``plugins/forge/inspect.py``), qui reste la source.
 """
 
 from __future__ import annotations

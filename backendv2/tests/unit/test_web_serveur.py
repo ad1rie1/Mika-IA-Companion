@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from mika.plugins.web import serveur as s
+from mika.plugins.web import server as s
 
 RESULTS = """<html><body><div class="serp__results"><div class="results">
 <div class="result results_links results_links_deep web-result ">

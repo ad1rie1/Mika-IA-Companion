@@ -19,8 +19,6 @@
 .hist-when { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
 .hist-when a { color: inherit; }
 .hist-when a:hover { color: var(--accent); }
-.hist-key { margin: 0; }
-.hist-key code { color: var(--muted); font-size: 11.5px; }
 @media (max-width: 640px) {
   .hist-steps > li { grid-template-columns: auto minmax(0, 1fr); }
   .hist-when { grid-column: 2; }

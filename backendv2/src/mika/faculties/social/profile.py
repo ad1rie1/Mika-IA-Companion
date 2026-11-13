@@ -270,7 +270,7 @@ class Revise:
             rows = knowns(store.query_mind(
                 memory_c.select_known().where(
                     v.c.about == only, v.c.told_by.in_(["[]", only]), v.c.status == "active",
-                    v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF]), v.c.between_us == 0, v.c.secret == 0,
+                    v.c.kind.in_([memory_c.EPISODE_MEMORY, memory_c.BELIEF]), v.c.between_us == 0, v.c.secret == 0,
                     v.c.knowledge_kind.not_in(["hypothesis", "opinion"]))
                 .order_by(v.c.importance.desc(), v.c.id.desc()).limit(p.profile_max_items * 2)), memory_c.KNOWN_COLUMNS)
             # … et ce que la personne peut entendre de sa propre fiche (le verdict de la mémoire : une réflexion de

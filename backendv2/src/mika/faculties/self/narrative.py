@@ -187,7 +187,7 @@ def gather(frame: Frame, store: Any, s: SelfState, p: SelfParams, *, floor: Audi
     since = frame.now - p.narrative_lookback_us
     v, lv = memory_c.KNOWLEDGE, memory_c.LIVED
     rows = knowns(store.query_mind(
-        memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.status == "active", v.c.born_at >= since)
+        memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active", v.c.born_at >= since)
         .order_by(v.c.id.desc()).limit(NARRATIVE_ROWS)), memory_c.KNOWN_COLUMNS)
     lived_rows = store.query_mind(memory_c.select_known(lv).add_columns(lv.c.gist)
                                   .where(lv.c.born_at >= since).order_by(lv.c.id.desc()).limit(NARRATIVE_ROWS))

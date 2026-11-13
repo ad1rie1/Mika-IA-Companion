@@ -26,15 +26,15 @@ from mika.runtime.boundary import Failed, call
 SEARCH_PAGE = 25
 
 
-def fiche_url(kind: str, key: str, tab: str = "") -> str:
+def subject_url(kind: str, key: str, tab: str = "") -> str:
     """L'adresse de la fiche d'un objet : la seule aide de la console pour l'écrire (``tab`` : l'onglet ouvert)."""
     return render.href(Ref.subject(kind, key, "", tab))
 
 
-def fiche_key(href: str, kind: str) -> str:
+def subject_url_key(href: str, kind: str) -> str:
     """La clé de l'objet dont ce lien ouvre la fiche, si c'est une fiche de cette sorte ; sinon « ». L'inverse de
-    ``fiche_url`` : ce qu'une page dessinée relit au lien rendu par la faculté."""
-    base, path = fiche_url(kind, ""), urlsplit(href).path
+    ``subject_url`` : ce qu'une page dessinée relit au lien rendu par la faculté."""
+    base, path = subject_url(kind, ""), urlsplit(href).path
     return unquote(path[len(base):]) if path.startswith(base) else ""
 
 
@@ -42,7 +42,7 @@ def forget_form(ui: Any, request: Request, kind: str, key: str, shown: str = "")
     """Le formulaire d'oubli : on retape **le nom affiché** (« Adrien »), pas une clé technique."""
     shown = shown or key
     return {"url": f"{PREFIX}/oublier/{quote(kind, safe='')}/{quote(key, safe='')}", "csrf": ui.csrf(request),
-            "nonce": "", "back": fiche_url(kind, key), "title": "Oublier", "fields": [], "retype": True,
+            "nonce": "", "back": subject_url(kind, key), "title": "Oublier", "fields": [], "retype": True,
             "subject": key, "retype_as": shown, "danger": True, "button": "Oublier pour de bon", "errors": {},
             "id": f"oubli-{kind}",
             "description": "Efface tout ce qui concerne cette personne (messages, souvenirs, traces) ; le journal "
@@ -112,7 +112,7 @@ class Subjects:
         self.pages = pages
         self.ui = pages.ui
 
-    async def fiche(self, request: Request) -> Response:
+    async def page(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]
         spec = self.ui.inspection.subject(kind)
         if spec is None:
@@ -124,9 +124,9 @@ class Subjects:
                                           blocks=[Note(f"Aucun objet « {key} » de ce type.", "warn")])
         if isinstance(head, Head) and head.key != key:
             query = urlencode(dict(request.query_params))
-            return RedirectResponse(fiche_url(kind, head.key) + ("?" + query if query else ""),
+            return RedirectResponse(subject_url(kind, head.key) + ("?" + query if query else ""),
                                     status_code=303)
-        tabs = self.ui.inspection.tabs(kind, key)
+        tabs = self.ui.subject_tabs(kind, key)
         asked = request.query_params.get("onglet", "")
         # une vue d'ensemble dessinée à la main (ADR 0121) : le premier onglet, ouvert par défaut
         overview = self.ui.deps.overviews.get(kind) if isinstance(head, Head) else None
@@ -145,7 +145,7 @@ class Subjects:
         host_of = {g.name: host for host, guests in joined.items() for g in guests}
         if asked in host_of:
             query = urlencode({**dict(request.query_params), "onglet": host_of[asked]})
-            return RedirectResponse(f"{fiche_url(kind, key)}?{query}#{quote(asked, safe='')}", status_code=303)
+            return RedirectResponse(f"{subject_url(kind, key)}?{query}#{quote(asked, safe='')}", status_code=303)
         tabs = [t for t in tabs if t.name not in host_of]
         slug = asked or (head.default_tab if isinstance(head, Head) else "") or (tabs[0].name if tabs else "")
         current = None if shown is not None else next((t for t in tabs if t.name == slug), tabs[0] if tabs else None)
@@ -177,19 +177,19 @@ class Subjects:
         tab_list, gear = self.tab_bar(request, kind, key, tabs, current, head, context)
         counts = call(overview.counts, self.ui, key, label=f"comptes {kind}") if overview is not None else {}
         if counts and not isinstance(counts, Failed):  # combien chaque onglet en compte, en petit (la maquette)
-            by_href = {fiche_url(kind, key, name): n for name, n in counts.items()}
+            by_href = {subject_url(kind, key, name): n for name, n in counts.items()}
             for t in tab_list:
                 t["count"] = by_href.get(t["href"].split("&", 1)[0], 0)
         tabs_more: list[dict[str, Any]] = []
         if overview is not None and overview.slug:
-            tab_list.insert(0, {"title": overview.title, "href": fiche_url(kind, key),
+            tab_list.insert(0, {"title": overview.title, "href": subject_url(kind, key),
                                 "on": shown is not None and current is None, "badge": 0})
         if overview is not None:
             # ce qu'elle résume : au bout de la barre, sous un seul menu
             folded = [{"name": t.name, "title": t.title} for t in tabs if t.name in overview.folded]
-            tabs_more = [{"title": f["title"], "href": fiche_url(kind, key, f["name"]),
+            tabs_more = [{"title": f["title"], "href": subject_url(kind, key, f["name"]),
                           "on": current is not None and current.name == f["name"]} for f in folded]
-            hidden = {fiche_url(kind, key, f["name"]) for f in folded}
+            hidden = {subject_url(kind, key, f["name"]) for f in folded}
             tab_list = [t for t in tab_list if t["href"].split("&", 1)[0] not in hidden]
         actions = self.pages.head_actions(request, kind=kind, subject=key) \
             if not isinstance(head, Head) or (head.automatic_actions and
@@ -281,10 +281,10 @@ class Subjects:
                 bar += [{"title": ref.text, "href": render.href(ref), "on": here and i == on, "badge": 0}
                         for i, ref in enumerate(pages)]
                 continue
-            bar.append({"title": t.title, "href": fiche_url(kind, key, t.name) + extra,
+            bar.append({"title": t.title, "href": subject_url(kind, key, t.name) + extra,
                         "on": current is not None and t.name == current.name, "badge": 0})
         by_name = {t.name: t for t in tabs}
-        gear = [{"title": by_name[n].title, "href": fiche_url(kind, key, n),
+        gear = [{"title": by_name[n].title, "href": subject_url(kind, key, n),
                  "on": current is not None and current.name == n} for n in geared if n in by_name]
         return bar, gear
 
@@ -399,7 +399,7 @@ class Subjects:
             return self.pages.render_page(request, title="Oubli refusé", active="", status=400,
                                           blocks=[Note(f"Retape « {shown} » pour confirmer.", "danger")],
                                           crumbs=self.home_trail(kind), crumbs_back=("Retour à la fiche",
-                                                                                     fiche_url(kind, key)))
+                                                                                     subject_url(kind, key)))
         # le même oubli que la ligne de commande : la clé et ses alias (ses adresses, ses noms)
         gone = await operations.forget_subject(self.ui.kernel, kind, key, by=account.handle,
                                                action=f"console.oublier.{kind}")
@@ -412,7 +412,7 @@ class Subjects:
         if not isinstance(result, Download):
             return self.pages.render_page(request, title="Téléchargement indisponible", active="",
                 status=404, blocks=[result if isinstance(result, Note) else Note("Ce document n'est plus disponible.", "warn")],
-                crumbs=self.home_trail(kind), crumbs_back=("Retour à la fiche", fiche_url(kind, key)))
+                crumbs=self.home_trail(kind), crumbs_back=("Retour à la fiche", subject_url(kind, key)))
         name = result.name.replace("\\", "/").rsplit("/", 1)[-1]
         name = "".join(c for c in name if c.isprintable())[:200] or "document"
         return secure(Response(result.data, media_type="application/octet-stream", headers={
@@ -431,7 +431,7 @@ class Subjects:
 
     def routes(self) -> list[Any]:
         g = self.ui.guarded
-        return [Route(PREFIX + "/fiche/{kind:str}/{key:str}", g(self.fiche)),
+        return [Route(PREFIX + "/fiche/{kind:str}/{key:str}", g(self.page)),
                 Route(PREFIX + "/telecharger/{kind:str}/{key:str}", g(self.download)),
                 Route(PREFIX + "/document/{digest:str}", g(self.document)),
                 Route(PREFIX + "/recherche", g(self.search)),

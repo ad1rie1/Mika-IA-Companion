@@ -16,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.droits_tables import choices, one_page, rows_of, table_args
+from mika.inspector.pages.rights_tables import choices, one_page, rows_of, table_args
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
@@ -42,7 +42,7 @@ from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import tool_allowance, vital_family
 
 BASE = f"{PREFIX}/outils/tous"
-REGLER = f"{PREFIX}/outils/familles/regler"
+SET_ACTION = f"{PREFIX}/outils/familles/regler"
 MAX_ROWS = 40
 #: la ligne qu'on ajoute : toi, par tous les canaux, toujours, fermée
 NEW_ROW = ToolRule(who=(OWNER,))
@@ -155,7 +155,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
                      "dans sa colonne) décide ; aucune, le comportement par défaut — après le tableau du canal, sous "
                      "le plafond de qui est en face.",
             "note": "Son minimum vital, tel que le code le déclare, tant qu'on ne l'a pas réglé." if not e["set"] else "",
-            "below": e["below"], "action": REGLER, "csrf": csrf, "rows": rows,
+            "below": e["below"], "action": SET_ACTION, "csrf": csrf, "rows": rows,
             "default": _values(e["default"]), "columns": e["columns"], "show_canal": True, "show_tools": True,
             "pager": one_page(len(rows) + 1), "floors": FLOORS, "set": e["set"]},
             "open": e["key"] == focus or bool(terms)})

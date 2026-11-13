@@ -7,14 +7,14 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from mika.app.moi import PROBES, form
-from mika.app.moi import api as moi_api
+from mika.app.me import PROBES, form
+from mika.app.me import api as moi_api
 from mika.contracts import email as email_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
 from mika.plugins.email import EmailParams
-from mika.plugins.email.console import actions as email_actions
+from mika.plugins.email.inspect import actions as email_actions
 from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, Mail, Sent
 from mika.ports.mail import Draft as MailDraft
 from mika.runtime import decisions
@@ -239,7 +239,9 @@ def test_her_drafts_are_read_where_they_will_leave_and_decided_there(world):  # 
 
     refused = post(client, "/mail/draft/refuse", {"id": first, "note": "trop sec"})
     assert refused.status_code == 200, refused.text
-    assert client.get(API + "/mail/drafts").json()["items"][0]["state"] == "refuse"
+    decided = client.get(API + "/mail/drafts").json()["items"][0]
+    # la note du refus, gardée à part depuis le journal v2, se relit dans la liste (avant : toujours vide)
+    assert decided["state"] == "refuse" and decided["note"] == "trop sec"
     assert post(client, "/mail/draft/refuse", {"id": first}).status_code == 409  # plus rien à décider
 
     second = propose(client, live, box)

@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -613,7 +613,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « on peut lui associer à elle des comptes en toute autonomie comme pour les autres » — une boîte avait une voix (« elle écrit en son nom, en assistante, à ta place ») mais pas de propriétaire ; et une personne ne pouvait pas avoir la sienne sans que tu la lises.
 
-*Révise 0134 (en partie : une ressource à quelqu'un est offerte à son propriétaire), 0173 (en partie : « À qui » dans la fiche d'une boîte). Révisée par 0186, 0188, 0191, 0207 (en partie : sa propriétaire règle comment part ce qu'elle y prépare, dans Paramètres).*
+*Révise 0134 (en partie : une ressource à quelqu'un est offerte à son propriétaire), 0173 (en partie : « À qui » dans la fiche d'une boîte). Révisée par 0186, 0188, 0191, 0207 (en partie : sa propriétaire règle comment part ce qu'elle y prépare, dans Paramètres), 0219 (en partie : l'onglet Comptes paraît aussi pour un service ou un partage).*
 
 ### 0186 — Un Teams par personne : un compte sert à son propriétaire
 
@@ -627,7 +627,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « un onglet Ses comptes email, son plugin Teams » ; « on puisse sélectionner l'utilisateur pour voir ses comptes » — et le choix d'un Teams par personne, chacune avec sa clé, plutôt qu'un seul Teams attribué.
 
-*Révise 0069 (en partie : un compte par personne), 0185 (Teams suit la même règle). Révisée par 0188, 0191, 0206.*
+*Révise 0069 (en partie : un compte par personne), 0185 (Teams suit la même règle). Révisée par 0188, 0191, 0206, 0219 (en partie : un service ou un partage fait paraître Comptes, où Teams se joint).*
 
 ### 0188 — Partager ce qui est à soi : lire, lire et préparer, s'en servir
 
@@ -2193,6 +2193,8 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* un numéro de ligne d'un tableau qu'on ne voit pas n'explique rien, et la ligne entière nommerait d'autres personnes ; chaque boîte répétait le tableau de sa famille, comme si elle avait des droits à elle ; le menu montrait « Buts 4 » pour un tableau de deux outils, et « Tout 97 » ne comptait rien de réel ; un onglet qui ne fait que renvoyer ailleurs est une impasse ; à 390 px, il fallait défiler vingt fois pour lire une ligne ; la ligne du catalogue de la recherche web dit « un sujet qui te rend curieuse », où « te » est Mika : montrée à la personne, elle refaisait le défaut des outils que corrige 0208 (audit du 2026-11-05, F4-03, F4-05, F4-06, F4-07, F4-10, F4-12 et F4-13, et sa relecture ; décisions Q21, Q23 et Q24).
 
+*Révisée par 0219 (en partie : le service du système a un but écrit pour la personne, et une case d'app redit sa ligne).*
+
 ### 0215 — Relire sa conversation, reprendre ses propres pièces
 
 - Le fil avec elle se relit page par page, pour toute connexion authentifiée : `strand_history` avec un `id` vide répond comme pour un fil de travail (`mode: strand`, `more`), toujours sur le compte de la session — la trame ne peut désigner personne. Les fils de travail restent à leur opératrice (ADR 0164).
@@ -2505,7 +2507,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* un nom doit dire ce qu'il y a dedans, et un mot ne doit avoir qu'un sens dans la console. L'audit du 2026-11-05 a vu qu'enregistrer Qui sert quoi figeait tous les replis, que l'annuaire oubliait les boîtes aux lettres et que la vue des plugins en oubliait quatre.
 
-*Révise 0193 (en partie : la carte de sa position se règle sous Réglages › Carte et téléphone), 0194 (en partie : les lieux et les itinéraires aussi).*
+*Révise 0193 (en partie : la carte de sa position se règle sous Réglages › Carte et téléphone), 0194 (en partie : les lieux et les itinéraires aussi) Révisée par 0219 (en partie : une entrée neuve s'intitule « Ajouter un fournisseur »).*
 
 ### 0201 — À valider : un seul lecteur du contexte d'une demande, un historique par demande tranchée
 
@@ -2614,6 +2616,18 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* une fiche de but existait en deux calculs, celui de la faculté (servi au MCP et au repli) et celui du dessin, qui avaient déjà divergé (la prochaine séance) sans qu'aucun test ne le voie ; et les fiches se mêlaient aux onglets, sous des noms français ou mêlés (audit du 2026-11-05, K0-10, K11-08, question Q05).
 
 *Révise 0177 (en partie : une fiche peut lire à côté ce que sa vue ne dit pas, en le déclarant, plutôt que de le faire toujours ajouter à la vue).*
+
+### 0219 — Ce que la console et Outils disent encore mal : un onglet Comptes sans boîte, des badges qui disent quoi, des titres accordés
+
+- **L'onglet Comptes d'une personne** paraît aussi quand elle n'a pas de boîte à elle mais a branché un service ou partage quelque chose, dans un sens ou dans l'autre : ses sous-onglets Services et Partages sont dessinés par sa fiche, qui le demande (`Overview.shows`, que `UI.subject_tabs` réunit aux onglets que les facultés montrent). Sans boîte, ni service, ni partage, Teams reste un onglet à lui.
+- **Un onglet de la console rend son badge en couple** `(n, indice)`, comme une vue (`Builtin.badge`, lu par `badge_of`) : l'accueil dit ce que chaque ligne compte (« de Béa et Léa » pour les questions sans réponse, « en échec d'affilée : … » pour les processus, « hôte connecté à qui il manque quelque chose ») plutôt que « à regarder ». Un nom suit son nombre, accordé (« 0 initiative », « 1 échec », « 2 brouillons d'elle à décider »), jamais « (s) ».
+- **Une liste d'entrées déclare le nom de ses entrées, avec son article** (`Knob.noun` : « un fournisseur », « une autrice ») : une entrée neuve s'intitule « Ajouter un fournisseur » ; une liste qui ne le déclare pas garde « Fournisseur à ajouter ».
+- **Le service du système a un titre et un but pour la personne**, écrits par la composition, qui joint le plugin au client MCP (`app/system_mcp.py`, `SHOWN` : « Le web ») ; un service de l'opératrice reste sans but dans Outils, son `purpose` étant la ligne du catalogue du modèle. **Le pourquoi d'une case d'app** redit la ligne de son app ou de son projet, lue par le plugin même (`forge.resource_allowance`), comme celui d'un service.
+- Un geste audité sur une personne dit son nom même quand l'action ne déclare pas d'objet (supprimer un voyage depuis sa fiche) ; un jeton montré une seule fois se copie d'un bouton, qui retombe sur le texte sélectionné quand la console est servie en HTTP.
+
+*Pourquoi :* une personne qui n'avait qu'un service ou des partages n'avait rien sur sa fiche, alors que les ADR 0188 et 0192 disent que la console les voit tous ; « 1 · Questions sans réponse · à regarder » ne disait pas pourquoi regarder ; le genre d'un nom ne se devine pas de son pluriel ; « Service « web » », sans but, ne disait rien à la personne du service dont elle se sert le plus (audit du 2026-11-05, C9-02, C1-10, C7-12, F4-12, C9-01, C9-05 et la décision Q21, repris par le lot LR1).
+
+*Révise 0185 (en partie : l'onglet Comptes paraît aussi pour un service ou un partage), 0186 (en partie : de même, et Teams s'y joint alors), 0197 (en partie : une entrée neuve s'intitule « Ajouter un fournisseur »), 0209 (en partie : le service du système a un but écrit pour la personne, et une case d'app redit sa ligne).*
 
 ## Ce que les sondes et les audits ont fixé
 

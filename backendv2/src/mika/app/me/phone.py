@@ -18,8 +18,8 @@ from starlette.routing import Route
 from mika.adapters.maps import NONE as NO_MAP
 from mika.adapters.maps import MapUnavailable
 from mika.adapters.web.accounts import CLIENT_MOBILE
-from mika.app.moi.api import PREFIX, Call, Denied, MeApiBase, missing
-from mika.app.moi.common import millis, snippet
+from mika.app.me.api import PREFIX, Call, Denied, MeApiBase, missing
+from mika.app.me.common import millis, snippet
 from mika.contracts import phone as phone_c
 from mika.plugins import location as location_p
 from mika.plugins import phone as phone_p
@@ -32,7 +32,7 @@ SNIPPET = 160
 #: le nom sous lequel l'application se télécharge
 APK_NAME = "mika.apk"
 #: d'une carte réglée qui ne se lit pas, ce qu'une personne lit : ce qui ne va pas (un fichier du serveur, une archive
-#: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY`` de ``carte.py``
+#: à refaire, un serveur de carte muet) ne se dit qu'à qui peut y remédier, comme ``NOT_READY`` de ``maps.py``
 MAP_NOT_READY = "La carte n'est pas encore prête sur ce serveur."
 
 

@@ -1,7 +1,7 @@
 /**
  * Les mots de Paramètres, et ce qui se calcule sans DOM : les niveaux d'un partage, l'état d'une boîte ou d'un
  * service, ses outils servis, sa voix, ce qu'un formulaire a changé, les préréglages d'un fournisseur de courrier.
- * Les codes sont ceux du moteur (`vocab/access.py`, `adapters/mail/config.py`, `app/moi/*.py`).
+ * Les codes sont ceux du moteur (`vocab/access.py`, `adapters/mail/config.py`, `app/me/*.py`).
  */
 import type { ServiceTool, ToolChoice } from "../../api/mcp";
 import type { Box, BoxValues } from "../../api/settings";
@@ -184,7 +184,7 @@ export function rangeProblems(values: Record<string, FormValue>): Record<string,
 }
 
 /** La connexion d'une boîte, secret par secret : quand une de ces valeurs change, le secret gardé se redonne — il ne
- *  part jamais vers un autre serveur (`app/moi/settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
+ *  part jamais vers un autre serveur (`app/me/settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
 export const CONNECTION: Readonly<Record<"password" | "smtp_password", readonly string[]>> = {
   password: ["auth", "imap_host", "imap_port", "imap_ssl", "user", "oauth_client_id", "oauth_tenant"],
   smtp_password: ["smtp_host", "smtp_port", "smtp_security", "smtp_user"],
@@ -195,7 +195,7 @@ const SECRET_HOST = { password: "imap_host", smtp_password: "smtp_host" } as con
 
 /**
  * Les secrets gardés qu'un enregistrement doit redonner : sa connexion change et rien n'est tapé à sa place — le
- * serveur le refuserait (400, `app/moi/settings.py`, `_kept_secrets`). L'envoi sans mot de passe à lui se sert de
+ * serveur le refuserait (400, `app/me/settings.py`, `_kept_secrets`). L'envoi sans mot de passe à lui se sert de
  * celui de la lecture : changer le serveur d'envoi le redemande aussi, sauf s'il est redonné pour lire dans le même
  * enregistrement. Une connexion dont le serveur est vidé ne redemande rien. Une boîte qui entre par Microsoft n'a
  * aucun mot de passe à redonner (ses champs sont cachés). `auth` : la connexion choisie dans le formulaire ; `hosts` :

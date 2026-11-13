@@ -97,7 +97,9 @@ HEAVY_DATE = 0.9
 #: ça s'est passé » : jeudi soir, elle le demande). C'est **dû** (``agency.OWED``), jamais une relance.
 KEEP_PROMISE = "keep_promise"
 
-SOUVENIR = "souvenir"
+#: un souvenir, ce qu'elle a vécu (à côté d'une croyance et d'une promesse) ; sa valeur, gardée au journal et dans
+#: les bases, reste « souvenir »
+EPISODE_MEMORY = "souvenir"
 BELIEF = "belief"
 PROMISE = "promise"
 EVENT = "event"

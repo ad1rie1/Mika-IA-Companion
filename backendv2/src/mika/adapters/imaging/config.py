@@ -91,7 +91,7 @@ class ImagingConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     backends: Annotated[dict[str, ImageBackendSpec], Knob(
-        label="Fournisseurs d'images", help="Les services déclarés ; les rôles désignent l'un d'eux par son nom. "
+        label="Fournisseurs d'images", noun="un fournisseur d'images", help="Les services déclarés ; les rôles désignent l'un d'eux par son nom. "
                                             "Aucun : elle ne génère pas d'images.", advanced=False, order=10)] = \
         Field(default_factory=dict)
     #: rôle → nom de fournisseur déclaré

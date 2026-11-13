@@ -5101,7 +5101,7 @@ email:
     failed: "{what} n'a pas pu partir ({why})."
     an_error: une erreur
     # la raison du refus d'un de ses brouillons quand une réponse au même mail est partie à la main, de la console
-    # ou de l'espace d'une personne (ADR 0188, 0200 ; plugins/email/console/actions.py) : elle la lit dans refused
+    # ou de l'espace d'une personne (ADR 0188, 0200 ; plugins/email/inspect/actions.py) : elle la lit dans refused
     # ci-dessus et dans « CE QU'ON CHANGE À TES BROUILLONS »
     answered_by_hand: "Répondu à la main : ce brouillon n'a plus lieu d'être."
   # « COMMENT TU ÉCRIS DEPUIS TES BOÎTES » : sa voix dans chaque boîte, réglée par un opérateur (voice_text) ; aussi
@@ -5386,7 +5386,7 @@ email:
     edited: ", retouché par {name} avant l'envoi"
 
   # Quand qui s'occupe d'elle envoie un mail depuis sa boîte, depuis la console : ce qu'elle en sait (une pensée
-  # qu'elle garde ; plugins/email/console/actions.py). {who} : son prénom, ou identity.keeper.unknown (avec sa
+  # qu'elle garde ; plugins/email/inspect/actions.py). {who} : son prénom, ou identity.keeper.unknown (avec sa
   # majuscule) ; {to} : le destinataire ; {subject} : l'objet
   operator_sent: "{who} a envoyé un mail depuis ta boîte, à {to} : « {subject} »"
 
@@ -6915,7 +6915,7 @@ approvals:
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # LE WEB (greffon « web », ADR 0066) : chercher sur le web (DuckDuckGo) et lire des pages, par un serveur MCP de la
 # machine. Ici, la ligne de son catalogue ; les descriptions de ses outils (mcp_web_search, mcp_web_read…) sont
-# écrites par le serveur lui-même (plugins/web/serveur.py, qui tourne seul, sans le paquet mika).
+# écrites par le serveur lui-même (plugins/web/server.py, qui tourne seul, sans le paquet mika).
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 web:
   # à quoi il sert, et quand s'en servir (mcp.bundle.line les assemble)

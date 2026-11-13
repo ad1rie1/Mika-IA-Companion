@@ -144,8 +144,8 @@ class ConsoleHost:
         if name == "chercher":
             return Outcome(self._search(str(arguments.get("texte") or ""), str(arguments.get("sorte") or "")))
         if name == "fiche":
-            return await self._fiche(str(arguments.get("sorte") or ""), str(arguments.get("cle") or ""),
-                                     str(arguments.get("onglet") or ""), params)
+            return await self._subject(str(arguments.get("sorte") or ""), str(arguments.get("cle") or ""),
+                                       str(arguments.get("onglet") or ""), params)
         return Outcome(f"outil inconnu : {name}", is_error=True)
 
     def _pages(self) -> dict[str, Builtin]:
@@ -207,7 +207,7 @@ class ConsoleHost:
                  for k in kinds for f in self.inspection.search(k, text, 20, when=self.when)]
         return "\n".join(lines) or "rien trouvé"
 
-    async def _fiche(self, kind: str, key: str, tab: str, params: dict[str, str]) -> Outcome:
+    async def _subject(self, kind: str, key: str, tab: str, params: dict[str, str]) -> Outcome:
         spec = self.inspection.subject(kind)
         if spec is None:
             return Outcome(f"sorte inconnue : {kind} (voir lister_vues)", is_error=True)

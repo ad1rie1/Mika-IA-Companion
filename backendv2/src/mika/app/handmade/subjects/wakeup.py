@@ -19,12 +19,12 @@ from mika.app.handmade import Look, excerpt
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade.subjects.parts import STYLES, draw, fact, rendered, tag, texts, tone
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.inspect import Ref
 from mika.plugins.wakeup import RUNNING, WAITING
-from mika.plugins.wakeup.console import STATUS_WORDS, edit_endpoint, notify_words, project_words, risks
+from mika.plugins.wakeup.inspect import STATUS_WORDS, edit_endpoint, notify_words, project_words, risks
 
 KIND = "reveil"
 TABS = ("etat", "appels")
@@ -152,4 +152,4 @@ class WakeupFiche(Overview):
                     "text": excerpt(said.get(x.text_ref), 240) if x.text_ref else FORGOTTEN,
                     "report": excerpt(said.get(x.report_ref), 280) if x.report_ref and x.report_ref in said else "",
                     "episode": x.episode, "tone": tone(STATUS_WORDS.get(x.status, ("", ""))[1])} for x in recent],
-            more=len(calls) > RECENT, calls_tab=fiche_url(KIND, key, "appels"))
+            more=len(calls) > RECENT, calls_tab=subject_url(KIND, key, "appels"))

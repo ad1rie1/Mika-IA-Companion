@@ -33,8 +33,8 @@ import pytest
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.app import composition
 from mika.app.handmade.subjects.teams import _journey
+from mika.app.me import form
 from mika.app.mindport import KernelPort
-from mika.app.moi import form
 from mika.app.teams import TeamsDesk, batch_of, digest
 from mika.contracts import attention as attention_c
 from mika.contracts import runtime as rt

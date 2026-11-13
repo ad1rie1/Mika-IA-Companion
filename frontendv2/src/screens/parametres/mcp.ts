@@ -28,7 +28,7 @@ import * as store from "../../shared/store";
 import { CHOICES, fieldErrors, ofName, serviceNameProblem, servedOf, shareWords, stateWords, urlProblem, type FormValue } from "./words";
 
 const TAB = "#parametres/mcp";
-/** Les bornes de l'API pour brancher un service (`app/moi/mcp.py`, en caractères) : au-delà, elle refuse. */
+/** Les bornes de l'API pour brancher un service (`app/me/mcp.py`, en caractères) : au-delà, elle refuse. */
 const MCP_LIMITS = { purpose: 1024, url: 500, headers: 8000 } as const;
 const SUBS = [["service", "Le service"], ["outils", "Ses outils"], ["acces", "Accès"]] as const;
 /** Un choix d'outil dans le formulaire : `tool:<son nom sur le serveur>`. */

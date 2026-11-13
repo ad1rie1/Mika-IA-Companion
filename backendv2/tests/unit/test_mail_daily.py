@@ -11,7 +11,7 @@ from mika.adapters.mail import MailConfig
 from mika.adapters.mail.client import ImapSmtpMail
 from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, Documents, framed_html
 from mika.plugins.email import EmailParams, EmailState, MailRead, Seen, _read
-from mika.plugins.email.console.common import her_badge, state_badge, to_answer, unread
+from mika.plugins.email.inspect.common import her_badge, state_badge, to_answer, unread
 from mika.ports.mail import Mail
 
 REF = "perso:<m1@exemple.fr>"

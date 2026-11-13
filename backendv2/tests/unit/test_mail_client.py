@@ -33,8 +33,8 @@ from mika.kernel.inspect import (
     Timeline,
     walk_blocks,
 )
-from mika.plugins.email.console import mail_key
-from mika.plugins.email.console.mail import _document
+from mika.plugins.email.inspect import mail_key
+from mika.plugins.email.inspect.mail import _document
 from mika.ports.mail import Mail
 from mika.runtime.inspection import Inspection, find, run_view
 from mika.runtime.operations import perform
@@ -208,7 +208,7 @@ def test_the_reply_form_carries_the_mail_it_answers_without_showing_it():
     jamais un champ à taper, et il revient au moteur tel quel."""
 
     class Spec:
-        from mika.plugins.email.console import ReplyArgs as args
+        from mika.plugins.email.inspect import ReplyArgs as args
 
         owner, name, key, title, description = "email", "repondre", "email.repondre", "Répondre", ""
         retype, confirm, danger = False, "", False

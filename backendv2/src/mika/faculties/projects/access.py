@@ -4,7 +4,7 @@ plafond de qui est en face (``vocab.rights.project_allowance``).
 
 ``allowance`` : ce qu'il laisse à qui est en face, à ce moment — le voir, le piloter, ses fichiers ; pour un outil
 d'une de ses apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Sa fiche (l'onglet « Accès »,
-l'action ``projects.acces``) et la page « Droits » : ``console_access``.
+l'action ``projects.acces``) et la page « Droits » : ``inspect_access``.
 """
 
 from __future__ import annotations

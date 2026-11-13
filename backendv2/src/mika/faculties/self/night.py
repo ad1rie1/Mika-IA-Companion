@@ -452,7 +452,7 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
         people |= {k.recipient for k in promised if k.recipient}
         names.update(_names(frame, {k.recipient for k in promised if k.recipient and k.recipient not in names}))
     souvenirs = knowns(store.query_mind(
-        memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.born_at >= start, v.c.born_at < end,
+        memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.born_at >= start, v.c.born_at < end,
                                       v.c.status == "active")
         .order_by(v.c.importance.desc(), v.c.id).limit(6)), memory_c.KNOWN_COLUMNS)
     if souvenirs:
@@ -770,7 +770,7 @@ class Dreaming:
         # rêve encore de ce qui revient (ADR 0058) ; ``touched_at`` vaut au moins ``born_at``
         v = memory_c.KNOWLEDGE
         rows = knowns(store.query_mind(
-            memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.status == "active",
+            memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active",
                                           v.c.touched_at >= frame.now - DREAM_LOOKBACK)
             .order_by(v.c.importance.desc(), v.c.id.desc()).limit(8)), memory_c.KNOWN_COLUMNS)
         picked = rng.sample(rows, k=min(3, len(rows))) if rows else []

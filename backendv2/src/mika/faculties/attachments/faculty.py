@@ -596,7 +596,7 @@ INDEX_RETRY_US = 10 * MINUTE
 
 @ATTACHMENTS.process("attachments.index", wake_on=[c.KEPT, c.LINKED, c.EXPIRED, *MEMORY_LINKS], lane="background",
                      catch_up=CatchUp.ONCE, max_quantum_s=600)
-class VectorIndex:
+class PieceIndexer:
     """L'index des vecteurs des pièces (un cache) : à chaque passage, ce qui a bougé depuis le précédent (une pièce
     lue, un lien posé) ; au premier, un rapprochement par les clés — ce qui a disparu part, ce qui manque s'ajoute."""
 

@@ -14,11 +14,11 @@ import pytest
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.app import LoginThrottle
-from mika.app.moi import Call, Denied
-from mika.app.moi import mail as mail_moi
-from mika.app.moi import mcp as mcp_moi
-from mika.app.moi import settings as settings_moi
-from mika.app.moi import shares as shares_moi
+from mika.app.me import Call, Denied
+from mika.app.me import mail as mail_moi
+from mika.app.me import mcp as mcp_moi
+from mika.app.me import settings as settings_moi
+from mika.app.me import shares as shares_moi
 from mika.vocab.access import OWNER, PERSON, SOURCE_WORDS_OTHER, who_words
 
 

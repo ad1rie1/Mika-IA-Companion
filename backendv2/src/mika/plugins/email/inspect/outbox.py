@@ -23,7 +23,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.plugins.email import EMAIL, EmailState, name_of
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     BOX_PAGE,
     NO_PORT,
     PAGE,

@@ -50,7 +50,7 @@ def _candidates(store: Any, s: IdentityState, person: str,
     rows = store.query_mind(
         select(v.c.id, v.c.text, v.c.sources)
         .where(memory_c.concerning(v, [person]), v.c.sensitivity >= int(privacy.Sensitivity.PERSONAL),
-               v.c.status == "active", v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF])).order_by(v.c.id))
+               v.c.status == "active", v.c.kind.in_([memory_c.EPISODE_MEMORY, memory_c.BELIEF])).order_by(v.c.id))
     rows = [r for r in rows if int(r[0]) not in exclude]
     if not rows:
         return []
@@ -79,7 +79,7 @@ def _corpus(store: Any) -> list[str]:
     """Sa mémoire vivante (les plus récents d'abord, bornée) : la rareté d'un mot s'y mesure."""
     v = memory_c.KNOWLEDGE
     rows = store.query_mind(select(v.c.text).where(v.c.status == "active",
-                                                   v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF]))
+                                                   v.c.kind.in_([memory_c.EPISODE_MEMORY, memory_c.BELIEF]))
                             .order_by(v.c.id.desc()).limit(corroboration.CORPUS_MAX))
     return [str(r[0]) for r in rows]
 

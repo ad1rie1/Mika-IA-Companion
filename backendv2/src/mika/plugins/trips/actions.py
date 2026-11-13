@@ -1,5 +1,5 @@
 """Ce qu'on fait d'un voyage depuis l'écran Carte : les actions de la console (``@TRIPS.action``), au nom de qui agit
-(``ctx.by``), que l'API par personne appelle (``app/moi/carte.py``) — journalisées, dédoublonnées et auditées comme
+(``ctx.by``), que l'API par personne appelle (``app/me/maps.py``) — journalisées, dédoublonnées et auditées comme
 toute action.
 
 Chacune vérifie que le voyage est à la personne qui agit (sinon : il n'existe pas) et les bornes du contrat ; un

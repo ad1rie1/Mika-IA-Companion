@@ -20,11 +20,11 @@ import pytest
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig, build_backend
 from mika.adapters.imaging.errors import ImagingError
-from mika.adapters.imaging.fake import solid_png
 from mika.adapters.imaging.models import list_image_models
 from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sdcpp import SdCppBackend
 from mika.ports.imaging import ImageRequest, Picture
+from tests.fixtures.fake_images import solid_png
 
 PNG = solid_png(8, 12, (200, 100, 50))
 

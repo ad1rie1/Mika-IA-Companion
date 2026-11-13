@@ -27,7 +27,7 @@ from mika.app.handmade import Look, person_card, plain, presences, span
 from mika.app.handmade.tabs import Got, Line, Tab, blank, paged, raw_rows, text
 from mika.app.handmade.tabs.people import person_of
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import env
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.inspect import Badge, Row, When
@@ -108,7 +108,7 @@ def _question(line: Line, at: int, now: int) -> dict[str, Any]:
         "who": who, "text": line.text("texte"), "when": line.get("reçue"), "number": line.get("n°"),
         "href": line.href, "wait": _wait(wait) if at else "", "tone": "danger" if wait >= DAY else
         "warn" if wait >= HOUR else "",
-        "exchanges": fiche_url("person", person, "echanges") if is_identifiable(person) else "",
+        "exchanges": subject_url("person", person, "echanges") if is_identifiable(person) else "",
         "forgotten": line.tone == "muted" or line.text("texte") in ("", "—"),
     }
 

@@ -47,7 +47,7 @@ from mika.adapters.web.accounts import (
 from mika.contracts import identity as identity_c
 from mika.inspector import render
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY
@@ -109,8 +109,8 @@ def rights_url(frame: Any, person: str) -> str:
 
 def _owned_tab(ui: Any, person: str) -> tuple[str, str] | None:
     """L'onglet de sa fiche qui réunit ce qui est à elle (son texte, son adresse) ; rien quand sa fiche n'en a pas."""
-    shown = {t.name for t in ui.inspection.tabs("person", person)}
-    return next(((text, fiche_url("person", person, name)) for name, text in OWNED_TABS if name in shown), None)
+    shown = {t.name for t in ui.subject_tabs("person", person)}
+    return next(((text, subject_url("person", person, name)) for name, text in OWNED_TABS if name in shown), None)
 
 
 def _seen(at: int | None) -> Any:

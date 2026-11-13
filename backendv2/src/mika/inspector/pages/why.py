@@ -412,7 +412,7 @@ def recall_blocks(ui: Any, provenance: Sequence[str]) -> list[Any]:
     refs = [_split(p) for p in provenance[:RECALL_MAX]]
     items = _memory_items(ui, [n for kind, n in refs if kind == "memory" and n is not None])
     chunks = _chunks(ui, [n for kind, n in refs if kind == "chunk" and n is not None])
-    kinds = {memory_c.SOUVENIR: "souvenir", memory_c.BELIEF: "croyance", memory_c.PROMISE: "promesse"}
+    kinds = {memory_c.EPISODE_MEMORY: "souvenir", memory_c.BELIEF: "croyance", memory_c.PROMISE: "promesse"}
     rows = []
     for (kind, n), raw in zip(refs, provenance[:RECALL_MAX], strict=True):
         if kind == "memory" and n is not None:

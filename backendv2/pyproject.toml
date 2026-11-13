@@ -42,7 +42,7 @@ mika = "mika.app.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mika.inspector" = ["templates/*.html", "static/*.css", "static/*.js", "static/fonts/*"]
+"mika.inspector" = ["templates/**/*.html", "static/**/*"]
 "mika.faculties.world" = ["*.json"]
 "mika.app" = ["migrations/*/script.py.mako"]
 
@@ -88,7 +88,7 @@ ignore = ["E501", "UP040", "UP046", "UP047", "B008"]
 "src/mika/sim/**" = ["TID251", "BLE001"]
 "src/mika/app/**" = ["TID251"]
 # le serveur MCP du plugin web : un programme à part, lancé dans sa cage, qui vit au vrai temps (débit, délais)
-"src/mika/plugins/web/serveur.py" = ["TID251"]
+"src/mika/plugins/web/server.py" = ["TID251"]
 "tests/**" = ["TID251", "BLE001", "PLC0415", "DTZ", "B"]
 
 [tool.importlinter]

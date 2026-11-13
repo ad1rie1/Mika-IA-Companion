@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from mika.app.moi.api import Call, Denied, missing
+from mika.app.me.api import Call, Denied, missing
 from mika.vocab.access import PERSON, reaches
 from mika.vocab.ownership import OWNED, held
 

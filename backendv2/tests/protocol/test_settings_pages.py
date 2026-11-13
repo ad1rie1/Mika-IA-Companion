@@ -261,12 +261,14 @@ def test_page_commands_are_title_bar_actions_and_a_dangerous_one_waits_under_mor
 
 
 def test_an_entry_page_is_titled_by_the_entry_not_by_a_verb_and_its_list(world):  # noqa: F811
-    """C7-12 (sa part) : « Fournisseur à ajouter », « Fournisseur « local » », « Autrice « Message » » — jamais
-    « Ajouter · Fournisseurs »."""
+    """C7-12 : « Ajouter un fournisseur » (le genre que la liste déclare, ``Knob.noun``, ADR 0219), « Fournisseur
+    « local » », « Autrice « Message » » — jamais « Ajouter · Fournisseurs »."""
     client, _live, _ = world
     bootstrap(client)
     new = html.unescape(page_of(client, f"{BASE}/fournisseurs?enregistrement=backends&cle=&nouveau=1"))
-    assert "<h1>Fournisseur à ajouter</h1>" in new and "Ajouter · " not in new
+    assert "<h1>Ajouter un fournisseur</h1>" in new and "Ajouter · " not in new
+    added = html.unescape(page_of(client, f"{BASE}/autrices?enregistrement=authors&cle=&nouveau=1"))
+    assert "<h1>Ajouter une autrice</h1>" in added
     post(client, f"{BASE}/fournisseurs", {"_section": "modeles", "_enregistrement": "backends", "_ancienne": "",
                                           "_cle": "local", "_champs": ["kind", "model", "host"], "kind": "ollama",
                                           "model": "gemma", "host": "http://127.0.0.1:9"})

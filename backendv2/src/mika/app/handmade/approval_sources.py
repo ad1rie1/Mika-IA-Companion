@@ -24,7 +24,7 @@ from mika.app.handmade.subjects.teams import CONVERSATION, REPLY
 from mika.contracts import email as email_c
 from mika.contracts import phone as phone_c
 from mika.contracts import teams as teams_c
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 from mika.ports.teams import conversation_key
@@ -60,11 +60,11 @@ def concern(ui: UI, context: str) -> Concern | None:
     head, _, rest = context.partition(":")
     kind = PREFIXES.get(head) if rest else None
     if kind == SERVICE:
-        return Concern(SERVICE, f"service « {rest} »", rest, fiche_url(SERVER, rest))
+        return Concern(SERVICE, f"service « {rest} »", rest, subject_url(SERVER, rest))
     if kind == FORGED:
-        return Concern(FORGED, f"app « {rest} »", rest, fiche_url(APP, rest))
+        return Concern(FORGED, f"app « {rest} »", rest, subject_url(APP, rest))
     if (project := project_of(context)) is not None:
-        return Concern(PROJECT, f"projet n° {project}", str(project), fiche_url("project", str(project)))
+        return Concern(PROJECT, f"projet n° {project}", str(project), subject_url("project", str(project)))
     if context in CHANNELS:
         return Concern(CHANNEL, CHANNELS[context])
     name = ui.names.name_of(context) or ui.names.who(context).removeprefix("le ")
@@ -89,15 +89,15 @@ def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> l
     out: list[tuple[str, str]] = []
     if capability == email_c.SEND:
         if draft := _arg(args, "draft"):
-            out.append(("Le brouillon", fiche_url(DRAFT, draft)))
+            out.append(("Le brouillon", subject_url(DRAFT, draft)))
         if account := _arg(args, "account"):
             out.append((f"La boîte « {account} »", f"{PREFIX}/courrier/reception?" + urlencode({"compte": account})))
     elif capability == teams_c.SEND:
         if draft := _arg(args, "draft"):
-            out.append(("La réponse préparée", fiche_url(REPLY, draft)))
+            out.append(("La réponse préparée", subject_url(REPLY, draft)))
         if conversation := _arg(args, "conversation"):
             key = conversation_key(_arg(args, "account") or DEFAULT_TEAMS_ACCOUNT, conversation)
-            out.append(("La conversation Teams", fiche_url(CONVERSATION, key)))
+            out.append(("La conversation Teams", subject_url(CONVERSATION, key)))
     got = concern(ui, context)
     if got is None or not got.href:  # un canal n'a pas de fiche : ses liens sont ceux de sa capacité
         return out
@@ -109,5 +109,5 @@ def sources(ui: UI, capability: str, context: str, args: Mapping[str, Any]) -> l
         out.append((f"Le projet n° {got.name}", got.href))
     elif got.kind == PERSON:
         out.append((f"La fiche {elided(got.name, 'de')}", got.href))
-        out.append(("Leur conversation", fiche_url("person", got.person, "echanges")))
+        out.append(("Leur conversation", subject_url("person", got.person, "echanges")))
     return out

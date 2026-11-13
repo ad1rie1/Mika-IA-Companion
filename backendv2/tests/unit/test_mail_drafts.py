@@ -43,7 +43,7 @@ from mika.kernel.inspect import (
     Table,
     walk_blocks,
 )
-from mika.plugins.email.console.common import mail_key
+from mika.plugins.email.inspect.common import mail_key
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.mail import AccountInfo, Mail
 from mika.runtime import decisions

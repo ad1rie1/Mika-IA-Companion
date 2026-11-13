@@ -91,7 +91,7 @@ SETTINGS = "serveurs-mcp"
 SERVERS = ("mcp", "serveurs")
 LIST = Ref.view(*SERVERS, "Venus d'ailleurs")
 NO_PORT = "Les outils extérieurs ne sont pas branchés sur ce serveur."
-FAILED_SEE_FICHE = "Le test a échoué : l'erreur est sur sa fiche."
+FAILED_SEE_SUBJECT = "Le test a échoué : l'erreur est sur sa fiche."
 STATE_TONES = {"inactif": "muted", "incomplet": "warn", "jamais": "muted", "connecte": "ok", "erreur": "warn",
                "panne": "danger"}
 #: ce qu'elle garde, en mots courts
@@ -259,7 +259,7 @@ def said_level(level: str, face: Face) -> tuple[str, str, str]:
     return "te demande", "dans la console (« À valider »)", "info"
 
 
-def _fiche(name: str, tab: str = "") -> Ref:
+def _server_ref(name: str, tab: str = "") -> Ref:
     return Ref.subject("serveur", name, name, tab)
 
 
@@ -308,13 +308,13 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
         if chosen and _whose(st) != chosen:
             continue
         review = len(st.new) + len(st.changed)
-        rows.append(Row((_fiche(st.name), owner_cell(st, frame),
+        rows.append(Row((_server_ref(st.name), owner_cell(st, frame),
                          Badge("sur cette machine" if st.kind == "local" else "à une adresse", "info"),
                          Text(st.purpose or "—", clamp=160), state_badge(st.state),
                          Text(f"{offered.get(st.name, 0)} / {len(st.live)}", "num"),
                          Badge(str(review), "warn") if review else Text("0", "muted"),
                          When(st.last_ok_at) if st.last_ok_at else "jamais", who_said(st, frame), access_said(st)),
-                        href=_fiche(st.name), tone="danger" if st.state == "panne" else "",
+                        href=_server_ref(st.name), tone="danger" if st.state == "panne" else "",
                         detail=((Note(st.detail, tone="warn"),) if st.detail else ())
                         + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
     # brancher un service : trois questions, que la console dessinée met en page (ADR 0128)
@@ -345,7 +345,7 @@ def _head(s: McpState, frame: Frame, ctx: InspectContext, key: str) -> Head | No
     if review:
         badges.append(Badge(f"{review} outil(s) à revoir", "warn"))
     return Head(key=key, title=key, subtitle=st.purpose[:1].upper() + st.purpose[1:], badges=tuple(badges),
-                facts=(("réglages", edit_server(key, _fiche(key))),),
+                facts=(("réglages", edit_server(key, _server_ref(key))),),
                 back=LIST)
 
 
@@ -378,7 +378,7 @@ def _tab_state(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("avec qui", f"{who_said(st, frame)} — jamais dans un salon ni avec une inconnue"),
         ("accès", access_said(st)),
         ("ses outils", "en main" if st.in_hand else "à la demande (elle les cherche par ce qu'ils font)"),
-        ("réglages", edit_server(st.name, _fiche(st.name))),
+        ("réglages", edit_server(st.name, _server_ref(st.name))),
     ), title="Ce que tu as déclaré", columns=2))
     blocks.append(Fields((
         ("serveur", f"{st.server_name} {st.server_version}".strip() or "—"),
@@ -602,7 +602,7 @@ async def _test(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     ok, said = await port.test(ctx.subject)
     st = port.status(ctx.subject)
     if not ok and st is not None and st.detail:
-        said = FAILED_SEE_FICHE  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
+        said = FAILED_SEE_SUBJECT  # sa fiche, où l'on revient, montre déjà l'erreur : le bandeau ne la recopie pas
     return Done(message=said, tone="ok" if ok else "danger", drafts=status_drafts(s, port))
 
 
@@ -833,7 +833,7 @@ def _service_grants(s: McpState, frame: Frame, ctx: Any, audience: Any, kind: st
         out.append(Grant(f"mcp:{t.server}", f"« {t.server} » · {t.remote}",
                          (("lit" if t.nature == "lecture" else "agit", POLICY_WORDS[got.level]),
                           ("garde", KEEP_WORDS[got.keep] if got.level != NO else "—")),
-                         got.why, href=_fiche(t.server, "fait"), closed=got.level == NO))
+                         got.why, href=_server_ref(t.server, "fait"), closed=got.level == NO))
     return out
 
 
@@ -846,5 +846,5 @@ def _service_tables(s: McpState, frame: Frame, ctx: Any) -> list[RuleTable]:
         return []
     return [RuleTable(f"mcp:{st.name}", f"Le service « {st.name} »", COLUMNS,
                       tuple(_row(a, frame) for a in st.access), _row(st.default, frame),
-                      href=_fiche(st.name, "fait"), floors=FLOORS)
+                      href=_server_ref(st.name, "fait"), floors=FLOORS)
             for st in port.statuses()]

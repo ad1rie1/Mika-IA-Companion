@@ -28,7 +28,7 @@ from markupsafe import Markup
 
 from mika.app.handmade import excerpt
 from mika.app.handmade.tabs import Got, Line, Tab, blank, pairs, text
-from mika.inspector.pages.subjects import fiche_key
+from mika.inspector.pages.subjects import subject_url_key
 from mika.inspector.ui import PREFIX
 from mika.plugins.teams import WAITING, under_way
 from mika.ports.teams import split_conversation_key
@@ -68,7 +68,7 @@ def _navs(got: Got) -> list[dict[str, Any]]:
 
 
 def _conversation(line: Line, port: Any, s: Any) -> dict[str, Any]:
-    account, key = split_conversation_key(fiche_key(line.href, CONVERSATION))
+    account, key = split_conversation_key(subject_url_key(line.href, CONVERSATION))
     last = None
     if port is not None and key:
         thread = port.thread(account, key, 1)
@@ -105,7 +105,7 @@ def conversations(got: Got) -> Markup | None:
 
 
 def _reply(line: Line, port: Any) -> dict[str, Any]:
-    key = fiche_key(line.href, REPLY)
+    key = subject_url_key(line.href, REPLY)
     draft = port.draft(key) if port is not None and key else None
     answered = port.message(draft.reply_to) if draft is not None and draft.reply_to else None
     return {

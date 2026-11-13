@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Le serveur MCP du plugin ``web`` (stdio) : chercher sur le web avec DuckDuckGo, lire des pages.
 
-Mika ne l'importe pas : le plugin ``web`` le lance, quand il est actif, comme un serveur MCP local du client MCP
+Mika ne l'exécute pas : le plugin ``web`` l'importe pour sa liste d'outils et son environnement (``tools``,
+``Settings``), et le fait lancer, quand il est actif, comme un serveur MCP local du client MCP
 (ADR 0064, 0066) — ``python3`` dans sa cage bubblewrap, réseau « isolé » (Internet, jamais cette machine ni le
 réseau local). Ses outils sont des outils système : approuvés d'office, ils deviennent ``mcp_web_search``,
 ``mcp_web_read`` et ``mcp_web_read_pages``.
@@ -23,7 +24,7 @@ Seulement la bibliothèque standard (Python ≥ 3.10) : ``/usr/bin/python3`` suf
 sur le disque ; la sortie d'erreur (gardée par Mika pour l'opérateur) ne dit jamais ce qui a été cherché ou lu.
 
 Ses réglages viennent de l'environnement, posé par le plugin d'après ses paramètres (``Settings.from_env``).
-Essai à la main : ``python3 serveur.py --chercher "actualités"`` ; ``python3 serveur.py --lire https://…``.
+Essai à la main : ``python3 server.py --chercher "actualités"`` ; ``python3 server.py --lire https://…``.
 """
 
 from __future__ import annotations

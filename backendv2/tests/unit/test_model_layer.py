@@ -23,7 +23,7 @@ from mika.ports.llm import (
     LLMResponse,
     ToolCall,
 )
-from mika.runtime.facts import facts_of, keeps_facts
+from mika.runtime.kept_facts import facts_of, keeps_facts
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import PRO

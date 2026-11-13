@@ -634,7 +634,7 @@ def announced(frame: Frame) -> tuple[str, ...]:
 
 
 # les contributions : le relevé, sa voix et ce qu'elle voit, ses outils, ses tâches, la console
-from mika.plugins.email import console as console  # noqa: E402
+from mika.plugins.email import inspect as inspect  # noqa: E402
 from mika.plugins.email import poll as poll  # noqa: E402
 from mika.plugins.email import tasks as tasks  # noqa: E402
 from mika.plugins.email import tools as tools  # noqa: E402

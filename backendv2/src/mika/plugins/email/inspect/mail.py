@@ -51,7 +51,7 @@ from mika.plugins.email import (
     name_of,
     params_of,
 )
-from mika.plugins.email.console.common import (
+from mika.plugins.email.inspect.common import (
     NO_MAIL,
     PAGE,
     UNKNOWN,

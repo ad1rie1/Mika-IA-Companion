@@ -28,6 +28,7 @@ from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.facts import FactKey
+from mika.kernel.forms import agree
 from mika.kernel.inspect import (
     Badge,
     Chart,
@@ -414,6 +415,10 @@ def operation_row(ui: Any, e: Any, origin: str) -> Row:
         on = ui.names.who_cell(subject)
     elif subject and spec is not None and ui.inspection.head(kind, subject) is not None:
         on = Ref.subject(kind, subject, f"{spec.label} {subject}")
+    elif subject and not kind and ui.names.name_of(subject):
+        # une action qui ne déclare pas d'objet, faite depuis la fiche d'une personne (supprimer un de ses voyages,
+        # ADR 0204) : la personne par son nom, pas sa clé (C9-01)
+        on = ui.names.who_cell(subject)
     elif subject:
         on = Text(subject, hint=kind)
     return Row((When(e.at), ui.names.action(e.data.action), ui.names.who(e.data.by),
@@ -457,8 +462,7 @@ async def all_views(ui: Any, request: Request) -> list[Any]:
 
 
 @TABS.tab("systeme.processus", title="Processus", group="Surveiller",
-          badge=lambda ui: sum(1 for s in ui.kernel.scheduler.specs if ui.kernel.scheduler.consecutive.get(s.name, 0)
-                                 >= health.PROCESS_FAILURES_MAX),
+          badge=lambda ui: _failing(ui),
           description="Ses processus de fond (relire la mémoire, dormir, relever le courrier…) : combien de passages, "
                       "d'échecs, la dernière erreur — et les échecs gardés au journal, qui survivent au redémarrage.")
 async def processus(ui: Any, request: Request) -> list[Any]:
@@ -466,7 +470,7 @@ async def processus(ui: Any, request: Request) -> list[Any]:
 
 
 @TABS.tab("systeme.anomalies", title="Anomalies", group="Surveiller",
-          badge=lambda ui: len(getattr(ui.kernel.mind, "anomalies", ()) or ()),
+          badge=lambda ui: _anomalies(ui),
           description="Ce qui s'est mal passé sans tout arrêter : une évaluation, une réduction, un choix de l'arbitre ; et "
                       "les traces du journal (épisode supplanté, oubli, reconstruction). En mémoire depuis le "
                       "démarrage.")
@@ -551,10 +555,37 @@ def _effect_label(ui: Any, effect: str) -> str:
     return {"episode.utterance": "une parole à livrer"}.get(type_name, ui.names.event(type_name or owner))
 
 
-def _outbox_problems(ui: Any) -> int:
+def _outbox_problems(ui: Any) -> tuple[int, str]:
+    """Le badge de la file de sortie : ce qui n'a pas pu partir, et l'indice qui le dit."""
     rows = ui.kernel.mind.store.query_mind(select(func.count()).select_from(JournalOutbox)
                                            .where(JournalOutbox.status.in_(OUTBOX_PROBLEMS)))
-    return int(rows[0][0]) if rows else 0
+    n = int(rows[0][0]) if rows else 0
+    return n, agree(n, "effet qui n'a pas pu partir", "effets qui n'ont pas pu partir")
+
+
+# Les badges des onglets de Système disent ce qu'ils comptent (C1-10) : l'accueil montre l'indice après le nombre,
+# jamais un « à regarder » qui ne dit rien.
+
+def _failing(ui: Any) -> tuple[int, str]:
+    """Les processus en échec d'affilée, par leur nom (trois au plus)."""
+    sched = ui.kernel.scheduler
+    failing = [ui.names.process(s.name) for s in sched.specs
+               if sched.consecutive.get(s.name, 0) >= health.PROCESS_FAILURES_MAX]
+    shown = ", ".join(failing[:3]) + (f" et {len(failing) - 3} de plus" if len(failing) > 3 else "")
+    return len(failing), f"en échec d'affilée : {shown}" if failing else ""
+
+
+def _anomalies(ui: Any) -> tuple[int, str]:
+    n = len(getattr(ui.kernel.mind, "anomalies", ()) or ())
+    return n, agree(n, "chose qui s'est mal passée depuis le démarrage, sans rien arrêter",
+                    "choses qui se sont mal passées depuis le démarrage, sans rien arrêter")
+
+
+def _world_badge(ui: Any) -> tuple[int, str]:
+    if ui.deps.world is None:
+        return 0, ""
+    n = len(_world_warnings(ui.deps.world.overview()))
+    return n, agree(n, "hôte connecté à qui il manque quelque chose", "hôtes connectés à qui il manque quelque chose")
 
 
 async def outbox_post(ui: Any, request: Request) -> Response:
@@ -635,7 +666,7 @@ WORLD_ROLES = {"viewer": "écran", "host": "hôte", "creator": "créateur"}
 
 
 @TABS.tab("systeme.monde", title="Écrans du monde", group="Surveiller",
-          badge=lambda ui: len(_world_warnings(ui.deps.world.overview())) if ui.deps.world is not None else 0,
+          badge=lambda ui: _world_badge(ui),
           description="Les clients du monde (/ws/world) : qui est connecté, avec quel moteur et quels rôles, qui "
                       "tient le bail d'hôte (le moteur qui joue ses actions), et ce que chaque hôte a dit lui manquer "
                       "en chargeant le monde.")

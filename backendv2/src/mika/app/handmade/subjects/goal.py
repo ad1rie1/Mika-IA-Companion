@@ -37,7 +37,7 @@ from mika.contracts import goals as c
 from mika.faculties.goals.actions import TASK_STATUS_FR
 from mika.faculties.goals.faculty import Goal, budget, goal_at, params
 from mika.faculties.goals.inspect import NEXT_SESSION, TASK_ORDER, TASK_TONE, VERDICT_FR, VERDICT_TONE
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.kernel.inspect import Badge, Meter
@@ -254,4 +254,4 @@ class GoalFiche(Overview):
             editable=parts["add"] is not None or any(r["detail"] for r in (parts["plan"] or {}).get("rows", [])),
             add=parts["add"], detail=parts["detail"], steps=[] if reminder else _steps(ui, g, look),
             instruction=said.get(latest, FORGOTTEN) if latest else "",
-            tabs={t: fiche_url(KIND, key, t) for t in TABS})
+            tabs={t: subject_url(KIND, key, t) for t in TABS})

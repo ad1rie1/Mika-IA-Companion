@@ -48,13 +48,14 @@ from mika.kernel.faculty import InspectSpec
 from mika.kernel.inspect import Vital
 from mika.runtime import health
 from mika.runtime.bootstrap import Kernel
+from mika.runtime.boundary import Failed, call
 from mika.runtime.effects import with_content
 from mika.runtime.inspection import Inspection
 
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "59"
+ASSET_VERSION = "60"
 
 log = logging.getLogger("mika.console")
 
@@ -259,6 +260,12 @@ class Overview:
         maquette) ; rien : des onglets sans compte."""
         return {}
 
+    def shows(self, ui: UI, key: str) -> Sequence[str]:
+        """Des onglets des facultés qu'elle montre sur la fiche de cet objet même quand leur faculté n'a rien à en dire
+        (``InspectSpec.shown``), parce qu'elle y dessine elle-même autre chose (``render_tab``) : leurs noms. Rien
+        par défaut. ``UI.subject_tabs`` les réunit aux autres."""
+        return ()
+
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         """Un onglet d'une faculté, dessiné : ``blocks`` sont ceux que la faculté a rendus (ses lignes, ses
@@ -405,6 +412,18 @@ class UI:
             bar.insert(0, (base, d.lead))
         return bar if len(bar) > 1 else []
 
+    def subject_tabs(self, kind: str, key: str) -> list[InspectSpec]:
+        """Les onglets de la fiche de cet objet : ceux dont la faculté a quelque chose à en dire
+        (``Inspection.tabs``), et ceux que sa vue d'ensemble montre quand même (``Overview.shows``), dans leur ordre."""
+        tabs = self.inspection.tabs(kind, key)
+        overview = self.deps.overviews.get(kind)
+        extra = call(overview.shows, self, key, label=f"onglets montrés {kind}") if overview is not None else ()
+        if isinstance(extra, Failed) or not extra:
+            return tabs
+        have = {t.name for t in tabs}
+        more = [t for t in self.inspection.tabs(kind) if t.name in extra and t.name not in have]
+        return sorted([*tabs, *more], key=lambda v: (v.order, v.title)) if more else tabs
+
     def attention_items(self, *, distinct: bool = False) -> list[dict[str, Any]]:
         """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
         (l'accueil en fait des cadres qui mènent à la bonne page). ``distinct`` : chaque chose une fois (l'accueil) —
@@ -426,13 +445,13 @@ class UI:
                     b = self.builtins.get(key)
                     if b is None or b.badge is None:
                         continue
-                    n = int(b.badge(self) or 0)
+                    n, hint = b.badge_of(self)
                     if f"{base}/{b.slug}" in covered:
                         if n:
                             parts.append((b.title, n))
                         continue
                     if n:
-                        found.append({"label": f"{d.label} › {b.title}", "count": n, "hint": "",
+                        found.append({"label": f"{d.label} › {b.title}", "count": n, "hint": hint,
                                       "href": f"{base}/{b.slug}"})
                 for item in found if parts else ():
                     item["hint"] = self._made_of(parts, item["count"])

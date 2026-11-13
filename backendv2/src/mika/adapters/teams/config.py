@@ -94,7 +94,7 @@ class TeamsConfig(BaseModel):
         help="Décoché : toute extension est refusée (rien n'est reçu, rien ne part), pour tous les comptes ; ce qui "
              "est déjà reçu reste.")] = True
     accounts: Annotated[dict[str, TeamsAccount], Knob(
-        label="Comptes", advanced=False, order=10, key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE,
+        label="Comptes", noun="un compte", advanced=False, order=10, key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE,
         help=f"Chaque Teams qu'une extension lui apporte : à qui il est, comment elle y écrit. Sa clé d'extension se "
              f"crée dans l'onglet Extension de Teams. La clé d'un compte est un nom court "
              f"({ACCOUNT_KEY_RULE}).")] = Field(default_factory=dict)

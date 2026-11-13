@@ -120,7 +120,7 @@ def corpus() -> tuple[dict[int, Item], list[Message], set[int]]:
         teller = who if parle else handles["Adrien"]
         ids = []
         for el in data.get("elements", []):
-            kind = c.SOUVENIR if el.get("type") == "souvenir" else c.BELIEF
+            kind = c.EPISODE_MEMORY if el.get("type") == "souvenir" else c.BELIEF
             items[nxt] = item(nxt, kind, el["texte"], (who,), (teller,), float(el.get("importance", 0.5)),
                               0.8 if kind == c.BELIEF else None, None, NOW - rnd.randint(1, 365) * DAY)
             ids.append(nxt)
@@ -164,8 +164,8 @@ async def recall(idx: SqliteVectorIndex, items: dict[int, Item], msg: Message, p
                  caps: tuple[int, int]) -> tuple[list[int], float]:
     """Ce que le rappel ferait remonter pour ce message : (identifiants retenus, temps des recherches)."""
     t0 = time.perf_counter()
-    near, wider = await search(idx, msg.text, "", p.recall_k, kinds={c.SOUVENIR, c.BELIEF})
-    own_near, own_wider = await search(idx, msg.text, "", p.recall_k, kinds={c.SOUVENIR, c.BELIEF},
+    near, wider = await search(idx, msg.text, "", p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF})
+    own_near, own_wider = await search(idx, msg.text, "", p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF},
                                        persons=(msg.speaker,))
     near, wider = _merged(near, own_near), _merged(wider, own_wider)
     took = time.perf_counter() - t0
@@ -178,7 +178,7 @@ async def recall(idx: SqliteVectorIndex, items: dict[int, Item], msg: Message, p
             continue
         ranked.append((rank(it, sim, NOW, p, interlocutor=msg.speaker, mood_valence=0.0), i))
     ranked.sort(key=lambda r: (-r[0], r[1]))
-    souvenirs = [i for _s, i in ranked if items[i].kind == c.SOUVENIR][:caps[0]]
+    souvenirs = [i for _s, i in ranked if items[i].kind == c.EPISODE_MEMORY][:caps[0]]
     beliefs = [i for _s, i in ranked if items[i].kind == c.BELIEF][:caps[1]]
     return souvenirs + beliefs, took
 

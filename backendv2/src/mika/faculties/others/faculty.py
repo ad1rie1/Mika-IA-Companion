@@ -65,6 +65,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.others.farewell import closing
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, within_daily_window
@@ -78,7 +79,6 @@ from mika.kernel.state import FrozenDict
 from mika.vocab import causes, privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of, felt_pad
 from mika.vocab.episodes import CONVERSATIONAL, Kind
-from mika.vocab.farewell import closing
 from mika.vocab.people import is_identifiable, key_concerns
 from mika.vocab.phrasebook import phrase
 from mika.vocab.reading import OTHER, Reading

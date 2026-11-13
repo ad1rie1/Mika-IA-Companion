@@ -123,6 +123,36 @@ def test_the_total_of_the_queue_says_what_it_counts(world, monkeypatch):  # noqa
     assert UI._made_of([("Réponses Teams", 2)], 2) == "réponses Teams : 2"
 
 
+def test_a_builtin_badge_says_what_it_counts(world, monkeypatch):  # noqa: F811
+    """Un onglet de la console rend (n, indice) comme une vue (C1-10) : l'accueil dit l'indice après le nombre, pas
+    « à regarder ». Avant, ``int(badge)`` refusait un couple."""
+    client, _, _ = world
+    bootstrap(client)
+    checks = tuple(health.Check(name, health.OK, "ok") for name in
+                   ("journal", "slices", "loops", "projections", "processes", "llm", "lanes", "config", "ports",
+                    "outbox"))
+    monkeypatch.setattr(health, "report", lambda kernel: health.Health("ready", checks))
+    monkeypatch.setattr(system_pages, "_outbox_problems", lambda ui: (3, "effets qui n'ont pas pu partir"))
+    rows = priorities_of(client.get("/inspecteur/").text)
+    assert ("/inspecteur/systeme/sorties", "3", "Système › File de sortie", "effets qui n'ont pas pu partir") in rows
+    # son onglet garde son nombre
+    menu = html.unescape(client.get("/inspecteur/systeme/sorties").text)
+    assert client.get("/inspecteur/systeme/sorties").status_code == 200 and "File de sortie" in menu
+
+
+def test_today_in_figures_agrees_with_its_numbers(world):  # noqa: F811
+    """« Aujourd'hui, en chiffres » : le nom s'accorde au nombre qu'il suit — « 0 initiative », « 1 échec », jamais
+    « 0 initiatives » ni « 1 échecs » (C1-10)."""
+    client, _, _ = world
+    bootstrap(client)
+    figures = re.findall(r'<span class="now-today-value now-num">([^<]*)</span><span class="now-today-label">'
+                         r"([^<·]*)", html.unescape(client.get("/inspecteur/").text))
+    labels = {label.strip() for _value, label in figures}
+    assert {"initiative", "silence choisi", "échec"} <= labels, labels  # rien de tout ça aujourd'hui : zéro
+    for value, label in figures:  # le premier mot au pluriel au-delà de 1 seulement
+        assert label.split(" ", 1)[0].endswith("s") == (int(value) > 1), (value, label)
+
+
 def test_an_episode_toward_no_one_says_nothing_of_whom():
     """Une séance de travail ne s'adresse à personne : sa ligne ne dit plus « vers personne en particulier » (« — »,
     que la liste de l'accueil tait) ; « n'importe qui de présent » reste dit (C1-10)."""

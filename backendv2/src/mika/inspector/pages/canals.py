@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.droits_tables import canal_instances, choices, one_page, rows_of, table_args
+from mika.inspector.pages.rights_tables import canal_instances, choices, one_page, rows_of, table_args
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.forms import Knob

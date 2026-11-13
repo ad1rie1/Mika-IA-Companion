@@ -39,12 +39,12 @@ from mika.app.handmade.subjects.parts import (
 )
 from mika.app.handmade.tabs import text
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.plugins.email import READ_AFTER_S, WAITING, params_of
-from mika.plugins.email.console.accounts import signin_note
-from mika.plugins.email.console.common import VOICE_LABEL, box_link, clip, draft_state, mail_key, resolve
+from mika.plugins.email.inspect.accounts import signin_note
+from mika.plugins.email.inspect.common import VOICE_LABEL, box_link, clip, draft_state, mail_key, resolve
 
 ACCOUNT, MAIL, DRAFT = "compte", "mail", "brouillon"
 #: le fil d'un mail, à côté du message : ses premiers messages
@@ -154,7 +154,7 @@ class AccountFiche(Overview):
                       "sync": look.ago(f.last_sync) if f.last_sync else "jamais relu",
                       "href": render.href(box_link(f.label, account=key, folder=f.name), ui.env())} for f in folders],
             voice=VOICE_LABEL.get(info.voice, info.voice), sender=info.sender_name or info.display_name,
-            signature=bool(info.signature.strip()), voice_tab=fiche_url(ACCOUNT, key, "voix"),
+            signature=bool(info.signature.strip()), voice_tab=subject_url(ACCOUNT, key, "voix"),
             details=list(info.details), write=[drawn_blocks.shape_block(d) for d in items if d["t"] == "action"],
             box=render.href(box_link("", account=key), ui.env()))
 
@@ -227,12 +227,12 @@ class MailFiche(Overview):
                 total = page.total
                 thread = [{"subject": clip(m.subject, 90) or "(sans objet)", "who": clip(m.who, 60), "sent": m.sent,
                            "when": look.day(m.date) if m.date else "", "here": m.ref == ref,
-                           "href": fiche_url(MAIL, mail_key(m.ref))} for m in page.items]
+                           "href": subject_url(MAIL, mail_key(m.ref))} for m in page.items]
         return draw("mail.html", forms=forms or {}, tables="cards",
                     message=[drawn_blocks.shape_block(d) for d in rendered(ui, blocks, query)],
                     known=side_view(ui, "email", "remarque", key, "remarque"),
                     thread=thread if total > 1 else [], more=total > len(thread), total=total,
-                    thread_tab=fiche_url(MAIL, key, "fil"), known_tab=fiche_url(MAIL, key, "remarque"),
+                    thread_tab=subject_url(MAIL, key, "fil"), known_tab=subject_url(MAIL, key, "remarque"),
                     read_after=READ_AFTER_S.get(params_of(ui.kernel.mind.frame()).read_on_open))
 
 
@@ -320,7 +320,7 @@ class DraftFiche(Overview):
             envelope={"from": shown.sender, "to": shown.to, "cc": shown.cc, "subject": shown.subject}
             if shown is not None else None,
             answered={"text": clip(answered.subject, 100) or "(sans objet)",
-                      "href": fiche_url(MAIL, mail_key(answered.ref))} if answered is not None else None,
+                      "href": subject_url(MAIL, mail_key(answered.ref))} if answered is not None else None,
             blocked=shown.blocked if shown is not None else "",
             text=[d for d in items if d["t"] in ("prose", "nav") or _long(d)],
             actions=[d for d in items if d["t"] in ("action", "disclosure")],
@@ -355,7 +355,7 @@ def _why(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> M
     ref = got.reply_to if got is not None and got.reply_to else seen.mail if seen is not None else ""
     m = port.cached_one(ref) if port is not None and ref else None
     look = Look.of(ui, DAY)
-    origin = {"subject": clip(m.subject, 160) or "(sans objet)", "sender": m.sender, "href": fiche_url(MAIL, mail_key(m.ref)),
+    origin = {"subject": clip(m.subject, 160) or "(sans objet)", "sender": m.sender, "href": subject_url(MAIL, mail_key(m.ref)),
               "when": look.day(m.date) if m.date else "", "opening": excerpt(m.body, OPENING)} if m is not None else None
     link = facts.get("le mail")
     return draw("brouillon_pourquoi.html", tables="cards", origin=origin,

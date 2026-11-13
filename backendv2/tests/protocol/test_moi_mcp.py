@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from mika.app.moi import mcp as mcp_moi
+from mika.app.me import mcp as mcp_moi
 from mika.ports.mcp import LiveTool, ToolReview
 from tests.protocol.test_moi_mail import API, login, post, second_person
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée

@@ -79,6 +79,8 @@ def test_the_accounts_page_says_comptes_and_an_account_is_an_object_view(world):
     # le fil : la rubrique, la destination, le compte par son nom (avant : « Réglages / Comptes opérateurs /
     # Comptes / bea ») ; le titre : son nom et ses étiquettes, jamais « Modifier · » ni l'identifiant interne
     assert crumbs(shown) == ["Réglages", "Comptes", "Béa Martin"]
+    # le niveau de la liste y ramène (C1-04)
+    assert '<a href="/inspecteur/reglages/comptes">Comptes</a>' in shown.split('<nav class="crumbs"', 1)[1].split("</nav>", 1)[0]
     title = shown.split('<div class="page-title-row">', 1)[1].split("</div>", 1)[0]
     assert "<h1>Béa Martin</h1>" in title and ">utilisateur<" in title and ">actif<" in title
     assert "Modifier ·" not in shown and bea.handle not in text(shown)
@@ -106,6 +108,10 @@ def test_a_console_token_is_shown_once_audited_and_survives_a_new_password(world
     first = page(client, where)
     raw = RAW_TOKEN.findall(first)
     assert len(raw) == 1 and "Montré une seule fois" in first and "Jeton créé" in first
+    # « Copier le jeton » vise le jeton montré ; console.js le montre (caché sans script, C9-05)
+    assert f'<pre class="hm-code" id="acc-token-value">{raw[0]}</pre>' in first
+    assert re.search(r'<button type="button" class="btn small" data-copy="acc-token-value"[^>]* hidden>Copier le jeton<',
+                     first)
     assert RAW_TOKEN.search(page(client, where)) is None  # une seule fois
     [token] = client.portal.call(live.accounts.tokens, bea.id)
     assert (token.label, token.client, token.source) == ("Unity du salon", "screen", "console")
@@ -214,3 +220,31 @@ def test_a_persons_fiche_leads_to_her_account_and_lists_her_services_and_shares(
     # l'ancienne adresse de Teams rouvre son sous-onglet
     moved = client.get("/inspecteur/fiche/person/user_1?onglet=teams", follow_redirects=False)
     assert moved.status_code == 303 and moved.headers["location"].endswith("#teams")
+
+
+def test_a_person_with_only_a_share_or_a_service_has_her_accounts_tab(world):  # noqa: F811
+    """L'onglet Comptes de sa fiche ne dépend plus d'une boîte à elle (C9-02, ADR 0219) : qui reçoit seulement un
+    partage, ou n'a branché qu'un service, y retrouve ses sous-onglets ; le compte y mène."""
+    client, live, _ = world
+    bootstrap(client)
+    lea = second_person(client, live)
+    live.kernel.ports["mail"] = mailbox(1)
+    fiche = f"/inspecteur/fiche/person/{lea}"
+    assert f"{fiche}?onglet=boites" not in page(client, fiche)  # rien à elle, rien pour elle : pas d'onglet
+    # « Personnel », à toi, partagée avec Léa (lire) : aucune boîte à elle, mais un partage
+    client.portal.call(live.kernel.set_params, "email", EmailParams(
+        owners={"perso": "", "pro": ""}, shares={"perso": {f"personne:{lea}": "lire"}}))
+    assert f"{fiche}?onglet=boites" in page(client, fiche)
+    tab = page(client, f"{fiche}?onglet=boites")
+    assert re.findall(r'<section id="([a-z]+)" class="stack" data-pane', tab) == ["boites", "services", "partages"]
+    assert "aucune boîte à son nom" in text(tab) and "Personnel" in text(tab.split('id="partages"', 1)[1])
+    # sans partage, un service qu'elle a branché suffit ; son compte mène à l'onglet
+    client.portal.call(live.kernel.set_params, "email", EmailParams(owners={"perso": "", "pro": ""}))
+    assert f"{fiche}?onglet=boites" not in page(client, fiche)
+    login(client, "lea")
+    assert moi_post(client, "/mcp/plug", SERVICE).status_code == 200
+    login(client, "adrien")
+    tab = page(client, f"{fiche}?onglet=boites")
+    assert "factures" in text(tab.split('id="services"', 1)[1].split('id="partages"', 1)[0])
+    facts = page(client, f"{ACCOUNTS}?compte=2").split('<div class="head-facts">', 1)[1].split("</div>", 1)[0]
+    assert f"{fiche}?onglet=boites" in facts

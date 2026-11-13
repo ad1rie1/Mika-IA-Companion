@@ -1,7 +1,7 @@
 /**
  * Paramètres › Partages (ADR 0188) : ce que tu partages — tes boîtes, tes comptes Teams, tes services — avec qui et
  * à quel niveau (lire ; lire et préparer ; s'en servir), ce qu'on te partage, et « Partager… ». Seul le propriétaire
- * partage, et seulement avec une personne qui a un compte (`app/moi/shares.py`).
+ * partage, et seulement avec une personne qui a un compte (`app/me/shares.py`).
  */
 import { ApiError } from "../../api/moi";
 import { setShare, type GivenShare, type ShareKind, type ShareLevel } from "../../api/shares";

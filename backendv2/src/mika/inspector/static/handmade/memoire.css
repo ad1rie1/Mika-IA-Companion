@@ -32,6 +32,7 @@
 .belief-origin.o-told::before { background: var(--info); }
 .belief-origin.o-observed::before { background: var(--ok); }
 .belief-origin.o-inferred::before { border: 1.5px solid var(--muted); background: transparent; }
+.belief-origin.o-read::before { background: var(--accent); }
 .belief-replaces { color: var(--muted); }
 
 /* ── Promesses : l'échéance à gauche ; tenues et abandonnées côte à côte ── */

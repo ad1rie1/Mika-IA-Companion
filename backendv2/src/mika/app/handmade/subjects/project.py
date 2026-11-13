@@ -43,7 +43,7 @@ from mika.faculties.projects.access import STEER_WORDS, who_named
 from mika.faculties.projects.actions import pending_of
 from mika.faculties.projects.faculty import access_of, in_force, project_at
 from mika.inspector import render
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env
 from mika.kernel.inspect import Pager
 from mika.plugins.forge import app_tool_names
@@ -66,7 +66,7 @@ TILE_TABS = {"objectifs": "objectifs", "executions": "executions", "decisions": 
 
 
 def _tab(key: str, tab: str) -> str:
-    return fiche_url(KIND, key, tab)
+    return subject_url(KIND, key, tab)
 
 
 def _banner(got: Got, key: str, pending: list[Any], notes: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -282,4 +282,4 @@ class ProjectFiche(Overview):
             rows=rows, default=default, steers=c.STEERS, policies=POLICY_CHOICES, steer_words=STEER_WORDS,
             form=_form(forms, "projects.acces"), never_set=p.access is None, has_apps=bool(tools),
             pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
-            behaviour_tab=fiche_url(KIND, key, "comportement")))
+            behaviour_tab=subject_url(KIND, key, "comportement")))

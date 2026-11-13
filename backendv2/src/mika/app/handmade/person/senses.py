@@ -12,7 +12,7 @@ from markupsafe import Markup
 
 from mika.app.handmade import Look
 from mika.app.handmade.tabs.senses import conversation_of, fix_of, offers_of, reader_of, said_of, slice_of
-from mika.inspector.pages.subjects import fiche_url
+from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
 from mika.plugins.location.inspect import by_person
@@ -41,6 +41,6 @@ def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, st
         return None
     fixes = by_person(s).get(key, [])
     texts = look.texts([r for f in fixes for r in (f.coords_ref, f.label_ref)])
-    said = said_of(look, query, key, fiche_url("person", key, "position"))
+    said = said_of(look, query, key, subject_url("person", key, "position"))
     return Markup(env.get_template("handmade/person/tabs/position.html").render(
         fixes=[fix_of(look, f, texts) for f in fixes], said=said, name=look.name(key)))

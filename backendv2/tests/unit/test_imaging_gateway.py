@@ -18,7 +18,6 @@ import asyncio
 import pytest
 
 from mika.adapters.imaging import gateway as gateway_mod
-from mika.adapters.imaging.fake import FakeImageBackend
 from mika.adapters.imaging.gateway import ImageGateway, ImageTrace
 from mika.kernel.clock import ManualClock
 from mika.kernel.slots import PREEMPTED
@@ -34,6 +33,7 @@ from mika.ports.imaging import (
     ImageResult,
     Picture,
 )
+from tests.fixtures.fake_images import FakeImageBackend
 
 HOSTED = ImageCaps(edit=True, max_refs=16, transparent=True)
 DALLE = ImageCaps()
