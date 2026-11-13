@@ -1,4 +1,4 @@
-"""Ce que partagent les fiches dessinées des objets (``fiches.py``, ADR 0121) : leur en-tête, leur feuille, les blocs
+"""Ce que partagent les fiches dessinées des objets (``subjects/``, ADR 0121) : leur en-tête, leur feuille, les blocs
 d'un onglet rendus comme la console les numérote, et le dessin d'un gabarit.
 
 Une fiche dessinée reprend les formulaires que la console a préparés pour l'onglet (``Forms``, par emplacement) : ses
@@ -78,23 +78,13 @@ def side_view(ui: UI, owner: str, name: str, key: str, namespace: str) -> list[d
     if spec is None:
         return []
     got = safely(lambda: ui.inspection.run(spec, {}, ui.when_long, subject=key), f"onglet {owner}/{name}", [])
-    return [shaped(d) for d in render.blocks(got, ui.env(), {}, namespace=namespace)]
+    return [drawn_blocks.shape_block(d) for d in render.blocks(got, ui.env(), {}, namespace=namespace)]
 
 
 def rendered(ui: UI, blocks: Sequence[Any], query: Mapping[str, str]) -> list[dict[str, Any]]:
     """Les blocs d'un onglet, rendus et numérotés comme la console les a rendus pour préparer leurs formulaires : un
     dessin qui en reprend un (une action, un repli) y retrouve le sien. Alignés sur ``blocks``, un pour un."""
     return render.blocks(blocks, ui.env(), dict(query))
-
-
-def shaped(item: dict[str, Any]) -> dict[str, Any]:
-    """Un bloc rendu, prêt pour le vocabulaire des pages dessinées (une liste en cartes)."""
-    return drawn_blocks.shape_block(item)
-
-
-def whole(ui: UI, blocks: Sequence[Any], query: Mapping[str, str], forms: Mapping[str, Any] | None) -> Any:
-    """Un onglet de la faculté, dessiné bloc par bloc (rien à lui : un onglet secondaire de la fiche)."""
-    return drawn_blocks.page(ui, blocks, query, forms=forms)
 
 
 def texts(ui: UI, refs: Sequence[str]) -> dict[str, str]:

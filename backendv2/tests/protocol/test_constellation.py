@@ -63,7 +63,11 @@ def test_only_an_operator_sees_her_memory(world):  # noqa: F811
     async def guest():
         account = await live.accounts.create("bea", "un-autre-mot-de-passe", operator=False)
         return await live.accounts.open_session(account)
-    client.cookies.set("sessionid", client.portal.call(guest))
+    token = client.portal.call(guest)
+    # httpx 0.28 ajoute un second cookie au lieu de remplacer celui que le serveur a posé : la requête partirait avec
+    # la session de l'opératrice aussi, et la page s'ouvrirait pour elle, pas pour l'invitée
+    client.cookies.delete("sessionid")
+    client.cookies.set("sessionid", token)
     assert client.get(BASE, follow_redirects=False).status_code == 303
     assert client.get(BASE + "/carte").status_code == 401
 

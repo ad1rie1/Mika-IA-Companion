@@ -516,7 +516,7 @@ def _plan_progress(g: Goal, p: Any) -> Meter:
 
 
 #: la prochaine séance d'un but, dite par ``next_session`` dans toutes ses vues ; la fiche dessinée la lit dans
-#: l'en-tête que la faculté déclare (``app/handmade/goal.py``)
+#: l'en-tête que la faculté déclare (``app/handmade/subjects/goal.py``)
 NEXT_SESSION = "prochaine séance"
 
 

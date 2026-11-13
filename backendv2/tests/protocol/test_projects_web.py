@@ -119,6 +119,8 @@ def test_only_an_operator_decides_and_only_an_owner_sees_the_queue(world):  # no
         return await live.accounts.open_session(account)
 
     key = client.portal.call(bea)
+    # httpx 0.28 ajoute un second cookie au lieu de remplacer celui de l'opératrice : on le retire d'abord
+    client.cookies.delete("sessionid")
     client.cookies.set("sessionid", key)
     r = client.post(f"/api/projects/pending/{action}/approve", json={}, headers=csrf(client))
     assert r.status_code == 403

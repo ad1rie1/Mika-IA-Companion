@@ -61,7 +61,7 @@ def conversations(got: Got) -> Markup | None:
     table = got.table("Ses conversations")
     if table is None:
         notes = got.notes()
-        return got.draw("handmade/conversations/par_personne.html", t=None, items=[], notes=notes) if notes else None
+        return got.draw("handmade/fil/par_personne.html", t=None, items=[], notes=notes) if notes else None
     look = Look.of(got.ui, DAY)
     online = presences(look)
     items = [_person(x, look, online) for x in got.lines("Ses conversations")]
@@ -71,7 +71,7 @@ def conversations(got: Got) -> Markup | None:
     lede = (f"{waiting} avec une question sans réponse{where} · " if waiting else "") \
         + (f"le dernier message où « {said} » a été dit" if said else "la plus récente d'abord") \
         + " ; une ligne s'ouvre sur leur conversation"
-    return got.draw("handmade/conversations/par_personne.html", t=table, items=items, notes=[], lede=lede)
+    return got.draw("handmade/fil/par_personne.html", t=table, items=items, notes=[], lede=lede)
 
 
 # ── Questions sans réponse ────────────────────────────────────────────────
@@ -118,7 +118,7 @@ def questions(got: Got) -> Markup | None:
     table = got.table("Questions sans réponse")
     if table is None:
         notes = got.notes()
-        return got.draw("handmade/conversations/questions.html", t=None, items=[], notes=notes) if notes else None
+        return got.draw("handmade/fil/questions.html", t=None, items=[], notes=notes) if notes else None
     lines = got.lines("Questions sans réponse")
     instants = _instants(got, "Questions sans réponse", "reçue")
     now = got.env.now
@@ -126,7 +126,7 @@ def questions(got: Got) -> Markup | None:
     oldest = min((a for a in instants if a), default=0)
     where = " sur cette page" if paged(table) else ""
     lede = f"la plus ancienne{where} attend depuis {_wait(now - oldest)} · la plus récente d'abord" if oldest else ""
-    return got.draw("handmade/conversations/questions.html", t=table, items=items, notes=[], lede=lede)
+    return got.draw("handmade/fil/questions.html", t=table, items=items, notes=[], lede=lede)
 
 
 # ── Ses réponses jugées ───────────────────────────────────────────────────
@@ -155,7 +155,7 @@ def judged(got: Got) -> Markup | None:
             "should": "" if should == "—" else should, "why": render.href(row.href) if row.href else "",
         })
     pager = render.block(table, shown, got.query).get("pager")
-    return Markup(env.get_template("handmade/conversations/judged.html").render(
+    return Markup(env.get_template("handmade/fil/judged.html").render(
         verdicts=verdicts, pager=pager, empty=table.empty))
 
 

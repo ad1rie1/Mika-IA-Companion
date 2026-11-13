@@ -1,13 +1,13 @@
-"""Personnes (``app/handmade/people.py``), à travers le vrai serveur : la page d'entrée de la destination, dessinée —
-une carte par personne (ce qu'elle est pour elle, ce qu'elle ressent, ce qui se passe entre elles), qui est là ; on
-cherche, on filtre ; les onglets des facultés restent, sous « Le détail »."""
+"""Personnes (``app/handmade/tabs/people.py``), à travers le vrai serveur : la page d'entrée de la destination,
+dessinée — une carte par personne (ce qu'elle est pour elle, ce qu'elle ressent, ce qui se passe entre elles), qui est
+là ; on cherche, on filtre ; les onglets des facultés restent, sous « Le détail »."""
 
 from __future__ import annotations
 
 import html
 import re
 
-from mika.app.handmade import people
+from mika.app.handmade.tabs import people
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_now_page import chat
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée

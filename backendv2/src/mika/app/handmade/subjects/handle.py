@@ -3,7 +3,8 @@
 Par où la personne lui écrit (le canal, ce qu'il prouve, son compte, si elle peut lui écrire d'elle-même), qui écrit
 d'ici (pour qui il parle, ses droits de propriétaire, ses autres moyens de communication), ce que ça ouvre (en privé, en
 public, une ligne par sorte de chose) et le verdict pas à pas, replié. Le verdict est celui de la faculté ``identity``
-(ses faits ``IDENTITY`` et ``DISCLOSURE``), lu par ses propres fonctions : rien n'est recalculé autrement. Son fil se
+(ses faits ``IDENTITY`` et ``DISCLOSURE``), lu par ses propres fonctions : rien n'est recalculé autrement (``view_of``,
+``known_as``, ``handles_of``, déclarés : ADR 0218). Son fil se
 dessine en bulles, comme les Échanges ; ses onglets « Verdict » et « Ses autres moyens de communication », qu'elle
 résume, passent sous
 « Le détail ».

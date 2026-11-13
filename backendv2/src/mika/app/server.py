@@ -69,12 +69,12 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
 from mika.app.forge_settings import ForgeSettingsStore
-from mika.app.handmade import access, approval_sources, fiches, handles, projects, rights, servers, waiting
+from mika.app.handmade import access, approval_sources, rights, subjects, waiting
 from mika.app.handmade.home import HomePage
 from mika.app.handmade.now import NowPage
 from mika.app.handmade.pages import DRAWN
-from mika.app.handmade.people import PeoplePage
 from mika.app.handmade.person import PersonOverview
+from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
 from mika.app.logs import RedactingFilter, configure_logging, redact  # noqa: F401 — réexportés pour les tests
@@ -503,9 +503,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       parameters=settings_sections.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
                       backups=lambda: backup.overview(data), relay=live.relay, lending=lending, world=world_hub,
-                      overviews={"person": person_overview, servers.KIND: servers.ServerOverview(),
-                                 handles.KIND: handles.HandleOverview(), projects.KIND: projects.ProjectFiche(),
-                                 **fiches.OVERVIEWS},
+                      overviews={"person": person_overview, **subjects.OVERVIEWS},
                       drawn=DRAWN, approval_sources=approval_sources.sources, queue=waiting.QUEUE,
                       nameable=access.people_with_accounts, canal_instances=access.instances_from_settings,
                       family_href=access.family_href,

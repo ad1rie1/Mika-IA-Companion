@@ -81,7 +81,7 @@
 .elsewhere-id code { font-size: 11px; }
 .elsewhere-open { margin: 2px 0 0; font-size: 13px; }
 
-/* La fiche d'un service branché, « En bref » (app/handmade/servers.py) : ses tuiles, ce qu'elle en lit, ses outils. */
+/* La fiche d'un service branché, « En bref » (app/handmade/subjects/server.py) : ses tuiles, ce qu'elle en lit, ses outils. */
 .server { display: grid; gap: 18px; }
 .server-alert { margin: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px; }
 .server-alert.warn { background: var(--warn-bg); color: var(--warn); }

@@ -118,7 +118,7 @@
   .prj-runs > li { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Un projet › Vue d'ensemble (app/handmade/projects.py, ADR 0177) : la vue d'un objet de la maquette — un bandeau,
+/* Un projet › Vue d'ensemble (app/handmade/subjects/project.py, ADR 0177) : la vue d'un objet de la maquette — un bandeau,
    une bande de chiffres à filets (les dernières exécutions en barres), puis des tuiles en trois colonnes, chacune
    vers son onglet. Couleurs : les jetons ; une barre prend sa couleur de sa classe. */
 .prj-ov { gap: 16px; }
@@ -176,7 +176,7 @@
 .prj-ov-dl dt { color: var(--muted); }
 .prj-ov-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
-/* Un projet › Objectifs, Décisions (app/handmade/projects.py, gabarits fiche_*.html et _fiche.html, ADR 0177) : une
+/* Un projet › Objectifs, Décisions (app/handmade/subjects/project.py, gabarits fiche_*.html et _fiche.html, ADR 0177) : une
    entrée par objectif ou par décision — son numéro, son titre, ses étiquettes, ses faits en une ligne, ses boutons à
    leur droite ; un texte cité (compte rendu, pourquoi : long, quatre lignes que « lire la suite » déplie sans
    script) ; le formulaire d'ajout en colonne à côté sur un grand écran. Une décision remplacée ou retirée s'estompe. */

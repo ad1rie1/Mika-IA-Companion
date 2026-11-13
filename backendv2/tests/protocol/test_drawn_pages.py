@@ -13,12 +13,14 @@ import pytest
 
 import mika
 import mika.app.handmade as handmade
+from mika.app.console import NAVIGATION
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade import pages, plain
 from mika.app.handmade.lists import text as cell_text
 from mika.app.handmade.tabs import Tab
 from mika.app.handmade.tabs import text as tabs_text
 from mika.contracts import self_
+from mika.inspector.catalog import destinations
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.inspect import Badge, Ref, Text
 from tests.fixtures.console_html import ConsoleHTML
@@ -70,14 +72,46 @@ def test_a_block_is_shaped_under_one_name():
 
 
 def test_nothing_cites_a_tab_module_that_moved():
-    """Les modules repris dans ``tabs/`` (K0-10) : ni un gabarit, ni une feuille, ni le code ne renvoient à eux. Ce sont
-    justement les commentaires qu'on lit ici, pour savoir où aller : le texte, pas l'arbre du code."""
-    gone = re.compile(r"app/handmade/(?:nights|conversations|mail|running|tools|senses|system)\.py")
+    """Les modules repris dans ``tabs/`` ou renommés (K0-10, K0-11), les dossiers de gabarits et les feuilles renommés
+    sous leur destination (K11-10) : ni un gabarit, ni une feuille, ni le code ne renvoient à eux. Ce sont justement
+    les commentaires qu'on lit ici, pour savoir où aller : le texte, pas l'arbre du code."""
+    gone = re.compile(r"app/handmade/(?:nights|conversations|mail|running|tools|senses|system|people)\.py"
+                      r"|app/handmade/person/memoire\.py|handmade/(?:conversations|mail|system|people)/"
+                      r"|\b(?:tools|senses|rights|system|mail|nights|people)\.css\b")
     root = Path(mika.__file__).parent
     cited = [f"{path.relative_to(root)}:{at}" for path in sorted(root.rglob("*"))
              if path.suffix in (".py", ".html", ".css", ".js") and "__pycache__" not in path.parts
              for at, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if gone.search(line)]
     assert cited == []
+
+
+#: les dossiers de gabarits et les feuilles d'une page à part, pas d'une destination : la console et ses macros
+#: (``shared``, ``base``), l'accueil, « En ce moment », la fiche d'une personne et celles des objets (``fiches``,
+#: ``projet-git``), les droits (Réglages › Droits et Canaux, Outils › Ce qu'elle peut faire), la recherche, un
+#: événement, un épisode, une parole
+NOT_A_DESTINATION = {"shared", "base", "home", "now", "person", "fiches", "projet-git", "droits", "recherche",
+                     "evenement", "episode", "parole"}
+
+
+def test_templates_and_sheets_are_named_after_their_destination():
+    """K11-10 : un onglet dessine son gabarit ``handmade/<destination>/<onglet>.html`` et lit la feuille
+    ``handmade/<destination>.css`` (ou ``<destination>_<partie>.css``), sous la clé de sa destination — pas sous un
+    nom anglais à côté (``conversations/`` pour fil, ``mail.css`` pour courrier), ni dans un second dossier ou une
+    seconde feuille de même sens (``people/`` à côté de ``personnes/``, ``nights.css`` à côté de ``pensees.css``)."""
+    named = set(destinations(NAVIGATION)) | NOT_A_DESTINATION
+    inspector = Path(mika.__file__).parent / "inspector"
+    folders = {p.name for p in (inspector / "templates" / "handmade").iterdir() if p.is_dir()}
+    sheets = {p.stem.split("_")[0] for p in (inspector / "static" / "handmade").glob("*.css")}
+    assert sorted(folders - named) == []
+    assert sorted(sheets - named) == []
+
+
+def test_a_destination_is_drawn_by_one_module():
+    """K0-10 : la page d'entrée d'une destination vit avec ses onglets, dans son module de ``tabs/`` ; aucun module de
+    ``app/handmade/`` ne porte le nom d'un module de ``tabs/`` (``people.py`` à côté de ``tabs/people.py``)."""
+    root = Path(handmade.__file__).parent
+    beside = {p.stem for p in root.glob("*.py")} & {p.stem for p in (root / "tabs").glob("*.py")}
+    assert sorted(beside - {"__init__"}) == []
 
 
 def test_every_drawn_tab_is_a_tab():

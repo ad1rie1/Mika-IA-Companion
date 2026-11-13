@@ -4,7 +4,7 @@
    échecs, sa part de cache), tous les appels (la pagination de la console) et le détail jour par jour. Sans registre
    des appels : sa note. #}
 {% import "handmade/shared/tab.html" as tab with context %}
-{% import "handmade/system/tab_macros.html" as sx %}
+{% import "handmade/systeme/tab_macros.html" as sx %}
 {% macro usage(g) -%}
 <section class="sys-calls-split" aria-labelledby="{{ g.id }}">
   <h3 id="{{ g.id }}">{{ g.title }} <span class="now-muted">· 7 jours</span></h3>

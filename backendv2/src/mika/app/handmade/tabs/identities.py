@@ -26,7 +26,7 @@ from urllib.parse import quote, urlencode
 
 from markupsafe import Markup
 
-from mika.app.handmade.handles import CHANNELS
+from mika.app.handmade.subjects.handle import CHANNELS
 from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs, text, tiles
 from mika.app.handmade.tabs.people import person_of
 from mika.contracts.identity import DENIED, VOUCHED

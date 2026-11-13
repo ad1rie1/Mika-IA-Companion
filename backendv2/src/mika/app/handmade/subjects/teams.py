@@ -19,7 +19,8 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade import Look, excerpt
-from mika.app.handmade.fiche_parts import STYLES, draw, fact, rendered, shaped, tag, texts, tone
+from mika.app.handmade import blocks as drawn_blocks
+from mika.app.handmade.subjects.parts import STYLES, draw, fact, rendered, tag, texts, tone
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
@@ -150,7 +151,7 @@ class ConversationFiche(Overview):
         items = rendered(ui, blocks, query)
         return draw("teams_fil.html", forms=forms or {}, tables="cards", days=_days(look, thread, s),
                     count=len(thread), drafts=mine, under_way=s is not None and under_way(s, account, conversation),
-                    ask=[shaped(d) for d in items if d["t"] in ("disclosure", "action")])
+                    ask=[drawn_blocks.shape_block(d) for d in items if d["t"] in ("disclosure", "action")])
 
 
 class ReplyFiche(Overview):
@@ -213,5 +214,5 @@ class ReplyFiche(Overview):
             steps=_journey(ui, look, seen) if seen is not None else [],
             mode=MODE_LABEL.get(seen.mode, seen.mode) if seen is not None else "",
             conversation=fiche_url(CONVERSATION, conversation_key(got.account, got.conversation)),
-            actions=[shaped(d) for d in items if d["t"] in ("action", "disclosure")],
+            actions=[drawn_blocks.shape_block(d) for d in items if d["t"] in ("action", "disclosure")],
             notes=[d for d in items if d["t"] == "note" and not waiting])

@@ -83,6 +83,6 @@ def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str])
     got = render.block(table, shown, query)
     # la même liste en tableau, filtres gardés : la console la rend (``wants_table``)
     as_table = "?" + urlencode({**{k: v for k, v in query.items() if k != "flash"}, f"vue_{got['id']}": "table"})
-    return Markup(env.get_template("handmade/conversations/echanges.html").render(
+    return Markup(env.get_template("handmade/fil/echanges.html").render(
         name=look.name(key) if key else "", days=days, counts=counts, summaries=summaries, pager=got.get("pager"),
         empty=table.empty, as_table=as_table))

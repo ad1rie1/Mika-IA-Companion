@@ -5,7 +5,7 @@
    archives gardées, avec les commandes pour sauvegarder, vérifier, restaurer — au-dessus de ce que garde sa base de vie
    (une barre par table). Un serveur qui ne mesure pas son dossier : ce que garde sa base à gauche. #}
 {% import "handmade/shared/tab.html" as tab with context %}
-{% import "handmade/system/tab_macros.html" as sx %}
+{% import "handmade/systeme/tab_macros.html" as sx %}
 {% macro kept_card() %}
     <section class="now-card" id="{{ kept.id }}" aria-labelledby="sys-store-kept">
       {{ tab.head(kept.title, "sys-store-kept", none, "Sa vie : à sauvegarder. Les projections jetables vivent à part et se reconstruisent depuis le journal.") }}

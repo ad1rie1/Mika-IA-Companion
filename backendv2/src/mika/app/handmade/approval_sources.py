@@ -18,9 +18,9 @@ from typing import Any
 from urllib.parse import urlencode
 
 from mika.app.handmade import person_href
-from mika.app.handmade.mail_fiches import DRAFT
-from mika.app.handmade.servers import KIND as SERVER
-from mika.app.handmade.teams_fiches import CONVERSATION, REPLY
+from mika.app.handmade.subjects.mail import DRAFT
+from mika.app.handmade.subjects.server import KIND as SERVER
+from mika.app.handmade.subjects.teams import CONVERSATION, REPLY
 from mika.contracts import email as email_c
 from mika.contracts import phone as phone_c
 from mika.contracts import teams as teams_c

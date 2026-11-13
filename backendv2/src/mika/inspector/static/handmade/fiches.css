@@ -1,4 +1,4 @@
-/* Les fiches dessinées des objets (app/handmade/fiches.py, ADR 0121) : un but, un réveil, une conversation et une
+/* Les fiches dessinées des objets (app/handmade/subjects/, ADR 0121) : un but, un réveil, une conversation et une
    réponse Teams, une boîte aux lettres (et sa voix), un mail (son fil, ce qu'elle en sait), un brouillon (pourquoi, son
    historique). Sur le vocabulaire commun (base.css) ; aucune couleur ni longueur en ligne (CSP) : une jauge est un
    attribut SVG, un ton une classe. */

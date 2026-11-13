@@ -20,6 +20,13 @@
   comme les règles d'un pare-feu, puis la ligne par défaut, obligatoire. Les outils qu'une ligne peut cocher sont ceux
   des apps du projet, lus dans la Forge (une app vit dans un projet, ADR 0104) ; chaque bouton envoie tout le tableau
   (``projects.acces``).
+
+Ce que la fiche lit par les fonctions de la faculté, à côté de sa vue (ADR 0218, déclaré dans
+``tests/protocol/test_drawn_fiches.py``) : le projet lui-même (``project_at``) ; pour la vue d'ensemble, les demandes
+qui attendent ton accord (``pending_of`` : le bandeau les compte et mène à la première) et le nombre de ses décisions en
+vigueur (``in_force`` : sa vue n'en montre que les dernières), et elle compte ses objectifs (``_objectives`` : sa vue
+les dit en une phrase) — deux lectures à reprendre sur ses blocs ; pour « Accès », ses lignes (``access_of``) et le nom
+de qui elles nomment (``who_named``), qu'un formulaire édite et que sa vue ne porte pas.
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade.access import canal_choices, canal_instances, people_with_accounts, who_choices
-from mika.app.handmade.project_git import git_page
+from mika.app.handmade.subjects.project_git import git_page
 from mika.app.handmade.tabs import Got, Line, blank, lines, pairs, text
 from mika.contracts import projects as c
 from mika.faculties.projects.access import STEER_WORDS, who_named
@@ -220,7 +227,7 @@ class ProjectFiche(Overview):
 
     slug = ""
     title = "Vue d'ensemble"
-    styles = ("handmade/tools.css", "handmade/projets.css", "handmade/projet-git.css")
+    styles = ("handmade/outils.css", "handmade/projets.css", "handmade/projet-git.css")
     tabs = ("apercu", "objectifs", "decisions", "git", "acces")
     folded = ("acces", "carnet")
     folded_title = "Plus"

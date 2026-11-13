@@ -19,7 +19,7 @@ from markupsafe import Markup
 from mika.app.handmade.tabs import Got, Line, Tab, blank, number, pairs
 from mika.app.handmade.tabs.senses import HEAD, state
 
-STYLES = ("handmade/senses.css", "handmade/reveils.css")
+STYLES = ("handmade/sens.css", "handmade/reveils.css")
 
 
 def _endpoint(line: Line) -> dict[str, Any]:

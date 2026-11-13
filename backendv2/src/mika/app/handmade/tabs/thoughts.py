@@ -227,5 +227,5 @@ TABS: dict[str, Any] = {
     "pensees/pensees": Tab(pensees, *STYLES),
     "pensees/remarque": Tab(remarque, *STYLES),
     "pensees/attentes": Tab(attentes, *STYLES),
-    "pensees/nuits": Tab(nights, "handmade/nights.css"),
+    "pensees/nuits": Tab(nights, *STYLES),
 }

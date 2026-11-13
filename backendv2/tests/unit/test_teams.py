@@ -32,7 +32,7 @@ import pytest
 
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.app import composition
-from mika.app.handmade.teams_fiches import _journey
+from mika.app.handmade.subjects.teams import _journey
 from mika.app.mindport import KernelPort
 from mika.app.moi import form
 from mika.app.teams import TeamsDesk, batch_of, digest

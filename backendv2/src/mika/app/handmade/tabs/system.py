@@ -1,4 +1,4 @@
-"""Système : ses onglets, chacun dans sa forme (ADR 0177), sur la même feuille (``handmade/system.css``).
+"""Système : ses onglets, chacun dans sa forme (ADR 0177), sur la même feuille (``handmade/systeme.css``).
 
 Des pages d'exploitation, faites pour diagnostiquer : ce qui ne va pas d'abord, en un seul bandeau ; des chiffres ;
 puis les données denses en listes serrées, lisibles en colonnes.
@@ -96,7 +96,7 @@ from mika.runtime.boundary import Failed, call
 from mika.runtime.effects import MAX_ATTEMPTS, RETRY_BASE_S, RETRY_MAX_S, STALE_AFTER_S
 from mika.runtime.inspection import SLOW_US
 
-STYLES = ("handmade/system.css",)
+STYLES = ("handmade/systeme.css",)
 
 
 # ── Ce que partagent les onglets ──────────────────────────────────────────
@@ -195,7 +195,7 @@ def anomalies(got: Got) -> Markup | None:
         band = _band("warn", f"{_plural(total, 'anomalie')} depuis le démarrage : rien ne s'est arrêté, mais une "
                              "faculté ou l'arbitre n'a pas su traiter un événement.")
     items = [_trace(got, x, r) for x, r in zip(got.lines("Traces du journal"), raw_lines(got, traces), strict=False)]
-    return got.draw("handmade/system/anomalies.html", band=band, stats=stats, lists=lists, traces=traces,
+    return got.draw("handmade/systeme/anomalies.html", band=band, stats=stats, lists=lists, traces=traces,
                     trace_days=by_day(got, items), notes=[n for n in notes if n is not note])
 
 
@@ -229,7 +229,7 @@ def chronologie(got: Got) -> Markup | None:
                  "on": chosen == f"{fam}."}
                 for fam, n in sorted(Counter(x["family"] for x in items).items(), key=lambda kv: (-kv[1], kv[0]))]
     everything = {"href": "?" + urlencode(kept), "on": not chosen} if chosen else None
-    return got.draw("handmade/system/chronologie.html", t=t, days=days, families=families, everything=everything,
+    return got.draw("handmade/systeme/chronologie.html", t=t, days=days, families=families, everything=everything,
                     count=len(items), notes=got.notes())
 
 
@@ -252,7 +252,7 @@ def monde(got: Got) -> Markup | None:
     stats, notes = got.stats(), got.notes()
     sessions_t, loaded_t = got.table("Connexions"), got.table("Ce que chaque hôte a chargé")
     if stats is None:  # le monde n'est pas branché : sa note
-        return got.draw("handmade/system/monde.html", off=notes, band=None) if notes else None
+        return got.draw("handmade/systeme/monde.html", off=notes, band=None) if notes else None
     if sessions_t is None or loaded_t is None:
         return None
     sessions = []
@@ -270,7 +270,7 @@ def monde(got: Got) -> Markup | None:
                  f"{len(warns)} hôtes connectés disent qu'il leur manque quelque chose : ce sont des lieux ou des objets "
                  "que leur moteur ne sait pas montrer.") if warns else \
         _band("info", infos[0]["text"]) if infos else None
-    return got.draw("handmade/system/monde.html", off=None, band=band, stats=stats, sessions_t=sessions_t,
+    return got.draw("handmade/systeme/monde.html", off=None, band=band, stats=stats, sessions_t=sessions_t,
                     sessions=sessions, loaded_t=loaded_t, loaded=loaded)
 
 
@@ -347,7 +347,7 @@ def contributions(got: Got) -> Markup | None:
                   _num("Processus", totals["processes"], "qui tournent en fond"),
                   _num("Outils", totals["tools"], "que le modèle peut appeler"))
     notes = got.notes()
-    return got.draw("handmade/system/contributions.html", faculties=faculties, kinds=CONTRIBUTIONS,
+    return got.draw("handmade/systeme/contributions.html", faculties=faculties, kinds=CONTRIBUTIONS,
                     technical=TECHNICAL, band=band, lede=" ".join(n["text"] for n in notes))
 
 
@@ -361,7 +361,7 @@ def simulations(got: Got) -> Markup | None:
     """Système › Simulations : les rapports à gauche, celui qu'on lit à droite."""
     t, notes = got.table("Rapports"), got.notes()
     if t is None:  # pas de dossier de rapports : sa note
-        return got.draw("handmade/system/simulations.html", t=None, notes=notes) if notes else None
+        return got.draw("handmade/systeme/simulations.html", t=None, notes=notes) if notes else None
     chosen = str(got.query.get("fichier") or "")
     reports = []
     for x in got.lines("Rapports"):
@@ -370,7 +370,7 @@ def simulations(got: Got) -> Markup | None:
         ext = base.rpartition(".")[2].lower()
         reports.append({"name": base, "folder": folder, "path": name, "href": (x.get("fichier") or {}).get("href", ""),
                         "kind": REPORT_KINDS.get(ext, ext), "when": x.get("modifié"), "on": name == chosen})
-    return got.draw("handmade/system/simulations.html", t=t, reports=reports, chosen=chosen,
+    return got.draw("handmade/systeme/simulations.html", t=t, reports=reports, chosen=chosen,
                     reading=got.first("prose"), notes=notes)
 
 
@@ -386,7 +386,7 @@ def passerelle(got: Got) -> Markup | None:
     """Système › Moteur des modèles : le bandeau, les chiffres, chaque fournisseur, qui sert quoi."""
     stats, notes = got.stats(), got.notes()
     if stats is None:  # aucun modèle configuré : sa note
-        return got.draw("handmade/system/passerelle.html", band=_band(notes[0]["tone"], notes[0]["text"],
+        return got.draw("handmade/systeme/passerelle.html", band=_band(notes[0]["tone"], notes[0]["text"],
                                                                        f"{PREFIX}/reglages/fournisseurs",
                                                                        "Déclarer un fournisseur"),
                         stats=None) if notes else None
@@ -424,7 +424,7 @@ def passerelle(got: Got) -> Markup | None:
                            f"{', '.join(r['label'] for r in unserved)}. Chaque appel de ce rôle échoue.",
                  f"{PREFIX}/reglages/roles", "Qui sert quoi") if unserved else \
         _band("warn", f"{_plural(waiting, 'appel attend', 'appels attendent')} un créneau libre.") if waiting else None
-    return got.draw("handmade/system/passerelle.html", band=band, stats=stats, providers_t=providers_t,
+    return got.draw("handmade/systeme/passerelle.html", band=band, stats=stats, providers_t=providers_t,
                     providers=providers, roles_t=roles_t, served=sorted(served.items()), unserved=unserved,
                     notes=[n for n in notes if n.get("tone") != "danger"])
 
@@ -495,7 +495,7 @@ def appels(got: Got) -> Markup | None:
     stats, all_t, notes = got.stats(), got.table("Tous les appels"), got.notes()
     calls = got.ui.deps.calls
     if calls is None or stats is None or all_t is None:  # pas de registre : sa note
-        return got.draw("handmade/system/appels.html", off=notes) if notes else None
+        return got.draw("handmade/systeme/appels.html", off=notes) if notes else None
     ui, now = got.ui, got.env.now
 
     def day_of(at: int) -> str:
@@ -521,7 +521,7 @@ def appels(got: Got) -> Markup | None:
                      + (f", dont {num_fr(today.failures)} aujourd'hui" if today and today.failures else "")
                      + (f" — surtout : {worst}" if worst else "") + ".", "#calls-all", "Les voir")
     first = "calls-all" if got.query.get("page") else ""
-    return got.draw("handmade/system/appels.html", off=None, band=band, stats=stats, chart=chart, split=split,
+    return got.draw("handmade/systeme/appels.html", off=None, band=band, stats=stats, chart=chart, split=split,
                     all_t=anchored(all_t, "calls-all"), calls=[_call(x) for x in got.lines("Tous les appels")],
                     days_t=got.table("Par jour"),
                     panes=[p["id"] for p in subpanes([{"id": p} for p in CALL_PANES], first)])
@@ -544,7 +544,7 @@ def stockage(got: Got) -> Markup | None:
     band = _band(tone, f"Sauvegardes : {said}.") if tone in ("warn", "danger") else None
     archives = got.table("Archives")
     places = got.table(PLACES_TITLE)
-    return got.draw("handmade/system/stockage.html", band=band, bases=bases, kept=kept, tables=tables,
+    return got.draw("handmade/systeme/stockage.html", band=band, bases=bases, kept=kept, tables=tables,
                     places=places, place_items=[{"name": x.text("nom"), "size": x.text("place"),
                                                  "what": x.text("ce qu'il garde"), "kept": x.get("sauvegarde") or {}}
                                                 for x in got.lines(PLACES_TITLE)],
@@ -575,7 +575,7 @@ def operations(got: Got) -> Markup | None:
     items = [_operation(got, x, r) for x, r in zip(got.lines(OPERATIONS_TITLE), raw_lines(got, t), strict=False)]
     outcomes = Counter((x["outcome"].get("text", ""), x["outcome"].get("tone", "")) for x in items)
     who = Counter(x["by"] for x in items)
-    return got.draw("handmade/system/operations.html", t=t, days=by_day(got, items),
+    return got.draw("handmade/systeme/operations.html", t=t, days=by_day(got, items),
                     outcomes=[{"text": k, "tone": tone, "n": n} for (k, tone), n in outcomes.most_common() if k],
                     who=[{"name": k, "n": n} for k, n in who.most_common()], shown=len(items))
 
@@ -636,7 +636,7 @@ def vues(got: Got) -> Markup | None:
         panes[0]["groups"].append({"key": "", "label": "Sans place", "href": "", "views": lost})
         panes[0]["n"] += len(lost)
     owners = {v["owner"] or v["faculty"] for v in views}
-    return got.draw("handmade/system/vues.html", panes=[p for p in panes if p["n"]], total=len(views),
+    return got.draw("handmade/systeme/vues.html", panes=[p for p in panes if p["n"]], total=len(views),
                     faculties=len(owners), places=len({v["section"] for v in shown if v["section"]}),
                     subjects=len(subjects), hidden=sum(1 for v in views if v["hidden"]))
 
@@ -704,7 +704,7 @@ def etat(got: Got) -> Markup | None:
     recent = sorted(panes, key=lambda p: -p["seq"])
     notes = got.notes()
     note = next((n for n in notes if n.get("tone") == "danger"), None)
-    return got.draw("handmade/system/etat.html", panes=panes, recent=recent, head=head,
+    return got.draw("handmade/systeme/etat.html", panes=panes, recent=recent, head=head,
                     band=_band("danger", note["text"] + " Leur état est figé jusqu'à leur reconstruction "
                                                         "(« mika rebuild »).") if note else None,
                     total=sum(len(p["facts"]) for p in panes),
@@ -785,7 +785,7 @@ def processes(got: Got) -> tuple[Markup, list[Any]] | None:
     listed = render.block(table, got.env, got.query)
     as_table = "?" + urlencode({**got.query, f"vue_{listed['id']}": "table"})
     rest = [b for b in got.raw if b is not table and not isinstance(b, Stats)]
-    return Markup(env.get_template("handmade/system/processes.html").render(
+    return Markup(env.get_template("handmade/systeme/processes.html").render(
         total=len(rows), counts=[c for c in counts if c["count"]], trouble=trouble, faculties=faculties,
         failures=sum(r["failures"] for r in rows), as_table=as_table)), rest
 
@@ -921,7 +921,7 @@ def outbox(got: Got) -> Markup:
             families.append({"title": title, "rows": rows})
     page = Pager(number=number, size=RECENT_PAGE, total=total)
     stuck_tone = "danger" if counts.get("failed") or counts.get("orphan") else "warn" if stuck_total else "ok"
-    return Markup(env.get_template("handmade/system/sorties.html").render(
+    return Markup(env.get_template("handmade/systeme/sorties.html").render(
         tone=stuck_tone, stuck_total=stuck_total, route=sum(counts.get(s, 0) for s in ROUTE),
         done=counts.get("done", 0), seen=counts.get("seen", 0),
         attempts=MAX_ATTEMPTS, base_s=int(RETRY_BASE_S), max_min=int(RETRY_MAX_S // 60),
@@ -988,7 +988,7 @@ def health(got: Got) -> Markup:
     technical = [b for b in got.raw if isinstance(b, Disclosure)
                  and b.title.split(" (")[0] not in (HEALTHY_FOLD, PROJECTIONS_FOLD)]
     folds = drawn_blocks.page(ui, technical, got.query)
-    return Markup(env.get_template("handmade/system/health.html").render(
+    return Markup(env.get_template("handmade/systeme/health.html").render(
         title=title, her=ui.her_name(), tone=diagnostics.TONES.get(report.status, "warn"), ready=report.ready,
         checks=checks,
         problems=len(problems), failed=sum(1 for c in problems if c["tone"] == "danger"),

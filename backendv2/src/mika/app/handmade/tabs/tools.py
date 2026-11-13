@@ -9,7 +9,7 @@
   Ses outils (ADR 0206). Lus dans leurs tableaux déclarés ; un tableau qu'il ne reconnaît pas reste tel quel.
 - Prêter à un agent : la page est son panneau, déjà dessiné (``handmade/outils/expose.html`` : la console en lecture,
   ses points de prêt, le relais du moteur Claude Code) ; la vue n'a pas de blocs. L'onglet garde ce panneau, charge sa
-  feuille (``handmade/tools.css``) et pose sa marque, rien de plus.
+  feuille (``handmade/outils.css``) et pose sa marque, rien de plus.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from mika.inspector import render
 from mika.inspector.ui import env
 from mika.kernel.inspect import Badge, Fields, Nav, Note, Ref, Table, When
 
-STYLES = ("handmade/tools.css",)
+STYLES = ("handmade/outils.css",)
 #: la vue de la Forge que « Venus d'ailleurs » montre sous les services : (propriétaire, nom)
 APP_TOOLS = ("forge", "outils_apps")
 #: la vue des services branchés (où « Brancher » revient)

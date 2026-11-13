@@ -16,7 +16,8 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.handmade import Look, excerpt
-from mika.app.handmade.fiche_parts import STYLES, draw, fact, rendered, tag, texts, tone, whole
+from mika.app.handmade import blocks as drawn_blocks
+from mika.app.handmade.subjects.parts import STYLES, draw, fact, rendered, tag, texts, tone
 from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
@@ -99,7 +100,7 @@ class WakeupFiche(Overview):
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "etat":
             return self._state(ui, key, blocks, query, forms)
-        return whole(ui, blocks, query, forms) if tab in TABS else None
+        return drawn_blocks.page(ui, blocks, query, forms=forms) if tab in TABS else None
 
     @staticmethod
     def _state(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],

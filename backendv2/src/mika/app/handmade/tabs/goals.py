@@ -1,5 +1,5 @@
 """Activité › Buts : ses onglets, chacun dans sa forme (ADR 0177), dans le vocabulaire de la fiche d'un but
-(``app/handmade/goal.py``).
+(``app/handmade/subjects/goal.py``).
 
 - Buts vivants : ce qu'elle a entrepris en une bande de chiffres (combien, en pause, ses séances de l'heure sur son
   plafond, quand elle pourra entreprendre d'elle-même) ; puis, côte à côte, ses explorations — chacune avec ses

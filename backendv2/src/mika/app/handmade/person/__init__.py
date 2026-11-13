@@ -58,7 +58,7 @@ from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
 from mika.app.handmade.person.files import files
-from mika.app.handmade.person.memoire import memory
+from mika.app.handmade.person.memory import memory
 from mika.app.handmade.person.senses import phone_tab, position_tab
 from mika.app.handmade.person.voyages import GPX as TRIP_GPX
 from mika.app.handmade.person.voyages import gpx as trip_gpx
@@ -643,7 +643,7 @@ class PersonOverview(Overview):
 
     slug = "ensemble"
     title = "Vue d'ensemble"
-    styles = ("handmade/person.css", "handmade/senses.css")
+    styles = ("handmade/person.css", "handmade/sens.css")
     scripts = ("handmade/live.js",)
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre

@@ -344,7 +344,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Ses boîtes aux lettres — lire (IMAP), envoyer (SMTP), sa voix dans chacune — et ce que "
                             "fait le courrier de toutes : son relevé, ce qu'elle en dit, les réponses qu'elle "
                             "prépare."), home="courrier/parametres", params="email",
-                            template="handmade/mail/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
+                            template="handmade/courrier/parametres.html", styles=("handmade/courrier_reglages.css",)),)),
         SettingsSection("mcp", "Outils extérieurs", "plugins", McpConfig, settings.mcp, save_mcp, order=15,
                         lock=settings.writing,
                         description="Les serveurs MCP dont elle peut utiliser les outils. Jetons et variables "

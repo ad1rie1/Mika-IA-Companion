@@ -26,18 +26,18 @@ from markupsafe import Markup
 
 from mika.adapters.mail.compose import sender
 from mika.app.handmade import Look, excerpt
-from mika.app.handmade.fiche_parts import (
+from mika.app.handmade import blocks as drawn_blocks
+from mika.app.handmade.subjects.parts import (
     STYLES,
     draw,
     faculty_head,
     head_of,
     rendered,
     safely,
-    shaped,
     side_view,
     tag,
-    whole,
 )
+from mika.app.handmade.tabs import text
 from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
@@ -64,11 +64,6 @@ OPENING = 420
 def _pairs(item: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Les faits d'un bloc rendu, par leur libellé."""
     return {p["label"]: p["value"] for p in item.get("pairs", [])}
-
-
-def _text(cell: dict[str, Any] | None) -> str:
-    text = str((cell or {}).get("text") or "")
-    return "" if text == "—" else text
 
 
 def _alert(item: dict[str, Any]) -> dict[str, str]:
@@ -119,7 +114,7 @@ class AccountFiche(Overview):
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "voix":
-            return self._voice(ui, key, blocks, query) or whole(ui, blocks, query, forms)
+            return self._voice(ui, key, blocks, query) or drawn_blocks.page(ui, blocks, query, forms=forms)
         if tab != "etat":
             return None
         port = _port(ui)
@@ -160,7 +155,7 @@ class AccountFiche(Overview):
                       "href": render.href(box_link(f.label, account=key, folder=f.name), ui.env())} for f in folders],
             voice=VOICE_LABEL.get(info.voice, info.voice), sender=info.sender_name or info.display_name,
             signature=bool(info.signature.strip()), voice_tab=fiche_url(ACCOUNT, key, "voix"),
-            details=list(info.details), write=[shaped(d) for d in items if d["t"] == "action"],
+            details=list(info.details), write=[drawn_blocks.shape_block(d) for d in items if d["t"] == "action"],
             box=render.href(box_link("", account=key), ui.env()))
 
 
@@ -173,9 +168,9 @@ class AccountFiche(Overview):
         facts = next((_pairs(d) for d in items if d["t"] == "fields"), None)
         if info is None or facts is None:
             return None
-        her = _text(facts.get("son nom d'expéditrice"))
+        her = text(facts.get("son nom d'expéditrice"), dash=False)
         reads = next((d["text"] for d in items if d["t"] == "prose" and d["title"].startswith("Ce qu'elle lit")), "")
-        prepares = _text(facts.get("réponses préparées d'elle-même"))
+        prepares = text(facts.get("réponses préparées d'elle-même"), dash=False)
         return draw(
             "compte_voix.html", tables="cards",
             voices=[{"label": VOICE_LABEL.get(v, v), "text": text, "on": v == info.voice} for v, text in VOICES],
@@ -215,9 +210,9 @@ class MailFiche(Overview):
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "fil":
-            return _thread(ui, key, blocks, query) or whole(ui, blocks, query, forms)
+            return _thread(ui, key, blocks, query) or drawn_blocks.page(ui, blocks, query, forms=forms)
         if tab == "remarque":
-            return _known(ui, blocks, query) or whole(ui, blocks, query, forms)
+            return _known(ui, blocks, query) or drawn_blocks.page(ui, blocks, query, forms=forms)
         if tab != "message":
             return None
         port, s = _port(ui), _state(ui)
@@ -234,7 +229,7 @@ class MailFiche(Overview):
                            "when": look.day(m.date) if m.date else "", "here": m.ref == ref,
                            "href": fiche_url(MAIL, mail_key(m.ref))} for m in page.items]
         return draw("mail.html", forms=forms or {}, tables="cards",
-                    message=[shaped(d) for d in rendered(ui, blocks, query)],
+                    message=[drawn_blocks.shape_block(d) for d in rendered(ui, blocks, query)],
                     known=side_view(ui, "email", "remarque", key, "remarque"),
                     thread=thread if total > 1 else [], more=total > len(thread), total=total,
                     thread_tab=fiche_url(MAIL, key, "fil"), known_tab=fiche_url(MAIL, key, "remarque"),
@@ -305,9 +300,9 @@ class DraftFiche(Overview):
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "pourquoi":
-            return _why(ui, key, blocks, query) or whole(ui, blocks, query, forms)
+            return _why(ui, key, blocks, query) or drawn_blocks.page(ui, blocks, query, forms=forms)
         if tab == "historique":
-            return _history(ui, blocks, query) or whole(ui, blocks, query, forms)
+            return _history(ui, blocks, query) or drawn_blocks.page(ui, blocks, query, forms=forms)
         if tab != "brouillon":
             return None
         port = _port(ui)
@@ -317,7 +312,7 @@ class DraftFiche(Overview):
         seen = _seen(ui, key)
         shown = port.preview(got.id)
         answered = port.cached_one(got.reply_to) if got.reply_to else None
-        items = [shaped(d) for d in rendered(ui, blocks, query)]
+        items = [drawn_blocks.shape_block(d) for d in rendered(ui, blocks, query)]
         waiting = seen is not None and seen.state == WAITING and got.state == "brouillon"
         history = side_view(ui, "email", "historique", key, "historique")
         return draw(
@@ -365,8 +360,8 @@ def _why(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> M
     link = facts.get("le mail")
     return draw("brouillon_pourquoi.html", tables="cards", origin=origin,
                 missing=link["href"] if origin is None and link and link.get("href") else "",
-                retained=_text(facts.get("ce qu'elle en avait retenu")), asked=bool(seen is not None and seen.asked), known=seen is not None,
-                needs_reply=_text(facts.get("réponse attendue")), proposal=facts.get("la proposition"),
+                retained=text(facts.get("ce qu'elle en avait retenu"), dash=False), asked=bool(seen is not None and seen.asked), known=seen is not None,
+                needs_reply=text(facts.get("réponse attendue"), dash=False), proposal=facts.get("la proposition"),
                 asks=[{"title": d["title"], "text": d["text"]} for d in items if d["t"] == "prose"])
 
 

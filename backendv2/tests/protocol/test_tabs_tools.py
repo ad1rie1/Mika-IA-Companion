@@ -11,6 +11,6 @@ def test_lending_keeps_its_panel_and_its_stylesheet(world):  # noqa: F811
     client, _, _ = world
     bootstrap(client)
     page = drawn(client, "/inspecteur/outils/expose")
-    assert 'data-tab="outils/expose"' in page and "/static/handmade/tools.css" in page
+    assert 'data-tab="outils/expose"' in page and "/static/handmade/outils.css" in page
     assert "La console, en lecture" in page and "Ses outils prêtés" in page and "Créer un jeton" in page
     assert page.index("La console, en lecture") < page.index('data-tab="outils/expose"')  # le panneau d'abord

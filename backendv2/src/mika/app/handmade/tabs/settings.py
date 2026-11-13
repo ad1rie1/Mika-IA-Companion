@@ -237,5 +237,5 @@ TABS: dict[str, Any] = {
     f"reglages/{FACULTY_PAGE}*": Tab(faculte, *STYLES),
     "reglages/comptes": Tab(accounts, *STYLES),
     "reglages/journal": Tab(journal, *STYLES),
-    "reglages/droits": Tab(droits, "handmade/tools.css", "handmade/rights.css", panel=False),
+    "reglages/droits": Tab(droits, "handmade/outils.css", "handmade/droits.css", panel=False),
 }

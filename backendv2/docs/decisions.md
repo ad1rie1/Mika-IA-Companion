@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -2428,7 +2428,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* la plupart des onglets restaient des blocs génériques (63 sur 79) : tous se ressemblaient, et aucun ne suivait les gabarits de l'ADR 0176.
 
-*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202.*
+*Révise 0121 (en partie), 0176 (en partie). Révisée par 0178, 0180, 0183, 0201, 0202, 0218.*
 
 ### 0178 — Le menu montre les groupes de pages
 
@@ -2484,7 +2484,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 ### 0183 — Le dépôt git d'un projet face à son distant, issues et pull requests comprises
 
-- L'onglet Dépôt git d'un projet est dessiné (`app/handmade/project_git.py`) : l'atelier et son dépôt distant face à face, l'écart entre eux (à pousser, à récupérer) et les gestes qui le comblent — « Pousser maintenant », « Récupérer » (les actions d'avant, avec leur accord) et « Relire » (une lecture neuve du distant) ; puis, en sous-onglets, l'historique de l'atelier (ceux qui restent à pousser marqués), ce qui n'est pas enregistré, l'histoire du distant (ceux à récupérer marqués), ses issues et pull requests ouvertes, les échanges passés et les réglages du distant.
+- L'onglet Dépôt git d'un projet est dessiné (`app/handmade/subjects/project_git.py`) : l'atelier et son dépôt distant face à face, l'écart entre eux (à pousser, à récupérer) et les gestes qui le comblent — « Pousser maintenant », « Récupérer » (les actions d'avant, avec leur accord) et « Relire » (une lecture neuve du distant) ; puis, en sous-onglets, l'historique de l'atelier (ceux qui restent à pousser marqués), ce qui n'est pas enregistré, l'histoire du distant (ceux à récupérer marqués), ses issues et pull requests ouvertes, les échanges passés et les réglages du distant.
 - Un nouveau port, `repo_host` (`ports/workshop.RepoHost`), lit l'hôte d'un dépôt distant pour la console : la tête de la branche et ses derniers commits, les issues et pull requests ouvertes. Seul GitHub se lit (`adapters/workshop/github.py`, son API) ; pour un autre hôte, pousser et récupérer marchent comme avant, et la page le dit.
 - L'écart se compte dans l'atelier quand il connaît la tête du distant (`Workshop.compare`, `git rev-list --left-right`) ; sinon l'hôte compare le dernier commit de l'atelier à sa tête. S'il ne connaît pas ce commit, ou s'il ne répond pas, l'écart est inconnu et la page ne montre pas de chiffres.
 - Le jeton est celui des dépôts git. Il ne part à `api.github.com` que si `github.com` est parmi ses hôtes autorisés ; sans lui, un dépôt public se lit quand même. Ni redirection suivie ni réponse de plus de 2 Mo ; un délai de six secondes ; les liens montrés sont composés à partir du dépôt et d'un numéro, jamais repris de la réponse.
@@ -2603,6 +2603,17 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 - Restent hors de ces tables, que la question Q03 ne nommait pas : le repli d'une ligne d'un onglet de fiche sur un paramètre de requête quand la fiche ne donne pas de clé (`?id=` des onglets d'un mail, plugin `email`, qu'un test vérifie ; `?person=` de Synthèse et Moyens de communication, `identity` ; `?handle=` de Fil, `transcript`), et l'ancienne page d'une personne (`app/handmade/person`), qui redirige déjà vers sa fiche. Les onglets d'un moyen de communication de `identity` (Verdict, Revendication, Preuves, Autres) n'ont plus ce repli.
 
 *Pourquoi :* chaque refonte laissait sa trace dans le code du domaine pour servir d'anciens favoris ; que les liens d'avant mènent quelque part est l'affaire de la console (audit du 2026-11-05, K0-28, question Q03).
+
+### 0218 — Une fiche dessinée lit ce que sa vue montre ; ce qu'elle lit à côté, elle le déclare
+
+- Les fiches dessinées des objets vivent dans `app/handmade/subjects/`, un module par sorte d'objet (`server`, `handle`, `project` et `project_git`, `goal`, `wakeup`, `teams`, `mail`) et leurs aides dans `parts.py` ; la composition les reçoit ensemble (`subjects.OVERVIEWS`). La fiche d'une personne garde son paquet (`person/`).
+- Ce que la vue de la faculté montre déjà, la fiche le lit dans ses blocs ou dans l'en-tête qu'elle déclare (`parts.faculty_head`), jamais par un second calcul : la fiche d'un but y lit sa sorte (une rêverie comprise), son autorité, son statut, sa priorité, sa prochaine séance et son envie.
+- Ce que la vue ne dit pas sous la forme que la fiche dessine (un nombre qu'elle ne dit qu'en phrase, un formulaire qu'elle ne porte pas), la fiche peut le lire par les fonctions de la faculté, à condition de le déclarer : chaque nom qu'un module de `subjects/` importe d'une faculté hors de son `inspect` (ses mots et ses règles restent permis) est écrit, avec sa raison, dans la table `READS` de `tests/protocol/test_drawn_fiches.py`, et un import non déclaré fait échouer le test.
+- Les fiches se reprennent une à une, en commençant par celle d'un but. Restent déclarées, à reprendre : la fiche d'un projet compte ses objectifs à côté de sa vue (qui les dit en phrase) et lit à côté les demandes qui attendent un accord ; celle d'un moyen de communication lit son verdict par la fonction de sa vue ; le dépôt git, l'adresse du distant (sa vue ne la donne qu'en lien).
+
+*Pourquoi :* une fiche de but existait en deux calculs, celui de la faculté (servi au MCP et au repli) et celui du dessin, qui avaient déjà divergé (la prochaine séance) sans qu'aucun test ne le voie ; et les fiches se mêlaient aux onglets, sous des noms français ou mêlés (audit du 2026-11-05, K0-10, K11-08, question Q05).
+
+*Révise 0177 (en partie : une fiche peut lire à côté ce que sa vue ne dit pas, en le déclarant, plutôt que de le faire toujours ajouter à la vue).*
 
 ## Ce que les sondes et les audits ont fixé
 

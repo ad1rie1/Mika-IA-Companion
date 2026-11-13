@@ -42,7 +42,7 @@ def code() -> str:
                      if f.is_file() and f.suffix in {".py", ".html", ".js"})
 
 
-@pytest.mark.parametrize("name", ["console.css", "handmade/tools.css", "handmade/base.css",
+@pytest.mark.parametrize("name", ["console.css", "handmade/outils.css", "handmade/base.css",
                                   "handmade/reglages_onglets.css"])
 def test_every_class_of_a_cleaned_sheet_is_used(code, name):
     used = set(re.findall(r"[A-Za-z_][\w-]*", code))

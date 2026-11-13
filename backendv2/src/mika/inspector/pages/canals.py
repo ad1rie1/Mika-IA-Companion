@@ -186,7 +186,7 @@ async def canals_page(ui: Any, request: Request) -> Any:
             "pager": one_page(len(rows) + 1), "floors": FLOORS, "set": e["set"]},
             "open": e["key"] == focus or (not focus and not e["instance"])})
     return {"blocks": [], "panel": Panel("handmade/droits/canaux.html", {
-        "canals": shown, "focus": focus, "locked": account is None, "words": CANAL_WORDS}, styles=("handmade/tools.css", "handmade/rights.css"))}
+        "canals": shown, "focus": focus, "locked": account is None, "words": CANAL_WORDS}, styles=("handmade/outils.css", "handmade/droits.css"))}
 
 
 async def canals_post(ui: Any, request: Request) -> Response:

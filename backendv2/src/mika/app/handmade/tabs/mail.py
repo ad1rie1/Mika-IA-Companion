@@ -27,7 +27,7 @@ from markupsafe import Markup
 
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade import excerpt
-from mika.app.handmade.fiche_parts import side_view
+from mika.app.handmade.subjects.parts import side_view
 from mika.app.handmade.tabs import Got, Tab, text
 from mika.inspector import render
 from mika.inspector.pages.subjects import fiche_key, fiche_url
@@ -36,7 +36,7 @@ from mika.kernel.inspect import Head
 from mika.plugins.email import READ_AFTER_S, params_of
 from mika.plugins.email.console.actions import GESTURES
 
-STYLES = ("handmade/mail.css",)
+STYLES = ("handmade/courrier.css",)
 #: la sorte d'objet d'un mail : la fiche que la liseuse ouvre
 KIND = "mail"
 #: l'onglet de la fiche que la liseuse montre (son propriétaire, son nom)
@@ -128,12 +128,12 @@ def reader(ui: UI, key: str, query: Mapping[str, str], forms: Forms,
     spec = ui.inspection.find(*MESSAGE)
     head = ui.inspection.head("mail", key, ui.when_long)
     if spec is None or not isinstance(head, Head):
-        return Markup(env.get_template("handmade/mail/reader.html").render(
+        return Markup(env.get_template("handmade/courrier/reader.html").render(
             missing=True, close=_here(query), blocks=[], forms={}, read_after=None))
     got = ui.inspection.run(spec, query, ui.when_long, subject=key)
     rendered = render.blocks(got, ui.env(), query, namespace=READ)  # ses listes à part de celles de la boîte
     prev, next_ = _neighbours(ordered, key)
-    return Markup(env.get_template("handmade/mail/reader.html").render(
+    return Markup(env.get_template("handmade/courrier/reader.html").render(
         head={"title": head.title, "subtitle": head.subtitle, "badges": [render.cell(b, ui.env()) for b in head.badges],
               "facts": [{"label": k, "value": render.cell(v, ui.env())} for k, v in head.facts]},
         blocks=[drawn_blocks.shape_block(d) for d in rendered], forms=forms.of(rendered, key) if isinstance(forms, Forms) else {},
@@ -166,7 +166,7 @@ def box(got: Got, tab: str) -> Any:
     at = items.index(table)
     shown = lines(table, query)
     actions, before = drawn_blocks.lift([d for d in items[:at] if d is not tidy])
-    page = Markup(env.get_template("handmade/mail/box.html").render(
+    page = Markup(env.get_template("handmade/courrier/box.html").render(
         tab=tab, side=space["sidebar"], before=before, after=items[at + 1:], table=table,
         lines=shown, reader=reader(ui, key, query, forms, shown) if key else "", forms=forms,
         bulk=forms.get(tidy["slot"]) if tidy is not None else None, gestures=GESTURES))
@@ -194,7 +194,7 @@ def drafts(got: Got) -> Any:
         return drawn_blocks.page(got.ui, got.raw, got.query, forms=got.forms, tab="courrier/brouillons")
     lists = [{**t, "drafts": [_draft(t, r) for r in t["rows"]]} for t in tables]
     actions, before = drawn_blocks.lift([d for d in space["items"] if d["t"] != "table"])
-    page = Markup(env.get_template("handmade/mail/drafts.html").render(
+    page = Markup(env.get_template("handmade/courrier/drafts.html").render(
         side=space["sidebar"], before=before, waiting=lists[0],
         done=lists[1] if len(lists) > 1 else None, forms=got.forms))
     return page, [], got.head(items=actions)
@@ -219,7 +219,7 @@ def contacts(got: Got) -> Any:
         return drawn_blocks.page(got.ui, got.raw, got.query, forms=forms, tab="courrier/contacts")
     table = tables[0]
     actions, before = drawn_blocks.lift([d for d in space["items"] if d is not table])
-    page = Markup(env.get_template("handmade/mail/contacts.html").render(
+    page = Markup(env.get_template("handmade/courrier/contacts.html").render(
         side=space["sidebar"], before=before, table=table,
         people=[_contact(table, r, forms) for r in table["rows"]], forms=forms,
         note=str(table.get("caption") or "").split(". ")[0].rstrip(".")))

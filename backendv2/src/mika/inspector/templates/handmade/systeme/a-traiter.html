@@ -1,7 +1,7 @@
 {# Système › File de sortie : ce qui est à traiter (pages/system.py), dans le vocabulaire des pages dessinées (ADR 0121) —
    chaque effet qui n'a pas pu partir, son erreur, ce qu'il faut vérifier ; le relancer, le marquer comme vu. #}
 {% from "_navigation.html" import pager %}
-{% from "handmade/system/macros.html" import outbox_item %}
+{% from "handmade/systeme/macros.html" import outbox_item %}
 {% if problems %}
 <section class="outbox-review now-card hm-outbox" aria-label="Effets à traiter">
   <header class="now-card-head"><h2>À traiter</h2><span class="person-count now-num" title="{{ problem_total }} au total">{{ problem_total }}</span><p>Vérifie le résultat de chaque action. « Marquer comme vu » conserve la trace et retire son signalement.</p></header>

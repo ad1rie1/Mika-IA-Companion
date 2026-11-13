@@ -29,7 +29,7 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.app.handmade.access import people_with_accounts
-from mika.app.handmade.servers import KIND as SERVICE
+from mika.app.handmade.subjects.server import KIND as SERVICE
 from mika.app.moi import Denied, missing
 from mika.app.moi import shares as shares_moi
 from mika.contracts import forge as forge_c

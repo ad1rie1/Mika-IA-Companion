@@ -171,7 +171,7 @@ class ServerOverview(Overview):
     slug = "ensemble"
     title = "En bref"
     description = "S'il marche, ses accès, ce qu'elle en lit, qui peut quoi, pour qui et quand."
-    styles = ("handmade/tools.css",)
+    styles = ("handmade/outils.css",)
     folded = ("etat", "appels")
 
     def head(self, ui: UI, key: str) -> Markup | None:

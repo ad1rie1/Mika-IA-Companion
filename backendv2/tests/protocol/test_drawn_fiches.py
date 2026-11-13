@@ -1,23 +1,30 @@
-"""Les fiches dessinées des objets (``app/handmade/fiches.py``, ADR 0121), à travers le vrai serveur : un but, un
+"""Les fiches dessinées des objets (``app/handmade/subjects/``, ADR 0121, 0218), à travers le vrai serveur : un but, un
 réveil, une conversation et une réponse Teams, une boîte, un mail, un brouillon. Chacune s'ouvre dessinée (son
 en-tête, son onglet principal), son HTML est valide, ses données y sont — et ses formulaires sont ceux que la console a
 préparés : un formulaire repris du dessin s'envoie tel quel. Ses autres onglets se dessinent bloc par bloc ; un dessin
-qui échoue rend la main aux blocs de la faculté."""
+qui échoue rend la main aux blocs de la faculté. Ce que la vue de sa faculté montre, une fiche le lit dans la vue ; ce
+qu'elle lit à côté, par les fonctions d'une faculté, est déclaré ici (``READS``)."""
 
 from __future__ import annotations
 
+import ast
 import html
 import json
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest
 
-from mika.app.handmade import fiches, goal
+import mika
+from mika.app.handmade import subjects
+from mika.app.handmade.subjects import goal, mail, parts
 from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
+from mika.faculties.goals import inspect as goals_inspect
 from mika.kernel.events import Content, Origin
+from mika.kernel.inspect import Badge, Meter
 from mika.ports.mail import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.mail import Draft as MailDraft
 from mika.ports.teams import Draft as TeamsDraft
@@ -136,6 +143,21 @@ def test_a_failing_drawing_gives_back_the_faculty_blocks(world, monkeypatch):  #
     page = client.get(f"/inspecteur/fiche/goal/{gid}")
     assert page.status_code == 200 and 'class="now-page goal"' not in page.text
     assert "Plan de travail" in html.unescape(page.text)  # les blocs de la faculté
+
+
+def test_a_goal_fiche_says_what_its_faculty_head_says(world, monkeypatch):  # noqa: F811
+    """Q05, ADR 0218 : sa sorte, son statut et son envie ne se recalculent pas à côté — la fiche les lit dans l'en-tête
+    que la faculté déclare, sur son en-tête comme sur son résumé. Ce que la faculté dit autrement, la fiche le suit."""
+    client, live, _ = world
+    bootstrap(client)
+    gid = open_goal(client, live)
+    monkeypatch.setattr(goals_inspect, "_kind_fr", lambda g: "sorte de la vue")
+    monkeypatch.setattr(goals_inspect, "_status", lambda g, now: Badge("statut de la vue", "danger"))
+    monkeypatch.setattr(goals_inspect, "_desire", lambda g, now, frame: Meter(0.42, "42 %"))
+    page = drawn(client, f"/inspecteur/fiche/goal/{gid}")
+    assert f"But n° {gid} · sorte de la vue · à elle" in page  # l'en-tête
+    assert "statut de la vue" in page and "42 %" in page  # le résumé
+    assert ">exploration<" not in page and "en cours" not in page
 
 
 # ── un réveil ──
@@ -330,6 +352,85 @@ def test_drafts_and_contacts_are_drawn_in_the_mail_space(world):  # noqa: F811
 
 
 def test_every_fiche_kind_is_registered_once():
-    assert set(fiches.OVERVIEWS) == {"goal", "reveil", "conversation_teams", "reponse_teams", "compte", "mail",
-                                     "brouillon"}
-    assert "app" not in fiches.OVERVIEWS  # la Forge garde le rendu de la console
+    assert set(subjects.OVERVIEWS) == {"serveur", "handle", "project", "goal", "reveil", "conversation_teams",
+                                       "reponse_teams", "compte", "mail", "brouillon"}
+    assert "app" not in subjects.OVERVIEWS  # la Forge garde le rendu de la console
+    assert "person" not in subjects.OVERVIEWS  # la fiche d'une personne a son paquet (``person/``)
+
+
+# ── où elles vivent, ce qu'elles lisent ──
+
+HANDMADE = Path(mika.__file__).parent / "app" / "handmade"
+
+#: Ce qu'une fiche lit par les fonctions d'une faculté, à côté de sa vue (ADR 0218, décision Q05 de l'audit du
+#: 2026-11-05) : par module de ``subjects/``, chaque nom importé d'une faculté hors de son ``inspect`` (ses mots et
+#: ses règles restent permis), et sa raison. Ce que sa vue montre déjà se lit dans ses blocs ou son en-tête : un nom
+#: qui n'est pas ici fait échouer ``test_a_fiche_reads_beside_its_view_only_what_it_declares``.
+READS: dict[str, dict[str, str]] = {
+    "goal.py": {
+        "Goal": "le type du but lu",
+        "goal_at": "le but lui-même, dans sa tranche",
+        "budget": "le budget de séances, que sa vue ne dit qu'en phrase (« 2 / 8 séances ») : la fiche en dessine "
+                  "la barre",
+        "params": "les seuils de ses garde-fous, que sa vue ne dit qu'en phrase : la fiche en dessine les barres",
+    },
+    "handle.py": {
+        "view_of": "son verdict, par la fonction même de sa vue, que la fiche range en tuiles : son onglet « Verdict » "
+                   "le dit en blocs — à reprendre sur eux",
+        "known_as": "le nom de la personne derrière lui",
+        "handles_of": "ses autres moyens de communication, que son onglet « Autres » liste — à reprendre sur lui",
+    },
+    "project.py": {
+        "project_at": "le projet lui-même, dans sa tranche",
+        "pending_of": "les demandes qui attendent un accord, que le bandeau compte : à reprendre sur « À décider »",
+        "in_force": "le nombre de ses décisions en vigueur, quand sa vue n'en montre que les dernières",
+        "access_of": "ses lignes d'accès, qu'un formulaire édite et que sa vue ne porte pas",
+        "who_named": "le nom de qui une ligne d'accès nomme",
+    },
+    "project_git.py": {
+        "project_at": "l'adresse du distant telle qu'elle est réglée, son hôte et son nom : sa vue ne la donne qu'en "
+                      "lien, et seulement en http(s) — à reprendre sur ce lien",
+    },
+}
+
+
+def _faculty_reads(path: Path) -> set[str]:
+    """Les noms qu'un module importe d'une faculté, hors de son ``inspect`` et hors des mots (des constantes)."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.ImportFrom) or not (node.module or "").startswith("mika.faculties."):
+            continue
+        if (node.module or "").rsplit(".", 1)[-1] == "inspect":
+            continue
+        names |= {a.name for a in node.names if not a.name.isupper()}
+    return names
+
+
+def test_a_fiche_reads_beside_its_view_only_what_it_declares():
+    """La fiche d'un but recalculait sa sorte, son statut et son envie à côté de sa vue (K11-08) : la vue n'était plus
+    la source, et la prochaine séance avait déjà divergé."""
+    found = {path.name: _faculty_reads(path) for path in sorted((HANDMADE / "subjects").glob("*.py"))}
+    assert {name: reads for name, reads in found.items() if reads} == {name: set(r) for name, r in READS.items()}
+
+
+def test_every_fiche_lives_in_subjects():
+    """K0-10 : les fiches des objets sont dans ``subjects/``, sous des noms anglais ; plus rien ne vit à côté des
+    onglets, et ni un gabarit, ni une feuille, ni le code ne renvoient aux anciens modules (on lit ici les
+    commentaires : le texte, pas l'arbre du code)."""
+    gone = ("goal", "handles", "mail_fiches", "teams_fiches", "wakeup", "projects", "project_git", "servers", "fiches",
+            "fiche_parts")
+    assert [n for n in gone if (HANDMADE / f"{n}.py").exists()] == []
+    cited_as = re.compile(r"app/handmade/(?:" + "|".join(gone) + r")\.py"
+                          r"|\b(?:mail_fiches|teams_fiches|fiche_parts)\b")
+    root = Path(mika.__file__).parent
+    cited = [f"{path.relative_to(root)}:{at}" for path in sorted(root.rglob("*"))
+             if path.suffix in (".py", ".html", ".css", ".js") and "__pycache__" not in path.parts
+             for at, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if cited_as.search(line)]
+    assert cited == []
+
+
+def test_a_fiche_calls_each_helper_by_its_own_name():
+    """K11-05, K11-06 : plus d'alias — un bloc se met en forme par ``blocks.shape_block``, un onglet entier par
+    ``blocks.page`` ; le texte d'une cellule se lit par ``tabs.text``."""
+    assert not hasattr(parts, "shaped") and not hasattr(parts, "whole")
+    assert not hasattr(mail, "_text")

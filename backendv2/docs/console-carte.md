@@ -126,12 +126,13 @@ porte le mot cherché dans son titre, un lien « Chercher dans les vues techniqu
 Toute la console est dessinée (ADR 0121) : chaque onglet d'une destination a sa forme à lui (ADR 0177), sur les
 données de sa faculté — un module par destination (`app/handmade/tabs/`) lit les blocs qu'elle déclare, rendus et
 numérotés comme la console les rend (`Got` : leur pagination, la bascule « Tableau », les jetons de leurs formulaires
-restent ceux de la console), et en fait sa page (gabarit `handmade/<destination>/<onglet>.html`, racine
+restent ceux de la console), et en fait sa page (gabarit `handmade/<destination>/<onglet>.html`, feuille
+`handmade/<destination>.css`, sous la clé de la destination ; racine
 `data-tab="<destination>/<onglet>"`) ; un onglet qui ne reconnaît plus ses blocs rend la main à la console ; les fiches, les épisodes, « pourquoi a-t-elle dit ça ? » et les
 panneaux (réglages, comptes, demandes en attente) dans le même vocabulaire. Seules les vues de la Forge gardent le
 rendu de la console : ses apps déclarent leur interface par un contrat. Les fiches d'un but, d'un réveil, d'une
 conversation et d'une réponse Teams, d'une boîte aux lettres, d'un mail et d'un brouillon ont leur en-tête et leur
-onglet principal dessinés (`app/handmade/fiches.py`, gabarits `handmade/fiches/`) : ce qui compte d'abord (où en est
+onglet principal dessinés (`app/handmade/subjects/`, une fiche par module, gabarits `handmade/fiches/`) : ce qui compte d'abord (où en est
 le but et son plan, ce qu'un réveil fait faire et sa clé, le fil en bulles, ce qui partira en face du message), les
 formulaires que la console a préparés à leur place, leurs autres onglets bloc par bloc. Les pages de détail ont
 chacune leur gabarit (`inspector/templates/handmade/`, inclus comme un panneau, leurs blocs au repli ou quand une
@@ -206,11 +207,11 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 
 ### Relations & échanges
 
-- **Personnes** (`/inspecteur/personnes`, `app/handmade/people.py`) : une carte par personne — ce qu'elle est pour
+- **Personnes** (`/inspecteur/personnes`, `app/handmade/tabs/people.py`) : une carte par personne — ce qu'elle est pour
   elle, ce qu'elle ressent, ce qui se passe entre elles, ce qu'elle en sait —, qui est là, qui lui manque, une
   recherche et des filtres (proximité, en ligne). Ses onglets, les mêmes sur ses quatre pages : Vue d'ensemble
   (cette page), Annuaire, Liens, Présents — la destination déclare ce premier onglet dessiné à part
-  (`Destination.lead`), ses autres onglets y ramènent. Ses onglets (`app/handmade/tabs/people.py`) disent une
+  (`Destination.lead`), ses autres onglets y ramènent. Ses onglets (dans le même module) disent une
   personne comme la vue d'ensemble : **Annuaire**, une entrée par personne — ses moyens de communication (le
   principal d'abord, ce que chaque canal prouve), la certitude, depuis quand, son dernier message, leurs échanges et
   leur lien ; **Liens**, un bandeau si quelqu'un lui manque, la bande de chiffres, puis les liens par proximité
@@ -308,7 +309,7 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - Dans la console, une *adresse* (une identité qui parle pour une personne : un compte, un téléphone, un compte
   extérieur) se dit **moyen de communication** ; les clés techniques restent (l'onglet `adresses`, le paramètre
   `handle`). La fiche d'un moyen de communication (`fiche/handle/<clé>`) s'ouvre sur **En bref**
-  (`app/handmade/handles.py`) : quatre tuiles (par où, ce que le canal prouve, si elle peut lui écrire d'elle-même,
+  (`app/handmade/subjects/handle.py`) : quatre tuiles (par où, ce que le canal prouve, si elle peut lui écrire d'elle-même,
   son dernier message), *Le canal*, *Qui écrit d'ici* (pour qui il parle, ses droits de propriétaire, ses autres
   moyens), *Ce que ça ouvre* (une ligne par sorte de chose, en privé et en public, et pourquoi), le verdict pas à pas
   replié. Son *Fil* est en bulles ; *Verdict* et *Ses autres moyens de communication* passent sous « Le détail » ;
@@ -333,12 +334,12 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   qui est choisi, pourquoi, qui l'a posée et quand ; une décision remplacée s'estompe.
 - **La fiche** gouverne, onglet par onglet ; ses onglets disent leur compte (objectifs, exécutions, décisions), Accès
   et Carnet sont rangés sous « Plus » ; en tête, la principale (« Lancer maintenant », ou « Reprendre » en pause) et
-  « Donner une consigne », le reste sous « ⋯ ». *Vue d'ensemble* (dessinée, `app/handmade/projects.py`, ADR 0177 : la
+  « Donner une consigne », le reste sous « ⋯ ». *Vue d'ensemble* (dessinée, `app/handmade/subjects/project.py`, ADR 0177 : la
   vue d'un objet de la maquette — un seul bandeau : ce qui attend ton accord, « Les décider » ouvrant la file des
   validations, sinon sa pause ou ce qui le retient ; une bande de chiffres « Où il en est », ses dernières exécutions
   en barres ; son plan et sa réponse ; puis des tuiles qui mènent à leurs onglets : ses objectifs, ses dernières
   exécutions, ses décisions en vigueur, son cadre, sa prochaine exécution, son dépôt) · *Objectifs* (dessiné,
-  `app/handmade/projects.py` : ses chiffres, puis une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
+  `app/handmade/subjects/project.py` : ses chiffres, puis une entrée par objectif — son numéro, ce qu'il vise, sa sorte et son
   état, son rythme et qui l'a posé, son dernier compte rendu en citation (long, quatre lignes que « lire la suite »
   déplie) et ce qu'elle en a tiré ; ses boutons sur sa ligne, deux en vue (le lancer, le premier statut), « Modifier
   l'objectif » en panneau, le reste sous « ⋯ » ; un constant ne se coche pas ; « Ajouter un objectif » en colonne à
@@ -348,7 +349,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   envisagées repliés, qui l'a posée, quand, ce qu'elle remplace ; sur sa ligne, la retirer ou la remettre en vigueur
   et « Remplacer cette décision » en panneau ; remplacée ou retirée, elle s'estompe ; « Consigner une décision » en
   colonne à côté) · *Fichiers* (dossiers à parcourir, lire,
-  télécharger, déposer) · *Dépôt git* (dessiné, `app/handmade/project_git.py`, ADR 0183 : un seul bandeau — un
+  télécharger, déposer) · *Dépôt git* (dessiné, `app/handmade/subjects/project_git.py`, ADR 0183 : un seul bandeau — un
   envoi qui attend ton accord, GitHub qui ne répond pas, ou les deux histoires qui ont divergé ; l'atelier et son
   dépôt distant face à face, l'atelier avec sa branche, son dernier commit et ce qui n'est pas enregistré, le distant
   avec son hôte, le bout de sa branche, ses issues et pull requests et quand il a été lu ; entre eux l'écart (à
@@ -357,7 +358,7 @@ Ses onglets sont dans `app/handmade/tabs/projects.py` (ADR 0177).
   au-dessus ; ce qui n'est pas enregistré ; l'histoire du distant, ceux à récupérer marqués ; ses issues et ses pull
   requests ouvertes, qui s'ouvrent sur GitHub ; les échanges passés et ce que git a répondu ; les réglages du
   distant) · *Comportement et outils* (modifier le projet, ce que veut dire son
-  mode, son rythme, ses outils et leurs noms) · *Accès* (dessiné, ADR 0133, `app/handmade/projects.py` : un tableau
+  mode, son rythme, ses outils et leurs noms) · *Accès* (dessiné, ADR 0133, `app/handmade/subjects/project.py` : un tableau
   de lignes lues de haut en bas — qui et par où (les mêmes cases qu'un service), quand, voir, piloter projet (lecture seule, accord du propriétaire, modification, aucun pilotage), fichiers, ce qu'elle fait d'un outil de ses apps qui lit et d'un
   outil qui agit, à quels outils —, « + Ajouter un accès » (une ligne fermée), chaque ligne montée, descendue ou
   retirée, la dernière, obligatoire, le comportement par défaut ; jamais réglé, il le dit) · *Carnet* (consignes,

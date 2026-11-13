@@ -1,4 +1,4 @@
-/* Courrier › Paramètres, une boîte (templates/handmade/mail/parametres.html, ADR 0174) : le formulaire suit ce qu'on
+/* Courrier › Paramètres, une boîte (templates/handmade/courrier/parametres.html, ADR 0174) : le formulaire suit ce qu'on
    tape. Ce qui ne sert pas au choix fait se masque déjà (data-only, console.js) ; ce script propose ce qui va de soi :
    - sur une boîte neuve, l'adresse d'un fournisseur courant remplit ses serveurs, leurs ports et la connexion ;
    - un compte Microsoft choisi remplit les serveurs de Microsoft ;

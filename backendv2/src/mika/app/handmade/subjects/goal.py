@@ -3,52 +3,44 @@ avancement, sa prochaine séance, ses garde-fous, son plan de travail (chaque t�
 séances et la dernière consigne reçue ; le détail complet, replié. Un rappel se dit autrement : quoi, quand, à qui,
 s'il a été dit. Ses autres onglets (cadre, séances, carnet, décisions, épisodes) se dessinent bloc par bloc.
 
-Les données sont celles de la faculté ``goals`` : sa tranche, lue par ses propres fonctions (statut, budget, envie),
-ses textes et son journal (ses séances). Ce que sa vue dit déjà se lit dans ses blocs : la prochaine séance et ce qui la
-retient, dans l'en-tête qu'elle déclare (une seule règle, ``goals.inspect.next_session``). Les formulaires du plan sont
-ceux que la console a préparés pour l'onglet (``Forms``), retrouvés dans les blocs de la faculté.
+Les données sont celles de la faculté ``goals``. Ce que sa vue dit déjà se lit dans l'en-tête qu'elle déclare
+(ADR 0218) : sa sorte et son autorité en mots (une rêverie se dit comme telle), son statut à l'instant, sa priorité, la
+prochaine séance et ce qui la retient (une seule règle, ``goals.inspect.next_session``), son envie. Le reste vient de sa
+tranche : le but lui-même (``goal_at``), et ce que sa vue ne dit qu'en phrases — le budget de séances (``budget``) et
+les seuils de ses garde-fous (``params``), dont la fiche dessine les barres ; puis ses textes et son journal (ses
+séances). Les formulaires du plan sont ceux que la console a préparés pour l'onglet (``Forms``), retrouvés dans les
+blocs de la faculté.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from markupsafe import Markup
 
 from mika.app.handmade import Look, excerpt, person_href, span, unit
-from mika.app.handmade.fiche_parts import (
+from mika.app.handmade import blocks as drawn_blocks
+from mika.app.handmade.subjects.parts import (
     STYLES,
     draw,
     fact,
     faculty_head,
     rendered,
     safely,
-    shaped,
     tag,
     texts,
     tone,
-    whole,
 )
 from mika.contracts import goals as c
 from mika.faculties.goals.actions import TASK_STATUS_FR
-from mika.faculties.goals.faculty import Goal, budget, desire, goal_at, musing, params, status
-from mika.faculties.goals.inspect import (
-    AUTHORITY_FR,
-    KIND_FR,
-    NEXT_SESSION,
-    PRIORITY_FR,
-    PRIORITY_TONE,
-    STATUS_FR,
-    STATUS_TONE,
-    TASK_ORDER,
-    TASK_TONE,
-    VERDICT_FR,
-    VERDICT_TONE,
-)
+from mika.faculties.goals.faculty import Goal, budget, goal_at, params
+from mika.faculties.goals.inspect import NEXT_SESSION, TASK_ORDER, TASK_TONE, VERDICT_FR, VERDICT_TONE
 from mika.inspector.pages.subjects import fiche_url
 from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
+from mika.kernel.inspect import Badge, Meter
 
 KIND = "goal"
 #: ses onglets, tous dessinés : « Résumé » à sa façon, les autres bloc par bloc
@@ -56,6 +48,8 @@ TABS = ("resume", "politique", "seances", "carnet", "decisions", "episodes")
 #: ses dernières séances, sur le résumé
 RECENT_STEPS = 3
 FORGOTTEN = "(oublié)"
+#: le fait de l'en-tête de la faculté qui dit son envie (une exploration ouverte : une jauge)
+WISH = "envie"
 
 
 def _read(ui: UI, key: str) -> tuple[Any, Any, Goal] | None:
@@ -68,8 +62,32 @@ def _read(ui: UI, key: str) -> tuple[Any, Any, Goal] | None:
     return None if g is None else (frame, s, g)
 
 
-def _kind(g: Goal) -> str:
-    return "rêverie" if musing(g) else KIND_FR.get(g.kind, g.kind)
+@dataclass(frozen=True, slots=True)
+class Said:
+    """Ce que l'en-tête de la faculté dit d'un but : sa sorte et son autorité en mots, son statut à l'instant, sa
+    priorité (quand elle n'est pas normale), la prochaine séance (vide : il n'en aura pas) et son envie (``None`` : pas
+    une exploration ouverte)."""
+
+    kind: str
+    authority: str
+    status: Badge
+    priority: Badge | None
+    next: str
+    wish: float | None
+
+
+def _said(ui: UI, key: str) -> Said | None:
+    """L'en-tête que la faculté déclare pour ce but (``goals.inspect``), ses étiquettes dans leur ordre — sa sorte, son
+    autorité, son statut, puis sa priorité ; ``None`` : inconnu, ou un en-tête qui n'a pas cette forme (la console
+    reprend alors la main)."""
+    got = faculty_head(ui, KIND, key)
+    if got is None or len(got.badges) < 3:
+        return None
+    kind, authority, state, *more = got.badges
+    facts = dict(got.facts)
+    wish = facts.get(WISH)
+    return Said(kind=kind.text, authority=authority.text, status=state, priority=more[0] if more else None,
+                next=str(facts.get(NEXT_SESSION) or ""), wish=wish.ratio if isinstance(wish, Meter) else None)
 
 
 def _who(ui: UI, key: str | None) -> dict[str, str] | None:
@@ -78,13 +96,6 @@ def _who(ui: UI, key: str | None) -> dict[str, str] | None:
         return None
     person = ui.names.person_of(key)
     return {"name": ui.names.name_of(key) or person, "href": person_href(person)}
-
-
-def _next(ui: UI, key: str) -> str:
-    """La prochaine séance, telle que la faculté la dit dans l'en-tête qu'elle déclare (quand, ou ce qui la retient) ;
-    vide quand elle n'en montre pas (un rappel, un but clos ou en pause)."""
-    got = faculty_head(ui, KIND, key)
-    return str(dict(got.facts).get(NEXT_SESSION) or "") if got is not None else ""
 
 
 def _progress(g: Goal, p: Any) -> dict[str, Any]:
@@ -105,7 +116,7 @@ def _guard(n: int, limit: int, then: str) -> dict[str, Any]:
             "tone": "danger" if near else "warn" if n else ""}
 
 
-def _alerts(g: Goal, frame: Any, look: Look, said: Mapping[str, str]) -> list[dict[str, str]]:
+def _alerts(g: Goal, state: Badge, frame: Any, look: Look, said: Mapping[str, str]) -> list[dict[str, str]]:
     """Ce qui se dit avant tout : en pause, clos (et comment), en attente de quelqu'un."""
     if g.paused_at and g.status not in c.CLOSED_STATUSES:
         return [{"tone": "warn", "text": f"En pause depuis {span(frame.now - g.paused_at)} : ni séance, ni rappel, "
@@ -113,8 +124,7 @@ def _alerts(g: Goal, frame: Any, look: Look, said: Mapping[str, str]) -> list[di
                                           "haut)."}]
     if g.status in c.CLOSED_STATUSES:
         result = said.get(g.result_ref, FORGOTTEN) if g.result_ref else "sans résultat écrit"
-        return [{"tone": STATUS_TONE.get(g.status, ""),
-                 "text": f"{STATUS_FR.get(g.status, g.status).capitalize()} {look.day(g.closed_at)} — {result}."}]
+        return [{"tone": state.tone, "text": f"{state.text.capitalize()} {look.day(g.closed_at)} — {result}."}]
     if g.status == c.WAITING:
         whom = f"la réponse de {_who_name(look, g.wait_for)}" if g.wait_for else "un délai"
         late = g.waiting_until <= frame.now
@@ -161,7 +171,7 @@ def _blocks(blocks: Sequence[Any], items: list[dict[str, Any]]) -> dict[str, Any
     plan = next((d for d in items if d["t"] == "table" and d["title"].startswith("Plan de travail")), None)
     add = next((d for d in items if d["t"] == "action" and d.get("key") == "goals.tache_ajouter"), None)
     detail = next((d for d in items if d["t"] == "disclosure"), None)
-    return {"plan": plan, "add": add, "detail": shaped(detail) if detail else None}
+    return {"plan": plan, "add": add, "detail": drawn_blocks.shape_block(detail) if detail else None}
 
 
 class GoalFiche(Overview):
@@ -176,18 +186,17 @@ class GoalFiche(Overview):
         return None
 
     def head(self, ui: UI, key: str) -> Markup | None:
-        got = _read(ui, key)
-        if got is None:
+        got, known = _read(ui, key), _said(ui, key)
+        if got is None or known is None:
             return None
         frame, s, g = got
         look = Look.of(ui, DAY)
         title = texts(ui, (g.title_ref,)).get(g.title_ref, FORGOTTEN) if g.title_ref else "(sans titre)"
-        st = status(g, frame.now)
-        tags = [tag(STATUS_FR.get(st, st), STATUS_TONE.get(st, ""))]
+        tags = [tag(known.status.text, known.status.tone)]
         if g.paused_at and g.status not in c.CLOSED_STATUSES:
             tags.append(tag("en pause", "warn"))
-        if g.priority != c.NORMAL:
-            tags.append(tag(f"priorité {PRIORITY_FR.get(g.priority, g.priority)}", PRIORITY_TONE.get(g.priority, "")))
+        if known.priority is not None:
+            tags.append(tag(known.priority.text, known.priority.tone))
         if g.urgent:
             tags.append(tag("urgent", "danger"))
         facts = []
@@ -195,23 +204,23 @@ class GoalFiche(Overview):
             facts.append(fact("pour", who["name"], who["href"]))
         if g.due is not None:
             facts.append(fact("échéance", look.day(g.due)))
-        if nxt := _next(ui, key):
-            facts.append(fact(NEXT_SESSION, nxt))
+        if known.next:
+            facts.append(fact(NEXT_SESSION, known.next))
         facts.append(fact("ouvert", look.day(g.opened_at)))
-        return draw("tete.html", kicker=f"But n° {g.id} · {_kind(g)} · {AUTHORITY_FR.get(g.authority, g.authority)}",
-                    title=title, tags=tags, facts=facts, lede="")
+        return draw("tete.html", kicker=f"But n° {g.id} · {known.kind} · {known.authority}", title=title, tags=tags,
+                    facts=facts, lede="")
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:
         if tab == "resume":
             return self._summary(ui, key, blocks, query, forms)
-        return whole(ui, blocks, query, forms) if tab in TABS else None
+        return drawn_blocks.page(ui, blocks, query, forms=forms) if tab in TABS else None
 
     @staticmethod
     def _summary(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
                  forms: Mapping[str, Any] | None) -> Markup | None:
-        got = _read(ui, key)
-        if got is None:
+        got, known = _read(ui, key), _said(ui, key)
+        if got is None or known is None:
             return None
         frame, s, g = got
         look = Look.of(ui, DAY)
@@ -219,22 +228,19 @@ class GoalFiche(Overview):
         latest = g.instructions[-1] if g.instructions else ""
         said = texts(ui, (g.title_ref, g.details_ref, g.summary_ref, g.result_ref, latest,
                           *(t.text_ref for t in g.tasks), *(t.note_ref for t in g.tasks)))
-        st = status(g, frame.now)
         reminder = g.kind == c.REMINDER
-        exploring = g.kind == c.EXPLORATION and g.status not in c.CLOSED_STATUSES
-        wish = desire(g, frame.now, p) if exploring else None
+        wish = known.wish
         parts = _blocks(blocks, rendered(ui, blocks, query))
-        chips = [_kind(g), AUTHORITY_FR.get(g.authority, g.authority)]
+        chips = [known.kind, known.authority]
         chips += [f"outils : {', '.join(g.bundles)}"] if g.bundles else []
         chips += [f"{len(g.instructions)} consigne{'s' if len(g.instructions) > 1 else ''}"] if g.instructions else []
         return draw(
-            "but.html", forms=forms or {}, tables="cards", reminder=reminder, alerts=_alerts(g, frame, look, said),
+            "but.html", forms=forms or {}, tables="cards", reminder=reminder, alerts=_alerts(g, known.status, frame, look, said),
             title=said.get(g.title_ref, FORGOTTEN) if g.title_ref else "(sans titre)",
             details=said.get(g.details_ref, FORGOTTEN) if g.details_ref else "",
             summary=said.get(g.summary_ref, FORGOTTEN) if g.summary_ref else "",
             last_step=look.ago(g.last_step_at) if g.last_step_at else "", chips=chips,
-            status={"text": STATUS_FR.get(st, st), "tone": tone(STATUS_TONE.get(st, ""))},
-            progress=_progress(g, p), next=_next(ui, key),
+            status=tag(known.status.text, known.status.tone), progress=_progress(g, p), next=known.next,
             due=look.day(g.due) if g.due is not None else "",
             wish={"text": f"{round(100 * wish)} %", "w": unit(wish), "frozen": bool(g.paused_at)}
             if wish is not None else None,

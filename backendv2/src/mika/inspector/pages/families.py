@@ -169,7 +169,7 @@ def panel(ui: Any, request: Request, query: str = "", lot: str = "", prompts: An
                                 for s in sorted(registry.tools.values(), key=lambda t: t.name) if s.bundle == lot]})
     return Panel("handmade/droits/familles.html", {
         "families": shown, "focus": focus, "locked": account is None, "query": query, "lot": lot,
-        "prompts": prompts or [], "all_url": BASE}, styles=("handmade/tools.css", "handmade/rights.css"))
+        "prompts": prompts or [], "all_url": BASE}, styles=("handmade/outils.css", "handmade/droits.css"))
 
 
 async def families_post(ui: Any, request: Request) -> Response:

@@ -3,7 +3,7 @@
    moteur, qui, ses rôles, le bail d'hôte — et ce que chaque hôte a chargé : sa révision, ce qui lui manque en puces.
    Le monde pas branché : sa note seule. #}
 {% import "handmade/shared/tab.html" as tab with context %}
-{% import "handmade/system/tab_macros.html" as sx %}
+{% import "handmade/systeme/tab_macros.html" as sx %}
 <div class="now-page sys sys-wd" data-tab="systeme/monde">
   {% if off %}
   {% for n in off %}{{ sx.band({"tone": "info" if n.tone == "muted" else n.tone, "text": n.text}) }}{% endfor %}

@@ -10,7 +10,8 @@ et pull requests ouvertes, les échanges passés et les réglages du distant.
 - Les sous-onglets : Historique (un commit par ligne, ceux qui restent à pousser marqués ; un commit ouvert en diff
   au-dessus), Non enregistré, Sur le distant (ceux à récupérer marqués), Issues, Pull requests, Échanges, Réglages.
 - Les données sont les blocs de la vue « git » de la faculté (``Got``) : elle reste la source, pour la console en
-  MCP comme pour le repli ; l'adresse du distant se lit dans la tranche des projets.
+  MCP comme pour le repli ; l'adresse du distant se lit dans la tranche des projets (``project_at``, déclaré :
+  ADR 0218 ; sa vue ne la donne qu'en lien, et seulement en http(s)).
 """
 
 from __future__ import annotations

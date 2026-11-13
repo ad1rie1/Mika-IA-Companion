@@ -1,4 +1,4 @@
-/* La fiche d'un moyen de communication (app/handmade/handles.py) : son en-tête, le canal, qui écrit d'ici, ce que ça ouvre. */
+/* La fiche d'un moyen de communication (app/handmade/subjects/handle.py) : son en-tête, le canal, qui écrit d'ici, ce que ça ouvre. */
 .handle-head { display: grid; flex: 1 1 520px; gap: 6px; min-width: 0; }
 .handle-head h1 { margin: 0; }
 .handle-head-what { margin: 0; color: var(--text-2); font-size: 14.5px; }

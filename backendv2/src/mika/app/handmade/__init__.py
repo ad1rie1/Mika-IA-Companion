@@ -1,5 +1,5 @@
 """Ce que partagent les pages dessinées à la main de la console (ADR 0121) : l'accueil (``home.py``), « En ce
-moment » (``now.py``), Personnes (``people.py``), la fiche d'une personne (``person/``) et les onglets dessinés des
+moment » (``now.py``), Personnes (``tabs/people.py``), la fiche d'une personne (``person/``) et les onglets dessinés des
 destinations (``pages.py``).
 
 Une telle page croise les facultés là où une vue déclarée n'en montre qu'une : elle lit leurs faits au même

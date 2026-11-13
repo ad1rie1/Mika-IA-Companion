@@ -55,7 +55,7 @@ from mika.plugins.phone.inspect import APPS, FORGOTTEN, PER_PERSON, PER_THREAD, 
 from mika.plugins.phone.inspect import PAGE as MESSAGES
 from mika.vocab.people import is_internal
 
-STYLES = ("handmade/senses.css",)
+STYLES = ("handmade/sens.css",)
 #: les liens d'une page dans sa barre de titre : ses actions en boutons, ses réglages en roue
 HEAD = "handmade/sens/head.html"
 
