@@ -29,6 +29,7 @@ from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.forms import Knob
 from mika.kernel.guards import workshop
+from mika.vocab import access
 from mika.vocab.access import (
     ALONE,
     INTERNAL,
@@ -43,8 +44,6 @@ from mika.vocab.access import (
     Steer,
 )
 from mika.vocab.access import CHANGES as CHANGES
-from mika.vocab.access import OWNER as YOU
-from mika.vocab.access import SELF as HER
 from mika.vocab.access import STEER_ASK as STEER_ASK
 from mika.vocab.privacy import Sensitivity
 
@@ -121,8 +120,9 @@ class ProjectAccess(Rule):
 CLOSED = ProjectAccess()
 #: un projet dont on n'a pas réglé les accès : toi, tout ; elle seule, tout ; les autres l'entendent selon ce que
 #: permet sa confidentialité, en lecture seule, sans fichier ni ses apps
-UNSET = (ProjectAccess(who=(YOU,), see=True, steer=STEER_EDIT, files=True, read=ALONE, act=ALONE),
-         ProjectAccess(who=(HER,), canal=(INTERNAL,), see=True, steer=STEER_EDIT, files=True, read=ALONE, act=ALONE))
+UNSET = (ProjectAccess(who=(access.OWNER,), see=True, steer=STEER_EDIT, files=True, read=ALONE, act=ALONE),
+         ProjectAccess(who=(access.SELF,), canal=(INTERNAL,), see=True, steer=STEER_EDIT, files=True, read=ALONE,
+                       act=ALONE))
 UNSET_DEFAULT = ProjectAccess(see=True, steer=STEER_READ)
 
 

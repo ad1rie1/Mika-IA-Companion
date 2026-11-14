@@ -118,6 +118,12 @@ Disclosure = Restriction
 Feelings = Annotated[tuple[tuple[str, float], ...], BeforeValidator(facets)]
 
 
+#: la précision d'une date : un jour (ou une heure) — la forme d'avant, vide —, un mois, une saison, une année, une
+#: période entre deux dates
+DAY, MONTH, SEASON, YEAR, RANGE = "", "month", "season", "year", "range"
+PRECISIONS = (DAY, MONTH, SEASON, YEAR, RANGE)
+
+
 class Remembered(Payload):
     text: Content
     constraints: tuple[Disclosure, ...] = ()
@@ -209,7 +215,7 @@ class Believed(Payload):
     felt: Feelings = ()
     empathy: Feelings = ()
     #: une prévision (``knowledge_kind`` « prediction », ADR 0084) : quand c'est attendu (``expected`` : le début,
-    #: ``expected_until`` : la fin, ``expected_precision`` : ``vocab.timespan``) et à quel point (0 à 1)
+    #: ``expected_until`` : la fin, ``expected_precision`` : ``PRECISIONS``) et à quel point (0 à 1)
     expected: int | None = None
     expected_until: int | None = None
     expected_precision: str = ""
@@ -452,7 +458,7 @@ class EventNoted(Payload):
     #: (ADR 0083)
     felt: Feelings = ()
     empathy: Feelings = ()
-    #: une période plutôt qu'un jour (ADR 0084) : sa fin (``when`` : son début) et sa précision (``vocab.timespan`` :
+    #: une période plutôt qu'un jour (ADR 0084) : sa fin (``when`` : son début) et sa précision (``PRECISIONS`` :
     #: un mois, une saison, une année, une période ; vide : un jour, comme avant)
     until: int | None = None
     precision: str = ""
@@ -878,10 +884,6 @@ SELF_CHANGES_COLUMNS = ("was", "was_text", "item", "text", "knowledge_kind", "se
 LIVED_VIEW = "memory_lived"
 #: Tout, statut compris, pour la console, le simulateur et l'application — jamais pour une faculté ou un plugin.
 LEDGER_VIEW = "memory_ledger"
-#: Ce que chaque élément de ``KNOWLEDGE_VIEW`` fait ressentir (``item``, ``whose``, ``emotion``, ``intensity``) :
-#: à la personne concernée (``THEIRS``) ou à elle (``HERS``) — « ce qui t'énerve » se cherche par l'émotion
-#: (ADR 0083). Les mêmes droits que l'élément : on lit l'élément, puis le verdict.
-FEELINGS_VIEW = "memory_knowledge_feelings"
 #: La table qu'elle lit (dans la mémoire seulement) ; qui ressent : la personne concernée, ou elle
 FEELINGS_TABLE = "memory_feelings"
 THEIRS = "theirs"
@@ -936,8 +938,6 @@ RETOLD = _view(RETOLD_VIEW, ("item", "handle", "at", "veiled"), veiled=BigIntege
 SELF_CHANGES = _view(SELF_CHANGES_VIEW, SELF_CHANGES_COLUMNS)
 LIVED = _view(LIVED_VIEW, (*KNOWN_COLUMNS, "gist"))
 LEDGER = _view(LEDGER_VIEW, LEDGER_COLUMNS)
-FEELINGS = view_table(FEELINGS_VIEW, Column("item", BigInteger), Column("whose", Key(16)), Column("emotion", Key(64)),
-                      Column("intensity", Double))
 
 
 def select_known(view: Table | None = None) -> Select[Any]:

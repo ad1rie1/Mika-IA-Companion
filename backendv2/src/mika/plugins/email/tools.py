@@ -61,7 +61,8 @@ from mika.plugins.email import (
 )
 from mika.plugins.email.boxes import Boxes
 from mika.plugins.email.voice import voice_text
-from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject, to_fill
+from mika.ports.drafts import to_fill
+from mika.ports.mail import Draft, MailQuery, addresses, reply_recipients, reply_subject
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE

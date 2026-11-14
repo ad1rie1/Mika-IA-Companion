@@ -6,7 +6,7 @@ Algorithme d'ajout (``append``), atomique vis-à-vis des autres ajouts :
 2. validation — l'émetteur possède le type, charge utile valide, provenance de
    voix pour un événement « écrit par elle », contenus avec texte ;
 3. garde — empreintes des faits lus identiques entre la base et la tête,
-   prédicat, baux, épisode vivant ; sinon ``Superseded`` et rien n'est ajouté ;
+   prédicat, baux ; sinon ``Superseded`` et rien n'est ajouté ;
 4. estampille — ``seq``, ``at = max(horloge, dernier at)``, identifiant ;
 5. application des réducteurs (double tampon : chaque réducteur voit sa tranche
    et les faits des autres *avant* l'événement) ;

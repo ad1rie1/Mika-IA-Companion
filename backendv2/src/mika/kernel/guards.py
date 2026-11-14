@@ -3,8 +3,10 @@
 Un processus ou un épisode lit un état épinglé (sa *base*), travaille — un
 appel de modèle peut durer une minute —, puis émet. Sa garde vérifie sur la
 *tête* que ce qu'il a lu n'a pas changé (empreintes des faits), que son
-prédicat tient encore, qu'il détient toujours ses baux et qu'il est vivant.
-Sinon : ``Superseded``, et rien n'est ajouté.
+prédicat tient encore et qu'il détient toujours ses baux. Sinon :
+``Superseded``, et rien n'est ajouté. La garde ne sait pas si l'épisode
+vit encore : un épisode préempté n'arrive pas jusqu'au commit, celui qui le
+mène l'arrête avant.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ class Guard:
 def combine(*guards: Guard | None) -> Guard:
     real = [g for g in guards if g is not None]
     if not real:
-        return Guard("vivant")
+        return Guard("aucune")
     preds = [g.predicate for g in real if g.predicate is not None]
 
     def predicate(view: FactView) -> bool:
@@ -86,12 +88,9 @@ def check(
     holder: str,
     basis_view: FactView,
     head_view: FactView,
-    live: bool = True,
 ) -> Superseded | None:
     """Rend l'échec (sans le lever) ou ``None`` si la garde tient."""
     basis, head = basis_view.root.seq, head_view.root.seq
-    if not live:
-        return Superseded(guard.name, "épisode terminé", basis=basis, head=head)
     if guard.max_lag is not None and head - basis > guard.max_lag:
         return Superseded(guard.name, f"retard {head - basis} > {guard.max_lag}", basis=basis, head=head)
     changed = [repr(r) for r in guard.reads if basis_view.fingerprint(r) != head_view.fingerprint(r)]

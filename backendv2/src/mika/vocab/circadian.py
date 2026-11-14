@@ -23,7 +23,8 @@ from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
 from mika.kernel.clock import local, next_local
-from mika.vocab.affect import Emotion, Vec3, to_pad
+from mika.kernel.dynamics import Vec3
+from mika.vocab.affect import Emotion, to_pad
 from mika.vocab.phrasebook import family, phrase, phrases
 
 

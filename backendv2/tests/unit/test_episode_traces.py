@@ -18,7 +18,7 @@ from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Payload
-from mika.kernel.faculty import EffectClass, Faculty
+from mika.kernel.faculty import Faculty
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.runtime.lanes import REPORTS_KEPT, Lanes
 from mika.runtime.pipeline import EpisodeReport, EpisodeRequest
@@ -132,7 +132,7 @@ def _did(s: SlowState, e, cx) -> SlowState:
 
 
 @SLOW.tool("slow_do", description="Fait quelque chose, lentement.", args=DoArgs, bundle="atelier",
-           episodes=["STEP"], effect=EffectClass.INTERNAL)
+           episodes=["STEP"])
 async def slow_do(args: DoArgs, ctx) -> ToolResult:
     await asyncio.sleep(2.5)  # temps virtuel
     await ctx.emit(DID.draft(what=args.what))

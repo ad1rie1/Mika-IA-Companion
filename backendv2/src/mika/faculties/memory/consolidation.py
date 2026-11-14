@@ -49,6 +49,7 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
+from mika.faculties.memory import timespan
 from mika.faculties.memory.archive import for_people
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, day_of, occurrence, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
@@ -66,7 +67,6 @@ from mika.ports.llm_budget import fit_by_halving, fits_context, halved
 from mika.ports.shares import valid_id
 from mika.ports.sql import json_has
 from mika.ports.vectors import VectorItem
-from mika.vocab import timespan
 from mika.vocab.affect import Declared, Emotion, dominant, facets, facets_valence
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase

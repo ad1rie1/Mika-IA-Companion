@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
-from mika.ports.mcp import KEEPS, POLICIES
-from mika.vocab.access import ToolRule
+from mika.ports.mcp import KEEPS
+from mika.vocab.access import POLICIES, ToolRule
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")

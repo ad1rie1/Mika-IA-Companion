@@ -20,8 +20,10 @@ from mika.faculties.self import load
 from mika.kernel.clock import instant
 from mika.kernel.events import Content, Origin
 from mika.kernel.ids import SeededIdGen
+from mika.kernel.operate import Preview
 from mika.ports.delivery import Delivery
 from mika.ports.llm import LLMRequest, LLMResponse
+from mika.runtime import decisions
 from mika.runtime.bootstrap import Kernel
 from mika.sim.clock import SimClock
 from mika.sim.llm.scripted import ScriptedLLM
@@ -125,3 +127,12 @@ async def befriend(kernel: Kernel, person: str, closeness: str = "friend") -> No
 def said(handle: str, text: str, **kw: Any) -> PerceptionReceived:
     return PerceptionReceived(handle=handle, channel=kw.pop("channel", "web"), text=Content.of(text),
                               authenticated=kw.pop("authenticated", handle.startswith("user_")), **kw)
+
+
+async def effect_preview(kernel: Kernel, proposal: int) -> Preview | None:
+    """Exactement ce que ferait un effet en attente s'il partait maintenant (``None`` : rien en attente sous ce
+    numéro) — la lecture que fait une carte d'accord (``KernelPort.approval_cards``)."""
+    pending = kernel.mind.frame().state("runtime").effects.get(proposal)
+    if pending is None:
+        return None
+    return await decisions.preview(kernel.mind, kernel.ports, pending.capability, pending.args_json)

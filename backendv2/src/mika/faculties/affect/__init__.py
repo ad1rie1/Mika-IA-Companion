@@ -36,6 +36,7 @@ from mika.faculties.affect import prose
 from mika.faculties.affect.params import AffectParams, derive
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
+from mika.kernel.dynamics import Vec3
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
@@ -251,7 +252,7 @@ def _awake_now(s: AffectState, at: int, cx: Any) -> AffectState:
 _VALENCE_SAID = 0.02
 
 
-def _cause(m: ph.Mood, toward: A.Vec3, now: int, p: AffectParams) -> tuple[str, str, int]:
+def _cause(m: ph.Mood, toward: Vec3, now: int, p: AffectParams) -> tuple[str, str, int]:
     """La plus récente impulsion qui pousse dans le sens de ce qu'elle ressent (cause, personne, quand) — et du
     même côté : un soulagement n'explique pas qu'il lui reste de la mélancolie."""
     for mark in reversed(m.marks):
@@ -282,7 +283,7 @@ def over(cause: str, at: int, needs: Any) -> bool:
     return False
 
 
-def _lingering(m: ph.Mood, fond: A.Vec3, now: int, p: AffectParams, cw: ph.Clockwork) -> Emotion:
+def _lingering(m: ph.Mood, fond: Vec3, now: int, p: AffectParams, cw: ph.Clockwork) -> Emotion:
     """Ce que garde le fond : parmi ses émotions récentes, celle qui l'explique le
     mieux, lue contre son repos moyen. Contre le repos de l'heure, une colère de
     l'après-midi se lisait « pensive » le soir."""

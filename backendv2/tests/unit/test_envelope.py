@@ -12,7 +12,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mika.kernel.envelope import VERSION, Limits, decode, encode, schema
 from mika.kernel.inspect import (
     BLOCKS,
     TONES,
@@ -45,6 +44,7 @@ from mika.kernel.inspect import (
     When,
     Workspace,
 )
+from mika.plugins.forge.envelope import VERSION, Limits, decode, encode, schema
 
 try:
     import jsonschema
@@ -697,12 +697,10 @@ def test_emotions():
     def payload(key):
         return env({"type": "fields", "items": [{"label": "l", "value": {"kind": "emotion", "key": key}}]})
 
-    canon = frozenset({"happy", "sad"})
-    assert invalid(payload("joy"), emotions=canon) == "blocks[0].items[0].value.key : émotion inconnue « joy »"
-    assert ok(payload("happy"), emotions=canon)[0].pairs[0][1] == Swatch("happy", "emotion", "happy")
-    # sans ensemble injecté : tout mot ascii en minuscules
-    assert ok(payload("joy"))[0].pairs[0][1].key == "joy"
-    assert "émotion" in invalid(payload("Joie!"))
+    # seuls les noms canoniques passent, sans ensemble à fournir
+    assert ok(payload("happy"))[0].pairs[0][1] == Swatch("happy", "emotion", "happy")
+    assert invalid(payload("joy")) == "blocks[0].items[0].value.key : émotion inconnue « joy »"
+    assert invalid(payload("Joie!")) == "blocks[0].items[0].value.key : émotion inconnue « Joie! »"
 
 
 def test_table_consistency():
@@ -960,8 +958,8 @@ def test_chart_bounds_must_be_finite():
 def test_named_table_pagination_roundtrips_and_matches_the_schema():
     import jsonschema
 
-    from mika.kernel.envelope import decode, encode, schema
     from mika.kernel.inspect import Pager, Table
+    from mika.plugins.forge.envelope import decode, encode, schema
 
     tables = [Table(("valeur",), (("x",),), pager=Pager(param="page_articles", number=2, size=1, total=3)),
               Table(("valeur",), (("y",),), pager=Pager(param="page_alertes", size=1, total=2))]

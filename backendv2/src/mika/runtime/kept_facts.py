@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from mika.vocab.affect import strip_prosody
+from mika.vocab.tag import strip_prosody
 
 #: un nombre : des chiffres, des blancs (« 1 234 », « 14 °C »), une unité ; un point, une virgule ou deux-points
 #: seulement entre deux chiffres (« 1 234,50 », « 16:30 ») — « 1999, 2 fois » fait deux faits, pas un

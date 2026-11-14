@@ -67,13 +67,13 @@ from mika.plugins.mcp import (
 from mika.ports.mcp import (
     KEEPS,
     NATURES,
-    POLICIES,
     STATES,
     Access,
 )
 from mika.vocab.access import (
     OWNER,
     PERSON,
+    POLICIES,
     SELF,
     SOURCE_WORDS,
     TableArgs,

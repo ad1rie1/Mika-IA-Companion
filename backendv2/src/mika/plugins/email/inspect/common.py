@@ -16,7 +16,6 @@ from typing import Any
 from mika.contracts import email as c
 from mika.contracts import self_ as self_c
 from mika.kernel.clock import instant
-from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -32,6 +31,7 @@ from mika.kernel.inspect import (
     Ref,
     Toolbar,
     Workspace,
+    agree,
     is_table_choice,
 )
 from mika.kernel.text import fold  # noqa: F401 — réexportée : les vues du courrier la prennent ici

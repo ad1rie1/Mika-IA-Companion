@@ -11,7 +11,8 @@ import pytest
 
 from mika.faculties.expression import parse
 from mika.vocab import affect as A
-from mika.vocab.affect import Declared, Emotion, emotion_named, parse_tag, partitive, strip_prosody
+from mika.vocab.affect import Declared, Emotion, emotion_named, partitive
+from mika.vocab.tag import parse_tag, strip_prosody
 
 
 @pytest.mark.parametrize("text, clean, declared", [

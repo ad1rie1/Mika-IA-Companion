@@ -445,13 +445,6 @@ def verdict(lines: Iterable[L], default: L, audience: Any, kind: str, concerns: 
     return decide(lines, default, matches) if matches is not None else None
 
 
-def first(lines: Iterable[L], default: L, audience: Any, kind: str, concerns: Callable[[L], bool] | None = None,
-          *, close: Callable[[str], bool] | None = None) -> L | None:
-    """La ligne qui décide pour qui est en face (``verdict``, sans sa place)."""
-    got = verdict(lines, default, audience, kind, concerns, close=close)
-    return got.line if got is not None else None
-
-
 def families(rule: Any) -> frozenset[str]:
     """Les familles d'épisodes où une ligne peut valoir — ce qu'on offre au plus ; qui l'a vraiment se décide devant
     chaque audience. Elle seule (``WORK``) quand la ligne n'a personne ; les moments cochés (ou tous) sinon."""

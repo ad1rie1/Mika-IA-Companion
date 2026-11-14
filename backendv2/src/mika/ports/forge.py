@@ -10,7 +10,8 @@ configuration, un journal, le réseau (``api.http``, ``api.http_get`` : tout
 Internet, jamais la machine ni le réseau local — ADR 0105), et des **signaux**
 (ce qu'elle veut porter à l'attention de Mika) que le plugin journalise. Ses
 outils déclarent leurs arguments dans le vocabulaire des champs d'action
-(``ArgSpec``) : un schéma pour le modèle, une vérification par l'hôte.
+(``ArgSpec``) : un schéma pour le modèle, une vérification par l'hôte — ce
+langage des arguments est dans ``ports/forge_args.py``.
 
 Ce qu'une app **déclare** pour la console (ses vues, leurs paramètres et leurs
 actions, ses réglages typés) est décrit ici en données : l'hôte le lit du
@@ -22,34 +23,16 @@ from __future__ import annotations
 
 import functools
 import json
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from mika.kernel.forms import FormField
+from mika.ports.forge_args import ArgSpec, arg_specs, number_or_none
 
 
 class ForgeRefused(ValueError):
     """Une écriture refusée (manifeste invalide, code qui ne passe pas la relecture)."""
-
-
-@dataclass(frozen=True, slots=True)
-class ArgSpec:
-    """Un argument déclaré — d'un outil d'app, ou un champ d'une action : **le même vocabulaire partout** (ADR 0105).
-    ``type`` : ``text`` | ``textarea`` | ``int`` | ``number`` | ``bool`` | ``select`` | ``email`` | ``url`` |
-    ``lines`` (une liste de textes)."""
-
-    key: str
-    type: str = "text"
-    label: str = ""
-    description: str = ""
-    required: bool = False
-    default: Any = None
-    choices: tuple[str, ...] = ()
-    lo: float | None = None
-    hi: float | None = None
-    max_length: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,15 +340,11 @@ def _pairs(raw: Any) -> tuple[tuple[str, str], ...]:
     return tuple((str(v), str(label)) for v, label in (raw or ()))
 
 
-def _num(raw: Any) -> float | None:
-    return float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
-
-
 def config_form(raw: Sequence[Mapping[str, Any]]) -> tuple[FormField, ...]:
     return tuple(form_field(str(c["key"]), CONFIG_KINDS.get(str(c.get("type")), "text"),
                             str(c.get("label") or c["key"]), help=str(c.get("description") or ""),
-                            group=str(c.get("group") or ""), default=c.get("default"), lo=_num(c.get("min")),
-                            hi=_num(c.get("max")), choices=_pairs(c.get("choices")), order=i)
+                            group=str(c.get("group") or ""), default=c.get("default"), lo=number_or_none(c.get("min")),
+                            hi=number_or_none(c.get("max")), choices=_pairs(c.get("choices")), order=i)
                  for i, c in enumerate(raw))
 
 
@@ -376,8 +355,8 @@ def action_form(raw: Sequence[Mapping[str, Any]]) -> tuple[tuple[FormField, ...]
         required = bool(f.get("required"))
         fields.append(form_field(str(f["key"]), FIELD_KINDS.get(kind, "text"), str(f.get("label") or f["key"]),
                                  help=str(f.get("description") or ""), required=required, default=f.get("default"),
-                                 lo=_num(f.get("min")), hi=_num(f.get("max")), choices=_pairs(f.get("choices")),
-                                 order=i))
+                                 lo=number_or_none(f.get("min")), hi=number_or_none(f.get("max")),
+                                 choices=_pairs(f.get("choices")), order=i))
         rules.append(FieldRule(str(f["key"]), kind, required, int(f.get("max_length") or 0)))
     return tuple(fields), tuple(rules)
 
@@ -418,151 +397,3 @@ def ui_load(text: str) -> AppUI:
                      tuple(str(f) for f in data.get("functions") or ()))
     except (ValueError, TypeError, KeyError, AttributeError):
         return AppUI()
-
-
-# ── Les arguments déclarés : un vocabulaire, un schéma, une vérification (ADR 0105) ──
-
-#: ce qu'un argument de chaque type devient dans le schéma que lit le modèle
-_JSON_TYPES: Mapping[str, str] = {"text": "string", "textarea": "string", "email": "string", "url": "string",
-                                  "select": "string", "int": "integer", "number": "number", "bool": "boolean",
-                                  "lines": "array"}
-EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-URL = re.compile(r"^https?://[^\s/?#@\\]+(?:[/?#][^\s\\]*)?$", re.IGNORECASE)
-_TRUE = frozenset({"true", "vrai", "oui", "yes", "on", "1"})
-_FALSE = frozenset({"false", "faux", "non", "no", "off", "0", ""})
-#: une liste de textes : au plus tant d'éléments, chacun au plus tant de caractères
-LINES_MAX, LINE_MAX = 100, 500
-
-
-def arg_specs(raw: Sequence[Mapping[str, Any]]) -> tuple[ArgSpec, ...]:
-    """Les arguments normalisés par la relecture (``{key, type, label, description, required, default, choices,
-    min, max, max_length}``), en specs."""
-    return tuple(ArgSpec(str(a["key"]), str(a.get("type") or "text"), str(a.get("label") or a["key"]),
-                         str(a.get("description") or ""), bool(a.get("required")), a.get("default"),
-                         tuple(str(c[0]) if isinstance(c, list | tuple) else str(c) for c in a.get("choices") or ()),
-                         _num(a.get("min")), _num(a.get("max")), int(a.get("max_length") or 0))
-                 for a in raw)
-
-
-def args_schema(specs: Sequence[ArgSpec]) -> dict[str, Any]:
-    """Le schéma JSON que voit le modèle : chaque argument, son type, ce qu'il veut dire, ses bornes et ses choix —
-    rien d'autre n'est accepté."""
-    props: dict[str, Any] = {}
-    for a in specs:
-        prop: dict[str, Any] = {"type": _JSON_TYPES.get(a.type, "string")}
-        words = " — ".join(x for x in (a.label if a.label != a.key else "", a.description) if x)
-        if words:
-            prop["description"] = words[:400]
-        if a.type == "lines":
-            prop["items"] = {"type": "string"}
-        if a.choices:
-            prop["enum"] = list(a.choices)
-        for name, bound in (("minimum", a.lo), ("maximum", a.hi)):
-            if bound is not None:
-                prop[name] = int(bound) if float(bound).is_integer() else bound
-        if a.max_length:
-            prop["maxLength"] = a.max_length
-        if a.type == "email":
-            prop["format"] = "email"
-        elif a.type == "url":
-            prop["format"] = "uri"
-        if a.default is not None:
-            prop["default"] = a.default
-        props[a.key] = prop
-    return {"type": "object", "properties": props, "required": [a.key for a in specs if a.required],
-            "additionalProperties": False}
-
-
-def _empty_of(a: ArgSpec) -> Any:
-    return False if a.type == "bool" else [] if a.type == "lines" else \
-        None if a.type in ("int", "number", "select") else ""
-
-
-def _bounded(a: ArgSpec, value: float) -> str:
-    if (a.lo is not None and value < a.lo) or (a.hi is not None and value > a.hi):
-        return f"doit être entre {a.lo:g} et {a.hi:g}" if a.lo is not None and a.hi is not None \
-            else "hors de ses bornes"
-    return ""
-
-
-def _one(a: ArgSpec, value: Any) -> tuple[Any, str]:
-    """(la valeur vérifiée, ou le problème en français)."""
-    if a.type == "bool":
-        if isinstance(value, bool):
-            return value, ""
-        word = str(value).strip().lower()
-        return (True, "") if word in _TRUE else (False, "") if word in _FALSE else (None, "vrai ou faux attendu")
-    if a.type in ("int", "number"):
-        if isinstance(value, bool):
-            return None, "un nombre est attendu"
-        try:
-            number = float(value) if isinstance(value, str) else value
-        except ValueError:
-            return None, "un entier est attendu" if a.type == "int" else "un nombre est attendu"
-        if not isinstance(number, int | float) or number != number or number in (float("inf"), float("-inf")):
-            return None, "un entier est attendu" if a.type == "int" else "un nombre est attendu"
-        if a.type == "int":
-            if float(number) != int(number):
-                return None, "un entier est attendu"
-            number = int(number)
-        return number, _bounded(a, number)
-    if a.type == "lines":
-        items = value.splitlines() if isinstance(value, str) else value
-        if not isinstance(items, list | tuple) or not all(isinstance(x, str | int | float) for x in items):
-            return None, "une liste de textes est attendue"
-        if len(items) > LINES_MAX:
-            return None, f"{LINES_MAX} éléments au plus"
-        return [str(x)[:LINE_MAX] for x in items if str(x).strip()], ""
-    if not isinstance(value, str | int | float) or isinstance(value, bool):
-        return None, "un texte est attendu"
-    text = str(value)
-    if a.type == "select":
-        if a.choices and text not in a.choices:
-            return None, f"un de ces choix : {', '.join(a.choices)}"
-        return text, ""
-    if a.max_length and len(text) > a.max_length:
-        return text, f"trop long : {a.max_length} caractères au plus"
-    if a.type == "email" and not EMAIL.match(text.strip()):
-        return text, "une adresse e-mail est attendue (nom@exemple.fr)"
-    if a.type == "url" and not URL.match(text.strip()):
-        return text, "une adresse http(s)://… est attendue"
-    return text, ""
-
-
-def check_args(specs: Sequence[ArgSpec], data: Mapping[str, Any], *, defaults: bool = True,
-               strict: bool = True) -> tuple[dict[str, Any], dict[str, str]]:
-    """Des arguments vérifiés un par un : présence, type, bornes, choix, longueur, forme d'un e-mail ou d'une
-    adresse. Rend (valeurs, problèmes par argument). ``defaults`` : un argument absent prend son défaut déclaré (un
-    outil ; un formulaire, lui, envoie ce qu'on y a laissé) ; ``strict`` : un argument non déclaré est un problème."""
-    out: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-    known = {a.key for a in specs}
-    if strict:
-        for key in data:
-            if key not in known:
-                errors[str(key)[:40]] = "argument inconnu"
-    for a in specs:
-        if a.key not in data and defaults and a.default is not None:
-            value: Any = list(a.default) if isinstance(a.default, list) else a.default
-        else:
-            value = data.get(a.key)
-        empty = value is None or (isinstance(value, str) and not value.strip() and a.type != "bool") or \
-            (a.type == "lines" and isinstance(value, list | tuple) and not value)
-        if empty and a.type != "bool":
-            if a.required:
-                errors[a.key] = "valeur requise"
-            out[a.key] = _empty_of(a)
-            continue
-        if value is None:  # un vrai/faux absent : faux
-            out[a.key] = False
-            continue
-        got, problem = _one(a, value)
-        if problem:
-            errors[a.key] = problem
-        out[a.key] = got if got is not None else _empty_of(a)
-    return out, errors
-
-
-def said_args(specs: Sequence[ArgSpec]) -> str:
-    """Les arguments d'un outil en quelques mots : « symbole (text), n (int, requis) » (vide : aucun)."""
-    return ", ".join(f"{a.key} ({a.type}{', requis' if a.required else ''})" for a in specs)

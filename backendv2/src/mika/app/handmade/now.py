@@ -65,9 +65,8 @@ from mika.inspector import names, render
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
-from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Ref, money_fr, num_fr, pct_fr
+from mika.kernel.inspect import Ref, agree, money_fr, num_fr, pct_fr
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
 from mika.vocab import causes

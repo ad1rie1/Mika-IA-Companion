@@ -144,7 +144,6 @@ def test_every_outcome_has_its_status_and_the_ports_share_them():
     assert set(GATE_STATUS) == outcomes
     assert phone.GateResult is teams.GateResult is wakeup.GateResult is gate.GateResult
     assert teams.KeyState is wakeup.KeyState is gate.KeyState
-    assert teams.ACCEPTED == phone.ACCEPTED == gate.ACCEPTED
     assert phone.IGNORED == "ignored"  # le sort d'une réponse proposée : pas une issue de porte, il reste au port
 
 

@@ -74,8 +74,8 @@ from mika.plugins.forge.views import (  # noqa: E402
 from mika.sim import sonde, world  # noqa: E402
 from mika.sim.clock import SimClock, run_virtual  # noqa: E402
 from mika.sim.lane import PARIS, at_paris  # noqa: E402
-from mika.vocab.affect import strip_prosody  # noqa: E402
 from mika.vocab.episodes import project_of  # noqa: E402
+from mika.vocab.tag import strip_prosody  # noqa: E402
 from scenarios import BY_ID, SCENARIOS, Scenario  # noqa: E402
 
 #: les mesures restent dans le dépôt de travail, même quand le banc tourne depuis une copie figée du code

@@ -110,7 +110,7 @@ class KernelDeps:
     #: attente, sans épisode) ou l'instant d'où elle est due — son réveil, d'où la
     #: reprise au démarrage compte l'âge de la question.
     reply_wait: Callable[[Frame, int], int | None] | None = None
-    #: les tableaux de droits réglés (ADR 0134 : ``kernel.rights.Rights``), posés sur le registre ; ``None`` : les
+    #: les tableaux de droits réglés (ADR 0134 : ``vocab.rights.Rights``), posés sur le registre ; ``None`` : les
     #: minimums vitaux seuls
     access_tables: Callable[[], Any] | None = None
     #: qui est proche d'elle, devant ce qu'elle vit (``fn(frame) -> fn(personne) -> bool``), posé sur le registre

@@ -25,7 +25,6 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
 from mika.faculties.transcript import _COLUMNS, TRANSCRIPT, TranscriptState, _messages_of
-from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -45,10 +44,11 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
-    describe_error,
+    agree,
     paginate,
 )
 from mika.ports.delivery import TOO_LATE
+from mika.ports.errors import describe_error
 from mika.ports.paging import fold_text
 from mika.vocab import privacy
 from mika.vocab.affect import emotion_cell

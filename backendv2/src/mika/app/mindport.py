@@ -41,7 +41,6 @@ from mika.kernel.clock import MINUTE, local
 from mika.kernel.events import Content, Event, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
-from mika.kernel.operate import Preview
 from mika.kernel.state import Root
 from mika.plugins import location
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
@@ -546,13 +545,6 @@ class KernelPort:
             return decisions.CHANGED  # accepter sans dire ce qu'on a lu : jamais
         return await self.resolve_effect(proposal, approved, by=handle, seen=seen,
                                          note="" if approved else "refusé dans la conversation")
-
-    async def effect_preview(self, proposal: int) -> Preview | None:
-        """Exactement ce que ferait un effet en attente s'il partait maintenant."""
-        pending = self.kernel.mind.frame().state("runtime").effects.get(proposal)
-        if pending is None:
-            return None
-        return await decisions.preview(self.kernel.mind, self.kernel.ports, pending.capability, pending.args_json)
 
     def _work(self, frame: Any) -> dict[str, Any]:
         """Ses projets et ce qui attend un accord — pour une propriétaire."""

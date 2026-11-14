@@ -60,6 +60,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import tables as tb
+from mika.faculties.memory import timespan
 from mika.faculties.memory.extraction import (
     date_words,
     facet_words,
@@ -97,7 +98,6 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import Fragment, SectionBody
 from mika.ports.sql import alias_of
 from mika.vocab import affect as A
-from mika.vocab import timespan
 from mika.vocab.days import when_fr, window_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import clean_tokens, is_identifiable, named_label, phone_label, read_source

@@ -133,17 +133,17 @@ class _BoundedLLM:
         self._llm = llm
         self._sem = sem
 
-    async def call(self, request: Any) -> Any:
+    async def call(self, req: Any) -> Any:
         try:
             async with self._sem:
-                resp = await self._llm.call(request)
+                resp = await self._llm.call(req)
                 if getattr(resp, "truncated_tool_call", False):
-                    retry = raised_cap(self._llm, request, TOOL_CALL_CAP_CEILING)
+                    retry = raised_cap(self._llm, req, TOOL_CALL_CAP_CEILING)
                     if retry is not None:
                         resp = await self._llm.call(retry)
                 return resp
         finally:
-            release(self._llm, str(getattr(request, "call_id", "")))
+            release(self._llm, str(getattr(req, "call_id", "")))
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._llm, name)

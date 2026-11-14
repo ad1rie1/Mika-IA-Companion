@@ -79,7 +79,8 @@ from mika.plugins.forge.views import (
     summary,
     view_params,
 )
-from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args, ui_load
+from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, ui_load
+from mika.ports.forge_args import args_schema, check_args, said_args
 from mika.vocab.access import ALONE, CLOSED_TOOLS, INTERNAL, NO, OWNER, SELF, ToolRule
 from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target

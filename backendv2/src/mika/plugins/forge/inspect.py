@@ -102,11 +102,10 @@ from mika.ports.forge import (
     AppViewSpec,
     CallResult,
     ForgeRefused,
-    check_args,
     form_field,
-    said_args,
     ui_load,
 )
+from mika.ports.forge_args import check_args, said_args
 from mika.vocab.access import (
     KEEP_WORDS,
     KEEPS,
@@ -920,7 +919,7 @@ def _act_fields(s: ForgeState, frame: Frame, key: str, fixed: dict[str, str]) ->
 
 def _check(action: Any, data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     """Les données d'une action, vérifiées au-delà du contrôle : présence, longueur, forme — la même vérification que
-    les arguments d'un outil d'app (``ports.forge.check_args``, ADR 0105). Un formulaire envoie ce qu'on y a laissé :
+    les arguments d'un outil d'app (``ports.forge_args.check_args``, ADR 0105). Un formulaire envoie ce qu'on y a laissé :
     pas de défaut pour un champ vide, et les champs de la console (app, vue, action…) passent."""
     return check_args(action.specs, data, defaults=False, strict=False)
 

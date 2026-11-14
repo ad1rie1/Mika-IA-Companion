@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Payload
-from mika.kernel.faculty import EffectClass, Faculty, Zone
+from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Audience
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
@@ -50,8 +50,7 @@ def _added(s: NotesState, e, cx) -> NotesState:
     return replace(s, count=s.count + 1)
 
 
-@NOTES.tool("note_add", description="Ajoute une note.", args=AddArgs, bundle="atelier", episodes=["STEP"],
-            effect=EffectClass.INTERNAL)
+@NOTES.tool("note_add", description="Ajoute une note.", args=AddArgs, bundle="atelier", episodes=["STEP"])
 async def note_add(args: AddArgs, ctx) -> ToolResult:
     await ctx.emit(ADDED.draft(what=args.what))
     return ToolResult(content="noté")

@@ -40,7 +40,6 @@ from mika.faculties.identity.faculty import (
     worn_names,
 )
 from mika.kernel.events import Event
-from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -65,6 +64,7 @@ from mika.kernel.inspect import (
     Text,
     Toolbar,
     When,
+    agree,
     paginate,
 )
 from mika.vocab import privacy

@@ -201,11 +201,6 @@ def _share_any(rows: list[Row], any_evidence: Mapping[str, float], policy: Arbit
     return out
 
 
-def rate_bound(rows: Sequence[Row], policy: ArbitrationPolicy) -> float:
-    """Borne supérieure de l'intensité totale : σ ≤ 1."""
-    return sum(policy.max_rates.get(r.kind, 0.0) for r in rows if not r.vetoes)
-
-
 def local_bound(rows: Sequence[Row], headroom: float = 2.0) -> float:
     """Une borne de l'intensité totale valable jusqu'à la prochaine
     réévaluation : ``headroom`` fois l'intensité actuelle. L'intensité ne

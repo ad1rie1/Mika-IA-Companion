@@ -20,7 +20,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from mika.vocab.affect import Facet, facets, parse_tag, strip_prosody
+from mika.vocab.affect import Facet, facets
+from mika.vocab.tag import parse_tag, strip_prosody
 from mika.vocab.words import fold
 
 _MD = r"[*_`~]*"

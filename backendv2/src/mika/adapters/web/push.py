@@ -30,8 +30,8 @@ from mika.ports import delivery as delivery_p
 from mika.ports.delivery import Delivery
 from mika.ports.shares import valid_id
 from mika.vocab import voice
-from mika.vocab.affect import strip_prosody
 from mika.vocab.people import is_internal
+from mika.vocab.tag import strip_prosody
 
 log = logging.getLogger("mika.push")
 

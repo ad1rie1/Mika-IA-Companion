@@ -377,7 +377,7 @@ def test_hurt_the_relation_cools_and_never_grows_tender():
     """Le constat G4 : triste envers qui la blesse, ce n'est pas être triste avec lui — l'ancre se refroidit autant
     qu'avec de la colère, sans attachement ; la même tristesse partagée, elle, rapproche."""
     p, ref = affect_derive(T.Temperament()), ph.reference(affect_derive(T.Temperament()), _cw())
-    st = ph.Stance(ph.Osc(ref, ph.ZERO, T0))
+    st = ph.Stance(ph.Osc(ref, A.ORIGIN, T0))
     hurt_sad = ph.fold(st, Declared(Emotion.SAD, 0.7), T0, 1, ref, p, hurt=True)
     hurt_angry = ph.fold(st, Declared(Emotion.ANGRY, 0.7), T0, 1, ref, p, hurt=True)
     shared = ph.fold(st, Declared(Emotion.SAD, 0.7), T0, 1, ref, p)

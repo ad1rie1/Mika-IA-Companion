@@ -56,7 +56,8 @@ from mika.ports.llm import (
     Usage,
 )
 from mika.ports.llm_budget import LLMLimits
-from mika.runtime.tools import ToolResult, declare, run_tool_loop
+from mika.runtime.tools import TOOL_CALL_CAP_CEILING, ToolResult, declare, raised_cap, run_tool_loop
+from mika.vocab.episodes import Role
 from tests.contract.test_llm_backends import (
     FakeAnthropic,
     FakeOllama,
@@ -472,6 +473,30 @@ async def test_a_cut_is_not_asked_again_when_the_provider_would_send_the_same_ca
     assert resp.stop == "max_tokens" and len(cut.seen) == 1
     assert gw.output_tokens(LLMRequest(role="extract", call_id="y#0", system_stable="s", max_tokens=1000)) == 16_384
     assert gw.output_tokens(LLMRequest(role="inconnu", call_id="z#0", system_stable="s", max_tokens=1000)) == 1000
+
+
+def test_the_live_gateway_says_the_effective_cap_so_a_cut_tool_call_is_not_replayed_for_nothing():
+    """La passerelle en service dit le plafond effectif de la passerelle qui servira la requête, comme la passerelle
+    nue ; sans passerelle, le plafond demandé. La boucle d'outils le lit (``raised_cap``) : chez un fournisseur qui
+    réfléchit, doubler 1 000 jetons envoie toujours 16 384, et l'appel coupé n'est pas rejoué (ADR 0135)."""
+    req = LLMRequest(role="extract", call_id="x#0", system_stable="s", max_tokens=1000)
+    bare = Gateway({"c": Thinker()}, {"extract": "c"}, clock=ManualClock(0))
+    live = LiveGateway(Gateway({"c": Thinker()}, {"extract": "c"}, clock=ManualClock(0)))
+    assert live.output_tokens(req) == bare.output_tokens(req) == 16_384
+    assert LiveGateway().output_tokens(req) == 1000
+    assert raised_cap(live, req, TOOL_CALL_CAP_CEILING) is None
+
+
+def test_both_gateways_say_who_serves_each_role_without_being_told_the_roles():
+    """``resolution()`` sans rôles : chaque ``Role``, replis compris ; la passerelle en service relaie la nue, et dit
+    « » partout sans passerelle. Avec des rôles, la passerelle nue ne répond que pour eux."""
+    bare = Gateway({"c": Cut()}, {"reply": "c"}, clock=ManualClock(0), fallbacks={"extract": "reply"})
+    every = {str(r) for r in Role}
+    assert set(bare.resolution()) == every
+    assert bare.resolution()["reply"] == bare.resolution()["extract"] == "c"
+    assert LiveGateway(bare).resolution() == bare.resolution()
+    assert LiveGateway().resolution() == dict.fromkeys(every, "")
+    assert bare.resolution(["reply", "inconnu"]) == {"reply": "c", "inconnu": ""}
 
 
 def test_the_prompt_budget_and_the_fit_reserve_the_effective_output():

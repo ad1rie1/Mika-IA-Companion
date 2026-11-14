@@ -24,7 +24,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.contracts import teams as c
 from mika.kernel.events import Content
-from mika.kernel.forms import Knob, agree
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -44,6 +44,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    agree,
     paginate,
 )
 from mika.kernel.operate import Decision, Done, Refused
@@ -68,7 +69,8 @@ from mika.plugins.teams import (
     under_way,
 )
 from mika.plugins.teams.accounts import Scope
-from mika.ports.teams import MODES, SEND, conversation_key, split_conversation_key, to_fill
+from mika.ports.drafts import to_fill
+from mika.ports.teams import MODES, OUTBOX_SEND, conversation_key, split_conversation_key
 from mika.ports.teams import Draft as TeamsDraft
 from mika.vocab.access import PERSON, SELF
 from mika.vocab.privacy import Sensitivity
@@ -634,7 +636,7 @@ def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
         raise Refused("Il reste des passages [À COMPLÉTER] à remplir.", {"body": "un passage à compléter"})
     draft = port.save_draft(TeamsDraft(id="", conversation=conversation, body=body, reply_to=args.reply_to,
                                        author=ctx.by, account=account))
-    why = port.enqueue(draft.id, mode=SEND, digest="", expires_at=frame.now + p.queue_ttl_us, now=frame.now)
+    why = port.enqueue(draft.id, mode=OUTBOX_SEND, digest="", expires_at=frame.now + p.queue_ttl_us, now=frame.now)
     if why:
         port.discard_draft(draft.id)
         raise Refused(f"Il n'a pas pu partir : {why}.")

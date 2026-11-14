@@ -52,9 +52,9 @@ from mika.kernel.inspect import (
     Text,
     When,
     cursor_page,
-    describe_error,
 )
 from mika.kernel.text import fold
+from mika.ports.errors import describe_error
 from mika.ports.journal import JournalEvent
 from mika.ports.sql import json_field
 from mika.runtime import operations

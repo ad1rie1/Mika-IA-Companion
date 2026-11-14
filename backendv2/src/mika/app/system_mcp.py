@@ -15,7 +15,7 @@ from typing import Any
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.mcp.system import Provided
 from mika.plugins import web
-from mika.ports.mcp import INTERNAL, OWNER, SELF
+from mika.vocab.access import INTERNAL, OWNER, SELF
 
 #: les plugins qui apportent un serveur : quand leurs paramètres changent, le client MCP se reconfigure
 OWNERS = frozenset({web.WEB.name})

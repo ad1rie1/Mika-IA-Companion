@@ -31,8 +31,9 @@ from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab import affect as A
 from mika.vocab import reading
-from mika.vocab.affect import Declared, Emotion, felt_pad, parse_tag
+from mika.vocab.affect import Declared, Emotion, felt_pad
 from mika.vocab.reading import Reading
+from mika.vocab.tag import parse_tag
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 from tests.fixtures.reading import Reads
 
@@ -310,8 +311,8 @@ def test_her_mood_and_her_stance_follow_all_her_facets():
     """L'humeur et la posture visent toutes ses facettes (``mood_target_of``, ``stance_target_of``) : « triste 0,6,
     en colère 0,4 » ne vise pas où vise « triste 0,6 » seule ; une seule facette, là où visait la balise d'avant."""
     p = AffectParams()
-    mood = ph.Mood(ph.Osc((0.1, 0.1, 0.0), ph.ZERO, 0))
-    stance = ph.Stance(ph.Osc((0.1, 0.1, 0.0), ph.ZERO, 0))
+    mood = ph.Mood(ph.Osc((0.1, 0.1, 0.0), A.ORIGIN, 0))
+    stance = ph.Stance(ph.Osc((0.1, 0.1, 0.0), A.ORIGIN, 0))
     alone, mixed = Declared(Emotion.SAD, 0.6), Declared.of((("sad", 0.6), ("angry", 0.4)))
     assert ph.mood_target_of(mood, alone, p) == pytest.approx(ph.mood_target(mood, Emotion.SAD, 0.6, p))
     assert ph.mood_target_of(mood, mixed, p) != pytest.approx(ph.mood_target_of(mood, alone, p))

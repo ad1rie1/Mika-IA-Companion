@@ -43,7 +43,6 @@ from mika.faculties.memory.extraction import self_names
 from mika.kernel.events import Content, Draft, Origin
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel
-from mika.vocab import timespan
 from mika.vocab.affect import Emotion, emotion_of, facets
 from mika.vocab.people import ACCOUNT_PREFIX, EXTERNAL_PREFIX, clean_display_name, fold, is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -252,16 +251,16 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
     """Un moment de la vie de quelqu'un (``about``, au moins une personne) noté d'après ses archives : à venir
     (``when``, en µs ; le jour seulement si ``all_day``), ou une situation en cours depuis ``when``
     (``ongoing``) — qui peut rouvrir une situation finie (``recurs`` : la même histoire, une autre fois). Une période
-    (``until``, ``precision`` : ``vocab.timespan``), ce qui arrive dans le monde (``world`` : ``about`` vide, dit par
-    quelqu'un), un moment qu'elle vivra à travers la personne (``shared``), une date officielle, sa vraisemblance
-    (ADR 0084)."""
+    (``until``, ``precision`` : ``memory_c.PRECISIONS``), ce qui arrive dans le monde (``world`` : ``about`` vide,
+    dit par quelqu'un), un moment qu'elle vivra à travers la personne (``shared``), une date officielle, sa
+    vraisemblance (ADR 0084)."""
     about_, told = _people(kernel, about, "about"), _people(kernel, told_by, "told_by")
     if world and (about_ or not told):
         raise ValueError("un moment du monde n'est la vie de personne (« about » vide) et se dit par quelqu'un "
                          "(« told_by »)")
     if not about_ and not world:
         raise NotAPerson("un moment de la vie de quelqu'un dit de qui (« about » vide)")
-    if precision not in timespan.PRECISIONS or (precision and until is None):
+    if precision not in memory_c.PRECISIONS or (precision and until is None):
         raise ValueError(f"précision inconnue : « {precision} » (month, season, year, range — avec « until »)")
     if int(when) <= 0:
         raise ValueError(f"un moment sans date : {when}")

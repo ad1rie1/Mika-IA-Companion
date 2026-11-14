@@ -49,7 +49,7 @@ from mika.runtime.tools import ToolContext
 from mika.sim.llm.persona import _section
 from mika.vocab.episodes import Kind, project_target
 from tests.fixtures.atelier import Atelier
-from tests.fixtures.mika import connect, said
+from tests.fixtures.mika import connect, effect_preview, said
 from tests.unit.test_projects import create, events, form, live, llm_call, row_form, wait
 
 #: une commande qui pourrait cacher quelque chose dans un argument (un espace, une fin de ligne)
@@ -85,7 +85,7 @@ def test_a_network_command_is_shown_whole_and_its_approval_pins_the_workshop(tmp
         # la même commande, redemandée à l'exécution suivante, ne s'empile pas : une seule attend
         [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "projects.networked"]
         out = {"summary": events(kernel, rt.EFFECT_PROPOSED)[-1].data.summary.text,
-               "preview": await port.effect_preview(pending.proposal),
+               "preview": await effect_preview(kernel, pending.proposal),
                "panel": port.person_panel("user_1")["pending_project_actions"]}
         await kernel.ports["workshop"].write(pid, "autre.py", "x = 2\n")  # l'atelier change après qu'on l'a lu
         out["changed"] = await port.resolve_effect(pending.proposal, True, by="user_1", seen=out["preview"].digest)

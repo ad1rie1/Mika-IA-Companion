@@ -4,8 +4,8 @@ Une faculté déclare ``@f.inspect("nom", title=…, section=…, subject=…)``
 fonction ``(tranche, frame, ctx) -> Sequence[Block]`` ; la console les rend
 toutes de la même façon, les range là où la composition l'a décidé (une
 destination, ou un onglet de la fiche d'un objet), sans connaître aucune
-faculté. Le même vocabulaire sert aux apps forgées, par une enveloppe JSON
-(``kernel/envelope.py``).
+faculté. Un propriétaire peut recevoir ce vocabulaire sérialisé d'ailleurs ;
+c'est à lui de le décoder.
 
 Lecture seule : une vue lit le frame, les projections et les caches des
 ports, jamais n'écrit. Tout y est montré (la console est réservée aux
@@ -18,6 +18,7 @@ import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date
 from typing import Any
 
 from mika.kernel.text import fold
@@ -140,8 +141,8 @@ class Meter:
 
 @dataclass(frozen=True, slots=True)
 class Swatch:
-    """Une pastille de couleur tirée d'une palette nommée (``"emotion"`` : la
-    couleur de l'une des 29 émotions, ``key`` = son nom canonique)."""
+    """Une pastille de couleur tirée d'une palette nommée (``palette``) ; ``key`` : sa couleur
+    dans cette palette."""
 
     text: str
     palette: str
@@ -684,6 +685,19 @@ def num_fr(value: float | int | None, digits: int | None = None, *, signed: bool
     return sign + text
 
 
+def agree(n: int, one: str, many: str) -> str:
+    """Le nom accordé au compte, sans le compte : « mail important », « mails importants » — quand le nombre est
+    déjà dit à côté (la valeur d'un badge, que l'accueil montre devant son indice). Le singulier jusqu'à 1, comme
+    en français."""
+    return one if abs(n) < 2 else many
+
+
+def plural(n: int, one: str, many: str) -> str:
+    """Un compte et son nom accordé (``agree``), plutôt que « mail(s) » : « 0 échec », « 1 mail important »,
+    « 3 mails importants » ; les milliers séparés par une espace fine (« 1 200 événements »)."""
+    return f"{num_fr(n)} {agree(n, one, many)}"
+
+
 def pct_fr(ratio: float | None, digits: int = 0) -> str:
     """Une part en pourcentage à la française : 0,423 → « 42 % »."""
     if ratio is None or not math.isfinite(float(ratio)):
@@ -714,13 +728,15 @@ def size_fr(octets: float | int | None) -> str:
     return f"{num_fr(value)}{_NNBSP}{_SIZE_UNITS[unit]}"
 
 
-def day_fr(year: int, month: int, day: int, weekday: int, *, with_year: bool = False) -> str:
-    """Un jour à la française (« mer. 1 oct. », « mer. 1 oct. 2026 ») ; ``weekday`` : 0 = lundi."""
-    text = f"{_DAYS_FR[weekday % 7]} {day} {_MONTHS_FR[(month - 1) % 12]}"
-    return f"{text} {year}" if with_year else text
+def short_day_fr(d: date, *, with_year: bool = False) -> str:
+    """Un jour en abrégé, pour la console (« mer. 1 oct. », « mer. 1 oct. 2025 ») ; ce qu'elle dit d'un jour
+    (« lundi 28 septembre ») vient de sa voix : ``vocab.circadian.day_fr``."""
+    text = f"{_DAYS_FR[d.weekday()]} {d.day} {_MONTHS_FR[d.month - 1]}"
+    return f"{text} {d.year}" if with_year else text
 
 
-#: ce que veut dire une erreur, pour un opérateur (jamais un ``repr`` Python)
+#: ce que veut dire une erreur de Python ou du noyau, pour un opérateur (jamais un ``repr`` Python) ;
+#: celles du monde extérieur arrivent par ``meanings`` (``ports.errors``)
 _ERRORS_FR: Mapping[str, str] = {
     "TimeoutError": "délai dépassé", "CancelledError": "interrompu", "PermissionError": "permission refusée",
     "FileNotFoundError": "fichier introuvable", "IsADirectoryError": "c'est un dossier, pas un fichier",
@@ -728,24 +744,24 @@ _ERRORS_FR: Mapping[str, str] = {
     "ConnectionRefusedError": "connexion refusée", "ConnectionResetError": "connexion coupée",
     "ConnectionError": "connexion impossible", "OSError": "erreur du système", "KeyError": "élément introuvable",
     "LookupError": "introuvable", "IndexError": "élément introuvable", "ValueError": "valeur refusée",
-    "ZoneInfoNotFoundError": "fuseau horaire inconnu", "UnconfiguredRole": "aucun modèle configuré",
-    "MissingPersona": "persona manquante", "PromptBudgetError": "prompt trop long pour le budget",
+    "ZoneInfoNotFoundError": "fuseau horaire inconnu", "PromptBudgetError": "prompt trop long pour le budget",
     "MemoryError": "mémoire épuisée", "RecursionError": "erreur interne (récursion)",
     "TypeError": "erreur interne (type inattendu)", "AttributeError": "erreur interne (attribut manquant)",
     "AssertionError": "erreur interne (vérification)", "NotImplementedError": "pas encore possible",
-    "RuntimeError": "erreur", "StoreSealed": "magasin fermé", "ListingFailed": "liste indisponible",
-    "ClaudeCodeError": "erreur de Claude Code", "ImapError": "erreur du serveur de courrier",
+    "RuntimeError": "erreur",
 }
 _PY_NAME = re.compile(r"^([A-Z][A-Za-z0-9_]*): ?(.*)$", re.S)
 #: un ``repr`` d'exception gardé en texte (« TimeoutError() », « KeyError('x') »)
 _PY_REPR = re.compile(r"^([A-Z][A-Za-z0-9_]*)\((.*)\)$", re.S)
 
 
-def describe_error(error: BaseException | str) -> str:
+def describe_error(error: BaseException | str, meanings: Mapping[str, str] | None = None) -> str:
     """Une erreur en français, pour un opérateur : son sens (« délai dépassé », « fichier
     introuvable »), puis son message s'il en a un — jamais un ``repr`` ni un nom de classe nu.
     Accepte une exception, un texte « NomDeClasse: message » ou un ``repr`` gardé en texte
-    (« TimeoutError() », la dernière erreur d'un effet)."""
+    (« TimeoutError() », la dernière erreur d'un effet). ``meanings`` ajoute le sens d'autres
+    noms de classe à ceux du noyau : il sert à reconnaître un texte gardé comme à le dire."""
+    known = {**_ERRORS_FR, **meanings} if meanings else _ERRORS_FR
     if isinstance(error, BaseException):
         name = type(error).__name__
         if isinstance(error, OSError) and error.strerror:
@@ -756,11 +772,11 @@ def describe_error(error: BaseException | str) -> str:
             message = str(error)
     else:
         match = _PY_REPR.match(error.strip()) or _PY_NAME.match(error.strip())
-        if match is None or not (match.group(1) in _ERRORS_FR or match.group(1).endswith(("Error", "Exception"))):
+        if match is None or not (match.group(1) in known or match.group(1).endswith(("Error", "Exception"))):
             return error.strip()
         name, message = match.group(1), match.group(2)
     message = message.strip().strip("'\"").strip()
-    meaning = _ERRORS_FR.get(name)
+    meaning = known.get(name)
     if meaning is None:
         return message or f"erreur inattendue ({name})"
     return f"{meaning} : {message}" if message and message.casefold() != meaning.casefold() else meaning

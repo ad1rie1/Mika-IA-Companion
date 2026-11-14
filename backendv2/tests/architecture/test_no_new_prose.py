@@ -57,6 +57,9 @@ CEILING = {
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
     "plugins/forge/__init__.py": 4,  # capacité d'installation (console)
+    # les erreurs de validation d'une vue forgée, chemin JSON compris (la note « Vue invalide » de la console,
+    # forge_test), pas sa voix ; venues de ``kernel/envelope.py`` le 2026-11-14 (audit du 2026-11-05, K1-01)
+    "plugins/forge/envelope.py": 43,
     # mode d'emploi de forge_help (exemples de code) — à migrer ; +2 le 2026-10-12 : le manifeste et le code de
     # l'exemple de veille (ADR 0104), du code qu'un test exécute, pas une phrase qu'elle lit (son texte est dans
     # la voix, forge.guide.veille)

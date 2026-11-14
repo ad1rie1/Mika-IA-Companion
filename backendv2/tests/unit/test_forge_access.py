@@ -28,7 +28,7 @@ from mika.plugins.forge.calls import _section, call_digest
 from mika.runtime.tools import offer
 from mika.vocab.access import OWNER, PERSON
 from mika.vocab.episodes import PRO, Kind
-from tests.fixtures.mika import connect
+from tests.fixtures.mika import connect, effect_preview
 from tests.unit.test_forge_console import ADRIEN, needs_bwrap, run
 from tests.unit.test_project_access import facing, set_access, talking
 from tests.unit.test_projects import create, events
@@ -108,7 +108,7 @@ def test_her_apps_follow_the_access_of_their_project_and_on_approval_what_comes_
         out["asked"] = await as_camille("cours_cours", symbole="AAPL")
         [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == forge_c.CALL]
         port = KernelPort(kernel)
-        preview = await port.effect_preview(pending.proposal)
+        preview = await effect_preview(kernel, pending.proposal)
         out["preview"] = preview.text
         out["decider"] = json.loads(kernel.mind.frame().state("forge").calls[pending.proposal].args_json)[rt.DECIDER]
         out["answered_before"] = events(kernel, forge_c.ANSWERED)
@@ -174,7 +174,7 @@ def test_in_pro_mode_her_app_call_waits_for_the_card_and_hands_back_what_came_ba
             await asyncio.sleep(1)
         out = {"waiting": not call.done()}
         port = KernelPort(kernel)
-        preview = await port.effect_preview(pending[0].proposal)
+        preview = await effect_preview(kernel, pending[0].proposal)
         await port.resolve_effect(pending[0].proposal, True, by="user_2", seen=preview.digest)
         out["result"] = await asyncio.wait_for(call, 120)
         out["proposal"] = pending[0].proposal

@@ -355,7 +355,7 @@ def test_a_file_leaves_with_her_message_and_only_its_recipient_downloads_it(tmp_
         history = port.recent("user_2", 10)
         mine = await port.shared_file(file, handle="user_2")
         theirs = await port.shared_file(file, handle="user_1")
-        state = kernel.mind.frame().get(c.RECENT("user_2"))
+        state = kernel.mind.frame().state("shares").sent.get("user_2", ())
         # elle lui reparle : la section lui rappelle ce qu'elle a envoyé
         await (await kernel.perceive(said("user_2", "merci beaucoup !"))).reply
         last = [r for r in llm.calls if r.role == "reply"][-1]
@@ -392,8 +392,9 @@ def test_a_reply_that_never_left_keeps_its_file_unsent(tmp_path):
         report = await (await kernel.perceive(said("user_2", "la liste ?"))).reply
         [e] = journal(kernel, c.SHARED)
         port = KernelPort(kernel)
-        return report, e.data.file, await port.shared_file(e.data.file, handle="user_2"), \
-            kernel.mind.frame().get(c.RECENT("user_2")), [d for d in deliveries.items if d.attachments]
+        download = await port.shared_file(e.data.file, handle="user_2")
+        kept = kernel.mind.frame().state("shares").sent.get("user_2", ())
+        return report, e.data.file, download, kept, [d for d in deliveries.items if d.attachments]
 
     report, file, download, state, carried = live(tmp_path, scenario, respond=mute)
     assert report.outcome.value == "abstained"
@@ -445,8 +446,9 @@ def test_an_operator_removes_one_file_its_bytes_go_and_its_line_stays_marked(tmp
         frame = kernel.mind.frame()
         lines = [row(kernel.ports["store"], f) for f in (gone, kept)]
         audit = [e.data for e in journal(kernel, rt.OPERATED) if e.data.action == REMOVE]
+        recent = [v.file for v in frame.state("shares").sent.get("user_2", ())]
         return (gone, kept, done, again, unknown, journal(kernel, c.EXPIRED), store.files(), lines,
-                [v.file for v in frame.get(c.RECENT("user_2"))], KernelPort(kernel).shared([gone, kept]), audit)
+                recent, KernelPort(kernel).shared([gone, kept]), audit)
 
     gone, kept, done, again, unknown, expired, files, lines, recent, metas, audit = live(tmp_path, scenario)
     assert done.ok and "« secret.txt » retiré" in done.message

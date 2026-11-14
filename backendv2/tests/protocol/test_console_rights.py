@@ -202,6 +202,26 @@ def test_her_inner_life_is_described_to_the_operator_and_tool_names_wait_for_som
     assert '<span class="rights-chip on">memory_search</span>' in mine.split('id="d-vie" data-pane', 1)[1]
 
 
+def test_none_of_her_own_tools_waits_for_an_approval(world):  # noqa: F811
+    """Un outil du code ne se diffère pas (ADR 0220) : dans chaque famille de ses propres outils, « demande à la
+    personne » et « ton accord » sont grisées, pour un outil qui lit comme pour un outil qui agit, et le titre de la
+    colonne dit pourquoi ; « seule » et « non » restent à régler."""
+    client, live, _ = world
+    bootstrap(client)
+    registry = live.kernel.registry
+    bundles = {s.bundle for s in registry.tools.values() if not registry.is_dynamic(s.name)}
+    page = html_of(client.get(FAMILIES))
+    assert bundles
+    for bundle in sorted(bundles):
+        form = form_of(page, f"t-{bundle.replace('.', '-')}")
+        for label in ("Un outil qui lit", "Un outil qui agit"):
+            assert f'title="Ces outils ne se diffèrent pas : seule, ou non.">{label}</th>' in form, (bundle, label)
+        for column in ("lecture", "action"):
+            pick = form.split(f'name="{column}.', 1)[1].split("</select>", 1)[0]
+            assert '<option value="carte" disabled>' in pick and '<option value="toi" disabled>' in pick, bundle
+            assert '<option value="seule" disabled' not in pick and '<option value="non" disabled' not in pick, bundle
+
+
 def test_a_declared_owner_is_never_offered_as_a_person(world):  # noqa: F811
     """Une propriétaire déclarée sans compte opérateur, « Toi » la désigne déjà : pas plus dans les tableaux des canaux
     et des familles que dans ceux des services et des projets, une seule liste pour tous (K0-16)."""

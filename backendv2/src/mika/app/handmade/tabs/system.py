@@ -85,10 +85,11 @@ from mika.kernel.inspect import (
     Row,
     Stats,
     Text,
-    day_fr,
     money_fr,
     num_fr,
     pct_fr,
+    plural,
+    short_day_fr,
 )
 from mika.ports.journal import JournalOutbox
 from mika.runtime import health as health_m
@@ -126,10 +127,6 @@ def _stats(*items: dict[str, Any]) -> dict[str, Any]:
 def _hm(got: Got, at: int, seconds: bool = False) -> str:
     """L'heure locale d'un instant (« 14:05 »)."""
     return got.ui.kernel.mind.frame().local(at).strftime("%H:%M:%S" if seconds else "%H:%M") if at else ""
-
-
-def _plural(n: int, word: str, words: str = "") -> str:
-    return f"{num_fr(n)} {word if n == 1 else words or word + 's'}"
 
 
 # ── Anomalies ─────────────────────────────────────────────────────────────
@@ -192,8 +189,8 @@ def anomalies(got: Got) -> Markup | None:
         band = _band(note["tone"], note["text"])
     else:
         total = sum(x["t"]["count"] or 0 for x in lists)
-        band = _band("warn", f"{_plural(total, 'anomalie')} depuis le démarrage : rien ne s'est arrêté, mais une "
-                             "faculté ou l'arbitre n'a pas su traiter un événement.")
+        band = _band("warn", f"{plural(total, 'anomalie', 'anomalies')} depuis le démarrage : rien ne s'est arrêté, "
+                             "mais une faculté ou l'arbitre n'a pas su traiter un événement.")
     items = [_trace(got, x, r) for x, r in zip(got.lines("Traces du journal"), raw_lines(got, traces), strict=False)]
     return got.draw("handmade/systeme/anomalies.html", band=band, stats=stats, lists=lists, traces=traces,
                     trace_days=by_day(got, items), notes=[n for n in notes if n is not note])
@@ -420,10 +417,10 @@ def passerelle(got: Got) -> Markup | None:
         else:
             served[by.text if isinstance(by, Text) else str(by)].append(role)
     waiting = sum(p["waiting"] for p in providers)
-    band = _band("danger", f"{_plural(len(unserved), 'rôle')} sans fournisseur : "
+    band = _band("danger", f"{plural(len(unserved), 'rôle', 'rôles')} sans fournisseur : "
                            f"{', '.join(r['label'] for r in unserved)}. Chaque appel de ce rôle échoue.",
                  f"{PREFIX}/reglages/roles", "Qui sert quoi") if unserved else \
-        _band("warn", f"{_plural(waiting, 'appel attend', 'appels attendent')} un créneau libre.") if waiting else None
+        _band("warn", f"{plural(waiting, 'appel attend', 'appels attendent')} un créneau libre.") if waiting else None
     return got.draw("handmade/systeme/passerelle.html", band=band, stats=stats, providers_t=providers_t,
                     providers=providers, roles_t=roles_t, served=sorted(served.items()), unserved=unserved,
                     notes=[n for n in notes if n.get("tone") != "danger"])
@@ -470,7 +467,7 @@ def _days(got: Got, usage: Mapping[str, Any]) -> dict[str, Any]:
         base = cost_h + 4 + calls_h if cost_top else calls_h
         bars.append({"x": i * 10 + 1.5, "cost_y": round(cost_h - h, 2), "cost_h": h, "calls_y": round(base - ch, 2),
                      "calls_h": ch, "fail_y": round(base - fh, 2), "fail_h": fh, "n": n, "failed": failed,
-                     "cost": money_fr(cost), "day": day_fr(d.year, d.month, d.day, d.weekday()),
+                     "cost": money_fr(cost), "day": short_day_fr(d),
                      "label": str(d.day), "today": d == today, "monday": d.weekday() == 0})
     return {"bars": bars, "width": 10 * len(bars), "cost_top": money_fr(cost_top) if cost_top else "",
             "calls_top": calls_top,
@@ -517,7 +514,7 @@ def appels(got: Got) -> Markup | None:
     if chart["failures"]:
         worst = ", ".join(f"{names.role(u.key)} ({u.failures})" for u in failing[:3])
         band = _band("danger" if today and today.failures else "warn",
-                     f"{_plural(chart['failures'], 'appel a échoué', 'appels ont échoué')} en quatorze jours"
+                     f"{plural(chart['failures'], 'appel a échoué', 'appels ont échoué')} en quatorze jours"
                      + (f", dont {num_fr(today.failures)} aujourd'hui" if today and today.failures else "")
                      + (f" — surtout : {worst}" if worst else "") + ".", "#calls-all", "Les voir")
     first = "calls-all" if got.query.get("page") else ""

@@ -25,8 +25,9 @@ from mika.kernel import forms
 from mika.kernel.events import Origin
 from mika.kernel.faculty import ActionSpec
 from mika.kernel.guards import Superseded
-from mika.kernel.inspect import Head, Ref, describe_error
+from mika.kernel.inspect import Head, Ref
 from mika.kernel.operate import ActionContext, Decision, Done, Refused
+from mika.ports.errors import describe_error
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.inspection import Inspection

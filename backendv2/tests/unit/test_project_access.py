@@ -32,7 +32,7 @@ from mika.runtime.tools import ToolContext, offer
 from mika.vocab.access import CLOSE, EVERYONE, OWNER, PERSON
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
-from tests.fixtures.mika import connect
+from tests.fixtures.mika import connect, effect_preview
 from tests.unit.test_projects import create, events, live
 
 FIELDS = ["ligne", "qui", "canal", "toujours", "moments", "voir", "piloter", "fichiers", "lecture", "action", "tous",
@@ -179,7 +179,7 @@ def test_steering_alone_writes_at_once_and_on_your_approval_waits_for_it(tmp_pat
         out["amended_before"] = events(kernel, AMENDED)
         [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "projects.steer"]
         port = KernelPort(kernel)
-        preview = await port.effect_preview(pending.proposal)
+        preview = await effect_preview(kernel, pending.proposal)
         out["preview"] = preview.text
         out["summary"] = events(kernel, rt.EFFECT_PROPOSED)[-1].data.summary.text
         out["resolved"] = await port.resolve_effect(pending.proposal, True, by="user_1", seen=preview.digest)
@@ -192,7 +192,7 @@ def test_steering_alone_writes_at_once_and_on_your_approval_waits_for_it(tmp_pat
         out["asked_again"] = await project_steer(_args(pid, what="instruct", text="Tout en rouge."),
                                                  talking(kernel, "user_2", camille))
         [again] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "projects.steer"]
-        preview = await port.effect_preview(again.proposal)
+        preview = await effect_preview(kernel, again.proposal)
         out["refused"] = await port.resolve_effect(again.proposal, False, by="user_1", seen=preview.digest)
         await asyncio.sleep(5)
         out["amended_end"] = events(kernel, AMENDED)

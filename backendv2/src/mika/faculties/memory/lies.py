@@ -26,10 +26,11 @@ from mika.faculties.memory.faculty import LIE_MARK, MEMORY, MemoryState
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
-from mika.vocab.affect import Emotion, strip_prosody
+from mika.vocab.affect import Emotion
 from mika.vocab.people import clean_display_name
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.tag import strip_prosody
 
 #: ce qu'un souvenir de mensonge cite au plus, de la question et de sa réponse (en caractères)
 QUOTE_MAX = 200

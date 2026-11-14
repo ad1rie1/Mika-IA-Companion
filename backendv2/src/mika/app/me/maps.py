@@ -195,10 +195,9 @@ def _order(got: Any, n: int) -> list[int]:
 
 
 def _index(port: Any) -> tuple[int, int]:
-    """Combien de lieux a l'index, et quand il a été construit (ms) : ce que le port en dit, s'il sait le dire
-    (``places_summary``, en plus du port : ``built`` en ISO 8601) ; sinon rien (0)."""
-    summary = getattr(port, "places_summary", None)
-    got = summary() if callable(summary) else None
+    """Combien de lieux a l'index, et quand il a été construit (ms) : ce que le port en dit (``places_summary``,
+    ``built`` en ISO 8601) ; 0 pour ce qu'il ne dit pas lisiblement."""
+    got = port.places_summary()
     if not isinstance(got, Mapping):
         return 0, 0
     try:

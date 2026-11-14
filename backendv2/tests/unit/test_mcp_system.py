@@ -27,7 +27,7 @@ from mika.kernel.clock import MINUTE, US
 from mika.kernel.registry import _decode_params
 from mika.plugins import web
 from mika.plugins.web import server
-from mika.ports.mcp import CLOSE, OWNER
+from mika.vocab.access import CLOSE, OWNER
 
 
 def _system(p: web.WebParams | None) -> SystemServers:

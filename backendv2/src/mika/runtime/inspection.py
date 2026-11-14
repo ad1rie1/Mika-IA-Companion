@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mika.kernel.faculty import ActionSpec, InspectSpec, SubjectSpec, VitalSpec
-from mika.kernel.inspect import Block, Found, Head, InspectContext, Note, Vital, describe_error, read_params
+from mika.kernel.inspect import Block, Found, Head, InspectContext, Note, Vital, read_params
+from mika.ports.errors import describe_error
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.effects import with_content
 

@@ -53,7 +53,6 @@ from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
-from mika.kernel.rights import Rights
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert, visible
 from mika.vocab.access import KINDS_OF
@@ -64,7 +63,7 @@ from mika.vocab.access import situation as situation
 from mika.vocab.episodes import CONVERSATIONAL, PRO, WORKING
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.rights import grants_of, rights_of, tool_allowance
+from mika.vocab.rights import Rights, grants_of, rights_of, tool_allowance
 
 FAMILY = "mcp"
 #: quand une famille d'épisodes d'un serveur sert (``vocab.access``) ; une tâche prend les lots qu'elle choisit — un

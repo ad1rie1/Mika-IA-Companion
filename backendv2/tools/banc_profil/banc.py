@@ -83,7 +83,7 @@ from mika.sim.llm.scripted import CHARACTER  # noqa: E402
 from mika.sim.sonde import Blocking  # noqa: E402
 from mika.sim.world import Driver  # noqa: E402
 from mika.vocab import temperament as T  # noqa: E402
-from mika.vocab.affect import strip_prosody  # noqa: E402
+from mika.vocab.tag import strip_prosody  # noqa: E402
 
 #: les mesures restent dans le dépôt de travail, même quand le banc tourne depuis sa copie figée
 ROOT = Path(os.environ.get("BANC_SORTIES") or BACKEND / "data" / "banc-profil")

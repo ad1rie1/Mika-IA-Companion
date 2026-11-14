@@ -20,7 +20,6 @@ from mika.inspector.pages.rights_tables import choices, one_page, rows_of, table
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
-from mika.kernel.rights import Rights
 from mika.kernel.text import fold
 from mika.runtime import operations as ops
 from mika.runtime.tools import gate_of
@@ -39,7 +38,7 @@ from mika.vocab.access import (
 )
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
-from mika.vocab.rights import tool_allowance, vital_family
+from mika.vocab.rights import Rights, tool_allowance, vital_family
 
 BASE = f"{PREFIX}/outils/tous"
 SET_ACTION = f"{PREFIX}/outils/familles/regler"
@@ -49,6 +48,10 @@ NEW_ROW = ToolRule(who=(OWNER,))
 FLOORS = ("une inconnue n'obtient au plus que des outils qui lisent, jamais une action",
           "à plusieurs (un salon), un outil qui lit au plus ; rien de ce qui vient du dehors",
           "elle seule : un projet ou un réveil seulement s'il a pris ce lot, une tâche seulement si c'est la sienne")
+#: un outil du code ne se diffère pas (ADR 0220) : « ton accord » et « demande à la personne » restent grisées pour
+#: toutes ses familles
+UNDEFERRED = (CARD, OWNER_OK)
+UNDEFERRED_HELP = "Ces outils ne se diffèrent pas : seule, ou non."
 #: elle seule, et toi : les deux audiences du minimum vital
 WORKING = Audience(persons=(), channel="internal", public=False, trust=ChannelTrust.INTERNAL.value, owner=True)
 YOU = Audience(persons=("familles:toi",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
@@ -109,8 +112,7 @@ def entries(ui: Any) -> list[dict[str, Any]]:
     for bundle, specs in sorted(families.items(), key=lambda kv: ui.names.bundle(kv[0]).casefold()):
         table = rights.families.get(bundle)
         lines, default = (tuple(table.lines), table.default) if table is not None else vital_family(specs)
-        deferrable, outside = any(s.deferrable for s in specs), any(s.outside for s in specs)
-        locked_policies = () if deferrable else (CARD, OWNER_OK)
+        outside = any(s.outside for s in specs)
         out.append({
             "key": bundle, "id": bundle.replace(".", "-"), "label": ui.names.bundle(bundle), "set": table is not None,
             "reserved": any(s.owner_only for s in specs),
@@ -118,10 +120,10 @@ def entries(ui: Any) -> list[dict[str, Any]]:
                        "href": _tool_href(s.name)} for s in specs],
             "lines": lines, "default": default,
             "columns": [
-                {"key": "lecture", "label": "Un outil qui lit", "kind": "pick", "choices": choices(POLICIES, locked_policies),
-                 "help": "" if deferrable else "Ces outils ne se diffèrent pas : seule, ou non."},
-                {"key": "action", "label": "Un outil qui agit", "kind": "pick", "choices": choices(POLICIES, locked_policies),
-                 "help": "" if deferrable else "Ces outils ne se diffèrent pas : seule, ou non."},
+                {"key": "lecture", "label": "Un outil qui lit", "kind": "pick", "choices": choices(POLICIES, UNDEFERRED),
+                 "help": UNDEFERRED_HELP},
+                {"key": "action", "label": "Un outil qui agit", "kind": "pick", "choices": choices(POLICIES, UNDEFERRED),
+                 "help": UNDEFERRED_HELP},
                 {"key": "garde", "label": "Ce qu'elle en garde", "kind": "pick",
                  "choices": choices(KEEPS, () if outside else tuple(k for k, _ in KEEPS if k != "public")),
                  "help": "" if outside else "Ce que rendent ces outils est déjà à elle : rien à garder de plus."}],

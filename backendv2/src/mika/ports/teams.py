@@ -31,12 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from mika.ports.drafts import to_fill as to_fill
-from mika.ports.gate import ACCEPTED as ACCEPTED
-from mika.ports.gate import CONFLICT as CONFLICT
-from mika.ports.gate import MISSING as MISSING
 from mika.ports.gate import GateResult, KeyState
-from mika.ports.sql import HANDLE_MAX, fit
 
 #: le compte d'avant l'ADR 0186 (un seul Teams) : ce qui était déjà là, et le compte d'une installation neuve
 DEFAULT_ACCOUNT = "principal"
@@ -57,8 +52,10 @@ MODES: tuple[tuple[str, str], ...] = (
     ("validation", "après ton accord — il part une fois que tu l'as accepté"),
     ("autonome", "autonome — il part sans te demander"),
 )
-#: ce que fait l'extension d'un élément de la file : le poser dans la zone de saisie, ou l'envoyer
-DRAFT, SEND = "draft", "send"
+#: ce que fait l'extension d'un élément de la file (``Draft.mode``, ``OutboxItem.mode``) : le poser dans la
+#: zone de saisie, ou l'envoyer. Ces valeurs sont le protocole de l'extension ; ni la capacité ni la raison de
+#: preuve du contrat (``contracts.teams.SEND``, ``contracts.teams.DRAFT``)
+OUTBOX_PLACE, OUTBOX_SEND = "draft", "send"
 
 # ── Les états d'un brouillon (dans l'adaptateur) ──
 WRITTEN = "brouillon"  # écrit, pas encore en file (il attend un accord, ou d'être proposé)
@@ -77,8 +74,6 @@ RESULTS = ("sending", "placed", "sent", "failed")
 
 #: un identifiant de conversation Teams tel que le client les écrit (``19:…@thread.v2``, ``19:a_b@unq.gbl.spaces``)
 CONVERSATION_ID = re.compile(r"^\d{1,3}:[A-Za-z0-9@._:=+\-]{1,300}$")
-#: le préfixe des sujets (au sens de l'oubli) d'une personne connue par Teams
-HANDLE_PREFIX = "teams:"
 
 
 def message_ref(conversation: str, external_id: str, account: str = DEFAULT_ACCOUNT) -> str:
@@ -101,11 +96,6 @@ def split_conversation_key(key: str) -> tuple[str, str]:
     if sep and ACCOUNT_KEY.fullmatch(account):
         return account, conversation
     return DEFAULT_ACCOUNT, key
-
-
-def person_handle(author_id: str) -> str:
-    """``teams:8:orgid:…`` : le sujet (au sens de l'oubli) de quelqu'un qu'on ne connaît que par Teams."""
-    return fit(f"{HANDLE_PREFIX}{author_id.strip().lower()}", HANDLE_MAX) if author_id.strip() else ""
 
 
 def plain(text: str) -> str:

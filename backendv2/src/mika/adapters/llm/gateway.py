@@ -60,10 +60,9 @@ from typing import Any
 from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import Clock
 from mika.kernel.prompt import Budget
-from mika.kernel.slots import PrioritySlots
+from mika.kernel.slots import PREEMPTED, PrioritySlots
 from mika.ports.llm import (
     DEADLINE_AT,
-    PREEMPTED,
     RETRY_AFTER_CUT,
     LLMBackend,
     LLMRequest,
@@ -72,7 +71,7 @@ from mika.ports.llm import (
     Usage,
 )
 from mika.ports.llm_budget import LLMLimits
-from mika.vocab.episodes import TRIAL_ROLE
+from mika.vocab.episodes import TRIAL_ROLE, Role
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
@@ -281,10 +280,11 @@ class Gateway:
                         "extra": extra if isinstance(extra, dict) else {}})
         return out
 
-    def resolution(self, roles: Iterable[str]) -> dict[str, str]:
-        """Pour chaque rôle, le fournisseur qui le sert vraiment (replis compris) ; « » : aucun."""
+    def resolution(self, roles: Iterable[str] | None = None) -> dict[str, str]:
+        """Pour chaque rôle (``None`` : chaque ``Role``), le fournisseur qui le sert vraiment (replis compris) ; « » :
+        aucun."""
         out = {}
-        for role in roles:
+        for role in (str(r) for r in Role) if roles is None else roles:
             try:
                 out[role] = self.resolve(role)
             except UnconfiguredRole:

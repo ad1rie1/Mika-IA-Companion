@@ -30,7 +30,7 @@ from mika.plugins.mcp import calls as mcp_calls
 from mika.plugins.teams import expire as teams_expire
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
-from tests.fixtures.mika import boot, build, connect, said
+from tests.fixtures.mika import boot, build, connect, effect_preview, said
 from tests.unit.test_mcp_plugin import NAME, FakePort, ruled
 
 SECRET_ANSWER = "Grand soleil sur Lyon, 24 degrés."
@@ -292,7 +292,7 @@ def test_her_approval_asked_before_someone_else_has_no_card_and_is_decided_in_th
         (proposal,) = pending(kernel)
         args = pending(kernel)[proposal]
         cards = await mind_port.approval_cards("user_1") + await mind_port.approval_cards("user_2")
-        shown = await mind_port.effect_preview(proposal)
+        shown = await effect_preview(kernel, proposal)
         status = await mind_port.resolve_effect(proposal, True, by="user_1", seen=shown.digest)
         await asyncio.sleep(5)
         return args, cards, status, port.calls

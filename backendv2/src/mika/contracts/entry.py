@@ -223,6 +223,24 @@ class MindPort(Protocol):
         ``"rejected"``, ``"unknown"`` (rien en attente sous ce numéro)."""
         ...
 
+    async def approval_cards(self, handle: str) -> list[dict[str, Any]]:
+        """Les cartes d'accord de cette adresse (ADR 0064) : les effets en attente dont elle seule décide, dans le
+        chat (``_decider``) — chacun avec exactement ce qui partirait et son empreinte (celle que la réponse
+        renvoie), et l'instant où la carte ne vaudra plus."""
+        ...
+
+    async def judge(self, handle: str, seq: int, verdict: str, comment: str) -> str:
+        """Une de ses réponses jugée depuis le chat par une opératrice (ADR 0113) : le chemin des actions de la
+        console (``transcript.juger``, validé et audité). ``ok``, ``invalid`` (pas une de ses réponses, un avis
+        inconnu) ou ``failed``."""
+        ...
+
+    async def decide_card(self, handle: str, proposal: int, approved: bool, seen: str) -> str:
+        """Une carte décidée dans le chat : seulement par l'adresse à qui elle est adressée, tant qu'elle vaut,
+        telle qu'elle était montrée (``seen``). ``approved``, ``rejected``, ``unknown``, ``changed``, ``blocked``,
+        ``expired`` ou ``forbidden`` (pas à toi de décider)."""
+        ...
+
     # ── le monde (ADR 0050, 0051) ──
     def world_view(self) -> tuple[w.WorldDef, w.WorldState]:
         """La définition en vigueur et l'état vécu, lus sur la même racine (``WorldState.seq`` : le dernier

@@ -21,7 +21,6 @@ from pydantic import ValidationError
 
 from mika.kernel.faculty import ToolSpec
 from mika.kernel.frame import Audience
-from mika.kernel.rights import Rights
 from mika.runtime.tools import ASK, HAND, allowed, deferred
 from mika.vocab.access import (
     ALONE,
@@ -54,7 +53,7 @@ from mika.vocab.access import (
 from mika.vocab.canals import CanalRule, Canals, CanalTable, mail_rule, mail_rule_for_all, teams_rule, vital
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
-from mika.vocab.rights import project_allowance, tool_allowance, vital_family
+from mika.vocab.rights import Rights, project_allowance, tool_allowance, vital_family
 
 AUTH = ChannelTrust.AUTHENTICATED.value
 YOU = Audience(persons=("user_1",), channel="web", public=False, trust=AUTH, owner=True, person="user_1")

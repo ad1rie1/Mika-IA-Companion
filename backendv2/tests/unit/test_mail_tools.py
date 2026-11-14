@@ -24,7 +24,6 @@ from mika.app.me import form
 from mika.faculties.identity import audience_for
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.frame import Audience, EpisodeRef, Frame
-from mika.kernel.rights import Rights
 from mika.plugins.email import EMAIL, READ, SENT_KEPT, answered
 from mika.plugins.email import params_of as email_params
 from mika.plugins.email.inspect.common import mail_key
@@ -41,6 +40,7 @@ from mika.vocab.canals import CanalRule, Canals, CanalTable
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
+from mika.vocab.rights import Rights
 from tests.fixtures.mika import at_paris, boot, build, connect
 
 PERSO = AccountInfo("perso", "Perso", "mika@exemple.fr", display_name="Adrien", ready=True, can_send=True)

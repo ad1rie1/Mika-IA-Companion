@@ -8,11 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from mika.ports import drafts, mail, teams
-
-
-def test_mail_and_teams_read_the_same_mark():
-    assert mail.to_fill is drafts.to_fill and teams.to_fill is drafts.to_fill
+from mika.ports import drafts
 
 
 @pytest.mark.parametrize("text", [

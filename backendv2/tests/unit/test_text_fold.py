@@ -47,8 +47,7 @@ from mika.plugins.forge import views as forge_views
 from mika.ports.forge import AppViewSpec
 from mika.ports.paging import fold_text, has_words, words_of
 from mika.vocab import access, people, words
-from mika.vocab.affect import Emotion, emotion_named
-from mika.vocab.affect import fold as emotion_key
+from mika.vocab.affect import Emotion, emotion_key, emotion_named
 from mika.vocab.privacy import ChannelTrust
 from tests.fixtures import backend
 

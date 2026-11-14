@@ -1,4 +1,4 @@
-"""Règles d'agenda d'un projet, en fonctions pures.
+"""Une règle d'agenda (manuelle, intervalle, cron), en fonctions pures.
 
 - ``""`` / ``manual`` : pas d'agenda — elle y avance quand elle en a le temps ;
 - ``interval:30m`` (s, m, h, d ; au moins cinq minutes) : un pas par intervalle ;

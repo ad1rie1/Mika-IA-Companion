@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from mika.kernel.arbitration import Anyone, Candidate, Modulation, pool, rate_bound, sigmoid, thin
+from mika.kernel.arbitration import Anyone, Candidate, Modulation, pool, sigmoid, thin
 from mika.kernel.registry import ArbitrationPolicy
 
 POLICY = ArbitrationPolicy(thresholds={"INITIATIVE": 1.0}, max_rates={"INITIATIVE": 1 / 600})
@@ -12,6 +12,12 @@ POLICY = ArbitrationPolicy(thresholds={"INITIATIVE": 1.0}, max_rates={"INITIATIV
 
 def no_mod(view):
     return []
+
+
+def ceiling(rows):
+    """Une borne de l'intensité totale qui ne dépend pas des intensités (σ ≤ 1) : le plafond de chaque ligne sans
+    veto. Elle reste positive quand toutes les intensités sont nulles, ce que le tirage doit alors refuser."""
+    return sum(POLICY.max_rates.get(r.kind, 0.0) for r in rows if not r.vetoes)
 
 
 def test_two_weak_reasons_pool_over_the_threshold():
@@ -47,7 +53,7 @@ def test_veto_wins_and_shifts_add():
 
 def test_thin_never_fires_without_intensity_and_respects_proportions():
     rows = pool([("social", Candidate("INITIATIVE", "alice", "manque", -50.0))], POLICY, no_mod)
-    bound = rate_bound(rows, POLICY)
+    bound = ceiling(rows)
     rng = random.Random(1)
     assert all(thin(rows, bound, rng)[0] is None for _ in range(1000))
 
@@ -56,7 +62,7 @@ def test_thin_never_fires_without_intensity_and_respects_proportions():
          ("social", Candidate("INITIATIVE", "bob", "manque", 1.0))],
         POLICY, no_mod,
     )
-    bound = rate_bound(rows, POLICY)
+    bound = ceiling(rows)
     picks = [thin(rows, bound, rng)[0] for _ in range(20000)]
     fired = [p.target for p in picks if p is not None]
     share_alice = fired.count("alice") / len(fired)

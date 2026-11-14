@@ -2,8 +2,8 @@
 
 Une app forgée (écrite par le modèle, exécutée en bac à sable, donc non fiable)
 rend ses vues d'opérateur en JSON. ``decode`` en fait des blocs du vocabulaire
-de ``kernel/inspect.py`` ; ``encode`` fait l'inverse (tests, vues natives qui
-veulent se sérialiser) ; ``schema`` publie le contrat en JSON Schema.
+de ``kernel/inspect.py`` ; ``encode`` fait l'inverse (pour les tests) ;
+``schema`` publie le contrat en JSON Schema.
 
 Contrat de ``decode`` :
 
@@ -21,9 +21,8 @@ Contrat de ``decode`` :
   l'hôte (inconnue → invalide), ou une adresse ``http(s)`` avec un hôte, sans
   identifiants ni caractère de contrôle. Rien d'autre (``javascript:``,
   ``data:``, chemins relatifs, ``//hôte``) ;
-- **émotions** : ``emotions`` est l'ensemble des noms canoniques, injecté par
-  l'appelant (le noyau ne connaît pas ``mika.vocab``) ; vide, tout mot ascii en
-  minuscules est admis.
+- **émotions** : une pastille d'émotion ne nomme qu'un des noms canoniques
+  (``EMOTIONS``, les valeurs de ``mika.vocab.affect.Emotion``).
 
 Le formulaire (``"form"``) donne un ``ActionSlot`` dont ``action`` est la clé
 *locale* à l'app : c'est à l'hôte de la qualifier (``<propriétaire>.<nom>``).
@@ -75,8 +74,11 @@ from mika.kernel.inspect import (
     is_page_param,
     tone,
 )
+from mika.vocab.affect import Emotion
 
 VERSION = 2
+#: les pastilles d'émotion admises dans une vue (les 29 noms canoniques)
+EMOTIONS = frozenset(e.value for e in Emotion)
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,13 +234,12 @@ def _ix(path: str, index: int) -> str:
 # ── Décodage ──────────────────────────────────────────────────────────────
 
 
-def decode(payload: Any, *, links: LinkPolicy | None = None, limits: Limits = Limits(),
-           emotions: frozenset[str] = frozenset()) -> list[Block]:
+def decode(payload: Any, *, links: LinkPolicy | None = None, limits: Limits = Limits()) -> list[Block]:
     """Les blocs d'une enveloppe, ou une seule note « Vue invalide » qui nomme
     le premier problème. ``links`` résout les liens vers les autres vues de
-    l'app (absent : ces liens sont refusés) ; ``emotions`` : les noms admis
-    pour une pastille d'émotion (vide : tout mot ascii en minuscules)."""
-    decoder = _Decoder(links, limits, emotions)
+    l'app (absent : ces liens sont refusés) ; une pastille d'émotion ne nomme
+    qu'un des ``EMOTIONS``."""
+    decoder = _Decoder(links, limits)
     try:
         return decoder.envelope(payload)
     except Invalid as exc:
@@ -251,12 +252,11 @@ def decode(payload: Any, *, links: LinkPolicy | None = None, limits: Limits = Li
 
 
 class _Decoder:
-    __slots__ = ("blocks_left", "chars_left", "emotions", "limits", "links", "where")
+    __slots__ = ("blocks_left", "chars_left", "limits", "links", "where")
 
-    def __init__(self, links: LinkPolicy | None, limits: Limits, emotions: frozenset[str]) -> None:
+    def __init__(self, links: LinkPolicy | None, limits: Limits) -> None:
         self.links = links
         self.limits = limits
-        self.emotions = emotions
         self.blocks_left = limits.blocks
         self.chars_left = limits.total_chars
         #: le chemin du dernier bloc abordé (pour une erreur sans chemin propre)
@@ -400,11 +400,8 @@ class _Decoder:
     def swatch(self, d: dict[str, Any], path: str) -> Swatch:
         kp = _at(path, "key")
         key = self.string(d["key"], kp)
-        if self.emotions:
-            if key not in self.emotions:
-                raise Invalid(kp, f"émotion inconnue « {_show(key)} »")
-        elif not _WORD.fullmatch(key):
-            raise Invalid(kp, f"émotion : un mot ascii en minuscules est attendu, pas « {_show(key)} »")
+        if key not in EMOTIONS:
+            raise Invalid(kp, f"émotion inconnue « {_show(key)} »")
         weight = None
         if "weight" in d:
             weight = min(1.0, max(0.0, self.number(d["weight"], _at(path, "weight"))))
@@ -1036,7 +1033,7 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
     (paramètres d'un lien, valeurs initiales, cellules par colonne), dont les
     noms sont contraints par ``propertyNames``. Le schéma est plus large que le
     décodeur sur ce qu'il ne sait pas dire (cohérence des colonnes et de la
-    pagination, totaux, vues connues, noms d'émotions injectés)."""
+    pagination, totaux, vues connues, noms d'émotions canoniques)."""
     text = {"type": "string", "maxLength": limits.chars}
     tones = {"enum": list(TONES)}
     number = {"type": "number"}

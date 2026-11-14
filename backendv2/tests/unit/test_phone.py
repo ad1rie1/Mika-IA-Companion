@@ -26,8 +26,9 @@ from mika.contracts import phone as c
 from mika.contracts import runtime as rt
 from mika.faculties.identity import audience_for
 from mika.kernel.clock import HOUR, MINUTE
+from mika.ports.gate import ACCEPTED, DISABLED, FORBIDDEN
 from mika.ports.llm import LLMResponse, ToolCall
-from mika.ports.phone import ACCEPTED, DISABLED, FORBIDDEN, IGNORED, SENT
+from mika.ports.phone import IGNORED, SENT
 from mika.runtime.effects import with_content
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import SimClock, run_virtual

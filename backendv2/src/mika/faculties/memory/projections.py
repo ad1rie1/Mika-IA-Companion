@@ -79,7 +79,8 @@ from mika.kernel.faculty import Tier
 from mika.ports.paging import fold_text
 from mika.ports.sql import create_view, drop_view, fit, greatest, insert_ignore, json_has, least, upsert
 from mika.ports.store import Sql
-from mika.vocab.affect import FACET_DEFAULT, dominant, strip_prosody
+from mika.vocab.affect import FACET_DEFAULT, dominant
+from mika.vocab.tag import strip_prosody
 from mika.vocab.words import WORD, fold, same_words, stems
 
 ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
@@ -196,8 +197,11 @@ def fingerprint(text: str) -> str:
 
 
 #: les vues de la porte (``contracts.memory``) que ``memory_items`` porte ; ``RETOLD_VIEW`` est à ``memory_told``
-VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW,
-         c.SELF_CHANGES_VIEW, c.LIVED_VIEW)
+VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.LEDGER_VIEW, c.SELF_CHANGES_VIEW, c.LIVED_VIEW)
+#: les vues que la porte n'a plus, mais qu'une base d'avant porte encore : elles tombent avec la version qu'on
+#: abandonne (``Items.drop``), sans monter celle du projecteur. ``memory_knowledge_feelings`` n'avait aucun lecteur :
+#: la recherche par ressenti lit la table ``memory_feelings`` (audit du 2026-11-05).
+RETIRED_VIEWS = ("memory_knowledge_feelings",)
 
 
 def create_views(sql: Sql, sfx: str) -> None:
@@ -205,7 +209,7 @@ def create_views(sql: Sql, sfx: str) -> None:
     vue est une requête compilée pour le moteur (``create_view``), créée après les tables qu'elle lit — MariaDB
     refuse une vue sur une table qui n'existe pas encore ; la vue de ce qu'elle a répété (``RETOLD_VIEW``) naît
     donc avec ``memory_told``, son propre projecteur."""
-    t, ab, ft = items(sfx), about(sfx), feelings(sfx)
+    t, ab = items(sfx), about(sfx)
     known = [t.c[n] for n in c.KNOWN_COLUMNS]
     held = t.c.status.not_in(c.FORMER_STATUSES)
     create_view(sql, f"{c.KNOWLEDGE_VIEW}{sfx}", select(*known).where(held))
@@ -215,11 +219,6 @@ def create_views(sql: Sql, sfx: str) -> None:
                 .select_from(a.join(i, i.c.id == a.c.item)).where(i.c.status.not_in(c.FORMER_STATUSES)))
     create_view(sql, f"{c.FORMER_VIEW}{sfx}", select(*known).where(t.c.status.in_(c.FORMER_STATUSES)))
     create_view(sql, f"{c.LEDGER_VIEW}{sfx}", select(*(t.c[n] for n in c.LEDGER_COLUMNS)))
-    f = ft.alias("f")
-    create_view(sql, f"{c.FEELINGS_VIEW}{sfx}",
-                select(f.c.item.label("item"), f.c.whose.label("whose"), f.c.emotion.label("emotion"),
-                       f.c.intensity.label("intensity"))
-                .select_from(f.join(i, i.c.id == f.c.item)).where(i.c.status.not_in(c.FORMER_STATUSES)))
     o, n = t.alias("o"), t.alias("n")
     create_view(sql, f"{c.SELF_CHANGES_VIEW}{sfx}",
                 select(o.c.id.label("was"), o.c.text.label("was_text"), n.c.id.label("item"), n.c.text.label("text"),
@@ -271,7 +270,7 @@ class Items:
         create_views(sql, sfx)
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        for view in VIEWS:
+        for view in (*VIEWS, *RETIRED_VIEWS):
             drop_view(sql, f"{view}{sfx}")
         sql.drop(items(sfx), about(sfx), forgets(sfx), refs(sfx), changes(sfx), testimonies(sfx), contests(sfx),
                  feelings(sfx))

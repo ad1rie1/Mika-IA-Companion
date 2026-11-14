@@ -193,8 +193,6 @@ class ContactReading:
     usual_days: float = 0.0
 
 
-#: Instant de la dernière salutation adressée à cette personne (0 si jamais).
-GREETED = FactFamily("social.greeted", arg=str, type=int)
 #: Une des ``CLOSENESS_LEVELS`` (elle varie avec le temps : un long silence la fait descendre).
 CLOSENESS = FactFamily("social.closeness", arg=str, type=str, time_varying=True)
 CONTACT = FactFamily("social.contact", arg=str, type=ContactReading, time_varying=True)

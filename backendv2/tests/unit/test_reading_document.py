@@ -5,8 +5,8 @@ from html.parser import HTMLParser
 import pytest
 
 from mika.inspector.document import readable_html, readable_text
-from mika.kernel.envelope import decode, encode
 from mika.kernel.inspect import Note, Prose
+from mika.plugins.forge.envelope import decode, encode
 
 
 class Tags(HTMLParser):

@@ -1052,9 +1052,10 @@ DEFINITION = FactKey("world.definition", type=WorldDef, doc="le monde tel que le
 STATE = FactKey("world.state", type=WorldState, doc="où est chaque chose, qui fait quoi")
 #: Où elle est, sa posture, ce qu'elle tient, ce qu'elle fait.
 SELF = FactKey("world.self", type=ActorState, doc="son corps dans le monde")
-#: Les acteurs dans la même pièce qu'elle (hors elle).
+#: Les acteurs dans la même pièce qu'elle (hors elle). Lu à partir de P4 : aujourd'hui personne.
 AROUND = FactKey("world.around", type=tuple, doc="qui est dans la pièce avec elle")
-#: Les objets à portée d'un acteur (son lieu, ce qu'il tient, ce qui est posé là), du plus saillant au moins.
+#: Les objets à portée d'un acteur (son lieu, ce qu'il tient, ce qui est posé là), du plus saillant au moins. Lu à
+#: partir de P4 : aujourd'hui personne.
 REACH = FactFamily("world.reach", arg=str, type=tuple, doc="ce qu'un acteur a à portée")
 #: Ce qu'elle a fait de ses derniers jours (ses occupations, de la plus ancienne à celle en cours) : la matière
 #: d'un journal qui raconte sa journée sans l'inventer.
@@ -1062,5 +1063,6 @@ LIVED = FactKey("world.lived", type=tuple, time_varying=True, doc="ses occupatio
 #: Son occupation du moment (``Doing``), ``None`` quand elle ne fait rien ou que sa fin prévue est passée : ce que
 #: les écrans reçoivent dans l'état intérieur (l'adaptateur ne lit pas la faculté, il lit ce fait).
 DOING = FactKey("world.doing", type=object, time_varying=True, doc="ce qu'elle est en train de faire")
-#: Les demandes qui attendent la réponse de cet acteur.
+#: Les demandes qui attendent la réponse de cet acteur. Lu à partir de P4, quand le noyau enverra ``request``
+#: (``docs/protocole-monde.md``) : aujourd'hui personne.
 PENDING = FactFamily("world.pending", arg=str, type=tuple, doc="ce qu'on lui demande et qui attend")

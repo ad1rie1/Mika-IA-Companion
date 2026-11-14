@@ -52,7 +52,7 @@ from mika.sim.clock import SimClock, run_virtual  # noqa: E402
 from mika.sim.lane import PARIS, at_paris  # noqa: E402
 from mika.sim.sonde import Blocking  # noqa: E402
 from mika.sim.world import Driver  # noqa: E402
-from mika.vocab.affect import strip_prosody  # noqa: E402
+from mika.vocab.tag import strip_prosody  # noqa: E402
 from mika.vocab.temperament import apply_profile  # noqa: E402
 from scenarios import BY_ID, SCENARIOS, Scenario  # noqa: E402
 

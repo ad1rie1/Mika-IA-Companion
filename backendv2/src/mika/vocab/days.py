@@ -17,21 +17,18 @@ from mika.vocab.phrasebook import phrase
 
 
 def part_of_day(hour: int) -> str:
-    """Le moment de la journée (heure locale) : midi n'est pas l'après-midi (« ce midi », pas « cet après-midi
-    (vers 12 h) »)."""
+    """La clé de voix du moment de la journée (heure locale) : ``morning``, ``noon``, ``afternoon``, ``evening`` ou
+    ``night``, celle des familles ``expression.when.today`` / ``yesterday`` et ``identity.calendar.today`` /
+    ``yesterday``. Midi n'est pas l'après-midi (« ce midi », pas « cet après-midi (vers 12 h) »)."""
     if 5 <= hour < 12:
-        return "matin"
+        return "morning"
     if 12 <= hour < 14:
-        return "midi"
+        return "noon"
     if 14 <= hour < 18:
-        return "après-midi"
+        return "afternoon"
     if 18 <= hour < 24:
-        return "soir"
-    return "nuit"
-
-
-#: le moment de la journée → sa clé dans sa voix (``expression.when.today.…``, ``expression.when.yesterday.…``)
-_PART_KEYS = {"matin": "morning", "midi": "noon", "après-midi": "afternoon", "soir": "evening", "nuit": "night"}
+        return "evening"
+    return "night"
 
 
 def when_fr(then: int, now: int, tz: Any) -> str:
@@ -44,9 +41,9 @@ def when_fr(then: int, now: int, tz: Any) -> str:
     a, b = local(then, tz), local(now, tz)
     days = (b.date() - a.date()).days
     if days <= 0:
-        return phrase(f"expression.when.today.{_PART_KEYS[part_of_day(a.hour)]}")
+        return phrase(f"expression.when.today.{part_of_day(a.hour)}")
     if days == 1:
-        return phrase(f"expression.when.yesterday.{_PART_KEYS[part_of_day(a.hour)]}")
+        return phrase(f"expression.when.yesterday.{part_of_day(a.hour)}")
     if days == 2:
         return phrase("expression.when.day_before")
     return phrase("expression.when.days_ago", days=days)

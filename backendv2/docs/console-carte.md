@@ -700,7 +700,7 @@ rubrique.
 
 ## Composants communs et langage de la Forge
 
-- `kernel/inspect.py` décrit les blocs natifs ; `kernel/envelope.py` valide
+- `kernel/inspect.py` décrit les blocs natifs ; `plugins/forge/envelope.py` valide
   et documente leur représentation JSON pour les apps (version 2 conservée).
 - `inspector/render.py` prépare les cellules, liens, filtres, tableaux,
   graphiques et paginations ; les valeurs des graphiques utilisent le même

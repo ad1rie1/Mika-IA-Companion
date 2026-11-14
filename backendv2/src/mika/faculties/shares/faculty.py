@@ -164,11 +164,6 @@ def _sent_today(s: SharesState, cx: Any, handle: str) -> int:
     return sum(1 for at in s.stamps.get(handle, ()) if at > since)
 
 
-@SHARES.fact(c.RECENT)
-def _recent(s: SharesState, cx: Any, handle: str) -> tuple[c.SentView, ...]:
-    return s.sent.get(handle, ())
-
-
 # ── La projection T0 ──────────────────────────────────────────────────────
 
 _COLUMNS = ("id", "at", "person", "subjects", "name", "path", "mime", "size", "digest", "kind", "origin",

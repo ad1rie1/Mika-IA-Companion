@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import email as c
 from mika.kernel.events import Content
-from mika.kernel.forms import Knob, agree
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -41,6 +41,7 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    agree,
     paginate,
 )
 from mika.kernel.operate import Decision, Done, Refused
@@ -70,7 +71,7 @@ from mika.plugins.email.inspect.common import (
     workspace,
 )
 from mika.plugins.email.inspect.mail import _document
-from mika.ports.mail import to_fill
+from mika.ports.drafts import to_fill
 from mika.ports.paging import page_slice
 from mika.vocab.privacy import Sensitivity
 

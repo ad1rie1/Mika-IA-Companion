@@ -10,9 +10,6 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from mika.ports.gate import ACCEPTED as ACCEPTED
-from mika.ports.gate import DISABLED as DISABLED
-from mika.ports.gate import FORBIDDEN as FORBIDDEN
 from mika.ports.gate import GateResult
 
 #: les applis dont le téléphone lit les messages (le nom qu'il leur donne)

@@ -45,8 +45,9 @@ from mika.plugins.teams import (
 from mika.plugins.teams.accounts import Accounts
 from mika.plugins.teams.triage import rule_of
 from mika.plugins.teams.voice import voice_text
+from mika.ports.drafts import to_fill
 from mika.ports.preprocess import cite, inert
-from mika.ports.teams import DRAFT, SEND, Draft, person_handle, to_fill
+from mika.ports.teams import OUTBOX_PLACE, OUTBOX_SEND, Draft
 from mika.vocab import flows
 from mika.vocab.access import SELF, SHARE_PREPARE, SHARE_READ
 from mika.vocab.episodes import WORKING, Kind, is_work_target
@@ -217,7 +218,7 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     title = inert(shown.title, 80)
     wrote = inert(m.author, 80) or "quelqu'un"
     summary = summary_of(wrote, title, _kind(port, m.account, m.conversation), mode)
-    about = tuple(dict.fromkeys((*_asker(ctx), *(h for h in (person_handle(m.author_id),) if h))))
+    about = tuple(dict.fromkeys((*_asker(ctx), *(h for h in (c.person_handle(m.author_id),) if h))))
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=mode == "validation",
@@ -242,10 +243,8 @@ def summary_of(wrote: str, title: str, kind: str, mode: str) -> str:
 
 
 def _kind(port: Any, account: str, conversation: str) -> str:
-    """La sorte d'une conversation (``dm``, ``group``…) ; vide si elle n'est plus en cache (ou si le port ne la dit
-    pas)."""
-    find = getattr(port, "conversation", None)
-    conv = find(account, conversation) if find is not None else None
+    """La sorte d'une conversation (``dm``, ``group``…) ; vide si elle n'est plus en cache."""
+    conv = port.conversation(account, conversation)
     return str(getattr(conv, "kind", "") or "") if conv is not None else ""
 
 
@@ -291,7 +290,7 @@ async def send(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
     if str(args.get("account") or "") in p.accounts_off:
         return False, "Ce compte Teams est désactivé"
     mode = str(args.get("mode") or "brouillon")
-    why = port.enqueue(str(args.get("draft") or ""), mode=DRAFT if mode == "brouillon" else SEND,
+    why = port.enqueue(str(args.get("draft") or ""), mode=OUTBOX_PLACE if mode == "brouillon" else OUTBOX_SEND,
                        digest=str(args.get("_apercu") or ""), expires_at=frame.now + p.queue_ttl_us, now=frame.now,
                        her=her(frame))
     if why:
@@ -316,7 +315,7 @@ async def _gone(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
     summary = f"Ta réponse Teams à {to} est partie"
     if ev.data.edited:
         summary += f", retouchée par {writer_of(frame, draft.account)} avant l'envoi"
-    about = tuple(h for h in (person_handle(m.author_id) if m is not None else "",) if h)
+    about = tuple(h for h in (c.person_handle(m.author_id) if m is not None else "",) if h)
     return [c.SENT.draft(
         source="teams", kind=c.SENT_KIND, summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)),
         pertinence=0.55 if ev.data.edited else 0.35, sensitivity=int(Sensitivity.PERSONAL), bundle=BUNDLE,

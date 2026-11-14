@@ -27,6 +27,7 @@ from mika.faculties.affect import (
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect.params import AffectParams
 from mika.kernel.clock import DAY
+from mika.kernel.dynamics import Vec3
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Block,
@@ -46,7 +47,6 @@ from mika.kernel.inspect import (
     Series,
     Stat,
     Stats,
-    Swatch,
     Table,
     Text,
     Timeline,
@@ -73,7 +73,7 @@ _SPANS = {"24h": DAY, "7j": 7 * DAY}
 PERIOD = Param("periode", "Période", kind="select", choices=PERIODS, default="24h")
 
 
-def _vec(v: A.Vec3 | None) -> str:
+def _vec(v: Vec3 | None) -> str:
     if v is None:
         return "—"
     return " · ".join(f"{axis} {num_fr(x, 2, signed=True)}" for axis, x in zip("PAD", v, strict=True))
@@ -83,16 +83,12 @@ def _feeling(emotion: A.Emotion, intensity: float) -> str:
     return f"{A.FR[emotion]} ({pct_fr(intensity)})"
 
 
-def _swatch(emotion: A.Emotion, intensity: float | None = None) -> Swatch:
-    return Swatch(A.FR[emotion], "emotion", emotion.value, intensity)
-
-
 def _declared_cell(name: object, intensity: object) -> Cell:
     """Une balise lue dans le fil : sa pastille, ou le nom brut s'il n'est pas l'une des 29."""
     emotion = A.emotion_of(str(name))
     if emotion is None:
         return Text(str(name), kind="muted")
-    return _swatch(emotion, float(intensity or 0.0))
+    return A.emotion_cell(emotion, float(intensity or 0.0))
 
 
 def _name(frame: Frame, key: str) -> str:
@@ -139,7 +135,8 @@ def _mood_vital(s: AffectState, frame: Frame) -> Vital:
     href = Ref.view("affect", "humeur", "Humeur")
     if _at_rest(m, p):
         return Vital("au repos", hint=f"son fond : {A.FR[p.background]}", href=href)
-    return Vital(_feeling(m.felt, m.felt_intensity), ratio=m.felt_intensity, swatch=_swatch(m.felt, m.felt_intensity),
+    return Vital(_feeling(m.felt, m.felt_intensity), ratio=m.felt_intensity,
+                 swatch=A.emotion_cell(m.felt, m.felt_intensity),
                  tone="warn" if m.overflow > p.overflow_floor else "", hint=prose.mood(m, p), href=href)
 
 
@@ -225,12 +222,13 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
         last_sub = f"{ctx.when(at)}, {_who_text(frame, handle)}"
     return [
         Stats((
-            Stat("ressentie", "au repos" if rest else _swatch(m.felt, m.felt_intensity), sub="l'écart à son repos"),
+            Stat("ressentie", "au repos" if rest else A.emotion_cell(m.felt, m.felt_intensity),
+                 sub="l'écart à son repos"),
             Stat("débordement", Meter(m.overflow, pct_fr(m.overflow),
                                       tone="warn" if m.overflow > p.overflow_floor else ""),
                  sub=f"pousse à parler au-delà de {pct_fr(p.overflow_floor)}",
                  tone="warn" if m.overflow > p.overflow_floor else ""),
-            Stat("son fond", _swatch(p.background), sub="ce vers quoi elle revient"),
+            Stat("son fond", A.emotion_cell(p.background), sub="ce vers quoi elle revient"),
             Stat("dernière balise", last, sub=last_sub),
         ), title="Humeur générale"),
         Note(prose.mood(m, p)),
@@ -277,7 +275,7 @@ def _anchor_cell(r: c.StanceReading) -> Cell:
     if r.anchor is None:
         return Text("aucune", kind="muted")
     label, intensity = A.felt(r.anchor, r.reference)
-    return _swatch(label, intensity)
+    return A.emotion_cell(label, intensity)
 
 
 def _stance_prose(frame: Frame, r: c.StanceReading, p: AffectParams) -> str:
@@ -306,12 +304,12 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
     )
     return Row((
         who,
-        Text("au repos", kind="muted") if r.at_rest else _swatch(r.felt, r.felt_intensity),
+        Text("au repos", kind="muted") if r.at_rest else A.emotion_cell(r.felt, r.felt_intensity),
         _warmth_cell(regard(s, person, frame.now, p, cw)),
         _hostility_cell(hostility(s, person, frame.now, p, cw)),
         _bond_cell(r.bond),
         _anchor_cell(r),
-        _swatch(last.emotion, last.intensity) if last else Text("—", kind="muted"),
+        A.emotion_cell(last.emotion, last.intensity) if last else Text("—", kind="muted"),
         When(stored.declared_at) if stored.declared_at else Text("—", kind="muted"),
     ), href=who if isinstance(who, Ref) else None, detail=detail)
 
@@ -366,14 +364,14 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
         warmth = regard(s, key, frame.now, p, cw)
         blocks += [
             Stats((
-                Stat("ressentie", "au repos" if r.at_rest else _swatch(r.felt, r.felt_intensity),
+                Stat("ressentie", "au repos" if r.at_rest else A.emotion_cell(r.felt, r.felt_intensity),
                      sub="envers elle, à l'instant"),
                 Stat("chaleur", _warmth_cell(warmth), sub="ce que leurs échanges ont installé (−1…1)"),
                 Stat("hostilité", _hostility_cell(hostility(s, key, frame.now, p, cw)), sub="la rancune (0…1)"),
                 Stat("attachement", _bond_cell(r.bond), sub="ce qui l'attache à elle (0…1)"),
                 Stat("ancre", _anchor_cell(r),
                      sub=f"{stored.days} jour(s) de contact" if r.anchor is not None else ""),
-                Stat("dernière balise", _swatch(last.emotion, last.intensity) if last else "—",
+                Stat("dernière balise", A.emotion_cell(last.emotion, last.intensity) if last else "—",
                      sub=ctx.when(stored.declared_at) if stored.declared_at else ""),
             ), title="Envers elle" if key == person else f"Envers le moyen de communication {key} (avant d'être relié)"),
             Note(_stance_prose(frame, r, p) or "Rien de particulier envers cette personne."),

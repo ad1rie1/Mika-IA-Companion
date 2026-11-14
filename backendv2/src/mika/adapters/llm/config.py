@@ -26,6 +26,7 @@ from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, Trial, Unc
 from mika.kernel import forms
 from mika.kernel.clock import Clock
 from mika.kernel.forms import Knob
+from mika.kernel.prompt import Budget
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
 from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import FALLBACKS, TRIAL_ROLE, VOICE_ROLES, Role
@@ -442,8 +443,14 @@ class LiveGateway:
         """La passerelle de ``req`` : celle d'avant qui tient sa boucle ouverte, sinon celle en service."""
         return next((g for g in self._retired if g.continues(req)), self._inner)
 
-    def budget(self, role: str, max_tokens: int):
+    def budget(self, role: str, max_tokens: int) -> Budget:
         return self._inner.budget(role, max_tokens) if self._inner is not None else LLMLimits().budget(max_tokens)
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        """Le plafond de sortie effectif de ``req`` chez la passerelle qui la servira (``Gateway.output_tokens``) ;
+        ``req.max_tokens`` sans passerelle."""
+        gateway = self._serving(req)
+        return gateway.output_tokens(req) if gateway is not None else req.max_tokens
 
     @property
     def configured(self) -> bool:
@@ -490,9 +497,8 @@ class LiveGateway:
         return self._inner.status() if self._inner is not None else []
 
     def resolution(self) -> dict[str, str]:
-        """Rôle → fournisseur qui le sert vraiment (« » : aucun)."""
-        roles = [str(r) for r in Role]
-        return self._inner.resolution(roles) if self._inner is not None else dict.fromkeys(roles, "")
+        """Rôle → fournisseur qui le sert vraiment (« » : aucun), pour chaque ``Role`` (``Gateway.resolution``)."""
+        return self._inner.resolution() if self._inner is not None else dict.fromkeys((str(r) for r in Role), "")
 
     def is_voice(self, role: str) -> bool:
         return role in {str(r) for r in VOICE_ROLES}

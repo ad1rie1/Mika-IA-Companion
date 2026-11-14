@@ -14,14 +14,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from mika.contracts.memory import DAY, MONTH, RANGE, SEASON, YEAR
 from mika.kernel.clock import instant
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.words import fold
 
-#: la précision d'une date : un jour (ou une heure) — la forme d'avant, vide —, un mois, une saison, une année, une
-#: période entre deux dates
-DAY, MONTH, SEASON, YEAR, RANGE = "", "month", "season", "year", "range"
-PRECISIONS = (DAY, MONTH, SEASON, YEAR, RANGE)
 #: les saisons (météorologiques : un mois plein de plus ou de moins ne change pas ce qu'on attend) — le premier mois,
 #: et les noms qu'écrit un modèle
 SEASONS = {"spring": 3, "summer": 6, "autumn": 9, "winter": 12}

@@ -77,7 +77,7 @@ from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 from tests.fixtures.console_html import ConsoleHTML
-from tests.fixtures.mika import boot, build, connect, reply
+from tests.fixtures.mika import boot, build, connect, effect_preview, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
@@ -764,7 +764,7 @@ def test_an_app_validated_once_changes_without_asking_again_until_trust_is_withd
                                                                    "code": REGLAGES_CODE})
         out["pas installée"] = forge.source("reglee")[0]
         [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
-        out["aperçu"] = await port.effect_preview(pending.proposal)
+        out["aperçu"] = await effect_preview(kernel, pending.proposal)
         out["approuvée"] = await port.resolve_effect(pending.proposal, True, by="user_1",
                                                      seen=out["aperçu"].digest)
         await asyncio.sleep(5)
@@ -778,7 +778,7 @@ def test_an_app_validated_once_changes_without_asking_again_until_trust_is_withd
                                                 "code": REGLAGES_CODE})
         [stale] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
         await forge.write("reglee", REGLAGES + "# par l'opérateur\n", REGLAGES_CODE)
-        out["dépassée"] = await port.effect_preview(stale.proposal)
+        out["dépassée"] = await effect_preview(kernel, stale.proposal)
         out["refusée"] = await port.resolve_effect(stale.proposal, True, by="user_1", seen=out["dépassée"].digest)
         # le contre-exemple : une app sans secret change tout de suite…
         await install(kernel, forge, "libre", "title: Libre\n", "def view(api):\n    return 1\n")

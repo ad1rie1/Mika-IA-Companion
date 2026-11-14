@@ -128,8 +128,6 @@ def requirement(item: int | None, about: Sequence[str], sensitivity: int, *, tol
                                                       secret=secret),))
 
 
-def of_message(item: int | None, person: str, *, public: bool = False, secret: bool = False) -> Requirement:
-    """Ce qu'exige un message qu'on lui a dit : ce que la personne lui a dit en privé est personnel et à elle (un
-    salon l'a entendu : anodin, devant ceux qui y étaient)."""
-    level = Sensitivity.ANODYNE if public and not secret else Sensitivity.PERSONAL
-    return requirement(item, (person,), int(level), told_by=(person,), heard_by=(person,), secret=secret)
+def of_message(item: int | None, person: str) -> Requirement:
+    """Ce qu'exige un message qu'on lui a dit : ce que la personne lui a dit est personnel et à elle."""
+    return requirement(item, (person,), int(Sensitivity.PERSONAL), told_by=(person,), heard_by=(person,))

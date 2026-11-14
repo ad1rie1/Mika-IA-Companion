@@ -56,7 +56,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
-from mika.kernel.inspect import describe_error
+from mika.ports.errors import describe_error
 from mika.vocab.phrasebook import phrase
 
 #: l'écart minimal entre deux passes de « tenir » qui trouvent encore quelque chose à faire

@@ -21,10 +21,18 @@ from mika.contracts import runtime as rt
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import LifeArchive
 from mika.faculties.memory.night import joinable_pairs
-from mika.faculties.memory.projections import ITEM_COLUMNS, Chunks, ExtractionQueue, Items, Readings, Told
+from mika.faculties.memory.projections import (
+    ITEM_COLUMNS,
+    RETIRED_VIEWS,
+    Chunks,
+    ExtractionQueue,
+    Items,
+    Readings,
+    Told,
+)
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
-from mika.ports.sql import HANDLE_MAX, PROJECTIONS, Key
+from mika.ports.sql import HANDLE_MAX, PROJECTIONS, Key, create_view
 from tests.fixtures.memory import event
 from tests.fixtures.sqldb import SqlDB
 
@@ -52,13 +60,25 @@ def said_to(target: str, *provenance: str) -> object:
 
 
 @pytest.mark.parametrize("view", [mc.KNOWLEDGE, mc.KNOWLEDGE_ABOUT, mc.FORMER, mc.RETOLD, mc.SELF_CHANGES, mc.LIVED,
-                                  mc.LEDGER, mc.FEELINGS], ids=lambda v: v.name)
+                                  mc.LEDGER], ids=lambda v: v.name)
 def test_each_view_has_the_columns_its_contract_declares(view):
     """Les autres facultés lisent la porte par ``view_table`` : une colonne déclarée que la vue n'a pas, ou dans un
     autre ordre, ne se verrait qu'à la première lecture."""
     db = DB()
     found = [col["name"] for col in inspect(db.conn).get_columns(view.name)]
     assert found == [col.name for col in view.c]
+
+
+@pytest.mark.parametrize("retired", RETIRED_VIEWS)
+def test_a_retired_view_is_no_longer_made_and_falls_with_the_version_dropped(retired):
+    """Une vue que la porte n'a plus (``RETIRED_VIEWS``) ne naît plus ; une base d'avant la porte encore, et elle
+    tombe avec la version que la reconstruction abandonne (``Items.drop``), sans que le projecteur change de version."""
+    db = DB()
+    assert retired not in inspect(db.conn).get_view_names()
+    create_view(db, retired, f"SELECT item, whose, emotion, intensity FROM {mc.FEELINGS_TABLE}")  # une base d'avant
+    assert retired in inspect(db.conn).get_view_names()
+    Items().drop(db, "")
+    assert retired not in inspect(db.conn).get_view_names()
 
 
 def test_the_ledger_is_every_column_of_an_item_and_the_door_reads_by_queries():

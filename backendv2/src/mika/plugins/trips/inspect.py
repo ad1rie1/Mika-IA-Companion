@@ -31,7 +31,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
-    day_fr,
+    short_day_fr,
 )
 from mika.plugins.trips import TRIPS, TripsState, days_of, trips_of
 
@@ -126,7 +126,7 @@ def avoid_words(avoid: Collection[str]) -> str:
 
 def day_words(day: date | None) -> str:
     """Un jour du voyage (« sam. 3 avr. 2027 ») ; sans date : vide."""
-    return day_fr(day.year, day.month, day.day, day.weekday(), with_year=True) if day is not None else ""
+    return short_day_fr(day, with_year=True) if day is not None else ""
 
 
 def _stops(t: TripSeen, her: str) -> Table:

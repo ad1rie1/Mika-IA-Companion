@@ -46,12 +46,6 @@ class Tier(enum.StrEnum):
     T2 = "t2"  # différée, calcul lourd
 
 
-class EffectClass(enum.StrEnum):
-    NONE = "none"
-    INTERNAL = "internal"
-    EXTERNAL = "external"
-
-
 class ToolResult(BaseModel):
     """Ce qu'un outil rend au modèle. ``ok=False`` : refusé ou raté — ce
     n'est pas du travail fait (un pas qui dit « fini » ne s'en prévaut pas)."""
@@ -191,7 +185,6 @@ class ToolSpec:
     handler: Callable[..., Any]
     bundle: str
     episodes: frozenset[str]
-    effect: EffectClass = EffectClass.NONE
     max_calls_per_episode: int | None = None
     #: le minimum vital de sa famille le réserve à sa propriétaire (ADR 0134) : sa famille naît à toi et elle seule
     #: pour cet outil ; une ligne d'un opérateur peut l'ouvrir — ce n'est plus un plancher
@@ -221,9 +214,6 @@ class ToolSpec:
     fits: Callable[[Any, str, Any], bool] | None = None
     #: il change quelque chose (sa colonne « action » dans un tableau de droits) ; sinon il lit
     acts: bool = False
-    #: il sait attendre un accord (un effet proposé, exécuté une fois accepté) : « ton accord » et « demande à la
-    #: personne » se règlent pour lui ; sinon ces cases sont grisées (il agit dans la conversation même)
-    deferrable: bool = False
     #: le port sans lequel il ne fait rien (« imaging ») : pas offert tant que ce port n'est pas configuré — un
     #: outil qui répondrait « je ne peux pas » ferait croire qu'elle sait le faire (ADR 0160)
     needs: str = ""
@@ -668,7 +658,6 @@ class Faculty(Generic[S, Pm]):
         args: type[BaseModel],
         bundle: str | None = None,
         episodes: Iterable[str],
-        effect: EffectClass = EffectClass.NONE,
         max_calls_per_episode: int | None = None,
         owner_only: bool = False,
         when: Callable[[Any], bool] | None = None,
@@ -676,7 +665,6 @@ class Faculty(Generic[S, Pm]):
         rule: str = "",
         fits: Callable[[Any, str, Any], bool] | None = None,
         acts: bool = False,
-        deferrable: bool = False,
         needs: str = "",
         owned: Callable[[Any, str, Any], bool] | None = None,
         label: str = "",
@@ -685,8 +673,8 @@ class Faculty(Generic[S, Pm]):
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
-                    frozenset(episodes), effect, max_calls_per_episode, owner_only, when, ends_loop,
-                    rule, fits=fits, acts=acts, deferrable=deferrable, needs=needs, owned=owned, label=label,
+                    frozenset(episodes), max_calls_per_episode, owner_only, when, ends_loop,
+                    rule, fits=fits, acts=acts, needs=needs, owned=owned, label=label,
                 )
             )
             return fn

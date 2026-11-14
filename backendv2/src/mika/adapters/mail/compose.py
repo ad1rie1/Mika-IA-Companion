@@ -21,7 +21,8 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 
 from mika.contracts.self_ import DEFAULT_NAME
-from mika.ports.mail import AccountInfo, Draft, File, Mail, Preview, addresses, to_fill
+from mika.ports.drafts import to_fill
+from mika.ports.mail import AccountInfo, Draft, File, Mail, Preview, addresses
 from mika.vocab.phrasebook import phrase
 
 

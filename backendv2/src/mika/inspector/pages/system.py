@@ -28,7 +28,6 @@ from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.facts import FactKey
-from mika.kernel.forms import agree
 from mika.kernel.inspect import (
     Badge,
     Chart,
@@ -50,15 +49,16 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    agree,
     cursor_page,
-    day_fr,
-    describe_error,
     money_fr,
     num_fr,
     pct_fr,
     read_params,
+    short_day_fr,
     size_fr,
 )
+from mika.ports.errors import describe_error
 from mika.ports.journal import JournalContent, JournalEvent, JournalOutbox, JournalSnapshot
 from mika.runtime import health
 from mika.runtime import operations as ops
@@ -134,7 +134,7 @@ async def appels(ui: Any, request: Request) -> list[Any]:
 
     def day_label(key: str) -> str:
         d = datetime.strptime(key, "%Y-%m-%d").replace(tzinfo=ui.tz)
-        return day_fr(d.year, d.month, d.day, d.weekday())
+        return short_day_fr(d)
 
     def usage_table(rows: list[Any], label: str, title: str, show: Any = str) -> Table:
         return Table((label, Column("appels", "num"), Column("échecs", "num"), Column("entrée", "num", detail=True),

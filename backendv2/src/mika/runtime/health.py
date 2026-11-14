@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from mika.kernel.clock import DAY, MINUTE, US
-from mika.kernel.forms import plural, show_duration
-from mika.kernel.inspect import describe_error
+from mika.kernel.forms import show_duration
+from mika.kernel.inspect import plural
 from mika.kernel.registry import zone_known
+from mika.ports.errors import describe_error
 from mika.ports.journal import JournalOutbox
 from mika.runtime.boundary import Failed, call
 from mika.vocab.episodes import Role
@@ -224,7 +225,8 @@ def _config(kernel: Kernel) -> Check:
 
 def _ports(kernel: Kernel) -> Check:
     """Ses branchements (ADR 0064) : un port qui sait dire ce qui est en panne chez lui (``failing()`` → des noms)
-    — un serveur d'outils extérieurs coupé par son disjoncteur, par exemple. Le noyau n'en nomme aucun."""
+    — un serveur d'outils extérieurs coupé par son disjoncteur, par exemple. Le noyau n'en nomme aucun. Ce crochet
+    et les trois autres que le runtime cherche sur chaque port sont décrits dans ports/__init__.py."""
     problems: list[str] = []
     for name, port in sorted(kernel.deps.ports.items()):
         failing = getattr(port, "failing", None)

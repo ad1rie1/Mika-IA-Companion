@@ -35,12 +35,11 @@ from dataclasses import dataclass, field, replace
 from zoneinfo import ZoneInfo
 
 from mika.faculties.affect.params import AffectParams
-from mika.kernel.dynamics import Oscillator, propagate, propagate_toward
+from mika.kernel.dynamics import Oscillator, Vec3, propagate, propagate_toward
 from mika.vocab import affect as A
 from mika.vocab import circadian
-from mika.vocab.affect import Declared, Emotion, Vec3
+from mika.vocab.affect import Declared, Emotion
 
-ZERO: Vec3 = (0.0, 0.0, 0.0)
 #: Au-delà de tant de constantes de temps, le jumeau est sur son repos.
 SETTLED_TAUS = 40.0
 #: En deçà de cette norme, une ancre est guérie (effacée).
@@ -104,9 +103,9 @@ class Mark:
 @dataclass(frozen=True, slots=True)
 class Mood:
     rest: Osc
-    gap: Vec3 = ZERO
-    gap_velocity: Vec3 = ZERO
-    fond: Vec3 = ZERO  # non borné ; lu borné (``fond_of``)
+    gap: Vec3 = A.ORIGIN
+    gap_velocity: Vec3 = A.ORIGIN
+    fond: Vec3 = A.ORIGIN  # non borné ; lu borné (``fond_of``)
     asleep: bool = False
     marks: tuple[Mark, ...] = ()
     asleep_at: int = 0  # quand elle s'est endormie (pour ce que le sommeil a déjà allégé)
@@ -121,8 +120,8 @@ class Mood:
 @dataclass(frozen=True, slots=True)
 class Stance:
     rest: Osc  # le jumeau sans impulsion, sur le repos propre de la personne
-    gap: Vec3 = ZERO
-    gap_velocity: Vec3 = ZERO
+    gap: Vec3 = A.ORIGIN
+    gap_velocity: Vec3 = A.ORIGIN
     #: ce que la relation a installé, mesuré depuis son repos moyen ; valable à ``rest.at``
     anchor: Vec3 | None = None
     bond: float = 0.0  # valable à ``rest.at``
@@ -175,7 +174,7 @@ def reference(p: AffectParams, cw: Clockwork) -> Vec3:
     le repos de l'instant, elles variaient avec l'heure."""
     starts = cw.rhythm.starts
     total = 24 * 60
-    tint = ZERO
+    tint = A.ORIGIN
     for i, (phase, start) in enumerate(starts):
         nxt = starts[(i + 1) % len(starts)][1]
         minutes = (nxt - start) % total or total
@@ -190,7 +189,7 @@ def _segments(t0: int, t1: int, cw: Clockwork) -> list[tuple[int, int]]:
 
 
 def _follow(oscillator: Oscillator, osc: Osc, t: int, p: AffectParams, cw: Clockwork, settled_after_s: float,
-            offset: Vec3 = ZERO, rate: float = 0.0) -> Osc:
+            offset: Vec3 = A.ORIGIN, rate: float = 0.0) -> Osc:
     """Le jumeau propagé jusqu'à ``t`` : vers le repos commun de chaque segment
     de phase, plus un décalage ``offset`` (valable à ``osc.at``) qui décroît à
     ``rate`` — l'ancre qui guérit. Exact, quel que soit le pas."""
@@ -201,7 +200,7 @@ def _follow(oscillator: Oscillator, osc: Osc, t: int, p: AffectParams, cw: Clock
         return A.scale(offset, math.exp(-rate * (at - osc.at) / 1e6)) if rate else offset
 
     if (t - osc.at) / 1e6 > settled_after_s:
-        return Osc(A.add(common_home(t, p, cw), shift(t)), ZERO, t)
+        return Osc(A.add(common_home(t, p, cw), shift(t)), A.ORIGIN, t)
     pos, vel = osc.position, osc.velocity
     for a, b in _segments(osc.at, t, cw):
         pos, vel = propagate_toward(oscillator, pos, vel, common_home(a, p, cw), shift(a), rate, (b - a) / 1e6)
@@ -235,13 +234,13 @@ def fond_of(m: Mood, p: AffectParams) -> Vec3:
 
 def advance_mood(m: Mood | None, t: int, p: AffectParams, cw: Clockwork) -> Mood:
     if m is None:
-        return Mood(Osc(common_home(t, p, cw), ZERO, t))
+        return Mood(Osc(common_home(t, p, cw), A.ORIGIN, t))
     if t <= m.at:
         return m
     oscillator = p.mood.oscillator()
     rest = _follow(oscillator, m.rest, t, p, cw, SETTLED_TAUS * p.mood.tau_s)
     dt = (t - m.at) / 1e6
-    gap, vel = propagate(oscillator, m.gap, m.gap_velocity, ZERO, dt)
+    gap, vel = propagate(oscillator, m.gap, m.gap_velocity, A.ORIGIN, dt)
     fond = m.fond if m.asleep else _lowpass(oscillator, m.gap, m.gap_velocity, gap, vel, m.fond,
                                             p.fond_tau_us / 1e6, p.fond_weight, dt)
     return replace(m, rest=rest, gap=gap, gap_velocity=vel, fond=fond)
@@ -360,7 +359,7 @@ def bond_at(bond: float, dt_us: int, p: AffectParams) -> float:
 
 def new_stance(t: int, p: AffectParams, cw: Clockwork) -> Stance:
     """Une posture neuve commence au repos, pas à l'origine."""
-    return Stance(Osc(common_home(t, p, cw), ZERO, t))
+    return Stance(Osc(common_home(t, p, cw), A.ORIGIN, t))
 
 
 def advance_stance(st: Stance, t: int, p: AffectParams, cw: Clockwork) -> Stance:
@@ -369,10 +368,10 @@ def advance_stance(st: Stance, t: int, p: AffectParams, cw: Clockwork) -> Stance
     oscillator = p.person.oscillator()
     dt_us = t - st.at
     anchor = heal(st.anchor, st.hostile, dt_us, p)
-    offset = ZERO if st.anchor is None else A.scale(st.anchor, p.anchor_weight)
+    offset = A.ORIGIN if st.anchor is None else A.scale(st.anchor, p.anchor_weight)
     rest = _follow(oscillator, st.rest, t, p, cw, SETTLED_TAUS * p.person.tau_s, offset,
                    heal_rate(st.anchor, st.hostile, p))
-    gap, vel = propagate(oscillator, st.gap, st.gap_velocity, ZERO, dt_us / 1e6)
+    gap, vel = propagate(oscillator, st.gap, st.gap_velocity, A.ORIGIN, dt_us / 1e6)
     return replace(st, rest=rest, gap=gap, gap_velocity=vel, anchor=anchor, bond=bond_at(st.bond, dt_us, p),
                    hostile=st.hostile if anchor is not None else 0)
 

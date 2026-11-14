@@ -37,7 +37,6 @@ from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.inspector import mcp as console_mcp
-from mika.kernel.rights import Rights
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
@@ -45,6 +44,7 @@ from mika.runtime.boundary import call
 from mika.runtime.tools import RULES as TOOL_RULES
 from mika.vocab.access import Table, ToolRule
 from mika.vocab.canals import Canals, CanalTable
+from mika.vocab.rights import Rights
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal

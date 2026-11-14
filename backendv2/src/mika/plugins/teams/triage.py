@@ -16,7 +16,6 @@ from mika.kernel.frame import Frame
 from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.preprocess import inert
-from mika.ports.teams import person_handle
 from mika.vocab.access import SELF
 from mika.vocab.affect import Emotion, named_feeling
 from mika.vocab.canals import CanalRule, teams_rule
@@ -174,7 +173,7 @@ class Triage:
                 importance=triage["importance"],
                 needs_reply=bool(addressed and triage["question"] and triage["aide"]),
                 mentions_me=m.mentions_me, prepare=rule.prepare, send=rule.reply, account=m.account,
-                about=tuple(h for h in (person_handle(m.author_id),) if h), dedupe_key=f"teams:{m.ref}"))
+                about=tuple(h for h in (c.person_handle(m.author_id),) if h), dedupe_key=f"teams:{m.ref}"))
         if drafts:
             await ctx.emit(*drafts)
         # remarqués (ou déjà connus, ou des notifications) : le prochain passage ne les rendra plus

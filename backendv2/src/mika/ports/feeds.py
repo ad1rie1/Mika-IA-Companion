@@ -77,10 +77,6 @@ class FeedPort(Protocol):
         """Les derniers articles déjà relevés, sans relever (lecture seule : l'inspecteur)."""
         ...
 
-    def cached_count(self) -> int:
-        """Nombre d'articles en cache, y compris ceux d'un ancien abonnement."""
-        ...
-
     def followed(self) -> list[tuple[str, str]]:
         """Les flux suivis : (titre s'il est connu, adresse montrable — sans
         identifiants ni valeurs de paramètres, qui peuvent porter un jeton)."""
@@ -89,7 +85,8 @@ class FeedPort(Protocol):
     def health(self) -> list[dict[str, object]]:
         """Pour chaque flux suivi, ce que son dernier relevé a donné (lecture seule) : ``title``, ``url``
         (montrable), ``attempted_at``, ``ok_at`` (µs), ``error`` (vide : il va bien), ``failures`` (d'affilée),
-        ``items`` (lus au dernier relevé), ``added`` (nouveaux), ``kept`` (dans le cache)."""
+        ``items`` (lus au dernier relevé), ``added`` (nouveaux), ``kept`` (dans le cache). Facultatif : les flux du
+        simulateur n'en ont pas, et la console le lit par ``getattr`` (``_health``, plugins/rss)."""
         ...
 
     async def article(self, entry_id: str) -> str:

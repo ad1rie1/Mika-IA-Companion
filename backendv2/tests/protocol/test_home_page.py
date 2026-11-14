@@ -15,8 +15,7 @@ from mika.inspector.pages import home as home_tabs
 from mika.inspector.pages import system as system_pages
 from mika.inspector.ui import UI
 from mika.kernel.clock import MINUTE
-from mika.kernel.forms import plural
-from mika.kernel.inspect import Note, Ref, Stat, Stats, Swatch, Text, Vital
+from mika.kernel.inspect import Note, Ref, Stat, Stats, Swatch, Text, Vital, plural
 from mika.runtime import health
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_now_page import chat

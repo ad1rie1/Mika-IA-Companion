@@ -1062,11 +1062,6 @@ def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: 
                             since=ct.since, her_starts=her, their_starts=them, one_sided=one_sided, usual_days=usual)
 
 
-@SOCIAL.fact(c.GREETED, reads=[identity_c.HANDLES])
-def _greeted(s: SocialState, cx, person: str) -> int:
-    return gathered(s, person, cx.facts.get(identity_c.HANDLES(person))).greeted.get(person, 0)
-
-
 def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
     """Assez d'histoire pour avoir pu être une amie (jours de contact et messages) : en deçà, une connaissance au
     plus, quoi que l'affect en dise — la proximité ne dépasse jamais ce que l'histoire permet."""

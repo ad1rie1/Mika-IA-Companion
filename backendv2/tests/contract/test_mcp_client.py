@@ -20,7 +20,8 @@ from mika.adapters.mcp.config import AccessRule, McpConfig, McpServer, StoredRev
 from mika.adapters.mcp.http import HttpTransport
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi
-from mika.ports.mcp import CLOSE, OWNER, PERSON, Access
+from mika.ports.mcp import Access
+from mika.vocab.access import CLOSE, OWNER, PERSON
 
 TOKEN = "jeton-canari-7f3a"
 URL = "http://127.0.0.1:9100/mcp"

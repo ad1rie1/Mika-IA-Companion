@@ -52,7 +52,7 @@ from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.outside import FakeMail
 from mika.vocab.episodes import Kind
-from tests.fixtures.mika import DOC, at_paris, build, connect, said
+from tests.fixtures.mika import DOC, at_paris, build, connect, effect_preview, said
 
 ALICE = "Alice <alice@exemple.fr>"
 PERSO = AccountInfo("perso", "Perso", "mika@exemple.fr", display_name="Adrien Dupont", voice="proprietaire",
@@ -184,7 +184,7 @@ def test_she_drafts_in_the_voice_of_the_box_and_only_what_you_read_leaves(tmp_pa
         out["stale send"] = await perform(kernel, "email.envoyer_brouillon", fixed(draft=draft.id, seen=shown.digest),
                                           by="user_1", nonce="e1")
         now = box.preview(draft.id)
-        out["approvals preview"] = await KernelPort(kernel).effect_preview(out["proposed"][0].seq)
+        out["approvals preview"] = await effect_preview(kernel, out["proposed"][0].seq)
         out["send"] = await perform(kernel, "email.envoyer_brouillon", fixed(draft=draft.id, seen=now.digest),
                                     by="user_1", nonce="e2")
         await sleep(2 * MINUTE)

@@ -1,33 +1,47 @@
 """Lire la console en français (CON-28, CON-29) et paginer juste (CON-25, CON-26).
 
 Ce qu'un opérateur lit : des nombres à la française (« 0,42 », « 42 % »,
-« 0,0034 $ »), des jours (« mer. 1 oct. »), des erreurs qui disent ce qui ne va
-pas (« fichier introuvable : x ») — jamais un ``repr`` Python —, et des listes
-qui n'annoncent pas une page de plus quand il n'y en a pas.
+« 0,0034 $ », « 0 échec », « 2 échecs »), des jours (« mer. 1 oct. »), des
+erreurs qui disent ce qui ne va pas (« fichier introuvable : x ») — jamais un
+``repr`` Python —, et des listes qui n'annoncent pas une page de plus quand il
+n'y en a pas.
 """
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from types import SimpleNamespace
 
+import pytest
+
+from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
+from mika.adapters.llm.claude_code import ClaudeCodeError
 from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.llm.gateway import UnconfiguredRole
+from mika.adapters.llm.models import ListingFailed
+from mika.adapters.mail.imap import ImapError
+from mika.adapters.store_sql.store import StoreSealed
 from mika.app import console
 from mika.app.composition import arbitration, faculties, policies
 from mika.inspector import names
 from mika.inspector.catalog import Labels
 from mika.kernel import forms
+from mika.kernel import inspect as kernel_inspect
 from mika.kernel.inspect import (
     INT_MAX,
     InspectContext,
+    agree,
     cursor_page,
-    day_fr,
-    describe_error,
     int_query,
     money_fr,
     num_fr,
     pct_fr,
+    plural,
+    short_day_fr,
 )
 from mika.kernel.registry import Registry
+from mika.ports.errors import OUTSIDE, describe_error
+from mika.ports.llm import MissingPersona
 from mika.runtime.state import RUNTIME
 from mika.vocab.episodes import Kind, Role
 
@@ -42,9 +56,25 @@ def test_numbers_read_the_french_way():
     assert num_fr(float("nan")) == "—" and num_fr(None) == "—"
     assert pct_fr(0.423) == f"42{NNBSP}%" and money_fr(0.0034) == f"0,0034{NNBSP}$"
     assert money_fr(1.254) == f"1,25{NNBSP}$"
-    assert day_fr(2026, 10, 1, 2) == "mer. 1 oct." and day_fr(2026, 10, 1, 2, with_year=True).endswith("2026")
+    # un jour se passe entier (une date, ou l'instant d'une page), pas en quatre morceaux : le jour de la semaine
+    # se lit dans la date (le 1er octobre 2025 est un mercredi, le 1er octobre 2026 un jeudi)
+    assert short_day_fr(date(2025, 10, 1)) == "mer. 1 oct." and short_day_fr(date(2026, 10, 1)) == "jeu. 1 oct."
+    assert short_day_fr(datetime(2025, 10, 1, 23)) == "mer. 1 oct."
+    assert short_day_fr(date(2025, 10, 1), with_year=True) == "mer. 1 oct. 2025"
     # contre-exemple : le format anglais n'apparaît jamais
     assert "." not in num_fr(3.14159) and "0.000 $" not in money_fr(0.0)
+
+
+@pytest.mark.parametrize("n, counted, bare", [
+    (0, "0 échec", "échec"), (1, "1 échec", "échec"), (2, "2 échecs", "échecs"), (-1, "−1 échec", "échec"),
+    (1200, f"1{NNBSP}200 échecs", "échecs"),
+])
+def test_plural_says_the_count_and_agree_only_the_word(n, counted, bare):
+    # le singulier jusqu'à 1 ; le compte écrit comme tout nombre de la console (``num_fr`` : milliers à l'espace
+    # fine, « − » pour le signe) ; ``agree`` pour un indice dont le nombre est déjà dit à côté (la valeur d'un
+    # badge à l'accueil : « 3 · Courrier › Réception · mails importants pas encore lus », pas « … · 3 mails … »)
+    assert plural(n, "échec", "échecs") == counted
+    assert agree(n, "échec", "échecs") == bare
 
 
 def test_errors_say_what_is_wrong_never_a_python_repr():
@@ -64,6 +94,32 @@ def test_errors_say_what_is_wrong_never_a_python_repr():
     assert describe_error("Note : rien à faire") == "Note : rien à faire"
     for shown in (describe_error(ValueError("x")), names.detail("ValueError('x')")):
         assert "ValueError" not in shown and "(" not in shown
+    # une panne du magasin, gardée en texte ou levée, se dit par les ports
+    assert describe_error("StoreSealed: écriture après la fermeture") == \
+        "magasin fermé : écriture après la fermeture"
+    assert describe_error(StoreSealed()) == "magasin fermé"
+
+
+def test_the_kernel_alone_knows_no_adapter_failure():
+    # le noyau ne dit que les erreurs de Python et la sienne ; celles du monde extérieur lui viennent des ports
+    assert kernel_inspect.describe_error("UnconfiguredRole: aucun modèle associé au rôle « reply »") == \
+        "UnconfiguredRole: aucun modèle associé au rôle « reply »"
+    assert kernel_inspect.describe_error("UnconfiguredRole('aucun modèle pour « extract »')") == \
+        "UnconfiguredRole('aucun modèle pour « extract »')"
+    assert kernel_inspect.describe_error("StoreSealed()") == "StoreSealed()"
+    assert kernel_inspect.describe_error(StoreSealed()) == "erreur inattendue (StoreSealed)"
+    assert kernel_inspect.describe_error(TimeoutError()) == "délai dépassé"
+    for name, meaning in OUTSIDE.items():
+        assert meaning not in kernel_inspect.describe_error(f"{name}: x")
+        assert describe_error(f"{name}: x") == f"{meaning} : x"
+
+
+def test_outside_names_real_failures_of_the_adapters_and_ports():
+    raised = (UnconfiguredRole, MissingPersona, StoreSealed, ListingFailed, ImageListingFailed, ClaudeCodeError,
+              ImapError)
+    assert {kind.__name__ for kind in raised} == set(OUTSIDE)
+    assert describe_error(UnconfiguredRole("reply")) == \
+        "aucun modèle configuré : aucun modèle associé au rôle « reply »"
 
 
 def test_every_kind_and_role_has_a_french_name():

@@ -29,8 +29,8 @@ from mika.kernel.codec import canonical_json
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, ChatPrompt
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
-from mika.vocab.affect import parse_tag
 from mika.vocab.phrasebook import phrase
+from mika.vocab.tag import parse_tag
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 
 MON = (2026, 9, 28)  # un lundi

@@ -59,8 +59,8 @@ from mika.faculties.projects.work import FULL, MENTION, unplanned_stall, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import describe_error
 from mika.kernel.prompt import SectionBody
+from mika.ports.errors import describe_error
 from mika.vocab.days import ago_words
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
 from mika.vocab.phrasebook import family, phrase

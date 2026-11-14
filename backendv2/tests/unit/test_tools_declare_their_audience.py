@@ -17,7 +17,6 @@ from mika.app.composition import policies
 from mika.app.handmade.rights import fixed_tools
 from mika.faculties.identity import audience_for
 from mika.kernel.registry import ArbitrationPolicy
-from mika.kernel.rights import Rights
 from mika.plugins.location import offered as located
 from mika.plugins.phone import offered as phoned
 from mika.ports.llm import LLMResponse
@@ -27,6 +26,7 @@ from mika.sim.clock import run_virtual
 from mika.vocab.access import ALONE, EVERYONE, Table, ToolRule
 from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind
+from mika.vocab.rights import Rights
 from tests.fixtures.mika import boot, build, connect
 
 GUARDED = ("location_where", "phone_draft", "phone_messages")

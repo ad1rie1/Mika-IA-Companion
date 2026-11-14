@@ -16,9 +16,8 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects.faculty import Project, access_of
 from mika.kernel.frame import Frame
-from mika.kernel.rights import Rights
 from mika.vocab.access import AT_OWNER, STEER_WORDS, situation, who_words
-from mika.vocab.rights import ProjectAllowance, closeness_of, project_allowance, rights_of
+from mika.vocab.rights import ProjectAllowance, Rights, closeness_of, project_allowance, rights_of
 
 __all__ = ["STEER_WORDS", "allowance", "lines", "of_frame", "reads", "sees", "shares_files", "steering", "who_named"]
 

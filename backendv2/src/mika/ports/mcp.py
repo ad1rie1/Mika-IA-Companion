@@ -14,18 +14,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-# qui une ligne d'accès désigne, quand elle vaut, ce qu'elle laisse faire d'un outil : ceux de ``vocab.access``,
-# partagés avec les projets et leurs apps (ADR 0131, 0133)
-from mika.vocab.access import ANY as ANY
-from mika.vocab.access import CANALS as CANALS
-from mika.vocab.access import CLOSE as CLOSE
-from mika.vocab.access import EVERYONE as EVERYONE
-from mika.vocab.access import INTERNAL as INTERNAL
-from mika.vocab.access import MOMENTS as MOMENTS
-from mika.vocab.access import OWNER as OWNER
-from mika.vocab.access import PERSON as PERSON
-from mika.vocab.access import POLICIES as POLICIES
-from mika.vocab.access import SELF as SELF
 from mika.vocab.access import alone as _alone
 
 #: la nature d'un outil : lire, ou changer quelque chose ailleurs
@@ -36,8 +24,6 @@ KEEPS = (("public", "ce qu'elle sait — peut devenir un savoir, et se raconter"
          ("perso", "un souvenir — comme ce qu'on lui raconte"),
          ("prive", "une confidence — elle en reparle avec la personne, jamais à quelqu'un d'autre"),
          ("rien", "rien — elle s'en sert sur le moment, puis l'oublie"))
-#: les familles d'épisodes où un serveur peut servir
-EPISODES = MOMENTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +36,7 @@ class Access:
     who: tuple[str, ...]
     #: ses canaux (``vocab.access.CANALS``) ; vide : tous
     canal: tuple[str, ...] = ()
-    #: ses moments (``MOMENTS``) ; vide : toujours
+    #: ses moments (``vocab.access.MOMENTS``) ; vide : toujours
     when: tuple[str, ...] = ()
     read: str = "non"
     act: str = "non"
@@ -133,7 +119,8 @@ class OfferedTool:
     description: str
     schema: Mapping[str, Any]
     nature: str
-    #: les familles d'épisodes où une de ses lignes (ou la ligne par défaut) le laisse servir (``EPISODES``)
+    #: les familles d'épisodes où une de ses lignes (ou la ligne par défaut) le laisse servir
+    #: (``vocab.access.families``)
     episodes: frozenset[str]
     in_hand: bool
     max_calls: int

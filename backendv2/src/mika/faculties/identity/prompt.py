@@ -38,8 +38,6 @@ def owner_line(frame: Frame) -> str:
 
 
 _KNOWN = (social_c.FRIEND, social_c.CLOSE)
-#: le moment de la journée (``vocab.days.part_of_day``) → sa clé dans ``identity.calendar.today`` / ``yesterday``
-_MOMENT = {"nuit": "night", "matin": "morning", "midi": "noon", "après-midi": "afternoon", "soir": "evening"}
 
 
 def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | None = None) -> list[str]:
@@ -81,7 +79,7 @@ def calendar_words(then: int, frame: Frame) -> str:
     « il y a 5 jours ») — les jours comptés sur le calendrier, pas en durée."""
     now, past = frame.local(), frame.local(then)
     days = (now.date() - past.date()).days
-    moment = _MOMENT[part_of_day(past.hour)]
+    moment = part_of_day(past.hour)
     precise = phrase("identity.calendar.precise", weekday=phrases("identity.calendar.weekdays")[past.weekday()],
                      hour=past.hour)
     if days <= 0:

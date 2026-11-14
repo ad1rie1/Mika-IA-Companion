@@ -202,7 +202,6 @@ class TrustPolicy:
     affirmation + souvenir partagé l'atteint."""
 
     private_threshold: float = CORROBORATED
-    confident_threshold: float = CORROBORATED
     confidence_threshold: float = BOUND
     warmth_min: float = 0.3
     pending_claim_ttl_days: int = 7
@@ -392,29 +391,23 @@ def tied_to(others: Collection[str], ties: Collection[str], presumed: Callable[[
 
 
 def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
-    """Une ligne de prompt : un ressenti, jamais un pourcentage (sinon le
-    modèle finit par réciter des scores à la personne)."""
+    """La certitude dite pour un humain (le champ ``level`` de la trame d'état ``identity``) ; jamais lue par le
+    modèle. Un état, à la troisième personne, jamais un pourcentage ni une consigne."""
     name = clean_display_name(name)
     who = f"« {name} »" if name else "cette personne"
     if trust is ChannelTrust.AUTHENTICATED:
-        return f"Tu sais avec certitude que tu parles à {who} : la personne s'est connectée avec son compte."
-    where = " et vous êtes dans un espace public où n'importe qui peut parler" if trust is ChannelTrust.PUBLIC else ""
+        return f"Elle sait que c'est {who} : la personne s'est connectée avec son compte."
+    where = ", dans un espace public" if trust is ChannelTrust.PUBLIC else ""
     level = certainty_name(certainty)
     if level == "unknown":
-        return (
-            f"Tu ne sais pas qui est cette personne{where}. Reste accueillante mais ne suppose rien "
-            "d'elle, et ne lui raconte rien de personnel sur qui que ce soit."
-        )
+        return f"Elle ne sait pas qui c'est{where}."
     if level == "suspected":
-        return f"Tu crois deviner que c'est {who}, sans en être sûre{where}. C'est une intuition, pas un fait."
+        return f"Elle croit deviner que c'est {who}, sans en être sûre{where}."
     if level == "claimed":
-        return (
-            f"Quelqu'un affirme être {who}, mais rien ne le confirme{where}. Tu peux jouer le jeu poliment "
-            f"en gardant une réserve : ne raconte pas ce que {who} t'avait confié tant que tu n'es pas plus sûre."
-        )
+        return f"Quelqu'un dit être {who}, rien ne le confirme{where}."
     if level == "corroborated":
-        return f"Tu penses vraiment que c'est {who} : ce qui a été dit recoupe ce que tu sais{where}."
-    return f"Tu reconnais {who} : tu as décidé de le croire et tu as relié ce contact à ta mémoire{where}."
+        return f"Elle pense vraiment que c'est {who} : ce qui a été dit recoupe ce qu'elle sait{where}."
+    return f"Elle reconnaît {who} : ce contact est relié à sa mémoire{where}."
 
 
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,

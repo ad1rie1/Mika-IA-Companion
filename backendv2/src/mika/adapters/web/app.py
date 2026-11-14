@@ -812,10 +812,9 @@ class _Session:
         await self.send(self.hub.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL),
                                          verdicts=self._judges()))
         await self._refresh()
-        listed = getattr(self.port, "strands", None)
-        if self._judges() and listed is not None:
+        if self._judges():
             # ses fils de travail (ADR 0164), après le visage et le panneau : l'ouverture garde son ordre
-            await self.send(protocol.strands(listed(c.handle)))
+            await self.send(protocol.strands(self.port.strands(c.handle)))
 
     async def run(self) -> None:
         try:
@@ -1073,9 +1072,8 @@ class _Session:
         if not self.conn.authenticated or self.account is None or not self._session_valid():
             await self.send({"type": "approval_result", "id": proposal, "status": "forbidden"})
             return
-        decide = getattr(self.port, "decide_card", None)
-        status = await decide(self.conn.handle, proposal, decision == "accept", str(frame.get("digest") or "")[:128]) \
-            if decide is not None else "unknown"
+        status = await self.port.decide_card(self.conn.handle, proposal, decision == "accept",
+                                             str(frame.get("digest") or "")[:128])
         await self.send({"type": "approval_result", "id": proposal, "status": status})
         await self.hub.push_approvals([self.conn.handle])
         await self.hub.refresh_panels()
@@ -1092,10 +1090,9 @@ class _Session:
             await self.send(reply | {"status": "forbidden"})
             return
         title, description = frame.get("title"), frame.get("description")
-        setter = getattr(self.port, "set_strand", None)
-        status = await setter(self.conn.handle, strand, title=title if isinstance(title, str) else "",
-                              description=description if isinstance(description, str) else "",
-                              archived=frame.get("archived") is True) if setter is not None else "failed"
+        status = await self.port.set_strand(self.conn.handle, strand, title=title if isinstance(title, str) else "",
+                                            description=description if isinstance(description, str) else "",
+                                            archived=frame.get("archived") is True)
         await self.send(reply | {"status": status})
         if status == "ok":
             await self.hub.push_strands(self.conn.handle)
@@ -1109,14 +1106,13 @@ class _Session:
         main = raw == ""
         strand = "" if main else protocol.strand_id(raw)
         allowed = self.conn.authenticated and self.account is not None if main else self._judges()
-        history = getattr(self.port, "strand_history", None)
-        if strand is None or history is None or not allowed or not self._session_valid():
+        if strand is None or not allowed or not self._session_valid():
             return
         try:
             before = int(frame["before"]) if frame.get("before") is not None else None
         except (TypeError, ValueError):
             before = None
-        rows, more = history(self.conn.handle, strand, before, protocol.HISTORY_MAX)
+        rows, more = self.port.strand_history(self.conn.handle, strand, before, protocol.HISTORY_MAX)
         await self.send(self.hub.history("strand", rows, life=self.hub.life(), verdicts=self._judges())
                         | {"strand": strand, "more": more})
 
@@ -1140,8 +1136,7 @@ class _Session:
         if not self._judges() or self.account is None or not self._session_valid():
             await self.send({**reply, "status": "forbidden"})
             return
-        judge = getattr(self.port, "judge", None)
-        status = await judge(self.conn.handle, seq, verdict, comment) if judge is not None else "failed"
+        status = await self.port.judge(self.conn.handle, seq, verdict, comment)
         await self.send({**reply, "status": status, "comment": comment if status == "ok" else ""})
 
     def enqueue_chat(self, frame: dict[str, Any]) -> None:

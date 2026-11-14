@@ -21,7 +21,8 @@ from typing import Any
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import identity as identity_c
 from mika.inspector.catalog import Labels
-from mika.kernel.inspect import Cell, Ref, Text, describe_error
+from mika.kernel.inspect import Cell, Ref, Text
+from mika.ports.errors import describe_error
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
 from mika.vocab.episodes import GOAL_PREFIX, PROJECT_PREFIX, TASK_PREFIX, Kind, goal_of, project_of, task_of

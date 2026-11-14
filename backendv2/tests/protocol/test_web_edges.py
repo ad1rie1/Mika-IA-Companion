@@ -562,6 +562,9 @@ class _StatePort:
     def get(self, key):
         return _Phase()
 
+    async def approval_cards(self, handle):
+        return []
+
 
 # ── Sessions et connexion ─────────────────────────────────────────────────
 

@@ -38,7 +38,6 @@ from email.errors import HeaderParseError
 from email.headerregistry import Address
 from typing import Literal, Protocol
 
-from mika.ports.drafts import to_fill as to_fill
 from mika.ports.paging import Page
 
 #: les trois façons d'écrire depuis une boîte
@@ -552,5 +551,7 @@ class MailPort(Protocol):
     async def forget(self, subject: str) -> int:
         """Oublie un correspondant (``mail:<adresse>``, ``contracts.email.address_handle``) : ses mails, ce
         qui lui a été écrit et ce qui lui répondait (brouillons, envois) ; une relecture ne ramène pas ses
-        mails. Rend combien de lignes ont été effacées (0 pour un autre sujet)."""
+        mails. Rend combien de lignes ont été effacées (0 pour un autre sujet). Facultatif : c'est un crochet que
+        le runtime cherche par ``getattr`` sur chaque port (ports/__init__.py), et le courrier du simulateur n'en a
+        pas."""
         ...

@@ -379,10 +379,6 @@ class HttpFeeds:
             rows = s.execute(select(*_ENTRY).order_by(*_NEWEST).limit(limit)).all()
         return [Entry(*r) for r in rows]
 
-    def cached_count(self) -> int:
-        with self._lock, self._session() as s:
-            return int(s.scalar(select(func.count()).select_from(EntryRow)) or 0)
-
     @staticmethod
     def _matching(feed: str = "", text: str = "") -> list[Any]:
         """Les articles d'un flux et qui contiennent un texte, casse et accents ignorés : les deux côtés repliés

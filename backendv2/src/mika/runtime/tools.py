@@ -56,7 +56,6 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, combine
 from mika.kernel.prompt import TRIM_MARK, cited, neutral
-from mika.kernel.rights import Rights
 from mika.kernel.schema import problems as schema_problems
 from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
 from mika.ports.llm import (
@@ -73,7 +72,7 @@ from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
 from mika.vocab.access import NO
 from mika.vocab.phrasebook import phrase
-from mika.vocab.rights import closeness_of, family_table, rights_of, tool_allowance
+from mika.vocab.rights import Rights, closeness_of, family_table, rights_of, tool_allowance
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Commit, Mind

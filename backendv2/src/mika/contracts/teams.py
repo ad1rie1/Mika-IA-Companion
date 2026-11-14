@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
+from mika.ports.sql import HANDLE_MAX, fit
 from mika.ports.teams import DEFAULT_ACCOUNT
-from mika.ports.teams import person_handle as person_handle
 
 OWNER = "teams"
 MESSAGE = "teams_message"
@@ -26,6 +26,13 @@ DRAFT = "teams_draft"
 SEND = "teams.send"
 #: la sorte du signal d'un brouillon parti
 SENT_KIND = "teams_sent"
+#: le préfixe des sujets (au sens de l'oubli) d'une personne connue par Teams
+HANDLE_PREFIX = "teams:"
+
+
+def person_handle(author_id: str) -> str:
+    """``teams:8:orgid:…`` : le sujet (au sens de l'oubli) de quelqu'un qu'on ne connaît que par Teams."""
+    return fit(f"{HANDLE_PREFIX}{author_id.strip().lower()}", HANDLE_MAX) if author_id.strip() else ""
 
 
 class TeamsNoticed(Signal):

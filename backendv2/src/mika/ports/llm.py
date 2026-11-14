@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
-from mika.kernel.slots import PREEMPTED as PREEMPTED
+from mika.kernel.prompt import Budget
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,9 +140,18 @@ class LLMBackend(Protocol):
     jamais vers lui en cours de boucle), ``defers_tools`` (faux : il ignore
     ``ToolDecl.deferred`` et envoie tous les outils — le prompt ne lui parle alors
     pas d'outils « à chercher »), ``release(call_id)`` (la boucle est finie :
-    relâcher ce qu'il tient encore pour elle) et ``output_tokens(req) -> int`` (le
+    relâcher ce qu'il tient encore pour elle), ``output_tokens(req) -> int`` (le
     plafond de sortie qu'il enverra vraiment pour cette requête — un modèle qui
-    réfléchit a un plancher ; sans lui : ``req.max_tokens``)."""
+    réfléchit a un plancher ; sans lui : ``req.max_tokens``), ``status() -> dict``
+    (ce qu'il dit de lui, le quota d'un abonnement : ``Gateway.status`` le joint à
+    ses créneaux), ``holds(priority) -> str`` (la raison, en mots, d'un refus
+    d'avance d'un appel de fond à cette priorité, le quota d'un abonnement entamé
+    — ``Gateway.held`` et ``Gateway.holding``, ADR 0127 ; « » : il passerait),
+    ``carries(req) -> bool`` (il tient déjà le fil de ``req``, une session de CLI
+    vivante qui attend ces résultats : seuls les nouveaux résultats sont mesurés
+    contre le budget — ``_carried``, adapters/llm/gateway.py) et ``async aclose()``
+    (arrêter ce qu'il tient encore, les CLI de Claude Code : ``LiveGateway.aclose``,
+    à l'arrêt du serveur)."""
 
     name: str
 
@@ -150,22 +159,71 @@ class LLMBackend(Protocol):
 
 
 class LLMGateway(Protocol):
-    """``release(call_id)`` (facultatif, à appeler par ``getattr``) : la boucle
-    d'outils ``call_id`` est finie — y compris quand on s'arrête sur un appel
-    d'outil lu comme une sortie structurée, ou au plafond de tours. Sans lui, un
-    fournisseur à session (la CLI de Claude Code) ne la relâche qu'à son délai
-    d'inactivité."""
+    """La passerelle : ``is_voice`` et ``call`` sont toujours là. Les autres membres, les appelants les lisent par
+    ``getattr`` (avec un repli), parce qu'une doublure de test peut ne pas les avoir et que ``_BoundedLLM`` (le
+    runtime) délègue les siens. Les deux passerelles du dépôt les ont tous — ``Gateway``, la passerelle nue (celle
+    du simulateur), et ``LiveGateway``, celle du serveur, qui l'enveloppe —, sauf ``configured`` et ``failing``, que
+    seule la passerelle en service a : la passerelle nue ne garde pas de traces à relire."""
 
     def is_voice(self, role: str) -> bool: ...
 
     async def call(self, req: LLMRequest) -> LLMResponse: ...
 
-    # facultatif (à appeler par ``getattr``) : ``serving(role) -> str`` — le fournisseur qui sert ce rôle, « » : aucun
-    # (une étape qui ne se fait que si l'opératrice lui a donné un modèle : la seconde passe, ``Role.POLISH``).
-    # facultatif (à appeler par ``getattr``) : ``defers_tools(role) -> bool`` — le fournisseur qui sert ce rôle
-    # sait-il différer des outils (une recherche d'outils) ? Sans réponse : oui.
-    # facultatif (à appeler par ``getattr``) : ``held(role, priority) -> str`` — un appel de ce rôle à cette priorité
-    # serait-il refusé d'avance (``Held``) ? La raison en mots, « » : il passerait (ADR 0127).
-    # facultatif (à appeler par ``getattr``) : ``output_tokens(req) -> int`` — le plafond de sortie que le fournisseur
-    # de cette requête enverra vraiment (jamais sous ``req.max_tokens``) : un rejeu après coupure qui ne le relève pas
-    # ne vaut pas un appel.
+    @property
+    def configured(self) -> bool:
+        """Peut-elle parler ? Le rôle « répondre » se résout vers un fournisseur déclaré (un fournisseur déclaré sans
+        rôle ne suffit pas)."""
+        ...
+
+    def serving(self, role: str) -> str:
+        """Le fournisseur qui sert vraiment ce rôle (replis compris) ; « » : aucun (une étape qui ne se fait que si
+        l'opératrice lui a donné un modèle : la seconde passe, ``Role.POLISH``)."""
+        ...
+
+    def defers_tools(self, role: str) -> bool:
+        """Le fournisseur de ce rôle sait-il différer des outils (une recherche d'outils) ? Sans configuration : oui
+        (l'appel échouera de toute façon)."""
+        ...
+
+    def held(self, role: str, priority: int = 1) -> str:
+        """Un appel de ce rôle à cette priorité serait-il refusé d'avance (``Held``) ? La raison en mots, « » : il
+        passerait (ADR 0127)."""
+        ...
+
+    def holding(self) -> list[tuple[str, str]]:
+        """Les fournisseurs qui refusent en ce moment leurs appels de fond : (fournisseur, raison)."""
+        ...
+
+    def output_tokens(self, req: LLMRequest) -> int:
+        """Le plafond de sortie que le fournisseur de cette requête enverra vraiment (jamais sous ``req.max_tokens``) :
+        un rejeu après coupure qui ne le relève pas ne vaut pas un appel (ADR 0135)."""
+        ...
+
+    def release(self, call_id: str) -> None:
+        """La boucle d'outils ``call_id`` est finie — y compris quand on s'arrête sur un appel d'outil lu comme une
+        sortie structurée, ou au plafond de tours. Sans lui, un fournisseur à session (la CLI de Claude Code) ne la
+        relâche qu'à son délai d'inactivité."""
+        ...
+
+    def budget(self, role: str, max_tokens: int) -> Budget:
+        """Le budget de prompt du fournisseur de ce rôle, la sortie réservée sur le plafond qu'il enverra vraiment."""
+        ...
+
+    def status(self) -> list[dict[str, Any]]:
+        """L'état vivant de chaque fournisseur : créneaux, préemption, et ce qu'il dit de lui (vide sans
+        configuration)."""
+        ...
+
+    def resolution(self) -> dict[str, str]:
+        """Rôle → fournisseur qui le sert vraiment (« » : aucun), pour chaque rôle."""
+        ...
+
+    async def try_on(self, name: str, req: LLMRequest) -> Any:
+        """Un essai de la console (« Rejouer avec… ») sur le fournisseur ``name`` : un seul appel, derrière tout le
+        reste. Il rend un ``Trial`` (adapters/llm), qu'un port n'importe pas."""
+        ...
+
+    def failing(self, role: str, now: int, window_us: int) -> tuple[str, int, str] | None:
+        """Le fournisseur de ce rôle ne répond plus : ses derniers appels (dans ``window_us``) ont tous échoué, sans un
+        succès depuis. ``(fournisseur, depuis quand, cause)``, ou ``None``."""
+        ...

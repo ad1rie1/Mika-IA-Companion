@@ -1929,7 +1929,7 @@ others:
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-#  Le temps des choses (vocab/timespan.py, ADR 0084) — une période dite comme on la dit, jamais un jour
+#  Le temps des choses (faculties/memory/timespan.py, ADR 0084) — une période dite comme on la dit, jamais un jour
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 timespan:

@@ -453,9 +453,6 @@ class FakeFeeds:
     def cached(self, limit: int) -> list[Entry]:
         return sorted(self.entries, key=lambda e: -e.published)[:limit]
 
-    def cached_count(self) -> int:
-        return len(self.entries)
-
     def entries_page(self, feed="", text="", page=1, size=25):
         rows = [e for e in self.entries if fold_text(feed) in fold_text(e.feed)
                 and fold_text(text) in fold_text(e.title + ' ' + e.summary)]

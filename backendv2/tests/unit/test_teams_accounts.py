@@ -42,10 +42,9 @@ from mika.plugins.teams import TEAMS, TeamsParams, accounts_here, owns_an_accoun
 from mika.plugins.teams.accounts import Accounts
 from mika.plugins.teams.tools import ListArgs, _port, teams_conversations
 from mika.plugins.teams.voice import voice_text
+from mika.ports.gate import ACCEPTED, MISSING
 from mika.ports.teams import (
-    ACCEPTED,
     DEFAULT_ACCOUNT,
-    MISSING,
     Draft,
     InboxBatch,
     InboxConversation,

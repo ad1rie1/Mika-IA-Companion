@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, TypeAdapter
 
 from mika.kernel.builtin import KERNEL, KernelParams, KernelState
-from mika.kernel.codec import canonical_json
 from mika.kernel.events import EventRegistry, EventType
 from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
@@ -394,9 +393,6 @@ class Registry:
         except KeyError:
             raise UnknownFact(name) from None
 
-    def encode_params(self, owner: str, params: BaseModel) -> str:
-        return canonical_json(params)
-
     # ── reconstruction ──
     def _check_console(self, facs: Sequence[Faculty[Any, Any]], problems: list[str]) -> None:
         """Ce que la console lit : types d'objets, onglets, actions, vitaux, séries."""
@@ -433,7 +429,7 @@ class Registry:
         #: les types de règles (ADR 0133), dans l'ordre où la page « Droits » les montre
         self.rights = sorted((x for f in facs for x in f.rights_specs), key=lambda x: (x.order, x.key))
         #: les tableaux de droits réglés (ADR 0134 : canaux, familles d'outils, outils en main), donnés par
-        #: l'application (``kernel.rights.Rights``) ; ``None`` : les minimums vitaux seuls
+        #: l'application (``vocab.rights.Rights``) ; ``None`` : les minimums vitaux seuls
         self.access_tables: Callable[[], Any] | None = None
         #: qui est proche d'elle, devant ce qu'elle vit (``fn(frame) -> fn(personne) -> bool``) : les lignes « tes
         #: proches » s'en servent ; donné par l'application, jamais nommé ici

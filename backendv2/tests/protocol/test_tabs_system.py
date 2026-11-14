@@ -158,6 +158,21 @@ def test_the_gateway_says_which_role_nobody_serves_and_how_full_each_provider_is
     assert "répondre (voix)" in roles and "retenir (mémoire)" in roles
 
 
+def test_the_gateway_says_how_many_calls_wait_with_the_word_agreed(world, monkeypatch):  # noqa: F811
+    # chaque rôle servi : le bandeau dit les appels en file, le nom et le verbe accordés au compte (``plural``)
+    client, live, _ = world
+    _life(client, live)
+    gateway = live.kernel.deps.gateway
+    monkeypatch.setattr(gateway, "resolution", lambda: {"reply": "claude", "extract": "claude"})
+    for waiting, said in ((1, "1 appel attend un créneau libre."), (2, "2 appels attendent un créneau libre.")):
+        monkeypatch.setattr(gateway, "status", lambda w=waiting: [
+            {"name": "claude", "slots": 3, "busy": 3, "waiting": w, "preempt": False, "extra": {}}])
+        page = drawn(client, "/inspecteur/systeme/passerelle")
+        assert page.count('<p class="sys-band tone-') == 1 and 'class="sys-band tone-warn"' in page
+        band = page[page.index('class="sys-band tone-warn"'):]
+        assert band[:band.index("</p>")].count(said) == 1
+
+
 def _calls(client, live, failed_roles=("extract",)):
     now = live.kernel.mind.clock.now()
 

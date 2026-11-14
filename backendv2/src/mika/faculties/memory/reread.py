@@ -36,6 +36,7 @@ from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
+from mika.faculties.memory import timespan
 from mika.faculties.memory.archive import decode
 from mika.faculties.memory.consolidation import resolution, target_of, testimonies_of, twin_of
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
@@ -49,7 +50,6 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import PromptBudgetError, SectionBody
 from mika.ports.llm import LLMRequest, Message, ToolDecl
 from mika.ports.sql import json_field
-from mika.vocab import timespan
 from mika.vocab.episodes import Kind
 from mika.vocab.people import clean_tokens, read_source
 from mika.vocab.phrasebook import phrase

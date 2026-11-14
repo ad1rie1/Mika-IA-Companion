@@ -11,11 +11,9 @@ ou critique (1, t). Aucune dépendance au pas de lecture : propager ``a`` puis
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
 
 Vec3 = tuple[float, float, float]
-ZERO: Vec3 = (0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,35 +127,3 @@ def euler_reference(osc: Oscillator, position: Vec3, velocity: Vec3, home: Vec3,
             x[i] += v[i] * h
         remaining -= h
     return (x[0], x[1], x[2]), (v[0], v[1], v[2])
-
-
-def first_crossing(
-    fn: Callable[[int], float], t0: int, t1: int, level: float, *, samples: int = 64, tol_us: int = 1_000_000
-) -> int | None:
-    """Le premier instant de ``[t0, t1]`` où ``fn`` franchit ``level``
-    (changement de signe de ``fn − level``), trouvé par échantillonnage puis
-    bissection ; ``None`` s'il n'y en a pas."""
-    if t1 <= t0:
-        return None
-    f0 = fn(t0) - level
-    if f0 == 0:
-        return t0
-    step = (t1 - t0) / samples
-    prev_t, prev_f = t0, f0
-    for i in range(1, samples + 1):
-        t = t0 + round(i * step) if i < samples else t1
-        f = fn(t) - level
-        if f == 0:
-            return t
-        if (f > 0) != (prev_f > 0):
-            lo, hi, flo = prev_t, t, prev_f
-            while hi - lo > tol_us:
-                mid = (lo + hi) // 2
-                fm = fn(mid) - level
-                if (fm > 0) == (flo > 0):
-                    lo, flo = mid, fm
-                else:
-                    hi = mid
-            return hi
-        prev_t, prev_f = t, f
-    return None

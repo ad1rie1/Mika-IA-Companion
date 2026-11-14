@@ -105,5 +105,3 @@ class SentView:
 
 #: Combien de fichiers elle a préparés pour cette adresse sur les dernières 24 heures (glissantes).
 SENT_TODAY = FactFamily("shares.sent_today", arg=str, type=int, time_varying=True)
-#: Les fichiers encore gardés pour cette adresse, du plus ancien au plus récent (``SentView``).
-RECENT = FactFamily("shares.recent", arg=str, type=tuple)

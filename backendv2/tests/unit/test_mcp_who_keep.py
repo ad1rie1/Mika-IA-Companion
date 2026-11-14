@@ -40,12 +40,11 @@ from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.mcp import ExternalArgs, _gate, _handler, access_for
 from mika.plugins.mcp.inspect import closeness, faces, said_level, serves_nobody, tool_view
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import CLOSE, CLOSED, INTERNAL, PERSON, Access
-from mika.ports.mcp import EVERYONE as ALL
-from mika.ports.mcp import OWNER as YOU
+from mika.ports.mcp import CLOSED, Access
 from mika.runtime.tools import run_tool_loop
 from mika.sim.clock import run_virtual
-from mika.vocab.access import situation
+from mika.vocab import access
+from mika.vocab.access import CLOSE, INTERNAL, PERSON, situation
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
@@ -97,11 +96,11 @@ def test_a_review_and_a_row_keep_only_their_own_fields():
     assert (review.nature, review.enabled, review.schema_) == ("action", False, {"type": "object"})
     with pytest.raises(ValidationError):  # une décision d'avant l'ADR 0131 (son accord, ses exceptions)
         StoredReview.model_validate({"fingerprint": "f", "autonomy": "toi", "situations": {"compte": "non"}})
-    for bad in ({"who": "toi"}, {"who": ["comptes"]}, {"who": [YOU], "when": ["travail"]}):  # d'avant l'ADR 0133
+    for bad in ({"who": "toi"}, {"who": ["comptes"]}, {"who": [access.OWNER], "when": ["travail"]}):  # d'avant l'ADR 0133
         with pytest.raises(ValidationError):
             AccessRule.model_validate(bad)
-    for bad in ({"who": ["salon"]}, {"who": [PERSON]}, {"who": [YOU], "when": ["parfois"]},
-                {"who": [YOU], "read": "jamais"}, {"who": [YOU], "keep": "tout"}):
+    for bad in ({"who": ["salon"]}, {"who": [PERSON]}, {"who": [access.OWNER], "when": ["parfois"]},
+                {"who": [access.OWNER], "read": "jamais"}, {"who": [access.OWNER], "keep": "tout"}):
         with pytest.raises(ValidationError):
             AccessRule.model_validate(bad)
 
@@ -128,11 +127,11 @@ def test_without_a_row_the_default_decides_and_it_starts_closed():
 
 
 def test_you_she_at_work_and_named_people_only_authenticated():
-    assert levels(tool(Access(who=(YOU,), read="seule"), Access(who=(), canal=(INTERNAL,), read="seule"))) == {
+    assert levels(tool(Access(who=(access.OWNER,), read="seule"), Access(who=(), canal=(INTERNAL,), read="seule"))) == {
         "owner": "seule", "account": "non", "named": "non", "unproven": "non", "stranger": "non", "room": "non",
         "work": "seule", "none": "non"}
     # elle seule est un canal, sans personne : toi seule ne l'ouvre pas au travail, ni l'inverse
-    assert levels(tool(Access(who=(YOU,), read="seule")))["work"] == "non"
+    assert levels(tool(Access(who=(access.OWNER,), read="seule")))["work"] == "non"
     assert {k for k, v in levels(tool(Access(who=(), canal=(INTERNAL,), read="seule"))).items() if v != "non"} == {"work"}
     assert levels(tool(Access(who=(NAMED_3,), read="toi"))) == {
         "owner": "non", "account": "non", "named": "toi", "unproven": "non", "stranger": "non", "room": "non",
@@ -153,10 +152,10 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
             if v != "non"} == {"account", "named"}
     # une inconnue, sur le chat web ou par Internet, lit au plus (le plafond), jamais une action ; dans un salon, rien
     # venu d'ailleurs (des témoins)
-    assert levels(tool(Access(who=(ALL,), read="seule"))) == {
+    assert levels(tool(Access(who=(access.EVERYONE,), read="seule"))) == {
         "owner": "seule", "account": "seule", "named": "seule", "unproven": "seule", "stranger": "seule",
         "room": "non", "work": "non", "none": "non"}
-    assert levels(tool(Access(who=(ALL,), act="seule"), nature="action")) == {
+    assert levels(tool(Access(who=(access.EVERYONE,), act="seule"), nature="action")) == {
         "owner": "seule", "account": "seule", "named": "seule", "unproven": "non", "stranger": "non", "room": "non",
         "work": "non", "none": "non"}
 
@@ -164,7 +163,7 @@ def test_her_close_ones_in_private_and_everyone_but_never_a_tool_in_a_room():
 def test_the_first_row_that_matches_decides():
     near = {"user_2", "user_3"}.__contains__  # ses deux comptes lui sont proches
     rows = (Access(who=(NAMED_3,), read="non"), Access(who=(CLOSE,), read="seule"),
-            Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(YOU,), read="toi"), Access(who=(), canal=(INTERNAL,), read="toi"))
+            Access(who=(access.OWNER,), when=("conversation",), read="seule"), Access(who=(access.OWNER,), read="toi"), Access(who=(), canal=(INTERNAL,), read="toi"))
     t = tool(*rows, default=Access(who=(), read="carte"))
     assert levels(t, near) == {"owner": "seule", "account": "seule", "named": "non", "unproven": "carte",
                                "stranger": "carte", "room": "non", "work": "toi", "none": "non"}
@@ -174,7 +173,7 @@ def test_the_first_row_that_matches_decides():
 
 
 def test_a_tool_reads_or_acts_and_takes_its_column():
-    row = Access(who=(YOU,), read="seule", act="toi", keep="prive")
+    row = Access(who=(access.OWNER,), read="seule", act="toi", keep="prive")
     assert access_for(tool(row, nature="lecture"), OWNER, Kind.REPLY) == ("seule", "prive")
     assert access_for(tool(row, nature="action"), OWNER, Kind.REPLY) == ("toi", "prive")
 
@@ -182,9 +181,9 @@ def test_a_tool_reads_or_acts_and_takes_its_column():
 def test_what_she_has_at_hand_is_every_tool_a_row_opens():
     """La facturation : la lecture des factures en souvenir, leur écriture sur ton accord, en confidence — deux
     lignes, deux outils ; ce qu'elle a sous la main, ce sont les deux (2026-10-23)."""
-    rows = (Access(who=(YOU,), read="seule", act="toi", keep="prive", tools=("set_facture",)),
-            Access(who=(YOU,), read="seule", act="toi", keep="perso", tools=("get_facture",)),
-            Access(who=(YOU,), read="non", act="non"))
+    rows = (Access(who=(access.OWNER,), read="seule", act="toi", keep="prive", tools=("set_facture",)),
+            Access(who=(access.OWNER,), read="seule", act="toi", keep="perso", tools=("get_facture",)),
+            Access(who=(access.OWNER,), read="non", act="non"))
     get = tool(*rows, nature="lecture", remote="get_facture")
     put = tool(*rows, nature="action", remote="set_facture")
     rest = tool(*rows, nature="lecture", remote="ticket_list")
@@ -196,7 +195,7 @@ def test_what_she_has_at_hand_is_every_tool_a_row_opens():
 
 
 def test_the_moments_she_may_be_offered_it_come_from_the_rows_that_open_it():
-    rows = (Access(who=(YOU,), when=("conversation",), read="seule"), Access(who=(), canal=(INTERNAL,), act="toi"))
+    rows = (Access(who=(access.OWNER,), when=("conversation",), read="seule"), Access(who=(), canal=(INTERNAL,), act="toi"))
     assert granted(rows, CLOSED, "lecture") == frozenset({"conversation"})
     assert granted(rows, CLOSED, "action") == frozenset({"travail"})
     assert granted((), Access(who=(), read="carte"), "lecture") == frozenset({"conversation", "initiative", "travail"})
@@ -220,7 +219,7 @@ def facing(st, nature: str = "action", remote: str = "prevision") -> dict[str, s
 def test_who_can_do_what_is_the_engine_rule_on_typical_people():
     # « carte » : toi, une carte dans ton chat ; une personne, la sienne ; personne en face, la console
     st = service(Access(who=(NAMED_3,), act="carte"), Access(who=(CLOSE,), act="carte"),
-                 Access(who=(YOU,), act="carte"), Access(who=(), canal=(INTERNAL,), act="carte"))
+                 Access(who=(access.OWNER,), act="carte"), Access(who=(), canal=(INTERNAL,), act="carte"))
     assert facing(st) == {
         "Toi": "te demande / une carte dans ton chat",
         "Toi, quand elle te parle d'elle-même": "te demande / une carte dans ton chat",
@@ -229,15 +228,15 @@ def test_who_can_do_what_is_the_engine_rule_on_typical_people():
     # « ton accord » devant quelqu'un d'autre : la console, pas une carte
     assert facing(service(Access(who=(NAMED_3,), act="toi")))["user_3"] == "te demande / dans la console (« À valider »)"
     # un moment : toi quand elle répond, mais pas d'elle-même ni au travail
-    only = facing(service(Access(who=(YOU,), when=("conversation",), act="seule")))
+    only = facing(service(Access(who=(access.OWNER,), when=("conversation",), act="seule")))
     assert (only["Toi"], only["Toi, quand elle te parle d'elle-même"], only["Elle travaille seule"]) == (
         "seule", "non", "non")
 
 
 def test_a_service_open_to_nobody_says_so():
     assert serves_nobody(service())
-    assert serves_nobody(service(Access(who=(YOU,), read="non", act="non")))
-    assert not serves_nobody(service(Access(who=(YOU,), read="seule")))
+    assert serves_nobody(service(Access(who=(access.OWNER,), read="non", act="non")))
+    assert not serves_nobody(service(Access(who=(access.OWNER,), read="seule")))
     assert not serves_nobody(service(default=Access(who=(), act="toi")))
 
 
@@ -270,7 +269,7 @@ async def call(t, ctx) -> ToolResult:
     return await _handler(t)(ExternalArgs(ville="Lyon"), ctx)
 
 
-def asking(level: str, who: tuple[str, ...] = (YOU,), keep: str = "prive", **kw):
+def asking(level: str, who: tuple[str, ...] = (access.OWNER,), keep: str = "prive", **kw):
     return offered_tool(access=(Access(who=who, read=level, act=level, keep=keep),
                                 Access(who=(), canal=(INTERNAL,), read=level, act=level, keep=keep)), **kw)
 
@@ -286,8 +285,8 @@ async def test_alone_the_call_leaves_and_what_it_returns_carries_what_she_keeps(
 
 
 async def test_what_she_keeps_comes_from_the_row_that_matched():
-    t = offered_tool(access=(Access(who=(YOU,), when=("conversation",), read="seule", keep="rien"),
-                             Access(who=(YOU,), read="seule", keep="public"), Access(who=(), canal=(INTERNAL,), read="seule", keep="public")))
+    t = offered_tool(access=(Access(who=(access.OWNER,), when=("conversation",), read="seule", keep="rien"),
+                             Access(who=(access.OWNER,), read="seule", keep="public"), Access(who=(), canal=(INTERNAL,), read="seule", keep="public")))
     got = await call(t, Ctx(OWNER, "user_1"))
     assert got.unkept
     got = await call(t, Ctx(WORK, None, kind=Kind.STEP))

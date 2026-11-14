@@ -11,10 +11,9 @@ l'application) ; sans eux, les minimums vitaux. Une famille de ses propres outil
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from mika.kernel.rights import Rights
 from mika.vocab.access import (
     ALONE,
     EVERYONE,
@@ -28,6 +27,7 @@ from mika.vocab.access import (
     STEER_NO,
     STEER_RANK,
     Ceiling,
+    Table,
     ToolRule,
     Verdict,
     at_work_with,
@@ -39,6 +39,18 @@ from mika.vocab.access import (
     why_words,
 )
 from mika.vocab.canals import CanalRule, Canals, canal_verdict
+
+
+@dataclass(frozen=True, slots=True)
+class Rights:
+    """Les tableaux de droits qu'un opérateur a réglés (ADR 0134), tels que l'application les donne au registre
+    (``Registry.access_tables``) : ``canals`` (les tableaux des canaux, ``vocab.canals.Canals``), ``families``
+    (famille d'outils → tableau, ``vocab.access.Table[ToolRule]``), ``in_hand`` (outil → « hand » ou « ask »,
+    l'offre réglée)."""
+
+    canals: Canals | None = None
+    families: Mapping[str, Table[ToolRule]] = field(default_factory=dict)
+    in_hand: Mapping[str, str] = field(default_factory=dict)
 
 
 def rights_of(env: Any) -> Rights:
@@ -185,7 +197,7 @@ def project_allowance(lines: Iterable[Any], default: Any, audience: Any, kind: s
 
 
 def here_allowed(frame: Any, bundle: str, tool: str = "", acts: bool = False,
-                 tasks: Callable[[str], bool] | None = None, outside: bool = False) -> bool:
+                 tasks: Callable[[str], bool] | None = None) -> bool:
     """Ce qu'un gestionnaire revérifie à l'exécution, par la même règle que la porte (ADR 0134) : elle seule, avec ce
     lot (``at_work_with``) ; devant quelqu'un, le tableau de la famille de l'outil, serré par le canal et le
     plafond."""
@@ -199,15 +211,10 @@ def here_allowed(frame: Any, bundle: str, tool: str = "", acts: bool = False,
     lines, default = family_table(rights, bundle, specs)
     concerns = (lambda r: r.concerns(tool)) if tool else None
     got = tool_allowance(lines, default, frame.audience, kind, acts, rights, concerns,
-                         close=closeness_of(registry, frame), outside=outside)
+                         close=closeness_of(registry, frame))
     return got is not None and got.level != NO
 
 
 def grants_of(allowance: Allowance | None) -> tuple[str, str]:
     """(niveau, garde) d'une réponse, ou fermé."""
     return (allowance.level, allowance.keep) if allowance is not None else (NO, "rien")
-
-
-def names_of(rights: Rights) -> Mapping[str, Any]:
-    """Les tableaux de familles réglés, par lot (pour la console)."""
-    return rights.families

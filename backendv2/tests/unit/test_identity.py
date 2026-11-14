@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -384,3 +385,21 @@ def test_the_panel_shows_a_claim_but_opens_the_file_only_once_convinced(tmp_path
     assert impostor["identity"]["pending_claims"][0]["name"] == "Alice"
     assert "person_profile" not in impostor or impostor["person_profile"]["name"] != "Alice"
     assert real["person_profile"]["closeness"] == "close"  # la relation d'Alice, reconnue
+
+
+# ── La certitude dite pour un humain ──────────────────────────────────────
+
+ADDRESSING = re.compile(r"\b(tu|toi|te|ta|ton|tes|vous)\b", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("trust", list(privacy.ChannelTrust))
+@pytest.mark.parametrize("level,certainty", privacy.CERTAINTY_NAMES)
+@pytest.mark.parametrize("name", ["Alice", ""])
+def test_the_certainty_shown_to_a_human_is_a_state_not_an_instruction(name, level, certainty, trust):
+    """Le champ ``level`` de la trame d'état ``identity`` s'affiche tel quel dans un panneau du client : il dit où elle
+    en est, à la troisième personne, et ne s'adresse à personne (ni « tu », ni consigne d'une ancienne ligne de
+    prompt). Il nomme la personne dès qu'elle croit savoir qui c'est."""
+    text = privacy.describe_fr(certainty, trust, name)
+    assert text and not ADDRESSING.search(text), text
+    if name and (trust is privacy.ChannelTrust.AUTHENTICATED or level != "unknown"):
+        assert f"« {name} »" in text, text

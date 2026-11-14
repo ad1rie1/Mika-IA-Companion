@@ -44,20 +44,20 @@ from mika.adapters.teams.models import (
     MessageRow,
     fit,
 )
+from mika.contracts import teams as teams_c
+from mika.ports.drafts import to_fill
+from mika.ports.gate import ACCEPTED, CONFLICT, MISSING
 from mika.ports.paging import fold_text
 from mika.ports.sql import TEAMS
 from mika.ports.teams import (
-    ACCEPTED,
-    CONFLICT,
     DISCARDED,
-    DRAFT,
     FAILED,
     GONE,
-    MISSING,
     OPEN_STATES,
+    OUTBOX_PLACE,
+    OUTBOX_SEND,
     PLACED,
     QUEUED,
-    SEND,
     SENDING,
     UNUSED,
     WRITTEN,
@@ -73,7 +73,6 @@ from mika.ports.teams import (
     Voice,
     message_ref,
     plain,
-    to_fill,
 )
 
 #: au plus tant de messages gardés par conversation (les plus récents)
@@ -314,7 +313,7 @@ class TeamsStore:
                 edited = _edited(text, d)
                 self._write(s, replace(d, state=GONE, sent_at=now, sent_text=text, edited=edited))
                 out.append(Settled(d.id, GONE, edited=edited))
-            elif d.mode == DRAFT:
+            elif d.mode == OUTBOX_PLACE:
                 reason = "tu as écrit autre chose" if d.state == PLACED else "tu as répondu toi-même"
                 self._write(s, replace(d, state=UNUSED, reason=reason))
                 out.append(Settled(d.id, UNUSED, reason=reason))
@@ -525,7 +524,7 @@ class TeamsStore:
                 return "il n'est plus à envoyer"
             if digest and shown.digest != digest:
                 return "il a changé depuis qu'on l'a montré"
-            if shown.blocked and (mode == SEND or not to_fill(d.body)):
+            if shown.blocked and (mode == OUTBOX_SEND or not to_fill(d.body)):
                 return shown.blocked  # posé dans Teams, un « à compléter » se remplit ; envoyé, jamais
             self._write(s, replace(d, state=QUEUED, mode=mode, digest=shown.digest, final=shown.text,
                                    expires_at=expires_at, updated=now))
@@ -576,14 +575,14 @@ class TeamsStore:
             if account and d.account != _account_key(account):
                 return MISSING, None  # le brouillon d'un autre compte : l'extension de celui-ci ne le connaît pas
             if result == "sending":
-                if d.state != QUEUED or d.mode != SEND:
+                if d.state != QUEUED or d.mode != OUTBOX_SEND:
                     return CONFLICT, None  # déjà réservé (ailleurs, ou par un essai d'avant), réglé, ou à poser
                 self._write(s, replace(d, state=SENDING, updated=now))
                 return ACCEPTED, None
             if result == "placed":
                 if d.state == PLACED:
                     return ACCEPTED, None
-                if d.state != QUEUED or d.mode != DRAFT:
+                if d.state != QUEUED or d.mode != OUTBOX_PLACE:
                     return CONFLICT, None
                 done = Settled(d.id, PLACED)
                 self._write(s, replace(d, state=PLACED, placed_at=now))
@@ -611,7 +610,7 @@ class TeamsStore:
                     done = Settled(d.id, FAILED, reason="incertain : l'envoi a commencé sans qu'on sache s'il est parti "
                                                          "(à vérifier dans Teams)")
                     self._write(s, replace(d, state=FAILED, reason=done.reason))
-                elif d.mode == SEND:
+                elif d.mode == OUTBOX_SEND:
                     done = Settled(d.id, FAILED, reason="jamais envoyé : l'extension ne l'a pas relevé à temps")
                     self._write(s, replace(d, state=FAILED, reason=done.reason))
                 else:
@@ -636,9 +635,9 @@ class TeamsStore:
     async def forget(self, subject: str) -> int:
         """Oublier quelqu'un (``teams:<identifiant>``), dans tous les comptes : ses messages, et ses tête-à-tête
         entiers (ce qui y a été écrit, les brouillons qui y répondaient, la conversation elle-même)."""
-        if not subject.startswith("teams:"):
+        if not subject.startswith(teams_c.HANDLE_PREFIX):
             return 0
-        author = subject[len("teams:"):].strip().lower()
+        author = subject[len(teams_c.HANDLE_PREFIX):].strip().lower()
         if not author:
             return 0
         key = fit(author, AUTHOR_MAX)

@@ -44,11 +44,12 @@ from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
 from mika.vocab import flows, reading, voice
-from mika.vocab.affect import Declared, Emotion, parse_tag
+from mika.vocab.affect import Declared, Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_internal
 from mika.vocab.phrasebook import family, phrase
+from mika.vocab.tag import PROSODY, SILENCE_TOKEN, parse_tag, strip_prosody
 from mika.vocab.words import STOPWORDS, elided, fold, stems
 
 
@@ -223,7 +224,7 @@ GREETINGS = frozenset({"salut", "coucou", "hey", "bonjour", "bonsoir", "yo", "he
 
 def _tokens(text: str) -> list[tuple[str, str]]:
     """Les mots d'un message : tels qu'elle les a écrits (en minuscules), et leur clé sans accents."""
-    return [(w, fold(w)) for w in _TOKEN.findall(A.strip_prosody(text).lower().replace("’", "'"))]
+    return [(w, fold(w)) for w in _TOKEN.findall(strip_prosody(text).lower().replace("’", "'"))]
 
 
 def _words(text: str) -> list[str]:
@@ -232,7 +233,7 @@ def _words(text: str) -> list[str]:
 
 def _opener(text: str) -> tuple[str, str]:
     """Les deux premiers mots d'un message : tels qu'elle les a écrits, et leur clé."""
-    raw = " ".join(A.strip_prosody(text).split()[:2])
+    raw = " ".join(strip_prosody(text).split()[:2])
     return raw.strip(" ,;:!?."), " ".join(_words(raw)[:2])
 
 
@@ -241,8 +242,8 @@ def asking_in_a_row(said: Sequence[tuple[int, str]]) -> bool:
     « tu les as essayés, ou… ? », « tu comptes y aller, ou… ? »). Elle se l'entend dire comme un fait (« ce que tu te
     répètes »), jamais comme un ordre : le 2026-10-26, un ordre de ne plus demander et un ordre de demander dans le
     même prompt ont fait écrire à Sonnet un brouillon où il se disputait avec lui-même (ADR 0141)."""
-    kept = [t for _at, t in said if t and t.strip() and A.SILENCE_TOKEN not in t][-HABIT_WINDOW:]
-    return len(kept) >= 3 and all("?" in A.strip_prosody(t) for t in kept[-3:])
+    kept = [t for _at, t in said if t and t.strip() and SILENCE_TOKEN not in t][-HABIT_WINDOW:]
+    return len(kept) >= 3 and all("?" in strip_prosody(t) for t in kept[-3:])
 
 
 def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = ()) -> list[str]:
@@ -250,7 +251,7 @@ def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = (
     trois des six derniers) et une même formule de quatre mots ou plus dans au moins trois messages. Une
     personne s'entend se répéter ; la consigne de style seule n'y suffit pas (sonde réelle du 2026-10-02 :
     « Adrien… Je t'entends dire que… » en tête de quatre réponses sur cinq)."""
-    kept = [(at, t) for at, t in said if t and t.strip() and A.SILENCE_TOKEN not in t][-HABIT_WINDOW:]
+    kept = [(at, t) for at, t in said if t and t.strip() and SILENCE_TOKEN not in t][-HABIT_WINDOW:]
     msgs = [t for _at, t in kept]
     out: list[str] = []
     # redire bonjour à quelqu'un qu'on vient de saluer (sa salutation, puis sa réponse au « salut » qui suit)
@@ -315,9 +316,9 @@ def said_of_herself(said: Sequence[tuple[int, str]], now: int) -> str | None:
     for at, text in reversed(said):
         if now - at > HOUR or len(quotes) >= SAID_OF_HERSELF_MESSAGES:
             break
-        if not text or A.SILENCE_TOKEN in text:
+        if not text or SILENCE_TOKEN in text:
             continue
-        mine = [t.strip() for t in _SENTENCES.split(A.strip_prosody(text))
+        mine = [t.strip() for t in _SENTENCES.split(strip_prosody(text))
                 if _SELF.search(t) and not t.strip().endswith("?")]
         if mine:
             quote = " ".join(mine[:2])
@@ -423,7 +424,7 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
     at, text = said[-1]
     if now - at > QUESTION_PENDING_US:
         return None
-    asked = [q.strip() for q in _QUESTION.findall(A.strip_prosody(text)) if len(q.strip()) > 3]
+    asked = [q.strip() for q in _QUESTION.findall(strip_prosody(text)) if len(q.strip()) > 3]
     if not asked:
         return None
     q = asked[-1]
@@ -432,7 +433,7 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
 
 def _plain(text: str) -> str:
     """Sa parole sans balise ni jeton de voix."""
-    return " ".join(A.strip_prosody(_BRACKETS.sub(" ", text or "")).split())
+    return " ".join(strip_prosody(_BRACKETS.sub(" ", text or "")).split())
 
 
 #: une ligne vide : en chat, ce qui suit part dans une autre bulle (les clients découpent, ADR 0112)
@@ -504,7 +505,7 @@ def authored(text: str, name: str) -> str:
     for line in (part for raw in (text or "").splitlines() for part in split.split(raw)):
         line = _unquoted(line.strip())
         mark = _TIME_MARK.match(line)
-        if mark and not A.PROSODY.match(line) and not line.startswith(A.SILENCE_TOKEN):
+        if mark and not PROSODY.match(line) and not line.startswith(SILENCE_TOKEN):
             if out:
                 break
             line = line[mark.end():]  # le repère de ce message-ci, redit avant lui

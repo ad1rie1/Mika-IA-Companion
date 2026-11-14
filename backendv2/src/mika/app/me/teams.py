@@ -20,6 +20,7 @@ from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import OWN, allows, held_by, millis, only_owner, opened, snippet
 from mika.plugins import teams as teams_p
 from mika.plugins.teams import UNDER_WAY, WAITING, DraftSeen, TeamsState, latest, under_way
+from mika.ports.drafts import to_fill
 from mika.ports.teams import (
     FAILED,
     PLACED,
@@ -30,7 +31,6 @@ from mika.ports.teams import (
     Message,
     conversation_key,
     split_conversation_key,
-    to_fill,
 )
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 

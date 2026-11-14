@@ -1,5 +1,5 @@
 """Rendre la vue d'une app forgée : l'appeler dans le bac à sable, décoder son
-enveloppe avec le décodeur partagé (``kernel/envelope.py``), qualifier ses
+enveloppe avec son décodeur (``envelope.py``), qualifier ses
 formulaires.
 
 - **Jamais journalisé, jamais compté par le disjoncteur** : une vue est une
@@ -21,7 +21,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from mika.kernel.envelope import decode
 from mika.kernel.inspect import (
     ActionSlot,
     Block,
@@ -40,16 +39,14 @@ from mika.kernel.inspect import (
     read_params,
 )
 from mika.kernel.text import fold
+from mika.plugins.forge.envelope import decode
 from mika.ports.forge import AppInfo, AppViewSpec, CallResult
-from mika.vocab.affect import Emotion
 
 VIEW_TIMEOUT_S = 3.0
 VIEW_MAX_BYTES = 256_000
 VIEW_CACHE_S = 2.0
 ACTION_TIMEOUT_S = 5.0
 MAX_PAGE = 100_000
-#: les pastilles d'émotion admises dans une vue (les 29 noms canoniques)
-EMOTIONS = frozenset(e.value for e in Emotion)
 #: l'action de la console qui exécute une action d'app
 ACT = "forge.agir"
 INVALID = "Vue invalide"
@@ -157,7 +154,7 @@ def decode_view(value: Any, app: str, info: AppInfo, spec: AppViewSpec) -> list[
         return [Note("Cette ancienne vue rend une donnée brute, pas une enveloppe {\"version\": 2, \"blocks\": […]} "
                      "(forge_help blocs).", tone="muted"),
                 Code(text[:20_000] + ("\n…" if cut else ""), title="Ce que rend view(api)")]
-    blocks = decode(value, links=links(app, info), emotions=EMOTIONS)
+    blocks = decode(value, links=links(app, info))
     if is_invalid(blocks):
         return blocks
     try:

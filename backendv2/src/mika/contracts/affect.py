@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mika.kernel.dynamics import Vec3
 from mika.kernel.facts import FactFamily, FactKey
-from mika.vocab.affect import ORIGIN, Declared, Emotion, Vec3
+from mika.vocab.affect import ORIGIN, Declared, Emotion
 
 OWNER = "affect"
 

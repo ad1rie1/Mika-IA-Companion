@@ -26,7 +26,8 @@ from mika.inspector.ui import UI, Overview
 from mika.kernel.clock import DAY
 from mika.plugins.teams import APPROVED, EXPIRED, EXPIRERS, GONE, REFUSED, WAITING, her, latest, under_way
 from mika.plugins.teams.inspect import KIND_LABEL, MODE_LABEL, STATE_LABEL
-from mika.ports.teams import conversation_key, split_conversation_key, to_fill
+from mika.ports.drafts import to_fill
+from mika.ports.teams import conversation_key, split_conversation_key
 
 CONVERSATION = "conversation_teams"
 REPLY = "reponse_teams"

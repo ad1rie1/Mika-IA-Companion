@@ -23,10 +23,10 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 | Thème | Décisions |
 |---|---|
-| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151 |
+| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222 |
 | Le stockage | 0004, 0101, 0212 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153 |
-| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207 |
+| Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214 |
@@ -58,6 +58,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - Un type n'entre au vocabulaire partagé qu'avec au moins deux consommateurs, et en petites valeurs.
 
 *Pourquoi :* en v1, 13 paquets sur 15 formaient un seul cycle d'imports, et l'intégration passait par le prompt et par des appels directs.
+
+*Révisée par 0221.*
 
 ### 0003 — L'initiative par preuves cumulées et déclenchement à taux
 
@@ -180,6 +182,27 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Révise 0112 (en partie : `LAST`).*
 
+### 0221 — Un type n'entre au vocabulaire partagé qu'avec trois propriétaires
+
+- Un type n'entre au vocabulaire partagé (`vocab`) qu'avec au moins trois propriétaires, et en petites valeurs.
+- Partagé par deux, il vit dans le contrat de son propriétaire (`contracts/`), que l'autre lit ; lu par un seul, il vit chez lui.
+- Ce qui sort de `vocab` n'y laisse pas de réexport : chaque importeur suit.
+- Ainsi le temps des choses (0084) : ses précisions sont des valeurs du contrat de la mémoire (`PRECISIONS`, `contracts/memory.py`), que la genèse lit aussi ; le reste n'a que la mémoire pour lecteur (`faculties/memory/timespan.py`). Rien ne change de ce qu'elle dit ni de ce qui est gardé au journal.
+
+*Pourquoi :* ARCHITECTURE (« partagés par au moins trois propriétaires ») et l'ADR 0002 (« au moins deux consommateurs ») se contredisaient ; le code tenait déjà la règle de trois pour 19 modules sur 20, et les contrats par propriétaire, que pose la même ADR 0002, donnent sa place au cas de deux (audit du 2026-11-05 : K0-23, K1-05, décision K1-Q2).
+
+*Révise 0002 (en partie : la règle d'entrée au vocabulaire partagé).*
+
+### 0222 — Un port déclare ce qu'on lui demande
+
+- Ce qu'un appelant lit d'un port, de la passerelle LLM ou du port d'entrée est déclaré dans son Protocol (`ports/`, `contracts/entry.py`), avec ses paramètres sous leur nom.
+- Un membre que toutes les implémentations ont s'appelle directement. Un membre facultatif (une doublure du simulateur ou d'un test ne l'a pas) le dit dans sa docstring, et se lit par `getattr` sous son nom déclaré.
+- Les quatre crochets que le runtime cherche sur chaque port (`open`, `shutdown`, `forget`, `failing`) sont écrits une fois, dans `ports/__init__.py`.
+- `ports/` porte trois choses : ce que le cœur demande au dehors, les portes du transport web qu'`app` implémente (0213), et les bases SQL avec les aides pures qu'elles partagent.
+- `tests/architecture/test_ports_declared.py` confronte chaque Protocol à ses implémentations (adaptateurs, portes d'`app`, doublures du simulateur et de l'aperçu) et chaque `getattr` sur un port à un membre déclaré, avec une liste blanche raisonnée : une excuse qui ne sert plus la fait échouer.
+
+*Pourquoi :* la passerelle en service avait perdu `output_tokens` sans que rien ne casse, et chaque appel d'outil coupé se rejouait pour rien. Le transport web lisait par `getattr`, avec des replis morts, des méthodes que le port d'entrée ne déclarait pas (audit du 2026-11-05 : K2-01 à K2-03).
+
 ## Le stockage
 
 ### 0004 — Sans Django
@@ -210,7 +233,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 ### 0212 — Un seul repli du texte, et une clé de nom qui ne bouge pas
 
-- Comparer deux textes passe par `kernel/text.py::fold` : ni casse ni accents, les ligatures dépliées (« sœur » → « soeur »), `ß` en `ss`. `ports.paging.fold_text`, `vocab.words.fold`, `vocab.affect.fold`, le composeur et les filtres de l'inspecteur s'y ramènent.
+- Comparer deux textes passe par `kernel/text.py::fold` : ni casse ni accents, les ligatures dépliées (« sœur » → « soeur »), `ß` en `ss`. `ports.paging.fold_text`, `vocab.words.fold`, la clé d'émotion `vocab.affect.emotion_key` (bâtie sur lui), le composeur et les filtres de l'inspecteur s'y ramènent.
 - Ce qui est écrit replié change avec lui. Les colonnes de `mail`, `teams` et `feeds` passent par une révision qui déplie leurs ligatures en SQL (`unfold_ligatures`), sans relire les textes ; `thread` (version 10) et `memory_items` (version 21) se reconstruisent depuis le journal. La révision ne déplie que les ligatures : une ligne d'avant garde les majuscules de ses signes de compatibilité (« ™ » y reste `TM`), et ne se retrouve plus en tapant ce signe ; un mot tapé en ASCII ne la trouvait pas non plus avant.
 - `vocab.people.fold` reste à part : elle forme les clés `name:…`, écrites au journal, et `name_aliases` les recalcule pour l'oubli. Sa casse reste `lower` et ses ligatures restent : « Lætitia » garde `name:lætitia`, sinon une mention déjà écrite ne serait plus reliée à la personne, ni oubliée avec elle. `same_name` et `mentions`, qui ne forment aucune clé, suivent le repli commun. `same_name` décide pourtant dans deux réducteurs d'`identity` (une revendication, un démenti) : « Lætitia » et « Laetitia » y deviennent un seul nom, et la tranche passe en version 8 pour se reconstruire depuis la genèse, sinon un instantané d'avant et un rejeu complet ne donneraient pas le même état.
 - La table des pièces reçues garde les lettres de ce qu'elle a déjà, le `ß` et quelques signes hors du français : une pièce d'avant cette décision ne se retrouve pas par un mot qui en contient un. Elle n'a jamais été reconstruite, et le français n'a pas ces lettres : elle ne l'est pas pour elles.
@@ -384,7 +407,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 ### 0084 — Le temps des choses
 
-- Une date garde sa précision (`vocab.timespan`) : jour, mois, saison, année ou période, dite comme on la dit. Une période n'a ni veille ni lendemain : ni encouragement, ni suivi, ni vœux.
+- Une date garde sa précision (`faculties.memory.timespan`) : jour, mois, saison, année ou période, dite comme on la dit. Une période n'a ni veille ni lendemain : ni encouragement, ni suivi, ni vœux.
 - Le monde n'est la vie de personne (portée `world`, oublié avec qui l'a dit). Elle n'a pas de corps : elle vit à travers quelqu'un (`shared`), jamais un moment inventé à elle.
 - Le fait `memory.ahead` et « CE QUI VIENT » montrent le monde et les moments partagés à venir, au verdict de chaque moment.
 - La vraisemblance a un a priori par nature (0,9 de première main, 0,7 rapporté, 0,98 officiel, 0,6 prévision) que ce qu'on en dit ne peut qu'abaisser ; dite en mots, jamais en nombre.
@@ -580,7 +603,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Pourquoi :* « un salon n'existe pas dans la sélection de qui ? » — « qui » mélangeait la personne et la situation, et cinq règles restaient cachées dans le code ; « il faudrait rajouter canal source » ; « ils doivent aussi avoir leur tableau de droits » (sa boîte mail, Internet, chaque app sans projet) ; ses propres outils sont « le minimum vital : pré-rempli, modifiable, et dépendant du moteur de droits comme le reste ».
 
-*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185.*
+*Révise 0122 (en partie), 0131 (en partie), 0132 (en partie), 0133 (en partie). Révisée par 0148, 0184, 0185, 0220.*
 
 ### 0148 — Ce qu'un outil exige de qui est en face, il le déclare
 
@@ -651,6 +674,17 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* depuis les ADR 0185 et 0186, un compte a un propriétaire et ses droits le suivent ; sans console, elle ne pouvait pas régler ce qui part de chez elle (audit du 2026-11-05, décision Q22).
 
 *Révise 0132 (en partie : sur un compte qui a une propriétaire, elle règle préparer et comment ça part), 0185 (en partie : comment ça part ne se règle plus seulement dans Réglages › Canaux).*
+
+### 0220 — Un outil du code ne se diffère pas
+
+- Un outil du code (`@f.tool`) agit dans la conversation même, ou propose une capacité (`@f.capability`) qu'un accord décide après le commit : Envoyer à ta place (0132), À valider.
+- Il ne se diffère jamais lui-même : `ToolSpec.deferrable` et le paramètre `tool(deferrable=…)` sont retirés, comme `ToolSpec.effect` (`EffectClass`), que rien ne lisait. S'il faut un jour différer un outil du code, une décision le rouvrira.
+- Seuls les outils d'un service (0131) ou d'une app de la Forge (0134) demandent eux-mêmes un accord, par une carte ; en mode pro, la boucle attend celui d'un service (0165).
+- Dans Outils › Ce qu'elle peut faire, « ton accord » et « demande à la personne » restent grisées pour toutes ses familles (`inspector/pages/families.py`) : rien ne change à l'écran.
+
+*Pourquoi :* aucun outil ne posait le champ, et la page gardait une branche qui ne pouvait pas servir ; un champ que personne ne pose fait croire qu'il compte (audit du 2026-11-05, décision K1-Q1).
+
+*Révise 0134 (en partie : un accord ne se règle pour aucun de ses propres outils).*
 
 ## Sa vie intérieure : affect, corps, besoins, liens, initiatives
 

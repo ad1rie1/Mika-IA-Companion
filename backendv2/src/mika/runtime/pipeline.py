@@ -63,11 +63,11 @@ from mika.kernel.facts import FactView
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
+from mika.kernel.slots import PREEMPTED
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import DONE, NOTE, Activity
 from mika.ports.llm import (
     DEADLINE_AT,
-    PREEMPTED,
     Held,
     LLMGateway,
     LLMRequest,

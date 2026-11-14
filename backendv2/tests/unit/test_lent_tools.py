@@ -19,7 +19,6 @@ from mika.app import lending as lending_mod
 from mika.app.lending import Lending
 from mika.contracts import goals as goals_c
 from mika.inspector.mcp import ConsoleHost
-from mika.kernel.rights import Rights
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import Mail
 from mika.sim.clock import run_virtual
@@ -27,6 +26,7 @@ from mika.sim.outside import FakeMail
 from mika.vocab.access import ALONE, INTERNAL, OWNER, Table, ToolRule
 from mika.vocab.canals import Canals
 from mika.vocab.phrasebook import phrase
+from mika.vocab.rights import Rights
 from tests.fixtures.mika import at_paris, boot, build, connect
 
 TOKEN = "mlp_jeton-de-test"

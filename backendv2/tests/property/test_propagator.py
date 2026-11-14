@@ -10,7 +10,7 @@ import time
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mika.kernel.dynamics import Oscillator, euler_reference, first_crossing, propagate
+from mika.kernel.dynamics import Oscillator, euler_reference, propagate
 
 
 def reference_params(volatility: float, recovery: float) -> Oscillator:
@@ -71,16 +71,3 @@ def test_read_cost_is_microseconds():
         propagate(osc, (0.5, -0.2, 0.1), (0.0, 0.0, 0.0), (0.1, 0.0, 0.0), float(i % 3600))
     per_call_us = (time.perf_counter() - t0) / n * 1e6
     assert per_call_us <= 20.0, per_call_us
-
-
-def test_first_crossing_finds_the_instant():
-    osc = GRID[5]
-    home = (0.0, 0.0, 0.0)
-
-    def excursion(t_us: int) -> float:
-        pos, _ = propagate(osc, (0.8, 0.0, 0.0), (0.0, 0.0, 0.0), home, t_us / 1e6)
-        return abs(pos[0])
-
-    t = first_crossing(excursion, 0, int(10 * osc.tau * 1e6), 0.4)
-    assert t is not None
-    assert abs(excursion(t) - 0.4) < 0.01

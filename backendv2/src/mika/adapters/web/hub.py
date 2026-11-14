@@ -218,10 +218,9 @@ class Hub:
         """La liste des fils de travail de la personne (ADR 0164), à ses écrans d'opératrice authentifiée : les
         seuls qui en ouvrent."""
         conns = [c for c in self.of(handle) if c.operator and c.authenticated]
-        listed = getattr(self.port, "strands", None)
-        if not conns or listed is None:
+        if not conns:
             return 0
-        return await self._send(conns, protocol.strands(listed(handle)))
+        return await self._send(conns, protocol.strands(self.port.strands(handle)))
 
     async def activity(self, a: Activity) -> None:
         """Un moment de son travail en mode pro (le port ``activity``, ADR 0116) : aux écrans regardés de la personne,
@@ -349,40 +348,37 @@ class Hub:
                 await self._send(group, self.history("catchup", mine, after_id=min(wanted) - 1))
 
     def shared(self, ids: Any) -> list[SharedMeta]:
-        """Ce qu'on peut montrer des fichiers qu'elle envoie (ADR 0062) ; un port qui ne sait pas le dire, ou qui
-        échoue, n'empêche jamais une livraison : le message part sans eux."""
-        getter = getattr(self.port, "shared", None)
+        """Ce qu'on peut montrer des fichiers qu'elle envoie (ADR 0062) ; un port qui échoue n'empêche jamais une
+        livraison : le message part sans eux."""
         wanted = tuple(i for i in (ids or ()) if isinstance(i, str))
-        if getter is None or not wanted:
+        if not wanted:
             return []
         try:
-            return list(getter(wanted))
+            return list(self.port.shared(wanted))
         except Exception as exc:  # le message part quand même : le fichier se retrouvera par le fil
             log.warning("fichiers envoyés illisibles (%s) : %r", ", ".join(wanted), exc)
             return []
 
     def pieces(self, files: Any) -> list[SharedMeta]:
-        """Ce qu'on peut montrer des pièces qu'une personne a envoyées (ADR 0215) ; un port qui ne sait pas le dire,
-        ou qui échoue, n'empêche pas le fil de partir : la pièce reste montrée par son nom."""
-        getter = getattr(self.port, "pieces", None)
+        """Ce qu'on peut montrer des pièces qu'une personne a envoyées (ADR 0215) ; un port qui échoue n'empêche pas
+        le fil de partir : la pièce reste montrée par son nom."""
         wanted = tuple(f for f in (files or ()) if isinstance(f, str))
-        if getter is None or not wanted:
+        if not wanted:
             return []
         try:
-            return list(getter(wanted))
+            return list(self.port.pieces(wanted))
         except Exception as exc:  # le fil part quand même, sans le lien vers ces pièces
             log.warning("pièces reçues illisibles (%s) : %r", ", ".join(wanted), exc)
             return []
 
     def notes(self, ids: Any) -> list[MessageNote]:
-        """Les petites bulles de ce qu'elle a fait en écrivant un message (ADR 0119) ; un port qui ne sait pas le dire,
-        ou qui échoue, n'empêche jamais une livraison : le message part sans elles."""
-        getter = getattr(self.port, "notes", None)
+        """Les petites bulles de ce qu'elle a fait en écrivant un message (ADR 0119) ; un port qui échoue n'empêche
+        jamais une livraison : le message part sans elles."""
         wanted = tuple(i for i in (ids or ()) if isinstance(i, str))
-        if getter is None or not wanted:
+        if not wanted:
             return []
         try:
-            return list(getter(wanted))
+            return list(self.port.notes(wanted))
         except Exception as exc:  # le message part quand même : la bulle reviendra avec le fil
             log.warning("bulles d'un message illisibles (%s) : %r", ", ".join(wanted), exc)
             return []
@@ -456,9 +452,6 @@ class Hub:
         """Les cartes d'accord de chaque adresse (ADR 0064) : la liste entière, à chaque changement — un client
         montre exactement celle-là (une carte absente n'attend plus rien). ``if_any`` (une connexion qui s'ouvre,
         partie d'une liste vide) : rien quand il n'y en a pas."""
-        getter = getattr(self.port, "approval_cards", None)
-        if getter is None:
-            return 0
         sent = 0
         wanted = sorted({c.handle for c in self.conns.values()}) if handles is None else handles
         for handle in wanted:
@@ -466,7 +459,7 @@ class Hub:
             if not conns:
                 continue
             try:
-                cards = await getter(handle)
+                cards = await self.port.approval_cards(handle)
             except Exception as exc:  # une carte illisible ne fait pas tomber la synchro
                 log.debug("cartes d'accord illisibles : %r", exc)
                 continue
@@ -475,11 +468,8 @@ class Hub:
         return sent
 
     def panel(self, handle: str) -> dict[str, Any] | None:
-        getter = getattr(self.port, "person_panel", None)
-        if getter is None:
-            return None
         try:
-            return getter(handle)
+            return self.port.person_panel(handle)
         except Exception as exc:  # le panneau ne doit jamais empêcher une livraison
             log.debug("panneau de %s : %r", handle, exc)
             return None

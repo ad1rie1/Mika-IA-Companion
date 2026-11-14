@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from mika.contracts import memory as mc
 from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import timespan
 from mika.faculties.memory.archive import decode
 from mika.faculties.memory.extraction import Extraction, XEvenement, XPrevision
 from mika.faculties.memory.faculty import (
@@ -31,7 +32,6 @@ from mika.faculties.memory.recall import _ahead as ahead_section
 from mika.faculties.others.faculty import OthersParams, _cheer_window
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
-from mika.vocab import timespan
 from mika.vocab.privacy import Sensitivity
 from tests.unit.test_knowledge_coherence import FRAME, Frame, Store, alice_says, drafts, mika_says
 

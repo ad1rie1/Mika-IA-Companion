@@ -19,7 +19,6 @@ from mika.kernel.forms import (
     FormField,
     Knob,
     PathConflict,
-    agree,
     as_text,
     describe,
     errors_fr,
@@ -27,7 +26,6 @@ from mika.kernel.forms import (
     nest,
     parse,
     parse_duration,
-    plural,
     record_noun,
     show_duration,
     validate,
@@ -664,17 +662,6 @@ def test_parse_duration_refuses_in_french(text, message):
 ])
 def test_show_duration(us, text):
     assert show_duration(us) == text
-
-
-@pytest.mark.parametrize("n, counted, bare", [
-    (0, "0 échec", "échec"), (1, "1 échec", "échec"), (2, "2 échecs", "échecs"), (-1, "-1 échec", "échec"),
-    (1200, "1 200 échecs", "échecs"),
-])
-def test_plural_says_the_count_and_agree_only_the_word(n, counted, bare):
-    # le singulier jusqu'à 1 ; ``agree`` pour un indice dont le nombre est déjà dit à côté (la valeur d'un badge à
-    # l'accueil : « 3 · Courrier › Réception · mails importants pas encore lus », pas « … · 3 mails … »)
-    assert plural(n, "échec", "échecs") == counted
-    assert agree(n, "échec", "échecs") == bare
 
 
 @settings(max_examples=300, deadline=None)

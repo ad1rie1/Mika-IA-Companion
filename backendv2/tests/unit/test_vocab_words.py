@@ -7,7 +7,8 @@ import pytest
 
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.sim.lane import PARIS, at_paris
-from mika.vocab.days import ago_words, window_of
+from mika.vocab.days import ago_words, part_of_day, window_of
+from mika.vocab.phrasebook import family
 from mika.vocab.words import elided, fold, stems
 from tests.architecture.test_phrasebook import uses
 
@@ -65,3 +66,16 @@ def test_how_long_ago_is_said_in_few_words(us, expected):
 def test_how_long_ago_is_counted_in_one_place():
     """Une seule façon de compter : les seuils ne divergent plus d'un greffon à l'autre."""
     assert {u.where.split(":")[0] for u in uses() if u.key == "timespan.ago.minutes"} == {"vocab/days.py"}
+
+
+@pytest.mark.parametrize(("hour", "key"), [
+    (5, "morning"), (11, "morning"), (12, "noon"), (13, "noon"), (14, "afternoon"), (17, "afternoon"),
+    (18, "evening"), (23, "evening"), (0, "night"), (4, "night"),
+])
+def test_the_part_of_day_is_its_key_in_her_voice(hour, key):
+    """Le moment de la journée se lit directement dans ses deux façons de dire quand : plus de table qui le
+    retraduise d'un mot français en clé (audit du 2026-11-05, K1-08)."""
+    assert part_of_day(hour) == key
+    for words_of in ("expression.when.today", "expression.when.yesterday", "identity.calendar.today",
+                     "identity.calendar.yesterday"):
+        assert key in family(words_of), words_of

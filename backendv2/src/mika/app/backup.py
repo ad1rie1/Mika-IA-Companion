@@ -84,8 +84,8 @@ from mika.app import backup_server, datadir, schema
 from mika.app.composition import READING, faculties
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
-from mika.kernel.inspect import describe_error
 from mika.kernel.registry import Registry
+from mika.ports.errors import describe_error
 from mika.ports.journal import JournalSnapshot
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME

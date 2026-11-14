@@ -24,7 +24,8 @@ from mika.inspector.framed import FRAME_CSP, FRAME_CSP_REMOTE, framed_html
 from mika.plugins import email as email_p
 from mika.plugins.email import WAITING, EmailState, Seen, exhausted, name_of
 from mika.plugins.email.inspect.common import important, mail_key
-from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref, to_fill
+from mika.ports.drafts import to_fill
+from mika.ports.mail import AccountInfo, Contact, Mail, MailQuery, Sent, addresses, split_ref
 from mika.runtime.operations import SPACE, perform
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 

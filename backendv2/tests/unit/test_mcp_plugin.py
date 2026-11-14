@@ -16,9 +16,10 @@ from mika.faculties.identity import audience_for
 from mika.kernel.prompt import TRIM_MARK
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.ports.mcp import EVERYONE, INTERNAL, OWNER, Access, CallResult, OfferedTool
+from mika.ports.mcp import Access, CallResult, OfferedTool
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
+from mika.vocab.access import EVERYONE, INTERNAL, OWNER
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import boot, build, connect, said

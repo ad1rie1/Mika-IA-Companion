@@ -74,11 +74,11 @@ from mika.ports.forge import (
     ForgeRefused,
     SignalRules,
     StagedVersion,
-    arg_specs,
     config_form,
     ui_dump,
     view_specs,
 )
+from mika.ports.forge_args import arg_specs
 
 __all__ = ["ForgeBases", "ForgeHost", "Limits", "fingerprint", "lint", "read_manifest", "real_http_get"]
 

@@ -16,7 +16,7 @@ from mika.inspector.pages.diagnostics import CHECKS, DESTINATIONS, HEALTH, check
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, MINUTE, US
-from mika.kernel.forms import plural, show_duration
+from mika.kernel.forms import show_duration
 from mika.kernel.inspect import (
     Badge,
     Column,
@@ -29,6 +29,7 @@ from mika.kernel.inspect import (
     Text,
     When,
     money_fr,
+    plural,
 )
 from mika.runtime import health
 from mika.vocab.episodes import Kind

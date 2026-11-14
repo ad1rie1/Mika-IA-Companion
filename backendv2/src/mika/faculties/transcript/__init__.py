@@ -63,11 +63,12 @@ from mika.ports.llm_budget import fit_by_halving, halved
 from mika.ports.paging import fold_text
 from mika.ports.sql import HANDLE_MAX, fit, json_values, upsert
 from mika.ports.store import Sql
-from mika.vocab.affect import Declared, strip_prosody
+from mika.vocab.affect import Declared
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import clean_display_name, fold, is_internal
 from mika.vocab.phrasebook import phrase, phrases
+from mika.vocab.tag import strip_prosody
 
 #: Messages relus au plus pour composer l'historique (le budget coupe ensuite).
 THREAD_WINDOW = 320

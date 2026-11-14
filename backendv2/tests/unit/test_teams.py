@@ -498,6 +498,24 @@ def test_forgetting_a_colleague_reaches_the_journal_and_the_cache(tmp_path):
     assert out["teams"] >= 1 and message is None and conversation is None and drafts == []
 
 
+def test_the_cache_forgets_by_the_prefix_of_the_contract(tmp_path, monkeypatch):
+    """Le cache reconnaît le sujet d'un correspondant par le préfixe du contrat (``teams_c.HANDLE_PREFIX``), celui
+    que ``person_handle`` écrit, jamais par une copie : s'il changeait, l'oubli atteindrait encore la personne."""
+    monkeypatch.setattr(teams_c, "HANDLE_PREFIX", "teams-autre:")
+    clock = SimClock(START)
+    store = TeamsStore(lambda: TeamsConfig(), tmp_path / "teams.db", now=clock.now)
+    lot = {"self": {"id": SELF, "name": "Adrien Dupont"}, "conversations": [conv(DM)],
+           "messages": [msg(clock, 1, QUESTION)]}
+    try:
+        store.store_batch(PRINCIPAL, batch_of(lot, clock.now() // 1000)[0], clock.now())
+        [m] = store.thread(PRINCIPAL, DM, 10)
+        assert asyncio.run(store.forget("teams:" + ALICE)) == 0  # l'ancien préfixe ne désigne plus personne
+        assert teams_c.person_handle(ALICE) == "teams-autre:" + ALICE
+        assert asyncio.run(store.forget(teams_c.person_handle(ALICE))) >= 1 and store.message(m.ref) is None
+    finally:
+        store.close()
+
+
 # ── Ce que la relecture a trouvé ──────────────────────────────────────────
 
 
