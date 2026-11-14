@@ -459,7 +459,9 @@ le texte cherché part, jamais la position de la personne) et un itinéraire au 
 partent). Ce qui n'est pas branché répond 503, en mots. Une personne lit ce qui n'est pas prêt (« La recherche de lieux
 n'est pas encore prête sur ce serveur. », de même pour les adresses et les itinéraires) : elle n'a pas la console. Une
 opératrice lit ce qui manque et où le régler : « Les itinéraires ne sont pas réglés : Réglages › Carte et téléphone ›
-Itinéraires. ». Un service qui ne répond pas, ou aucun chemin entre deux points : 503 aussi, son message dit lequel.
+Itinéraires. ». Un index des lieux abîmé ou effacé en cours de route se dit sans consigne d'exploitation (« L'index
+des lieux est illisible. ») : c'est aussi ce que le modèle lit ; la console seule dit comment le refaire. Un service qui ne
+répond pas, ou aucun chemin entre deux points : 503 aussi, son message dit lequel.
 
 Un **lieu** : `id` (`l<n>` : l'index, qui change à chaque reconstruction — un arrêt garde son nom et ses
 coordonnées ; `a:<n>` : une adresse de cette réponse), `name`, `kind` (la sorte OpenStreetMap, `camp_site` ;

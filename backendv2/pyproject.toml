@@ -26,8 +26,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Ollama et Ollama Cloud passent par httpx : aucun paquet à eux (audit du 2026-10-26)
-llm = ["anthropic>=0.40", "openai>=1.40"]
+# ``ollama`` : le client d'Ollama et d'Ollama Cloud (``adapters/llm/ollama.py``, ``ollama.AsyncClient``, qui passe par
+# httpx) ; retiré le 2026-10-26 sur un constat faux (« aucun import »), l'ancien venv le recevait des paquets du
+# système. Les tests de contrat comparent aussi chaque adaptateur aux types de son SDK (``tests/contract``).
+llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4"]
 memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
 # lire les PDF joints (sans : « je ne peux pas le lire »)
 documents = ["pypdf>=4"]

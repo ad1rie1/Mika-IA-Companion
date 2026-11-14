@@ -36,6 +36,11 @@ from mika.adapters.maps.mvt import read_points
 from mika.adapters.maps.tiles import BROKEN, DIR_MAX_BYTES, read_directory
 from mika.ports.maps import MapsUnavailable, PlaceHit
 
+#: ce qu'une recherche lève quand l'index manque ou s'abîme : une personne (``app/me/maps.py``) et le modèle (les outils
+#: de voyage) le lisent, sans consigne d'exploitation — la console dit comment le refaire (``IndexInfo.reason``)
+NOT_READY = "L'index des lieux n'est pas prêt."
+DAMAGED = "L'index des lieux est illisible."
+
 # ── ce qu'on garde ──
 #: les lieux habités (calque ``places``, leur ``kind_detail``) : jamais une maison isolée ni une ferme
 PLACE_KINDS = ("city", "town", "village", "hamlet", "suburb", "neighbourhood", "quarter", "locality")
@@ -786,7 +791,7 @@ class Places:
     def _ready_path(self) -> Path:
         found = self._file()
         if found is None or not self.info().ready:
-            raise MapsUnavailable(self.info().reason)
+            raise MapsUnavailable(DAMAGED if found is not None else NOT_READY)
         return found[0]
 
     async def _run(self, fn: Callable[[sqlite3.Connection], Any]) -> Any:
@@ -802,7 +807,7 @@ class Places:
         try:
             return await asyncio.to_thread(run)
         except sqlite3.DatabaseError:
-            raise MapsUnavailable("L'index des lieux est illisible : refais-le (mika carte lieux).") from None
+            raise MapsUnavailable(DAMAGED) from None
 
     async def search(self, text: str, *, near: tuple[float, float] | None = None,
                      bbox: tuple[float, float, float, float] | None = None, category: str = "",

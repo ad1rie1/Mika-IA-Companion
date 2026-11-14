@@ -53,7 +53,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
   client dans son `README.md`. Ne pas recopier ailleurs ce qu'ils disent : y renvoyer.
 - **La doc suit le code, dans le même lot.** Un changement qui modifie ce qu'une doc décrit la met à jour en même
   temps. `tests/architecture/test_docs_agree.py` confronte la doc au code (trames du chat, sous-commandes de la CLI,
-  chemins cités, numéros d'ADR).
+  chemins cités, numéros d'ADR et leurs renvois).
 - **Une décision, une entrée.** Une règle qu'on ne doit ni casser ni reproposer s'écrit dans `docs/decisions.md`, au
   numéro suivant, sous la forme des autres entrées (et « Révisée par » sur celles qu'elle change). Pas de décision
   prise seulement dans le code.
@@ -72,8 +72,8 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
   rapide pour le cacher. Ne jamais supprimer ni sauter un test long pour gagner du temps.
 - **`--mariadb`** rejoue la suite sur des bases jetables du serveur MariaDB local ; le marqueur `sqlite_only` en
   écarte un test.
-- **Volumes.** La suite compte environ 4 550 cas (`--slow` compris). Mesure du 2026-11-04 : ~28 min pour la suite
-  entière, au-delà des 25 min de la borne. Avec `--slow`, poser `BORNE_TEMPS=45m`, et écrire la sortie dans un
+- **Volumes.** La suite compte environ 5 470 cas (`--slow` compris). Mesure du 2026-11-14 : ~28 min pour la suite
+  entière, au-delà des 25 min de la borne ; le processus de pytest plafonne vers 750 Mo. Avec `--slow`, poser `BORNE_TEMPS=45m`, et écrire la sortie dans un
   fichier : tuée par la borne, elle ne laisse aucun résumé.
 
 **La mémoire de la machine (30 Go)**
@@ -127,12 +127,12 @@ Mika est une psyché à **journal d'événements** : tout ce qui lui arrive s'aj
 faculté s'en déduit par des fonctions pures. On peut donc rejouer sa vie, l'expliquer et la simuler.
 
 ```
-app                         composition, serveur, CLI, console, réglages, schéma, sauvegarde
+app                         composition et processus : serveur, CLI, port d'entrée, portes HTTP, console dessinée, /api/moi…
 inspector | sim             la console, le simulateur
 runtime                     le Mind générique : ajouts, épisodes, voies, arbitre, ordonnanceur, effets, projections, santé
 faculties | plugins | adapters
-contracts                   le contrat public de chaque propriétaire (événements publics, faits), sans logique
-ports                       interfaces d'entrée/sortie, entités SQL
+contracts                   le contrat public de chaque propriétaire, ses fonctions pures, le port d'entrée : rien qui agit
+ports                       les interfaces que les adaptateurs implémentent et leurs types, entités SQL
 vocab                       types de valeur partagés par au moins trois propriétaires
 kernel                      machinerie générique, sans un mot du domaine
 ```
@@ -141,10 +141,12 @@ Ce qui fait échouer un changement :
 
 - **`lint-imports`** : une couche n'importe que celles du dessous ; une faculté n'importe ni une autre faculté ni un
   plugin, et l'inverse non plus ; les adaptateurs n'importent ni facultés, ni plugins, ni runtime ; facultés et plugins
-  n'importent ni adaptateurs ni runtime ; ni le runtime ni l'inspecteur ne nomment une faculté.
+  n'importent ni adaptateurs ni runtime ; ni le runtime ni l'inspecteur ne nomment une faculté ou un plugin ; le runtime
+  n'importe aucun adaptateur, l'inspecteur pas le simulateur.
 - **`ruff`** : pas d'import dans une fonction ; pas de `except Exception` aveugle (sauf `runtime/boundary.py`,
-  `adapters/**`, `sim/**`) ; ni l'heure, ni le hasard, ni un identifiant lus directement (sauf `adapters/**`, `sim/**`,
-  `app/**`) : le temps vient de `kernel.clock`, le hasard du rng de l'événement, les identifiants de l'`IdGen` injecté.
+  `adapters/**`, `sim/**` ; ailleurs, seulement avec `# noqa: BLE001` et sa raison) ; ni l'heure, ni le hasard, ni un
+  identifiant lus directement (sauf `adapters/**`, `sim/**`, `app/**` et `plugins/web/server.py`, ADR 0066) : le temps
+  vient de `kernel.clock`, le hasard du rng de l'événement, les identifiants de l'`IdGen` injecté.
 - **Les gardes d'architecture** (`tests/architecture/`, leur table dans ARCHITECTURE.md), dont :
   - `Mind.append` est le seul point d'écriture ;
   - une charge utile ne porte jamais un état recalculé ;
@@ -161,6 +163,8 @@ ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté ».
 
 - **Où ils sont** : `tests/unit/` (le gros), `contract/` (les adaptateurs), `protocol/`, `scenarios/` (déterminisme,
   voie rapide, deux moteurs), `property/`, `architecture/`, `browser/console.cjs` (Playwright).
+- **Leur nom** : un fichier de tests se nomme d'après ce qu'il garde, jamais d'après l'audit ou le jalon qui l'a fait
+  naître.
 - **Les montages** :
   - `conftest.make_mind(tmp, faculties, clock=…)` donne un Mind nu ;
   - `tests/fixtures/mika.py::build(tmp, respond)` donne le vrai Kernel composé, avec `boot`, `connect`, `befriend`,

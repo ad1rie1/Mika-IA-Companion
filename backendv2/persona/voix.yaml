@@ -5525,15 +5525,26 @@ teams:
     asked: "{who} te demande de préparer une réponse à ce message."
     # derrière, quand l'opérateur a dit quoi y répondre (suivi de son texte, à la ligne)
     say: " Ce qu'il faut y dire :"
-  # ── Ses outils Teams : leur libellé pour la personne (Outils, ADR 0208) ─────────────────────────────────────
-  # Leurs descriptions, que le modèle lit, sont encore écrites dans plugins/teams/tools.py (à migrer).
+  # ── Ses outils Teams : leur libellé pour la personne (Outils, ADR 0208), et ce que le modèle lit de chacun et de
+  # ses arguments (description, puis un argument par clé : ``plugins/teams/tools.py``) ──────────────────────────
   tools:
     conversations:
       label: Voir tes dernières conversations Teams
+      description: >-
+        Les dernières conversations Teams des comptes dont tu peux te servir ici (celui de la personne qui s'occupe
+        de toi, le tien, celui de la personne en face), et leur dernier message.
+      text: "un morceau du nom d'une conversation (vide : toutes)"
     read:
       label: Relire une de tes conversations Teams
+      description: "Relire le fil d'une conversation Teams, jusqu'à un message."
+      message: "la référence d'un message (entre crochets) : le fil de sa conversation, jusqu'à lui"
     draft:
       label: Préparer une réponse sur Teams à ta place
+      description: >-
+        Préparer une réponse à un message Teams, à la place de la personne du compte qui l'a reçu (selon son réglage,
+        elle est posée dans Teams pour qu'elle l'envoie, envoyée après son accord, ou envoyée telle quelle).
+      message: la référence du message auquel tu réponds (entre crochets)
+      body: ta réponse, à la place de la personne, sans signature (elle est ajoutée)
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # SES FLUX (greffon « rss ») : les flux d'actualité qu'elle suit. Elle remarque ce qui touche ses centres d'intérêt

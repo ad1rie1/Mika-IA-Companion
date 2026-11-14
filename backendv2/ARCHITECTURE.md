@@ -5,24 +5,26 @@ Mika est une psyché à **journal d'événements** : tout ce qui lui arrive (un 
 ## Couches
 
 ```
-app                         composition : serveur, ligne de commande, console, réglages, schéma, sauvegarde
+app                         composition et processus : serveur, CLI, port d'entrée, portes HTTP, console dessinée, /api/moi…
 inspector | sim             la console, le simulateur
 runtime                     le Mind générique : ajouts, épisodes, voies, arbitre, ordonnanceur, effets, projections, santé
 faculties | plugins | adapters
-contracts                   le contrat public de chaque propriétaire (événements publics, faits) : rien qui agit
-ports                       interfaces d'entrée/sortie, entités SQL
+contracts                   le contrat public de chaque propriétaire, ses fonctions pures, le port d'entrée : rien qui agit
+ports                       les interfaces que les adaptateurs implémentent et leurs types, entités SQL
 vocab                       types de valeur partagés par au moins trois propriétaires
 kernel                      machinerie générique, sans un mot du domaine
 ```
 
+`contracts` dit, pour chaque propriétaire, ce que les autres en lisent : ses événements publics, ses clés de faits, ses codes de raison, et les fonctions pures que ses lecteurs partagent plutôt que de les recopier (`contracts/world.py::apply_changes`, `contracts/memory.py::withdrawals`, `contracts/agency.py::spoke_up`, `contracts/social.py::is_close`…). Rien n'y agit : une fonction de contrat calcule sur ce qu'on lui donne. Le port d'entrée — ce que les adaptateurs web et monde peuvent demander au cœur, `contracts/entry.py::MindPort` — y vit aussi, parce qu'il parle la langue des contrats (perceptions, présence) ; il est implémenté sur le noyau par `app/mindport.py`. `ports` porte l'autre sens : ce que le cœur demande au dehors, que les adaptateurs implémentent. Ce que fait chaque module de `app`, et pourquoi il y vit : « Le paquet `app` », plus bas.
+
 Vérifié à chaque test (`lint-imports`, configuré dans `pyproject.toml`) :
 
-- une couche n'importe que celles d'en dessous ;
+- une couche n'importe que celles d'en dessous, et deux voisines d'une même couche (`inspector | sim`, `faculties | plugins | adapters`) ne s'importent pas ;
 - **une faculté n'importe jamais une autre faculté** ni un plugin, et l'inverse non plus ;
 - les adaptateurs n'importent ni facultés, ni plugins, ni runtime ; facultés et plugins n'importent ni adaptateurs ni runtime ;
-- ni le runtime ni l'inspecteur ne nomment une faculté.
+- ni le runtime ni l'inspecteur ne nomment une faculté ou un plugin ; le runtime n'importe aucun adaptateur (la composition les lui donne par ses ports), et l'inspecteur n'importe pas le simulateur.
 
-`ruff` interdit les imports dans une fonction (`PLC0415`), le `except Exception` aveugle (`BLE001`) hors de `runtime/boundary.py`, des adaptateurs et du simulateur, et toute lecture directe de l'heure, du hasard ou d'identifiants (`TID251`) hors des adaptateurs, du simulateur, de `app/` et du serveur de recherche du plugin `web` (`plugins/web/server.py`, ADR 0066 : un programme à part, que le plugin importe seulement pour sa liste d'outils et ses réglages, lancé dans sa cage, qui vit au vrai temps de ses débits et de ses délais) : le temps vient de `kernel.clock`, le hasard d'un tirage dérivé de l'événement, les identifiants de l'`IdGen` injecté.
+`ruff` interdit les imports dans une fonction (`PLC0415`), le `except Exception` aveugle (`BLE001`) hors de `runtime/boundary.py`, des adaptateurs et du simulateur — ailleurs, un `except Exception` ne passe qu'avec `# noqa: BLE001` et sa raison sur la même ligne, là où une panne ne doit rien faire tomber (« une nuit manquée : la suivante relira ») —, et toute lecture directe de l'heure, du hasard ou d'identifiants (`TID251`) hors des adaptateurs, du simulateur, de `app/` et du serveur de recherche du plugin `web` (`plugins/web/server.py`, ADR 0066 : un programme à part, que le plugin importe seulement pour sa liste d'outils et ses réglages, lancé dans sa cage, qui vit au vrai temps de ses débits et de ses délais) : le temps vient de `kernel.clock`, le hasard d'un tirage dérivé de l'événement, les identifiants de l'`IdGen` injecté.
 
 ## Le noyau
 
@@ -235,6 +237,7 @@ Souvenirs, croyances, promesses, échanges (ADR 0010 et, pour ce qui suit, 0043�
 - Une estime qui a des causes (sociomètre, `self.touched`). **Ce qu'elle sait d'elle** : tenir parole, mener au bout, voir venir — des marques et des tendances dites en mots (`self.knows`, « CE QUE TU SAIS DE TOI »), son changement d'avis récent ; l'estime n'en bouge pas.
 - **Qui elle devient** : son récit de soi part de ce qui a marqué et se réécrit quand elle a changé, sur tout ce qu'elle sait d'elle (goûts et avis, changements d'avis, passions, tendances, moments vécus à travers les autres dits en bref et sans qui, sa propriétaire d'abord), jamais un prénom.
 - Le journal de la journée vécue et sa version « à raconter », la seule montrée à qui n'en est pas le seul concerné ; ce qu'elle raconte de sa journée est tiré des faits, jamais écrit par un modèle. Ses rêves : le modèle reçoit ce que chaque fragment lui a fait et dit lui-même leur sorte (`[RÊVE: …]`, banal si elle manque, ADR 0153), dont la couleur se pose au réveil (`self.woke_with`).
+- Ce qu'elle écrit pour elle (son récit, son journal, ses rêves, son caractère) se garde sans ce que sa voix y pose par habitude — balise d'émotion, lecture de la personne, jetons de voix (`vocab/reading.py::untagged`, comme ses messages dans `expression`) : ce texte se montre dans la console et lui revient dans son prompt. Son caractère se relit aussi ainsi (le réducteur de `self.character_written`) : un caractère gardé avec sa balise en sort sans elle, sans attendre que sa persona change.
 - **Ce qui la passionne** : ses centres d'intérêt vivent (`self.interests`) — ceux de sa persona s'avivent et s'endorment sans disparaître, d'autres naissent la nuit de ses pistes (ce qu'elle lit, trouve, médite), jugés par le modèle et bornés par le code (`self.reflect`). Une réflexion n'est ni un exploit ni une réussite comptée.
 - Ses bonjours : ses petits mots, jamais une phrase d'exemple.
 - Outil `self_journal`.
@@ -375,6 +378,35 @@ Les plugins ont la même forme que les facultés et une confiance restreinte : d
 - **Genèse** (`app/genesis.py`, ADR 0070) : un pilote extérieur, sur un noyau démarré (souvent sur horloge virtuelle), lui donne ce que ses archives disent d'elle. `remember`, `believe` et `note_event` émettent les événements de sa mémoire avec `origin=GENESIS`, par `Mind.append`, en clés de personne canoniques vérifiées (l'oubli les atteint). Le pilote pose puis lève le préréglage « avance rapide » (`begin_fast_forward`, `end_fast_forward`) : des surcharges journalisées qui coupent sa vie spontanée le temps du rejeu. C'est la couture avec `INJECTION/`.
 - **Simulateur** (`sim/`, ADR 0007) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice qui répète tout secret (`CANARI-…`) qu'on lui montre, des pannes, des mesures. Voie rapide : S01–S13 puis S15–S23 (il n'y a pas de S14). On valide par cibles d'intention, et on casse exprès ce qu'un test garde pour vérifier qu'il n'est pas vide. **La sonde** (`mika sim sonde --semaine 1|2`) fait vivre une semaine au vrai modèle configuré, pour voir ce que la doublure ne montre pas (ADR 0043, 0048, 0054) ; la seconde semaine : un deuil, un rappel promis, un anniversaire, un surnom, un salon.
 
+## Le paquet `app`
+
+La couche du haut, la seule qui peut tout importer. Un module y vit pour l'une de ces raisons : il fait le processus (le serveur, la ligne de commande, le dossier de données) ; ou il relie des couches que les règles d'import séparent — un plugin n'écrit au journal que par ses décorateurs, un adaptateur n'importe ni le runtime, ni une faculté, ni un plugin, l'inspecteur ne lit aucune faculté. La couture se fait donc ici, et nulle part plus bas.
+
+| Module | Ce qu'il fait | Pourquoi dans `app` |
+|---|---|---|
+| `app/composition.py` | La liste des facultés et des plugins, les politiques d'épisode, les modes, l'arbitrage, l'ordre de lecture du prompt (`READING`). | La seule racine qui nomme tout le monde. |
+| `app/server.py` | Le processus : le noyau réel (horloge, identifiants, magasin, modèles), ses ports, l'adaptateur web, la console, l'API par personne, le monde, la constellation ; `serve`. | Il assemble toutes les couches. |
+| `app/cli/` | `python -m mika …`, un module par famille de sous-commandes ; `app/cli/common.py` : qui opère, un noyau relu hors ligne, les réglages hors ligne. | Les commandes ouvrent le noyau, les réglages et les adaptateurs. |
+| `app/mindport.py` | `KernelPort`, le port d'entrée (`MindPort`) que voient les adaptateurs web et monde : perceptions, historique, vues, téléchargements, commandes du monde. | Il lit des facultés (fils, partages, pièces, projets), qu'un adaptateur ne peut pas importer. |
+| `app/teams.py`, `app/phone.py`, `app/wakeups.py` | Les portes HTTP de `/api/teams/…`, `/api/phone/…` et `/api/wake/<nom>` : la clé (`mtk_…`, jeton `mobile`, `mwk_…`), la cadence et la forme du lot, puis l'ajout au journal ; les clés de Teams et des réveils, les réglages des réveils. | Un plugin n'écrit au journal que par ses décorateurs, et l'adaptateur web n'importe aucun plugin. |
+| `app/lending.py` | Ses outils prêtés à un agent (`/mcp/pret/<nom>`, ADR 0122). | Il lit la porte d'offre (`runtime.tools`) et les réglages. |
+| `app/system_mcp.py` | Les serveurs MCP qu'apporte un plugin système (`web`), faits serveurs du client MCP (ADR 0066). | Un plugin ne connaît pas le client MCP, ni le client un plugin. |
+| `app/settings.py` | Le magasin des réglages d'exploitation, dans `mind.db` : fournisseurs, boîtes, comptes, clés, secrets scellés (Fernet) ; `Settings.writing`. | Il range les configurations des adaptateurs et des plugins. |
+| `app/settings_sections/` | Les rubriques de réglages de la console, un module par rubrique : le modèle, la valeur, l'enregistrement, le rechargement (ADR 0197, 0206). | Un enregistrement recharge le service vivant (`app/server.py::Live`). |
+| `app/forge_settings.py` | Le port `forge_settings` : les réglages d'une app forgée, rangés par `Settings`. | Il relie l'hôte de la Forge (un adaptateur) aux réglages. |
+| `app/logs.py`, `app/datadir.py`, `app/embeddings.py`, `app/paths.py` | Les journaux du serveur, secrets masqués ; le verrou du dossier de données (`mika.lock`) ; le modèle de plongements choisi par la machine (ADR 0109) ; les chemins de l'installation (`persona/`, lue à côté de `src/`). | Le serveur et la ligne de commande les partagent. |
+| `app/persona.py`, `app/authors.py` | Sa persona lue pour un humain (une erreur dite en français, la dernière persona gardée, ADR 0057) ; ses autrices et leurs flux (ADR 0124). | Ils lisent les réglages, la faculté `self` ou la configuration du courrier. |
+| `app/genesis.py` | La couture du jumeau (ADR 0070) : une vie importée, ajoutée par `Mind.append`. | Un pilote extérieur écrit les événements de la mémoire sur un noyau démarré, hors de la faculté. |
+| `app/console.py`, `app/console_menu.py` | La carte de la console (destinations, libellés, noms des sections, raisons, vetos, processus, événements) et son menu. | Une décision de composition : l'inspecteur ne nomme aucune faculté. |
+| `app/handmade/` | Les pages dessinées de la console (ADR 0121, 0177) : l'accueil, En ce moment, la fiche d'une personne (`app/handmade/person/`), les fiches d'objets (`app/handmade/subjects/`), les onglets des destinations (`app/handmade/tabs/`, réunis par `app/handmade/pages.py`), À valider (`app/handmade/waiting.py`), les droits (`app/handmade/rights.py`, `app/handmade/access.py`). | Elles croisent les facultés, que l'inspecteur ne lit pas : la composition les lui donne (`InspectorDeps`). |
+| `app/constellation.py` | La constellation : sa mémoire en une boule de points, et ce qui la parcourt, en direct (ADR 0103). | Elle lit la faculté `memory`. |
+| `app/me/` | L'API par personne, `/api/moi/…`, de `frontendv2` (ADR 0187 ; `docs/protocole-moi.md`). | Elle passe par `runtime.operations`, les réglages et les ports des plugins. |
+| `app/schema.py`, `app/migrations/` | Le schéma de ses bases et leurs révisions Alembic, un dossier par base (ADR 0101). | Il réunit les entités que déclarent plusieurs couches (ports, adaptateurs, runtime, réglages). |
+| `app/backup.py`, `app/backup_server.py` | Sauvegarder, vérifier, restaurer : les fichiers, et les bases d'un serveur MariaDB. | Une sauvegarde rejoue sa copie au vrai noyau composé. |
+| `app/preview/` | `mika console apercu` : la console exportée en HTML, page par page, sur une vie fictive, sans serveur. | Il compose une Mika entière, avec ses ports simulés. |
+
+Un même sujet se lit donc dans plusieurs paquets, chacun à sa couche, et aucun n'est un reste. Teams : ses événements dans `contracts/teams.py`, son interface dans `ports/teams.py`, son monde (`teams.db`) dans `adapters/teams/`, le plugin et sa console dans `plugins/teams/`, sa porte HTTP dans `app/teams.py`, l'API par personne dans `app/me/teams.py`, ses pages dessinées dans `app/handmade/subjects/teams.py` et `app/handmade/tabs/teams.py`, ses révisions dans `app/migrations/teams/`. Le téléphone et les réveils se découpent de même, à leur mesure.
+
 ## Écrire une faculté
 
 **La déclarer** (`kernel/faculty.py`) : `Faculty(name, state, init, state_version, params, volatile, derive…)`. Tout le reste se déclare par décorateurs.
@@ -420,7 +452,7 @@ Au démarrage, sa tranche se reconstruit depuis le journal et elle apparaît seu
 | `test_tools_described` | Les lots, outils et conditions `when=` sont décrits ; chaque outil du code a un libellé pour la personne (`label` : quelques mots, sans « tu » ni nom d'outil, distinct dans sa famille). |
 | `test_causes_are_said` | Une cause d'humeur est un code `vocab.causes` qui a sa phrase. |
 | `test_audiences_say_who_knows_whom` | Toute audience réelle précise `untied_level`. |
-| `test_docs_agree` | La documentation dit ce que fait le code : les trames du chat, les sous-commandes de la CLI, les chemins cités, les numéros d'ADR (sans trou ni double, hors ceux que l'en-tête de `decisions.md` déclare non attribués) et leurs renvois, dits des deux côtés (« Révise » et « Révisée par » ou « Remplacée par »), chaque mot une fois par entrée, ses numéros à la suite. |
+| `test_docs_agree` | La documentation dit ce que fait le code : les trames du chat, les sous-commandes de la CLI, les chemins cités (ici, dans les protocoles — `/api/moi` compris —, la carte de la console, `CLAUDE.md` et les README du moteur, de sa mise en service et des deux clients web), les numéros d'ADR (sans trou ni double, hors ceux que l'en-tête de `decisions.md` déclare non attribués) et leurs renvois, dits des deux côtés (« Révise » et « Révisée par » ou « Remplacée par »), chaque mot une fois par entrée, ses numéros à la suite. |
 
 ## Invariants
 

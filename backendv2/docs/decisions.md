@@ -2507,7 +2507,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 
 *Pourquoi :* un nom doit dire ce qu'il y a dedans, et un mot ne doit avoir qu'un sens dans la console. L'audit du 2026-11-05 a vu qu'enregistrer Qui sert quoi figeait tous les replis, que l'annuaire oubliait les boîtes aux lettres et que la vue des plugins en oubliait quatre.
 
-*Révise 0193 (en partie : la carte de sa position se règle sous Réglages › Carte et téléphone), 0194 (en partie : les lieux et les itinéraires aussi) Révisée par 0219 (en partie : une entrée neuve s'intitule « Ajouter un fournisseur »).*
+*Révise 0193 (en partie : la carte de sa position se règle sous Réglages › Carte et téléphone), 0194 (en partie : les lieux et les itinéraires aussi). Révisée par 0219 (en partie : une entrée neuve s'intitule « Ajouter un fournisseur »).*
 
 ### 0201 — À valider : un seul lecteur du contexte d'une demande, un historique par demande tranchée
 
@@ -2620,7 +2620,7 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 ### 0219 — Ce que la console et Outils disent encore mal : un onglet Comptes sans boîte, des badges qui disent quoi, des titres accordés
 
 - **L'onglet Comptes d'une personne** paraît aussi quand elle n'a pas de boîte à elle mais a branché un service ou partage quelque chose, dans un sens ou dans l'autre : ses sous-onglets Services et Partages sont dessinés par sa fiche, qui le demande (`Overview.shows`, que `UI.subject_tabs` réunit aux onglets que les facultés montrent). Sans boîte, ni service, ni partage, Teams reste un onglet à lui.
-- **Un onglet de la console rend son badge en couple** `(n, indice)`, comme une vue (`Builtin.badge`, lu par `badge_of`) : l'accueil dit ce que chaque ligne compte (« de Béa et Léa » pour les questions sans réponse, « en échec d'affilée : … » pour les processus, « hôte connecté à qui il manque quelque chose ») plutôt que « à regarder ». Un nom suit son nombre, accordé (« 0 initiative », « 1 échec », « 2 brouillons d'elle à décider »), jamais « (s) ».
+- **Un onglet de la console rend son badge en couple** `(n, indice)`, comme une vue (`Builtin.badge`, lu par `badge_of`) : l'accueil dit ce que chaque ligne compte (« de Béa et Léa » pour les questions sans réponse, « en échec d'affilée : … » pour les processus, « hôte connecté à qui il manque quelque chose ») plutôt que « à regarder » ; quand le contrôle de santé de la même page dit la même panne, son constat reste (il dit depuis quand), le badge ne faisant que compter. Un nom suit son nombre, accordé (« 0 initiative », « 1 échec », « 2 brouillons d'elle à décider »), jamais « (s) ».
 - **Une liste d'entrées déclare le nom de ses entrées, avec son article** (`Knob.noun` : « un fournisseur », « une autrice ») : une entrée neuve s'intitule « Ajouter un fournisseur » ; une liste qui ne le déclare pas garde « Fournisseur à ajouter ».
 - **Le service du système a un titre et un but pour la personne**, écrits par la composition, qui joint le plugin au client MCP (`app/system_mcp.py`, `SHOWN` : « Le web ») ; un service de l'opératrice reste sans but dans Outils, son `purpose` étant la ligne du catalogue du modèle. **Le pourquoi d'une case d'app** redit la ligne de son app ou de son projet, lue par le plugin même (`forge.resource_allowance`), comme celui d'un service.
 - Un geste audité sur une personne dit son nom même quand l'action ne déclare pas d'objet (supprimer un voyage depuis sa fiche) ; un jeton montré une seule fois se copie d'un bouton, qui retombe sur le texte sélectionné quand la console est servie en HTTP.

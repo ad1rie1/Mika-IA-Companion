@@ -13,6 +13,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[llm,memory]"     # + documents (lire les PDF), dev (les tests), mariadb
 ```
 
+Seule l'installation éditable (`-e`) est prise en charge : sa persona et sa voix
+(`persona/`) sont lues à côté de `src/` (`src/mika/app/paths.py`,
+`src/mika/vocab/phrasebook.py`), et une roue ne les emporte pas.
+
 Bubblewrap (`dnf install bubblewrap`, `apt install bubblewrap`) n'est utile
 qu'à ce qui exécute du code : la Forge et les ateliers de ses projets.
 
@@ -55,25 +59,35 @@ vers un autre fournisseur (ADR 0073).
 Tant qu'aucun modèle ne sert « répondre », chaque message reste sans réponse ;
 l'accueil de la console le dit, et `/health` aussi.
 
-## 4. Le frontend
+## 4. Les clients
+
+Le client de tous les jours est `frontendv2/` (ADR 0187) : le chat avec Mika, et
+pour chaque personne qui a un compte, ses Outils, Mail, Teams, Téléphone, Carte et
+Paramètres (`frontendv2/README.md`).
 
 ```bash
-cd frontend/Web
+cd frontendv2
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:4173
 ```
 
-Il vise `http://localhost:8001` par défaut ; pour une autre adresse,
-`VITE_BACKEND_ORIGIN` dans `frontend/Web/.env.local` (voir `frontend/Web/.env.example`).
-Le serveur admet les origines de développement (`localhost:3000`, `:4173`) ;
-servi d'ailleurs, ajoute `--origin <adresse du frontend>` à `serve`.
+Le client 3D, `frontend/Web/` (sa VRM, sa pièce, le monde), se lance de même
+(`npm run dev`, sur http://localhost:3000 ; `frontend/Web/README.md`).
+
+Chacun vise `http://localhost:8001` par défaut ; pour une autre adresse,
+`VITE_BACKEND_ORIGIN` dans son `.env.local` (voir son `.env.example`). Le serveur
+admet d'office les origines de développement (les ports 3000 et 4173 de
+`localhost` et de `127.0.0.1`) ; servi d'ailleurs, ajoute `--origin <adresse du
+client>` à `serve`. Garde le même nom d'hôte que le serveur (`localhost` avec
+`localhost`) : le cookie de session est `SameSite=Lax`.
 
 Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
 
 ## Et ensuite
 
-- **Lui écrire** se fait par une application dédiée (le frontend web, le client
-  Unity, l'application Android de `frontend/Android/`), avec un compte ; il n'y a
+- **Lui écrire** se fait par une application dédiée (`frontendv2/`, le client 3D
+  de `frontend/Web/`, le client Unity, l'application Android de
+  `frontend/Android/`), avec un compte ; il n'y a
   pas de Telegram (ADR 0060). Un client natif s'authentifie par un jeton de son
   compte : l'application Android l'obtient elle-même par identifiant et mot de
   passe (`POST /auth/token`), un moteur de jeu le reçoit de la console (Réglages ›
@@ -82,6 +96,12 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   L'application Android est une messagerie : Mika peut y écrire la première,
   application fermée comprise (une notification Firebase), et on peut s'y envoyer
   des fichiers (ADR 0062, 0077, `docs/protocole-chat.md`).
+- **L'espace de chacun** : dans `frontendv2/`, chaque personne qui a un compte
+  retrouve ce qui est à elle, ou qu'on lui partage — ses boîtes, ses comptes
+  Teams, ses téléphones, ses voyages, ses services MCP, ses partages — et lit ce
+  que Mika peut faire pour elle (Outils), par l'API par personne
+  (`docs/protocole-moi.md`) ; une opératrice y a aussi le mode pro du chat. Le
+  servir en production : `deploy/README.md`.
 - **Lui donner une vie importée** (un rejeu d'archives) : `mika.app.genesis` ajoute
   souvenirs, croyances et moments à l'instant courant d'un noyau démarré, et coupe
   sa vie spontanée le temps du rejeu ; sa nature (`nature: incarnee` dans la
@@ -92,7 +112,8 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   ou le JSON d'un service tel quel (ADR 0068, 0117).
 - **Lui faire lire Teams, et y répondre à ta place** : installe l'extension de
   `frontend/Extension/` dans le navigateur où tu ouvres Teams, génère sa clé
-  (Relations & échanges › Teams, ou `python -m mika teams key`) et colle-la dans
+  (dans `frontendv2/`, Paramètres › Teams ; dans la console, Relations & échanges
+  › Teams ; ou `python -m mika teams key`) et colle-la dans
   l'extension. Ses réponses sont posées dans Teams pour que tu les envoies, ou
   partent après ton accord, ou seules — selon le mode (ADR 0069).
 - **L'accueil de la console** (`/inspecteur/`) dit ce qui attend ton attention ;

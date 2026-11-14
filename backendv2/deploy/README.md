@@ -284,6 +284,64 @@ messages lui arrivent par Firebase (ADR 0077, plus bas).
 Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 `Bearer` sont masqués ; `httpx` ne parle qu'en avertissement.
 
+## Servir frontendv2, le client de tous les jours
+
+`frontendv2` (ADR 0187, son `README.md`) se construit en fichiers statiques, que le
+mandataire sert à côté du serveur, sur la même adresse. Construit avec
+`VITE_BACKEND_ORIGIN` vide, il parle à l'adresse de sa page. Il faut Node.js et
+npm (`sudo dnf install nodejs npm`, ou `apt`) ; le dépôt est à root, comme à
+l'installation :
+
+```bash
+cd /opt/mika/frontendv2
+sudo npm ci
+sudo env VITE_BACKEND_ORIGIN= npm run build         # → frontendv2/dist/ ; à refaire à chaque mise à jour (plus bas)
+```
+
+`sudo env` pose la variable vide après `sudo`, qui vide l'environnement : posée
+devant `sudo`, elle se perdrait, et le client parlerait à `localhost:8001`.
+
+`vite build` n'embarque ni ses polices, ni ses portraits, ni sa VRM : le mandataire
+sert ces trois chemins à côté de `dist/`, depuis le dépôt (`frontendv2/README.md`,
+« Ce qui est lu ailleurs ») — `/ext/fonts/`, `/ext/avatar/` et `/ext/models/`. Les
+portraits et la VRM sont sous licence, hors du dépôt : copie-les dans
+`frontend/Android/app/src/main/assets/avatar/` et `frontend/Web/public/models/`
+(sans eux, ses ronds restent à leur couleur et son portrait remplace sa VRM). Le
+reste va au serveur. Avec Caddy, un site à lui (ici un second port de la même
+machine ; un autre nom marche aussi) :
+
+```
+mika.example:8443 {
+    handle_path /ext/fonts/* {
+        root * /opt/mika/backendv2/src/mika/inspector/static/fonts
+        file_server
+    }
+    handle_path /ext/avatar/* {
+        root * /opt/mika/frontend/Android/app/src/main/assets/avatar
+        file_server
+    }
+    handle_path /ext/models/* {
+        root * /opt/mika/frontend/Web/public/models
+        file_server
+    }
+    @server path /api/* /auth/* /ws /ws/* /files/* /inspecteur /inspecteur/* /health
+    handle @server {
+        reverse_proxy 127.0.0.1:8001
+    }
+    handle {
+        root * /opt/mika/frontendv2/dist
+        file_server
+    }
+}
+```
+
+Seuls les chemins de `@server` vont au serveur : `/mcp/` n'y passe pas, et
+`/inspecteur/` y est relayé pour une opératrice, que le client mène à la console
+(« Pourquoi a-t-elle dit ça ? »). Son adresse s'ajoute aux origines admises :
+`--origin https://mika.example:8443`, à côté des autres (l'option se répète). Le
+client 3D (`frontend/Web/`, son `README.md`) se construit et se sert de même, sur
+son propre site.
+
 ## Premier démarrage
 
 1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou
@@ -302,8 +360,9 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
    flux, Teams, réveils…), la transcription, les comptes opérateurs, et les **paramètres avancés** : une page par
    faculté, qui dit d'où vient chaque valeur, où une surcharge se pose, bornée et journalisée. Chaque
    enregistrement laisse une ligne dans **Réglages › Historique des réglages**. On lui écrit par une application
-   dédiée (le frontend web, le client Unity, l'application Android), avec un compte : il n'y a pas de robot de
-   messagerie (ADR 0060). Un client natif s'authentifie par un jeton de son compte (`mika token create <compte>`).
+   dédiée (`frontendv2`, le client de tous les jours ; le client 3D de `frontend/Web` ; le client Unity ;
+   l'application Android), avec un compte : il n'y a pas de robot de messagerie (ADR 0060). Un client natif
+   s'authentifie par un jeton de son compte (`mika token create <compte>`).
 4. Ses boîtes aux lettres : **Courrier › Paramètres**, le bouton en haut à droite du courrier
    (`/inspecteur/courrier/parametres`) — un
    enregistrement par boîte : serveurs IMAP/SMTP, dossiers relevés, et sa voix (en son nom, en assistante, ou à ta
@@ -312,8 +371,8 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
    le serveur : coche ceux où elle remarque ce qui arrive. « Synchroniser tous les dossiers » tient les autres à
    jour dans la console à chaque relève, sans qu'elle les remarque (ADR 0171). En ligne de commande, serveur arrêté : `mika mail set --compte perso --address … --imap-host …
    --user … --password … --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
-   `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Brouillons
-   de courrier).
+   `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans ton accord (À valider › Courriers à
+   envoyer).
    Une boîte **Hotmail ou Outlook.com** refuse les mots de passe : elle entre par ton compte Microsoft (ADR 0166).
    Inscris d'abord une application dans Microsoft Entra (portail Azure › Inscriptions d'applications : comptes
    Microsoft personnels acceptés, « Autoriser les flux de clients publics » activé) et note son identifiant (client
@@ -578,8 +637,13 @@ les souvenirs).
 ```bash
 sudo systemctl start mika-backup.service
 cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # les extras de l'installation (+ mariadb)
+cd /opt/mika/frontendv2 && sudo npm ci && sudo env VITE_BACKEND_ORIGIN= npm run build   # si tu sers frontendv2
 sudo systemctl restart mika
 ```
+
+La ligne de `frontendv2` reconstruit les fichiers que le mandataire sert (« Servir
+frontendv2 », plus haut) : sans elle, la page d'avant parle au moteur d'après. Le
+client 3D, s'il est servi, se reconstruit de même dans `/opt/mika/frontend/Web`.
 
 Une faculté dont la tranche change de version est reconstruite depuis le
 journal au démarrage ; une projection qui change de version est reconstruite

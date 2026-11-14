@@ -151,8 +151,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   d'affilée, les anomalies, la sauvegarde à faire et les contrôles de santé qui ne passent pas ; chacune mène à sa
   page et dit pourquoi. Un contrôle de santé mène à la page où regarder (« Système › File de sortie », la table
   `DESTINATIONS` de `inspector/pages/diagnostics.py` ; la santé générale s'il n'en a pas) : avec le badge de cette
-  page, la même panne ne fait qu'une ligne (la plus grave, à gravité égale la plus précise), et la santé générale, qui
-  compte ces contrôles, ne la répète pas. Le total de la file dit ce qu'il compte (« courriers à envoyer : 3 · autres
+  page, la même panne ne fait qu'une ligne (la plus grave, à gravité égale la plus précise, puis le constat du
+  contrôle plutôt que le badge), et la santé générale, qui compte ces contrôles, ne la répète pas. Le total de la file dit ce qu'il compte (« courriers à envoyer : 3 · autres
   demandes : 2 ») ; chaque badge, ce qu'il compte (son indice : « de Béa et Léa » pour les questions sans réponse,
   « en échec d'affilée : … » pour les processus), un onglet de la console comme une vue (`Builtin.badge` rend
   `(n, indice)`, ADR 0219).
