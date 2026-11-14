@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from mika.app.console import NAVIGATION
-from mika.runtime import inspection
+from mika.runtime.inspection import Inspection
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
 INSPECTOR = Path(__file__).resolve().parents[2] / "src" / "mika" / "inspector"
@@ -20,7 +20,7 @@ PAYLOAD = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
 
 def pages(client, live) -> list[str]:
     urls = ["/inspecteur/"]  # l'accueil, dessiné à la main hors de la carte
-    views = client.portal.call(inspection.views, live.kernel)
+    views = client.portal.call(Inspection(live.kernel).views)
     for group in NAVIGATION:
         for d in group.items:
             base = f"/inspecteur/{d.key}"

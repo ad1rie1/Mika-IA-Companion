@@ -65,7 +65,8 @@ from mika.plugins.forge import (
 )
 from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
 from mika.ports.llm import LLMResponse, ToolCall
-from mika.runtime.tools import ToolContext, offer
+from mika.runtime.tool_offer import offer
+from mika.runtime.tools import ToolContext
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab.episodes import Kind, goal_target, project_target

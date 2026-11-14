@@ -70,7 +70,7 @@ from mika.plugins.forge import TestArgs as ForgeTestArgs
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST, TOPICS
 from mika.plugins.forge.inspect import _app_grants
 from mika.plugins.forge.views import decode_view, is_invalid
-from mika.runtime.inspection import Inspection, find
+from mika.runtime.inspection import Inspection
 from mika.runtime.operations import dynamic_fields, offered, perform
 from mika.runtime.tools import ToolContext
 from mika.sim.clock import run_virtual
@@ -141,7 +141,8 @@ def events(kernel, *types):
 
 
 async def tab(kernel, name: str, app: str, **params: str):
-    return await Inspection(kernel).arun(find(kernel, "forge", name), params, subject=app)
+    ins = Inspection(kernel)
+    return await ins.arun(ins.find("forge", name), params, subject=app)
 
 
 def meteo_ajout(ville="Paris", temperature="-12", note="gel") -> dict[str, list[str]]:
@@ -162,7 +163,7 @@ def test_an_app_is_an_object_with_a_head_a_search_and_its_tabs(tmp_path):
         out = {"head": ins.head("app", "meteo"), "inconnue": ins.head("app", "inconnue"),
                "évasion": ins.head("app", "../../etc"), "cherche": ins.search("app", "MÉTÉO"),
                "tout": ins.search("app", ""), "onglets": [t.name for t in ins.tabs("app")],
-               "apps": await ins.arun(find(kernel, "forge", "apps"), {})}
+               "apps": await ins.arun(ins.find("forge", "apps"), {})}
         out["rendus"] = {t.name: await tab(kernel, t.name, "meteo") for t in ins.tabs("app")}
         out["sans fiche"] = await tab(kernel, "vues", "")
         return out

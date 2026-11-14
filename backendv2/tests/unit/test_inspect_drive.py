@@ -49,7 +49,7 @@ from mika.kernel.inspect import (
 )
 from mika.ports.llm import LLMResponse
 from mika.runtime.effects import with_content
-from mika.runtime.inspection import Inspection, find, run_view
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
@@ -78,12 +78,10 @@ def when(t: int) -> str:
 
 def show(kernel, owner: str, name: str, *, subject: str = "", inspection: Inspection | None = None,
          **params: str) -> list[Block]:
-    spec = find(kernel, owner, name)
+    ins = inspection if inspection is not None else Inspection(kernel)
+    spec = ins.find(owner, name)
     assert spec is not None, f"vue absente : {owner}/{name}"
-    if inspection is not None:
-        blocks = inspection.run(spec, params, when=when, subject=subject)
-    else:
-        blocks = run_view(kernel, spec, params, when=when, subject=subject)
+    blocks = ins.run(spec, params, when=when, subject=subject)
     failed = [b.text for b in walk(blocks) if isinstance(b, Note) and b.text.startswith("Cette vue a échoué")]
     assert not failed, failed
     return blocks
@@ -221,7 +219,8 @@ def measure(kernel) -> dict[str, float]:
 
 def test_every_view_reads_a_fresh_kernel(tmp_path):
     async def scenario(kernel, script):
-        titles = {(o, n): find(kernel, o, n).title for o, n in VIEWS}
+        ins = Inspection(kernel)
+        titles = {(o, n): ins.find(o, n).title for o, n in VIEWS}
         return titles, {key: show(kernel, *key) for key in VIEWS}, {
             "inconnu": show(kernel, "goals", "resume", subject="999"),
             "illisible": show(kernel, "goals", "resume", subject="douze"),

@@ -25,6 +25,12 @@ class Failed:
         return f"Failed({self.error!r})"
 
 
+def describe(error: BaseException) -> str:
+    """Ce qu'une panne dit d'elle, brut (son type et son message, bornés) : pour une trace ou le détail d'un
+    règlement. Ce n'est pas ``ports.errors.describe_error``, qui la traduit pour un opérateur."""
+    return f"{type(error).__name__}: {error}"[:500]
+
+
 def call(fn: Callable[..., T], *args: Any, label: str = "") -> T | Failed:
     try:
         return fn(*args)

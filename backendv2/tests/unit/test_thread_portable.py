@@ -29,7 +29,7 @@ from mika.kernel.events import Content
 from mika.kernel.inspect import Table
 from mika.ports.llm import LLMResponse
 from mika.ports.paging import fold_text
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build, connect, said
 from tests.fixtures.sqldb import SqlDB
@@ -88,8 +88,9 @@ def test_the_console_finds_a_message_whatever_its_case_and_accents(tmp_path):
             await connect(kernel, "user_1", "Adrien", operator=True)
             await (await kernel.perceive(said("user_1", "Élodie m'a offert un CHAT roux."))).reply
             await kernel.lanes.join()
-            spec = find(kernel, "transcript", "messages")
-            return {q: run_view(kernel, spec, {"q": q}) for q in ("elodie", "ÉLODIE", "chat roux", "chien")}
+            ins = Inspection(kernel)
+            spec = ins.find("transcript", "messages")
+            return {q: ins.run(spec, {"q": q}) for q in ("elodie", "ÉLODIE", "chat roux", "chien")}
         finally:
             await kernel.stop()
 

@@ -28,7 +28,8 @@ from mika.faculties.projects.prompt import _live_section
 from mika.faculties.projects.tools import SteerArgs, may_steer, project_steer
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.runtime.operations import perform
-from mika.runtime.tools import ToolContext, offer
+from mika.runtime.tool_offer import offer
+from mika.runtime.tools import ToolContext
 from mika.vocab.access import CLOSE, EVERYONE, OWNER, PERSON
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust

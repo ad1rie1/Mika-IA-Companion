@@ -27,6 +27,7 @@ from mika.inspector import names
 from mika.inspector.catalog import Labels
 from mika.kernel import forms
 from mika.kernel import inspect as kernel_inspect
+from mika.kernel.faculty import NIGHT_LANE, PROCESS_LANES
 from mika.kernel.inspect import (
     INT_MAX,
     InspectContext,
@@ -142,6 +143,17 @@ def test_an_episode_that_went_well_has_spoken_only_if_it_was_speech():
     assert names.outcome("done", Kind.TASK)[0] == "terminé" and names.outcome("done", Kind.WORK)[0] == "terminé"
     # contre-exemple : une réponse qui s'est tue ne « parle » pas
     assert names.outcome("abstained", Kind.REPLY)[0] == "s'est tue"
+
+
+def test_a_process_lane_is_named_only_when_it_says_something():
+    """La voie d'un processus ne bornait rien hors de la nuit : la console ne la nomme que là (« nuit (une à la
+    fois) »). Sans voie, rien ; une voie inconnue, que le registre refuse, se montrerait telle quelle."""
+    assert names.process_lane(NIGHT_LANE) == "nuit (une à la fois)"
+    assert names.process_lane("") == ""
+    assert names.process_lane("ailleurs") == "ailleurs"
+    assert set(names.PROCESS_LANE_LABELS) == set(PROCESS_LANES)  # chaque voie permise a son nom, et rien d'autre
+    # les voies des épisodes gardent le leur ; l'arbitre n'en déclare plus
+    assert names.lane("background") == "fond" and "arbitre" not in names.LANES
 
 
 def _capabilities(**described: str) -> SimpleNamespace:

@@ -38,7 +38,7 @@ def _repaired(s: FlakyState, e, cx) -> FlakyState:
     return FlakyState(broken=False)
 
 
-@FLAKY.process("flaky.tick", lane="background", max_quantum_s=60)
+@FLAKY.process("flaky.tick", max_quantum_s=60)
 class Tick:
     def next_due(self, state: FlakyState, frame, last_run):
         return frame.now if last_run is None else last_run + MINUTE

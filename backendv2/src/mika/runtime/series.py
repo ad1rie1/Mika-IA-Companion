@@ -126,4 +126,4 @@ class Sampler:
 
 def sampler_spec(sampler: Sampler) -> ProcessSpec:
     return ProcessSpec(owner="kernel", name="séries", process=sampler, priority=90, catch_up=CatchUp.SKIP,
-                       max_quantum_us=HOUR, lane="background")
+                       max_quantum_us=HOUR)

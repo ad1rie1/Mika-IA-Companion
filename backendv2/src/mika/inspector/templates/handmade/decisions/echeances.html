@@ -14,7 +14,7 @@
   <section class="now-card due-failing" aria-labelledby="due-failing-title">
     <header class="now-card-head"><h2 id="due-failing-title">Échouent d’affilée</h2><p>Au-delà d’un certain nombre d’échecs, la santé le signale.</p></header>
     <ul class="due-list" role="list">
-      {% for x in failing %}<li class="danger"><span class="due-when">{{ x.hm or (tab.cell(x.next) if x.next else '—') }}</span><span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }} · voie {{ x.lane }}</span></span>{% if x.failing %}<span class="now-tag danger">{{ x.failing.text }}</span>{% endif %}</li>{% endfor %}
+      {% for x in failing %}<li class="danger"><span class="due-when">{{ x.hm or (tab.cell(x.next) if x.next else '—') }}</span><span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }}{% if x.lane %} · voie {{ x.lane }}{% endif %}</span></span>{% if x.failing %}<span class="now-tag danger">{{ x.failing.text }}</span>{% endif %}</li>{% endfor %}
     </ul>
   </section>
   {% endif %}
@@ -32,7 +32,7 @@
         {% for x in g["items"] %}
         <li class="{{ 'danger' if x.danger }}" title="{{ x.key }}">
           <span class="due-when">{% if x.hm %}{{ x.hm }}{% elif x.next %}{{ tab.cell(x.next) }}{% else %}—{% endif %}</span>
-          <span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }} · voie {{ x.lane }}{% if x.last %} · dernière fois {{ tab.cell(x.last) }}{% endif %} · <span class="now-num">{{ x.runs }}</span> passage{{ 's' if x.runs not in ('0', '1') }}</span></span>
+          <span class="due-name">{{ tab.cell(x.name) }}<span class="due-meta">{{ x.faculty }}{% if x.lane %} · voie {{ x.lane }}{% endif %}{% if x.last %} · dernière fois {{ tab.cell(x.last) }}{% endif %} · <span class="now-num">{{ x.runs }}</span> passage{{ 's' if x.runs not in ('0', '1') }}</span></span>
           {% if x.failing %}<span class="now-tag danger">{{ x.failing.text }}</span>{% endif %}
         </li>
         {% endfor %}

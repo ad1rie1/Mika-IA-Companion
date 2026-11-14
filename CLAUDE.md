@@ -72,9 +72,12 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
   rapide pour le cacher. Ne jamais supprimer ni sauter un test long pour gagner du temps.
 - **`--mariadb`** rejoue la suite sur des bases jetables du serveur MariaDB local ; le marqueur `sqlite_only` en
   écarte un test.
-- **Volumes.** La suite compte environ 5 470 cas (`--slow` compris). Mesure du 2026-11-14 : ~28 min pour la suite
-  entière, au-delà des 25 min de la borne ; le processus de pytest plafonne vers 750 Mo. Avec `--slow`, poser `BORNE_TEMPS=45m`, et écrire la sortie dans un
-  fichier : tuée par la borne, elle ne laisse aucun résumé.
+- **Volumes.** La suite compte environ 5 570 cas (`--slow` compris). Mesure du 2026-11-14 : ~28 min pour la suite
+  entière, au-delà des 25 min de la borne ; le processus de pytest plafonne vers 750 Mo. Avec `--slow`, poser
+  `BORNE_TEMPS=45m`, et écrire la sortie dans un fichier : tuée par la borne, elle ne laisse aucun résumé.
+- **`/tmp` est un tmpfs.** Les `tmp_path` y restent en mémoire et comptent dans la borne. Gardés tous, ils pesaient
+  1,7 Go à la fin de la suite et l'ont fait tuer. `pyproject.toml` ne garde donc que ceux d'un test en échec
+  (`tmp_path_retention_policy = "failed"`) : ne pas revenir sur ce réglage.
 
 **La mémoire de la machine (30 Go)**
 

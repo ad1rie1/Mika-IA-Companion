@@ -56,7 +56,7 @@ from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, Message
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
-from mika.runtime.tools import declare
+from mika.runtime.tool_offer import declare
 from mika.runtime.traces import STABLE_KEY, TRUNCATION_MARK
 from mika.vocab.episodes import TRIAL_ROLE
 

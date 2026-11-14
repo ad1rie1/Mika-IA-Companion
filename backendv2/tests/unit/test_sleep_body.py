@@ -27,7 +27,7 @@ from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant, local
 from mika.kernel.inspect import Timeline
 from mika.ports.llm import LLMResponse
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab import circadian
@@ -319,7 +319,8 @@ def test_a_woken_night_shows_in_her_last_transitions(tmp_path):
         await until(kernel, at_paris(2026, 9, 29, 3, 0))
         await (await kernel.perceive(said("user_1", "tu dors ?"))).reply
         await kernel.perceive(said("user_3", "hello"))
-        return run_view(kernel, find(kernel, "body", "rythme"), {})
+        ins = Inspection(kernel)
+        return ins.run(ins.find("body", "rythme"), {})
 
     blocks, _ = run(tmp_path, scenario)
     timeline = next(b for b in blocks if isinstance(b, Timeline))

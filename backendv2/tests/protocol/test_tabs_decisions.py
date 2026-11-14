@@ -13,7 +13,9 @@ from mika.app.handmade.tabs import decisions
 from mika.contracts import runtime as rt
 from mika.kernel.arbitration import Row, sigmoid
 from mika.kernel.builtin import SELECTED, RowRecord
+from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content, VoiceProvenance
+from mika.kernel.faculty import NIGHT_LANE
 from mika.kernel.registry import ArbitrationPolicy
 from mika.runtime.health import PROCESS_FAILURES_MAX
 from mika.vocab.episodes import Kind
@@ -195,6 +197,58 @@ def test_deadlines_are_ranged_by_horizon_and_what_fails_comes_first(world):  # n
     assert groups and [g.strip() for g in groups] == [o for o in order if o in [g.strip() for g in groups]]
     if "Rien de prévu" in page and len(groups) > 1:  # ce qui n'a rien de prévu se replie quand il y a autre chose
         assert '<details class="due-group h-never">' in page
+
+
+
+def test_deadlines_read_the_deadline_the_scheduler_kept_and_never_draw_for_the_arbiter(world, monkeypatch):  # noqa: F811
+    """Seul l'ordonnanceur appelle ``next_due`` : la page lit l'échéance qu'il a retenue (``Scheduler.due``, recul
+    après un échec et garde des passages à vide compris). La rendre ne fait pas le tirage de l'arbitre, que son
+    ``next_due`` fait dès qu'un événement l'a invalidé."""
+    client, live, _ = world
+    kernel, now = _life(client, live)
+    sched, arbiter = kernel.scheduler, kernel.arbiter
+    arbiter.invalidate()
+    draws = arbiter.draws
+    drawn(client, "/inspecteur/decisions/echeances")
+    assert (arbiter.draws, arbiter.next_at) == (draws, None), "une page de lecture ne tire rien"
+    # une seule échéance retenue, dans vingt minutes : elle seule est « dans l'heure », à son heure ; le reste, rien —
+    # y compris un processus retenu à jamais (``2**62``, comme l'aperçu les retient), qu'aucune date ne dit
+    soon, held = sched.specs[-1].name, sched.specs[0].name
+    at = now + 20 * MINUTE + 30 * US
+    monkeypatch.setattr(sched, "due", {soon: at, held: 2**62}.get)
+    page = drawn(client, "/inspecteur/decisions/echeances")
+    groups = [g.strip() for g in re.findall(r'class="due-group-head">([^<]+)<', page)]
+    assert groups == ["Dans l'heure", "Rien de prévu"]
+    head = page.index('class="due-group h-soon"')
+    group = page[head:page.index("</ul>", head)]
+    assert group.count("<li") == 1 and f'title="{soon}"' in group
+    assert kernel.mind.frame().local(at).strftime("%H:%M") in group
+    rest = page[page.index('class="due-group h-never"'):]
+    assert f'title="{held}"' in rest[:rest.index("</ul>")]
+
+
+def test_deadlines_show_a_lane_only_when_it_says_something(world):  # noqa: F811
+    """La voie d'un processus ne borne rien hors de la nuit (exclusive : un passage à la fois) : Échéances ne la
+    montre que là, jamais « voie fond » ni « voie arbitre »."""
+    client, live, _ = world
+    kernel, _ = _life(client, live)
+    sched = kernel.scheduler
+    page = drawn(client, "/inspecteur/decisions/echeances")  # sa première page : 25 processus
+    shown = [s for s in sched.specs if _items(page, s.name)]
+    night = next(s.name for s in shown if s.lane == NIGHT_LANE)
+    plain = [s.name for s in shown if s.lane != NIGHT_LANE]
+    assert len(plain) > 1
+    sched.consecutive[night] = PROCESS_FAILURES_MAX  # en tête, parmi ce qui échoue : la même ligne, deux fois
+    page = drawn(client, "/inspecteur/decisions/echeances")
+    assert "voie fond" not in page and "voie arbitre" not in page
+    assert len(_items(page, night)) == 2 and all("· voie nuit (une à la fois)" in x for x in _items(page, night))
+    assert all("voie" not in x for name in plain for x in _items(page, name))
+
+
+def _items(page: str, process: str) -> list[str]:
+    """Les entrées (``<li>`` … ``</li>``) qui nomment un processus : une par liste où il paraît."""
+    entries = (page[m.start():page.index("</li>", m.start())] for m in re.finditer(r"<li[\s>]", page))
+    return [x for x in entries if f'title="{process}"' in x]
 
 
 def test_the_arbiter_pages_read_the_view_never_the_arbiter_nor_the_journal():

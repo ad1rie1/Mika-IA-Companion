@@ -164,7 +164,7 @@ def _text(shift: Shift, name: str) -> str:
     return phrase("social.bonds.friends", name=name)
 
 
-@SOCIAL.process("social.bonds", wake_on=[rt.UTTERANCE, rt.PERCEPTION_RECEIVED], lane="background",
+@SOCIAL.process("social.bonds", wake_on=[rt.UTTERANCE, rt.PERCEPTION_RECEIVED],
                 catch_up=CatchUp.ONCE, max_quantum_s=3600,
                 reads=[c.CIRCLE, c.CLOSENESS, identity_c.HANDLES, identity_c.IDENTITY, identity_c.IS_OWNER,
                        affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, memory_c.HARD_TIMES])

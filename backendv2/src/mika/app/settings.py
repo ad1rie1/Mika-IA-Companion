@@ -41,7 +41,7 @@ from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.ports.teams import DEFAULT_ACCOUNT as DEFAULT_TEAMS_ACCOUNT
 from mika.runtime.boundary import call
-from mika.runtime.tools import RULES as TOOL_RULES
+from mika.runtime.tool_offer import RULES as TOOL_RULES
 from mika.vocab.access import Table, ToolRule
 from mika.vocab.canals import Canals, CanalTable
 from mika.vocab.rights import Rights

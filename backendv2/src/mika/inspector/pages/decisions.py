@@ -13,7 +13,7 @@ from typing import Any
 from starlette.requests import Request
 
 from mika.contracts import runtime as rt
-from mika.inspector import names
+from mika.inspector import names, render
 from mika.inspector.names import KINDS, OUTCOMES
 from mika.inspector.pages.home import episode_row
 from mika.inspector.pages.tabs import TABS
@@ -41,7 +41,6 @@ from mika.kernel.inspect import (
     num_fr,
     read_params,
 )
-from mika.runtime.boundary import Failed, call
 from mika.runtime.health import PROCESS_FAILURES_MAX
 
 EPISODES_PAGE = 50
@@ -454,16 +453,14 @@ async def episodes(ui: Any, request: Request) -> Any:
 async def schedule(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
     sched = kernel.scheduler
-    frame = kernel.mind.frame()
     rows = []
     for spec in sched.specs:
-        due: Any = call(sched.instances[spec.name].next_due, frame.root.slices.get(spec.owner), frame,
-                        sched.last_run(spec.name), label=f"échéance de {spec.name}")
-        nd = None if isinstance(due, Failed) else due
+        nd = render.dated(sched.due(spec.name))  # l'échéance retenue (recul et garde compris), pas ``next_due``
         failing = sched.consecutive.get(spec.name, 0)
+        lane = names.process_lane(spec.lane)  # seulement quand elle dit quelque chose (la nuit, exclusive)
         rows.append((nd if nd is not None else 1 << 62, Row((
             Text(ui.names.process(spec.name), hint=spec.name), ui.names.faculty(spec.owner),
-            Text(names.lane(spec.lane), hint=spec.lane), When(nd) if nd else Text("rien de prévu", "muted"),
+            Text(lane, hint=spec.lane) if lane else "", When(nd) if nd else Text("rien de prévu", "muted"),
             When(sched.last_run(spec.name) or 0) if sched.last_run(spec.name) else "—",
             sched.runs.get(spec.name, 0), Badge(f"{failing} d'affilée", "danger") if failing else "—",
             Text(spec.name, "mono")),

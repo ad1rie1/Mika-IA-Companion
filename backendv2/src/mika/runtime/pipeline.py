@@ -1,7 +1,9 @@
 """Le pipeline d'épisode, fixe.
 
 ``admission → baux → départ gardé → enrichissements ∥ → composition → appel
-(boucle d'outils) → analyse → prélude → commit gardé → règlement``. Chaque
+(boucle d'outils) → analyse → seconde passe (runtime/second_pass.py) → prélude →
+commit gardé → règlement``. Les règles du texte d'une réponse (le silence, la
+redite, les passages à l'abri) sont dans ``runtime/reply_text.py``. Chaque
 épisode composé laisse une trace (``runtime/traces.py``) : ce qui a été envoyé
 au modèle, la composition, les outils et leurs résultats. Pendant tout
 l'épisode, le Mind revérifie sa garde à chaque ajout d'autrui : si ce qu'il a
@@ -46,8 +48,6 @@ celles du fil avec la personne, ni à celles d'un autre fil.
 from __future__ import annotations
 
 import asyncio
-import difflib
-import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -62,9 +62,9 @@ from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.facts import FactView
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
-from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
+from mika.kernel.prompt import Budget, ChatPrompt, Composer, ComposeTrace, SectionBody
 from mika.kernel.slots import PREEMPTED
-from mika.kernel.state import FrozenDict
+from mika.kernel.state import FrozenDict, Root
 from mika.ports.delivery import DONE, NOTE, Activity
 from mika.ports.llm import (
     DEADLINE_AT,
@@ -75,36 +75,20 @@ from mika.ports.llm import (
     PersonaRender,
     ToolDecl,
 )
-from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.kept_facts import keeps_facts
+from mika.runtime.boundary import Failed, acall, call, describe
+from mika.runtime.reply_text import first_paragraphs, is_silence, repeats_last, shield, unshield
+from mika.runtime.second_pass import AuthorOf, DraftPolisher, Polisher, Reannotator, SecondPass
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
-from mika.runtime.tools import (
-    LoopEvent,
-    LoopResult,
-    ToolContext,
-    acting,
-    catalogue,
-    declare,
-    defers_tools,
-    gate_of,
-    offer,
-    run_tool_loop,
-)
+from mika.runtime.tool_offer import acting, catalogue, declare, defers_tools, gate_of, offer
+from mika.runtime.tools import LoopEvent, LoopResult, ToolContext, run_tool_loop
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 from mika.vocab import flows
-from mika.vocab.episodes import CONVERSATIONAL, Role
-from mika.vocab.flows import Author
+from mika.vocab.episodes import CONVERSATIONAL
 from mika.vocab.phrasebook import phrase
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
 
-SILENCE = "[SILENCE]"
-#: la balise de silence, où qu'elle soit (crochets, casse et espaces indifférents) : sans ambiguïté
-_SILENCE_TAG = re.compile(r"\[\s*silence\s*\]", re.IGNORECASE)
-#: ce qui habille un mot seul : emphase markdown, guillemets, ponctuation finale
-_DRESSING = "*_`~«»\"“”„‟'’ \t\r\n"
-_BARE_SILENCE = re.compile(r"[(\[]?\s*silence\s*[)\]]?", re.IGNORECASE)
 #: les issues d'une boucle d'outils qui n'a pas pu finir (plafond de tours, appel coupé)
 _UNFINISHED = frozenset({"max_turns", "truncated"})
 
@@ -112,88 +96,6 @@ PersonaProvider = Callable[[Frame, str], PersonaRender]
 AudienceResolver = Callable[[Frame, "EpisodeRequest"], Audience]
 #: ``(texte, son nom)`` → (texte livrable, annotations) ; son nom vient de la persona rendue (vide : inconnu)
 Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
-#: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, sa persona
-#: rendue, l'autrice du chat, le texte de chaque section de son prompt par clé) → (consigne, message, ce qu'on garde de
-#: ce que l'appel a écrit) d'un appel qui récrit sa réponse, ou ``None`` : rien à reprendre.
-Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None", "Author | None", Mapping[str, str]],
-                    "tuple[str, str, Callable[[str], str]] | None"]
-#: La passe d'une autrice sur un brouillon d'outil (ADR 0124) : (son flux, le premier jet, ce à quoi il répond,
-#: l'autrice) → (consigne, message) d'un appel qui le récrit, ou ``None`` : cette forme ne se récrit pas.
-DraftPolisher = Callable[[str, str, str, Author], "tuple[str, str] | None"]
-#: l'autrice d'un flux (``vocab.flows``), ou ``None`` : aucune n'y écrit
-AuthorOf = Callable[[str], "Author | None"]
-#: Les annotations d'une parole récrite par la seconde passe : (son premier jet, ses annotations, le texte récrit) →
-#: celles du texte récrit (ce qui décrit la forme du texte — une question, un passage — suit le message envoyé).
-Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
-#: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
-#: dérivé : on garde le premier jet (l'autrice peut envoyer en plusieurs bulles ce qu'un « ah merde. » disait seul)
-_POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
-#: … pour un brouillon (un courriel a sa formule d'appel et sa formule de politesse) : plus de marge
-_DRAFT_SLACK = 400
-#: sans réglage des autrices, le chat a l'autrice livrée « Message » : son nom et ses codes, qui portent la forme
-#: (ADR 0124, 0140) — sans eux, rien ne dirait comment on écrit dans un chat
-_CHAT_AUTHOR = Author(flows.CHAT, phrase("expression.author.defaults.message.name"),
-                      phrase("expression.author.defaults.message.codes"))
-#: un brouillon que le modèle a mis entre trois accents graves
-_FENCED = re.compile(r"^```[\w-]*\n(.*)\n```$", re.S)
-#: ce qu'une passe de plus (la seconde passe) laisse de l'échéance de l'épisode, en secondes, pour écrire la
-#: réponse : passé ce point, elle s'arrête et le premier jet part
-_PASS_SPARE_S = 5.0
-
-
-def _no_tools(spec: Any, call_id: str) -> ToolContext:
-    """Le contexte d'outil d'une passe qui n'en offre aucun : jamais demandé."""
-    raise RuntimeError("une passe sans outil n'appelle pas d'outil")
-
-
-def is_silence(text: str) -> bool:
-    """Elle a choisi de se taire : la balise ``[SILENCE]`` sous toutes ses formes réelles (``[silence]``,
-    ``[SILENCE].``, ``**[SILENCE]**``, « [SILENCE] », ``[SILENCE] (un commentaire)``, une phrase suivie de
-    ``[SILENCE]``), ou le seul mot *silence*, nu ou entre parenthèses (``SILENCE``, ``(silence)``). Jamais
-    un vrai message qui contient le mot (« le silence de la nuit me plaît »)."""
-    if _SILENCE_TAG.search(text):
-        return True
-    bare = text.strip(_DRESSING).rstrip(".!?…:;,").strip(_DRESSING)
-    return bool(_BARE_SILENCE.fullmatch(bare))
-
-
-#: les balises (``[EMOTION:happy:0.5]``, que le fil montré au modèle garde ; ``[SIGH]``, ``[PAUSE:500]``) et la
-#: ponctuation ne font pas une autre phrase
-_VOICE_TOKEN = re.compile(r"\[[^\[\]\n]{1,40}\]")
-_NOT_WORDS = re.compile(r"[^\w]+")
-#: en deçà (en caractères), un petit mot (« d'accord ») : il se redit
-REPEAT_MIN_CHARS = 30
-#: une réponse à quelques mots seulement (« re », « hey ») …
-SHORT_WORDS = 2
-#: … qui ressemble à ce point à son dernier message en est une redite
-NEAR_RATIO = 0.85
-
-
-def _plain(text: str) -> str:
-    return " ".join(_NOT_WORDS.sub(" ", _VOICE_TOKEN.sub(" ", text).lower()).split())
-
-
-def repeats_last(text: str, req: LLMRequest) -> bool:
-    """Elle allait redire, mot pour mot, son dernier message du fil qu'on lui a montré (sonde réelle du
-    2026-10-03 : à « re », la même phrase que son initiative d'une minute plus tôt, à l'identique). Une personne ne
-    se répète pas ainsi : mieux vaut se taire."""
-    last = next((m.content for m in reversed(req.messages) if m.role == "assistant" and m.content.strip()), "")
-    mine, before = _plain(text), _plain(last)
-    if min(len(mine), len(before)) < REPEAT_MIN_CHARS:
-        return False  # « d'accord », « haha ok » : un petit mot se redit sans qu'on se répète
-    if mine == before:
-        return True  # à l'identique (à la ponctuation et aux balises près)
-    # presque la même phrase, quand la personne n'a dit que deux mots (« re », « hey ») : la sonde du 2026-10-03,
-    # « joyeux anniversaire pour tes 30 ans… » à son initiative, puis « joyeux anniv' pour tes 30 ans… » à « hey ».
-    # Ailleurs, une variante (« numéro 3 », « numéro 4 ») n'est pas une redite : « CE QUE TU TE RÉPÈTES » s'en charge
-    heard = _plain(_current_message(req))
-    return 0 < len(heard.split()) <= SHORT_WORDS and difflib.SequenceMatcher(None, mine, before).ratio() >= NEAR_RATIO
-
-
-def _current_message(req: LLMRequest) -> str:
-    """Ce que la personne vient d'écrire : la fin du dernier tour (après l'état interne, s'il y est)."""
-    last = req.messages[-1].content if req.messages and req.messages[-1].role == "user" else ""
-    return last.rsplit(CONTEXT_FOOTER, 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +175,19 @@ class _Live:
     deadline: asyncio.Timeout | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _Composed:
+    """Ce que rend la composition d'un épisode (``EpisodeRunner._compose``)."""
+
+    #: la requête du premier appel ; ``None`` : sans rôle, rien ne part au modèle
+    request: LLMRequest | None
+    #: les outils offerts, par nom (``tool_offer.offer``)
+    tools: dict[str, Any]
+    persona: PersonaRender | None
+    prompt: ChatPrompt
+    trace: ComposeTrace
+
+
 class EpisodeRunner:
     def __init__(
         self,
@@ -303,16 +218,9 @@ class EpisodeRunner:
         self.persona = persona
         self.audience_of = audience_of
         self.parsers = list(parsers)
-        self.polishers = list(polishers)
-        #: les sortes d'épisode dont la parole passe une seconde fois, pour être rendue naturelle (``polishers``)
-        self.polished = frozenset(polished)
-        #: ce qui recalcule les annotations d'une parole récrite par la seconde passe (``Reannotator``)
-        self.reannotators = list(reannotators)
-        #: l'autrice de chaque flux (ADR 0124) ; ``None`` : le chat garde son autrice d'avant elles, un brouillon n'en a
-        #: pas
-        self.authors = authors
-        #: ce qui écrit la passe d'une autrice sur un brouillon d'outil (``DraftPolisher``)
-        self.draft_polishers = list(draft_polishers)
+        #: la seconde passe sur sa parole et l'autrice d'un brouillon d'outil (``runtime/second_pass.py``)
+        self.second = SecondPass(gateway, mind.clock, self._parse, polishers=polishers, polished=polished,
+                                 reannotators=reannotators, authors=authors, draft_polishers=draft_polishers)
         #: les façons de répondre qu'un message peut demander, par nom (``EpisodeRequest.mode``)
         self.modes = dict(modes or {})
         self.composer = composer or Composer()
@@ -364,7 +272,7 @@ class EpisodeRunner:
             got = await acall(self._run, ep, label=f"épisode {req.kind}")
             if isinstance(got, Failed):
                 # une exception imprévue : l'épisode est réglé quand même (jamais laissé ouvert)
-                await self._settle(ep, _failed(got.error), detail=_describe(got.error))
+                await self._settle(ep, _failed(got.error), detail=describe(got.error))
         finally:
             self._live.pop(eid, None)
             mind.untrack(eid)
@@ -429,8 +337,8 @@ class EpisodeRunner:
                 if req.kind in CONVERSATIONAL:
                     # la forme n'a qu'une maison, l'autrice du chat (ADR 0140) : ses codes passent en seconde passe,
                     # ou, quand aucune ne suivra, dans le premier jet (« COMMENT TU ÉCRIS ICI »)
-                    polished = self._authored(req.kind) and (ep.mode is None or ep.mode.polished)
-                    author = self._author(flows.CHAT)
+                    polished = self.second.authored(req.kind) and (ep.mode is None or ep.mode.polished)
+                    author = self.second.author(flows.CHAT)
                     attrs["second_pass"] = polished
                     attrs["form"] = "" if polished or author is None else author.codes
                 episode = EpisodeRef(eid, req.kind, req.target, policy.muted_tags, FrozenDict(attrs))
@@ -449,72 +357,15 @@ class EpisodeRunner:
                     await self._settle(ep, Outcome.ABSTAINED, detail="elle s'est ravisée")
                     return
 
-                enrich = await self._enrich(frame, policy)
-                blocks = self._sections(frame, enrich)
-                # ce qui part au modèle hors du composeur (persona, catalogue, outils) : le budget le réserve
-                persona = self.persona(frame, policy.persona_depth) if (
-                    policy.role is not None and policy.voice and self.persona) else None
-                rights, close = gate_of(self.mind.registry, frame)
-                tools = self._tools(policy, req.kind, audience,
-                                    req.selected.args.get("bundles") if req.selected is not None else None, frame,
-                                    rights, close)
-                offered = list(tools.values())
-                core = _in_hand(policy, req)
-                if core is not None and policy.role is not None and not _defers(self.gateway, policy.role):
-                    # un fournisseur sans recherche d'outils reçoit tout : le prompt ne parle pas d'outils à chercher
-                    core = None
-                # une parole que quelqu'un lira : ses outils sont ses mains (faire, pas annoncer ni inventer)
-                more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
-                                                 catalogue(offered, core, mind.registry.bundles, rights),
-                                                 self._instruction(ep.mode))))
-                declared = declare(offered, core, rights)
-                provider_budget = getattr(self.gateway, "budget", None)
-                budget = self.budget or (provider_budget(policy.role, policy.max_tokens) if (
-                    provider_budget is not None and policy.role is not None) else Budget(max_tokens=24_000))
-                budget = replace(budget, message_overhead=round(16 * budget.chars_per_token))
-                envelope = round((64 + 16 * 2) * budget.chars_per_token)
-                prompt, trace = self.composer.compose(
-                    blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
-                    tied_level=audience.tied_level, veiled_level=audience.veiled_level, muted_tags=policy.muted_tags,
-                    message=message, budget=budget,
-                    reserved=_reserved(persona, more, declared) + envelope if policy.role is not None else 0,
-                    typed_chars=req.typed_chars if message == req.message else None,
-                    # jamais un dernier tour utilisateur vide (une initiative sans consigne, tout le volatile coupé) :
-                    # l'API refuse une conversation qui finit sur un tour de l'assistant
-                    silence=phrase("llm.thread.silence"),
-                )
-                report.trace = trace
-                ep.seen.update(_composition(req, audience, policy.role, message, trace, enrich),
-                               at=mind.clock.now())
-                if ep.mode is not None:
-                    ep.seen["mode"] = req.mode
-                if req.strand is not None:
-                    ep.seen["strand"] = req.strand
-                if policy.role is None:
+                composed = await self._compose(ep, frame, audience, message)
+                llm_req, tools, persona, prompt = composed.request, composed.tools, composed.persona, composed.prompt
+                if llm_req is None:
+                    # sans rôle, pas de modèle : l'épisode composé (sa trace le dit) se règle là
                     await self._settle(ep, Outcome.DONE)
                     return
-                stable = (persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable
-                llm_req = LLMRequest(
-                    role=policy.role, call_id=f"{eid}#0",
-                    system_stable=f"{stable}\n\n{more}".strip() if more else stable,
-                    # l'état volatil voyage dans le dernier tour utilisateur (après les
-                    # points de cache) : ne pas le répéter dans le système
-                    system_volatile="",
-                    messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
-                    tools=declared, max_tokens=policy.max_tokens, persona=persona,
-                    lane=policy.lane, priority=req.priority,
-                    # le délai de chaque appel : celui de l'épisode (le mode pro a quinze minutes, pas les deux de sa
-                    # voie), et jamais plus que ce qui lui reste (``DEADLINE_AT``)
-                    deadline_s=policy.deadline_s,
-                    meta={"episode": eid, "kind": req.kind, "target": req.target, "sections": trace.included,
-                          "audience_level": audience.level, **_deadline_meta(ep)},
-                )
-
-                ep.seen.update(_request(llm_req))
-                self._record(ep, settled=False)
 
                 def author_draft(flow: str, text: str, about: str) -> Awaitable[str]:
-                    return self._author_draft(ep, eid, llm_req, flow, text, about)
+                    return self.second.author_draft(ep.seen, ep.deadline, eid, llm_req, flow, text, about)
 
                 def make_ctx(spec: Any, call_id: str) -> ToolContext:
                     return ToolContext(mind, spec, call_id, eid, Frame(mind.root, mind.clock.now(),
@@ -535,7 +386,7 @@ class EpisodeRunner:
                 )
                 ep.preemptible = False
                 if isinstance(loop, Failed):
-                    await self._settle(ep, _failed(loop.error), detail=_describe(loop.error))
+                    await self._settle(ep, _failed(loop.error), detail=describe(loop.error))
                     return
                 report.tools = loop.calls
                 if loop.stop == "refusal":
@@ -552,35 +403,22 @@ class EpisodeRunner:
                 if policy.max_paragraphs:
                     text = first_paragraphs(text, policy.max_paragraphs)
                 if not text.strip() or is_silence(text):
-                    if loop.stop == "max_turns" and not policy.delivered and any(x.ends_loop for x in tools.values()):
-                        # une séance qui se conclut par un outil (une exécution, un pas) et ne l'a pas fait : au
-                        # plafond, elle n'a rien conclu — muette, pas en panne (ADR 0161 ; la CLI garde ses outils au
-                        # tour de clôture, et un appel y rend un texte vide)
-                        await self._settle(ep, Outcome.DONE)
-                    elif loop.stop in _UNFINISHED and not loop.text.strip():
-                        # elle n'a pas pu finir (trop d'appels d'outils) : ce n'est pas un silence choisi
-                        await self._settle(ep, Outcome.FAILED, detail=f"pas de réponse au bout des outils "
-                                                                      f"({loop.stop})")
-                    elif not policy.delivered and any(ok for _name, ok in loop.calls):
-                        # un travail pour elle seule fait par ses outils (le tri d'une file, un verdict) : c'est fait,
-                        # pas un silence choisi — il n'y avait rien à dire à personne
-                        await self._settle(ep, Outcome.DONE)
-                    else:
-                        await self._settle(ep, Outcome.ABSTAINED)
+                    outcome, detail = self._unspoken(ep, loop, tools)
+                    await self._settle(ep, outcome, detail=detail)
                     return
                 # la seconde passe : le texte seul, rendu naturel au vu du fil, sans rien y ajouter ; ses balises
                 # restent celles du premier jet (ce qu'elle ressent ne change pas), et ses outils ne se refont pas —
                 # mais ce qui décrit la forme du texte (une question posée, le passage faux) suit le message envoyé.
                 # Un mode peut la taire (le mode pro, ADR 0116)
-                authored = (self._authored(req.kind) and policy.delivered
+                authored = (self.second.authored(req.kind) and policy.delivered
                             and (ep.mode is None or ep.mode.polished))
                 if authored:
                     # ce que la personne vient d'écrire : la consigne d'une initiative (« personne ne vient de
                     # t'écrire… ») n'est pas une ligne du fil
-                    polished = await self._polish(ep, eid, llm_req, text, req.message or "", make_ctx, persona,
-                                                  dict(prompt.bodies))
+                    polished = await self.second.polish(ep.seen, ep.deadline, eid, llm_req, text, req.message or "",
+                                                        persona, dict(prompt.bodies))
                     if polished != text:
-                        annotations = self._reannotate(text, annotations, polished)
+                        annotations = self.second.reannotate(text, annotations, polished)
                     text = polished
                 # un message qui emporte un fichier n'est pas une redite, même s'il redit sa phrase (« tiens, la
                 # voilà ») : se taire perdrait le fichier
@@ -592,37 +430,8 @@ class EpisodeRunner:
                 if ep.superseded is not None:
                     raise ep.superseded
                 self._check_preempted(ep)
-                ep.committing = True  # point de non-retour : l'énoncé s'écrit
-                answers = (turn_upto(mind.root.slices[RUNTIME.name], req.reply_to)
-                           if req.reply_to is not None else ())
-                inflight = mind.inflight(eid)
-                basis = inflight.basis if inflight is not None else start.root
-                voice = VoiceProvenance(
-                    call_id=llm_req.call_id, persona_hash=persona.hash if persona else "",
-                    role=policy.role, model=(loop.last.model if loop.last else ""),
-                )
-                commit = await mind.append(
-                    [UTTERANCE.draft(
-                        kind=req.kind, text=Content.of(text, level=0), voice=voice, target=req.target,
-                        channel=req.channel or audience.channel or None, room=req.room or audience.room,
-                        reply_to=req.reply_to, visible=policy.visible,
-                        annotations=tuple(sorted(annotations.items())),
-                        tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
-                        sections=trace.included,
-                        provenance=tuple(dict.fromkeys((*trace.provenance, *loop.provenance))), answers=answers,
-                        attachments=tuple(loop.attachments), about=req.about,
-                        mode=req.mode if ep.mode is not None else "", strand=req.strand,
-                        floor=max(loop.floor, trace.floor), unkept=loop.unkept or trace.unkept,
-                    )],
-                    emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
-                    guard=guard, holder=eid,
-                )
-                report.text = text
-                report.utterance_seq = commit.seqs[-1]
-                mind.untrack(eid)
-                if self.interpret is not None:
-                    await self.interpret(commit.seqs[-1], eid)
-                await self._settle(ep, Outcome.DONE)
+                await self._commit(ep, llm_req, persona, composed.trace, loop, text, annotations,
+                                   audience=audience, guard=guard, started=start.root)
         except Superseded as failure:
             await self._settle(ep, Outcome.SUPERSEDED, failure)
         except asyncio.CancelledError as exc:
@@ -645,6 +454,137 @@ class EpisodeRunner:
             await self._settle(ep, Outcome.TIMEOUT)
         except _Busy as busy:
             await self._settle(ep, Outcome.SUPERSEDED, Superseded("baux", f"ressource occupée : {busy.resource}"))
+
+    async def _compose(self, ep: _Live, frame: Frame, audience: Audience, message: str) -> _Composed:
+        """La composition : enrichissements, sections, persona, outils offerts et prompt, puis la requête du premier
+        appel, notée dans la trace (``_record``) avant que rien ne parte. Sans rôle (``policy.role``), pas de
+        requête : la composition est tracée, rien ne part au modèle."""
+        mind, req, policy = self.mind, ep.req, ep.policy
+        eid, report = ep.id, ep.report
+        enrich = await self._enrich(frame, policy)
+        blocks = self._sections(frame, enrich)
+        # ce qui part au modèle hors du composeur (persona, catalogue, outils) : le budget le réserve
+        persona = self.persona(frame, policy.persona_depth) if (
+            policy.role is not None and policy.voice and self.persona) else None
+        rights, close = gate_of(self.mind.registry, frame)
+        tools = self._tools(policy, req.kind, audience,
+                            req.selected.args.get("bundles") if req.selected is not None else None, frame,
+                            rights, close)
+        offered = list(tools.values())
+        core = _in_hand(policy, req)
+        if core is not None and policy.role is not None and not defers_tools(self.gateway, policy.role):
+            # un fournisseur sans recherche d'outils reçoit tout : le prompt ne parle pas d'outils à chercher
+            core = None
+        # une parole que quelqu'un lira : ses outils sont ses mains (faire, pas annoncer ni inventer)
+        more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
+                                         catalogue(offered, core, mind.registry.bundles, rights),
+                                         self._instruction(ep.mode))))
+        declared = declare(offered, core, rights)
+        provider_budget = getattr(self.gateway, "budget", None)
+        budget = self.budget or (provider_budget(policy.role, policy.max_tokens) if (
+            provider_budget is not None and policy.role is not None) else Budget(max_tokens=24_000))
+        budget = replace(budget, message_overhead=round(16 * budget.chars_per_token))
+        envelope = round((64 + 16 * 2) * budget.chars_per_token)
+        prompt, trace = self.composer.compose(
+            blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
+            tied_level=audience.tied_level, veiled_level=audience.veiled_level, muted_tags=policy.muted_tags,
+            message=message, budget=budget,
+            reserved=_reserved(persona, more, declared) + envelope if policy.role is not None else 0,
+            typed_chars=req.typed_chars if message == req.message else None,
+            # jamais un dernier tour utilisateur vide (une initiative sans consigne, tout le volatile coupé) :
+            # l'API refuse une conversation qui finit sur un tour de l'assistant
+            silence=phrase("llm.thread.silence"),
+        )
+        report.trace = trace
+        ep.seen.update(_composition(req, audience, policy.role, message, trace, enrich),
+                       at=mind.clock.now())
+        if ep.mode is not None:
+            ep.seen["mode"] = req.mode
+        if req.strand is not None:
+            ep.seen["strand"] = req.strand
+        if policy.role is None:
+            return _Composed(None, tools, persona, prompt, trace)
+        stable = (persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable
+        llm_req = LLMRequest(
+            role=policy.role, call_id=f"{eid}#0",
+            system_stable=f"{stable}\n\n{more}".strip() if more else stable,
+            # l'état volatil voyage dans le dernier tour utilisateur (après les
+            # points de cache) : ne pas le répéter dans le système
+            system_volatile="",
+            messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
+            tools=declared, max_tokens=policy.max_tokens, persona=persona,
+            lane=policy.lane, priority=req.priority,
+            # le délai de chaque appel : celui de l'épisode (le mode pro a quinze minutes, pas les deux de sa
+            # voie), et jamais plus que ce qui lui reste (``DEADLINE_AT``)
+            deadline_s=policy.deadline_s,
+            meta={"episode": eid, "kind": req.kind, "target": req.target, "sections": trace.included,
+                  "audience_level": audience.level, **_deadline_meta(ep)},
+        )
+
+        ep.seen.update(_request(llm_req))
+        self._record(ep, settled=False)
+        return _Composed(llm_req, tools, persona, prompt, trace)
+
+    @staticmethod
+    def _unspoken(ep: _Live, loop: LoopResult, tools: Mapping[str, Any]) -> tuple[Outcome, str]:
+        """L'issue d'un épisode qui n'a rien dit (un texte vide, un silence), et son détail : ce que sa boucle
+        d'outils a fait dit si c'est un travail fait, une boucle qui n'a pas pu finir ou un silence choisi. ``_run``
+        la règle."""
+        policy = ep.policy
+        if loop.stop == "max_turns" and not policy.delivered and any(x.ends_loop for x in tools.values()):
+            # une séance qui se conclut par un outil (une exécution, un pas) et ne l'a pas fait : au
+            # plafond, elle n'a rien conclu — muette, pas en panne (ADR 0161 ; la CLI garde ses outils au
+            # tour de clôture, et un appel y rend un texte vide)
+            return Outcome.DONE, ""
+        elif loop.stop in _UNFINISHED and not loop.text.strip():
+            # elle n'a pas pu finir (trop d'appels d'outils) : ce n'est pas un silence choisi
+            return Outcome.FAILED, f"pas de réponse au bout des outils ({loop.stop})"
+        elif not policy.delivered and any(ok for _name, ok in loop.calls):
+            # un travail pour elle seule fait par ses outils (le tri d'une file, un verdict) : c'est fait,
+            # pas un silence choisi — il n'y avait rien à dire à personne
+            return Outcome.DONE, ""
+        else:
+            return Outcome.ABSTAINED, ""
+
+    async def _commit(self, ep: _Live, llm_req: LLMRequest, persona: PersonaRender | None, trace: ComposeTrace,
+                      loop: LoopResult, text: str, annotations: Mapping[str, str], *, audience: Audience,
+                      guard: Guard, started: Root) -> None:
+        """L'énoncé et son règlement, à partir du point de non-retour : l'énoncé s'écrit sous la garde de l'épisode,
+        sur la base où le Mind le suit (à défaut, ``started``, l'état de son départ gardé), et règle le tour qu'il clôt
+        (``answers``) ; les facultés l'interprètent, puis l'épisode se règle ``done``."""
+        mind, req, policy = self.mind, ep.req, ep.policy
+        eid, report = ep.id, ep.report
+        ep.committing = True  # point de non-retour : l'énoncé s'écrit
+        answers = (turn_upto(mind.root.slices[RUNTIME.name], req.reply_to)
+                   if req.reply_to is not None else ())
+        inflight = mind.inflight(eid)
+        basis = inflight.basis if inflight is not None else started
+        voice = VoiceProvenance(
+            call_id=llm_req.call_id, persona_hash=persona.hash if persona else "",
+            role=policy.role, model=(loop.last.model if loop.last else ""),
+        )
+        commit = await mind.append(
+            [UTTERANCE.draft(
+                kind=req.kind, text=Content.of(text, level=0), voice=voice, target=req.target,
+                channel=req.channel or audience.channel or None, room=req.room or audience.room,
+                reply_to=req.reply_to, visible=policy.visible,
+                annotations=tuple(sorted(annotations.items())),
+                tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
+                sections=trace.included,
+                provenance=tuple(dict.fromkeys((*trace.provenance, *loop.provenance))), answers=answers,
+                attachments=tuple(loop.attachments), about=req.about,
+                mode=req.mode if ep.mode is not None else "", strand=req.strand,
+                floor=max(loop.floor, trace.floor), unkept=loop.unkept or trace.unkept,
+            )],
+            emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
+            guard=guard, holder=eid,
+        )
+        report.text = text
+        report.utterance_seq = commit.seqs[-1]
+        mind.untrack(eid)
+        if self.interpret is not None:
+            await self.interpret(commit.seqs[-1], eid)
+        await self._settle(ep, Outcome.DONE)
 
     @staticmethod
     def _check_preempted(ep: _Live) -> None:
@@ -788,145 +728,10 @@ class EpisodeRunner:
 
     def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None,
                frame: Frame | None = None, rights: Any = None, close: Any = None) -> dict[str, Any]:
-        """Les outils offerts (``tools.offer``, la seule porte), avec ce que la porte lit du registre (ADR 0134)."""
+        """Les outils offerts (``tool_offer.offer``, la seule porte), avec ce que la porte lit du registre (ADR 0134)."""
         if rights is None:
             rights, close = gate_of(self.mind.registry, frame)
         return offer(self.mind.registry.tools, policy, kind, audience, only, frame, rights, close, self.ports)
-
-    @staticmethod
-    async def _extra_pass(ep: _Live, fn: Callable[[], Awaitable[LoopResult]], *, label: str) -> LoopResult | Failed:
-        """Un appel de plus sur un texte déjà prêt (seconde passe, autrice), rangé dans l'échéance de l'épisode
-        moins de quoi écrire la réponse (``_PASS_SPARE_S``) : s'il n'y tient pas, c'est une panne comme une autre et le
-        premier jet part — jamais l'échéance de l'épisode qui tomberait pendant lui et jetterait la réponse prête."""
-        if ep.deadline is None or (when := ep.deadline.when()) is None:
-            return await acall(fn, label=label)
-        try:
-            async with asyncio.timeout_at(when - _PASS_SPARE_S):
-                return await acall(fn, label=label)
-        except TimeoutError as exc:
-            return Failed(exc)
-
-    def _authored(self, kind: str) -> bool:
-        """Sa parole de cette sorte passe par l'autrice : un polisseur, cette sorte, une autrice au chat, et un modèle
-        au rôle ``polish``."""
-        serving = getattr(self.gateway, "serving", None)
-        return (bool(self.polishers) and kind in self.polished and callable(serving)
-                and bool(serving(str(Role.POLISH))) and self._author(flows.CHAT) is not None)
-
-    def _author(self, flow: str) -> Author | None:
-        """L'autrice d'un flux (``authors``). Sans réglage des autrices, le chat garde la sienne d'avant elles (le
-        cadre seul) et un brouillon n'en a pas."""
-        if self.authors is None:
-            return _CHAT_AUTHOR if flow == flows.CHAT else None
-        got = call(self.authors, flow, label="l'autrice d'un flux")
-        return got if isinstance(got, Author) else None
-
-    async def _polish(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
-                      make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None,
-                      bodies: Mapping[str, str]) -> str:
-        """Sa réponse récrite (``polishers``) par le modèle du rôle ``polish`` — seulement si l'opératrice lui en a
-        donné un : sans repli, une installation ne paie pas un second appel de sa voix sans l'avoir choisi. Le
-        polisseur dit ce qu'on garde de ce que l'appel a écrit (l'autrice écrit aussi la réponse de l'autre, ADR 0114).
-        ``bodies`` : le texte de chaque section de son prompt, par clé (``ChatPrompt.bodies``). Une panne, rien gardé,
-        un silence, ou une réponse qui dérive en longueur : le premier jet part tel quel."""
-        gateway = self.gateway
-        serving = getattr(gateway, "serving", None)
-        if gateway is None or not callable(serving) or not serving(str(Role.POLISH)):
-            return text
-        name = persona.name if persona is not None else ""
-        author = self._author(flows.CHAT)
-        if author is None:
-            return text
-        asked = None
-        for polisher in self.polishers:
-            got = call(polisher, text, llm_req.messages, heard, persona, author, bodies,
-                       label="seconde passe sur la réponse")
-            if isinstance(got, tuple):
-                asked = got
-                break
-        if asked is None:
-            return text
-        system, message, keep = asked
-        req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
-                         messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
-                         priority=llm_req.priority, deadline_s=llm_req.deadline_s,
-                         meta={**dict(llm_req.meta), "passe": "naturel"})
-        # ce qu'elle a lu et ce qu'elle a rendu, gardés dans la trace quelle que soit l'issue (« pourquoi a-t-elle dit
-        # ça ? ») ; écartée, la raison dit pourquoi le premier jet est parti
-        seen: dict[str, Any] = {"premier_jet": text, "autrice": author.key, "systeme": system, "message": message}
-        ep.seen["naturel"] = seen
-        again = await self._extra_pass(
-            ep, lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
-            label="seconde passe : appel du modèle")
-        if isinstance(again, Failed):
-            seen["ecartee"] = f"panne : {_describe(again.error)}"
-            return text
-        seen["reponse"] = again.text
-        kept = call(keep, again.text, label="seconde passe : ses messages")
-        if isinstance(kept, Failed):
-            seen["ecartee"] = "ses messages illisibles"
-            return text
-        polished, _annotations = self._parse(kept, name)
-        polished = polished.strip()
-        if not polished or is_silence(polished):
-            seen["ecartee"] = "rien rendu"
-            return text
-        if len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
-            seen["ecartee"] = "plus longue que le premier jet"
-            return text
-        if not keeps_facts(text, polished):
-            # l'autrice n'a pas vu les résultats des outils : une température, une heure, un lien du premier jet
-            # qui manquent au texte récrit, et c'est le premier jet qui part
-            seen["ecartee"] = "faits du premier jet perdus"
-            return text
-        return polished
-
-    async def _author_draft(self, ep: _Live, eid: str, llm_req: LLMRequest, flow: str, text: str, about: str) -> str:
-        """Un brouillon d'outil (un courriel, un message Teams, un SMS à la place de la personne) récrit par l'autrice
-        de son flux (ADR 0124), comme la seconde passe de sa parole : par le modèle du rôle ``polish`` seulement, sans
-        outil, en un tour. Pas d'autrice, pas de modèle, une panne, rien rendu, un silence, ou un texte qui dérive en
-        longueur : le premier jet est posé tel quel."""
-        gateway = self.gateway
-        serving = getattr(gateway, "serving", None)
-        author = self._author(flow)
-        if gateway is None or author is None or not callable(serving) or not serving(str(Role.POLISH)):
-            return text
-        asked = None
-        for polisher in self.draft_polishers:
-            got = call(polisher, flow, text, about, author, label="autrice d'un brouillon")
-            if isinstance(got, tuple):
-                asked = got
-                break
-        if asked is None:
-            return text
-        system, message = asked
-        done = ep.seen.setdefault("autrice", [])
-        req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#autrice{len(done)}", system_stable=system,
-                         messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
-                         priority=llm_req.priority, deadline_s=llm_req.deadline_s,
-                         meta={**dict(llm_req.meta), "passe": "autrice", "flux": flow})
-        again = await self._extra_pass(
-            ep, lambda: run_tool_loop(gateway, req, {}, _no_tools, max_turns=1, clock=self.mind.clock.now),
-            label="autrice d'un brouillon : appel du modèle")
-        if isinstance(again, Failed):
-            return text
-        written = again.text.strip()
-        fenced = _FENCED.match(written)
-        written = fenced.group(1).strip() if fenced else written
-        if not written or is_silence(written) or len(written) > len(text) * _POLISH_GROWTH + _DRAFT_SLACK \
-                or not keeps_facts(text, written):
-            return text
-        done.append({"flux": flow, "autrice": author.key, "premier_jet": text})
-        return written
-
-    def _reannotate(self, draft: str, annotations: Mapping[str, str], text: str) -> dict[str, str]:
-        """Les annotations du texte récrit (``reannotators``) ; une panne garde celles qu'on avait."""
-        out = dict(annotations)
-        for reannotator in self.reannotators:
-            got = call(reannotator, draft, out, text, label="annotations de la réponse récrite")
-            if not isinstance(got, Failed):
-                out = dict(got)
-        return out
 
     @staticmethod
     def _instruction(mode: EpisodeMode | None) -> str:
@@ -974,11 +779,11 @@ class EpisodeRunner:
 
     def _parse(self, text: str, speaker: str = "", *, markdown: bool = False) -> tuple[str, dict[str, str]]:
         """Le texte livrable et ce que les analyseurs en tirent. ``markdown`` : ses blocs de code, son code en ligne
-        et l'indentation de ses lignes passent à l'abri (``_shield``)."""
+        et l'indentation de ses lignes passent à l'abri (``reply_text.shield``)."""
         if markdown:
-            shielded, kept = _shield(text)
+            shielded, kept = shield(text)
             out, annotations = self._parse(shielded, speaker)
-            return _unshield(out, kept), annotations
+            return unshield(out, kept), annotations
         annotations: dict[str, str] = {}
         for parser in self.parsers:
             got = call(parser, text, speaker, label="analyse de réponse")
@@ -1013,30 +818,6 @@ class EpisodeRunner:
             label="régler l'épisode",
         )
         await self._show_done(ep, outcome)
-
-
-#: ce qu'une réponse en Markdown garde tel quel (``EpisodeMode.markdown``) : un bloc de code (fermé ou non), du code
-#: en ligne, l'indentation d'une ligne — les analyseurs rangent une parole de chat (espaces resserrés, indentation
-#: ôtée, ``[ARR]`` pris pour un jeton)
-_SHIELDED = re.compile(r"```.*?(?:```|\Z)|`[^`\n]+`|^[ \t]{2,}(?=\S)", re.DOTALL | re.MULTILINE)
-_SHIELD = re.compile("\ue000(\\d+)\ue001")
-
-
-def _shield(text: str) -> tuple[str, list[str]]:
-    """Le texte où chaque passage à garder tel quel est remplacé par un repère (des caractères à usage privé), et
-    ces passages dans l'ordre."""
-    kept: list[str] = []
-
-    def keep(m: re.Match[str]) -> str:
-        kept.append(m.group(0))
-        return f"\ue000{len(kept) - 1}\ue001"
-
-    return _SHIELDED.sub(keep, text), kept
-
-
-def _unshield(text: str, kept: Sequence[str]) -> str:
-    """Les passages gardés remis à leur repère (un repère inconnu se retire)."""
-    return _SHIELD.sub(lambda m: kept[int(m.group(1))] if int(m.group(1)) < len(kept) else "", text)
 
 
 def _turn_guard(req: EpisodeRequest) -> Guard | None:
@@ -1082,17 +863,6 @@ def _scope(root: Any, req: EpisodeRequest, eid: str) -> str:
     turn = turn_upto(root.slices[RUNTIME.name], req.reply_to)
     first = turn[0] if turn else req.reply_to
     return f"tour:{req.target}:{req.room or ''}:{req.strand or ''}:{first}"
-
-
-def _defers(gateway: LLMGateway | None, role: str) -> bool:
-    """Le fournisseur de ce rôle sait-il différer des outils ? (``tools.defers_tools``)"""
-    return defers_tools(gateway, role)
-
-
-def first_paragraphs(text: str, n: int) -> str:
-    """Les ``n`` premiers paragraphes d'un texte (séparés par une ligne vide)."""
-    kept = [part.strip() for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
-    return "\n\n".join(kept[:n])
 
 
 def _in_hand(policy: EpisodePolicy, req: EpisodeRequest) -> frozenset[str] | None:
@@ -1166,10 +936,6 @@ def _reserved(persona: PersonaRender | None, more: str, tools: Sequence[ToolDecl
     pas différer les envoie."""
     return (len(persona.text) + 2 if persona else 0) + (len(more) + 2 if more else 0) + sum(
         len(d.name) + len(d.description) + len(canonical_json(d.schema)) for d in tools)
-
-
-def _describe(error: BaseException) -> str:
-    return f"{type(error).__name__}: {error}"[:500]
 
 
 def _failed(error: BaseException) -> Outcome:

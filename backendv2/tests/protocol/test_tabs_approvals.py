@@ -11,7 +11,6 @@ from urllib.parse import parse_qs, urlsplit
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
-from mika.runtime import inspection
 from mika.runtime.inspection import Inspection
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_console_workflows import append
@@ -154,7 +153,7 @@ def test_a_name_is_decided_in_the_queue_with_both_answers(world):  # noqa: F811
     assert "C'est elle : relier" in actions and "onglet=synthese" in actions
     assert "/inspecteur/action/identity.ecarter_nom" in actions and "Ce n'est pas elle" in actions
     # son badge accorde son nom à son nombre, jamais « nom(s) » (ADR 0219)
-    names = inspection.find(live.kernel, "identity", "noms")
+    names = Inspection(live.kernel).find("identity", "noms")
     assert client.portal.call(lambda: Inspection(live.kernel).badge(names)) == (
         1, "nom dont on lui a parlé que porte quelqu'un qu'elle connaît")
     emit(client, live, "memory", [memory_c.BELIEVED.draft(

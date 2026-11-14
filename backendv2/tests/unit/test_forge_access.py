@@ -25,7 +25,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.plugins.forge import FORGE, calls, written_draft
 from mika.plugins.forge.calls import _section, call_digest
-from mika.runtime.tools import offer
+from mika.runtime.tool_offer import offer
 from mika.vocab.access import OWNER, PERSON
 from mika.vocab.episodes import PRO, Kind
 from tests.fixtures.mika import connect, effect_preview

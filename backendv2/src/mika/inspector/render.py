@@ -12,13 +12,14 @@ import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 from mika.inspector.document import readable_html, readable_text
 from mika.inspector.framed import SANDBOX
 from mika.inspector.svg import chart_svg
-from mika.kernel.clock import US
+from mika.kernel.clock import US, instant
 from mika.kernel.inspect import (
     ActionSlot,
     Badge,
@@ -142,6 +143,17 @@ def href(ref: Ref, env: Env | None = None) -> str:
         return (place or f"{PREFIX}/reglages/{quote(ref.key, safe='')}") + query
     place = env.views.get(ref.key, "") if env is not None else ""
     return f"{PREFIX}/{place}{query}" if place else f"{PREFIX}/facultes/{_two(ref.key)}{query}"
+
+
+#: au-delà, un instant ne se date plus (le calendrier s'arrête à l'an 9999) : c'est un « jamais », comme les ``2**62``
+#: d'une pensée qui ne naîtra plus, ou d'un processus que l'aperçu retient
+UNDATED_FROM = instant(datetime(9999, 1, 1, tzinfo=UTC))
+
+
+def dated(at: int | None) -> int | None:
+    """``at`` s'il se date ; ``None`` pour un « jamais » (au-delà de ``UNDATED_FROM``) : une échéance qu'aucune
+    date ne dit se lit « rien de prévu », pas « dans 53 millions de jours »."""
+    return at if at is not None and at < UNDATED_FROM else None
 
 
 def relative(at: int, now: int) -> str:

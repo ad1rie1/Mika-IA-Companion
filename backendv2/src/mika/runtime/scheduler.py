@@ -7,10 +7,22 @@ un seul à la fois par processus.
 
 Après un arrêt ou un saut d'horloge, une échéance très en retard donne **une**
 exécution, avec ``missed=(échéance, maintenant)`` : pas de rafale. Avec
-``CatchUp.SKIP``, elle est sautée une fois ; si ``next_due`` la redonne telle
-quelle (une échéance qui ne lit pas ``last_run``), le processus fait un passage
-ordinaire, sans ``missed``, au lieu de rester figé. Un quantum
-borne l'attente pour réévaluer les échéances qui dépendent du temps.
+``CatchUp.SKIP``, elle est sautée une fois, et une passe suit aussitôt, qui
+retient l'occurrence suivante ; si ``next_due`` la redonne telle quelle (une
+échéance qui ne lit pas ``last_run``), le processus fait un passage ordinaire,
+sans ``missed``, au lieu de rester figé.
+
+**Chaque processus à son quantum** (ADR 0223). L'ordonnanceur garde l'échéance
+que chaque processus a donnée et ne la lui redemande qu'après un ajout au
+journal, après un passage de ce processus, ou à cette échéance, au plus tard à
+son quantum (``max_quantum_s``) : le temps seul ne réévalue un processus qu'à
+son propre rythme, jamais à celui du plus pressé. Une échéance que le temps
+seul fait venir, sans événement (un fait ``time_varying``, l'heure locale), se
+dit en instant absolu ; sinon le quantum est le retard toléré, et un processus
+ne compte jamais sur la cadence d'un autre. Une échéance relative
+(``frame.now + 15 min``) est un relevé à cette cadence, comptée depuis la
+dernière demande ; plus longue que le quantum, elle n'arrive jamais. ``poke``
+fait tout redemander.
 
 **Boucles sûres par construction.** Un processus qui échoue n'est pas relancé
 aussitôt : son échéance est repoussée par un recul exponentiel (5 s, 10 s, …
@@ -32,6 +44,8 @@ un processus ne tient la voie ``model`` (bornée) que le temps de ses appels de
 modèle — deux consolidations lentes n'empêchent plus le sommeil de tomber ni
 l'attention de remarquer. Une voie déclarée exclusive (``night``) se tient pour
 tout le passage : le travail de la nuit se fait un à la fois.
+
+Seul l'ordonnanceur appelle ``next_due`` : la console lit l'échéance qu'il a retenue (``due``).
 """
 
 from __future__ import annotations
@@ -44,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 
 from mika.contracts.runtime import PROCESS_FAILED
 from mika.kernel.events import Draft, Event, Origin
-from mika.kernel.faculty import CatchUp, ProcessSpec
+from mika.kernel.faculty import NIGHT_LANE, CatchUp, ProcessSpec
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, combine
 from mika.kernel.state import Root
@@ -59,8 +73,8 @@ US = 1_000_000
 #: la voie des appels de modèle des processus (bornée)
 MODEL_LANE = "model"
 #: les voies tenues pour tout le passage (le travail de la nuit, un à la fois)
-EXCLUSIVE_LANES = frozenset({"night"})
-DEFAULT_LANES: Mapping[str, int] = {MODEL_LANE: 2, "night": 1}
+EXCLUSIVE_LANES = frozenset({NIGHT_LANE})
+DEFAULT_LANES: Mapping[str, int] = {MODEL_LANE: 2, NIGHT_LANE: 1}
 #: recul après un échec : 5 s, doublé à chaque échec d'affilée, jamais plus d'une heure
 BACKOFF_BASE_US = 5 * US
 BACKOFF_MAX_US = 3600 * US
@@ -119,6 +133,25 @@ class ProcessContext:
         return None if isinstance(got, Failed) else got
 
 
+@dataclass(slots=True)
+class _Asked:
+    """Ce qu'un processus a répondu la dernière fois qu'on lui a demandé son échéance, et jusqu'à quand cette
+    réponse vaut : elle ne se redemande qu'après un ajout (une autre racine), après un passage du processus (un
+    autre ``gen``) ou à ``until`` (voir ``Scheduler._still``)."""
+
+    #: la racine du cadre où l'échéance a été demandée (``Mind.frame()`` la garde tant que rien n'est écrit)
+    root: Root
+    #: les démarrages du processus à cet instant (``Scheduler._gen``)
+    gen: int
+    #: ce que ``next_due`` a rendu, avant le recul et la garde des passages à vide
+    raw: int | None
+    #: la plus proche de ``raw`` et de l'instant de la demande plus le quantum (``None`` : ni l'une ni l'autre,
+    #: elle ne se redemande qu'à un ajout ou à un passage)
+    until: int | None
+    #: l'instant de la demande
+    at: int
+
+
 class _BoundedLLM:
     """La passerelle vue d'un processus : chaque appel tient une place de la voie ``model`` le temps de
     l'appel, et seulement lui. Un processus ne mène pas de boucle d'outils (il lit une sortie structurée, au
@@ -174,8 +207,17 @@ class Scheduler:
         self._lanes = {name: asyncio.Semaphore(max(1, n)) for name, n in caps.items()}
         self.llm = _BoundedLLM(llm, self._lanes[MODEL_LANE]) if llm is not None else None
         self._last_run: dict[str, int] = {}
+        #: l'échéance que la dernière passe a retenue pour chaque processus (recul et garde compris) : ce que lit la console
+        self._due: dict[str, int | None] = {}
+        #: la dernière échéance donnée par chaque processus, gardée tant qu'elle vaut (``_Asked``)
+        self._asked: dict[str, _Asked] = {}
+        #: les démarrages de chaque processus et ses échéances en retard sautées : ce qu'il a dit avant ne vaut plus
+        #: (un compteur plutôt que ``_last_run`` : sous l'horloge virtuelle, deux passages tombent au même instant)
+        self._gen: dict[str, int] = {}
         #: l'échéance en retard sautée (``CatchUp.SKIP``) : si elle revient telle quelle, le processus tourne
         self._skipped: dict[str, int] = {}
+        #: ceux qu'un saut a fait repasser aussitôt : la passe d'après, un nouveau saut ne la redemande pas
+        self._skip_woken: set[str] = set()
         self._running: dict[str, asyncio.Task[None]] = {}
         self._wake = asyncio.Event()
         self._stopping = False
@@ -211,6 +253,9 @@ class Scheduler:
                     self._idle_streak.pop(spec.name, None)
 
     def poke(self) -> None:
+        """Une passe tout de suite, où chaque processus redonne son échéance : ce qui a changé hors du journal
+        (un saut d'horloge, un cache vidé) est revu."""
+        self._asked.clear()
         self._wake.set()
 
     def stop(self) -> None:
@@ -224,32 +269,41 @@ class Scheduler:
             frame = self.mind.frame()
             now = frame.now
             timer: int | None = None
-            due: list[tuple[int, ProcessSpec]] = []
+            ready: list[tuple[int, ProcessSpec]] = []
+            woken, self._skip_woken = self._skip_woken, set()
             for spec in self.specs:
                 if spec.name in self._running:
                     continue
-                state = frame.root.slices.get(spec.owner)
-                nd = call(self.instances[spec.name].next_due, state, frame, self._last_run.get(spec.name),
-                          label=f"échéance de {spec.name}")
-                if isinstance(nd, Failed):
-                    self._failed(spec.name, now, nd.error)
+                asked = self._still(spec, frame) or self._ask(spec, frame)
+                if asked is None:
                     continue
-                nd = self._held_back(spec.name, nd, now)
+                nd = asked.raw
+                if spec.name in self._idle_at or spec.name in self.not_before:
+                    # le recul et la garde des passages à vide bougent sans ajout : ils s'appliquent à chaque passe
+                    nd = self._held_back(spec.name, nd, now)
+                self._due[spec.name] = nd
                 if nd is not None and nd <= now:
-                    due.append((nd, spec))
+                    ready.append((nd, spec))
                     continue
-                horizon = now + spec.max_quantum_us if spec.max_quantum_us > 0 else None
-                candidates = [t for t in (nd, horizon) if t is not None]
-                if candidates:
-                    wake_at = min(candidates)
-                    timer = wake_at if timer is None else min(timer, wake_at)
-            for nd, spec in sorted(due, key=lambda x: (x[0], x[1].priority, x[1].name)):
+                # le réveil : son échéance retenue, ou l'instant de la lui redemander (une échéance due mais
+                # retenue n'a plus que sa retenue)
+                for at in (nd, asked.until):
+                    if at is not None and at > now:
+                        timer = at if timer is None else min(timer, at)
+            for nd, spec in sorted(ready, key=lambda x: (x[0], x[1].priority, x[1].name)):
                 missed = (nd, now) if spec.max_quantum_us > 0 and now - nd > spec.max_quantum_us else None
                 skipped = self._skipped.pop(spec.name, None)
                 if missed and spec.catch_up is CatchUp.SKIP:
                     if skipped is None or nd > skipped:
                         self._skipped[spec.name] = nd
                         self._last_run[spec.name] = now
+                        self._gen[spec.name] = self._gen.get(spec.name, 0) + 1
+                        if spec.name not in woken:
+                            # une passe aussitôt retient l'occurrence suivante (``due``) et en fait son réveil ;
+                            # une seule : un ``next_due`` qui redonne sans fin un retard neuf ne fait pas tourner
+                            # la boucle à vide
+                            self._skip_woken.add(spec.name)
+                            self._wake.set()
                         continue
                     # la même échéance revient : son ``next_due`` ne lit pas ``last_run``. Sauter voulait dire ne
                     # pas rattraper l'occurrence manquée, pas ne plus jamais tourner : un passage ordinaire.
@@ -271,6 +325,7 @@ class Scheduler:
         if self._storming(spec.name, now):
             return
         self._last_run[spec.name] = now
+        self._gen[spec.name] = self._gen.get(spec.name, 0) + 1  # ce qu'il a dit avant ce passage ne vaut plus
         run_id = f"{spec.name}:{self.mind.ids.new(now)}"
 
         async def job() -> None:
@@ -318,6 +373,40 @@ class Scheduler:
             label="journal d'échec de processus",
         )
 
+    def _still(self, spec: ProcessSpec, frame: Frame) -> _Asked | None:
+        """L'échéance gardée de ce processus, si elle vaut encore : rien d'écrit depuis (la même racine), aucun
+        passage (le même ``gen``), et l'instant de la redemander pas encore venu — ou bien venu, mais c'est
+        l'échéance qu'il avait donnée d'avance, avant son quantum : elle vaut telle quelle, et une échéance relative
+        (« dans un quart d'heure ») arrive au lieu de reculer à chaque demande.
+
+        Une échéance déjà due quand on l'a demandée (``raw <= at``), ou atteinte avec plus d'un quantum de retard
+        (un saut d'horloge), n'est jamais resservie : ``missed`` se calcule toujours sur une échéance fraîche."""
+        asked = self._asked.get(spec.name)
+        if asked is None or asked.root is not frame.root or asked.gen != self._gen.get(spec.name, 0):
+            return None
+        now, raw = frame.now, asked.raw
+        if asked.until is None or now < asked.until:
+            return asked
+        on_time = spec.max_quantum_us <= 0 or now - asked.until <= spec.max_quantum_us
+        return asked if raw is not None and raw == asked.until and raw > asked.at and on_time else None
+
+    def _ask(self, spec: ProcessSpec, frame: Frame) -> _Asked | None:
+        """Demande son échéance au processus et la garde, avec l'instant où la redemander : la plus proche d'elle
+        et de maintenant plus son quantum. ``None`` si ``next_due`` lève : l'échec est compté, rien n'est gardé, et
+        la passe suivante la redemande."""
+        name, now = spec.name, frame.now
+        got = call(self.instances[name].next_due, frame.root.slices.get(spec.owner), frame, self._last_run.get(name),
+                   label=f"échéance de {name}")
+        if isinstance(got, Failed):
+            self._asked.pop(name, None)
+            self._failed(name, now, got.error)
+            self._due[name] = None
+            return None
+        horizon = now + spec.max_quantum_us if spec.max_quantum_us > 0 else None
+        until = min((t for t in (got, horizon) if t is not None), default=None)
+        asked = self._asked[name] = _Asked(frame.root, self._gen.get(name, 0), got, until, now)
+        return asked
+
     def _held_back(self, name: str, nd: int | None, now: int) -> int | None:
         """L'échéance retenue : jamais avant la fin d'un recul ; et un processus qui, après un passage qui n'a
         rien écrit, se redit dû sur-le-champ (une échéance déjà passée, ou « maintenant ») sans que rien de ce
@@ -361,6 +450,13 @@ class Scheduler:
 
     def last_run(self, name: str) -> int | None:
         return self._last_run.get(name)
+
+    def due(self, name: str) -> int | None:
+        """L'échéance que la dernière passe a retenue pour ce processus, recul après un échec et garde des
+        passages à vide compris. ``None`` : il attend un événement, ou aucune passe ne l'a encore évalué. Un
+        processus en cours garde celle de la passe qui l'a lancé. Seul l'ordonnanceur appelle ``next_due`` : une
+        page lit ceci."""
+        return self._due.get(name)
 
     def running(self) -> list[str]:
         return sorted(self._running)

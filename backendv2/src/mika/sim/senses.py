@@ -34,7 +34,7 @@ from mika.plugins.forge import TICKED, WRITTEN, ForgeParams
 from mika.ports.feeds import Entry
 from mika.ports.forge import ui_load
 from mika.ports.mail import Mail
-from mika.runtime.inspection import Inspection, find
+from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim import expect
 from mika.sim.inner import _distressed, _sample_mood, until
@@ -169,7 +169,8 @@ async def _her_app(driver: Driver) -> dict[str, Any]:
     await driver.say("user_1", "écris-toi une app de relevés météo, avec une vue et une action")
     written = [e for e in driver.read_events() if e.type.name == WRITTEN.name and e.data.app == "meteo"]
     ui = ui_load(written[-1].data.ui) if written else None
-    ins, tab = Inspection(kernel), find(kernel, "forge", "vues")
+    ins = Inspection(kernel)
+    tab = ins.find("forge", "vues")
     assert tab is not None
     before = _blocks(await ins.arun(tab, {"vue": "releves", "ville": "Paris"}, subject="meteo"))
     form = {"_champs": ["ville", "temperature", "note"], "ville": ["Paris"], "temperature": ["-12"], "note": ["gel"],

@@ -246,7 +246,7 @@ def _remove(s: IdentityState, handle: str) -> IdentityState:
     return replace(s, handles=s.handles.delete(handle), by_person=by_person)
 
 
-@IDENTITY.process("identity.expire", lane="background", catch_up=CatchUp.SKIP, max_quantum_s=3600, priority=90,
+@IDENTITY.process("identity.expire", catch_up=CatchUp.SKIP, max_quantum_s=3600, priority=90,
                   reads=[social_c.CLOSENESS])
 class Expire:
     """Une fois par jour : les inconnues de passage silencieuses depuis ``stranger_ttl_days``, dont elle n'est pas

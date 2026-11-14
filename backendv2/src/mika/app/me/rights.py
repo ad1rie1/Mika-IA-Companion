@@ -2,7 +2,7 @@
 (le chat web, en privé ou dans un salon, l'app Android, Teams, le courrier) et à chaque moment (quand elle lui répond,
 quand elle lui parle d'elle-même), et seule quand elle travaille.
 
-Chaque case est la décision même de la porte d'offre (``runtime.tools.judge`` : les deux portes, le plafond, la
+Chaque case est la décision même de la porte d'offre (``runtime.tool_offer.judge`` : les deux portes, le plafond, la
 condition d'un outil, une ressource à son nom), jamais une recopie ; pour un service ou une app de la Forge, la ligne de
 leurs accès, telle que leur faculté la déclare (``RightsSpec.grants``). Ses ressources s'y rangent : ses propres
 outils, famille par famille, chacun nommé pour elle (``label``, ADR 0208) ; ses comptes (chaque boîte, chaque compte
@@ -37,7 +37,7 @@ from mika.kernel.frame import Audience
 from mika.plugins import forge as forge_p
 from mika.runtime.boundary import Failed, call
 from mika.runtime.inspection import Inspection
-from mika.runtime.tools import FITS, NEEDS, WHEN, Judged, allowed, gate_of, judge
+from mika.runtime.tool_offer import FITS, NEEDS, WHEN, Judged, allowed, gate_of, judge
 from mika.vocab.access import (
     ACCOUNT,
     ALONE,

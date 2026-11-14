@@ -120,7 +120,7 @@ def _keys(raw: Any) -> list[str]:
 
 @MEMORY.process("memory.consolidate", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, c.CONSOLIDATED,
                                                c.EXTRACTION_DEFERRED],
-                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=600)
+                catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Consolidate:
     def __init__(self) -> None:
         #: pas de nouveau passage avant : une panne passagère, ou une erreur hors des appels (aucune rafale)
@@ -1721,7 +1721,7 @@ def _at(frame: Frame, t: int, minutes: int) -> int:
 
 @MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE,
                                              goals_c.GOAL_OPENED],
-                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600)
+                catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class LetGo:
     """Une promesse qu'elle vient de tenir en le disant (l'initiative qui la tenait a parlé) est réglée : tenue.
     Une promesse ni tenue ni abandonnée s'abandonne quelques jours après son
@@ -1816,7 +1816,7 @@ def forgets_of(store: Any) -> int:
 
 
 @MEMORY.process("memory.index", wake_on=[*c.ALL, rt.UTTERANCE],
-                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=600)
+                catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Index:
     """L'index des vecteurs (un cache) suit la mémoire : à chaque passage, ce qui est né depuis le précédent
     (``id > ?``, textes compris) ; au premier passage, et après un oubli (``memory_forgets`` a bougé), un

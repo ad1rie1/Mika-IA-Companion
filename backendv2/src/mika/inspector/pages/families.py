@@ -22,7 +22,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Audience
 from mika.kernel.text import fold
 from mika.runtime import operations as ops
-from mika.runtime.tools import gate_of
+from mika.runtime.tool_offer import gate_of
 from mika.vocab.access import (
     ALONE,
     CARD,

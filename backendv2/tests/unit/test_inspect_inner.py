@@ -52,7 +52,7 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.ports.llm import LLMResponse, ToolCall
-from mika.runtime.inspection import Inspection, find, run_view, views
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, boot, build, connect, said
 
@@ -99,9 +99,10 @@ class Script:
 
 
 def show(kernel, owner: str, name: str, *, subject: str = "", **params: str) -> list[Block]:
-    spec = find(kernel, owner, name)
+    ins = Inspection(kernel)
+    spec = ins.find(owner, name)
     assert spec is not None, f"vue {owner}/{name} non déclarée"
-    return run_view(kernel, spec, params, subject=subject)
+    return ins.run(spec, params, subject=subject)
 
 
 def _cell(value: Any) -> str:
@@ -229,7 +230,7 @@ async def remember(kernel, *items: tuple[str, tuple[str, ...]], kind: str = "sou
 
 def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
     async def scenario(kernel):
-        declared = {(v.owner, v.name): v for v in views(kernel)}
+        declared = {(v.owner, v.name): v for v in Inspection(kernel).views()}
         shown = {key: show(kernel, *key) for key in INNER}
         tabs = {key: show(kernel, *key, subject="user_9") for key in TABS}
         bare = {key: show(kernel, *key) for key in TABS}
@@ -289,9 +290,9 @@ class _NoTables:
 def test_memory_views_survive_a_missing_projection(tmp_path):
     async def scenario(kernel):
         frame = kernel.mind.frame()
-        out = {}
+        ins, out = Inspection(kernel), {}
         for name in ("souvenirs", "croyances", "promesses", "consolidation", "memoire"):
-            spec = find(kernel, "memory", name)
+            spec = ins.find("memory", name)
             ctx = InspectContext(store=_NoTables(), ports={}, subject="user_2")
             out[name] = list(spec.fn(frame.state("memory"), frame, ctx))
         return out
@@ -528,7 +529,8 @@ def test_esteem_is_a_measured_series_and_its_curve_is_drawn(tmp_path):
             seen.append((key, until - since))
             return points
 
-        blocks = Inspection(kernel, sampler=sampler).run(find(kernel, "self", "soi"), {})
+        ins = Inspection(kernel, sampler=sampler)
+        blocks = ins.run(ins.find("self", "soi"), {})
         return spec, rested, knocked, blocks, seen
 
     spec, rested, knocked, blocks, seen = live(tmp_path, scenario)

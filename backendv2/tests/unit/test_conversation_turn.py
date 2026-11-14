@@ -26,7 +26,7 @@ from mika.kernel.clock import HOUR, MINUTE, US, local
 from mika.kernel.episode import Outcome
 from mika.ports.delivery import REPLY_ABSTAINED, REPLY_FAILED, REPLY_OUTCOMES
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall
-from mika.runtime.pipeline import is_silence
+from mika.runtime.reply_text import is_silence
 from mika.runtime.tools import run_tool_loop
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.scripted import ScriptedLLM

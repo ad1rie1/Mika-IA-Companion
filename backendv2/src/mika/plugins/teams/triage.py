@@ -95,7 +95,7 @@ def rule_of(p: TeamsParams, port: Any, account: str, conversation: str, author: 
     return teams_rule(p.canaux, account, conversation, title, author)
 
 
-@TEAMS.process("teams.triage", wake_on=[*body_c.ALL, RECEIVED], lane="background", catch_up=CatchUp.ONCE,
+@TEAMS.process("teams.triage", wake_on=[*body_c.ALL, RECEIVED], catch_up=CatchUp.ONCE,
                max_quantum_s=900, priority=70)
 class Triage:
     def __init__(self) -> None:

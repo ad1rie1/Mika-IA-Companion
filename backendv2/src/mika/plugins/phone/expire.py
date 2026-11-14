@@ -10,7 +10,7 @@ from mika.contracts import runtime as rt
 from mika.plugins.phone import PHONE, UNDER_WAY, PhoneState
 
 
-@PHONE.process("phone.expire", wake_on=[c.DRAFTED, c.SETTLED, rt.EFFECT_EXECUTED], lane="background",
+@PHONE.process("phone.expire", wake_on=[c.DRAFTED, c.SETTLED, rt.EFFECT_EXECUTED],
                max_quantum_s=60, priority=60)
 class Expire:
     def next_due(self, s: PhoneState, frame: Any, last_run: int | None) -> int | None:

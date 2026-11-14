@@ -379,7 +379,7 @@ def due_expiries(state: SharesState, now: int, p: SharesParams) -> list[tuple[st
     return out
 
 
-@SHARES.process("shares.retention", wake_on=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE], lane="background",
+@SHARES.process("shares.retention", wake_on=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE],
                 catch_up=CatchUp.ONCE,
                 max_quantum_s=600)
 class Retention:

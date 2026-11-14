@@ -13,7 +13,7 @@ from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app.server import build
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.clock import DAY, MINUTE, US
 from mika.runtime import operations
 from tests.protocol.test_console_diagnostics import stop
 from tests.protocol.test_drawn_pages import drawn
@@ -260,3 +260,66 @@ def test_the_state_gives_each_faculty_its_facts_and_its_slice_in_json(world):  #
     assert code.lstrip().startswith("{") and '"' in code
     slices = page[page.index('class="sys-state-slices"'):]
     assert slices.count('<a href="#st-') >= len(live.kernel.mind.root.slices)
+
+
+def test_processes_read_the_deadline_the_scheduler_kept_and_never_draw_for_the_arbiter(world, monkeypatch):  # noqa: F811
+    """Seul l'ordonnanceur appelle ``next_due`` : la page lit l'échéance qu'il a retenue (``Scheduler.due``, recul
+    après un échec et garde des passages à vide compris). La rendre ne fait pas le tirage de l'arbitre, que son
+    ``next_due`` fait dès qu'un événement l'a invalidé."""
+    client, live, _ = world
+    kernel = _life(client, live)
+    sched, arbiter = kernel.scheduler, kernel.arbiter
+    arbiter.invalidate()
+    draws = arbiter.draws
+    drawn(client, "/inspecteur/systeme/processus")
+    assert (arbiter.draws, arbiter.next_at) == (draws, None), "une page de lecture ne tire rien"
+    # un processus qui a échoué deux fois et attend son recul : la page dit son prochain essai, retenu par l'ordonnanceur
+    # (et un processus retenu à jamais, ``2**62``, comme l'aperçu les retient : ce n'est pas une date)
+    late, held = sched.specs[-1].name, sched.specs[0].name
+    at = kernel.mind.clock.now() + 20 * MINUTE + 30 * US
+    monkeypatch.setattr(sched, "due", {late: at, held: 2**62}.get)
+    monkeypatch.setitem(sched.consecutive, late, 2)
+    page = drawn(client, "/inspecteur/systeme/processus")
+    trouble = page.split('class="now-card sys-trouble"')[1].split("Par faculté")[0]
+    entry = trouble[trouble.rfind("<li", 0, trouble.index(f"<code>{late}</code>")):]
+    assert "prochain essai dans 20 min" in entry[:entry.index("</li>")]
+    assert _title(page, late).endswith("prochaine fois : dans 20 min")
+    # ce que l'ordonnanceur n'a pas daté attend un événement, ou rien
+    waiting = next(s.name for s in sched.specs if s.name not in (late, held) and s.wake_on)
+    assert _title(page, waiting).endswith("prochaine fois : à un événement")
+    never = "à un événement" if sched.specs[0].wake_on else "rien de prévu"
+    assert _title(page, held).endswith(f"prochaine fois : {never}")
+
+
+def test_processes_show_a_lane_only_when_it_says_something(world, monkeypatch):  # noqa: F811
+    """La voie d'un processus ne borne rien hors de la nuit (exclusive : un passage à la fois) : la page ne la montre
+    que là, ni « voie fond » ni « arbitre » ailleurs — sur les cartes de ce qui ne va pas, dans la bulle de chaque
+    processus, ni dans le détail de la vue en tableau."""
+    client, live, _ = world
+    kernel = _life(client, live)
+    sched = kernel.scheduler
+    night = "self.dream"
+    plain = next(s.name for s in sched.specs if not s.lane or s.lane == "background")
+    for name in (night, plain):  # deux processus en échec : leurs cartes montrent leurs faits
+        monkeypatch.setitem(sched.consecutive, name, 2)
+    page = drawn(client, "/inspecteur/systeme/processus")
+    assert "voie fond" not in page and "voie arbitre" not in page and "voie</span> fond" not in page
+    assert " · voie nuit (une à la fois) · " in _title(page, night)
+    assert "voie" not in _title(page, plain) and "voie" not in _title(page, "arbitre")
+    trouble = page.split('class="now-card sys-trouble"')[1].split("Par faculté")[0]
+
+    def card(name: str) -> str:
+        code = trouble.index(f"<code>{name}</code>")
+        return trouble[trouble.rfind("<li", 0, code):code]
+
+    assert '<span class="k">voie</span> nuit (une à la fois)' in card(night)
+    assert '<span class="k">voie</span>' not in card(plain)
+    # la vue en tableau : la voie, repliée dans le détail, ne dit « fond » pour personne
+    table = drawn(client, "/inspecteur/systeme/processus?vue_pg1=table")
+    assert "nuit (une à la fois)" in table and not re.search(r"<dt>voie</dt><dd>(<[^>]+>)*(fond|arbitre)<", table)
+
+
+def _title(page: str, process: str) -> str:
+    """La bulle d'un processus dans sa carte de faculté (« nom · voie · passages · prochaine fois : … »)."""
+    start = page.index(f'title="{process} · ') + len('title="')
+    return page[start:page.index('"', start)]

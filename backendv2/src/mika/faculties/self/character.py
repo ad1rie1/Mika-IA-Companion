@@ -142,7 +142,7 @@ def _character(s: SelfState, cx) -> str:
     return current(s)
 
 
-@SELF.process("self.character", wake_on=[c.PERSONA_REVISED], priority=10, lane="background", catch_up=CatchUp.ONCE,
+@SELF.process("self.character", wake_on=[c.PERSONA_REVISED], priority=10, catch_up=CatchUp.ONCE,
               max_quantum_s=600)
 class WriteCharacter:
     """Écrit son caractère dès que sa persona n'a pas le sien : au démarrage d'une vie, après un enregistrement

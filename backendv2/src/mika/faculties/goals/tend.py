@@ -231,7 +231,7 @@ def explored_title(t: attention_c.ThoughtReading, name: str) -> str:
 
 
 @GOALS.process("goals.seed", wake_on=[attention_c.THOUGHT_BORN, attention_c.DWELT, needs_c.FELT, *body_c.ALL,
-                                      memory_c.PROMISE_NOTICED, *c.ALL], lane="background", catch_up=CatchUp.ONCE,
+                                      memory_c.PROMISE_NOTICED, *c.ALL], catch_up=CatchUp.ONCE,
                max_quantum_s=1800, priority=60)
 class Seed:
     def __init__(self) -> None:
@@ -637,7 +637,7 @@ def _worn_out_at(g: Goal, p: Any) -> int | None:
 
 
 @GOALS.process("goals.tend", wake_on=[*c.ALL, GOAL_PAUSED, GOAL_RESUMED, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
-                                      rt.UTTERANCE, rt.PERCEPTION_RECEIVED], lane="background",
+                                      rt.UTTERANCE, rt.PERCEPTION_RECEIVED],
                catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: GoalsState, frame: Frame, last_run: int | None) -> int | None:

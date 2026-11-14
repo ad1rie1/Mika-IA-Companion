@@ -27,7 +27,7 @@ from mika.faculties.memory.consolidation import Index, LetGo
 from mika.kernel.arbitration import Anyone, Candidate, pool
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant
 from mika.kernel.events import Content, Origin, Payload
-from mika.kernel.faculty import Faculty
+from mika.kernel.faculty import NIGHT_LANE, Faculty
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy, CompositionError, Registry
 from mika.kernel.schedule import next_after, parse
@@ -464,6 +464,35 @@ async def _two(ev, ports):
 def test_two_effects_of_one_owner_on_one_type_are_refused_at_composition():
     with pytest.raises(CompositionError, match="deux effets"):
         Registry([TWICE])
+
+
+# ── K3-05 : la voie d'un processus ────────────────────────────────────────
+
+KNOWN_LANES = Faculty("known_lanes", state=Nothing, init=lambda p: Nothing())
+
+
+class _Never:
+    def next_due(self, state, frame, last_run):
+        return None
+
+    async def run(self, ctx) -> None:
+        return None
+
+
+KNOWN_LANES.process("known_lanes.plain")(_Never)
+KNOWN_LANES.process("known_lanes.night", lane=NIGHT_LANE)(_Never)
+ODD_LANE = Faculty("odd_lane", state=Nothing, init=lambda p: Nothing())
+ODD_LANE.process("odd_lane.tick", lane="background")(_Never)  # l'ancien défaut, qui ne bornait rien
+
+
+def test_a_process_lane_the_scheduler_does_not_know_is_refused_at_composition():
+    """Sans voie, ou la nuit (exclusive) : rien d'autre ne dit quelque chose à l'ordonnanceur. Une autre voie
+    ne bornerait rien, en silence ; la composition la refuse et dit quoi mettre à la place."""
+    Registry([KNOWN_LANES])  # les deux voies permises passent
+    with pytest.raises(CompositionError) as refused:
+        Registry([ODD_LANE])
+    assert refused.value.problems == [
+        "processus odd_lane.tick de odd_lane : voie inconnue « background » (vide, ou « night »)"]
 
 
 # ── KER-22 : l'heure d'hiver ──────────────────────────────────────────────

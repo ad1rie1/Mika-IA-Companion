@@ -36,7 +36,7 @@ from mika.kernel.inspect import (
 from mika.plugins.email.inspect import mail_key
 from mika.plugins.email.inspect.mail import _document
 from mika.ports.mail import Mail
-from mika.runtime.inspection import Inspection, find, run_view
+from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.outside import FakeMail
@@ -86,9 +86,10 @@ def events(kernel, event_type) -> list:
 
 
 def view(kernel, name: str, subject: str = "", **params: str) -> list:
-    spec = find(kernel, "email", name)
+    ins = Inspection(kernel)
+    spec = ins.find("email", name)
     assert spec is not None, name
-    return run_view(kernel, spec, params, subject=subject)
+    return ins.run(spec, params, subject=subject)
 
 
 def table(blocks, title: str) -> Table:

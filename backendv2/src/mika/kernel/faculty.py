@@ -10,8 +10,10 @@ projections, effets, vues d'inspecteur, invariants. Le registre
 from __future__ import annotations
 
 import enum
+import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -168,7 +170,9 @@ class ProcessSpec:
     priority: int = 50
     catch_up: CatchUp = CatchUp.ONCE
     max_quantum_us: int = 300 * 1_000_000
-    lane: str = "background"
+    #: vide, ou ``NIGHT_LANE`` (exclusive : un passage à la fois) ; ses appels de modèle prennent
+    #: toujours la voie ``model`` de l'ordonnanceur
+    lane: str = ""
     reads: frozenset[str] = frozenset()
     wake_shapes: tuple[type, ...] = ()
     #: au-delà, un passage est coupé et compte comme un échec (``None`` : l'échéance par défaut de
@@ -199,7 +203,7 @@ class ToolSpec:
     #: elle, « offert » laisserait croire qu'il servira)
     rule: str = ""
     #: le schéma de ses arguments tel que d'autres l'ont écrit (un outil venu d'ailleurs, ADR 0064) : déclaré tel
-    #: quel au modèle et vérifié par ``kernel.schema`` ; ``None`` : celui de ``args``
+    #: quel au modèle et vérifié par ``kernel.schema`` ; ``None`` : celui de ``args`` (``schema_of``)
     schema: Mapping[str, Any] | None = None
     #: en main quand il est offert, même si son lot n'est pas dans les lots en main de l'épisode
     in_hand: bool = False
@@ -228,6 +232,22 @@ class ToolSpec:
     label: str = ""
 
 
+#: les classes d'arguments dont le schéma est gardé (une par outil du code : moins d'une centaine)
+SCHEMAS_KEPT = 1024
+
+
+@lru_cache(maxsize=SCHEMAS_KEPT)
+def _schema_text(model: type[BaseModel]) -> str:
+    return json.dumps(model.model_json_schema(), ensure_ascii=False)
+
+
+def schema_of(model: type[BaseModel]) -> dict[str, Any]:
+    """Le schéma JSON des arguments ``model``, tel que ``model_json_schema`` le rend. Pydantic le recalcule à chaque
+    appel (3,5 ms pour celui de la relecture), et chaque épisode déclare ses outils : il se calcule une fois par
+    classe, qui ne change pas. Rendu en copie neuve, que l'appelant peut modifier sans toucher au suivant."""
+    return json.loads(_schema_text(model))
+
+
 @dataclass(frozen=True, slots=True)
 class ToolSourceSpec:
     """Une famille d'outils qui ne sont pas dans le code : ``fn(ports) -> (outils, lots)``, appelée par le
@@ -253,6 +273,13 @@ class ProjectorSpec:
 #: les capacités (lentes — une commande réseau, un envoi — chacune à part, en parallèle borné).
 DELIVERY_LANE = "delivery"
 CAPABILITY_LANE = "capability"
+
+#: La seule voie qu'un processus déclare : exclusive (un passage à la fois sur toute la voie, le travail
+#: de la nuit), tenue pour tout le passage. Avec ou sans elle, ses appels de modèle prennent la voie
+#: ``model`` de l'ordonnanceur.
+NIGHT_LANE = "night"
+#: les voies qu'un processus peut déclarer : aucune (``""``, le défaut) ou la nuit
+PROCESS_LANES: frozenset[str] = frozenset({"", NIGHT_LANE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -629,7 +656,7 @@ class Faculty(Generic[S, Pm]):
         priority: int = 50,
         catch_up: CatchUp = CatchUp.ONCE,
         max_quantum_s: float = 300.0,
-        lane: str = "background",
+        lane: str = "",  # vide, ou NIGHT_LANE : ses appels de modèle prennent toujours la voie « model »
         reads: Iterable[Declared | str] = (),
         wake_on_shapes: Iterable[type] = (),
         deadline_s: float | None = None,

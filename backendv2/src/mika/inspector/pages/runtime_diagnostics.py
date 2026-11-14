@@ -27,7 +27,8 @@ def process_blocks(ui: Any, query: Any) -> list[Any]:
     # Les problèmes restent visibles même lorsque la liste dépasse une page ; ensuite, l'ordre de l'ordonnanceur
     # (sa priorité : l'arbitre d'abord), le tri étant stable.
     specs = sorted(sched.specs, key=lambda s: (-sched.consecutive.get(s.name, 0), s.name not in running))
-    rows = tuple(Row((ui.names.process(s.name), state(s.name), ui.names.faculty(s.owner), names.lane(s.lane),
+    rows = tuple(Row((ui.names.process(s.name), state(s.name), ui.names.faculty(s.owner),
+                       names.process_lane(s.lane) or None,  # sans voie qui dise quelque chose : « — »
                        sched.runs.get(s.name, 0), sched.failures.get(s.name, 0),
                        When(sched.last_run(s.name)) if sched.last_run(s.name) else "—",
                        Text(names.detail(sched.last_error.get(s.name, (0, ""))[1]) or "—", clamp=240),

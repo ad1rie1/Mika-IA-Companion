@@ -19,7 +19,7 @@ from mika.kernel.prompt import CONTEXT_FOOTER
 from mika.plugins.email import MENTION_TITLE
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
-from mika.runtime.pipeline import repeats_last
+from mika.runtime.reply_text import repeats_last
 from mika.sim.llm.scripted import CHARACTER, LognormalLatency
 from mika.vocab.phrasebook import phrase
 

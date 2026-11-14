@@ -219,5 +219,5 @@ def shown(rows: Sequence[Row], fired: Row, top_k: int) -> list[Row]:
 def arbiter_spec(arbiter: Arbiter, *, quantum_s: float = 600.0) -> ProcessSpec:
     return ProcessSpec(
         owner="kernel", name="arbitre", process=arbiter, wake_on=frozenset({"*"}), priority=10,
-        max_quantum_us=int(quantum_s * 1_000_000), lane="arbitre",
+        max_quantum_us=int(quantum_s * 1_000_000),
     )

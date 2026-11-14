@@ -907,7 +907,7 @@ def emptiness(s: NeedsState, now: int, p: NeedsParams, lonely: bool = False) -> 
 
 @NEEDS.process("needs.empty", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
                                        c.FELT, *body_c.ALL, w.INTENDED, w.ENDED, w.CHANGED],
-               lane="background", catch_up=CatchUp.SKIP, max_quantum_s=3600)
+               catch_up=CatchUp.SKIP, max_quantum_s=3600)
 class Empty:
     """Quatre heures sans rien : un vide ressenti à intervalles tant
     qu'il dure (un état tenu, pas une dent de scie), qui se creuse avec la

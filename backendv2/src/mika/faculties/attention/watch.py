@@ -328,7 +328,7 @@ def alone_due(state: AttentionState, p: Any, frame: Frame | None = None) -> int 
                                                projects_c.OBJECTIVE_CLOSED, others_c.READ,
                                                *c.ALL, *body_c.ALL, *presence_c.ALL],
                    wake_on_shapes=[c.Signal],
-                   lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)
+                   catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)
 class Watch:
     def __init__(self) -> None:
         self.missing_at = 0

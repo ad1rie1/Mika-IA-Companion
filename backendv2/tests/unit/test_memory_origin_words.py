@@ -17,7 +17,6 @@ from mika.faculties.memory.inspect import ORIGIN_FR, ORIGIN_SHORT
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Table
 from mika.ports.llm import LLMResponse
-from mika.runtime import inspection
 from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build
@@ -88,8 +87,8 @@ def test_a_belief_she_read_says_so_in_the_console(tmp_path):
             await kernel.mind.append([memory_c.BELIEVED.draft(
                 text=Content.of("Le musée rouvre samedi."), origin=memory_c.READ, source="le-monde",
                 confidence=0.6)], emitter="memory", correlation="lu", origin=Origin.GENESIS)
-            spec = inspection.find(kernel, "memory", "croyances")
-            return Inspection(kernel).run(spec, {}, str)
+            ins = Inspection(kernel)
+            return ins.run(ins.find("memory", "croyances"), {}, str)
         finally:
             await kernel.stop()
 

@@ -55,7 +55,7 @@ def false_part(text: str, span: str | None) -> str:
     return part or text
 
 
-@MEMORY.process("memory.lies", wake_on=[rt.UTTERANCE, c.REMEMBERED], lane="background", catch_up=CatchUp.ONCE,
+@MEMORY.process("memory.lies", wake_on=[rt.UTTERANCE, c.REMEMBERED], catch_up=CatchUp.ONCE,
                 max_quantum_s=600)
 class Lies:
     def __init__(self) -> None:

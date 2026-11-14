@@ -855,7 +855,7 @@ def concerns(frame: Frame, app: App | None) -> tuple[tuple[str, ...], int]:
     return tuple(about), max(p.written, p.sensitivity) if about else 0
 
 
-@FORGE.process("forge.tick", wake_on=[WRITTEN, SWITCHED, *body_c.ALL], lane="background", catch_up=CatchUp.ONCE,
+@FORGE.process("forge.tick", wake_on=[WRITTEN, SWITCHED, *body_c.ALL], catch_up=CatchUp.ONCE,
                max_quantum_s=3600, priority=85)
 class Tick:
     def next_due(self, s: ForgeState, frame: Frame, last_run: int | None) -> int | None:
@@ -911,7 +911,7 @@ def outcomes(name: str, app: App, results: list[Any], now: int, p: ForgeParams, 
 
 
 @FORGE.process("forge.events", wake_on=[HANDLED, WRITTEN, SWITCHED, *body_c.ALL], wake_on_shapes=[attention_c.Signal],
-               lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=86)
+               catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=86)
 class Events:
     """Remettre à chaque app ce qu'elle attend, quelques événements à la fois."""
 
@@ -948,7 +948,7 @@ class Events:
                        *outcomes(name, app, results, frame.now, p, concern=concerns(frame, app)))
 
 
-@FORGE.process("forge.discover", wake_on=[], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=0, priority=90)
+@FORGE.process("forge.discover", wake_on=[], catch_up=CatchUp.ONCE, max_quantum_s=0, priority=90)
 class Discover:
     """Au démarrage : les apps posées sur le disque sans être passées par elle
     (restaurées d'une sauvegarde, écrites par un opérateur) entrent dans sa vie."""

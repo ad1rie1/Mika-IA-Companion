@@ -47,7 +47,8 @@ from mika.kernel.faculty import ToolSpec
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, ChatPrompt
 from mika.ports.llm import Held, LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, ToolDecl
 from mika.ports.llm_budget import LLMLimits
-from mika.runtime.tools import ToolResult, declare, run_tool_loop
+from mika.runtime.tool_offer import declare
+from mika.runtime.tools import ToolResult, run_tool_loop
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_claude.py"
 

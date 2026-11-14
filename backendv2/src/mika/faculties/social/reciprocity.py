@@ -64,7 +64,7 @@ def _due(s: SocialState, frame: Frame, p: Any) -> list[str]:
     return out
 
 
-@SOCIAL.process("social.reciprocity", wake_on=[rt.UTTERANCE], lane="background", catch_up=CatchUp.ONCE,
+@SOCIAL.process("social.reciprocity", wake_on=[rt.UTTERANCE], catch_up=CatchUp.ONCE,
                 max_quantum_s=3600, reads=[memory_c.HARD_TIMES])
 class Notice:
     """Elle remarque que c'est toujours elle qui écrit (une pensée, par l'attention)."""

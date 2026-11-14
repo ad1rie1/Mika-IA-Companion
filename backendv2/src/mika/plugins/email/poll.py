@@ -81,7 +81,7 @@ def read_triage(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
             "reponse": bool(data.get("reponse")), "emotion": emotion, "intensite": intensity}
 
 
-@EMAIL.process("email.poll", wake_on=[*body_c.ALL, POLL_ASKED], lane="background", catch_up=CatchUp.ONCE,
+@EMAIL.process("email.poll", wake_on=[*body_c.ALL, POLL_ASKED], catch_up=CatchUp.ONCE,
                max_quantum_s=1800, priority=70)
 class Poll:
     def __init__(self) -> None:

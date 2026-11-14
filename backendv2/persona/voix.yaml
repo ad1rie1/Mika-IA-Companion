@@ -6941,9 +6941,9 @@ web:
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-# SES OUTILS, EN GÉNÉRAL (runtime/tools.py) : ce qu'on lui dit de ses outils quand elle parle à quelqu'un, la liste
-# des lots qu'elle peut aller chercher, le dernier tour quand ses tours d'outils sont épuisés, et les réponses de la
-# boucle d'outils quand un appel ne peut pas partir.
+# SES OUTILS, EN GÉNÉRAL (runtime/tool_offer.py, runtime/tools.py) : ce qu'on lui dit de ses outils quand elle parle
+# à quelqu'un, la liste des lots qu'elle peut aller chercher (l'offre), le dernier tour quand ses tours d'outils sont
+# épuisés, et les réponses de la boucle d'outils quand un appel ne peut pas partir (la boucle).
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 runtime:
   tools:

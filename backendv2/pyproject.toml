@@ -56,6 +56,10 @@ markers = [
     "slow: tests longs (performances, scénarios complets)",
 ]
 addopts = "-q"
+# /tmp est un tmpfs : chaque tmp_path y reste en mémoire et compte dans la borne (scripts/borne.sh, 3 Go sans swap).
+# Gardés tous, ils pesaient 1,7 Go à la fin de la suite complète et la faisaient tuer (2026-11-14). Seuls ceux d'un
+# test en échec restent, pour qu'on les lise.
+tmp_path_retention_policy = "failed"
 
 [tool.ruff]
 line-length = 110

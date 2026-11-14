@@ -21,7 +21,7 @@ from mika.plugins.location import offered as located
 from mika.plugins.phone import offered as phoned
 from mika.ports.llm import LLMResponse
 from mika.runtime.pipeline import EpisodeRequest
-from mika.runtime.tools import offer
+from mika.runtime.tool_offer import offer
 from mika.sim.clock import run_virtual
 from mika.vocab.access import ALONE, EVERYONE, Table, ToolRule
 from mika.vocab.canals import Canals

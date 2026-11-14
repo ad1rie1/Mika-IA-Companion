@@ -50,7 +50,8 @@ from mika.kernel.faculty import ToolSpec
 from mika.kernel.frame import EpisodeRef
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.runtime.tools import ToolResult, declare, run_tool_loop
+from mika.runtime.tool_offer import declare
+from mika.runtime.tools import ToolResult, run_tool_loop
 from mika.vocab.episodes import Kind, goal_target, project_target
 from tests.fixtures.mika import said
 from tests.unit.test_projects import events, live

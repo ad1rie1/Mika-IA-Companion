@@ -525,7 +525,7 @@ def _last_night(s: BodyState, cx) -> c.NightReading | None:
 # ── Endormissement et réveil ──────────────────────────────────────────────
 
 
-@BODY.process("body.sleep", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, *c.ALL], lane="background",
+@BODY.process("body.sleep", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, *c.ALL],
               catch_up=CatchUp.ONCE, max_quantum_s=6 * 3600, priority=20)
 class Rest:
     """Émet les transitions à l'instant exact du croisement ; après un arrêt,

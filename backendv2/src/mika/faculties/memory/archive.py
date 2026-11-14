@@ -133,7 +133,7 @@ def recall_life(s, frame, ev, ports):
     return [c.LIFE_RECALLED.draft(items=items)] if items else []
 
 
-@MEMORY.process("memory.calendar", wake_on=[c.EVENT_NOTED], lane="background", catch_up=CatchUp.ONCE,
+@MEMORY.process("memory.calendar", wake_on=[c.EVENT_NOTED], catch_up=CatchUp.ONCE,
                 max_quantum_s=3600)
 class Calendar:
     def next_due(self, state, frame, last_run):

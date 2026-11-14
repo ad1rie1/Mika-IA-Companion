@@ -533,7 +533,7 @@ def level_of(p: Pending, sensitive: bool) -> int:
     return int(Sensitivity.ANODYNE) if p.public else int(Sensitivity.PERSONAL)
 
 
-@ATTACHMENTS.process("attachments.study", wake_on=[rt.PERCEPTION_RECEIVED, c.KEPT, c.EXPIRED], lane="background",
+@ATTACHMENTS.process("attachments.study", wake_on=[rt.PERCEPTION_RECEIVED, c.KEPT, c.EXPIRED],
                      catch_up=CatchUp.ONCE, max_quantum_s=600, deadline_s=600)
 class Study:
     """Lire de près, une pièce à la fois, la plus ancienne d'abord ; un échec passager se redemande plus tard."""
@@ -594,7 +594,7 @@ def vector_text(r: FileRow, linked: Sequence[str]) -> str:
 INDEX_RETRY_US = 10 * MINUTE
 
 
-@ATTACHMENTS.process("attachments.index", wake_on=[c.KEPT, c.LINKED, c.EXPIRED, *MEMORY_LINKS], lane="background",
+@ATTACHMENTS.process("attachments.index", wake_on=[c.KEPT, c.LINKED, c.EXPIRED, *MEMORY_LINKS],
                      catch_up=CatchUp.ONCE, max_quantum_s=600)
 class PieceIndexer:
     """L'index des vecteurs des pièces (un cache) : à chaque passage, ce qui a bougé depuis le précédent (une pièce
@@ -684,7 +684,7 @@ def due_expiries(state: AttachmentsState, frame: Frame, p: AttachmentsParams) ->
     return out
 
 
-@ATTACHMENTS.process("attachments.retention", wake_on=[c.KEPT, c.EXPIRED], lane="background",
+@ATTACHMENTS.process("attachments.retention", wake_on=[c.KEPT, c.EXPIRED],
                      catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Retention:
     """Retirer ce qui a fait son temps (``keep_days``) ou ce qui dépasse la place d'une personne : les octets

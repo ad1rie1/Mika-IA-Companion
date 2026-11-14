@@ -38,7 +38,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, SocialState, params
 from mika.kernel.events import Content
-from mika.kernel.faculty import CatchUp
+from mika.kernel.faculty import CatchUp, schema_of
 from mika.kernel.frame import Frame
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
 from mika.vocab.knowledge import knowns
@@ -61,7 +61,7 @@ class XProfile(BaseModel):
 
 def tool(name: str) -> ToolDecl:
     """L'outil de la fiche, au nom de celle qui la tient (celui de sa persona)."""
-    return ToolDecl(TOOL_NAME, phrase("social.profile.tool", name=name), XProfile.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("social.profile.tool", name=name), schema_of(XProfile))
 
 
 def system(name: str, persona: str) -> str:
@@ -222,7 +222,7 @@ def _due(s: SocialState, now: int, p: Any) -> list[tuple[int, str]]:
     return sorted(out)
 
 
-@SOCIAL.process("social.profile", wake_on=[memory_c.CONSOLIDATED], lane="background", catch_up=CatchUp.ONCE,
+@SOCIAL.process("social.profile", wake_on=[memory_c.CONSOLIDATED], catch_up=CatchUp.ONCE,
                 max_quantum_s=3600)
 class Revise:
     def __init__(self) -> None:

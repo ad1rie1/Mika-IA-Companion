@@ -56,7 +56,8 @@ from mika.ports.llm import (
     Usage,
 )
 from mika.ports.llm_budget import LLMLimits
-from mika.runtime.tools import TOOL_CALL_CAP_CEILING, ToolResult, declare, raised_cap, run_tool_loop
+from mika.runtime.tool_offer import declare
+from mika.runtime.tools import TOOL_CALL_CAP_CEILING, ToolResult, raised_cap, run_tool_loop
 from mika.vocab.episodes import Role
 from tests.contract.test_llm_backends import (
     FakeAnthropic,

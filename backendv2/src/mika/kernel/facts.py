@@ -115,9 +115,11 @@ class FactContext:
 
 
 class FactView:
-    """Lecture mémoïsée des faits d'une racine à un instant donné."""
+    """Lecture mémoïsée des faits d'une racine à un instant donné. Les paramètres de chaque fournisseur et le fuseau,
+    qui ne dépendent que de la racine, sont lus une fois par vue (``_settings``, partagé comme les faits) et non à
+    chaque fait calculé."""
 
-    __slots__ = ("_root", "_now", "_env", "_allowed", "_memo", "_trace")
+    __slots__ = ("_root", "_now", "_env", "_allowed", "_memo", "_trace", "_settings")
 
     def __init__(
         self,
@@ -127,6 +129,7 @@ class FactView:
         allowed: frozenset[str] | None = None,
         memo: dict[tuple[str, Hashable], Any] | None = None,
         trace: list[str] | None = None,
+        settings: dict[str | None, Any] | None = None,
     ) -> None:
         self._root = root
         self._now = now
@@ -134,6 +137,8 @@ class FactView:
         self._allowed = allowed
         self._memo = {} if memo is None else memo
         self._trace = trace
+        #: propriétaire → ses paramètres dans cette racine ; ``None`` → le fuseau
+        self._settings: dict[str | None, Any] = {} if settings is None else settings
 
     @property
     def root(self) -> Root:
@@ -144,7 +149,7 @@ class FactView:
         return self._now
 
     def restricted(self, allowed: frozenset[str] | None) -> FactView:
-        return FactView(self._root, self._now, self._env, allowed, self._memo, self._trace)
+        return FactView(self._root, self._now, self._env, allowed, self._memo, self._trace, self._settings)
 
     def get(self, ref: FactRef) -> Any:
         name = ref.name
@@ -157,11 +162,16 @@ class FactView:
             self._trace.append(name)
         spec = self._env.fact_spec(name)
         state = self._root.slices[spec.owner]
+        settings = self._settings
+        if spec.owner not in settings:
+            settings[spec.owner] = self._env.params_of(spec.owner, self._root)
+        if None not in settings:
+            settings[None] = self._env.tz_of(self._root)
         ctx = FactContext(
             now=self._now,
-            params=self._env.params_of(spec.owner, self._root),
-            facts=FactView(self._root, self._now, self._env, spec.reads, self._memo, self._trace),
-            tz=self._env.tz_of(self._root),
+            params=settings[spec.owner],
+            facts=FactView(self._root, self._now, self._env, spec.reads, self._memo, self._trace, settings),
+            tz=settings[None],
         )
         if isinstance(ref, BoundFact):
             value = spec.fn(state, ctx, ref.arg)

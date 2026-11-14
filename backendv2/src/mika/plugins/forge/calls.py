@@ -363,7 +363,7 @@ def _owed(s: ForgeState, frame: Frame) -> list[Candidate]:
     return out
 
 
-@FORGE.process("forge.calls_expire", wake_on=[rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED], lane="background",
+@FORGE.process("forge.calls_expire", wake_on=[rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED],
                max_quantum_s=60, priority=60)
 class Expire:
     """Une demande sans accord à temps est refusée au nom du délai (elle le saura comme un refus)."""

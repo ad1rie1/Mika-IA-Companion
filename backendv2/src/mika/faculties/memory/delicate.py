@@ -32,7 +32,7 @@ BATCH = 2000
 
 @MEMORY.process("memory.delicate", wake_on=[c.REMEMBERED, c.BELIEVED, c.ATTESTED, c.EVENT_NOTED,
                                            social_c.PROFILE_REVISED],
-                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600)
+                catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class Delicate:
     def __init__(self) -> None:
         #: le dernier élément examiné ; le portrait d'après lequel chaque personne a été relue (ses sujets délicats)

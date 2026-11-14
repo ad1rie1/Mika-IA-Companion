@@ -287,7 +287,7 @@ def _thinking_of(frame: Frame, store: Any, entries: list[Any], p: RssParams) -> 
     return drafts
 
 
-@RSS.process("rss.poll", wake_on=[*body_c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600,
+@RSS.process("rss.poll", wake_on=[*body_c.ALL], catch_up=CatchUp.ONCE, max_quantum_s=3600,
              priority=75)
 class Poll:
     def __init__(self) -> None:

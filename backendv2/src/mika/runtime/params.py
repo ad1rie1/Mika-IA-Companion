@@ -27,6 +27,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -152,13 +153,34 @@ def plan(faculties: Sequence[Faculty[Any, Any]], temperament: Temperament,
 
 def influence(fac: Faculty[Any, Any], temperament: Temperament) -> dict[str, tuple[tuple[str, Any, Any], ...]]:
     """Ce que chaque curseur pilote dans cette faculté : ``curseur → ((chemin, à 0, à 1), …)``,
-    mesuré en poussant le curseur à ses deux bouts (les autres restant où ils sont)."""
+    mesuré en poussant le curseur à ses deux bouts (les autres restant où ils sont). Deux dérivations par curseur et
+    par faculté, que chaque démarrage redemandait à l'identique : mesuré une fois par dérivation et par tempérament
+    (``derive`` est pure), rendu dans un dictionnaire neuf."""
     if fac.derive is None:
         return {}
+    return dict(_measured(_Measure(fac.derive, temperament.model_dump_json(), temperament)))
+
+
+#: les mesures gardées : une par dérivation (une par faculté qui en a) et par tempérament essayé
+INFLUENCES_KEPT = 128
+
+
+@dataclass(frozen=True, slots=True)
+class _Measure:
+    """Ce qui fait une mesure : la dérivation, et le tempérament lu en JSON (ses précisions sont un dictionnaire, qui
+    ne se hache pas) ; le tempérament lui-même n'entre pas dans la clé."""
+
+    derive: Callable[..., BaseModel]
+    temperament_json: str
+    temperament: Temperament = field(compare=False, hash=False)
+
+
+@lru_cache(maxsize=INFLUENCES_KEPT)
+def _measured(key: _Measure) -> dict[str, tuple[tuple[str, Any, Any], ...]]:
     out: dict[str, tuple[tuple[str, Any, Any], ...]] = {}
     for slider in SLIDERS:
-        lo = forms.flatten(fac.derive(temperament.model_copy(update={slider: 0.0}), None))
-        hi = forms.flatten(fac.derive(temperament.model_copy(update={slider: 1.0}), None))
+        lo = forms.flatten(key.derive(key.temperament.model_copy(update={slider: 0.0}), None))
+        hi = forms.flatten(key.derive(key.temperament.model_copy(update={slider: 1.0}), None))
         moved = tuple((path, lo[path], hi[path]) for path in lo if lo[path] != hi.get(path))
         if moved:
             out[slider] = moved

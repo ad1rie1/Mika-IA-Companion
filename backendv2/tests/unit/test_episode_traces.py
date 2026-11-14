@@ -170,6 +170,32 @@ def test_a_step_trace_times_its_tools_on_the_injected_clock_and_bounds_them(tmp_
     assert trace["reply"] == "fini" and trace["system_stable"].startswith("Tu es Mika.")
 
 
+THINK_POLICY = {"THINK": EpisodePolicy(kind="THINK", role=None, voice=False, priority=1, lane="background",
+                                       delivered=False, visible=False)}
+
+
+def test_an_episode_without_a_role_is_composed_and_traced_then_settled_once_without_the_model(tmp_path):
+    """Sans rôle, rien ne part au modèle : l'épisode est composé (sa trace dit la composition, pas de requête),
+    puis réglé ``done``, une seule fois."""
+    kernel, clock, llm = harness.build(tmp_path, [SLOW], policies=THINK_POLICY)
+
+    async def main():
+        await kernel.start()
+        report = await kernel.lanes.submit(EpisodeRequest(kind="THINK", target=None))
+        await kernel.traces.flush()
+        trace = kernel.traces.get(report.id)
+        ended = [e for e in harness.events_of(kernel, "episode.ended") if e.correlation == report.id]
+        await kernel.stop()
+        return report, trace, ended
+
+    report, trace, ended = run_virtual(clock, main)
+    assert report.outcome is Outcome.DONE and report.text is None and report.utterance_seq is None
+    assert llm.calls == [] and len(ended) == 1
+    assert trace["kind"] == "THINK" and trace["role"] is None and trace["outcome"] == "done"
+    assert "compose" in trace and trace["llm_calls"] == []
+    assert trace["system_stable"] == "" and "messages" not in trace and "call_id" not in trace
+
+
 # ── rétention, préfixe partagé, oubli, bornes ─────────────────────────────
 
 

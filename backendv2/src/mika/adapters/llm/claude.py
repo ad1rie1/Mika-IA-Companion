@@ -52,7 +52,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.ports.llm import RAW_ARGS_KEY, TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, Usage
 
 try:
     import anthropic
@@ -310,7 +310,7 @@ class ClaudeBackend:
                 if block.text:
                     replay.append({"type": "text", "text": block.text})
             elif kind == "tool_use":
-                args = _plain(block.input) if isinstance(block.input, Mapping) else {"_raw": str(block.input)}
+                args = _plain(block.input) if isinstance(block.input, Mapping) else {RAW_ARGS_KEY: str(block.input)}
                 calls.append(ToolCall(block.id, block.name, args))
                 replay.append({"type": "tool_use", "id": block.id, "name": block.name, "input": args})
             elif kind == "thinking":

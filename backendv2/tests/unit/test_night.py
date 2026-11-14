@@ -11,6 +11,9 @@
 - on se souvient d'un rêve une ou deux fois par semaine ; il revient le
   matin, une fois, et seulement à qui peut l'entendre ; un cauchemar demande
   une vraie menace ; ce que la nuit laisse se ressent au réveil ;
+- le sommeil se lit de l'instant : un rêve tombe dans la première minute du
+  sommeil paradoxal, et une nuit coupée finit, sans événement, dans la minute
+  (ADR 0223) ;
 - la nuit fond les souvenirs du jour presque identiques ;
 - rejouer la nuit redonne exactement le même état.
 """
@@ -33,6 +36,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import world as w
 from mika.faculties.body import BodyParams
+from mika.faculties.body import params as body_params
 from mika.faculties.body import sleep as sl
 from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
@@ -47,7 +51,7 @@ from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Table
 from mika.ports.llm import LLMResponse, ToolCall
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from mika.vocab import circadian
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
@@ -456,6 +460,57 @@ def test_the_dreamer_sees_what_each_fragment_made_her_feel_and_names_the_kind(tm
     assert texts and all("RÊVE" not in t and "Pixel" in t for t in texts.values())
 
 
+def test_a_dream_comes_in_the_first_minute_of_her_rem_sleep(tmp_path):
+    """Le sommeil paradoxal se lit de l'instant, aucun événement ne l'annonce : le rêve tombe dans la première minute
+    d'une phase, la cadence que lui donne son quantum d'une minute (ADR 0223). Relu « dans un quart d'heure », il
+    venait jusqu'à quinze minutes plus tard dans la phase, ou la manquait."""
+
+    async def scenario(kernel):
+        await kernel.set_params("self", SelfParams(dream_chance=1.0))
+        await genesis(kernel, souvenir("Alice m'a appris à pétrir le pain", about=("user_1",)))
+        await until(kernel, at_paris(2026, 9, 29, 3, 0))
+        frame = kernel.mind.frame()
+        night = frame.state("body").sleep, body_params(frame.env.params_of("body", frame.root)).sleep
+        await until(kernel, at_paris(2026, 9, 29, 9, 0))
+        return night, events(kernel, self_c.DREAMT.name)
+
+    ((sleep, bp), dreams), _ = build_run(tmp_path, scenario)
+    assert sleep.asleep and dreams
+    first = dreams[0].at
+    assert sleep.since < first
+    assert sl.phase(sleep, first, bp) is body_c.SleepPhase.REM
+    assert sl.phase(sleep, first - MINUTE, bp) is not body_c.SleepPhase.REM, "la phase avait commencé plus tôt"
+
+
+def test_a_night_cut_by_a_friend_ends_within_the_minute(tmp_path):
+    """Une proche la tire du sommeil avant le matin et lui parle encore un peu : elle reste debout. Sa nuit finit au
+    matin sans événement (``body.night_waking`` se lit de l'instant), et ce qu'elle en emporte (``self.woke_with``)
+    vient dans la minute qui suit (ADR 0223) — relu « dans un quart d'heure », jusqu'à quinze minutes plus tard."""
+
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", "close")
+        await until(kernel, at_paris(2026, 9, 29, 5, 30))
+        for text in ["tu dors ?", "désolée, je n'arrive pas à dormir", "on se parle encore un peu ?"]:
+            await (await kernel.perceive(said("user_1", text))).reply
+            await asyncio.sleep(10 * MINUTE / US)
+        await until(kernel, at_paris(2026, 9, 29, 9, 0))
+        roused = events(kernel, body_c.ROUSED.name)
+        asleep = [e for e in events(kernel, body_c.FELL_ASLEEP.name) if roused and e.at > roused[0].at]
+        woke = [e.at for e in events(kernel, self_c.WOKE_WITH.name)]
+
+        def waking(t):
+            return kernel.mind.frame(now=t).get(body_c.NIGHT_WAKING)
+
+        return roused, asleep, [(t, waking(t - MINUTE), waking(t)) for t in woke], waking(roused[0].at + US)
+
+    (roused, asleep, woke, cut), _ = build_run(tmp_path, scenario)
+    assert roused and cut, "tirée du sommeil pendant sa nuit"
+    assert not asleep, "restée debout"
+    assert len(woke) == 1
+    [(at, before, after)] = woke
+    assert before and not after, "dans la minute qui suit la fin de sa nuit"
+
+
 def test_what_the_night_leaves_is_felt_on_waking_not_at_three(tmp_path):
     """Une soirée triste : la nuit l'apaise ; ce soulagement (et la teinte d'un
     rêve) se pose au réveil — en pleine nuit, il se serait effacé avant le
@@ -749,7 +804,8 @@ def test_her_nights_page_only_offers_more_when_there_is_more(tmp_path, written):
     async def scenario(kernel):
         await kernel.mind.append([_journal(f"2026-08-{d:02d}", f"journal {d}") for d in range(1, written + 1)],
                                  emitter="self", correlation="journaux", origin=Origin.GENESIS)
-        return run_view(kernel, find(kernel, "self", "nuits"), {})
+        ins = Inspection(kernel)
+        return ins.run(ins.find("self", "nuits"), {})
 
     blocks, _ = build_run(tmp_path, scenario, script=script)
     history = next(b for b in blocks if isinstance(b, Table) and b.title == "Toutes ses nuits")

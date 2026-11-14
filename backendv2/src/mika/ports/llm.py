@@ -117,6 +117,9 @@ class LLMResponse:
 #: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
 #: fournisseur qui bride sa sortie (un modèle local) lève alors son propre plafond
 RETRY_AFTER_CUT = "retry_after_cut"
+#: Clé que posent les fournisseurs quand les arguments d'un appel ne sont pas
+#: du JSON : l'appel est refusé au modèle, jamais exécuté avec des défauts.
+RAW_ARGS_KEY = "_raw"
 #: ``meta`` : l'instant (``loop.time()``) où l'épisode qui porte la requête s'arrête — la passerelle ne donne à aucun
 #: de ses appels plus que ce qui reste devant lui
 DEADLINE_AT = "deadline_at"

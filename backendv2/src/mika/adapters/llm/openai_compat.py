@@ -34,7 +34,16 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import TOOL_CHOICE_NONE, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl, Usage
+from mika.ports.llm import (
+    RAW_ARGS_KEY,
+    TOOL_CHOICE_NONE,
+    LLMRequest,
+    LLMResponse,
+    Message,
+    ToolCall,
+    ToolDecl,
+    Usage,
+)
 from mika.vocab.phrasebook import phrase
 
 try:
@@ -43,8 +52,6 @@ except ImportError:  # pragma: no cover — extra « llm » absent
     openai = None
 
 log = logging.getLogger("mika.llm.openai")
-
-RAW_ARGS_KEY = "_raw"
 
 _FINISH = {
     "stop": "end",

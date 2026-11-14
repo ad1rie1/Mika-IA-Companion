@@ -382,7 +382,7 @@ def _orphan(call: Call, frame: Any) -> bool:
 
 @WAKEUP.process("wakeup.expire", wake_on=[c.CALLED, EXPIRED_EVENT, CANCELLED_EVENT, rt.EPISODE_STARTED,
                                          rt.EPISODE_ENDED, "projects.archived"],
-                lane="background", max_quantum_s=60, priority=60, reads=[projects_c.STATUS])
+                max_quantum_s=60, priority=60, reads=[projects_c.STATUS])
 class Expire:
     """Un appel resté en attente au-delà de sa durée de vie n'est plus traité (un appel en cours, si) ; un appel
     dont le projet a été archivé non plus, tout de suite."""

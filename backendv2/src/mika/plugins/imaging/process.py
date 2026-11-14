@@ -62,7 +62,7 @@ def failed_draft(j: Job, outcome: str, reason: str = "") -> Any:
                           dedupe_key=f"dessin-rate:{j.job}")
 
 
-@IMAGING.process("imaging.draw", wake_on=[c.REQUESTED], lane="background", catch_up=CatchUp.ONCE,
+@IMAGING.process("imaging.draw", wake_on=[c.REQUESTED], catch_up=CatchUp.ONCE,
                  max_quantum_s=DEADLINE_S, deadline_s=DEADLINE_S, priority=40)
 class Draw:
     def next_due(self, s: ImagingState, frame: Frame, last_run: int | None) -> int | None:

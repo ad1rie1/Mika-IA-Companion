@@ -20,7 +20,7 @@ from mika.inspector.pages.tabs import TABS
 from mika.kernel.inspect import Block, Note, Ref, Table
 from mika.kernel.rights import Grant, RightsSpec, RuleTable
 from mika.runtime.boundary import Failed, call
-from mika.runtime.tools import allowed, gate_of
+from mika.runtime.tool_offer import allowed, gate_of
 from mika.vocab.access import (
     INTERNAL,
     KEEP_WORDS,

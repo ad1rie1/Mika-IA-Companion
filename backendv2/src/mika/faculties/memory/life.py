@@ -176,7 +176,7 @@ def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft
 # ── Ce qu'elle en a dit : relu après coup ─────────────────────────────────
 
 
-@MEMORY.process("memory.follow", wake_on=[rt.UTTERANCE, c.EVENT_NOTED, c.MOMENT_FOLLOWED], lane="background",
+@MEMORY.process("memory.follow", wake_on=[rt.UTTERANCE, c.EVENT_NOTED, c.MOMENT_FOLLOWED],
                 catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Follow:
     """Relit ce qu'elle a dit depuis la dernière fois : ce qui reprend un moment de la vie de la personne à qui

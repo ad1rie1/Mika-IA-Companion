@@ -285,7 +285,7 @@ async def test_what_she_reads_working_or_for_someone_is_kept():
 
 async def test_what_she_reads_for_someone_comes_back_without_a_rule():
     """Ce qu'une lecture du monde lui rend en conversation est la même donnée citée qu'au travail : comment le
-    raconter a une seule maison, ses outils dans son prompt (``runtime.tools.acting``) — la réponse de l'outil n'y
+    raconter a une seule maison, ses outils dans son prompt (``runtime.tool_offer.acting``) — la réponse de l'outil n'y
     ajoute pas de consigne (ADR 0154). La sonde du 2026-10-14 (« c'est la page de flash info de RTL […] je n'ai lu
     que le début de la page ») est à surveiller au banc."""
     async def result(kind: str, target: str | None) -> str:

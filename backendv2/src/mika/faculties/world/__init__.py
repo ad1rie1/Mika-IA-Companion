@@ -886,7 +886,7 @@ def _idle_work(s: WorldState, intent: w.Intent, changes: list[Any], now: int) ->
 
 @WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
                                          w.AUTHORED],
-               lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60)
+               catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
     quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas). Et une occupation sans fin
@@ -924,7 +924,7 @@ class Settle:
 # ── Ce qu'on a changé chez elle ───────────────────────────────────────────
 
 
-@WORLD.process("world.notice", wake_on=[w.AUTHORED, *body_c.ALL], lane="background", catch_up=CatchUp.ONCE)
+@WORLD.process("world.notice", wake_on=[w.AUTHORED, *body_c.ALL], catch_up=CatchUp.ONCE)
 class Notice:
     """Ce qu'une édition a changé chez elle, elle le remarque (ADR 0050 §10) : éveillée, aussitôt ; endormie, rien
     de la nuit — à son réveil. Un signal par changement, une seule fois (sa clé dit l'édition et l'objet, et sa

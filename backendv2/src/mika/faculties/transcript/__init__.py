@@ -928,7 +928,7 @@ def secret_sources(store: Any, room: str, upto: int) -> set[int]:
     return found
 
 
-@TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",
+@TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED],
                     catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class Compact:
     """Replie le début des fils trop longs, un fil par passage (les appels de

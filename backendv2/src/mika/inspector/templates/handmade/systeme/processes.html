@@ -26,7 +26,7 @@
           <span class="person-entry-time">prochain essai {{ r.next }}</span>
         </div>
         {% if r.error %}<pre class="hm-error">{{ r.error }}</pre>{% endif %}
-        <p class="person-entry-facts"><span><span class="k">faculté</span> {{ r.faculty }}</span><span><span class="k">voie</span> {{ r.lane }}</span><span><span class="k">passages</span> {{ r.runs }}</span><span><span class="k">échecs</span> {{ r.failures }}</span><span><span class="k">dernier passage</span> {{ r.last }}</span>{% if r.error_at %}<span><span class="k">erreur</span> {{ r.error_at }}</span>{% endif %}<span><span class="k">nom technique</span> <code>{{ r.tech }}</code></span></p>
+        <p class="person-entry-facts"><span><span class="k">faculté</span> {{ r.faculty }}</span>{% if r.lane %}<span><span class="k">voie</span> {{ r.lane }}</span>{% endif %}<span><span class="k">passages</span> {{ r.runs }}</span><span><span class="k">échecs</span> {{ r.failures }}</span><span><span class="k">dernier passage</span> {{ r.last }}</span>{% if r.error_at %}<span><span class="k">erreur</span> {{ r.error_at }}</span>{% endif %}<span><span class="k">nom technique</span> <code>{{ r.tech }}</code></span></p>
       </li>
       {% endfor %}
     </ul>
@@ -43,7 +43,7 @@
         <header class="sys-faculty-head"><h3>{{ f.name }}</h3><span class="now-muted">{{ f.rows|length }}{% if f.trouble %} · <span class="sys-warn">{{ f.trouble }} à voir</span>{% endif %}</span></header>
         <ul class="sys-procs">
           {% for r in f.rows %}
-          <li class="st-{{ r.state }}" title="{{ r.tech }} · voie {{ r.lane }} · {{ r.runs }} passage{{ 's' if r.runs != 1 }}{% if r.failures %} · {{ r.failures }} échec{{ 's' if r.failures > 1 }}{% endif %} · prochaine fois : {{ r.next }}">
+          <li class="st-{{ r.state }}" title="{{ r.tech }}{% if r.lane %} · voie {{ r.lane }}{% endif %} · {{ r.runs }} passage{{ 's' if r.runs != 1 }}{% if r.failures %} · {{ r.failures }} échec{{ 's' if r.failures > 1 }}{% endif %} · prochaine fois : {{ r.next }}">
             <span class="sys-dot st-{{ r.state }}" aria-hidden="true"></span>
             <span class="sys-proc-name">{{ r.name }}<span class="sr"> — {{ r.said }}</span></span>
             <span class="sys-proc-when">{{ r.last }}</span>

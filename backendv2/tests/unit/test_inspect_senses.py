@@ -55,7 +55,7 @@ from mika.plugins.forge import WRITTEN
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse
 from mika.ports.mail import Mail
-from mika.runtime.inspection import Inspection, find, run_view, views
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.sim.outside import FakeFeeds, FakeMail
@@ -97,9 +97,10 @@ def when(t):
 
 
 def view(kernel, owner, name, subject="", **params):
-    spec = find(kernel, owner, name)
+    ins = Inspection(kernel)
+    spec = ins.find(owner, name)
     assert spec is not None, f"{owner}/{name} n'est pas déclarée"
-    return run_view(kernel, spec, params, when=when, subject=subject)
+    return ins.run(spec, params, when=when, subject=subject)
 
 
 def walk(blocks):
@@ -201,7 +202,7 @@ def notes(blocks):
 def test_every_sense_view_is_declared_placed_and_clean_on_a_fresh_kernel_without_ports(tmp_path):
     async def scenario(kernel):
         ins = Inspection(kernel)
-        declared = {(v.owner, v.name): v for v in views(kernel)}
+        declared = {(v.owner, v.name): v for v in ins.views()}
         return declared, {key: view(kernel, *key) for key in (*SENSE_VIEWS, *MAIL_TABS)}, {
             "fiche inconnue": view(kernel, "email", "message", subject="<nulle-part@exemple.fr>"),
             "ancien lien inconnu": view(kernel, "email", "remarque", id="<nulle-part@exemple.fr>"),
@@ -249,7 +250,7 @@ def test_every_sense_view_is_declared_placed_and_clean_on_a_fresh_kernel_without
 
 def test_the_forge_views_are_declared_and_clean_on_a_fresh_kernel_without_ports(tmp_path):
     async def scenario(kernel):
-        declared = {(v.owner, v.name): v for v in views(kernel)}
+        declared = {(v.owner, v.name): v for v in Inspection(kernel).views()}
         return declared, {key: view(kernel, *key) for key in FORGE_VIEWS}, {
             "app invalide": view(kernel, "forge", "etat", subject="../../etc"),
             "app inconnue": view(kernel, "forge", "etat", subject="inconnue"),
@@ -314,7 +315,7 @@ def test_the_mail_view_filters_pages_and_opens_each_mail_as_a_fiche(tmp_path):
                "cherche urgent": ins.search("mail", "urgent"),
                "cherche bob": ins.search("mail", "bob"),
                "cherche tout": ins.search("mail", ""),
-               "badge": ins.badge(find(kernel, "email", "reception"))}
+               "badge": ins.badge(ins.find("email", "reception"))}
         out["barre"] = view(kernel, "email", "message", subject=out["head barre"].key)
         return out
 

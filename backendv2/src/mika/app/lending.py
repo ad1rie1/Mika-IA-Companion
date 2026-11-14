@@ -2,7 +2,7 @@
 à un agent), servis sous ``/mcp/pret/<nom>``.
 
 Un point prête une liste d'outils, choisis parmi ceux que la porte d'offre lui donne en conversation
-(``runtime.tools.lendable``) — jamais au-delà de ce que le code permet. L'agent agit avec les droits de l'opératrice
+(``runtime.tool_offer.lendable``) — jamais au-delà de ce que le code permet. L'agent agit avec les droits de l'opératrice
 qui a déclaré le point, comme si elle le lui demandait en tête-à-tête : son audience est celle de son adresse
 (``audience_of``), la porte d'offre est relue à chaque appel, et un outil qu'elle ne lui offrirait plus n'est plus
 servi. Chaque appel est une petite séance à lui (``pret:<nom>:…``), sans modèle : les arguments sont vérifiés comme
@@ -29,16 +29,8 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.tools import (
-    ReadingContext,
-    ReadOnly,
-    ToolContext,
-    checked_args,
-    declare,
-    gate_of,
-    lendable,
-    offer,
-)
+from mika.runtime.tool_offer import declare, gate_of, lendable, offer
+from mika.runtime.tools import ReadingContext, ReadOnly, ToolContext, checked_args
 from mika.vocab.episodes import Kind
 from mika.vocab.phrasebook import phrase
 

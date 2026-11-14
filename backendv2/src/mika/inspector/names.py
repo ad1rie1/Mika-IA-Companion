@@ -21,6 +21,7 @@ from typing import Any
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import identity as identity_c
 from mika.inspector.catalog import Labels
+from mika.kernel.faculty import NIGHT_LANE
 from mika.kernel.inspect import Cell, Ref, Text
 from mika.ports.errors import describe_error
 from mika.runtime import operations as ops
@@ -41,8 +42,10 @@ OUTCOMES: dict[str, tuple[str, str]] = {
     "cancelled": ("annulé", "muted"),
 }
 #: les voies d'exécution
-LANES: dict[str, str] = {"conversation": "conversation", "background": "fond", "night": "nuit",
-                         "arbitre": "arbitre"}
+LANES: dict[str, str] = {"conversation": "conversation", "background": "fond", "night": "nuit"}
+#: la voie d'un processus, seulement quand elle dit quelque chose : la nuit, exclusive ; sans voie, rien
+#: (le registre refuse toute autre voie de processus)
+PROCESS_LANE_LABELS: dict[str, str] = {"": "", NIGHT_LANE: "nuit (une à la fois)"}
 #: les événements du noyau et du runtime (ceux des facultés : ``Labels.events``)
 EVENTS: dict[str, str] = {
     "kernel.boot": "Démarrage", "kernel.stopped": "Arrêt", "kernel.lease_acquired": "Bail pris", "kernel.lease_released": "Bail rendu",
@@ -111,6 +114,12 @@ def role(value: str | None) -> str:
 
 def lane(value: str | None) -> str:
     return LANES.get(str(value or ""), str(value or "—"))
+
+
+def process_lane(value: str) -> str:
+    """La voie d'un processus telle que la console la montre : « nuit (une à la fois) », ou rien quand elle
+    ne dit rien ; une voie qu'on ne connaît pas se montre telle quelle."""
+    return PROCESS_LANE_LABELS.get(value, value)
 
 
 #: un nom de rôle cité dans un détail technique (« aucun modèle associé au rôle « reply » »)

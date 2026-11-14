@@ -24,7 +24,8 @@ from mika.ports.llm import (
     ToolCall,
 )
 from mika.runtime.kept_facts import facts_of, keeps_facts
-from mika.runtime.tools import ToolResult, declare, run_tool_loop
+from mika.runtime.tool_offer import declare
+from mika.runtime.tools import ToolResult, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import PRO
 from tests.fixtures.mika import at_paris, boot, build, connect, said

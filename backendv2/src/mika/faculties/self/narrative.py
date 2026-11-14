@@ -271,7 +271,7 @@ def prompt_of(m: Material, previous: str | None) -> str:
 
 @SELF.process("self.narrate", wake_on=[memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.ATTESTED, c.INTEREST_BORN,
                                        c.REFLECTED, memory_c.PROMISE_RESOLVED, memory_c.RESOLVED],
-              lane="background", catch_up=CatchUp.ONCE, max_quantum_s=6 * 3600)
+              catch_up=CatchUp.ONCE, max_quantum_s=6 * 3600)
 class Narrate:
     def __init__(self) -> None:
         self.retry_at = 0

@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from mika.kernel.faculty import ToolSpec
 from mika.kernel.frame import Audience
-from mika.runtime.tools import ASK, HAND, allowed, deferred
+from mika.runtime.tool_offer import ASK, HAND, allowed, deferred
 from mika.vocab.access import (
     ALONE,
     CARD,

@@ -14,7 +14,7 @@ import pytest
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
-from mika.runtime import inspection
+from mika.runtime.inspection import Inspection
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
@@ -54,7 +54,7 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     converse(client)
-    views = client.portal.call(inspection.views, live.kernel)
+    views = client.portal.call(Inspection(live.kernel).views)
     assert len(views) >= 20  # chaque faculté déclare les siennes
     for group in NAVIGATION:
         for d in group.items:

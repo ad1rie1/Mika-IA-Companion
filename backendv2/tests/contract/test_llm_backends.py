@@ -32,7 +32,8 @@ from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
 from mika.kernel.prompt import ChatPrompt
 from mika.ports.llm import LLMRequest, Message, ToolCall, ToolDecl, Usage
-from mika.runtime.tools import ToolResult, declare, run_tool_loop
+from mika.runtime.tool_offer import declare
+from mika.runtime.tools import ToolResult, run_tool_loop
 
 # ── Faux clients ──────────────────────────────────────────────────────────
 

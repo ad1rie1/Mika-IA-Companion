@@ -30,7 +30,8 @@ from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.effects import with_content
-from mika.runtime.tools import ToolContext, acting, run_tool_loop
+from mika.runtime.tool_offer import acting, defers_tools
+from mika.runtime.tools import ToolContext, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind, project_target
 from mika.vocab.phrasebook import phrase
@@ -236,14 +237,13 @@ def test_the_gateway_in_service_says_whether_its_provider_can_defer_tools():
     from mika.adapters.llm.gateway import Gateway
     from mika.adapters.llm.ollama import OllamaBackend
     from mika.adapters.system import RealClock
-    from mika.runtime.pipeline import _defers
 
     def live(backend):
         return LiveGateway(Gateway({"m": backend}, {"reply": "m"}, clock=RealClock()))
 
-    assert _defers(live(OllamaBackend("nemotron-3-super", client=object())), "reply") is False
-    assert _defers(live(_Silent()), "reply") is True  # qui n'en dit rien sait différer (la déclaration le dit)
-    assert _defers(LiveGateway(), "reply") is True  # sans configuration, l'appel échouera de toute façon
+    assert defers_tools(live(OllamaBackend("nemotron-3-super", client=object())), "reply") is False
+    assert defers_tools(live(_Silent()), "reply") is True  # qui n'en dit rien sait différer (la déclaration le dit)
+    assert defers_tools(LiveGateway(), "reply") is True  # sans configuration, l'appel échouera de toute façon
 
 
 def test_when_she_speaks_her_tools_are_her_hands(tmp_path):

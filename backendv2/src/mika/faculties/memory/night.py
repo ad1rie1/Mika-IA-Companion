@@ -42,7 +42,7 @@ from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import same_words, stems
 
 
-@MEMORY.process("memory.reflect", wake_on=[attention_c.DIGESTED, c.REMEMBERED], lane="background",
+@MEMORY.process("memory.reflect", wake_on=[attention_c.DIGESTED, c.REMEMBERED],
                 catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class Reflect:
     def __init__(self) -> None:

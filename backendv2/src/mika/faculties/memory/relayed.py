@@ -106,7 +106,7 @@ def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[
                           room=f"relayed:{thread}", relayed=recipient, heading=heading)
 
 
-@MEMORY.process("memory.relayed", wake_on=[c.RELAYED_READ], wake_on_shapes=[c.Relayed], lane="background",
+@MEMORY.process("memory.relayed", wake_on=[c.RELAYED_READ], wake_on_shapes=[c.Relayed],
                 catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Relay:
     """Relire les conversations reçues ailleurs, une fois posées."""

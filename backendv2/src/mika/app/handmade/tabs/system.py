@@ -93,7 +93,6 @@ from mika.kernel.inspect import (
 )
 from mika.ports.journal import JournalOutbox
 from mika.runtime import health as health_m
-from mika.runtime.boundary import Failed, call
 from mika.runtime.effects import MAX_ATTEMPTS, RETRY_BASE_S, RETRY_MAX_S, STALE_AFTER_S
 from mika.runtime.inspection import SLOW_US
 
@@ -735,22 +734,16 @@ def processes(got: Got) -> tuple[Markup, list[Any]] | None:
         return None
     ui = got.ui
     sched, now = ui.kernel.scheduler, ui.now()
-    frame = ui.kernel.mind.frame()
     running = set(sched.running())
     rows = []
     for spec in sched.specs:
-        due = call(sched.instances[spec.name].next_due, frame.root.slices.get(spec.owner), frame,
-                   sched.last_run(spec.name), label=f"échéance de {spec.name}")
-        nd = None if isinstance(due, Failed) else due
-        floor = sched.not_before.get(spec.name, 0)
-        if nd is not None and floor > nd:
-            nd = floor
+        nd = render.dated(sched.due(spec.name))  # l'échéance retenue (recul et garde compris), pas ``next_due``
         last = sched.last_run(spec.name)
         error_at, error = sched.last_error.get(spec.name, (0, ""))
         state = _state(sched, spec.name, running, now)
         rows.append({
             "name": ui.names.process(spec.name), "tech": spec.name, "state": state,
-            "faculty": ui.names.faculty(spec.owner), "lane": names.lane(spec.lane),
+            "faculty": ui.names.faculty(spec.owner), "lane": names.process_lane(spec.lane),
             "runs": sched.runs.get(spec.name, 0), "failures": sched.failures.get(spec.name, 0),
             "consecutive": sched.consecutive.get(spec.name, 0),
             "last": render.relative(last, now) if last else "jamais",

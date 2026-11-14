@@ -176,7 +176,7 @@ def seen_draft(snap: Any, seen: Sight) -> Any:
         dedupe_key=f"vu:{snap.device}:{snap.digest}:{snap.at}")
 
 
-@CAMERA.process("camera.look", wake_on=[*body_c.ALL], lane="background", catch_up=CatchUp.SKIP, max_quantum_s=120,
+@CAMERA.process("camera.look", wake_on=[*body_c.ALL], catch_up=CatchUp.SKIP, max_quantum_s=120,
                 priority=80)
 class Look:
     def __init__(self) -> None:

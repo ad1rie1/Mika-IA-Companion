@@ -34,7 +34,7 @@ from mika.kernel.inspect import Fields, Table, Timeline, walk_blocks
 from mika.kernel.prompt import CONTEXT_FOOTER, UNTRUSTED_NOTE
 from mika.plugins.web import WebParams
 from mika.ports.llm import LLMResponse
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
 from mika.vocab.days import when_fr
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
@@ -347,11 +347,12 @@ def test_older_never_leads_to_an_empty_page(tmp_path, n, older):
     async def scenario(kernel, script, llm):
         for i in range(n):
             await thought(kernel, f"pensée {i}", origin=attention_c.REVISION, sensitivity=1)
-        spec = find(kernel, "attention", "pensees")
-        first = _history(run_view(kernel, spec, {}))
+        ins = Inspection(kernel)
+        spec = ins.find("attention", "pensees")
+        first = _history(ins.run(spec, {}))
         nxt = None
         if first.pager is not None and first.pager.older:
-            nxt = _history(run_view(kernel, spec, dict(first.pager.older)))
+            nxt = _history(ins.run(spec, dict(first.pager.older)))
         return first, nxt
 
     first, nxt = run(tmp_path, scenario)
@@ -375,7 +376,8 @@ def test_an_initiative_answered_from_another_of_her_addresses_is_answered(tmp_pa
         await asyncio.sleep(MINUTE / US)
         p = await kernel.perceive(said("ext_5", "coucou ! je suis sur mon téléphone", channel="external"))
         await p.reply
-        blocks = run_view(kernel, find(kernel, "agency", "initiatives"), {})
+        ins = Inspection(kernel)
+        blocks = ins.run(ins.find("agency", "initiatives"), {})
         return next(b for b in blocks if isinstance(b, Timeline))
 
     timeline = run(tmp_path, scenario)
@@ -394,10 +396,11 @@ def test_the_person_page_says_why_she_holds_back(tmp_path):
             annotations=((expression_c.QUESTION_ANNOTATION, "1"),),
             voice=VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m"))],
             emitter="runtime", correlation="genese2", origin=Origin.GENESIS)
-        spec = find(kernel, "attention", "pensees_personne")
+        ins = Inspection(kernel)
+        spec = ins.find("attention", "pensees_personne")
 
         def thread():
-            blocks = run_view(kernel, spec, {}, subject="user_1")
+            blocks = ins.run(spec, {}, subject="user_1")
             return dict(next(b for b in blocks if isinstance(b, Fields) and b.title == "Le fil avec cette personne")
                         .pairs)
 

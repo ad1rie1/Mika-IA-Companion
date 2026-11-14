@@ -33,6 +33,7 @@ import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
@@ -592,15 +593,29 @@ def flatten(value: BaseModel) -> dict[str, Any]:
     """Les valeurs du modèle par chemin pointé ; seuls les modèles imbriqués
     se déplient (un dictionnaire d'enregistrements reste une valeur)."""
     out: dict[str, Any] = {}
-    for name, info in type(value).model_fields.items():
+    for name, unfolds in _unfolding(type(value)):
         current = getattr(value, name)
-        annotation, extra, nullable = _unwrap(info.annotation)
-        knob = _knob_of(_expand((*info.metadata, *extra)))
-        if isinstance(current, BaseModel) and _groups(annotation, knob, nullable):
+        if unfolds and isinstance(current, BaseModel):
             out.update({f"{name}.{path}": sub for path, sub in flatten(current).items()})
         else:
             out[name] = _plain(current)
     return out
+
+
+#: les classes de paramètres dont le dépliage est gardé (quelques dizaines, avec leurs modèles imbriqués)
+UNFOLDINGS_KEPT = 1024
+
+
+@lru_cache(maxsize=UNFOLDINGS_KEPT)
+def _unfolding(model: type[BaseModel]) -> tuple[tuple[str, bool], ...]:
+    """Les champs du modèle, et si chacun se déplie (``_groups``) : lu de la classe, qui ne change pas — une fois par
+    classe, quand ``flatten`` sert des dizaines de milliers de fois par démarrage (ce que pilote chaque curseur)."""
+    out = []
+    for name, info in model.model_fields.items():
+        annotation, extra, nullable = _unwrap(info.annotation)
+        knob = _knob_of(_expand((*info.metadata, *extra)))
+        out.append((name, _groups(annotation, knob, nullable)))
+    return tuple(out)
 
 
 def nest(flat: Mapping[str, Any]) -> dict[str, Any]:

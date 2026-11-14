@@ -30,6 +30,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
+from mika.kernel.faculty import schema_of
 from mika.ports.llm import LLMResponse, ToolDecl
 from mika.ports.preprocess import inert
 from mika.ports.sql import HANDLE_MAX, fit
@@ -323,7 +324,7 @@ class Extraction(_Lenient):
 
 def tool(name: str) -> ToolDecl:
     """L'outil de la relecture, au nom de celle dont c'est la mémoire (``name``, celui de sa persona)."""
-    return ToolDecl(TOOL_NAME, phrase("memory.extraction.tool", name=name), Extraction.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("memory.extraction.tool", name=name), schema_of(Extraction))
 
 
 def self_names(name: str) -> frozenset[str]:

@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 from mika.contracts import runtime as rt
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages import tools as page
-from mika.runtime.tools import gate_of
+from mika.runtime.tool_offer import gate_of
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_inspector_pages import html_of

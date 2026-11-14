@@ -47,7 +47,7 @@ from mika.plugins.email.inspect.common import mail_key
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.mail import AccountInfo, Mail
 from mika.runtime import decisions
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.outside import FakeMail
@@ -97,9 +97,10 @@ def raw_journal(kernel) -> str:
 
 
 def view(kernel, name: str, subject: str = "", **params: str) -> list:
-    spec = find(kernel, "email", name)
+    ins = Inspection(kernel)
+    spec = ins.find("email", name)
     assert spec is not None, name
-    return run_view(kernel, spec, params, subject=subject)
+    return ins.run(spec, params, subject=subject)
 
 
 def walk(blocks):

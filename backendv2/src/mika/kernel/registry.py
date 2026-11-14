@@ -26,6 +26,8 @@ from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
     CAPABILITY_LANE,
     DELIVERY_LANE,
+    NIGHT_LANE,
+    PROCESS_LANES,
     ActionSpec,
     AppraisalSpec,
     CapabilitySpec,
@@ -204,6 +206,9 @@ class Registry:
         for s in (s for f in facs for s in f.processes):
             if s.name in self.processes:
                 problems.append(f"processus déclaré deux fois : {s.name}")
+            if s.lane not in PROCESS_LANES:
+                problems.append(f"processus {s.name} de {s.owner} : voie inconnue « {s.lane} » "
+                                f"(vide, ou « {NIGHT_LANE} »)")
             if s.wake_shapes:
                 s = replace(s, wake_on=s.wake_on | {t.name for t in self.of_shapes(s.wake_shapes) if t.public})
             self.processes[s.name] = s
@@ -281,8 +286,6 @@ class Registry:
         if problems:
             raise CompositionError(problems)
 
-        self._adapters: dict[str, TypeAdapter[Any]] = {}
-
     # ── états ──
     # ── outils dynamiques ──
     def is_dynamic(self, name: str) -> bool:
@@ -339,9 +342,7 @@ class Registry:
         return [n for n in self.owners() if not self.faculties[n].volatile]
 
     def slice_adapter(self, owner: str) -> TypeAdapter[Any]:
-        if owner not in self._adapters:
-            self._adapters[owner] = TypeAdapter(self.faculties[owner].state)
-        return self._adapters[owner]
+        return _adapter(self.faculties[owner].state)
 
     def initial_root(self) -> Root:
         slices = {}
@@ -514,6 +515,18 @@ def drop_retired(raw: Any, retired: tuple[str, ...]) -> Any:
 
 def _decode_params(model: type[BaseModel], data: str, retired: tuple[str, ...] = ()) -> BaseModel:
     return _decode_params_cached(model, data, retired)
+
+
+#: les types d'état dont l'adaptateur est gardé (un par tranche : quelques dizaines)
+ADAPTERS_KEPT = 256
+
+
+@lru_cache(maxsize=ADAPTERS_KEPT)
+def _adapter(state: Any) -> TypeAdapter[Any]:
+    """L'adaptateur d'un type d'état (instantanés, aller-retour du démarrage). Pydantic le compile (quelques
+    millisecondes) : une fois par type, qui ne change pas, et non une fois par registre — chaque démarrage en compose
+    un neuf."""
+    return TypeAdapter(state)
 
 
 @lru_cache(maxsize=64)

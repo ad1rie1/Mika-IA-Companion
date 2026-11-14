@@ -306,7 +306,7 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
                              level=int(Sensitivity.ANODYNE)),
             excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
             asked_by=asked_by[:200]))
-    # comment raconter ce qu'elle a lu a une seule maison, ses outils dans son prompt (runtime.tools.acting) : la
+    # comment raconter ce qu'elle a lu a une seule maison, ses outils dans son prompt (runtime.tool_offer.acting) : la
     # réponse de l'outil n'y ajoute pas de consigne (ADR 0154 ; la sonde du 2026-10-14 l'entendait commenter la
     # page, « je n'ai lu que le début » — à surveiller au banc). Elle part entière, sans ses caractères invisibles :
     # la boucle la cite et la borne à ce que lit l'épisode, coupée à une frontière (ADR 0163)
@@ -419,7 +419,7 @@ def _source(ports: Mapping[str, Any]) -> tuple[list[ToolSpec], dict[str, str]]:
     return specs_of(port.offered())
 
 
-@MCP.process("mcp.watch", lane="background", max_quantum_s=300, priority=80)
+@MCP.process("mcp.watch", max_quantum_s=300, priority=80)
 class Watch:
     """Rejoindre et relister les serveurs actifs : un outil changé est suspendu, un serveur revenu reprend."""
 

@@ -94,7 +94,7 @@ def today(frame: Frame) -> int:
 
 
 @ATTENTION.process("attention.anticipate", wake_on=[memory_c.EVENT_NOTED, memory_c.RESOLVED, c.ANTICIPATED],
-                   lane="background", catch_up=CatchUp.SKIP, max_quantum_s=600)
+                   catch_up=CatchUp.SKIP, max_quantum_s=600)
 class Anticipate:
     """Ce qu'elle attend le plus, ressenti une fois par jour, éveillée."""
 

@@ -45,7 +45,7 @@ from mika.faculties.memory.recall import items_by_id, names_of, verdict_of
 from mika.faculties.memory.salience import Item, age_words
 from mika.kernel.clock import DAY, local_date_of_night
 from mika.kernel.events import Content, Draft
-from mika.kernel.faculty import CatchUp, Zone
+from mika.kernel.faculty import CatchUp, Zone, schema_of
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import PromptBudgetError, SectionBody
 from mika.ports.llm import LLMRequest, Message, ToolDecl
@@ -167,7 +167,7 @@ def answer(response: Any) -> Mapping[str, Any] | None:
 
 
 def tool(name: str) -> ToolDecl:
-    return ToolDecl(TOOL_NAME, phrase("memory.reread.tool", name=name), Relecture.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("memory.reread.tool", name=name), schema_of(Relecture))
 
 
 # ── Ce qu'on lui montre ─────────────────────────────────────────────────────

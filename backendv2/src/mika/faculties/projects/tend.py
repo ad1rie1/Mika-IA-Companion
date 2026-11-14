@@ -150,7 +150,6 @@ def pause_reason(p: Project, pm: Any) -> str:
 
 
 @PROJECTS.process("projects.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.PERCEPTION_RECEIVED],
-                  lane="background",
                   catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
@@ -217,7 +216,7 @@ def to_repair(s: ProjectsState, frame: Frame) -> list[tuple[Project, Any]]:
     return out
 
 
-@PROJECTS.process("projects.apps", wake_on=[forge_c.SIGNALED, *c.ALL], lane="background", catch_up=CatchUp.ONCE,
+@PROJECTS.process("projects.apps", wake_on=[forge_c.SIGNALED, *c.ALL], catch_up=CatchUp.ONCE,
                   max_quantum_s=3600, priority=40)
 class Apps:
     """La panne d'une app rattachée : un objectif « Réparer » sur son projet, et une exécution tout de suite."""
@@ -257,7 +256,7 @@ def waiting(s: ProjectsState) -> list[tuple[Project, str, int, Any]]:
 
 
 @PROJECTS.process("projects.remote", wake_on=[REMOTE_REQUESTED, NETWORK_QUEUED, rt.EFFECT_PROPOSED, rt.EPISODE_ENDED,
-                                              *c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60,
+                                              *c.ALL], catch_up=CatchUp.ONCE, max_quantum_s=60,
                   priority=40)
 class Remote:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:

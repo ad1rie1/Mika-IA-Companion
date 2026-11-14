@@ -1,5 +1,6 @@
-"""La voie rapide : S01, S03, S13 réduit — en moins d'une minute, et la
-preuve des pannes (≥ 200 arrêts brutaux simulés) en voie lente."""
+"""La voie rapide : tous les scénarios de ``QUICK`` (``sim/catalog.py``), en
+moins d'une minute, et la preuve des pannes (≥ 200 arrêts brutaux simulés) en
+voie lente."""
 
 from __future__ import annotations
 

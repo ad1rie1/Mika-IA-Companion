@@ -33,7 +33,7 @@ from mika.vocab.phrasebook import phrase
 
 
 @TEAMS.process("teams.expire", wake_on=[rt.EFFECT_PROPOSED, rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED, SETTLED],
-               lane="background", max_quantum_s=60, priority=60)
+               max_quantum_s=60, priority=60)
 class Expire:
     def next_due(self, s: TeamsState, frame: Any, last_run: int | None) -> int | None:
         due = [d.expires for d in s.drafts.values() if d.state == WAITING and d.expires]
@@ -57,7 +57,7 @@ class Expire:
                 await ctx.emit(_expired(port, d.draft, now))
 
 
-@TEAMS.process("teams.answered", wake_on=[RECEIVED, WRITTEN, rt.EFFECT_PROPOSED], lane="background",
+@TEAMS.process("teams.answered", wake_on=[RECEIVED, WRITTEN, rt.EFFECT_PROPOSED],
                max_quantum_s=60, priority=60)
 class Answered:
     """Ses réponses en attente d'accord auxquelles la personne du compte a répondu autrement : refusées en son nom

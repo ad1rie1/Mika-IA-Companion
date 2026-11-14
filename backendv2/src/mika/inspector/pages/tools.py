@@ -2,7 +2,7 @@
 
 L'écran lit ce que le moteur exécute : le registre (ses outils, et ceux que des
 sources dynamiques y ajoutent) et la porte d'offre du pipeline
-(``runtime.tools.offer``), appliquée à des audiences de synthèse — jamais une
+(``runtime.tool_offer.offer``), appliquée à des audiences de synthèse — jamais une
 recopie de ses règles. « Ce qu'elle peut faire » est une grille : ses familles
 d'outils en lignes, leurs outils dessous, les situations en colonnes. Un
 opérateur y décoche un outil pour le lui retirer dans une situation ; sa fiche
@@ -52,7 +52,7 @@ from mika.kernel.inspect import (
 )
 from mika.kernel.text import fold
 from mika.runtime import operations as ops
-from mika.runtime.tools import (
+from mika.runtime.tool_offer import (
     acting,
     admitted,
     allowed,

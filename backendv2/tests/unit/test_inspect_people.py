@@ -47,7 +47,6 @@ from mika.kernel.inspect import (
     When,
 )
 from mika.ports.llm import LLMResponse
-from mika.runtime import inspection
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import offered, perform
 from mika.sim.clock import run_virtual
@@ -88,9 +87,10 @@ def when(at: int) -> str:
 
 
 def show(kernel, owner, name, *, subject: str = "", **params):
-    spec = inspection.find(kernel, owner, name)
+    ins = Inspection(kernel)
+    spec = ins.find(owner, name)
     assert spec is not None, f"{owner}/{name} n'est pas déclarée"
-    return Inspection(kernel).run(spec, params, when, subject=subject)
+    return ins.run(spec, params, when, subject=subject)
 
 
 def plain(cell) -> str:
@@ -229,7 +229,7 @@ def test_each_view_and_tab_is_declared_in_its_place(tmp_path):
                  for v in insp.views() if not v.subject}
         return (views, [(v.owner, v.name) for v in insp.tabs("person")],
                 [(v.owner, v.name) for v in insp.tabs("handle")],
-                insp.subject("person"), insp.subject("handle"), inspection.find(kernel, "identity", "personne"))
+                insp.subject("person"), insp.subject("handle"), insp.find("identity", "personne"))
 
     views, person_tabs, handle_tabs, person, handle, old_page = run(tmp_path, scenario)
     for key, expected in OWN_VIEWS.items():
@@ -446,7 +446,7 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
 def test_the_claims_badge_counts_pending_claims(tmp_path):
     async def scenario(kernel):
         insp = Inspection(kernel)
-        spec = inspection.find(kernel, "identity", "revendications")
+        spec = insp.find("identity", "revendications")
         counts = [insp.badge(spec)]
         await live(kernel)
         counts.append(insp.badge(spec))
@@ -692,7 +692,7 @@ def test_the_thread_shows_messages_filters_pages_and_unanswered_questions(tmp_pa
                 "search": show(kernel, "transcript", "messages", q="Alice"),
                 "mine": show(kernel, "transcript", "messages", role="assistant"),
                 "questions": show(kernel, "transcript", "questions"),
-                "badge": insp.badge(inspection.find(kernel, "transcript", "questions")),
+                "badge": insp.badge(insp.find("transcript", "questions")),
                 "exchanges": show(kernel, "transcript", "echanges", subject="user_1"),
                 "handle": show(kernel, "transcript", "fil", subject=ANON)}
 
@@ -741,8 +741,9 @@ def test_views_stay_bounded_in_a_crowd(tmp_path):
                                  origin=Origin.EXTERNAL)
         got = {key: show(kernel, *key) for key in OWN_VIEWS}
         got["page 5"] = show(kernel, "identity", "annuaire", page="5")
-        got["badge"] = Inspection(kernel).badge(inspection.find(kernel, "transcript", "questions"))
-        got["found"] = Inspection(kernel).search("person", "web_", 20)
+        insp = Inspection(kernel)
+        got["badge"] = insp.badge(insp.find("transcript", "questions"))
+        got["found"] = insp.search("person", "web_", 20)
         return got
 
     got = run(tmp_path, scenario)
@@ -768,7 +769,8 @@ def test_the_questions_badge_names_three_people_then_counts_the_others(tmp_path)
     people = (("user_2", "Béa"), ("user_3", "Léa"), ("user_4", "Max"), ("user_5", "Zoé"), ("user_6", "Ana"))
 
     async def scenario(kernel):
-        insp, spec = Inspection(kernel), inspection.find(kernel, "transcript", "questions")
+        insp = Inspection(kernel)
+        spec = insp.find("transcript", "questions")
         got = []
         for handle, name in people:
             await connect(kernel, handle, name)

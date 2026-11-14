@@ -25,7 +25,6 @@ from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Table
 from mika.kernel.registry import Registry
 from mika.ports.llm import LLMResponse
-from mika.runtime import inspection
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.runtime.state import RUNTIME
@@ -45,8 +44,8 @@ def when(at: int) -> str:
 
 
 def show(kernel, owner, name, *, subject="", **params):
-    spec = inspection.find(kernel, owner, name)
-    return Inspection(kernel).run(spec, params, when, subject=subject)
+    ins = Inspection(kernel)
+    return ins.run(ins.find(owner, name), params, when, subject=subject)
 
 
 def ledger(blocks) -> Table:

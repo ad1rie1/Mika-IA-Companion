@@ -220,10 +220,15 @@ def recall_chance(dream: Dream, woke_at: int, recall: float, recent_us: int) -> 
     return min(1.0, recall * dream.vividness * (2.0 if fresh else 1.0))
 
 
-@SELF.process("self.wake", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=3600)
+@SELF.process("self.wake", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Wake:
     """Au réveil qui finit sa nuit (pas un message qui la tire du sommeil le
-    temps de répondre), ce qu'elle emporte de sa nuit."""
+    temps de répondre), ce qu'elle emporte de sa nuit.
+
+    Tirée du sommeil puis restée debout, sa nuit finit au matin sans
+    événement (``body.night_waking`` se lit de l'instant) : rien de prévu, et
+    son quantum d'une minute relit sa nuit. C'est la cadence d'avant, quand
+    les processus à la minute faisaient tout réévaluer (ADR 0223)."""
 
     @staticmethod
     def _due(state: SelfState, frame: Frame) -> int:
@@ -236,7 +241,7 @@ class Wake:
         if not self._due(state, frame):
             return None
         if frame.get(body_c.NIGHT_WAKING):
-            return frame.now + 15 * MINUTE  # tirée du sommeil : sa nuit n'est pas finie
+            return None  # tirée du sommeil : sa nuit n'est pas finie, le quantum la relit
         return frame.now
 
     async def run(self, ctx: Any) -> None:
@@ -728,9 +733,14 @@ def vividness_of(rng: random.Random, kind: str, emotions: list[str]) -> float:
 
 
 @SELF.process("self.dream", wake_on=[*body_c.ALL, c.DREAMT], lane="night", catch_up=CatchUp.SKIP,
-              max_quantum_s=900)
+              max_quantum_s=60)
 class Dreaming:
-    """En sommeil paradoxal : peut-être un rêve (un tirage par cycle)."""
+    """En sommeil paradoxal : peut-être un rêve (un tirage par cycle).
+
+    Le sommeil paradoxal se lit de l'instant (``body.sleep``), aucun
+    événement ne l'annonce : hors du bon moment, rien de prévu, et son
+    quantum d'une minute relit son sommeil. C'est la cadence d'avant, quand
+    les processus à la minute faisaient tout réévaluer (ADR 0223)."""
 
     PER_NIGHT = 2
     SPACING = 45 * MINUTE
@@ -754,7 +764,7 @@ class Dreaming:
     def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
         if not frame.get(body_c.ASLEEP_SINCE):
             return None
-        return frame.now if self._moment(state, frame) else frame.now + 15 * MINUTE
+        return frame.now if self._moment(state, frame) else None
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame

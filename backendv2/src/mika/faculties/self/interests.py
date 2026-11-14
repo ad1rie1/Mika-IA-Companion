@@ -29,7 +29,7 @@ from mika.faculties.self.knobs import SelfParams, params
 from mika.faculties.self.records import Interest, Lead
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.events import Content
-from mika.kernel.faculty import CatchUp
+from mika.kernel.faculty import CatchUp, schema_of
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, ToolDecl
@@ -310,7 +310,7 @@ KINDS = {TALK: lambda: phrase("self.reflect.kinds.talk"), READING: lambda: phras
 
 
 def tool() -> ToolDecl:
-    return ToolDecl(TOOL_NAME, phrase("self.reflect.tool"), Reflet.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("self.reflect.tool"), schema_of(Reflet))
 
 
 @SELF.process("self.reflect", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=3600)

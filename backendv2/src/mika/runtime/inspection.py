@@ -227,19 +227,3 @@ class Inspection:
         t.last_us = us
         t.max_us = max(t.max_us, us)
         t.failures += int(failed)
-
-
-# ── compatibilité (tests et premières vues) ──
-
-
-def views(kernel: Kernel) -> list[InspectSpec]:
-    return Inspection(kernel).views()
-
-
-def find(kernel: Kernel, owner: str, name: str) -> InspectSpec | None:
-    return Inspection(kernel).find(owner, name)
-
-
-def run_view(kernel: Kernel, spec: InspectSpec, params: Mapping[str, str] | None = None,
-             when: Callable[[int], str] = str, *, subject: str = "") -> list[Block]:
-    return Inspection(kernel).run(spec, params, when, subject=subject)

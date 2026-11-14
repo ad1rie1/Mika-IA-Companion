@@ -42,7 +42,7 @@ from mika.plugins.mcp.inspect import (
     who_said,
 )
 from mika.ports.mcp import STATES
-from mika.runtime.tools import deferred, gate_of
+from mika.runtime.tool_offer import deferred, gate_of
 from mika.vocab.access import MOMENTS, PERSON
 from mika.vocab.episodes import Kind
 

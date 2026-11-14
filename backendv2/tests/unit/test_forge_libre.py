@@ -41,7 +41,7 @@ from mika.plugins import web as web_plugin
 from mika.plugins.forge import Edit, ForgeParams, apply_edits, guide, timeout_of
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.forge_args import arg_specs, args_schema, check_args
-from mika.runtime.tools import admitted
+from mika.runtime.tool_offer import admitted
 from tests.unit.test_forge_console import _content, _her_tool, install, run
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")

@@ -32,7 +32,8 @@ from mika.ports.llm import LLMRequest, LLMResponse
 from mika.ports.mail import AccountInfo, Attachment, Mail
 from mika.runtime.operations import perform
 from mika.runtime.pipeline import EpisodeRequest
-from mika.runtime.tools import ToolContext, allowed, checked_args
+from mika.runtime.tool_offer import allowed
+from mika.runtime.tools import ToolContext, checked_args
 from mika.sim.clock import run_virtual
 from mika.sim.outside import FakeMail
 from mika.vocab.access import ALONE, EVERYONE, NO
