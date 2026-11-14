@@ -19,7 +19,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from mika.adapters.web.gate import SlidingWindow
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -82,10 +81,6 @@ WHERE_LABEL_MAX = 200
 WHERE_ACCURACY_MAX = 100_000
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
-
-
-#: une cadence, sans clé : une seule fenêtre (``hub.py``, ``adapters/world/server.py`` la lisent sous ce nom)
-RateLimiter = SlidingWindow
 
 
 def sanitize_filename(name: Any) -> str:

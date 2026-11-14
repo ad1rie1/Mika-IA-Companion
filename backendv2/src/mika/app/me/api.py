@@ -25,11 +25,11 @@ from starlette.routing import Route
 from mika.adapters.web.accounts import Account, Accounts
 from mika.adapters.web.app import (
     BODY_MAX_BYTES,
-    LoginThrottle,
     PayloadTooLarge,
     bounded_stream,
     read_bounded,
 )
+from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.session import account_of, csrf_header_ok, native_token
 from mika.contracts import identity as identity_c
 from mika.kernel.forms import RENDERED, errors_fr
@@ -95,7 +95,7 @@ def refused(exc: Exception) -> Denied:
     return Denied(400, said[:300] or "Réglage refusé.")
 
 
-def spend(throttle: LoginThrottle, account: Account) -> bool:
+def spend(throttle: SlidingWindow, account: Account) -> bool:
     """Une demande de plus pour ce compte dans ``throttle`` ; faux, sans rien compter, s'il est à sa borne. La clé est
     le compte : l'écran Carte et la console (le GPX d'un voyage, ADR 0204) usent ainsi la même borne ``OUTBOUND``."""
     key = f"compte:{account.id}"
@@ -318,13 +318,13 @@ class MeApiBase:
         self.settings = settings
         self.reconfigure = reconfigure
         #: les essais pour changer son mot de passe, par compte (les bornes de ``/auth/login``)
-        self.password_tries = LoginThrottle(*PASSWORD_TRIES)
+        self.password_tries = SlidingWindow(*PASSWORD_TRIES)
         #: les essais qui font joindre un serveur (tester une boîte ou un service, relever), par compte
-        self.probes = LoginThrottle(*PROBES)
+        self.probes = SlidingWindow(*PROBES)
         #: les demandes de la carte qui sortent vers un service du dehors, par compte
-        self.outbound = LoginThrottle(*OUTBOUND)
+        self.outbound = SlidingWindow(*OUTBOUND)
         #: les adresses cherchées, par compte (``ADDRESSES``)
-        self.address_tries = LoginThrottle(*ADDRESSES)
+        self.address_tries = SlidingWindow(*ADDRESSES)
         #: les créations faites, par clé d'envoi (``Call.once``), et ce qui fait celles d'un compte l'une après l'autre
         self.created: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.creating: dict[int, asyncio.Lock] = {}

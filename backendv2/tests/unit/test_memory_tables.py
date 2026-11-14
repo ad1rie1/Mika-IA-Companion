@@ -25,8 +25,8 @@ from mika.faculties.memory.projections import ITEM_COLUMNS, Chunks, ExtractionQu
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
 from mika.ports.sql import HANDLE_MAX, PROJECTIONS, Key
+from tests.fixtures.memory import event
 from tests.fixtures.sqldb import SqlDB
-from tests.unit.test_audit_regressions import event
 
 ALICE, BOB = "user_2", "user_3"
 

@@ -66,7 +66,8 @@ VAGUE = tabs.VAGUE
 def _merged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Une ligne par page où décider : un badge (« Système › File de sortie »), son cadre (« Processus en échec ») et
     un contrôle de santé, qui mène à la même page (« 2 abandonnés en 24 h »), disent souvent la même panne ; la plus
-    grave reste, et à gravité égale, la plus précise."""
+    grave reste, et à gravité égale, la plus précise — à précision égale, le constat du contrôle (« ! »), qui dit
+    depuis quand, plutôt que le badge de sa page qui ne fait que compter (ADR 0219)."""
     best: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for r in rows:
@@ -76,8 +77,8 @@ def _merged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             order.append(key)
             continue
         kept = best[key]
-        rank = (SEVERITY.get(r["tone"], 3), r["sub"] in ("", VAGUE))
-        if rank < (SEVERITY.get(kept["tone"], 3), kept["sub"] in ("", VAGUE)):
+        rank = (SEVERITY.get(r["tone"], 3), r["sub"] in ("", VAGUE), r["value"] != "!")
+        if rank < (SEVERITY.get(kept["tone"], 3), kept["sub"] in ("", VAGUE), kept["value"] != "!"):
             best[key] = r
     return sorted((best[k] for k in order), key=lambda r: SEVERITY.get(r["tone"], 3))
 

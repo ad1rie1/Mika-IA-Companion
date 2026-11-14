@@ -259,7 +259,7 @@ def _seen_tab(s: AttachmentsState, frame: Frame, ctx: InspectContext) -> list[Bl
         return [Note("Cette pièce n'est pas (ou plus) connue.", tone="muted")]
     if not r.seen:
         return [Note("Rien n'a pu en être lu : un format illisible, ou pas de modèle qui voit (Réglages › "
-                     "Intelligence › Qui sert quoi, « décrire une image »).", tone="muted")]
+                     "Modèles de texte › Qui sert quoi, « décrire une image »).", tone="muted")]
     return [Prose(r.seen, title="Ce qu'elle y a lu", reading=True)]
 
 

@@ -47,7 +47,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.inspector import names, render
 from mika.inspector.catalog import Panel
-from mika.inspector.pages.decisions import arbiter_rows, waterfall
+from mika.inspector.pages.decisions import ARBITER_COLUMNS, arbiter_rows, waterfall
 from mika.kernel.builtin import SELECTED
 from mika.kernel.faculty import Zone
 from mika.kernel.inspect import (
@@ -202,9 +202,10 @@ def cause_blocks(ui: Any, started: Any | None) -> list[Any]:
         out.append(Fields((("le choix", Ref("event", str(event.seq), f"événement n° {event.seq}")),
                            ("quand", When(event.at)))))
         if others:
+            # les colonnes de la table de l'arbitre : ses lignes portent aussi, repliées, la sorte, la cible et le
+            # rythme maximal (ADR 0177) — cinq colonnes seulement les laissaient tomber
             out.append(Disclosure(f"Les autres lignes à ce moment-là ({len(others)})", (
-                Table((Column("ligne"), Column("ce qui pousse"), Column("score", "num"), Column("fois / h", "num"),
-                       "ce qui l'empêche"), arbiter_rows(ui, others), title="Les lignes non retenues"),)))
+                Table(ARBITER_COLUMNS, arbiter_rows(ui, others), title="Les lignes non retenues"),)))
         return out
     if trigger.startswith(("selected:", "prélude:")):
         return [Note("Lancé par l'arbitre, mais son choix n'a pas été retrouvé au journal.", "muted")]

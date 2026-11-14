@@ -96,25 +96,21 @@ def _line(frame: Any, m: Any) -> str:
 
 class ListArgs(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
-    text: str = Field(default="", max_length=80, description="un morceau du nom d'une conversation (vide : toutes)")
+    text: str = Field(default="", max_length=80, description=phrase("teams.tools.conversations.text"))
 
 
 class ReadArgs(BaseModel):
-    message: str = Field(min_length=1, max_length=40, description="la référence d'un message (entre crochets) : "
-                                                                  "le fil de sa conversation, jusqu'à lui")
+    message: str = Field(min_length=1, max_length=40, description=phrase("teams.tools.read.message"))
     limit: int = Field(default=15, ge=1, le=40)
 
 
 class DraftArgs(BaseModel):
-    message: str = Field(min_length=1, max_length=40,
-                         description="la référence du message auquel tu réponds (entre crochets)")
-    body: str = Field(min_length=1, max_length=4000,
-                      description="ta réponse, à la place de la personne, sans signature (elle est ajoutée)")
+    message: str = Field(min_length=1, max_length=40, description=phrase("teams.tools.draft.message"))
+    body: str = Field(min_length=1, max_length=4000, description=phrase("teams.tools.draft.body"))
 
 
-@TEAMS.tool("teams_conversations", description="Les dernières conversations Teams des comptes dont tu peux te servir "
-            "ici (celui de la personne qui s'occupe de toi, le tien, celui de la personne en face), et leur dernier "
-            "message.", label=phrase("teams.tools.conversations.label"), args=ListArgs, bundle=BUNDLE,
+@TEAMS.tool("teams_conversations", description=phrase("teams.tools.conversations.description"),
+            label=phrase("teams.tools.conversations.label"), args=ListArgs, bundle=BUNDLE,
             episodes=EPISODES, owner_only=True, owned=owns_an_account)
 async def teams_conversations(args: ListArgs, ctx: Any) -> Any:
     port, refused = _port(ctx)
@@ -136,7 +132,7 @@ async def teams_conversations(args: ListArgs, ctx: Any) -> Any:
     return f"{DATA}\n" + "\n".join(lines)
 
 
-@TEAMS.tool("teams_read", description="Relire le fil d'une conversation Teams, jusqu'à un message.",
+@TEAMS.tool("teams_read", description=phrase("teams.tools.read.description"),
             label=phrase("teams.tools.read.label"), args=ReadArgs, bundle=BUNDLE, episodes=EPISODES,
             owner_only=True, owned=owns_an_account, max_calls_per_episode=4)
 async def teams_read(args: ReadArgs, ctx: Any) -> Any:
@@ -162,9 +158,8 @@ def _asker(ctx: Any) -> tuple[str, ...]:
     return (target,) if target and is_identifiable(target) and not is_work_target(target) else ()
 
 
-@TEAMS.tool("teams_draft", acts=True, description="Préparer une réponse à un message Teams, à la place de la personne "
-            "du compte qui l'a reçu (selon son réglage, elle est posée dans Teams pour qu'elle l'envoie, envoyée après "
-            "son accord, ou envoyée telle quelle).", label=phrase("teams.tools.draft.label"), args=DraftArgs,
+@TEAMS.tool("teams_draft", acts=True, description=phrase("teams.tools.draft.description"),
+            label=phrase("teams.tools.draft.label"), args=DraftArgs,
             bundle=BUNDLE, episodes=EPISODES, max_calls_per_episode=2, owner_only=True,
             owned=owns_an_account_to_prepare)
 async def teams_draft(args: DraftArgs, ctx: Any) -> Any:

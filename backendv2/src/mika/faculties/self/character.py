@@ -29,6 +29,7 @@ from mika.ports.llm import LLMRequest, Message
 from mika.vocab import temperament as T
 from mika.vocab.affect import FR
 from mika.vocab.phrasebook import phrase
+from mika.vocab.reading import untagged
 
 #: un trait se dit avec sa phrase du bas à 40 % ou moins, du haut à 60 % ou plus ; entre les deux, comme la plupart
 #: des gens. À 15 % ou moins, à 85 % ou plus, il est très marqué et le dit (le banc du tempérament : sans cela, le
@@ -113,9 +114,10 @@ def current(s: SelfState) -> str:
 
 
 def written(raw: str | None) -> str:
-    """Le caractère tel qu'il se garde : le texte seul, coupé avant une balise qu'un modèle de voix aurait ajoutée
-    par habitude ; « » si ce n'en est pas un (vide, une balise, un refus en un mot)."""
-    text = (raw or "").strip()
+    """Le caractère tel qu'il se garde : le texte seul, sans les balises qu'un modèle de voix aurait ajoutées par
+    habitude (sur sa propre ligne ou au bout de la dernière phrase), et coupé avant ce qui resterait entre crochets ;
+    « » si ce n'en est pas un (vide, une balise, un refus en un mot)."""
+    text = untagged(raw or "")
     cut = text.find("\n[")
     if cut > 0:
         text = text[:cut].rstrip()
@@ -126,8 +128,13 @@ def written(raw: str | None) -> str:
 
 @SELF.reducer(c.CHARACTER_WRITTEN)
 def _written(s: SelfState, e, cx) -> SelfState:
+    """Le texte relu par ``written``, comme à l'écriture : un caractère gardé avant qu'elle ne retire les balises
+    (« … [EMOTION:happy:0.7] ») ne se réécrit qu'au changement de sa persona, et d'ici là il entrerait tel quel
+    dans sa persona et la console. Relu, il en sort sans sa balise ; ce qui, sans elle, n'est plus un caractère ne
+    vaut rien, et le processus en écrit un."""
     d = e.data
-    return replace(s, character=d.text, character_basis=d.basis, character_at=e.at, character_model=d.voice.model)
+    return replace(s, character=written(d.text), character_basis=d.basis, character_at=e.at,
+                   character_model=d.voice.model)
 
 
 @SELF.fact(c.CHARACTER)

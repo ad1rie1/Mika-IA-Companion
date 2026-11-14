@@ -27,7 +27,7 @@ from mika.plugins.mcp import ExternalArgs, _call
 from mika.ports.vectors import VectorItem
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import Sensitivity
-from tests.unit.test_audit_regressions import event
+from tests.fixtures.memory import event
 from tests.unit.test_knowledge_coherence import FRAME, Frame, Store, ask, index
 
 UTC = ZoneInfo("UTC")

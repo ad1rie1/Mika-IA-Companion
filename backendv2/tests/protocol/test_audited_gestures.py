@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from mika.app import cli
+from mika.app.cli import common as cli_common
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.pages.system import gesture_origin
@@ -64,7 +64,7 @@ def test_the_origin_is_read_from_the_key_and_from_the_command_line():
     assert origin("moi.partage", "user_2") == SPACE
     assert origin("cli.oublier.person", "user_1") == CLI and origin("identity.relier", CLI_BY) == CLI
     assert origin("identity.relier", "user_1") == ""  # une action déclarée sous sa clé nue : à qui la lit de juger
-    assert CLI_BY == cli.CLI_BY  # la ligne de commande se dit sous ce nom, des deux côtés
+    assert CLI_BY == cli_common.CLI_BY  # la ligne de commande se dit sous ce nom, des deux côtés
 
 
 def test_a_gesture_has_a_french_title_never_its_key_twice(tmp_path):

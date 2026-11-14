@@ -88,7 +88,7 @@ def test_forgetting_a_person_takes_the_files_she_was_sent(tmp_path):
 def test_the_command_line_forgets_her_files_too(tmp_path):
     """``mika forget`` (serveur arrêté) passe par le même port que la console : les octets s'effacent du disque."""
     from mika.adapters.shares import DiskShares
-    from mika.app import cli
+    from mika.app.cli import journal as cli_journal
     from mika.kernel.registry import ArbitrationPolicy
     from mika.sim.clock import run_virtual
     from tests.fixtures.mika import boot, build, connect, reply
@@ -107,6 +107,6 @@ def test_the_command_line_forgets_her_files_too(tmp_path):
 
     out = run_virtual(clock, main)
     assert out.ok and DiskShares(folder).files() == list(out.attach)
-    report = asyncio.run(cli.forget(tmp_path, "user_2"))
+    report = asyncio.run(cli_journal.forget(tmp_path, "user_2"))
     assert report["fichiers_effacés"] == 1 and DiskShares(folder).files() == []
     assert files_containing(folder, CANARY.encode()) == []

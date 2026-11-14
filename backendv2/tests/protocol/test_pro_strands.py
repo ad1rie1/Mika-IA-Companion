@@ -13,7 +13,7 @@ from collections.abc import Iterator
 import pytest
 from starlette.testclient import TestClient
 
-from mika.adapters.llm.config import LiveGateway
+from mika.adapters.llm.config import THINKING_CONTEXT_TOKENS, LiveGateway
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
@@ -21,6 +21,7 @@ from mika.adapters.web.app import WebConfig
 from mika.app.server import build
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMResponse
+from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import VOICE_ROLES
 from tests.protocol.test_web import ORIGIN, WS, bootstrap, recv_until
 from tests.protocol.test_web_thread import opening
@@ -37,12 +38,20 @@ class Worker:
         return LLMResponse("Voilà le travail." if req.role == "pro" else "Coucou ! [EMOTION:happy:0.4]")
 
 
+#: le mode pro est le « mode Claude Code » (ADR 0116) : son fournisseur a la fenêtre d'un fournisseur Claude sans
+#: contexte déclaré (``THINKING_CONTEXT_TOKENS``, 40 000), pas le défaut commun de 24 000. Mesuré le 2026-11-13 : la
+#: requête pro pèse 57 006 caractères, dont 49 250 pour ses 61 outils déclarés (54 à la demande) ; le défaut ne lui en
+#: laisse que 56 908 (sortie réservée : 8 192 jetons), la fenêtre d'un fournisseur Claude 114 508 (audit du
+#: 2026-11-05, LR2)
+PRO_WINDOW = LLMLimits(context_tokens=THINKING_CONTEXT_TOKENS)
+
+
 @pytest.fixture
 def world(tmp_path) -> Iterator[tuple[TestClient, object, Worker]]:
     backend = Worker()
     roles = {str(r): "fake" for r in VOICE_ROLES}
     gateway = LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(),
-                                  voice_roles=frozenset(roles), slots={"fake": 1}))
+                                  voice_roles=frozenset(roles), slots={"fake": 1}, limits={"fake": PRO_WINDOW}))
     app, live = build(tmp_path / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
                       arbitration=ArbitrationPolicy(), reply_wait=None)
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:

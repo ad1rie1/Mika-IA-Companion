@@ -42,7 +42,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.web.accounts import CREDENTIAL_CHECK_S, TOKEN_KEY, Account, Accounts
 from mika.adapters.web.app import SESSION_COOKIE, bearer
-from mika.adapters.web.protocol import RateLimiter
+from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.world import protocol as p
 from mika.contracts import world as w
 from mika.contracts.entry import MindPort
@@ -258,8 +258,8 @@ class WorldSession:
         self.closing = False
         self.commands: asyncio.Queue[Any] = asyncio.Queue()
         self.results: OrderedDict[str, p.Result] = OrderedDict()
-        self.gates = {kind: RateLimiter(max(1, int(n)), 1.0) for kind, n in p.RATES.items()}
-        self.errors = RateLimiter(ERRORS_PER_S, 1.0)
+        self.gates = {kind: SlidingWindow(max(1, int(n)), 1.0) for kind, n in p.RATES.items()}
+        self.errors = SlidingWindow(ERRORS_PER_S, 1.0)
         self._monotonic = monotonic
         self._out: deque[str | _Close] = deque()
         self._held: list[str] | None = None

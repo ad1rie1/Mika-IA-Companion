@@ -25,6 +25,7 @@ import {
   type Thread,
 } from "../../api/teams";
 import { ofName } from "../../shared/names";
+import { rights } from "../../shared/store";
 import { refreshCounts } from "../../shell/counts";
 import { $, $$, h, isMobile, on } from "../../shell/dom";
 import { closeModal, openMenu, openModal, toast, type MenuItem } from "../../shell/float";
@@ -33,7 +34,6 @@ import type { PaletteEntry } from "../../shell/palette";
 import type { ScreenContext, ScreenDef, ScreenTab, Shell } from "../../shell/shell";
 import { bindCounts, errorText, openAsk, paintCount } from "../mail/compose";
 import { ago, chars, newNonce, thousands, toFill } from "../mail/format";
-import { rights } from "../parametres/store";
 import { authorLabel, kindLabel, ownAccount, ownBubbles, stillSentHere, UNDER_WAY, withoutSent, type SentHere } from "./format";
 import {
   capsOf,
@@ -49,9 +49,6 @@ import {
   type Filter,
   type ThreadView,
 } from "./markup";
-
-/** Pour qui lie une réponse depuis ailleurs (la carte du chat) : `#teams/brouillons/<id>`. */
-export { replyHash } from "./format";
 
 const REFRESH_MS = 20_000;
 const ASK_POLL_MS = 10_000;

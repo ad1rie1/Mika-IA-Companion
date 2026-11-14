@@ -528,8 +528,8 @@ def _feeds_note(port: Any, p: RssParams) -> Note:
     if port is None:
         return Note("Flux non configurés : aucun lecteur de flux n'est branché.", tone="muted")
     if not port.configured():
-        return Note("Aucun flux n'est suivi : ajoute leurs adresses dans Réglages › Flux suivis, en haut à droite.",
-                    tone="muted")
+        return Note("Aucun flux n'est suivi : ajoute leurs adresses dans Connexions › Ses sens › Flux suivis, "
+                    "en haut à droite.", tone="muted")
     return Note(f"Relevés toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée ; elle ne remarque "
                 f"que ce qui touche ses centres d'intérêt ({p.noticed_per_poll} titres au plus par relevé, "
                 f"à partir d'une pertinence de {p.notice_from:.2f}).", tone="ok")

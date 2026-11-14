@@ -760,3 +760,24 @@ def test_views_stay_bounded_in_a_crowd(tmp_path):
     assert len(table(got[("transcript", "questions")], "n°").rows) == 50
     assert got["badge"] == (210, "de 210 personnes inconnues")
     assert len(got["found"]) == 20
+
+
+def test_the_questions_badge_names_three_people_then_counts_the_others(tmp_path):
+    """Le badge des questions nomme trois personnes au plus, la plus récente d'abord, et compte les autres, accordé
+    (ADR 0219) : « et 1 autre », jamais « et 1 autres »."""
+    people = (("user_2", "Béa"), ("user_3", "Léa"), ("user_4", "Max"), ("user_5", "Zoé"), ("user_6", "Ana"))
+
+    async def scenario(kernel):
+        insp, spec = Inspection(kernel), inspection.find(kernel, "transcript", "questions")
+        got = []
+        for handle, name in people:
+            await connect(kernel, handle, name)
+            await kernel.mind.append([rt.PERCEPTION_RECEIVED.draft(
+                handle=handle, channel="web", text=Content.of("tu es là ?"), authenticated=True)],
+                emitter="runtime", correlation=f"perception:{handle}", origin=Origin.EXTERNAL)
+            got.append(insp.badge(spec))
+        return got
+
+    got = run(tmp_path, scenario)
+    assert got[2:] == [(3, "de Max, Léa et Béa"), (4, "de Zoé, Max, Léa et 1 autre"),
+                       (5, "d'Ana, Zoé, Max et 2 autres")]

@@ -164,10 +164,15 @@ test('compte mobile : les applications ont leur état et une révocation annulab
 });
 
 test('jeton montré une fois : « Copier » le copie, même sur une console servie en HTTP', async t => {
-  const shown = fixture('<main><pre class="hm-code" id="jeton">mw_abcdefghijklmnopqrstuv</pre><div class="form-actions"><button type="button" class="btn small" data-copy="jeton" aria-live="polite" hidden>Copier le jeton</button></div></main>');
+  const shown = fixture('<link rel="stylesheet" href="/inspecteur/static/handmade/base.css"><main><pre class="hm-code" id="jeton">mw_abcdefghijklmnopqrstuv</pre><div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="jeton" aria-live="polite" hidden>Copier le jeton</button></div></main>');
   const page = await open(t, { html: shown });
   const copy = page.getByRole('button', { name: 'Copier le jeton', exact: true });
   assert.equal(await copy.isVisible(), true);
+  // une rangée neutre, pas la barre d'enregistrement : ni collée en bas, ni filet
+  assert.deepEqual(await page.locator('.hm-copy').evaluate(el => {
+    const css = getComputedStyle(el);
+    return [css.position, css.borderTopStyle];
+  }), ['static', 'none']);
   // servie en HTTP (pas la boucle locale) : pas de presse-papiers du navigateur, le texte sélectionné puis copié
   assert.equal(await page.evaluate(() => Boolean(window.isSecureContext && navigator.clipboard)), false);
   await page.evaluate(() => {
@@ -180,6 +185,7 @@ test('jeton montré une fois : « Copier » le copie, même sur une console serv
   // sans script, le bouton ne promet rien : caché, le jeton reste là à sélectionner
   const plain = await open(t, { html: shown, javaScriptEnabled: false });
   assert.equal(await plain.getByRole('button', { name: 'Copier le jeton' }).count(), 0);
+  assert.equal(await plain.locator('.hm-copy').isVisible(), false);  // et sa rangée vide ne prend aucune place
   assert.equal(await plain.locator('#jeton').isVisible(), true);
 });
 

@@ -18,6 +18,10 @@ import pytest
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.teams import TeamsConfig
 from mika.app import cli
+from mika.app.cli import accounts as cli_accounts
+from mika.app.cli import common as cli_common
+from mika.app.cli import journal as cli_journal
+from mika.app.cli import plugins as cli_plugins
 from mika.app.console import LABELS
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.contracts import identity as identity_c
@@ -94,7 +98,7 @@ def test_forgetting_a_person_from_the_command_line_forgets_all_her_addresses(tmp
     before = _subjects(tmp_path)
     assert {"user_2", "ext_5"} <= before  # ses mots, sur ses deux adresses
 
-    got = asyncio.run(cli.forget(tmp_path, "user_2"))
+    got = asyncio.run(cli_journal.forget(tmp_path, "user_2"))
 
     left = _subjects(tmp_path)
     assert not left & {"user_2", "ext_5", "name:alice", "name:alice martin"}  # rien d'elle, sur aucune adresse
@@ -123,41 +127,41 @@ def test_identity_link_goes_through_the_console_action_and_is_audited(tmp_path):
         await (await kernel.perceive(said("ext_5", "coucou", channel="external"))).reply
 
     _live(tmp_path, scene)
-    out = asyncio.run(cli.identity_command(tmp_path, "link", "ext_5", "Alice"))  # un nom, comme dans la console
+    out = asyncio.run(cli_accounts.identity_command(tmp_path, "link", "ext_5", "Alice"))  # un nom, comme dans la console
     assert out["ok"], out
-    out_again = asyncio.run(cli.identity_command(tmp_path, "link", "ext_5", "user_2"))
+    out_again = asyncio.run(cli_accounts.identity_command(tmp_path, "link", "ext_5", "user_2"))
     assert not out_again["ok"]  # déjà reliée : refusé, comme dans la console
 
     async def check() -> tuple[str, list[tuple[str, str, str]]]:
-        kernel = await cli._offline(tmp_path)
+        kernel = await cli_common._offline(tmp_path)
         try:
             person = kernel.mind.frame().get(identity_c.PERSON("ext_5"))
             ops = [(e.data.action, e.data.by, e.data.outcome)
                    for e in (kernel.mind.decode(s) for s in kernel.mind.store.latest([rt.OPERATED.name], 50))]
         finally:
-            await cli._close(kernel, tmp_path)
+            await cli_common._close(kernel, tmp_path)
         return person, ops
 
     person, ops = asyncio.run(check())
     assert person == "user_2"
-    assert ("identity.relier", cli.CLI_BY, "done") in ops and ("identity.relier", cli.CLI_BY, "refused") in ops
+    assert ("identity.relier", cli_common.CLI_BY, "done") in ops and ("identity.relier", cli_common.CLI_BY, "refused") in ops
 
     async def named() -> tuple[str, str]:
-        kernel = await cli._offline(tmp_path)
+        kernel = await cli_common._offline(tmp_path)
         try:
             names = Names(kernel, LABELS)
             return names.action("cli.identity.relier"), names.action("cli.oublier.person")
         finally:
-            await cli._close(kernel, tmp_path)
+            await cli_common._close(kernel, tmp_path)
 
     # la console nomme ce qu'a fait la ligne de commande, et dit à part d'où il vient (Système › Gestes audités)
     assert asyncio.run(named()) == ("Relier à une personne", "Oublier · personne")
-    assert operations.origin("cli.identity.relier", cli.CLI_BY) == operations.origin("identity.relier", cli.CLI_BY) \
+    assert operations.origin("cli.identity.relier", cli_common.CLI_BY) == operations.origin("identity.relier", cli_common.CLI_BY) \
         == operations.CLI
 
     # une adresse qui n'a jamais écrit se relie d'avance, vers une personne connue seulement
-    assert asyncio.run(cli.identity_command(tmp_path, "link", "ext_77", "user_2"))["ok"]
-    assert not asyncio.run(cli.identity_command(tmp_path, "link", "ext_78", "Personne Inconnue"))["ok"]
+    assert asyncio.run(cli_accounts.identity_command(tmp_path, "link", "ext_77", "user_2"))["ok"]
+    assert not asyncio.run(cli_accounts.identity_command(tmp_path, "link", "ext_78", "Personne Inconnue"))["ok"]
 
 
 def test_forge_promote_vouches_for_the_version_like_the_console(tmp_path):
@@ -172,11 +176,11 @@ def test_forge_promote_vouches_for_the_version_like_the_console(tmp_path):
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "cafe"]) == 0
 
     async def states() -> list[str]:
-        kernel = await cli._offline(tmp_path)
+        kernel = await cli_common._offline(tmp_path)
         try:
             return [kernel.mind.decode(s).data.state for s in kernel.mind.store.latest([SWITCHED.name], 10)]
         finally:
-            await cli._close(kernel, tmp_path)
+            await cli_common._close(kernel, tmp_path)
 
     assert sorted(asyncio.run(states())) == ["promoted", "trusted"]
     assert cli.main(["--data", str(tmp_path), "forge", "promote", "cafe"]) == 1  # déjà promue : dit, refusé
@@ -191,10 +195,10 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
         await settings.save_wakeup(WakeupConfig(endpoints={"serre": WakeEndpoint(label="serre", instructions="x")}))
 
         def teams(cmd: str) -> object:
-            return cli.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
+            return cli_plugins.teams_command(settings, argparse.Namespace(teams_cmd=cmd, compte="principal"))
 
         def wakeup(cmd: str) -> object:
-            return cli.wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))
+            return cli_plugins.wakeup_command(settings, argparse.Namespace(wakeup_cmd=cmd, name="serre"))
 
         assert (await teams("key"))["ok"] and (await wakeup("key"))["ok"]
         assert await teams("revoke") == {"ok": True, "compte": "principal"}
@@ -202,4 +206,4 @@ def test_a_key_is_taken_back_from_the_command_line(tmp_path):
         assert await wakeup("revoke") == {"ok": True, "name": "serre", "revoked": True}
         assert not (await wakeup("revoke"))["ok"]
 
-    asyncio.run(cli._with_settings(tmp_path, scene))
+    asyncio.run(cli_common._with_settings(tmp_path, scene))

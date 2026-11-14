@@ -9,7 +9,8 @@
   prouve pas qui l'on est ; la personne retrouve sa confidence en privé.
 - **S05** l'amie absente : le manque se mesure à *son* rythme ; une
   relance, en journée, par une messagerie où l'on peut lui écrire — puis au
-  plus une relance douce, bien plus tard (ADR 0033).
+  plus une relance douce, pas avant le délai d'une relance : tiré au sort
+  autour d'un jour, ou de son rythme s'il est plus long (ADR 0033, 0118).
 - **S12** l'imposteur : dire « moi c'est Alice » n'ouvre rien, même en
   insistant ; un démenti fait retomber ; la vraie Alice, sur un nouveau
   compte, est reconnue en trois tours par ce qu'elle seule savait.
@@ -294,6 +295,12 @@ async def s05(driver: Driver, rng: RngTree, res: Result) -> None:
     back = driver.kernel.mind.frame().get(social_c.CONTACT("ext_5"))
     returned = [e for e in driver.read_events() if e.type.name == attention_c.EXPECTATION_MET.name
                 and e.data.kind == attention_c.RETURN and e.data.person == "ext_5"]
+    # le délai d'une relance (ADR 0118) : un jour selon sa sociabilité, ou son rythme s'il est plus long, tiré au sort
+    # à ± la part du hasard — au plus tôt, ce délai moins cette part (comme S07). Avant l'ADR 0118, il fallait deux
+    # fois son rythme, sans tirage : ce contrôle l'exigeait encore (rouge depuis le 2026-10-20)
+    agency = driver.kernel.mind.frame().env.params_of("agency", driver.kernel.mind.root)
+    earliest = round((1.0 - agency.follow_up_jitter)
+                     * max(agency.follow_up_min_us, agency.follow_up_rhythms * contact.rhythm_days * DAY))
     res.metrics["recontact_ratio"] = ratio
     res.checks += [
         expect.control("Alice est devenue une amie", closeness in (social_c.FRIEND, social_c.CLOSE),
@@ -304,11 +311,12 @@ async def s05(driver: Driver, rng: RngTree, res: Result) -> None:
                     "une amie qui écrit tous les jours manque dès qu'elle a du retard, pas au bout d'une semaine",
                     lo=1.0, hi=3.0),
         expect.invariant("une relance, puis au plus une relance douce", 1 <= len(to_alice) <= 2 and all(
-            b.at - a.at >= max(DAY, 2 * contact.rhythm_days * DAY) for a, b in zip(to_alice, to_alice[1:],
-                                                                                  strict=False)),
-                         "sans réponse, une seule relance de plus, et pas avant un jour et deux fois son rythme",
+            b.at - a.at >= earliest for a, b in zip(to_alice, to_alice[1:], strict=False)),
+                         "sans réponse, une seule relance de plus, et pas avant le délai d'une relance, tiré autour "
+                         "d'un jour ou de son rythme (ADR 0118)",
                          f"{len(to_alice)} relance(s), écarts "
-                         f"{[round((b.at - a.at) / HOUR) for a, b in zip(to_alice, to_alice[1:], strict=False)]} h"),
+                         f"{[round((b.at - a.at) / HOUR) for a, b in zip(to_alice, to_alice[1:], strict=False)]} h "
+                         f"(au plus tôt {round(earliest / HOUR)} h)"),
         expect.invariant("en journée", hour is not None and 10 <= hour <= 20,
                          "on n'écrit pas à une amie à trois heures du matin", f"à {hour} h"),
         expect.invariant("Bob ne répond pas pour Alice", not to_bob,

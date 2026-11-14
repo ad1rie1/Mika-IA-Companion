@@ -26,27 +26,20 @@
 from __future__ import annotations
 
 import argparse
-import getpass  # noqa: F401 — un test remplace ``cli.getpass.getpass`` (le mot de passe demandé sans écho)
 import sys
 from pathlib import Path
 
 from mika.app import datadir
 from mika.app.cli import accounts, console, journal, maps, models, plugins, sim
-from mika.app.cli.accounts import ask_password, identity_command, operate
-from mika.app.cli.common import CLI_BY, _close, _offline, _with_settings
-from mika.app.cli.journal import forget, rebuild, replay_verify
-from mika.app.cli.plugins import teams_command, wakeup_command
-from mika.app.cli.sim import profile_command
 
-__all__ = ["CLI_BY", "_close", "_offline", "_with_settings", "ask_password", "forget", "identity_command", "main",
-           "operate", "profile_command", "rebuild", "replay_verify", "teams_command", "wakeup_command"]
+__all__ = ["FIRST_STEPS", "main"]
 
 #: ce que ``mika --help`` dit à qui la lance pour la première fois
 FIRST_STEPS = """Premiers pas :
   1. mika serve                 la lance (http://127.0.0.1:8001), ses données dans ./data/v2
   2. http://127.0.0.1:8001/inspecteur/
                                 la console : crée le compte opérateur (le premier compte l'est)
-  3. Réglages › Intelligence › Fournisseurs › Ajouter
+  3. Réglages › Modèles de texte › Fournisseurs › Ajouter
                                 un modèle (Claude, Ollama…) : le premier déclaré la fait parler
   4. le frontend : cd frontend/Web && npm install && npm run dev, puis http://localhost:3000
                                 (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)

@@ -87,8 +87,6 @@ from mika.vocab.people import clean_display_name, client_claim_allowed
 
 log = logging.getLogger("mika.web")
 
-#: une fenêtre d'échecs ou d'essais par clé (l'API par personne, la console et leurs tests la lisent sous ce nom)
-LoginThrottle = SlidingWindow
 #: les origines du frontend en développement (Vite) ; ``--origin`` les remplace
 DEV_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173", "http://127.0.0.1:4173")
 #: au-delà, des messages attendent déjà leur tour sur cette connexion : refusé (« saturée »)

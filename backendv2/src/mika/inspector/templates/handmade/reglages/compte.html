@@ -32,8 +32,9 @@
 <section class="now-card account-token" aria-labelledby="acc-token-title">
   <header class="now-card-head"><h2 id="acc-token-title">{{ shown.title }}</h2><p>Montré une seule fois : copie-le maintenant. La console n'en garde que l'empreinte.</p></header>
   <pre class="hm-code" id="acc-token-value">{{ shown.token }}</pre>
-  {# « Copier » : console.js le montre et le fait marcher (``data-copy``) ; sans script, le jeton se sélectionne #}
-  <div class="form-actions"><button type="button" class="btn small" data-copy="acc-token-value" aria-live="polite" hidden>Copier le jeton</button></div>
+  {# « Copier » : console.js le montre et le fait marcher (``data-copy``) ; sans script, le jeton se sélectionne. Une
+     rangée neutre (``hm-copy``), pas ``form-actions`` : celle-là est la barre d'enregistrement, collée en bas #}
+  <div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="acc-token-value" aria-live="polite" hidden>Copier le jeton</button></div>
   <p class="now-sub">{{ shown.use }}</p>
 </section>
 {% endif %}

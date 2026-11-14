@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from mika.app import cli
+from mika.app.cli import journal as cli_journal
 from mika.contracts import memory as memory_c
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Origin
@@ -51,7 +51,7 @@ def test_the_command_line_forgets_everywhere(tmp_path):
 
     before = run_virtual(clock, main)
     assert before > 0
-    report = asyncio.run(cli.forget(tmp_path, "user_2"))
+    report = asyncio.run(cli_journal.forget(tmp_path, "user_2"))
     assert report["contenus_effacés"] > 0 and report["vecteurs_effacés"] > 0 and report["traces_effacées"] > 0
     views = sqlite3.connect(tmp_path / "views.db")
     left = views.execute("SELECT COUNT(*) FROM memory_vectors WHERE persons LIKE '%\"user_2\"%'").fetchone()[0]

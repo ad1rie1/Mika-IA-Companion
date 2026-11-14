@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from mika.vocab.affect import Facet, facets
+from mika.vocab.affect import Facet, facets, parse_tag, strip_prosody
 from mika.vocab.words import fold
 
 _MD = r"[*_`~]*"
@@ -138,3 +138,13 @@ def read(text: str) -> tuple[str, Reading | None]:
     if not found:
         return text or "", None
     return TAG.sub(" ", text), body_of(found[-1].group("body"))
+
+
+def untagged(text: str) -> str:
+    """Un texte qu'elle écrit pour elle (son récit, son journal, un rêve, son caractère), sans ce que sa voix y pose
+    par habitude : sa balise d'émotion, sa lecture de la personne, ses jetons de voix et ses didascalies. Ce texte se
+    garde, se montre dans la console et revient dans son prompt, et une balise n'a sa place nulle part. Ses messages
+    sont nettoyés de même avant d'être gardés (``expression``) ; un texte qui ne s'adresse à personne n'a pas
+    d'émotion à déclarer, et ce qu'elle dirait est ignoré. Le silence (``[SILENCE]``) reste : à l'appelant d'en juger."""
+    unread, _ = read(text)
+    return strip_prosody(parse_tag(unread).text)

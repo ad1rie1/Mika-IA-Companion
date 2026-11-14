@@ -335,6 +335,11 @@ a.now-tag:hover { color: var(--accent); text-decoration: none; }
 .hm-code { margin: 0; padding: 12px 14px; overflow: auto; max-height: 28em; border-radius: var(--radius); background: var(--sunken);
   color: var(--text); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .hm-code.diff { white-space: pre; }
+/* « Copier » sous un texte montré une seule fois (un jeton ; console.js, ``data-copy``) : une rangée neutre, ni collée
+   en bas ni filet (``form-actions`` est la barre d'enregistrement d'un formulaire) ; sans script, son bouton reste caché
+   et la rangée avec lui. */
+.hm-copy { margin-top: 8px; }
+.hm-copy:not(:has(> :not([hidden]))) { display: none; }
 .hm-code .d-line { display: block; }
 .hm-code .d-add { background: var(--ok-bg); color: var(--ok); }
 .hm-code .d-del { background: var(--danger-bg); color: var(--danger); }

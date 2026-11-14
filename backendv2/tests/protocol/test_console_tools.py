@@ -205,6 +205,11 @@ def test_what_she_exposes_is_set_from_the_console(world):  # noqa: F811
     shown = client.get(made.headers["location"])
     ConsoleHTML(shown.text).check()
     assert "claude mcp add --transport http mika" in html_of(shown)
+    # « Copier la ligne », « Copier le jeton » : une rangée neutre, jamais la barre d'enregistrement collée en bas
+    copies = re.findall(r'<div class="([^"]*)"><button type="button" class="btn small" data-copy="(expose-\w+)"',
+                        shown.text)
+    assert [target for _, target in copies] == ["expose-command", "expose-token"]
+    assert all("form-actions" not in classes.split() for classes, _ in copies)
     token = re.search(r"Bearer ([A-Za-z0-9_\-]{20,})", html_of(shown)).group(1)
     assert digest and hashlib.sha256(token.encode()).hexdigest() == digest  # seule l'empreinte est gardée
     rows = client.portal.call(lambda: live.kernel.mind.store.query_mind("SELECT value FROM settings"))

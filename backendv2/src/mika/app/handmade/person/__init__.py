@@ -38,7 +38,7 @@ from starlette.routing import Route
 
 from mika.adapters.mcp.config import TRANSPORTS
 from mika.adapters.web.accounts import Account, account_of_handle
-from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.gate import SlidingWindow
 from mika.app.handmade import (
     FORGOTTEN,
     MONTHS,
@@ -65,7 +65,7 @@ from mika.app.handmade.person.voyages import gpx as trip_gpx
 from mika.app.handmade.person.voyages import voyages
 from mika.app.handmade.tabs import anchored
 from mika.app.me import OUTBOUND
-from mika.app.me.shares import _mcp_shares as service_shares
+from mika.app.me.shares import service_shares
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
@@ -534,7 +534,7 @@ def services(look: Look, who: Who) -> list[dict[str, Any]]:
     mine = PERSON + who.person
     return [{"name": name, "href": subject_url("serveur", name), "purpose": excerpt(spec.purpose, 200),
              "on": spec.enabled, "where": dict(TRANSPORTS).get(spec.transport, spec.transport),
-             "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec, mine).items())]}
+             "shared": [_with(look, p, level) for p, level in sorted(service_shares(spec).items())]}
             for name, spec in sorted(settings.mcp().servers.items()) if spec.owner == mine]
 
 
@@ -568,8 +568,8 @@ def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
     for name, spec in sorted(settings.mcp().servers.items()) if settings is not None else ():
         resource = {"kind": SHARED_KINDS["mcp"], "title": name, "href": subject_url("serveur", name)}
         if spec.owner == mine:
-            given += [{**resource, **_with(look, x, level)} for x, level in sorted(service_shares(spec, mine).items())]
-        elif spec.owner and (level := service_shares(spec, spec.owner).get(mine, "")):
+            given += [{**resource, **_with(look, x, level)} for x, level in sorted(service_shares(spec).items())]
+        elif spec.owner and (level := service_shares(spec).get(mine, "")):
             received.append({**resource, "owner": look.name(spec.owner.removeprefix(PERSON)),
                              "level": LEVEL_FR.get(level, level)})
     return {"given": given, "received": received}
@@ -717,12 +717,12 @@ class PersonOverview(Overview):
         """L'ancienne adresse de la page : la fiche, ouverte sur sa vue d'ensemble."""
         return secure(RedirectResponse(subject_url("person", request.path_params["key"]), status_code=303))
 
-    def routes(self, ui: UI, outbound: LoginThrottle | None = None) -> list[Route]:
+    def routes(self, ui: UI, outbound: SlidingWindow | None = None) -> list[Route]:
         """Ses routes. ``outbound`` : la borne des demandes au serveur d'itinéraires, celle de l'écran Carte
         (``MeApi.outbound``), que le GPX d'un voyage use sur le compte de l'opérateur ; sans elle, une borne à la
         console seule, aux mêmes nombres (``OUTBOUND``) — jamais aucune."""
         self.ui = ui
-        throttle = outbound if outbound is not None else LoginThrottle(*OUTBOUND)
+        throttle = outbound if outbound is not None else SlidingWindow(*OUTBOUND)
 
         async def gpx(request: Request) -> Response:
             return await trip_gpx(ui, request, throttle)

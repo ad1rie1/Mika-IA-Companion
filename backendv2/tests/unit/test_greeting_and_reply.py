@@ -1,5 +1,5 @@
-"""M1 — bout en bout sur temps virtuel : elle salue qui arrive, répond, et
-sa posture suit ce qu'elle déclare."""
+"""Une arrivée puis un échange, de bout en bout sur temps virtuel : elle salue qui arrive, répond sur le seul fil
+de cette personne, sa posture suit ce qu'elle déclare, et sa consigne dit depuis quand ils se connaissent."""
 
 from __future__ import annotations
 

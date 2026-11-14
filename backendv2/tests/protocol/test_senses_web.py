@@ -8,7 +8,7 @@ import base64
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.gate import SlidingWindow
 from mika.contracts.sensors import SENSED
 from mika.runtime.effects import with_content
 from tests.protocol.test_web import WS, bootstrap, csrf, recv_until, world  # noqa: F401 — fixture
@@ -98,9 +98,9 @@ def test_a_device_signals_through_the_perceptions_route(world):  # noqa: F811
 
 def test_the_devices_remembered_for_their_rate_are_bounded(world, monkeypatch):  # noqa: F811
     """Un nom d'appareil se choisit librement : les fenêtres gardées sont bornées comme les adresses de la connexion
-    (``LoginThrottle.MAX_KEYS``), les plus anciennes partent — un balayage de noms ne fait pas grossir la mémoire."""
+    (``SlidingWindow.MAX_KEYS``), les plus anciennes partent — un balayage de noms ne fait pas grossir la mémoire."""
     client, live, _ = world
-    monkeypatch.setattr(LoginThrottle, "MAX_KEYS", 3)
+    monkeypatch.setattr(SlidingWindow, "MAX_KEYS", 3)
     auth = {"Authorization": f"Bearer {client.portal.call(live.settings.new_sensors_token)}"}
 
     def signal(device: str) -> int:

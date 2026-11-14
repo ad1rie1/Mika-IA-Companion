@@ -13,7 +13,7 @@ import pytest
 
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
-from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.gate import SlidingWindow
 from mika.app.me import Call, Denied
 from mika.app.me import mail as mail_moi
 from mika.app.me import mcp as mcp_moi
@@ -29,7 +29,7 @@ def call(api: object, key: str = "") -> Call:
 
 
 def test_a_try_counted_ahead_is_given_back_when_it_succeeds():
-    throttle = LoginThrottle(2, 60.0, monotonic=lambda: 100.0)
+    throttle = SlidingWindow(2, 60.0, monotonic=lambda: 100.0)
     throttle.fail("k")
     throttle.forgive("k")  # réussi : il ne compte plus
     assert not throttle.blocked("k") and len(throttle) == 0
@@ -41,7 +41,7 @@ def test_a_try_counted_ahead_is_given_back_when_it_succeeds():
 
 
 def test_tries_that_reach_a_server_are_bounded_per_account():
-    api = NS(probes=LoginThrottle(3, 60.0, monotonic=lambda: 5.0))
+    api = NS(probes=SlidingWindow(3, 60.0, monotonic=lambda: 5.0))
     for _ in range(3):
         call(api).probe()
     with pytest.raises(Denied) as refused:
@@ -108,7 +108,7 @@ def test_password_tries_launched_together_are_bounded():
         await asyncio.sleep(0.01)  # scrypt : la vérification attend
         return None
 
-    api = NS(password_tries=LoginThrottle(5, 60.0, monotonic=lambda: 1.0), accounts=NS(verify=verify))
+    api = NS(password_tries=SlidingWindow(5, 60.0, monotonic=lambda: 1.0), accounts=NS(verify=verify))
 
     def wrong(i: int) -> Call:
         me = NS(account=NS(id=7, username="lea"), handle="user_7")

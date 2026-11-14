@@ -16,7 +16,7 @@ from mika.adapters.vectors.embedders import DEFAULT_MODEL, SentenceEmbedder, loa
 from mika.app import embeddings
 from mika.ports.vectors import VectorItem
 from mika.vocab.phrasebook import phrase
-from tests.unit.test_audit_regressions import DB
+from tests.fixtures.sqldb import SqlDB as DB
 
 
 class FakeModel:

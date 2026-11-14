@@ -88,6 +88,7 @@ from mika.vocab.lineage import Lineage, admits, merged, of_message, requirement
 from mika.vocab.people import clean_tokens, named_label, phone_label
 from mika.vocab.phrasebook import family, phrase, phrases
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.reading import untagged
 
 KEEP_JOURNALS = 14
 KEEP_DREAMS = 12
@@ -361,7 +362,7 @@ class Write:
                              system_stable=persona.text + "\n\n" + phrase("self.night.journal_system"),
                              messages=(Message("user", notes),), max_tokens=500, lane="background", priority=4)
         response = await ctx.llm.call(request)
-        text = (response.text or "").strip()
+        text = untagged(response.text or "")  # sans balise de sa voix : gardé, montré dans la console, relu
         if silent(text):
             return
         # ce qu'elle raconterait de sa journée à n'importe qui : rendu d'après les faits qu'elle a le droit de dire,
@@ -702,10 +703,11 @@ _KIND = re.compile(r"\[\s*r[eê]ve\s*:\s*([^\]]*)\]", re.IGNORECASE)
 def dream_of(text: str) -> tuple[str, str, str]:
     """Le rêve tel que le modèle l'a écrit : son texte sans la balise, sa sorte — celle que dit la balise (ADR 0153 :
     ni seuil ni moyenne ne la choisissent) ; absente ou inconnue, un rêve banal, la plus neutre — et ce qu'il lui
-    laisse au réveil."""
+    laisse au réveil. Une balise que sa voix y aurait ajoutée par habitude (une émotion, un jeton de voix) est retirée
+    aussi, après la sienne : le rêve se garde et se raconte sans."""
     said = [k.strip().lower() for k in _KIND.findall(text)]
     kind = said[-1] if said and said[-1] in c.DREAM_KINDS else c.MUNDANE
-    return _KIND.sub("", text).strip(), kind, FEELING_OF[kind].value
+    return untagged(_KIND.sub("", text)), kind, FEELING_OF[kind].value
 
 
 def felt_words(emotion: str | None, intensity: float = 1.0) -> str:

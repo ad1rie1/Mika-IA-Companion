@@ -295,14 +295,36 @@ def test_a_long_line_is_simplified_to_a_few_hundred_points():
     assert kept == sorted(set(kept))
 
 
-async def test_without_an_index_the_search_says_how_to_build_it(tmp_path):
+async def test_without_an_index_only_the_console_says_how_to_build_it(tmp_path):
+    """Ce qu'une recherche lève arrive à une personne (``app/me/maps.py``) et au modèle (les outils de voyage) : ce qui
+    manque, jamais une consigne d'exploitation, qui n'est pas pour eux. La console la lit (``IndexInfo.reason``,
+    ``describe``) — audit du 2026-11-05, LR2."""
     places = pl.Places(tmp_path, lambda: PlacesConfig())
     assert not places.ready() and places.summary() == {"ready": False, "count": 0, "built": ""}
-    with pytest.raises(MapsUnavailable, match="mika carte lieux"):
+    with pytest.raises(MapsUnavailable) as missing:
         await places.search("camping")
+    assert str(missing.value) == pl.NOT_READY
+    assert "mika carte lieux" in places.info().reason and "mika carte lieux" in places.describe()[0][1]
     (tmp_path / "cartes").mkdir()
     (tmp_path / "cartes" / "lieux.db").write_bytes(b"pas une base" * 100)
-    assert not places.ready() and "illisible" in places.info().reason
+    assert not places.ready() and "illisible" in places.info().reason and "mika carte lieux" in places.info().reason
+    with pytest.raises(MapsUnavailable) as damaged:
+        await places.around(45.9, 6.1, 1000)
+    assert str(damaged.value) == pl.DAMAGED and "mika" not in str(damaged.value)
+
+
+async def test_an_index_damaged_after_its_header_says_so_without_a_command(tmp_path, index):
+    """Un index dont l'en-tête se lit mais dont les tables sont abîmées : la recherche le dit, sans consigne."""
+    db = sqlite3.connect(tmp_path / "cartes" / "lieux.db")
+    try:
+        db.execute("DROP TABLE place")
+        db.commit()
+    finally:
+        db.close()
+    assert index.ready()
+    with pytest.raises(MapsUnavailable) as damaged:
+        await index.around(45.86, 6.14, 5000)
+    assert str(damaged.value) == pl.DAMAGED
 
 
 async def test_a_rebuilt_index_is_read_at_the_next_search(tmp_path, index):

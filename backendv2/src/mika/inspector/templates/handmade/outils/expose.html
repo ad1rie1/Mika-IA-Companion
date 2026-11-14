@@ -8,10 +8,10 @@
   <header class="now-card-head"><h2>{{ shown.title }}</h2><p>Montré une seule fois : copie-le maintenant. La console n'en garde que l'empreinte.</p></header>
   <p class="expose-label">La ligne à lancer dans ton terminal (Claude Code) :</p>
   <pre class="expose-code" id="expose-command">{{ shown.command }}</pre>
-  <div class="form-actions"><button type="button" class="btn small" data-copy="expose-command" aria-live="polite" hidden>Copier la ligne</button></div>
+  <div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="expose-command" aria-live="polite" hidden>Copier la ligne</button></div>
   <p class="expose-label">Le jeton seul :</p>
   <pre class="expose-code" id="expose-token">{{ shown.token }}</pre>
-  <div class="form-actions"><button type="button" class="btn small" data-copy="expose-token" aria-live="polite" hidden>Copier le jeton</button></div>
+  <div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="expose-token" aria-live="polite" hidden>Copier le jeton</button></div>
 </section>
 {% endif %}
 

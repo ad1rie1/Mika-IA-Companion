@@ -632,7 +632,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
     resolution = dict(getattr(gateway, "resolution", lambda: {})() or {})
     if not getattr(gateway, "configured", gateway is not None):
         return [Note("Aucun modèle n'est configuré : chaque tour échoue proprement. Déclare un fournisseur dans "
-                     "Réglages › Intelligence › Fournisseurs.", "danger")]
+                     "Réglages › Modèles de texte › Fournisseurs.", "danger")]
     rows = []
     for b in status:
         quota = (b.get("extra") or {}).get("quota") or {}
@@ -657,7 +657,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
                                                              "mono" if n else "muted")), tone="" if n else "danger")
             for r, n in resolution.items()), title="Qui sert quoi, en vrai",
             caption="Replis compris : un rôle sans fournisseur retombe sur un autre rôle (murmurer → répondre). "
-                    "Se règle dans Réglages › Intelligence › Qui sert quoi."),
+                    "Se règle dans Réglages › Modèles de texte › Qui sert quoi."),
     ]
 
 

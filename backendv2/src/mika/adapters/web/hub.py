@@ -58,6 +58,7 @@ from typing import Any
 
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import CREDENTIAL_CHECK_S
+from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.push import LIVE_S, MobilePush
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
@@ -107,21 +108,21 @@ class Conn:
     here: bool = True
     #: le canal de cette connexion : l'écran (``web``) ou l'application du téléphone (``mobile``, une messagerie)
     channel: str = "web"
-    chat: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.CHAT_RATE))
-    control: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.CONTROL_RATE))
+    chat: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.CHAT_RATE))
+    control: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.CONTROL_RATE))
     #: ce qui s'écrit au journal quand on va et vient (``presence``) : borné, une bascule rapide n'y paraît pas
-    presence: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
+    presence: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.PRESENCE_RATE))
     #: jusqu'où la personne dit avoir lu (``read``) : la dernière valeur voulue, écrite au journal au plus
     #: ``PRESENCE_RATE`` fois — jamais une rafale
     read_up_to: int = 0
-    reads: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
+    reads: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.PRESENCE_RATE))
     #: la personne écrit un message sur cet écran (``composing``) : ce que dit la connexion, et ce qu'en sait le
     #: journal — le début et la fin d'une saisie, écrits au plus ``COMPOSING_RATE`` fois
     composing: bool = False
     composing_said: bool = False
-    typing: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.COMPOSING_RATE))
+    typing: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.COMPOSING_RATE))
     #: où est la personne (``where``, ADR 0119) : au plus ``WHERE_RATE`` écritures au journal
-    places: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.WHERE_RATE))
+    places: SlidingWindow = field(default_factory=lambda: SlidingWindow(*protocol.WHERE_RATE))
 
 
 class Hub:

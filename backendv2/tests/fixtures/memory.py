@@ -1,6 +1,7 @@
 """Le harnais des tests de mémoire : un modèle scripté qui consolide selon la
-conversation qu'on lui montre (une par appel), et de quoi lire ce qu'elle a
-gardé et ce qu'on lui a montré pour parler à chacun."""
+conversation qu'on lui montre (une par appel), de quoi lire ce qu'elle a
+gardé et ce qu'on lui a montré pour parler à chacun, et un brouillon donné
+tel quel à un réducteur ou à une projection (``event``)."""
 
 from __future__ import annotations
 
@@ -8,9 +9,11 @@ import asyncio
 import json
 import re
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 
 from mika.contracts import memory as memory_c
+from mika.kernel.clock import DAY
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from tests.fixtures.mika import CHARACTER, said
 
@@ -101,3 +104,9 @@ def kept(kernel: Any) -> list[dict[str, Any]]:
             d[k] = json.loads(d[k] or "[]")
         out.append(d)
     return out
+
+
+def event(draft: Any, seq: int, at: int = DAY) -> Any:
+    """Un brouillon tel qu'un réducteur ou une projection le reçoit une fois écrit : son type, sa charge, son numéro et
+    son heure, sans passer par le journal."""
+    return SimpleNamespace(type=draft.type, data=draft.data, seq=seq, at=at)

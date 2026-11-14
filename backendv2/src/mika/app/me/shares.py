@@ -32,7 +32,7 @@ from mika.contracts import identity as identity_c
 from mika.plugins import email as email_p
 from mika.plugins import teams as teams_p
 from mika.runtime.operations import audit
-from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_READ, SHARE_USE, SHARES
+from mika.vocab.access import PERSON, SHARE_PREPARE, SHARE_USE, SHARES
 
 #: ce qui se partage
 KINDS = ("mail", "teams", "mcp")
@@ -73,14 +73,9 @@ def _name(call: Call, person: str) -> str:
     return getattr(view, "name", "") or person
 
 
-def _mcp_level(line: Any) -> str:
-    return SHARE_USE if line.act != "non" else SHARE_READ
-
-
-def _mcp_shares(spec: Any, owner: str) -> dict[str, str]:
-    """Les partages d'un service : ses lignes d'une seule personne, autre que son propriétaire."""
-    return {line.who[0]: _mcp_level(line) for line in spec.access
-            if len(line.who) == 1 and line.who[0].startswith(PERSON) and line.who[0] != owner}
+def service_shares(spec: Any) -> dict[str, str]:
+    """Les partages d'un service, par personne (« personne:<clé> ») : leur niveau, lu par la règle de ``mcp.shared``."""
+    return {who: level for who, (level, _line) in mcp_moi.shared(spec).items()}
 
 
 def every_share(settings: Any) -> list[Shared]:
@@ -94,7 +89,7 @@ def every_share(settings: Any) -> list[Shared]:
     for name, spec in sorted(settings.mcp().servers.items()):
         if spec.owner:
             out += [Shared("mcp", name, name, spec.owner, who[len(PERSON):], level)
-                    for who, level in sorted(_mcp_shares(spec, spec.owner).items())]
+                    for who, level in sorted(service_shares(spec).items())]
     return out
 
 
@@ -135,10 +130,10 @@ async def list_shares(call: Call) -> dict[str, Any]:
             if spec.owner == mine:
                 given += [{"kind": "mcp", "key": name, "title": name, "person": p[len(PERSON):],
                            "name": _name(call, p[len(PERSON):]), "level": lv}
-                          for p, lv in sorted(_mcp_shares(spec, mine).items())]
-            elif spec.owner and mine in _mcp_shares(spec, spec.owner):
+                          for p, lv in sorted(service_shares(spec).items())]
+            elif spec.owner and mine in (levels := service_shares(spec)):
                 received.append({"kind": "mcp", "key": name, "title": name,
-                                 "level": _mcp_shares(spec, spec.owner)[mine],
+                                 "level": levels[mine],
                                  "owner_name": _name(call, spec.owner[len(PERSON):])})
     return {"given": given, "received": received}
 
@@ -211,7 +206,7 @@ async def set_share(call: Call) -> dict[str, Any]:
         spec_m = mcp_moi.mine(call).get(key)
         if spec_m is None:
             other = settings.mcp().servers.get(key)
-            if other is not None and other.owner and PERSON + call.me.person in _mcp_shares(other, other.owner):
+            if other is not None and other.owner and PERSON + call.me.person in service_shares(other):
                 raise Denied(403, "Seul son propriétaire partage ce service.")  # comme une boîte qu'on te partage
             raise missing()
         if level == SHARE_PREPARE:

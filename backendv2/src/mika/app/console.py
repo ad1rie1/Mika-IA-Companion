@@ -11,7 +11,7 @@ comment va-t-elle (sa rubrique, à son nom) ; qui connaît-elle (Relations & éc
 groupe ne se montre que si une destination n'avait pas de lien au menu), et une destination porte le nom de son lien
 au menu (ADR 0202 : le menu fait foi, le fil d'Ariane et le titre de l'onglet le reprennent). Les réglages d'un
 plugin vivent dans sa destination, derrière sa roue (``gear``, ADR 0173, 0206 : Courrier, Teams, Ses outils, Ses sens,
-Réveils par API) : des onglets de la console, que ``app/reglages.py`` y pose (``SettingsPage.home``).
+Réveils par API) : des onglets de la console, que ``app/settings_sections/`` y pose (``SettingsPage.home``).
 ``docs/console-carte.md`` détaille chaque menu.
 """
 

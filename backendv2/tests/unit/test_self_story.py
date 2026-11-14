@@ -231,3 +231,13 @@ async def test_her_story_reads_her_persona_only_and_names_no_one():
     assert named.requests and nothing == []  # un prénom de son cercle : il ne s'écrit pas
     empty, none = await write(Her(), store=Store())
     assert empty.requests == [] and none == []  # rien de vécu : pas un récit de rien
+
+
+async def test_her_story_keeps_no_tag_of_her_voice():
+    """Sa voix pose parfois sa balise au bout de ce qu'elle écrit, par habitude : le récit se garde sans. Il se montre
+    dans la console (« Estime et récit ») et lui revient sous « QUI TU ES DEVENUE » — comme son caractère, où la
+    console montrait « Oh, bonne nouvelle ! [EMOTION:happy:0.7] » (test_views_in_french, test_character)."""
+    _, emitted = await write(Her(), "Je suis quelqu'un qui écoute. [EMOTION: happy 0.4]\n[EN_FACE: rien]")
+    assert emitted[0].data.text.text == "Je suis quelqu'un qui écoute."
+    _, nothing = await write(Her(), "[EMOTION: happy 0.4]")
+    assert nothing == []  # une balise seule n'est pas un récit

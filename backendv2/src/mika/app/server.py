@@ -77,7 +77,7 @@ from mika.app.handmade.person import PersonOverview
 from mika.app.handmade.tabs.people import PeoplePage
 from mika.app.lending import PREFIX as LENT_PREFIX
 from mika.app.lending import Lending
-from mika.app.logs import RedactingFilter, configure_logging, redact  # noqa: F401 — réexportés pour les tests
+from mika.app.logs import configure_logging
 from mika.app.me import MeApi
 from mika.app.me.phone import APK_NAME
 from mika.app.mindport import KernelPort
@@ -450,7 +450,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("aucun modèle ne sert « répondre » : elle ne peut pas parler. Déclare un fournisseur dans "
                         "la console, %s (ou `python -m mika llm backend --help`)",
                         f"{live.console_url}/reglages/fournisseurs" if live.console_url else
-                        "Réglages › Intelligence › Fournisseurs")
+                        "Réglages › Modèles de texte › Fournisseurs")
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
         for problem in await live.reload_imaging():

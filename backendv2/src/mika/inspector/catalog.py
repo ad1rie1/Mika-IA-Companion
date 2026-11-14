@@ -114,12 +114,12 @@ class Builtin:
 
 @dataclass(frozen=True, slots=True)
 class Command:
-    """Un bouton d'une section de réglages (« un jeton neuf ») : ``run(opérateur) ->
-    (ton, message)`` ; le message peut montrer une valeur une seule fois."""
+    """Un bouton d'une section de réglages (« un jeton neuf ») : ``run() -> (ton, message)`` ; le message peut
+    montrer une valeur une seule fois. Qui l'a pressé, la console l'audite (``console.reglages.<section>.<clé>``)."""
 
     key: str
     title: str
-    run: Callable[[str], Awaitable[tuple[str, str]]]
+    run: Callable[[], Awaitable[tuple[str, str]]]
     confirm: str = ""
     danger: bool = False
 

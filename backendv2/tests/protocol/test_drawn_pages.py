@@ -73,9 +73,11 @@ def test_a_block_is_shaped_under_one_name():
 
 def test_nothing_cites_a_tab_module_that_moved():
     """Les modules repris dans ``tabs/`` ou renommés (K0-10, K0-11), les dossiers de gabarits et les feuilles renommés
-    sous leur destination (K11-10) : ni un gabarit, ni une feuille, ni le code ne renvoient à eux. Ce sont justement
-    les commentaires qu'on lit ici, pour savoir où aller : le texte, pas l'arbre du code."""
+    sous leur destination (K11-10), les deux anciens noms des réglages, retirés avec leurs réexports (``app/reglages.py``,
+    ``inspector/pages/reglages.py`` ; LR2) : ni un gabarit, ni une feuille, ni le code ne renvoient à eux. Ce sont
+    justement les commentaires qu'on lit ici, pour savoir où aller : le texte, pas l'arbre du code."""
     gone = re.compile(r"app/handmade/(?:nights|conversations|mail|running|tools|senses|system|people)\.py"
+                      r"|\b(?:app|pages)/reglages\.py"
                       r"|app/handmade/person/memoire\.py|handmade/(?:conversations|mail|system|people)/"
                       r"|\b(?:tools|senses|rights|system|mail|nights|people)\.css\b")
     root = Path(mika.__file__).parent

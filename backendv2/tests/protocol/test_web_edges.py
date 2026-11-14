@@ -39,7 +39,8 @@ from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web import accounts as accounts_mod
 from mika.adapters.web import protocol
-from mika.adapters.web.app import LoginThrottle, WebConfig
+from mika.adapters.web.app import WebConfig
+from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.hub import REPLY_HOLD_S, Hub
 from mika.app.server import build
 from mika.contracts import affect as affect_c
@@ -622,7 +623,7 @@ def test_login_is_throttled_by_address_whatever_the_name(make):
 
 def test_the_throttle_forgets_empty_windows():
     clock = _Clock()
-    t = LoginThrottle(5, 60.0, monotonic=clock)
+    t = SlidingWindow(5, 60.0, monotonic=clock)
     for i in range(100):
         t.fail(f"ip:{i}")
     assert len(t) == 100

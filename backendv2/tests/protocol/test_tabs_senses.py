@@ -58,7 +58,7 @@ def test_feeds_say_how_she_reads_then_a_broken_feed_then_articles_with_their_per
     assert gear.index('href="/inspecteur/sens/parametres-flux"') < gear.index(
         'href="/inspecteur/sens/parametres-appareils"') < gear.index('href="/inspecteur/sens/parametres-transcription"')
     assert head.count('href="/inspecteur/sens/parametres-flux"') == 1 and "Flux suivis" in gear
-    assert "Réglages › Flux suivis, en haut à droite" in empty  # l'état vide dit où les ajouter
+    assert "Connexions › Ses sens › Flux suivis, en haut à droite" in empty  # l'état vide dit où les ajouter
     feeds = Feeds()
     feeds.publish(Entry(id="e1", feed="Sciences", title="Une exoplanète habitable", link="https://example.net/1",
                         summary="Une planète rocheuse, à 40 années-lumière.", published=now - HOUR))

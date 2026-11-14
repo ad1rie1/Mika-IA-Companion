@@ -14,7 +14,7 @@ import math
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.adapters.vectors.background import BACKGROUND
 from mika.ports.vectors import VectorItem
-from tests.unit.test_audit_regressions import DB
+from tests.fixtures.sqldb import SqlDB as DB
 
 TEXTS = {
     1: "Alice part au Japon en mai pour son travail.",

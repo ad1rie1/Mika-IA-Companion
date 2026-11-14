@@ -20,7 +20,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.goals import work
 from mika.faculties.goals.faculty import GOAL_REOPENED, TASK_ADDED, TASK_CHANGED, TASK_REMOVED, params
-from mika.inspector.pages.routes import per_row
+from mika.inspector.pages.actions import per_row
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import ActionSlot

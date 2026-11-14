@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mika.adapters.web.accounts import Account, Accounts
-from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.session import CSRF_COOKIE, SESSION_COOKIE
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -55,7 +55,7 @@ from mika.runtime.inspection import Inspection
 PREFIX = render.PREFIX
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "60"
+ASSET_VERSION = "61"
 
 log = logging.getLogger("mika.console")
 
@@ -102,7 +102,7 @@ class InspectorDeps:
     navigation: Sequence[NavGroup] = field(default_factory=tuple)
     #: les séries mesurées : ``sampler(clé, depuis, jusqu'à, points)``
     sampler: Callable[..., list[tuple[int, float]]] | None = None
-    #: les sections de réglages (``app/reglages.py``) et leurs onglets
+    #: les sections de réglages (``app/settings_sections/``) et leurs onglets
     sections: Sequence[SettingsSection] = field(default_factory=tuple)
     settings_tabs: Sequence[SettingsTab] = field(default_factory=tuple)
     #: les paramètres internes des facultés (``runtime/params.Parameters``)
@@ -305,8 +305,8 @@ class UI:
         self._reveals: dict[str, tuple[str, dict[str, str]]] = {}
         #: la connexion à la console : le même étranglement que /auth/login (identifiant et IP), plus
         #: un plafond par IP (qui essaierait cent identifiants)
-        self.login_throttle = LoginThrottle(LOGIN_FAILURES, LOGIN_WINDOW_S)
-        self.ip_throttle = LoginThrottle(LOGIN_FAILURES_PER_IP, LOGIN_WINDOW_S)
+        self.login_throttle = SlidingWindow(LOGIN_FAILURES, LOGIN_WINDOW_S)
+        self.ip_throttle = SlidingWindow(LOGIN_FAILURES_PER_IP, LOGIN_WINDOW_S)
 
     def login_blocked(self, ip: str, username: str) -> bool:
         # l'adresse IP d'abord : une IP déjà bloquée ne fait plus naître d'entrée par identifiant tapé

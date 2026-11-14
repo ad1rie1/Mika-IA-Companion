@@ -44,7 +44,7 @@ from mika.ports.paging import fold_text
 from mika.ports.sql import upsert
 from mika.vocab import privacy
 from mika.vocab.privacy import ChannelTrust, Sensitivity
-from tests.unit.test_audit_regressions import event
+from tests.fixtures.memory import event
 from tests.unit.test_knowledge_coherence import FRAME, Frame, mika_says
 from tests.unit.test_readings import store
 

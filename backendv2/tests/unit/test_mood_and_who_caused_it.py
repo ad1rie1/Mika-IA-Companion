@@ -1,4 +1,5 @@
-"""Les points faibles relevés par l'audit « émotions, conscience, mémoire » (2026-10-11), corrigés.
+"""Son humeur et qui l'a causée : qui la touche, et vers qui elle déborde. Deux points faibles relevés par l'audit
+« émotions, conscience, mémoire » (2026-10-11), corrigés :
 
 - quelqu'un qu'elle ne peut pas reconnaître (une adresse jetable) la touchait davantage qu'une inconnue connue : son
   humeur n'en était pas amortie ;

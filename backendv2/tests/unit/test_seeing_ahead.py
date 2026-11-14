@@ -56,8 +56,8 @@ from mika.sim.clock import run_virtual
 from mika.vocab import causes
 from mika.vocab.affect import Emotion
 from mika.vocab.privacy import Sensitivity, Verdict
+from tests.fixtures.memory import event
 from tests.fixtures.mika import at_paris, boot, build
-from tests.unit.test_audit_regressions import event
 from tests.unit.test_bonds_over_time import Script
 from tests.unit.test_knowledge_coherence import FRAME, Frame, Store, alice_says
 from tests.unit.test_readings import LLM, read, store

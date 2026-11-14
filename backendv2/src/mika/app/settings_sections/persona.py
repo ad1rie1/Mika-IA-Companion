@@ -82,7 +82,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def character_state() -> dict[str, Any]:
         """Son caractère écrit (ADR 0139), et ce qui retient l'appel qui l'écrirait : aucun modèle, ou le quota."""
         if not live.gateway.configured or not live.gateway.serving(str(Role.CHARACTER)):
-            held = "aucun modèle ne sert ce rôle (Intelligence › Qui sert quoi)"
+            held = "aucun modèle ne sert ce rôle (Réglages › Modèles de texte › Qui sert quoi)"
         else:
             held = live.gateway.held(str(Role.CHARACTER), 2)
         return temper.character_state(live.kernel, held)
@@ -91,7 +91,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
         return effect(ui, params.preview_temperament(t))
 
-    async def back_to_file(by: str) -> tuple[str, str]:
+    async def back_to_file() -> tuple[str, str]:
         if settings.persona_yaml() is None:
             return "info", "La persona vient déjà du fichier."
         try:

@@ -17,7 +17,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from mika.app.cli import _with_settings, profile_command
+from mika.app.cli.common import _with_settings
+from mika.app.cli.sim import profile_command
 from mika.app.composition import faculties
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c

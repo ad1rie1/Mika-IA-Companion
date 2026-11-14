@@ -24,7 +24,8 @@ import pytest
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.store_sql import SqlStore
 from mika.app import backup, datadir
-from mika.app.cli import main, replay_verify
+from mika.app.cli import main
+from mika.app.cli.journal import replay_verify
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import memory as memory_c
 from mika.sim.clock import SimClock, run_virtual

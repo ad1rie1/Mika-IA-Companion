@@ -135,6 +135,12 @@ def test_a_builtin_badge_says_what_it_counts(world, monkeypatch):  # noqa: F811
     monkeypatch.setattr(system_pages, "_outbox_problems", lambda ui: (3, "effets qui n'ont pas pu partir"))
     rows = priorities_of(client.get("/inspecteur/").text)
     assert ("/inspecteur/systeme/sorties", "3", "Système › File de sortie", "effets qui n'ont pas pu partir") in rows
+    # son contrôle au rouge : une seule ligne, son constat, qui dit depuis quand (le badge ne fait que compter)
+    report = health.Health("ready", (*checks[:-1], health.Check("outbox", health.DEGRADED, "2 abandonnés en 24 h")))
+    monkeypatch.setattr(health, "report", lambda kernel: report)
+    rows = priorities_of(client.get("/inspecteur/").text)
+    assert [r for r in rows if r[0] == "/inspecteur/systeme/sorties"] == [
+        ("/inspecteur/systeme/sorties", "!", "Système › File de sortie", "2 abandonnés en 24 h")]
     # son onglet garde son nombre
     menu = html.unescape(client.get("/inspecteur/systeme/sorties").text)
     assert client.get("/inspecteur/systeme/sorties").status_code == 200 and "File de sortie" in menu

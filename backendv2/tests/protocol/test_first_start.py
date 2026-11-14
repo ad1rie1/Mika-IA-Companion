@@ -15,6 +15,7 @@ pièges silencieux. Ce qui est vérifié ici, par ce qu'une personne ferait :
 
 from __future__ import annotations
 
+import getpass
 import html
 import json
 import logging
@@ -245,11 +246,11 @@ def test_the_cli_tells_the_first_steps_and_never_wants_a_password_in_argument(tm
         asked.append(prompt)
         return "un-mot-de-passe-long"
 
-    monkeypatch.setattr(cli.getpass, "getpass", ask)
+    monkeypatch.setattr(getpass, "getpass", ask)
     assert cli.main(["--data", str(tmp_path / "v2"), "account", "adrien", "--operator"]) == 0
     assert len(asked) == 2 and json.loads(capsys.readouterr().out)["operator"] is True
     answers = iter(["un-mot-de-passe-long", "pas-le-meme-mot-de-passe"])
-    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: next(answers))
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: next(answers))
     assert cli.main(["--data", str(tmp_path / "v2"), "account", "bea"]) == 1  # deux saisies différentes : rien
 
 

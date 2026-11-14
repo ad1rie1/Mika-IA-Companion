@@ -87,8 +87,8 @@ def _inspect(s: SensorsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     # leur jeton : derrière la roue de Ses sens, en haut à droite (ADR 0206)
     devices = ctx.tally(c.SENSED, "device")
     if not devices:
-        return [Note("Aucun appareil n’a encore rien signalé : donne-leur le jeton de Réglages › Accès des appareils, "
-                     "en haut à droite.", tone="muted")]
+        return [Note("Aucun appareil n’a encore rien signalé : donne-leur le jeton de Connexions › Ses sens › "
+                     "Accès des appareils, en haut à droite.", tone="muted")]
     device = ctx.value("appareil") or ""
     before = ctx.int_param("avant", 0) or None
     sensed = ctx.events([c.SENSED], SHOWN, where=("device", device) if device else None, before=before)

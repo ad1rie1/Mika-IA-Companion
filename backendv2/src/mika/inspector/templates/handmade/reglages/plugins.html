@@ -1,6 +1,7 @@
 {# Réglages › Configuration des plugins (app/handmade/tabs/settings.py ``plugins``, ADR 0121) : une table par groupe — les
    plugins composés, puis ce qui se branche sans en être un —, une ligne par plugin : son nom et ce qui s'y règle, ses
-   pages de réglages, ses paramètres avancés, où s'en servir. Les lignes viennent d'app/reglages.py (``PLUGINS``). #}
+   pages de réglages, ses paramètres avancés, où s'en servir. Les lignes viennent
+   d'app/settings_sections/plugins.py (``PLUGINS``). #}
 {% from "_navigation.html" import pager as pages %}
 <div class="stack hm-plugins">
 {% for g in groups %}

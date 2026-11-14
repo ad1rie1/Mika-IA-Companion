@@ -36,6 +36,7 @@ from mika.vocab.lineage import Lineage, admits, requirement, without_whom
 from mika.vocab.people import mentions
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import PUBLIC_FLOOR, Sensitivity
+from mika.vocab.reading import untagged
 
 
 @SELF.reducer(memory_c.REMEMBERED)
@@ -306,7 +307,9 @@ class Narrate:
                              messages=(Message("user", prompt_of(m, previous)),), max_tokens=500, lane="background",
                              priority=4)
         response = await ctx.llm.call(request)
-        text = (response.text or "").strip()
+        # le texte seul : une balise que sa voix y aurait posée par habitude se montrerait dans la console et lui
+        # reviendrait sous « QUI TU ES DEVENUE »
+        text = untagged(response.text or "")
         if not text:
             return
         if mentions(text, known_names(frame)):

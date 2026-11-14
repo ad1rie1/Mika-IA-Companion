@@ -4,7 +4,7 @@
  * des polices ajoutées, une autre zone — chaque carte ouverte suit (`restyle`).
  */
 import { fetchMap, type MapInfo } from "../api/phone";
-import { Cached } from "../screens/parametres/kit";
+import { Cached } from "../shared/kit";
 
 export const MAP_INFO_TTL = 5 * 60_000;
 

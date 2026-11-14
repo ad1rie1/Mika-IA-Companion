@@ -221,7 +221,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_stt(cfg.base_url, cfg.api_key, cfg.model or "whisper-1")
         return []
 
-    async def new_token(by: str) -> tuple[str, str]:
+    async def new_token() -> tuple[str, str]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 

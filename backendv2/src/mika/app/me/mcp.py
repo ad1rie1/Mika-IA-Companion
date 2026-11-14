@@ -60,22 +60,29 @@ def mine(call: Call) -> dict[str, McpServer]:
     return {n: s for n, s in call.api.settings.mcp().servers.items() if s.owner == me}
 
 
+def shared(spec: McpServer) -> dict[str, tuple[str, Any]]:
+    """Les partages d'un service (ADR 0188, 0192) : chaque ligne d'accès d'une seule personne (« personne:<clé> ») autre
+    que son propriétaire — celle qu'un partage ajoute —, par personne : son niveau (lire : ses outils qui lisent ; s'en
+    servir : aussi ceux qui agissent) et sa ligne. Un partage n'en écrit qu'une ; s'il y en avait plusieurs, la
+    dernière. La seule lecture de cette règle : ce qu'on lui partage (``received``), Paramètres › Partages et la
+    console (``app/me/shares.py``), la fiche d'une personne la lisent ici."""
+    out: dict[str, tuple[str, Any]] = {}
+    for line in spec.access:
+        if len(line.who) == 1 and line.who[0].startswith(PERSON) and line.who[0] != spec.owner:
+            out[line.who[0]] = (SHARE_USE if line.act != "non" else SHARE_READ, line)
+    return out
+
+
 def received(call: Call) -> dict[str, tuple[McpServer, str, Any]]:
-    """Les services qu'une autre personne lui partage (ADR 0188, 0192), comme Paramètres › Partages les compte
-    (``app/me/shares.py``) : à quelqu'un d'autre qu'elle, avec une ligne d'accès pour elle seule — celle qu'un partage
-    ajoute. Par nom : le service, son niveau (lire : ses outils qui lisent ; s'en servir : aussi ceux qui agissent) et
-    sa ligne."""
+    """Les services qu'une autre personne lui partage (ADR 0188, 0192) : à quelqu'un d'autre qu'elle, avec une ligne
+    d'accès pour elle seule (``shared``). Par nom : le service, son niveau et sa ligne."""
     if call.api.settings is None:
         return {}
     me = PERSON + call.me.person
     out: dict[str, tuple[McpServer, str, Any]] = {}
     for n, s in call.api.settings.mcp().servers.items():
-        if not s.owner or s.owner == me:
-            continue
-        # une ligne par personne, comme le partage l'écrit (s'il y en avait plusieurs, la dernière, comme Partages)
-        lines = [a for a in s.access if tuple(a.who) == (me,)]
-        if lines:
-            out[n] = (s, SHARE_USE if lines[-1].act != "non" else SHARE_READ, lines[-1])
+        if s.owner and s.owner != me and me in (lines := shared(s)):
+            out[n] = (s, *lines[me])
     return out
 
 

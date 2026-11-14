@@ -48,8 +48,8 @@ from mika.ports.vectors import VectorItem
 from mika.runtime.operations import FIXED_FIELD, forget_subject, perform
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from tests.fixtures.memory import event
 from tests.fixtures.mika import connect, said
-from tests.unit.test_audit_regressions import event
 from tests.unit.test_identity_security import form, run, say
 from tests.unit.test_knowledge_coherence import ALICE, Frame, Store, alice_says, drafts, index, mika_says
 

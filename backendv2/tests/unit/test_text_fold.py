@@ -32,7 +32,7 @@ from mika.faculties.identity.faculty import IDENTITY, Handle, IdentityState, _cl
 from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.projects import inspect as projects_inspect
 from mika.faculties.transcript import TRANSCRIPT
-from mika.inspector.pages import reglages, settings_directory, subjects
+from mika.inspector.pages import params, settings_directory, subjects
 from mika.inspector.pages import rights as rights_page
 from mika.inspector.pages import system as system_page
 from mika.inspector.pages import tools as tools_page
@@ -241,7 +241,7 @@ def test_a_forged_view_is_found_without_its_ligature() -> None:
 
 
 def test_a_settings_group_keeps_the_word_its_ligature_is_in() -> None:
-    assert reglages._slug("Cœur de métier") == "coeur-de-metier"
+    assert params._slug("Cœur de métier") == "coeur-de-metier"
 
 
 @pytest.mark.parametrize(("module", "copy"), [

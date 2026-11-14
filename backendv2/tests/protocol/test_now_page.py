@@ -73,8 +73,8 @@ def test_the_page_crosses_her_faculties(world):  # noqa: F811
     assert 'class="mark mark-reply"' in text and 'class="mark mark-thought"' in text
     # sa propriétaire se dit, et une conversation en cours n'est pas une attente
     assert '<span class="now-tag owner">propriétaire</span>' in text and "en pleine conversation" in text
-    # aujourd'hui, en chiffres : sa réponse, sa pensée
-    assert re.search(r'now-today-value now-num">1</span><span class="now-today-label">réponses', text)
+    # aujourd'hui, en chiffres : sa réponse, au singulier (C1-10 : « 1 réponses » avant)
+    assert re.search(r'now-today-value now-num">1</span><span class="now-today-label">réponse<', text)
     # aucune carte n'a échoué
     assert "Impossible de lire" not in text
 

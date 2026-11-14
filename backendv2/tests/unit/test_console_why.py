@@ -13,9 +13,11 @@ from types import SimpleNamespace
 
 from sqlalchemy import insert
 
+from mika.inspector.pages.decisions import ARBITER_COLUMNS
 from mika.inspector.pages.why import cause_blocks, selection_of
 from mika.kernel.builtin import SELECTED
-from mika.kernel.inspect import Note, Table
+from mika.kernel.inspect import Disclosure, Note, Table, Text
+from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.journal import JournalEvent
 from tests.fixtures.sqldb import SqlDB
 
@@ -47,8 +49,14 @@ class _Store(SqlDB):
         return [self.events[s] for s in seqs if s in self.events]
 
 
+#: la politique de l'arbitre que lit sa table (le rythme maximal de chaque sorte, ADR 0177) : celle du noyau composé
+POLICY = ArbitrationPolicy(max_rates={"INITIATIVE": 0.1})
+
+
 def _ui(events: list[SimpleNamespace]) -> SimpleNamespace:
-    return SimpleNamespace(kernel=SimpleNamespace(mind=SimpleNamespace(store=_Store(events))), decode=lambda e: e)
+    return SimpleNamespace(kernel=SimpleNamespace(mind=SimpleNamespace(store=_Store(events)),
+                                                  registry=SimpleNamespace(arbitration=POLICY)),
+                           decode=lambda e: e)
 
 
 def _started(seq: int, trigger: str, target: str | None, **more) -> SimpleNamespace:
@@ -113,6 +121,9 @@ class _Names:
     def faculty(self, owner):
         return owner
 
+    def who_cell(self, target):
+        return Text(self.who(target))
+
 
 def test_the_cause_of_an_initiative_is_the_arbiter_line_in_words():
     row = SimpleNamespace(kind="INITIATIVE", target="alice", score=1.2, hazard=0.002, vetoes=(), shift=0.0,
@@ -130,6 +141,10 @@ def test_the_cause_of_an_initiative_is_the_arbiter_line_in_words():
     assert "0,42" in lead.text and "Parmi 2 ligne(s)" in lead.text  # le tirage et les lignes, à la française
     steps = next(b for b in spoke if isinstance(b, Table))
     assert any("Envie de compagnie" in str(c) for r in steps.rows for c in r.cells)  # la preuve en mots
+    # les lignes non retenues se lisent comme la table de l'arbitre : la sorte, la cible et le rythme maximal, repliés,
+    # ont leurs colonnes (cinq colonnes seulement les laissaient tomber au rendu)
+    others = next(b for b in spoke if isinstance(b, Disclosure)).items[0]
+    assert others.columns == ARBITER_COLUMNS and all(len(r.cells) == len(others.columns) for r in others.rows)
     murmur = SimpleNamespace(seq=13, data=SimpleNamespace(kind="MURMUR", target=None, trigger="prélude:selected:10",
                                                          reply_to=None, reason=""))
     before = next(b for b in cause_blocks(ui, murmur) if isinstance(b, Note))

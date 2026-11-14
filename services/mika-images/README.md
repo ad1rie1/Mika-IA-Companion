@@ -72,7 +72,7 @@ détail) ; des poids moins compressés (Q8_0 par défaut ; les variantes Q4_K_M 
 
 ## Brancher Mika
 
-Dans la console (Configuration › Intelligence › Images › Fournisseurs d'images, type *stable-diffusion.cpp*) ou en
+Dans la console (Réglages › Modèles d’image › Fournisseurs d'images, type *stable-diffusion.cpp*) ou en
 ligne de commande :
 
 ```bash

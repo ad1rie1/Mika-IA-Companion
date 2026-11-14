@@ -7,11 +7,14 @@ reste relève de la règle « la doc suit le code, dans le même lot » (``CLAUD
 - les numéros d'ADR cités par le code et la doc ont leur entrée dans ``docs/decisions.md``, numérotée sans trou ni
   double (hors les numéros que son en-tête déclare non attribués), et chaque entrée est sur sa carte ;
 - chaque renvoi entre entrées se dit des deux côtés : « Révise X » appelle « Révisée par » (ou « Remplacée par »)
-  dans X, et l'inverse ; une entrée dit chaque mot de renvoi une fois, ses numéros à la suite ;
+  dans X, et l'inverse ; une entrée dit chaque mot de renvoi une fois, ses numéros à la suite, et chaque mot ouvre
+  sa phrase (« …(en partie). Révisée par 0039 », jamais « …(en partie) Révisée par 0039 ») ;
 - les trames du chat que le serveur émet et lit (lues dans le code par ``ast``) sont celles que décrit
   ``docs/protocole-chat.md`` ;
 - les sous-commandes de la CLI (lues dans l'analyseur lui-même) sont celles de la table d'``ARCHITECTURE.md`` ;
-- un chemin de fichier cité entre accents graves existe.
+- un chemin de fichier cité entre accents graves existe, dans chaque doc qui décrit le présent (``DOCS`` : celles du
+  moteur, de ses protocoles — l'API par personne comprise — et de la console, ``CLAUDE.md``, les README des deux
+  clients web) ; seul un dossier que git ignore, nommé dans ``UNVERSIONED``, peut manquer.
 """
 
 from __future__ import annotations
@@ -33,11 +36,15 @@ CHAT = ROOT / "docs" / "protocole-chat.md"
 ARCHITECTURE = ROOT / "ARCHITECTURE.md"
 #: la doc qui décrit le présent ; ``decisions.md`` raconte aussi ce qui a été retiré, il n'est pas lu pour ses chemins
 DOCS = (ARCHITECTURE, ROOT / "README.md", ROOT / "deploy" / "README.md", CHAT, ROOT / "docs" / "protocole-monde.md",
-        ROOT / "docs" / "console-carte.md", REPO / "CLAUDE.md", REPO / "frontend" / "Web" / "README.md")
-#: d'où se lit un chemin écrit court (« `handmade/now.py` », « `ui/bubbles.ts` »)
+        ROOT / "docs" / "protocole-moi.md", ROOT / "docs" / "console-carte.md", REPO / "CLAUDE.md",
+        REPO / "frontend" / "Web" / "README.md", REPO / "frontendv2" / "README.md")
+#: d'où se lit un chemin écrit court (« `handmade/now.py` », « `ui/bubbles.ts` », « `screens/chat/` »)
 BASES = (ROOT, PACKAGE, PACKAGE / "app", PACKAGE / "inspector", PACKAGE / "inspector" / "templates",
          PACKAGE / "inspector" / "static", ROOT / "tests", REPO, REPO / "frontend" / "Web", REPO / "frontend" / "Web" / "src",
-         REPO / "frontend" / "Unity")
+         REPO / "frontend" / "Unity", REPO / "frontendv2" / "src")
+#: un dossier cité que git ignore (des fichiers sous licence, déposés à la main) : un clone ne l'a pas, la doc le nomme
+#: pour dire où les mettre
+UNVERSIONED = frozenset({"frontend/Android/app/src/main/assets/avatar/"})
 #: une trame que le serveur lit et ignore toujours : l'identité vient de la session ou du jeton
 IGNORED = frozenset({"identify"})
 
@@ -81,7 +88,8 @@ def _links() -> dict[str, dict[str, set[str]]]:
 
     Une même ligne peut porter les deux sens (« *Révise 0020 (en partie). Révisée par 0039.* ») : chaque numéro va au
     dernier mot de renvoi qui le précède. Une entrée ne dit chaque mot qu'une fois, ses numéros à la suite (« Révisée
-    par 0194, 0197 », jamais une seconde ligne « Révisée par 0197 »).
+    par 0194, 0197 », jamais une seconde ligne « Révisée par 0197 ») ; un mot qui ne commence pas la ligne suit un
+    point (« …aussi). Révisée par 0219 », jamais collé à la parenthèse d'avant).
     """
     links: dict[str, dict[str, set[str]]] = {}
     current: str | None = None
@@ -95,10 +103,14 @@ def _links() -> dict[str, dict[str, set[str]]]:
                 links[current] = {word: set() for word in FORWARD | BACKWARD}
         elif current is not None and line.lstrip("*").startswith(("Révis", "Remplac")):
             assert line.endswith("*"), f"{current} : une ligne de renvoi tient sur une ligne, sinon ses numéros échappent"
+            opening = len(line) - len(line.lstrip("*"))
             word = None
-            for token in LINK.findall(line):
+            for found in LINK.finditer(line):
+                token = found.group()
                 if not token.isdigit():
                     assert token not in said, f"{current} : « {token} » se dit une fois, ses numéros à la suite"
+                    assert found.start() == opening or line[:found.start()].endswith(". "), \
+                        f"{current} : « {token} » ouvre sa phrase, après un point"
                     said.add(token)
                     word = token
                 elif word is not None:
@@ -225,7 +237,7 @@ def _documented() -> dict[str, set[str] | None]:
 def test_the_cli_table_names_every_command_and_only_those(monkeypatch):
     real = _choices(_parser(monkeypatch))
     documented = _documented()
-    assert set(documented) == set(real), "ARCHITECTURE.md › Commandes contre app/cli.py"
+    assert set(documented) == set(real), "ARCHITECTURE.md › Commandes contre app/cli/"
     for command, subs in documented.items():
         if subs is None:
             continue
@@ -243,6 +255,6 @@ def test_every_cited_path_exists():
     missing = []
     for doc in DOCS:
         for cited in PATH.findall(_text(doc)):
-            if not any((base / cited).exists() for base in (doc.parent, *BASES)):
+            if cited not in UNVERSIONED and not any((base / cited).exists() for base in (doc.parent, *BASES)):
                 missing.append(f"{doc.relative_to(REPO)} : {cited}")
     assert not missing, missing

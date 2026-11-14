@@ -25,6 +25,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
 from mika.faculties.transcript import _COLUMNS, TRANSCRIPT, TranscriptState, _messages_of
+from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -349,7 +350,8 @@ def _from_whom(frame: Frame, handles: Sequence[str]) -> str:
             unknown.add(person)
         elif name not in known:
             known.append(name)
-    words = known[:3] + ([f"{len(known) - 3} autres"] if len(known) > 3 else [])
+    more = len(known) - 3
+    words = known[:3] + ([f"{more} {agree(more, 'autre', 'autres')}"] if more > 0 else [])
     if unknown:
         words.append("une personne inconnue" if len(unknown) == 1 else f"{len(unknown)} personnes inconnues")
     if not words:

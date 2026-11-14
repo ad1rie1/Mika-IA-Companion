@@ -110,8 +110,10 @@ def test_a_console_token_is_shown_once_audited_and_survives_a_new_password(world
     assert len(raw) == 1 and "Montré une seule fois" in first and "Jeton créé" in first
     # « Copier le jeton » vise le jeton montré ; console.js le montre (caché sans script, C9-05)
     assert f'<pre class="hm-code" id="acc-token-value">{raw[0]}</pre>' in first
-    assert re.search(r'<button type="button" class="btn small" data-copy="acc-token-value"[^>]* hidden>Copier le jeton<',
-                     first)
+    copy = re.search(r'<div class="([^"]*)"><button type="button" class="btn small" data-copy="acc-token-value"[^>]* '
+                     r'hidden>Copier le jeton<', first)
+    # une rangée neutre : pas la barre d'enregistrement (``form-actions``), collée en bas de l'écran
+    assert copy and "form-actions" not in copy.group(1).split()
     assert RAW_TOKEN.search(page(client, where)) is None  # une seule fois
     [token] = client.portal.call(live.accounts.tokens, bea.id)
     assert (token.label, token.client, token.source) == ("Unity du salon", "screen", "console")

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import mika
 import mika.plugins
-from mika.app import reglages
+from mika.app import settings_sections
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 BASE = "/inspecteur/reglages"
@@ -30,10 +30,13 @@ BASE = "/inspecteur/reglages"
 SCIENTIFIC = re.compile(r"\d[eE][-+]?\d")
 #: les pages de réglages que le code cite par leur chemin, et leur adresse ; le chemin écrit, jusqu'à leur nom
 CITED = {"Notifications du téléphone": "notifications", "Carte de sa position": "carte",
-         "Lieux et adresses": "lieux", "Itinéraires": "itineraires", "Dépôts Git": "depots"}
+         "Lieux et adresses": "lieux", "Itinéraires": "itineraires", "Dépôts Git": "depots",
+         # les modèles, et deux pages de Ses sens (derrière sa roue : leur ancienne adresse y mène, ADR 0206)
+         "Fournisseurs": "fournisseurs", "Qui sert quoi": "roles", "Flux suivis": "flux",
+         "Accès des appareils": "appareils"}
 WRITTEN_PATH = re.compile(r"(?:Réglages|Connexions(?: extérieures)?)(?: › [^›:;,.()«»]+?)*? › "
                           r"(?:Notifications du téléphone|Carte de sa position|Lieux et adresses|Itinéraires|"
-                          r"Dépôts [Gg]it)")
+                          r"Dépôts [Gg]it|Fournisseurs(?! d)|Qui sert quoi|Flux suivis|Accès des appareils)")
 
 
 class FormReader(HTMLParser):
@@ -185,11 +188,15 @@ def written_paths() -> set[str]:
 
 def test_a_path_written_in_the_code_is_the_breadcrumb_of_its_page(world):  # noqa: F811
     """K0-08, Q01 : « Réglages › Canaux › Itinéraires » menait aux tableaux de droits, et « Canaux » ne nomme plus
-    qu'eux. Ce qu'on écrit à une opératrice est ce qu'elle lit en haut de la page, sa rubrique, son lien et son titre."""
+    qu'eux. Ce qu'on écrit à une opératrice est ce qu'elle lit en haut de la page, sa rubrique, son lien et son titre.
+    De même pour les modèles (« Réglages › Intelligence › Fournisseurs » : le menu dit Modèles de texte) et pour deux
+    pages de Ses sens (« Réglages › Flux suivis » : elles vivent derrière sa roue, ADR 0206 ; audit du 2026-11-05, LR2)."""
     client, _live, _ = world
     bootstrap(client)
     written = written_paths()
-    assert {"Réglages › Carte et téléphone › Itinéraires", "Connexions › Dépôts Git"} <= written
+    assert {"Réglages › Carte et téléphone › Itinéraires", "Connexions › Dépôts Git",
+            "Réglages › Modèles de texte › Fournisseurs", "Réglages › Modèles de texte › Qui sert quoi",
+            "Connexions › Ses sens › Flux suivis", "Connexions › Ses sens › Accès des appareils"} <= written
     for path in sorted(written):
         page = html.unescape(page_of(client, f"{BASE}/{CITED.get(path.rsplit(' › ', 1)[-1], 'inconnue')}"))
         nav = re.search(r'<nav class="crumbs"[^>]*>(.*?)</nav>', page, re.S)
@@ -225,10 +232,10 @@ def test_the_directory_lists_every_settings_page_in_a_rubric_named_after_what_it
 
 
 def test_the_plugins_overview_has_a_line_for_every_plugin(world):  # noqa: F811
-    """C9-09, C7-06 : une ligne par paquet de ``plugins/`` (la table d'``app/reglages.py`` ne peut plus en oublier),
+    """C9-09, C7-06 : une ligne par paquet de ``plugins/`` (la table d'``app/settings_sections/plugins.py`` ne peut plus en oublier),
     chacune vers ses réglages, ses paramètres avancés et l'endroit où s'en servir ; la transcription y a sa ligne."""
     packages = {m.name for m in pkgutil.iter_modules(mika.plugins.__path__) if m.ispkg}
-    assert set(reglages.PLUGINS) == packages
+    assert set(settings_sections.PLUGINS) == packages
     client, live, _ = world
     bootstrap(client)
     page = html.unescape(page_of(client, f"{BASE}/plugins"))
@@ -320,7 +327,7 @@ def test_a_section_saves_a_value_and_who_saved_it_is_for_the_audit_of_the_page(w
     """K0-26 : le contrat ne promet plus un opérateur que personne ne lisait ; c'est l'audit de la page qui le garde
     (``tests/protocol/test_console_settings.py`` le lit au journal)."""
     _, live, _ = world
-    saved = [s for s in reglages.sections(live) if s.save is not None]
+    saved = [s for s in settings_sections.sections(live) if s.save is not None]
     assert saved
     assert {s.key: list(inspect.signature(s.save).parameters) for s in saved
             if len(inspect.signature(s.save).parameters) != 1} == {}

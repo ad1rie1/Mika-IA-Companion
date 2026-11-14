@@ -97,7 +97,9 @@ def test_regarder_dehors_et_le_dire(tmp_path):
 
 def test_le_decor_se_regarde_il_ne_se_lit_plus_a_chaque_replique(tmp_path):
     """« AUTOUR DE TOI » n'est plus une section de la conversation (le décor y était raconté à tout bout de champ) :
-    elle regarde autour d'elle quand elle en a besoin, par world_look, qui rend la même chose."""
+    elle regarde autour d'elle quand elle en a besoin, par world_look, qui rend la même chose. La première requête de
+    sa réplique, pas la première de sa vie : au démarrage, son caractère s'écrit d'abord (ADR 0139, rôle
+    ``character``, sans outils)."""
     respond = _calling(("world_look", {}))
     seen: list[LLMRequest] = []
 
@@ -106,7 +108,7 @@ def test_le_decor_se_regarde_il_ne_se_lit_plus_a_chaque_replique(tmp_path):
         return respond(req)
 
     _, out, _ = _run(tmp_path, spy, _talk("Tu fais quoi ?"))
-    first = seen[0]
+    first = next(req for req in seen if req.role == "reply")
     assert not any("AUTOUR DE TOI" in m.content for m in first.messages) and "AUTOUR DE TOI" not in first.system_stable
     assert "world_look" in {t.name for t in first.tools if not t.deferred}
     (looked,) = respond.results  # type: ignore[attr-defined]

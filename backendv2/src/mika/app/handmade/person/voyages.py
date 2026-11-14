@@ -19,7 +19,7 @@ from markupsafe import Markup
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 
-from mika.adapters.web.app import LoginThrottle
+from mika.adapters.web.gate import SlidingWindow
 from mika.app.handmade import Look
 from mika.app.me import ROUTES_BUSY, spend
 from mika.app.me.maps import gpx_document, gpx_response
@@ -99,7 +99,7 @@ class _Busy(Exception):
     """Le compte de l'opérateur a demandé assez de trajets pour la minute (``OUTBOUND``)."""
 
 
-async def gpx(ui: UI, request: Request, outbound: LoginThrottle) -> Response:
+async def gpx(ui: UI, request: Request, outbound: SlidingWindow) -> Response:
     """Le GPX d'un voyage, pour un opérateur (ADR 0204) : ses arrêts, et le tracé quand les itinéraires le calculent.
     Le tracé use la borne de son compte, celle de l'écran Carte (``outbound`` : ``MeApi.outbound``) — 429 au-delà, le
     serveur d'itinéraires public est à tous. Un voyage qui n'est plus là : 404."""

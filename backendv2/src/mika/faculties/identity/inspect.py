@@ -40,6 +40,7 @@ from mika.faculties.identity.faculty import (
     worn_names,
 )
 from mika.kernel.events import Event
+from mika.kernel.forms import agree
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -1118,7 +1119,9 @@ def _names_badge(s: IdentityState, frame: Frame, ports: Mapping[str, Any]) -> tu
     store = ports.get("store")
     if store is None:
         return 0, ""
-    return len(waiting_names(s, store)), "nom(s) dont on lui a parlé que porte quelqu'un qu'elle connaît"
+    n = len(waiting_names(s, store))
+    return n, agree(n, "nom dont on lui a parlé que porte quelqu'un qu'elle connaît",
+                    "noms dont on lui a parlé que porte quelqu'un qu'elle connaît")
 
 
 # hors de la navigation : la file « À valider » la lit, et c'est là seulement qu'on en décide (ADR 0180)

@@ -134,6 +134,22 @@ def test_one_journal_per_lived_day(tmp_path):
 
 
 
+def test_her_journal_keeps_no_tag_of_her_voice(tmp_path):
+    """Sa voix pose parfois sa balise au bout de ce qu'elle écrit, par habitude : son journal se garde sans. Il se
+    montre dans la console et lui revient quand elle le relit."""
+    script = Script()
+    script.journal = f"Une soirée tranquille, un mot de quelqu'un. {script.tag}\n[EN_FACE: rien]"
+
+    async def scenario(kernel):
+        await (await kernel.perceive(said("user_1", "coucou, bonne soirée"))).reply
+        await until(kernel, at_paris(2026, 9, 29, 10, 0))
+        journals = events(kernel, self_c.JOURNALED.name)
+        return kernel.mind.store.content([j.data.text.ref for j in journals])
+
+    texts, _ = build_run(tmp_path, scenario, script=script)
+    assert list(texts.values()) == ["Une soirée tranquille, un mot de quelqu'un."]
+
+
 def test_her_very_first_day_without_a_word_leaves_no_journal(tmp_path):
     """Une vie qui commence à 23 h 50 (une remise à zéro) : sa première « journée » a duré dix minutes et personne
     ne lui a rien dit. Un journal écrit sur ce vide s'inventait une attente (« je me demandais si quelqu'un allait se
@@ -412,6 +428,8 @@ def test_the_dream_says_its_own_kind():
     assert dream_of("Une plage, la nuit. [reve:Melancholic]")[1:] == (self_c.MELANCHOLIC, "melancholic")
     assert dream_of("Je vole.") == ("Je vole.", self_c.MUNDANE, "dreamy")
     assert dream_of("Je vole.\n[RÊVE: épique]")[:2] == ("Je vole.", self_c.MUNDANE)
+    # une balise que sa voix ajoute par habitude part avec la sienne : le rêve se garde et se raconte sans
+    assert dream_of("Je cours.\n[RÊVE: nightmare]\n[EMOTION: scared 0.6]")[:2] == ("Je cours.", self_c.NIGHTMARE)
 
 
 def test_the_dreamer_sees_what_each_fragment_made_her_feel_and_names_the_kind(tmp_path):

@@ -16,6 +16,7 @@ from mika.contracts import affect as affect_c
 from mika.contracts import needs as needs_c
 from mika.contracts import social as social_c
 from mika.kernel.clock import US
+from mika.plugins.web import WebParams
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, said
@@ -32,12 +33,19 @@ def script(req):
 
 
 def evening_after_a_hollow_day(tmp_path, closeness: str | None):
-    """Lundi 9 h, un mot, puis rien jusqu'au mardi 18 h ; alors la même personne revient."""
+    """Lundi 9 h, un mot, puis rien jusqu'au mardi 18 h ; alors la même personne revient.
+
+    Rien, c'est aussi rien à chercher : ni flux ni web. Depuis l'ADR 0160, le web actif mène ses centres d'intérêt à
+    des explorations ; ce noyau de test n'a pas de client MCP (comme le monde simulé, ``Driver.overrides``), et le
+    faux modèle n'y conclut rien : chaque exploration se bloquait au bout de trois séances, et la frustration de la
+    dernière, ressassée (« une pensée qui te revient », mardi à 17 h 39), devenait la cause de son humeur à la
+    place de la solitude."""
     kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 9, 0))
 
     async def main():
         await boot(kernel)
         try:
+            await kernel.set_params("web", WebParams(enabled=False))
             if closeness:
                 await befriend(kernel, "user_1", closeness)
             await (await kernel.perceive(said("user_1", "salut, bonne journée"))).reply

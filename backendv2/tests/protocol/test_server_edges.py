@@ -15,7 +15,8 @@ from mika.adapters.mcp.relay import PREFIX, Relay
 from mika.adapters.web import app as web_app
 from mika.adapters.web.app import DEV_ORIGINS
 from mika.app import backup
-from mika.app.server import RedactingFilter, redact, web_config
+from mika.app.logs import RedactingFilter, redact
+from mika.app.server import web_config
 from tests.protocol.test_web import world  # noqa: F401 — fixture
 
 TOKEN = "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"

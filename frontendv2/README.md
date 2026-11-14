@@ -12,7 +12,7 @@ partage (ADR 0188).
 npm install
 npm run dev        # http://localhost:4173 (port fixe, admis d'office par le moteur), vise http://localhost:8001
 npm run build      # tsc (l'application, puis vite.config.ts et tools/) puis vite build : la vraie barrière
-npm test           # vitest
+npm test           # vitest (src/ ; tools/ : extAssets, et les règles des feuilles lues sur le disque, styles.test.ts)
 npm run preview    # le résultat de build, sur le même port
 ```
 
@@ -58,7 +58,7 @@ Les modules purs du client web sont réutilisés sans copie par l'alias `@web` (
 | `login/` | la carte de connexion, et celle du premier compte (`needs_bootstrap`, code de premier démarrage) |
 | `shell/` | le cadre porté de `maquette.js` : barre du haut, routes `#écran/onglet/objet`, barre de titre et onglets, palette Ctrl K, menus, fenêtres, toasts, thème, icônes |
 | `mika/` | Mika : ce qu'on sait d'elle (`state.ts`, plié des trames ; `store.ts`, qui le garde et le diffuse), sa ligne d'état, ses facettes et son visage (`view.ts`, `labels.ts` ; `view.ts` écrit aussi les lignes de la carte « Ce qu'elle fait » — une facette et une promesse, que sa colonne du chat reprend telles quelles, un projet et son statut en mots — et décide quand sa VRM se charge), son visage en rond (`face.ts`), ses portraits (`portraits.ts`), son élément unique (`corner.ts`) et sa VRM (`vrm.ts`, chargée à part) |
-| `screens/chat/` | le chat : `chat.ts` (les trames, l'état du fil, l'orchestration des gestes), `approvals.ts` (les cartes d'accord et « Tout accepter »), `strands.ts` (les fils de travail et leurs commandes), `composer.ts` (le champ : pièces jointes, emojis, compteur, phrase préremplie, envoi), `markup.ts` (le balisage de la maquette, pur) |
+| `screens/chat/` | le chat : `chat.ts` (les trames, l'état du fil, l'orchestration des gestes), `approvals.ts` (les cartes d'accord et « Tout accepter »), `strands.ts` (les fils de travail et leurs commandes), `composer.ts` (le champ : pièces jointes, emojis, compteur, phrase préremplie, envoi), `older.ts` (« Messages plus anciens » : d'où repartir, comment ce qui revient se recoud au fil chargé, pur), `markup.ts` (le balisage de la maquette, pur) |
 | `screens/mail/` | Mail : `index.ts` (l'écran et sa pastille), `mail.ts` (l'état, les gestes), `markup.ts` (le rendu de la maquette, pur), `compose.ts` (les destinataires proposés, la fenêtre d'un mail), `format.ts` (niveaux de partage, adresses, texte d'un mail, « [À COMPLÉTER », pur) |
 | `screens/teams/` | Teams : `index.ts`, `teams.ts` (l'état, les gestes), `markup.ts`, `format.ts` (états, modes, jours, mentions, qui a écrit — « Toi » sur un compte à toi seulement —, les cartes du fil, l'adresse d'une réponse) |
 | `screens/telephone/` | Téléphone : `index.ts`, `view.ts` (le rendu, pur ; si la vraie carte se montre, et ce que l'onglet en fait : `liveWanted`, `mapStep`), `livemap.ts` (la carte de sa position sur `map/base.ts` : le point et le cercle de sa précision) |

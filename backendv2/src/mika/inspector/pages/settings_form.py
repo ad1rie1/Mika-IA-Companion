@@ -912,7 +912,7 @@ class SettingsForms:
         if command is None:
             return None, {s.key: State(messages=[("danger", "Commande inconnue.")])}, 400
         try:
-            tone, message = await command.run(by)
+            tone, message = await command.run()
         except ValueError as exc:
             return None, {s.key: State(messages=[("danger", str(exc))])}, 400
         await operations.audit(ui.kernel, f"console.reglages.{s.key}.{command.key}", by=by,

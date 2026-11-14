@@ -12,7 +12,7 @@ from starlette.requests import Request
 
 from mika.adapters.web import app as web_app
 from mika.adapters.web import protocol, session
-from mika.adapters.web.app import GATE_STATUS, LoginThrottle, gate_reply
+from mika.adapters.web.app import GATE_STATUS, gate_reply
 from mika.adapters.web.gate import (
     KEY_MAX,
     NOTHING,
@@ -88,7 +88,7 @@ def test_the_ceiling_can_be_that_of_the_call():
 
 def test_failures_count_apart_and_a_success_gives_its_try_back():
     tick = Tick()
-    w = LoginThrottle(2, 60.0, monotonic=tick)
+    w = SlidingWindow(2, 60.0, monotonic=tick)
     w.fail("ip")
     assert not w.blocked("ip")
     w.fail("ip")
@@ -119,8 +119,10 @@ def test_keep_forgets_the_keys_that_are_gone():
     assert not w.blocked("retire") and w.blocked("serre")
 
 
-def test_the_two_old_names_are_the_same_window():
-    assert protocol.RateLimiter is SlidingWindow and LoginThrottle is SlidingWindow
+def test_a_window_has_one_name():
+    """``RateLimiter`` et ``LoginThrottle`` n'étaient que deux autres noms de ``SlidingWindow`` (lot L22) : retirés,
+    leurs lecteurs l'appellent par le sien (audit du 2026-11-05, LR2)."""
+    assert not hasattr(protocol, "RateLimiter") and not hasattr(web_app, "LoginThrottle")
 
 
 def test_what_arrives_from_outside_is_cleaned():

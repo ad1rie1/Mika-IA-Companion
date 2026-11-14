@@ -4,9 +4,9 @@ Une heuristique cherche, dans le code des facultés et des greffons, les chaîne
 française (au moins cinq mots, des mots-outils du français). Elle ignore ce qui n'est pas pour elle : les
 docstrings, les journaux techniques, les exceptions de programmation, les libellés des réglages (``Knob``), les
 raisons d'humeur (des codes gardés au journal), les expressions régulières, les vues de console (``inspect.py``,
-``inspect_<sujet>.py``, un paquet ``inspect/``) et le greffon Teams hors de son tri et de ce qu'elle en lit
-(``voice.py``, migré le 2026-10-28 ; ses autres textes restent à migrer : lot 4 de
-``docs/audit-2026-10-27-garde-fous.md``).
+``inspect_<sujet>.py``, un paquet ``inspect/``) et le greffon Teams hors de son tri, de ce qu'elle en lit
+(``voice.py``, migré le 2026-10-28) et de ses outils (``tools.py`` : leurs descriptions migrées le 2026-11-13, le reste
+sous plafond) ; ses autres textes restent à migrer : lot 4 de ``docs/audit-2026-10-27-garde-fous.md``.
 
 Ce qui reste a été trié pendant la migration : des textes de la console de l'opératrice, des valeurs gardées au
 journal, des listes de mots, un serveur autonome (``plugins/web/server.py``) qui ne peut pas lire la voix. Le
@@ -24,7 +24,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 ROOTS = ("faculties", "plugins")
 SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|knobs|reglages)\.py$|inspect/|"
-                           r"teams/(?!(triage|voice)\.py$))")
+                           r"teams/(?!(triage|voice|tools)\.py$))")
 NOT_FOR_HER = {"debug", "info", "warning", "error", "exception", "critical", "log", "ValueError", "TypeError",
                "RuntimeError", "KeyError", "AssertionError", "Knob", "Setting", "Action", "Panel", "Row", "Column",
                "Appraisal", "compile"}
@@ -69,6 +69,10 @@ CEILING = {
     "plugins/mcp/calls.py": 4,  # capacité et résumé (console)
     "plugins/rss/__init__.py": 16,  # panneaux de console
     "plugins/sensors/__init__.py": 6,  # panneaux de console
+    # ce que ses outils Teams rendent au modèle (refus, résultats) et l'aperçu d'un envoi (console) — à migrer ; les
+    # descriptions des trois outils et de leurs arguments sont dans la voix depuis le 2026-11-13 (audit du
+    # 2026-11-05, LR2)
+    "plugins/teams/tools.py": 22,
     "plugins/wakeup/prompt.py": 6,  # « pourquoi pas maintenant » (console)
     "plugins/web/server.py": 30,  # serveur autonome dans sa cage : il ne peut pas lire la voix
 }

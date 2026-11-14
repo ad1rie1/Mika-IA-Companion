@@ -246,6 +246,11 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     token = re.search(r"montré une seule fois\) : ([A-Za-z0-9_\-]{20,})", html_of(shown)).group(1)  # montré une fois…
     assert hashlib.sha256(token.encode()).hexdigest() == client.portal.call(live.settings.sensors_digest)  # …empreinte
     assert token not in client.get(devices).text  # … et plus jamais
+    # qui l'a pressé, la console l'audite : le bouton, lui, ne reçoit rien (``Command.run()``, audit du 2026-11-05, LR2)
+    ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 50))
+    pressed = [json.loads(o.data) for o in ops if "console.reglages.appareils.jeton" in o.data]
+    assert [(p["action"], p["by"]) for p in pressed] == [("console.reglages.appareils.jeton", "user_1")]
+    assert token not in " ".join(o.data for o in ops)
     # un envoi sur la page d'une autre section est refusé
     wrong = post(client, feeds, {"_section": "transcription", "_champs": ["model"], "model": "x"})
     assert wrong.status_code == 400 and "Section inconnue" in html_of(wrong)

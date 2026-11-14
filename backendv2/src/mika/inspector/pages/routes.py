@@ -17,7 +17,7 @@ from starlette.routing import Route
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Panel, destinations, menu_place
 from mika.inspector.pages import accounts, params
-from mika.inspector.pages.actions import Actions, per_row, safe_back
+from mika.inspector.pages.actions import Actions, safe_back
 from mika.inspector.pages.auth import Auth
 from mika.inspector.pages.canals import canals_post
 from mika.inspector.pages.episode_drawn import episode_panel
@@ -49,7 +49,7 @@ from mika.kernel.inspect import (
 from mika.ports.journal import JournalEvent
 from mika.runtime.boundary import Failed, call
 
-__all__ = ["Pages", "per_row"]
+__all__ = ["Pages"]
 
 #: les anciennes adresses de l'inspecteur → la console
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",

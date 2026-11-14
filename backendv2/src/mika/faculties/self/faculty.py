@@ -97,7 +97,9 @@ class SelfState:
 #: v12 : une source devenue une confidence (un sujet délicat, ``memory.delicate``) fait taire le récit, le rêve, le
 #: journal intime qui la reprenaient, comme une source devenue secrète (ADR 0099)
 #: v13 : son caractère écrit par le modèle d'après sa matrice, et l'empreinte du tempérament qu'il décrit (ADR 0139)
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=13,
+#: v14 : son caractère relu sans les balises de voix par le réducteur (``character.written``) : un instantané d'avant
+#: garderait « … [EMOTION:happy:0.7] » dans sa persona
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=14,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED, c.INTEREST_BORN,
              c.REFLECTED, c.CHARACTER_WRITTEN)

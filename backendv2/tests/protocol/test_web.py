@@ -16,6 +16,7 @@ from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import BODY_MAX_BYTES, WebConfig
 from mika.app.server import PERSONA, build
+from mika.contracts import place as place_c
 from mika.faculties.affect.params import derive as affect_derive
 from mika.faculties.self.persona import load as load_persona
 from mika.kernel.registry import ArbitrationPolicy
@@ -185,9 +186,14 @@ def test_ws_conversation_round_trip(world):
         face = ws.receive_json()
         assert face["type"] == "emotion_update" and face["emotion"] in NAMES
         assert isinstance(face["emotion_blend"], list)
-        # puis l'état intérieur, tout de suite : où elle est dans sa chambre, sans attendre un changement
+        # puis l'état intérieur, tout de suite : où elle est dans sa chambre (ou là où elle va), sans attendre un
+        # changement — au milieu le jour, en chemin vers son lit la nuit (l'horloge est réelle : le protocole se teste
+        # à toute heure)
         state = ws.receive_json()
-        assert state["type"] == "inner_state_update" and state["inner_state"]["place"] == "center"
+        here = client.portal.call(lambda: live.kernel.mind.frame().get(place_c.PLACE))
+        assert state["type"] == "inner_state_update" and state["inner_state"]["place"] == here
+        # puis, à une opératrice, ses fils de travail (ADR 0164) : aucun encore
+        assert ws.receive_json() == {"type": "strands", "items": []}
         ws.send_json({"type": "identify", "person_id": "user_99", "display_name": "Usurpateur"})
         ws.send_json({"type": "ping", "t": 123})
         assert ws.receive_json() == {"type": "pong", "t": 123}
@@ -297,7 +303,12 @@ def test_a_reply_goes_only_to_its_person(world):
         assert speech["person_id"] == "user_1"
         b.send_json({"type": "ping", "t": 7})
         frames = recv_until(b, "pong")
-        assert [f["type"] for f in frames] == ["pong"]  # rien de la réponse d'Adrien
+        # la nuit, le message d'Adrien la réveille : son panneau change sur chaque écran, chacun le sien (sa vie, pas
+        # la réponse d'Adrien) — l'horloge est réelle
+        hers = [f for f in frames if f["type"] == "inner_state_update"
+                and f["inner_state"].get("identity", {}).get("known_as", "bea") == "bea"]
+        assert [f["type"] for f in frames if f not in hers] == ["pong"]  # rien de la réponse d'Adrien
+        assert "secret" not in str(frames)
 
 
 def test_every_dream_kind_the_server_sends_is_one_the_frontend_names():
