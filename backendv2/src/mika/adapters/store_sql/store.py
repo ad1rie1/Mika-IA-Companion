@@ -336,7 +336,6 @@ class SqlStore:
         self._head = 0
         self._last_at = 0
         self._sealed = False
-        self._on_append: list[Callable[[AppendBatch], None]] = []
         #: les lectures lentes : (instant monotone, millisecondes, début de la requête)
         self.slow_reads: deque[tuple[float, float, str]] = deque(maxlen=SLOW_READS_KEPT)
 
@@ -403,9 +402,6 @@ class SqlStore:
     def unseal(self) -> None:
         self._sealed = False
 
-    def on_append(self, hook: Callable[[AppendBatch], None]) -> None:
-        self._on_append.append(hook)
-
     # ── écriture ──
     async def append(self, batch: AppendBatch) -> None:
         if self._sealed:
@@ -414,8 +410,6 @@ class SqlStore:
         if batch.events:
             self._head = batch.events[-1].seq
             self._last_at = batch.events[-1].at
-        for hook in self._on_append:
-            hook(batch)
 
     def bulk_load(self, events: Sequence[StoredEvent]) -> None:
         """Chargement massif (tests de performance) : une transaction."""

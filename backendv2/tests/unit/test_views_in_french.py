@@ -4,7 +4,8 @@ Le parcours de la console trouvait plus de deux cents « +0.05 » (humeur, postu
 (besoins), « « Bea » (user_2) » partout dans l'humeur et « en répondant · user_1 » dans l'onglet
 Affect d'une personne. Les nombres passent par les formateurs du noyau (``num_fr``, ``pct_fr`` :
 « +0,05 », « 8 h », « 42 % ») ; une personne se lit par son nom, sa clé reste au survol ou dans
-le lien de sa fiche. Le détail technique (« mono ») garde ses clés.
+le lien de sa fiche. Le détail technique (« mono ») garde ses clés. Un texte oublié se dit partout
+« (oublié) », d'une seule source (``FORGOTTEN``, ``content_text`` du noyau de la console).
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ import dataclasses
 import re
 from typing import Any
 
-from mika.kernel.inspect import Text
+from mika.kernel.events import Content
+from mika.kernel.inspect import FORGOTTEN, Text, content_text
 from mika.ports.llm import LLMResponse
 from mika.runtime.inspection import Inspection
 from mika.sim.clock import run_virtual
@@ -90,3 +92,11 @@ def test_faculty_views_say_numbers_in_french_and_name_people(tmp_path):
         _strings(blocks, every)
     assert any("Bea" in t for t in every)  # elle est nommée
     assert any(re.search(r"[+−]0,\d\d", t) for t in every)  # et les nombres signés sont à la française
+
+
+def test_a_forgotten_text_is_said_forgotten_and_a_kept_one_as_it_is():
+    assert FORGOTTEN == "(oublié)"
+    assert content_text(Content(ref="c1", text="Il pleut sur Lyon.")) == "Il pleut sur Lyon."
+    assert content_text(Content(ref="c1", text="")) == ""  # un texte vide gardé n'est pas oublié
+    assert content_text(Content(ref="c1")) == FORGOTTEN  # relu au journal après l'oubli : la référence seule
+    assert content_text(None) == FORGOTTEN

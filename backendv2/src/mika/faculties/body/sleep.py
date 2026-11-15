@@ -15,8 +15,10 @@ l'autre à une demi-heure près (un écart type d'environ 20 min).
 bissection à la seconde), jamais à la cadence d'une boucle. On ne s'endort
 pas en pleine conversation : pas avant un quart d'heure de calme.
 
-**Phases** : des cycles de 90 min — sommeil léger, profond (long en début de
-nuit), paradoxal (long en fin de nuit).
+**Phases** : des cycles de 90 min (``cycle_us``) — sommeil léger, profond
+(long en début de nuit), paradoxal (long en fin de nuit). Le sommeil
+paradoxal en cours ou le prochain se lit aussi en fenêtre (``rem_window``) :
+qui compte par cycle (le rêve) compte ces cycles-là.
 """
 
 from __future__ import annotations
@@ -259,17 +261,45 @@ def wake(s: Sleep, at: int, p: SleepParams, tz: ZoneInfo, *, by_message: bool = 
     return replace(s, asleep=False, since=at, pressure=pressure(s, at, p, tz), woken_by_message=by_message)
 
 
+#: le premier cycle (0 : celui de l'endormissement) où le sommeil profond touche son plancher : à partir de lui,
+#: tous les cycles se ressemblent
+_DEEP_FLOOR_CYCLE = 4
+
+
+def _deep(k: int) -> int:
+    """La durée du sommeil profond au cycle ``k`` (0 : le premier) : long en début de nuit, il raccourcit de 12 min
+    à chaque cycle, jusqu'à un plancher de 10 min qu'il touche au cinquième (``_DEEP_FLOOR_CYCLE``) et garde."""
+    return max(10 * MINUTE, 55 * MINUTE - k * 12 * MINUTE)
+
+
 def phase(s: Sleep, t: int, p: SleepParams) -> c.SleepPhase:
+    """Sa phase de sommeil à ``t`` : chaque cycle de ``cycle_us`` depuis l'endormissement s'ouvre sur ``light_us`` de
+    sommeil léger, puis le profond (``_deep``), et le sommeil paradoxal le clôt — s'il reste du cycle."""
     if not s.asleep:
         return c.SleepPhase.AWAKE
     elapsed = max(0, t - s.since)
     k, pos = divmod(elapsed, p.cycle_us)
     if pos < p.light_us:
         return c.SleepPhase.LIGHT_SLEEP
-    deep = max(10 * MINUTE, 55 * MINUTE - k * 12 * MINUTE)  # le profond raccourcit au fil de la nuit
-    if pos < p.light_us + deep:
+    if pos < p.light_us + _deep(k):
         return c.SleepPhase.DEEP_SLEEP
     return c.SleepPhase.REM
+
+
+def rem_window(s: Sleep, t: int, p: SleepParams) -> c.RemWindow | None:
+    """Son sommeil paradoxal en cours à ``t``, ou le prochain de ce sommeil : les mêmes cycles que ``phase`` (la
+    fenêtre rendue contient ``t`` exactement quand ``phase`` dit ``REM``). Un cycle trop court pour en laisser un
+    (léger et profond le remplissent) est sauté. ``None`` : éveillée, ou plus aucun dans ce sommeil — passé le
+    plancher du profond, un cycle vide l'est pour toujours."""
+    if not s.asleep:
+        return None
+    first = max(0, t - s.since) // p.cycle_us
+    for k in range(first, max(first, _DEEP_FLOOR_CYCLE) + 1):
+        start = s.since + k * p.cycle_us + p.light_us + _deep(k)
+        end = s.since + (k + 1) * p.cycle_us
+        if start < end:
+            return c.RemWindow(cycle=k, start=start, end=end)
+    return None
 
 
 def transitions(s: Sleep, t0: int, until: int, p: SleepParams, tz: ZoneInfo, shift: int = 0,

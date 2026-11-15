@@ -138,8 +138,9 @@ def _owns_boxes(s: EmailState, person: str, frame: Frame) -> bool:
     return _owner_of_person(frame, person) in params_of(frame).owners.values()
 
 
+# les boîtes d'une personne (ADR 0185)
 @EMAIL.inspect("boites", title="Comptes", subject="person", order=64, shown=_owns_boxes,
-               description="Les boîtes aux lettres qui sont à cette personne (ADR 0185) : elle s'en sert avec elle "
+               description="Les boîtes aux lettres qui sont à cette personne : elle s'en sert avec elle "
                            "seulement — en tête-à-tête, reconnue ; les tiennes, avec toi et quand elle travaille.")
 def _person_boxes(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")

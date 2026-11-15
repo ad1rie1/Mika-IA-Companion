@@ -177,7 +177,8 @@ def test_a_tendency_with_bounds(case):
 def test_a_glance_outside_does_not_buy_two_hours_but_an_hour_drawing_does():
     """Deux heures de vide, puis deux minutes à regarder dehors : le vide reprend presque où il en était ; une heure à
     dessiner l'efface. Ce qui s'est passé entre-temps (un message) compte en entier."""
-    from mika.faculties.needs import NeedsParams, Occupation, _void_after
+    from mika.faculties.needs import NeedsParams, Occupation
+    from mika.faculties.needs.occupation import _void_after
 
     p = NeedsParams()
     start = NOW - 2 * HOUR

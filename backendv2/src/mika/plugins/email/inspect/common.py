@@ -10,12 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import replace
-from datetime import datetime
 from typing import Any
 
 from mika.contracts import email as c
 from mika.contracts import self_ as self_c
-from mika.kernel.clock import instant
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -172,13 +170,6 @@ def author(frame: Frame, by: str, *, edited: bool = False) -> Badge:
     if edited:
         return Badge(f"écrit par elle, retouché par {operator_label(frame, by)}", "warn")
     return Badge(f"écrit par {operator_label(frame, by)}", "warn") if by else Badge("écrit par elle", "info")
-
-
-def day_start(frame: Frame) -> int:
-    """Minuit, aujourd'hui, à son heure à elle."""
-    tz = frame.env.tz_of(frame.root)
-    today = frame.local().date()
-    return instant(datetime(today.year, today.month, today.day, tzinfo=tz))
 
 
 def since(ctx: InspectContext, event_type: Any, start: int, cap: int) -> list[Any]:

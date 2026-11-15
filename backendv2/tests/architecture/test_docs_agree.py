@@ -176,8 +176,8 @@ def _emitted() -> set[str]:
 
 
 def _read() -> set[str]:
-    """Les trames que le serveur lit : les ``kind == "…"`` de ``_Session.dispatch``."""
-    tree = ast.parse(_text(PACKAGE / "adapters" / "web" / "app.py"))
+    """Les trames que le serveur lit : les ``kind == "…"`` de ``ChatSession.dispatch``."""
+    tree = ast.parse(_text(PACKAGE / "adapters" / "web" / "chat_session.py"))
     dispatch = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "dispatch")
     return {c.comparators[0].value for c in ast.walk(dispatch)
             if isinstance(c, ast.Compare) and isinstance(c.left, ast.Name) and c.left.id == "kind"
@@ -188,7 +188,7 @@ def test_the_chat_frames_are_those_the_protocol_describes():
     doc = _text(CHAT)
     sent = set(re.findall(r"^\| `(\w+)` \|", _between(doc, "## 3.", "## 4."), re.M))
     served = set(re.findall(r"\*\*`(\w+)`\*\*", _between(doc, "## 4.", "## 5.")))
-    assert sent == _read() - IGNORED, "protocole-chat.md § 3 contre ce que lit adapters/web/app.py"
+    assert sent == _read() - IGNORED, "protocole-chat.md § 3 contre ce que lit adapters/web/chat_session.py"
     assert served == _emitted(), "protocole-chat.md § 4 contre ce qu'émet adapters/web/"
 
 

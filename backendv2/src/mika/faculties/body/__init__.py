@@ -6,10 +6,12 @@
   l'on s'endort (ou passé ce moment, tenu éveillé), pas « parce qu'il est
   22 h » ;
 - le sommeil (``sleep``) : endormissement et réveil au croisement exact des
-  seuils (qui bougent un peu d'une nuit à l'autre), cycles de 90 min ; on ne
-  s'endort pas en pleine conversation ;
+  seuils (qui bougent un peu d'une nuit à l'autre), cycles de 90 min (son
+  sommeil paradoxal en cours ou le prochain : ``body.rem``, que le rêve lit) ;
+  on ne s'endort pas en pleine conversation ;
 - la nuit, **seul un message d'une amie ou d'une proche, ou quelque chose
-  d'urgent, la réveille** (``body.roused``) ; les autres attendent son réveil
+  d'urgent, la réveille** (``body.roused``), et la nuit qu'il a coupée finit au
+  matin (``body.night_waking_until``) ; les autres attendent son réveil
   (``body.waited``) — la réponse part le matin, et elle sait qu'elle dormait ;
 - elle ne prend pas la parole en dormant, et moins quand elle est fatiguée ;
 - ses nuits (les sept dernières) : quand elle s'est endormie et réveillée, ce
@@ -455,6 +457,11 @@ def _sleep(s: BodyState, cx) -> c.SleepPhase:
     return sl.phase(s.sleep, cx.now, params(cx.params).sleep)
 
 
+@BODY.fact(c.REM)
+def _rem(s: BodyState, cx) -> c.RemWindow | None:
+    return sl.rem_window(s.sleep, cx.now, params(cx.params).sleep)
+
+
 @BODY.fact(c.AWAKE_SINCE)
 def _awake_since(s: BodyState, cx) -> int:
     return 0 if s.sleep.asleep else s.sleep.since
@@ -473,6 +480,13 @@ def _epoch(s: BodyState, cx) -> tuple[Any, ...]:
 @BODY.fact(c.NIGHT_WAKING)
 def _night_waking(s: BodyState, cx) -> bool:
     return night_waking(s, cx.now, params(cx.params), cx.tz)
+
+
+@BODY.fact(c.NIGHT_WAKING_UNTIL)
+def _night_waking_until(s: BodyState, cx) -> int:
+    """La fin de la nuit qu'un message a coupée (``_roused_until``), que ``night_waking`` borne ; 0 si elle dort ou
+    si aucune nuit n'est coupée."""
+    return 0 if s.sleep.asleep else _roused_until(s, params(cx.params), cx.tz) or 0
 
 
 @BODY.fact(c.REPLY_WAIT)

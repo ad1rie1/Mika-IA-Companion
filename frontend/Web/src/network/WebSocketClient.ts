@@ -80,10 +80,10 @@ const MAX_OUTBOX_CHARS = 48 * 1024 * 1024;
  * Au plus tant de messages partis sans accusé (`backendv2/docs/protocole-chat.md`
  * §3 ; `MikaProtocol.MAX_IN_FLIGHT` côté Android) : le serveur refuse en
  * `overloaded` au-delà de 8 messages en attente sur une connexion, comptés à
- * la réception (`MAX_QUEUED_CHATS`, adapters/web/app.py). Une file rejouée
- * d'un bloc au retour du réseau les dépassait, et les derniers revenaient
- * refusés alors que personne ne les avait envoyés trop vite. Chaque accusé
- * fait partir le suivant.
+ * la réception (`MAX_QUEUED_CHATS`, adapters/web/chat_session.py). Une file
+ * rejouée d'un bloc au retour du réseau les dépassait, et les derniers
+ * revenaient refusés alors que personne ne les avait envoyés trop vite. Chaque
+ * accusé fait partir le suivant.
  */
 const MAX_IN_FLIGHT = 4;
 

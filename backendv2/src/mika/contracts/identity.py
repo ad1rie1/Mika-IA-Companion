@@ -328,3 +328,19 @@ def heard_since_guard(frame: Frame, person: str) -> Guard:
     adresses (``HANDLES``, à défaut sa clé), l'initiative est devancée — on lui répond, on ne la relance pas. Qui
     l'appelle déclare ``HANDLES`` et ``transcript.LAST_FROM`` dans ses ``reads=``."""
     return Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in _handles(frame, person)))
+
+
+# ── Le fil qu'elle relit avec elle ────────────────────────────────────────
+# Une fois pour son historique (``transcript``) et ses redites (``expression``) : les adresses de son fil privé, que
+# ``transcript.thread_where`` met en clauses.
+
+
+def thread_handles(frame: Frame, target: str) -> tuple[str, ...]:
+    """Les adresses que relit le fil privé avec ``target`` : la sienne seule, et, quand l'audience le permet
+    (``frame.audience.private_ok`` : sa fiche est ouverte à qui écrit par cette adresse), celles de sa personne dont
+    la liaison est confirmée (``THREAD`` : une liaison par simple recoupement ne relit que son propre fil). Triées.
+    Qui l'appelle déclare ``THREAD`` dans ses ``reads=``."""
+    aud = frame.audience
+    if aud is None or not aud.private_ok:
+        return (target,)
+    return tuple(sorted({target, *frame.get(THREAD(target))}))

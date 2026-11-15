@@ -32,7 +32,8 @@ from mika.contracts import social as social_c
 from mika.faculties.memory import cues
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.life import same_task, wishes
-from mika.faculties.needs import NeedsParams, _lead
+from mika.faculties.needs import NeedsParams
+from mika.faculties.needs.matter import _lead
 from mika.faculties.others.faculty import _follow_up
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
@@ -529,12 +530,16 @@ def test_what_she_could_talk_about_starts_from_what_weighs_most(tmp_path, weight
 def test_a_situation_that_lasts_is_spoken_of_in_the_present():
     """« son chat malade » depuis trois jours n'est ni « à venir » ni « passé » : il le vit encore (« Ce qui lui est
     arrivé, il y a 3 jours… » sonnait faux). Contre-exemple : un moment ponctuel passé est dit passé. Ni l'un ni
-    l'autre ne lui dicte quoi en faire (« prends de ses nouvelles », « comment ça s'est passé ? »)."""
+    l'autre ne lui dicte quoi en faire (« prends de ses nouvelles », « comment ça s'est passé ? »). Commencée la
+    veille à 3 h, elle dure « depuis la nuit d'hier », pas « depuis dans la nuit d'hier » (le « depuis » se tirait du
+    texte de ``when_fr`` en retirant « il y a » : audit du 2026-11-05, K7-11)."""
     now = at_paris(2026, 10, 8, 18, 0)
     frame = SimpleNamespace(now=now, root=None, env=SimpleNamespace(tz_of=lambda root: PARIS))
     lasting = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",), ongoing=True)
     done = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",))
     assert _lead(lasting, frame, "« Sam »").startswith("Ce que « Sam » vit en ce moment, depuis 3 jours")
+    last_night = needs_c.Matter(needs_c.MOMENT_MATTER, "r", at_paris(2026, 10, 7, 3, 0), ("ext_1",), ongoing=True)
+    assert _lead(last_night, frame, "« Sam »").startswith("Ce que « Sam » vit en ce moment, depuis la nuit d'hier —")
     assert _lead(done, frame, "« Sam »").startswith("Ce qui lui est arrivé, ")
     assert not any(x in _lead(m, frame, "« Sam »") for m in (lasting, done)
                    for x in ("(", "nouvelles", "comment ça s'est passé"))

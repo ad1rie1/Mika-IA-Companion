@@ -496,6 +496,47 @@ def test_the_backend_opens_its_sessions_on_the_relay_the_server_mounts():
     assert gateway.backends["cc"].relay is mounted
 
 
+def test_the_efforts_and_connections_of_claude_are_declared_once(tmp_path):
+    """Les efforts de réflexion et les modes de connexion de Claude Code ne sont déclarés que dans ``claude.py`` :
+    le type du réglage ``auth``, écrit à la main, n'a que ses modes ; les choix du réglage (libellés compris) et ceux
+    de ``mika llm backend`` sont les mêmes, dans le même ordre ; les deux fournisseurs Claude refusent un effort
+    inconnu au même message."""
+    import argparse
+    import typing
+
+    from mika.adapters.llm.claude import AUTH_LABELS, AUTHS, EFFORT_LABELS, EFFORTS, ClaudeBackend
+    from mika.adapters.llm.config import BackendSpec
+    from mika.app.cli.models import add_models
+    from mika.kernel.forms import Knob
+
+    assert AUTHS == ("abonnement", "cle_api") and EFFORTS == ("", "low", "medium", "high", "xhigh", "max")
+    auth = BackendSpec.model_fields["auth"]
+    assert typing.get_origin(auth.annotation) is typing.Literal and typing.get_args(auth.annotation) == AUTHS
+
+    def choices(field: str) -> tuple[tuple[str, str], ...]:
+        return next(m for m in BackendSpec.model_fields[field].metadata if isinstance(m, Knob)).choices
+
+    assert choices("auth") == tuple(AUTH_LABELS.items()) and choices("effort") == tuple(EFFORT_LABELS.items())
+    assert dict(choices("effort"))["xhigh"] == "très élevé" and dict(choices("auth"))["cle_api"] == "une clé d'API Console"
+    parser = argparse.ArgumentParser()
+    add_models(parser.add_subparsers(dest="cmd"))
+    line = ["llm", "backend", "cc", "--kind", "claude_code", "--model", "sonnet"]
+    assert [parser.parse_args([*line, "--auth", a]).auth for a in AUTHS] == list(AUTHS)
+    assert [parser.parse_args([*line, "--effort", e]).effort for e in EFFORTS] == list(EFFORTS)
+    with pytest.raises(SystemExit):
+        parser.parse_args([*line, "--effort", "énorme"])
+    said = "effort de réflexion inconnu : 'énorme' (attendu : low, medium, high, xhigh, max)"
+    with pytest.raises(ValueError) as by_api:
+        ClaudeBackend("k", "claude-sonnet-5-5", client=object(), effort="énorme")
+    with pytest.raises(ValueError) as by_cli:
+        ClaudeCodeBackend("sonnet", relay=Relay(), relay_base="http://x", work_dir=tmp_path, effort="énorme")
+    assert str(by_api.value) == str(by_cli.value) == said
+    with pytest.raises(ValueError, match="^mode d'authentification inconnu : 'jeton' \\(attendu : abonnement ou cle_api\\)$"):
+        ClaudeCodeBackend("sonnet", relay=Relay(), relay_base="http://x", work_dir=tmp_path, auth="jeton")
+    assert ClaudeCodeBackend("sonnet", relay=Relay(), relay_base="http://x", work_dir=tmp_path, effort="xhigh").effort \
+        == "xhigh"
+
+
 # ── Les bords de la CLI ───────────────────────────────────────────────────
 
 

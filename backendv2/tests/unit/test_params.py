@@ -7,6 +7,7 @@ reconfiguration ; chaque curseur dit ce qu'il pilote.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -87,6 +88,20 @@ def test_each_slider_says_what_it_drives():
     everywhere = params.influences([BODY, NEEDS, TOY], Temperament())
     assert ("toy", "gain", 0.2, 0.8) in everywhere["reactivity"]
     assert set(everywhere) == set(params.SLIDERS)
+
+
+#: les facultés dont l'aide des réglages est déjà en clair ; une autre y entre quand ses textes passent à la règle
+PLAIN_HELP = frozenset({"affect", "body", "expression", "needs", "transcript", "world"})
+
+
+def test_the_help_of_a_setting_says_its_rule_without_an_adr_number():
+    """Ce que Réglages affiche dit la règle en clair (ADR 0225) : le numéro d'ADR va dans un commentaire, au-dessus
+    du réglage. Les autres propriétaires suivront quand leur périmètre passera."""
+    owners = {f.name: f for f in composition.faculties() if f.name in PLAIN_HELP}
+    assert set(owners) == PLAIN_HELP
+    cited = [f"{name}.{field.path}" for name, f in sorted(owners.items()) for field in forms.describe(f.params)
+             if re.search(r"ADR\s*\d{4}", field.label + field.help)]
+    assert cited == []
 
 
 def _kernel(tmp_path):

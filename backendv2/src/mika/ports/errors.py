@@ -20,7 +20,7 @@ OUTSIDE: Mapping[str, str] = MappingProxyType({
     "UnconfiguredRole": "aucun modèle configuré",  # adapters/llm/gateway.py
     "MissingPersona": "persona manquante",  # ports/llm.py
     "StoreSealed": "magasin fermé",  # adapters/store_sql/store.py
-    "ListingFailed": "liste indisponible",  # adapters/imaging/models.py, adapters/llm/models.py
+    "ListingFailed": "liste indisponible",  # adapters/listing.py
     "ClaudeCodeError": "erreur de Claude Code",  # adapters/llm/claude_code.py
     "ImapError": "erreur du serveur de courrier",  # adapters/mail/imap.py
 })

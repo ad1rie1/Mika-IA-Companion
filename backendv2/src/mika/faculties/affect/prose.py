@@ -10,6 +10,7 @@ elle est connue, en termes génériques (jamais le nom d'un tiers) ; sinon
 
 from __future__ import annotations
 
+from mika.contracts import needs as needs_c
 from mika.contracts.affect import MoodReading, StanceReading
 from mika.faculties.affect.params import AffectParams
 from mika.faculties.affect.physics import HOSTILE
@@ -19,9 +20,16 @@ from mika.vocab import causes
 from mika.vocab.affect import FR, Emotion, intensity_word, partitive
 from mika.vocab.phrasebook import family, phrase
 
+#: Les causes qui sont des états, et ce qui y met fin : « personne ne t'a parlé » cesse d'être vrai dès qu'on lui
+#: parle (``needs.heard_at``) ; « il ne se passe pas grand-chose », dès que quelque chose se passe
+#: (``needs.idle_since``). ``over()`` (le paquet) les lit ; une seule déclaration, pour qu'une cause qui y entre se
+#: dise aussi au passé.
+ENDED_BY_SOMEONE = frozenset({needs_c.LONELY})
+ENDED_BY_ANYTHING = frozenset({needs_c.BORED})
 #: Une cause qui est un état, dite quand cet état a pris fin (quelqu'un est venu te parler depuis) : au passé, et
-#: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5) ; ``affect.cause_over``.
-CAUSES_OVER = frozenset({"lonely", "bored"})
+#: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5) ; la garde de la clé
+#: ``affect.cause_over.<cause>``.
+CAUSES_OVER = ENDED_BY_SOMEONE | ENDED_BY_ANYTHING
 #: Combien de temps elle se dit que quelqu'un s'est excusé (la posture), après.
 APOLOGY_SAID_US = 6 * HOUR
 #: En deçà, sa dernière balise date d'« à l'instant ».

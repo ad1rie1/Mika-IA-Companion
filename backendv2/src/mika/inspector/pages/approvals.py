@@ -99,11 +99,7 @@ def _sources(ui: Any, current: Any, args_json: str) -> list[dict[str, str]]:
     fn = getattr(ui.deps, "approval_sources", None)
     if fn is None:
         return []
-    try:
-        args = json.loads(args_json or "{}")
-    except ValueError:
-        args = {}
-    got = call(fn, ui, current.capability, current.context or "", args if isinstance(args, dict) else {},
+    got = call(fn, ui, current.capability, current.context or "", rt.proposal_args(args_json),
                label="sources d'une demande")
     return [] if isinstance(got, Failed) else [{"text": t, "href": h} for t, h in got]
 

@@ -17,8 +17,9 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from mika.adapters.listing import ListingFailed
 from mika.adapters.llm.config import BackendSpec, LLMConfig, ModelLimits
-from mika.adapters.llm.models import ListingFailed, list_models, model_limits, settle_limits
+from mika.adapters.llm.models import list_models, model_limits, settle_limits
 
 KEY = "sk-ant-CANARI-fenetre-42"
 

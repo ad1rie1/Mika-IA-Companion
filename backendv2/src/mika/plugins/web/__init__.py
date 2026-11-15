@@ -40,9 +40,10 @@ class WebParams(BaseModel):
 
     enabled: Annotated[bool, Knob(
         label="Actif", group="Le plugin",
+        # qui peut s'en servir : les lignes d'accès de sa fiche (ADR 0131)
         help="Décoché : son serveur n'est plus lancé et ses outils ne lui sont plus offerts (elle le sait : sans "
              "eux, elle ne cherche pas sur internet). Qui peut s'en servir, et quand : sa fiche, Outils › Venus "
-             "d'ailleurs › web › « Accès aux outils » (ADR 0131).")] = True
+             "d'ailleurs › web › « Accès aux outils ».")] = True
     spacing_us: Annotated[int, Knob(
         label="Entre deux recherches, au moins", group="Ménager DuckDuckGo", lo=US, hi=MINUTE,
         help="DuckDuckGo demande de prouver qu'on est humain quand les recherches se suivent de trop près : "

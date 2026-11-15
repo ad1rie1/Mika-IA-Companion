@@ -83,17 +83,18 @@ class WorldParams(BaseModel):
         label="Une occupation sans fin prévue s'arrête d'elle-même après (min)", group="Corps", lo=15, hi=480,
         step=5, help="Dessiner, travailler à son bureau : sans autre geste de sa part, elle s'arrête au bout de ce "
                      "temps et reste où elle est (on ne dessine pas treize heures d'affilée).")] = 90
+    # ADR 0127 : une séance qui a travaillé la laisse à son bureau, une séance vide l'arrête
     work_linger_min: Annotated[int, Knob(
         label="Après une séance de travail, elle y reste encore (min)", group="Corps", lo=0, hi=120, step=5,
         help="Une séance qui a travaillé (lu, noté, conclu) la laisse à son bureau, à y travailler encore ce temps, "
-             "puis elle s'arrête ; une séance qui n'a rien fait (refusée, en panne) l'arrête tout de suite "
-             "(ADR 0127).")] = 20
+             "puis elle s'arrête ; une séance qui n'a rien fait (refusée, en panne) l'arrête tout de suite.")] = 20
+    # ADR 0160 : par défaut jamais, sa journée ce sont ses vraies activités
     occupy_per_day: Annotated[int, Knob(
         label="S'occuper d'elle-même, par jour", group="S'occuper seule", lo=0, hi=8,
         help="Désœuvrée (l'ennui, la solitude que ses besoins lui font sentir), elle s'occupe d'elle-même dans sa "
              "chambre — dessiner, feuilleter un livre, regarder dehors, selon ce qui lui manque. Au plus autant de "
              "fois par jour (0 : jamais d'elle-même). Par défaut jamais : ces occupations sans contenu tournaient en "
-             "boucle dans ce qu'elle racontait ; sa journée, ce sont ses vraies activités (ADR 0160).")] = 0
+             "boucle dans ce qu'elle racontait ; sa journée, ce sont ses vraies activités.")] = 0
     occupy_spacing_min: Annotated[int, Knob(
         label="Pas plus souvent que toutes les (min)", group="S'occuper seule", lo=15, hi=720, step=5,
         help="Deux occupations qu'elle prend d'elle-même s'espacent d'au moins ce temps.")] = 120
@@ -327,9 +328,10 @@ def _woke(s: WorldState, e: Any, cx: Any) -> WorldState:
     return _lived(s, actors, s.objects, e.seq, e.at, intents=FrozenDict(intents))
 
 
-#: Les séances qui l'installent à son bureau : un pas sur un but, une exécution de projet dans son mode à elle (une
-#: exécution impersonnelle n'est pas elle).
-WORKING_KINDS = frozenset({Kind.STEP, Kind.WORK})
+#: Ce qui l'installe à son bureau : un pas sur un but, une exécution de projet dans son mode à elle (une exécution
+#: impersonnelle n'est pas elle) ; pas un réveil par API, qui l'occupe sans l'envoyer à son bureau — needs,
+#: ``ABSORBING_KINDS``.
+DESK_KINDS = frozenset({Kind.STEP, Kind.WORK})
 #: les séances de travail en cours qu'on suit, au plus (une séance perdue sans fin ne retient pas son bureau à vie)
 WORKING_KEPT = 8
 
@@ -350,7 +352,7 @@ def _to_work(s: WorldState, e: Any, cx: Any) -> WorldState:
     (la sienne, le coucher), quand une occupation à elle n'est pas finie (elle dessine : elle continue ; elle
     travaille déjà : elle y est), ni juste après une réplique à quelqu'un (on ne se lève pas au milieu d'une
     conversation pour aller à son bureau)."""
-    if e.data.kind not in WORKING_KINDS:
+    if e.data.kind not in DESK_KINDS:
         return s
     s = replace(s, working=(*s.working, e.correlation)[-WORKING_KEPT:])
     me = s.actors.get(w.MIKA)
@@ -886,12 +888,15 @@ def _idle_work(s: WorldState, intent: w.Intent, changes: list[Any], now: int) ->
 
 @WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
                                          w.AUTHORED],
-               catch_up=CatchUp.ONCE, max_quantum_s=60)
+               catch_up=CatchUp.ONCE)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
     quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas). Et une occupation sans fin
     prévue s'arrête d'elle-même au bout d'un temps naturel (un réflexe) : son corps reste où il est, assise à son
-    bureau, simplement sans plus dessiner — elle ne se lève pas et ne va nulle part à sa place."""
+    bureau, simplement sans plus dessiner — elle ne se lève pas et ne va nulle part à sa place.
+
+    Ses échéances sont des instants (celle d'une action, la fin naturelle d'une occupation), et ce qui les change
+    est un ajout au journal : le quantum par défaut n'est qu'un filet, sans relecture à la minute (ADR 0223)."""
 
     def next_due(self, state: WorldState, frame: Frame, last_run: int | None) -> int | None:
         due = [i.deadline for i in state.intents.values()]
@@ -973,7 +978,7 @@ async def _show_work(ev: Any, ports: Mapping[str, Any]) -> None:
 
 WORLD.effect(w.INTENDED, when=lambda d: d.intent.actor == w.MIKA and d.intent.cause.source is not w.Source.REFLEX)(
     _show)
-WORLD.effect(rt.EPISODE_STARTED, when=lambda d: d.kind in WORKING_KINDS)(_show_work)
+WORLD.effect(rt.EPISODE_STARTED, when=lambda d: d.kind in DESK_KINDS)(_show_work)
 WORLD.effect(w.ENDED, when=lambda d: d.actor == w.MIKA and (d.outcome is not w.Outcome.DONE
                                                              or _busy_changed(d.changes)))(_show)
 WORLD.effect(w.CHANGED, when=lambda d: _busy_changed(d.changes))(_show)

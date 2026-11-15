@@ -118,7 +118,9 @@ def test_only_a_phone_says_where_to_notify_it(ctx) -> None:
     phone = ctx.phone()
     r = ctx.register(phone)
     assert r.status_code == 200 and r.json() == {"ok": True, "available": False}  # pas de clé Firebase ici
-    assert ctx.register(phone, origin="http://localhost:3000").status_code == 403
+    browser = ctx.register(phone, origin="http://localhost:3000")
+    assert browser.status_code == 403 and browser.json() == {"error": "Réservé à l'application du téléphone."}
+    assert browser.headers["cache-control"] == "no-store"
     assert ctx.register(ctx.phone("cle", client="screen")).status_code == 403
     assert ctx.register(Phone("mw_faux", 0, "")).status_code == 401
     assert ctx.register(phone, key="pas une clé").status_code == 400

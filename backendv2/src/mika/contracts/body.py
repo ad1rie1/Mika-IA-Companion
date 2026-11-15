@@ -110,10 +110,25 @@ class NightReading:
     late: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RemWindow:
+    """Une phase de sommeil paradoxal de ce sommeil : le cycle qu'elle clôt (son index depuis l'endormissement, 0 : le
+    premier) et ses bornes, ``[start, end[`` (``end`` est la fin de ce cycle). Les cycles sont ceux du corps, à son
+    réglage : qui compte par cycle (le rêve de ``self``, un tirage par cycle) compte ceux-là, sans copie de leur
+    durée."""
+
+    cycle: int
+    start: int
+    end: int
+
+
 RHYTHM = FactKey("body.rhythm", type=Profile, doc="le profil circadien en vigueur")
 PHASE = FactKey("body.phase", type=Phase, time_varying=True)
 ENERGY = FactKey("body.energy", type=float, time_varying=True)
 SLEEP = FactKey("body.sleep", type=SleepPhase, time_varying=True)
+#: Son sommeil paradoxal en cours ou le prochain de ce sommeil (``RemWindow``) ; ``None`` : éveillée, ou plus aucun
+#: dans ce sommeil (des cycles réglés trop courts pour en laisser un).
+REM = FactKey("body.rem", type=object, time_varying=True)
 #: Depuis quand elle est éveillée (0 si elle dort).
 AWAKE_SINCE = FactKey("body.awake_since", type=int)
 #: Depuis quand elle dort (0 si elle est éveillée).
@@ -122,6 +137,10 @@ ASLEEP_SINCE = FactKey("body.asleep_since", type=int)
 EPOCH = FactKey("body.epoch", type=tuple)
 #: Tirée du sommeil en pleine nuit par un message : elle répond, puis va se rendormir.
 NIGHT_WAKING = FactKey("body.night_waking", type=bool, time_varying=True)
+#: Tirée du sommeil par un message pendant sa nuit : le matin qui clôt cette nuit-là ; 0 : aucune nuit coupée (ou
+#: elle dort). Il ne dépend que de son état, de ses réglages et du fuseau : ``NIGHT_WAKING`` vaut tant que maintenant
+#: est avant, et le réveil de ``self`` en fait son échéance (ADR 0227).
+NIGHT_WAKING_UNTIL = FactKey("body.night_waking_until", type=int)
 #: ``REPLY_WAIT(seq)`` : la réponse à ce message attend-elle son réveil ? ``None`` : rien de particulier ;
 #: ``0`` : elle dort (ou a été tirée du sommeil par quelqu'un d'autre), la réponse attend ; sinon l'instant
 #: d'où la réponse est due (son réveil).

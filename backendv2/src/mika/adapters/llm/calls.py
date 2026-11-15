@@ -199,16 +199,6 @@ class CallLog:
             .limit(max(1, min(limit, 1000))).offset(max(0, offset)))
         return [_trace(r) for r in rows]
 
-    def by_call_id(self, call_id: str) -> LLMTrace | None:
-        """L'appel qui porte cet identifiant — le dernier s'il y en a plusieurs :
-        une boucle d'outils le réutilise d'un tour à l'autre, et le dernier tour
-        est celui qui a écrit le texte (``VoiceProvenance.call_id``)."""
-        if not self._ready or not call_id:
-            return None
-        rows = self.store.query_views(
-            select(*_FIELDS).where(CallRow.call_id == call_id).order_by(CallRow.at.desc(), CallRow.id.desc()).limit(1))
-        return _trace(rows[0]) if rows else None
-
     def usage(self, since: int, *, by: str = "role", day_of: Any = None) -> list[Usage]:
         """Agrégats depuis ``since``, par ``role``, ``backend``, ``model`` ou jour
         (``by="day"``, ``day_of(at) -> str`` donne le jour local)."""

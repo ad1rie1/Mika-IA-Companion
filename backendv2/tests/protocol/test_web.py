@@ -14,7 +14,8 @@ from mika.adapters.llm.config import LiveGateway
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
-from mika.adapters.web.app import BODY_MAX_BYTES, WebConfig
+from mika.adapters.web.app import WebConfig
+from mika.adapters.web.body import BODY_MAX_BYTES
 from mika.app.server import PERSONA, build
 from mika.contracts import place as place_c
 from mika.faculties.affect.params import derive as affect_derive

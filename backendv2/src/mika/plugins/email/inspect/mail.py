@@ -17,6 +17,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     ActionSlot,
     Badge,
     Block,
@@ -360,7 +361,7 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
             pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, f"{felt.data.weight:.2f}")))
         pairs.append(("au journal", Ref("event", str(sent.seq), f"l'événement n° {sent.seq}")))
         return [Fields(tuple(pairs), title="Ce qu'elle en sait", columns=2),
-                Prose(text, title="Ce qu'on lui en a dit") if text else Note("(oublié)", tone="muted")]
+                Prose(text, title="Ce qu'on lui en a dit") if text else Note(FORGOTTEN, tone="muted")]
     if port is not None and port.sent_mail(ref) is not None:
         return [Note("Parti de sa boîte : elle le sait par son journal d'épisodes.", tone="muted")]
     seen = s.mails.get(ref)

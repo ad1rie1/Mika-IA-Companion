@@ -30,7 +30,6 @@ from mika.plugins.mcp import (
     EXPIRED,
     FAILED,
     FINAL,
-    FLOORS,
     MCP,
     PROVENANCE,
     REFUSED,
@@ -41,6 +40,7 @@ from mika.plugins.mcp import (
     label,
 )
 from mika.ports.preprocess import cite, inert
+from mika.vocab.access import KEEP_FLOORS
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -115,7 +115,7 @@ def _section(s: McpState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     shown = [r for r in reqs if r.status == ANSWERED]
     return SectionBody(phrase("mcp.section.head") + "\n" + "\n".join(lines),
                        level=int(Sensitivity.PERSONAL), witness=True, provenance=told,
-                       floor=max((FLOORS.get(r.keep, 0) for r in shown), default=0),
+                       floor=max((KEEP_FLOORS.get(r.keep, 0) for r in shown), default=0),
                        unkept=any(r.keep == "rien" for r in shown))
 
 

@@ -13,6 +13,7 @@ from mika.kernel.inspect import Ref
 from mika.runtime import operations
 from tests.protocol.test_drawn_pages import drawn
 from tests.protocol.test_tabs_teams import plugged
+from tests.protocol.test_teams_accounts import two_accounts
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 SRC = Path(operations.__file__).resolve().parents[1]
@@ -35,6 +36,36 @@ def test_every_link_of_a_teams_account_fiche_leads_somewhere(world):  # noqa: F8
     assert "/inspecteur/reglages/canaux?canal=teams%3Aprincipal" in links
     dead = sorted(href for href in links if client.get(href, follow_redirects=False).status_code == 404)
     assert not dead, dead
+
+
+def test_every_link_of_the_teams_replies_tab_leads_somewhere(world):  # noqa: F811
+    """L'onglet Réponses de Teams menait en pied à « /inspecteur/envoi » (K8-02), écrit en morceaux dans son gabarit :
+    il mène au tableau de Teams dans Réglages › Canaux, celui du compte choisi."""
+    client, live, _ = world
+    bootstrap(client)
+    plugged(client, live)
+    for where in ("/inspecteur/teams/reponses", "/inspecteur/teams/reponses?compte=principal"):
+        links = _content_links(drawn(client, where))
+        assert "/inspecteur/reglages/canaux?canal=teams%3Aprincipal" in links, where  # le seul compte, ou le choisi
+        dead = sorted(href for href in links if client.get(href, follow_redirects=False).status_code == 404)
+        assert not dead, (where, dead)
+
+
+def test_with_several_teams_accounts_the_replies_tab_leads_to_the_teams_table(world):  # noqa: F811
+    """Plusieurs comptes et aucun choisi : le tableau de Teams (« teams », ouvert sur la page des canaux) ; un compte
+    choisi : le sien."""
+    client, live, _ = world
+    bootstrap(client)
+    two_accounts(client, live)
+    every = _content_links(drawn(client, "/inspecteur/teams/reponses"))
+    assert "/inspecteur/reglages/canaux?canal=teams" in every
+    assert not any(href.startswith("/inspecteur/reglages/canaux?canal=teams%3A") for href in every), every
+    one = _content_links(drawn(client, "/inspecteur/teams/reponses?compte=bea_t"))
+    assert "/inspecteur/reglages/canaux?canal=teams%3Abea_t" in one
+    # « canal=teams » ouvre bien la page des canaux sur Teams : sa section vient en premier
+    canals = drawn(client, "/inspecteur/reglages/canaux?canal=teams")
+    first = canals.split('class="access-canal-pane"', 1)[1].split(">", 1)[0]
+    assert 'id="canal-teams"' in first, first
 
 
 def _written_addresses() -> dict[str, str]:

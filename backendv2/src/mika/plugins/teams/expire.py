@@ -92,6 +92,6 @@ def _expired(port: Any, draft_id: str, now: int) -> Any:
         if found is not None and found.state in FROM_PORT:
             return SETTLED.draft(draft=draft_id, state=found.state, edited=found.edited, reason=found.reason,
                                  dedupe_key=f"echeance:{draft_id}")
-        return SETTLED.draft(draft=draft_id, state="echec", reason="cette réponse n'est plus dans la file",
+        return SETTLED.draft(draft=draft_id, state="echec", reason=phrase("teams.expire.gone"),
                              dedupe_key=f"echeance:{draft_id}")
     return SETTLED.draft(draft=draft_id, state=done.state, reason=done.reason, dedupe_key=f"echeance:{draft_id}")

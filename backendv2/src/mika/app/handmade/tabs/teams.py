@@ -6,7 +6,8 @@ dessinées (``subjects/teams.py`` : le fil en bulles, une réponse en face du me
   chemin, dites. Sans extension branchée, comment la brancher.
 - **Réponses** : une file à valider d'abord — celles qui attendent ton accord, chacune avec le message auquel elle
   répond et, en face, ce qu'elle a écrit, « Examiner et décider » sur sa ligne — puis, en liste, ce que les autres
-  sont devenues.
+  sont devenues ; en pied, le lien de la vue vers le tableau de Teams dans Réglages › Canaux (celui du compte
+  choisi), là où se règle ce qu'elle prépare et comment ça part.
 - **Extension** : une extension par compte (ADR 0186). Un compte choisi (ou le seul) : où elle en est (branchée, son
   dernier envoi), une bande de chiffres (ce qu'elle a apporté, ce qui attend ta décision), ce compte Teams et sa clé
   (la créer, la retirer) ; comment la brancher, pas à pas. Plusieurs comptes : un par ligne, chacun mène au sien.
@@ -117,20 +118,31 @@ def _reply(line: Line, port: Any) -> dict[str, Any]:
     }
 
 
+def _how(got: Got) -> dict[str, Any] | None:
+    """Comment ses réponses partent, tel que la vue le dit (« Comment ça part ») : son aide et son lien vers le
+    tableau de Teams dans Réglages › Canaux (celui du compte choisi, ou celui de Teams) ; rien s'il n'y est pas."""
+    fields = got.fields("Comment ça part")
+    pair = next(iter((fields or {}).get("pairs", [])), None)
+    link = pair["value"] if pair is not None else None
+    if not link or link.get("t") != "link":
+        return None
+    return {"about": pair.get("hint", ""), "href": link["href"], "text": link["text"]}
+
+
 def reponses(got: Got) -> Markup | None:
-    """Teams › Réponses : celles qui attendent ton accord, chacune en face du message ; puis les autres."""
+    """Teams › Réponses : celles qui attendent ton accord, chacune en face du message ; puis les autres ; en pied,
+    où se règle comment elles partent."""
     table = got.table("Réponses")
     if table is None:
         notes = _notes(got)
         if not notes:
             return None
-        return got.draw("handmade/teams/reponses.html", t=None, waiting=[], done=[], notes=notes, about="",
+        return got.draw("handmade/teams/reponses.html", t=None, waiting=[], done=[], notes=notes, how=None,
                         navs=_navs(got))
     port = _port(got)
     items = [_reply(x, port) for x in got.lines("Réponses")]
-    about = next((n["text"] for n in got.notes() if n.get("tone") == "info"), "")
     return got.draw("handmade/teams/reponses.html", t=table, waiting=[x for x in items if x["waiting"]],
-                    done=[x for x in items if not x["waiting"]], notes=[], about=about, navs=_navs(got))
+                    done=[x for x in items if not x["waiting"]], notes=[], how=_how(got), navs=_navs(got))
 
 
 # ── Extension ─────────────────────────────────────────────────────────────

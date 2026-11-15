@@ -62,6 +62,20 @@ def test_only_the_phone_of_an_owner_gets_in(ctx) -> None:  # noqa: F811
     assert settled.status_code == 200 and settled.json() == {"ok": True, "settled": 0, "unknown": 1}
 
 
+def test_a_refusal_says_whom_the_door_admits_and_is_never_kept(ctx) -> None:  # noqa: F811
+    """Les refus de ``/api/phone/…`` (ceux de ``/auth/push``, la même lecture) ne parlent pas de notifications, et ne
+    se gardent nulle part (audit du 2026-11-05, K9-04)."""
+    adrien = owner(ctx)
+    screen = inbox(ctx, ctx.phone("ecran", client="screen"), lot("coucou"))
+    browser = inbox(ctx, adrien, lot("coucou"), origin="http://localhost:3000")
+    for r in (screen, browser):
+        assert r.status_code == 403 and r.json() == {"error": "Réservé à l'application du téléphone."}
+        assert r.headers["cache-control"] == "no-store"
+    unknown = inbox(ctx, Phone("mw_faux", 0, ""), lot("coucou"))
+    assert unknown.status_code == 401 and unknown.json() == {"error": "Jeton invalide."}
+    assert unknown.headers["cache-control"] == "no-store"
+
+
 def test_a_proposed_reply_leaves_sealed_for_every_phone(ctx) -> None:  # noqa: F811
     adrien = owner(ctx)
     assert ctx.register(adrien, device="fcm-tel").status_code == 200

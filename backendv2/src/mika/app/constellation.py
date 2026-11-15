@@ -1,7 +1,7 @@
 """La constellation : sa mémoire en une boule de points, et ce qui la parcourt, en direct.
 
 Chaque point est un élément de l'index des vecteurs — un souvenir, une croyance, une promesse, un moment de la vie de
-quelqu'un, un échange. Sa direction vient de ses voisins de sens (``adapters.vectors.layout``) ; sa profondeur se
+quelqu'un, un échange. Sa direction vient de ses voisins de sens (``app/constellation_layout.py``) ; sa profondeur se
 choisit à l'écran (l'âge, la vivacité). Rien n'y bouge pour faire joli : chaque trajet est un événement du journal qui
 nomme ces éléments.
 
@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.vectors import layout as lay
+from mika.app import constellation_layout as lay
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c

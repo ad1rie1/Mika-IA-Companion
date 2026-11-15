@@ -58,17 +58,14 @@ from mika.plugins.forge import (
     EMITTED,
     SWITCHED,
     WRITTEN,
-    HelpArgs,
-    _test_view,
-    action_verdict,
-    forge_help,
-    resource_allowance,
     trusted,
     written_draft,
 )
-from mika.plugins.forge import TestArgs as ForgeTestArgs
+from mika.plugins.forge.access import resource_allowance
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST, TOPICS
 from mika.plugins.forge.inspect import _app_grants
+from mika.plugins.forge.tools import HelpArgs, _test_view, action_verdict, forge_help
+from mika.plugins.forge.tools import TestArgs as ForgeTestArgs
 from mika.plugins.forge.views import decode_view, is_invalid
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import dynamic_fields, offered, perform

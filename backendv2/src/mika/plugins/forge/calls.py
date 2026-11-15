@@ -5,11 +5,14 @@ expire — comme l'appel d'un service extérieur (``plugins/mcp/calls.py``).
   ``toi`` : ta carte quand c'est toi en face ; sans personne pour l'accepter, la console —, l'appel est proposé
   (``forge.call``) et rien ne part.
 - *L'aperçu* montre exactement ce qui partirait — l'app, sa version, l'outil, les arguments — et l'empreinte de tout
-  cela : c'est elle qu'on accepte. Une app changée, arrêtée ou cassée depuis la demande, une demande expirée, bloque.
+  cela : c'est elle qu'on accepte ; il dit aussi ce qu'elle en gardera (``keep``, hors de l'empreinte). Une app
+  changée, arrêtée ou cassée depuis la demande, une demande expirée, bloque.
 - *La capacité* appelle et garde ce qu'il a rendu le temps qu'il soit journalisé (``ForgePort.keep``) ; *le retour*
-  (``came_back``) l'écrit comme un contenu (``forge.answered``, l'oubli l'atteint) et vit ce que l'app a signalé ou
-  émis ; la section et l'initiative due le disent à qui l'avait demandé. La section est à elle (ses demandes) : seul ce
-  que l'app a répondu est cité, une donnée — avec les phrases communes d'un appel sur accord (``approvals``).
+  (``came_back``) l'écrit comme un contenu (``forge.answered``, l'oubli l'atteint), à la sensibilité de ce qu'elle en
+  garde (``vocab.access.KEEP_LEVELS``, ADR 0128), et vit ce que l'app a signalé ou émis ; la section et l'initiative
+  due le disent à qui l'avait demandé. La section est à elle (ses demandes) : seul ce que l'app a répondu est cité, une
+  donnée — avec les phrases communes d'un appel sur accord (``approvals``) ; elle porte, comme la carte attendue en
+  mode pro, le plancher de ce qu'elle en garde (``KEEP_FLOORS``, ``unkept``), comme un service.
 - *L'expiration* : sans accord à temps (10 min dans le chat, un jour pour l'opérateur), refusée au nom du délai.
 - *En mode pro*, une carte dans la conversation s'attend dans la boucle (ADR 0165), comme celle d'un service : l'outil
   rend la décision et ce que l'app a rendu, dit avec sa réponse.
@@ -58,6 +61,7 @@ from mika.plugins.forge import (
     trusted,
 )
 from mika.ports.preprocess import cite, inert
+from mika.vocab.access import KEEP_FLOORS, KEEP_LEVELS, KEEP_WORDS
 from mika.vocab.episodes import CONVERSATIONAL, PRO, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -82,13 +86,14 @@ def call_digest(args: Mapping[str, Any]) -> str:
 
 
 async def ask(ctx: Any, app: App, name: str, tool: str, function: str, values: Mapping[str, Any],
-              level: str) -> ToolResult:
+              level: str, keep: str) -> ToolResult:
     """Proposer l'appel (rien ne part) et le dire : la carte à la personne en face (``carte``), ou à sa propriétaire
-    quand c'est elle en face (``toi``) ; sinon, l'opérateur décide."""
+    quand c'est elle en face (``toi``) ; sinon, l'opérateur décide. ``keep`` : ce qu'elle gardera de ce que l'app
+    rendra (la ligne d'accès qui permet la demande), hors de l'empreinte, comme pour un service."""
     ep = ctx.frame.episode
     target, in_chat = rt.approval_route(ep, ctx.frame.audience, level)
     payload = rt.call_request({"app": name, "tool": tool, "function": function, "args": dict(values),
-                               "fingerprint": app.fingerprint}, PINNED,
+                               "fingerprint": app.fingerprint, "keep": keep}, PINNED,
                               request=f"{ctx.episode_id}:{ctx.call_key or ctx.call_id}", target=target,
                               in_chat=in_chat, now=ctx.frame.now)
     shown = inert(json.dumps(values, ensure_ascii=False, sort_keys=True), 300)
@@ -115,11 +120,14 @@ def _settled(frame: Frame, proposal: int) -> bool:
 
 def _decided(r: AppCall, ctx: Any) -> ToolResult:
     """Ce qu'est devenue une demande attendue dans la boucle (ADR 0165), avec les mots de la section (``line``) : ce
-    que l'app a rendu, ou pourquoi rien n'est parti. Son message suivant l'emporte comme dit."""
+    que l'app a rendu, ou pourquoi rien n'est parti ; ce qu'elle a rendu porte ce qu'elle en garde (ADR 0128). Son
+    message suivant l'emporte comme dit."""
     store = ctx.ports.get("store")
     texts = store.content([r.text_ref]) if store is not None and r.text_ref else {}
-    return ToolResult(ok=r.status == ANSWERED, content=line(r, texts).removeprefix("- "),
-                      provenance=(f"{PROVENANCE}{r.proposal}",))
+    answered = r.status == ANSWERED
+    return ToolResult(ok=answered, content=line(r, texts).removeprefix("- "),
+                      provenance=(f"{PROVENANCE}{r.proposal}",),
+                      floor=KEEP_FLOORS.get(r.keep, 0) if answered else 0, unkept=answered and r.keep == "rien")
 
 
 def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
@@ -130,7 +138,8 @@ def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
     app = frame.state("forge").apps.get(name) if frame is not None else None
     shown = json.dumps(args.get("args") or {}, ensure_ascii=False, indent=1, sort_keys=True)
     text = phrase("forge.calls.preview", app=app.title if app is not None else name,
-                  version=app.version if app is not None else "?", tool=str(args.get("tool") or ""), args=shown)
+                  version=app.version if app is not None else "?", tool=str(args.get("tool") or ""),
+                  keep=KEEP_WORDS.get(str(args.get("keep") or ""), "—"), args=shown)
     info = port.info(name) if port is not None else None
     blocked = ""
     if app is None or info is None:
@@ -169,10 +178,7 @@ def came_back(ev: Any, s: ForgeState, frame: Frame, port: Any) -> list[Any] | No
     req = s.calls.get(ev.data.proposal)
     if req is None:
         return None
-    try:
-        request = str(json.loads(req.args_json).get("request") or "")
-    except ValueError:
-        request = ""
+    request = str(rt.proposal_args(req.args_json).get("request") or "")
     r = port.take(request) if request else None
     app = s.apps.get(req.app)
     drafts: list[Any] = []
@@ -184,8 +190,10 @@ def came_back(ev: Any, s: ForgeState, frame: Frame, port: Any) -> list[Any] | No
     else:
         text = json.dumps(r.value, ensure_ascii=False, default=str) if r.ok else r.error
     ok = ev.data.ok and (r is None or r.ok)
+    # journalisé à la sensibilité de ce qu'elle en garde (ADR 0128) ; une demande d'avant, comme un souvenir
+    level = KEEP_LEVELS.get(req.keep, int(Sensitivity.PERSONAL))
     return [*drafts, c.ANSWERED.draft(proposal=req.proposal, ok=ok,
-                                      text=Content.of((text or "")[:ANSWER_KEPT], level=int(Sensitivity.PERSONAL)),
+                                      text=Content.of((text or "")[:ANSWER_KEPT], level=level),
                                       about=(req.target,) if req.target else (),
                                       dedupe_key=f"forge-rendu:{req.proposal}")]
 
@@ -204,13 +212,10 @@ def _call_proposed(s: ForgeState, e: Any, cx: Any) -> ForgeState:
     d = e.data
     if d.owner != FORGE.name or d.capability != c.CALL:
         return s
-    try:
-        args = json.loads(d.args_json or "{}")
-    except ValueError:
-        args = {}
+    args = rt.proposal_args(d.args_json)
     req = AppCall(proposal=e.seq, app=str(args.get("app") or ""), tool=str(args.get("tool") or ""),
                   target=str(args.get("target") or ""), approval=str(args.get("approval") or ""), at=e.at,
-                  expires=int(args.get(rt.EXPIRES) or 0), args_json=d.args_json,
+                  expires=rt.arg_int(args, rt.EXPIRES), args_json=d.args_json, keep=str(args.get("keep") or ""),
                   status=WAITING if d.approval else APPROVED)
     return replace(s, calls=_kept(s.calls.set(e.seq, req)))
 
@@ -315,8 +320,12 @@ def _section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
         return None
     texts = enrich.get("calls") or {}
     told = tuple(f"{PROVENANCE}{r.proposal}" for r in reqs if r.status in FINAL)
+    # ce qu'une app a rendu vaut ce qu'elle en garde (ADR 0128), comme un service : le message qui le dit l'emporte
+    shown = [r for r in reqs if r.status == ANSWERED]
     return SectionBody(phrase("forge.calls.head") + "\n" + "\n".join(line(r, texts) for r in reqs),
-                       level=int(Sensitivity.PERSONAL), witness=True, provenance=told)
+                       level=int(Sensitivity.PERSONAL), witness=True, provenance=told,
+                       floor=max((KEEP_FLOORS.get(r.keep, 0) for r in shown), default=0),
+                       unkept=any(r.keep == "rien" for r in shown))
 
 
 def _still_untold(proposal: int) -> Guard:

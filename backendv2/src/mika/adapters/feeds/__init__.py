@@ -7,13 +7,15 @@ SQLite pour les tests, MariaDB en production — ADR 0101).
 - Un article se lit par son identifiant, depuis le cache : l'adresse vient
   du flux, jamais d'un texte. **Mais un flux peut mentir** : l'adresse d'un
   article (et chaque redirection, suivie à la main, trois au plus) doit
-  désigner une machine **publique** — l'hôte est résolu, toute adresse qui
-  n'est pas globalement routable (boucle locale, réseau privé, lien local,
-  plages réservées, métadonnées de nuage) est refusée, et la connexion se fait
-  vers l'adresse vérifiée (pas de seconde résolution qu'un DNS pourrait
-  retourner). Un flux, lui, est choisi par un opérateur : son adresse peut
-  être locale ; ses redirections ne quittent pas son hôte pour une machine
-  privée.
+  désigner une machine **publique**, par la règle d'``adapters/addresses.py``
+  (ADR 0228), celle de la Forge — l'hôte est résolu ; une adresse qui n'est
+  pas d'Internet (boucle locale, réseau privé, lien local, plages réservées,
+  métadonnées de nuage, une adresse privée déguisée en IPv6, NAT64 compris),
+  une adresse de la machine elle-même et le port où Mika écoute sont refusés ;
+  la connexion se fait vers l'adresse vérifiée (pas de seconde résolution
+  qu'un DNS pourrait retourner). Un flux, lui, est choisi par un opérateur :
+  son adresse peut être locale ; une redirection qui quitte son hôte suit la
+  même règle qu'un article.
 - **Des délais qui mordent** : un serveur qui égoutte sa réponse octet par
   octet ne retient pas un flux plus que son délai, ni un relevé plus que le
   sien ; le XML se lit hors de la boucle, et le texte HTML en une passe
@@ -38,7 +40,7 @@ import ipaddress
 import socket
 import threading
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,7 @@ import httpx
 from sqlalchemy import delete, false, func, select, true, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from mika.adapters.addresses import IP, LOCAL, MACHINE, PORT, PRIVATE, refusal
 from mika.adapters.database import Target, as_target
 from mika.adapters.feeds.models import URL_MAX, EntryRow, FeedRow, entry_values, fit
 from mika.kernel.clock import DAY
@@ -84,7 +87,7 @@ _ENTRY = (EntryRow.id, EntryRow.feed, EntryRow.title, EntryRow.link, EntryRow.su
 #: les plus récents d'abord ; l'ordre d'arrivée, puis l'identifiant, départagent (le même ordre sur les deux moteurs)
 _NEWEST = (EntryRow.published.desc(), EntryRow.n.desc(), EntryRow.id)
 
-__all__ = ["HttpFeeds", "NotPublic", "clean", "parse", "routable", "shown"]
+__all__ = ["HttpFeeds", "NotPublic", "clean", "parse", "shown"]
 
 
 class NotPublic(OSError):
@@ -96,18 +99,11 @@ async def system_resolve(host: str, port: int) -> list[str]:
     return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
-def routable(ip: str) -> bool:
-    """Une adresse globalement routable (ni boucle, ni privée, ni lien local, ni réservée, ni
-    multidiffusion) — une IPv4 enveloppée dans une IPv6 est jugée pour ce qu'elle est."""
-    try:
-        addr = ipaddress.ip_address(ip.split("%", 1)[0])
-    except ValueError:
-        return False
-    if isinstance(addr, ipaddress.IPv6Address):
-        inner = addr.ipv4_mapped or addr.sixtofour or (addr.teredo[1] if addr.teredo else None)
-        if inner is not None:
-            addr = inner
-    return bool(addr.is_global) and not addr.is_multicast
+#: ce qu'un refus dit, selon la règle d'``adapters/addresses.py`` (``refusal``) — jamais l'adresse : elle peut porter
+#: un jeton
+REFUSED = {PRIVATE: "cette adresse désigne une machine privée ou locale",
+           MACHINE: "cette adresse désigne cette machine elle-même",
+           PORT: "ce port est celui du serveur lui-même"}
 
 
 def _why(exc: BaseException) -> str:
@@ -211,12 +207,16 @@ class HttpFeeds:
     def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path | Target, *, client: httpx.AsyncClient | None = None,
                  timeout_s: float = 20.0, poll_total_s: float = POLL_TOTAL_S,
                  resolve: Resolver | None = None, kept_us: int = KEPT_US,
-                 keep_per_feed: int = KEEP_PER_FEED) -> None:
+                 keep_per_feed: int = KEEP_PER_FEED, local: Collection[IP] | None = None,
+                 server_ports: Collection[int] | None = None) -> None:
         self._feeds = feeds
         self._client = client
         self._timeout = timeout_s
         self._poll_total = poll_total_s
         self._resolve = resolve or system_resolve
+        #: les adresses de la machine et les ports de Mika (les essais) ; sinon ceux d'``adapters/addresses.py``
+        self._local = local
+        self._server_ports = server_ports
         self._kept = kept_us
         self._keep_per_feed = keep_per_feed
         self._lock = threading.RLock()
@@ -231,8 +231,9 @@ class HttpFeeds:
 
     # ── aller chercher ──
     async def _public(self, url: str) -> tuple[str, dict[str, str], dict[str, Any]]:
-        """L'adresse à demander, vérifiée : l'hôte résolu, chacune de ses adresses publique ; la
-        requête part vers l'adresse vérifiée (l'hôte reste dans ``Host`` et dans le SNI)."""
+        """L'adresse à demander, vérifiée par ``refusal`` (``adapters/addresses.py``) : l'hôte résolu,
+        chacune de ses adresses publique et pas celle de la machine, le port pas celui de Mika ; la requête part
+        vers l'adresse vérifiée (l'hôte reste dans ``Host`` et dans le SNI)."""
         parts = urlsplit(url)
         host, port = _origin(url)
         if not host:
@@ -250,8 +251,15 @@ class HttpFeeds:
                 raise httpx.ConnectError(f"nom inconnu ({type(exc).__name__})") from None
         if not ips:
             raise httpx.ConnectError("nom inconnu")
-        if not all(routable(ip) for ip in ips):
-            raise NotPublic("cette adresse désigne une machine privée ou locale")
+        # les adresses de la machine, relues au plus toutes les cinq minutes : hors de la boucle
+        local = self._local if self._local is not None else await asyncio.to_thread(LOCAL.get)
+        try:
+            resolved = [ipaddress.ip_address(ip.split("%", 1)[0]) for ip in ips]
+        except ValueError:  # une réponse du résolveur qui n'est pas une adresse
+            raise NotPublic(REFUSED[PRIVATE]) from None
+        why = refusal(resolved, port, local=local, server_ports=self._server_ports)
+        if why is not None:
+            raise NotPublic(REFUSED[why])
         ip = ips[0]
         netloc = (f"[{ip}]" if ":" in ip else ip) + (f":{parts.port}" if parts.port else "")
         headers = {"Host": parts.netloc.rsplit("@", 1)[-1]}

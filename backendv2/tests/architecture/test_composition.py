@@ -1,5 +1,6 @@
 """Preuve M0 — le démarrage refuse une composition incohérente, et les couches
-sont vérifiées (un import interdit fait échouer import-linter)."""
+sont vérifiées (un import interdit fait échouer import-linter) ; les sections
+des plugins restent en zone volatile (ADR 0022)."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import pytest
 from mika.app.composition import READING, faculties
 from mika.kernel.events import Payload
 from mika.kernel.facts import FactKey
-from mika.kernel.faculty import Faculty, Zone
+from mika.kernel.faculty import Faculty, SectionSpec, Zone
 from mika.kernel.registry import ArbitrationPolicy, CompositionError, Registry
 from mika.runtime.state import RUNTIME
 
@@ -92,6 +93,50 @@ def test_her_composition_declares_the_reading_order_of_her_prompt():
     keys = [s.key for s in Registry([RUNTIME, *faculties()], reading=READING).sections]
     assert keys == list(READING)
     assert keys[-1] == "answer" and keys.index("who") < keys.index("their_state") < keys.index("habits")
+
+
+def _plugin_sections(facs: Sequence[Faculty]) -> list[SectionSpec]:
+    """Les sections dont la fonction vit sous ``mika.plugins`` : celles d'un plugin. Rien d'autre ne les distingue
+    de celles d'une faculté, que ``faculties()`` rend dans la même liste."""
+    return [s for f in facs for s in f.sections if (getattr(s.fn, "__module__", None) or "").startswith("mika.plugins.")]
+
+
+def _plugin_sections_outside_volatile(facs: Sequence[Faculty]) -> list[str]:
+    """Les sections d'un plugin hors de la zone volatile, nommées ``plugin.clé (zone)``."""
+    return [f"{s.owner}.{s.key} ({s.zone})" for s in _plugin_sections(facs) if s.zone is not Zone.VOLATILE]
+
+
+def test_every_plugin_section_is_in_the_volatile_zone():
+    """La confiance restreinte des plugins (ARCHITECTURE.md, « Les plugins ») : toute section d'un plugin est en zone
+    volatile, jamais dans le préfixe stable du prompt — ce qui vient d'ailleurs est cité : une section non fiable,
+    coupée en premier (ADR 0022). Sur la composition réelle ; au moins vingt sections de plugin vues, pour que la
+    garde ne passe pas à vide."""
+    facs = faculties()
+    assert len(_plugin_sections(facs)) >= 20
+    assert _plugin_sections_outside_volatile(facs) == []
+
+
+def test_a_plugin_section_in_the_stable_zone_is_caught():
+    """La garde attrape un plugin qui écrirait en zone stable, et elle seule : la même zone reste permise à une
+    faculté, et une section de plugin en zone volatile passe."""
+    def stable_plugin(s, f, e):
+        return None
+
+    def volatile_plugin(s, f, e):
+        return None
+
+    def stable_faculty(s, f, e):
+        return None
+
+    stable_plugin.__module__ = volatile_plugin.__module__ = "mika.plugins.jouet"
+    stable_faculty.__module__ = "mika.faculties.jouet"
+    a = fac("jouet")
+    a.section("dedans", zone=Zone.STABLE, episodes=["REPLY"])(stable_plugin)
+    a.section("dehors", zone=Zone.VOLATILE, episodes=["REPLY"])(volatile_plugin)
+    a.section("sienne", zone=Zone.STABLE, episodes=["REPLY"])(stable_faculty)
+    assert len(_plugin_sections([a])) == 2
+    assert _plugin_sections_outside_volatile([a]) == ["jouet.dedans (stable)"]
+
 
 def test_unreachable_threshold():
     a = fac("a")

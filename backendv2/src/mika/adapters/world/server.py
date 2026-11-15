@@ -41,8 +41,8 @@ from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.web.accounts import CREDENTIAL_CHECK_S, TOKEN_KEY, Account, Accounts
-from mika.adapters.web.app import SESSION_COOKIE, bearer
 from mika.adapters.web.gate import SlidingWindow
+from mika.adapters.web.session import SESSION_COOKIE, bearer
 from mika.adapters.world import protocol as p
 from mika.contracts import world as w
 from mika.contracts.entry import MindPort

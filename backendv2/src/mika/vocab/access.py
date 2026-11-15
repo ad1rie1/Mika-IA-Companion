@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mika.kernel.forms import Knob
 from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind
-from mika.vocab.privacy import ChannelTrust, normalize_channel
+from mika.vocab.privacy import ChannelTrust, Sensitivity, normalize_channel
 
 # ── qui ─────────────────────────────────────────────────────────────────────
 
@@ -193,6 +193,14 @@ KEEPS = (("public", "public — un savoir"), ("perso", "personnel — un souveni
          ("prive", "privé — une confidence"), ("rien", "rien"))
 KEEP_WORDS = {"public": "un savoir", "perso": "un souvenir", "prive": "une confidence", "rien": "rien"}
 KEEP_RANK = {"rien": 0, "prive": 1, "perso": 2, "public": 3}
+#: ce qu'on tire de ce qu'un outil a rendu (un service, une app) ne se dit jamais en dessous de ce plancher
+#: (``ToolResult.floor``, ``SectionBody.floor``, ADR 0128) ; « rien » : rien ne s'en garde (``unkept``)
+KEEP_FLOORS = {"public": int(Sensitivity.NONE), "perso": int(Sensitivity.NONE), "prive": int(Sensitivity.CONFIDENCE),
+               "rien": int(Sensitivity.CONFIDENCE)}
+#: la sensibilité d'une réponse rendue sur accord, journalisée pour qu'elle la dise (``mcp.answered``,
+#: ``forge.answered``, ADR 0128)
+KEEP_LEVELS = {"public": int(Sensitivity.ANODYNE), "perso": int(Sensitivity.PERSONAL),
+               "prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
 Keep = Literal["public", "perso", "prive", "rien"]
 
 #: partager ce qui est à soi (ADR 0188) : une boîte, un compte Teams, un service — le lire (sans répondre ni ranger) ;
@@ -617,3 +625,18 @@ class TableArgs(BaseModel):
         tableau a une colonne d'outils."""
         boxes = {"qui": self.qui, "canal": self.canal, "moments": self.moments, "prend": self.prend}
         return rows_sent(self.ligne, boxes, fields, self.toujours, self.tous, tools=tools)
+
+
+class ToolColumnsArgs(TableArgs):
+    """Un tableau des lignes d'accès à des outils (un service branché, une app sans projet) : ses champs communs
+    (``TableArgs``) et ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ligne par ligne puis par défaut.
+    Ce qu'elle en garde (``garde``, ``defaut_garde``) est à chaque sorte de tableau : ses choix s'y disent autrement."""
+
+    lecture: Annotated[dict[str, Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
+        Field(default_factory=dict)
+    action: Annotated[dict[str, Policy], Knob(label="Un outil qui agit", choices=POLICIES, advanced=False)] = \
+        Field(default_factory=dict)
+    defaut_lecture: Annotated[Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
+                                           advanced=False)] = "non"
+    defaut_action: Annotated[Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
+                                          advanced=False)] = "non"

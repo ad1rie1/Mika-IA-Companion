@@ -52,7 +52,7 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.text import clipped
 from mika.vocab.affect import Emotion
-from mika.vocab.days import when_fr
+from mika.vocab.days import since_fr
 from mika.vocab.knowledge import Known, knowns
 from mika.vocab.lineage import merged
 from mika.vocab.people import is_identifiable
@@ -567,8 +567,7 @@ class Watch:
     def _alone(self, state: AttentionState, frame: Frame, p: Any) -> Draft[Any]:
         """Personne ne lui a écrit depuis plus d'un jour : une pensée de solitude,
         une par jour de silence (le texte dit depuis quand, en jours du calendrier)."""
-        when = when_fr(state.last_contact, frame.now, frame.env.tz_of(frame.root))
-        since = when[len("il y a "):] if when.startswith("il y a ") else when.removeprefix("dans ")
+        since = since_fr(state.last_contact, frame.now, frame.env.tz_of(frame.root))
         sens = int(Sensitivity.ANODYNE)
         return c.THOUGHT_BORN.draft(text=Content.of(phrase("attention.thought.alone", since=since), level=sens),
                                     emotion=Emotion.LONELY.value, intensity=p.alone_intensity, origin=c.ALONE,

@@ -44,11 +44,9 @@ async def test_a_restarted_log_finds_an_episodes_calls(tmp_path):
     episode = again.for_correlation("ep-1")
     assert [(t.call_id, t.input_tokens) for t in episode] == [("ep-1#0", 10), ("ep-1#0", 12)]
     assert all(t.estimated_input_tokens > 0 for t in episode)  # l'estimation du budget, gardée à côté du réel
-    last = again.by_call_id("ep-1#0")
-    assert last is not None and last.output_tokens == 3, "le dernier tour : celui qui a écrit le texte"
     process = again.for_correlation("memory.consolidate:xyz")
     assert len(process) == 1 and process[0].role == "extract"
-    assert again.by_call_id("absent") is None and again.for_correlation("absent") == []
+    assert again.for_correlation("absent") == []
     await store2.close()
 
 
@@ -64,7 +62,7 @@ async def test_opening_twice_keeps_the_log(tmp_path):
     await calls.flush()
     await calls.open()  # idempotent
     assert [t.call_id for t in calls.for_correlation("neuf")] == ["neuf#0"]
-    assert calls.by_call_id("neuf#0") is not None and calls.count(correlation="neuf") == 1
+    assert calls.count(correlation="neuf") == 1
     await store.close()
 
 

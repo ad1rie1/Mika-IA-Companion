@@ -235,21 +235,26 @@ class BwrapWorkshop:
         self._sizes: dict[int, int] = {}
 
     # ── le dossier ──
-    def folder(self, goal: int) -> Path:
-        return self.root / f"projet-{int(goal)}"
+    def folder(self, project: int) -> Path:
+        return self.root / f"projet-{int(project)}"
 
-    def exists(self, goal: int) -> bool:
-        return self.folder(goal).is_dir()
+    def exists(self, project: int) -> bool:
+        return self.folder(project).is_dir()
 
-    def _open(self, goal: int) -> Path:
+    def _has_git(self, project: int) -> bool:
+        """L'atelier a-t-il un dépôt ? Un ``.git`` dossier ou fichier (un gitfile) compte ; ``_listed``, qui laisse
+        git lister les fichiers, demande un dossier."""
+        return (self.folder(project) / ".git").exists()
+
+    def _open(self, project: int) -> Path:
         cage.private_root(self.root)  # ``ateliers/`` : des dépôts, des données personnelles, à elle seule
-        d = self.folder(goal)
+        d = self.folder(project)
         (d / HOME_DIRNAME).mkdir(parents=True, exist_ok=True)
         return d
 
-    def path(self, goal: int, rel: str, *, write: bool = False) -> Path:
+    def path(self, project: int, rel: str, *, write: bool = False) -> Path:
         """Résout ``rel`` dans l'atelier, ou lève ``OutsideWorkshop`` (une lecture ne crée rien)."""
-        base = (self._open(goal) if write else self.folder(goal)).resolve()
+        base = (self._open(project) if write else self.folder(project)).resolve()
         raw = str(rel or "").strip()
         if raw and Path(raw).is_absolute():
             raise OutsideWorkshop(f"chemin absolu refusé : {raw} — écris un chemin relatif au dossier")
@@ -268,61 +273,61 @@ class BwrapWorkshop:
                 raise OutsideWorkshop(f"« {parts[0]}/ » appartient à l'atelier lui-même : il ne s'écrit pas")
         return resolved
 
-    def _rel(self, goal: int, p: Path) -> str:
-        return str(p.relative_to(self.folder(goal).resolve()))
+    def _rel(self, project: int, p: Path) -> str:
+        return str(p.relative_to(self.folder(project).resolve()))
 
-    def full(self, goal: int) -> str:
+    def full(self, project: int) -> str:
         """Pourquoi l'atelier n'accepte plus rien (vide : il accepte)."""
-        size = self._sizes.get(goal, 0)
+        size = self._sizes.get(project, 0)
         if size <= self.limits.workshop_bytes:
             return ""
         return (f"l'atelier pèse {size_fr(size)} (au plus {size_fr(self.limits.workshop_bytes)}) : fais de la place "
                 "(rm …) avant d'écrire ou de lancer autre chose")
 
-    def _grew(self, goal: int, n: int) -> None:
-        if goal in self._sizes:
-            self._sizes[goal] += n
+    def _grew(self, project: int, n: int) -> None:
+        if project in self._sizes:
+            self._sizes[project] += n
 
-    async def _room(self, goal: int) -> None:
+    async def _room(self, project: int) -> None:
         """Lève ``WorkshopFull`` si l'atelier dépasse sa taille. Sa taille se mesure une première fois (hors de la
         boucle) au premier besoin : un atelier rempli fichier par fichier, sans jamais rien lancer, est borné lui
         aussi ; ensuite, chaque écriture l'ajoute, et chaque exécution la remesure."""
-        if goal not in self._sizes and self.exists(goal):
+        if project not in self._sizes and self.exists(project):
             loop = asyncio.get_running_loop()
-            self._sizes[goal] = await loop.run_in_executor(None, self._measure, self.folder(goal))
-        if why := self.full(goal):
+            self._sizes[project] = await loop.run_in_executor(None, self._measure, self.folder(project))
+        if why := self.full(project):
             raise WorkshopFull(why)
 
-    async def tree(self, goal: int, path: str = ".") -> list[str]:
+    async def tree(self, project: int, path: str = ".") -> list[str]:
         """Les fichiers de l'atelier (ou d'un de ses dossiers), en largeur d'abord : ce que git suit et ce qui est
         nouveau sans être ignoré (ni ``.venv`` ni ``node_modules``), sinon un parcours borné. Chaque entrée est lue
         par ``lstat`` : un lien cassé reste une entrée. Rien de tout ça ne tourne sur la boucle."""
-        start = self.path(goal, path or ".")
+        start = self.path(project, path or ".")
         try:
             st = os.lstat(start)
         except OSError:
             return []
         if not stat.S_ISDIR(st.st_mode):
-            return [_entry(self._rel(goal, start), st)]
-        listed = await self._listed(goal)
+            return [_entry(self._rel(project, start), st)]
+        listed = await self._listed(project)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._tree_sync, goal, start, listed)
+        return await loop.run_in_executor(None, self._tree_sync, project, start, listed)
 
-    async def _listed(self, goal: int) -> list[str] | None:
+    async def _listed(self, project: int) -> list[str] | None:
         """Ce que git voit (suivis, et nouveaux non ignorés), ou ``None`` (pas de dépôt, ou git ne répond pas)."""
-        if not (self.folder(goal) / ".git").is_dir():
+        if not (self.folder(project) / ".git").is_dir():
             return None
         # une liste lue par le code : coupée au milieu, elle tairait des dossiers entiers ; trop longue, le parcours
         # borné prend le relais
-        r = await self._git(goal, "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others",
+        r = await self._git(project, "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others",
                             "--exclude-standard", clip=False)
         if not r.ok or r.truncated:
             return None
         return [p for p in r.stdout.split("\x00") if p]
 
-    def _tree_sync(self, goal: int, start: Path, listed: list[str] | None) -> list[str]:
-        base = self.folder(goal).resolve()
-        prefix = "" if start == base else self._rel(goal, start) + "/"
+    def _tree_sync(self, project: int, start: Path, listed: list[str] | None) -> list[str]:
+        base = self.folder(project).resolve()
+        prefix = "" if start == base else self._rel(project, start) + "/"
         rows: list[tuple[int, str, os.stat_result]] = []
         if listed is not None:
             for rel in dict.fromkeys(listed):
@@ -333,14 +338,14 @@ class BwrapWorkshop:
                 except OSError:  # supprimé depuis (encore dans l'index)
                     continue
         else:
-            rows = self._walk(goal, start)
+            rows = self._walk(project, start)
         rows.sort(key=lambda r: (r[0], r[1]))
         out = [_entry(rel, st) for _, rel, st in rows[: self.max_tree]]
         if len(rows) > self.max_tree:
             out.append(f"[… liste coupée à {self.max_tree} entrées sur {len(rows)} …]")
         return out
 
-    def _walk(self, goal: int, start: Path) -> list[tuple[int, str, os.stat_result]]:
+    def _walk(self, project: int, start: Path) -> list[tuple[int, str, os.stat_result]]:
         """Un parcours en largeur, borné, qui ne descend ni dans les organes ni dans le bruit."""
         rows: list[tuple[int, str, os.stat_result]] = []
         queue: deque[Path] = deque([start])
@@ -353,7 +358,7 @@ class BwrapWorkshop:
                 continue
             for e in entries:
                 seen += 1
-                rel = self._rel(goal, Path(e.path))
+                rel = self._rel(project, Path(e.path))
                 if rel.split("/", 1)[0] in ORGANS:
                     continue
                 try:
@@ -367,47 +372,47 @@ class BwrapWorkshop:
                 rows.append((rel.count("/"), rel, st))
         return rows
 
-    async def read(self, goal: int, path: str) -> str:
-        target = self.path(goal, path)
+    async def read(self, project: int, path: str) -> str:
+        target = self.path(project, path)
         if not target.is_file():
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier (un dossier se liste avec ws_list)")
         raw = target.read_bytes()[: self.max_file + 1]
         text = raw[: self.max_file].decode("utf-8", errors="replace")
         return text + ("\n\n[… fichier tronqué …]" if len(raw) > self.max_file else "")
 
-    async def write(self, goal: int, path: str, content: str) -> str:
-        target = self.path(goal, path, write=True)
-        await self._room(goal)
-        await self._init(goal)  # l'amorce d'abord : le premier travail sera son propre commit
+    async def write(self, project: int, path: str, content: str) -> str:
+        target = self.path(project, path, write=True)
+        await self._room(project)
+        await self._init(project)  # l'amorce d'abord : le premier travail sera son propre commit
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
-        self._grew(goal, len(str(content).encode()))
-        return self._rel(goal, target)
+        self._grew(project, len(str(content).encode()))
+        return self._rel(project, target)
 
-    async def write_bytes(self, goal: int, path: str, data: bytes) -> str:
-        target = self.path(goal, path, write=True)
-        await self._room(goal)
-        await self._init(goal)
+    async def write_bytes(self, project: int, path: str, data: bytes) -> str:
+        target = self.path(project, path, write=True)
+        await self._room(project)
+        await self._init(project)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(bytes(data))
-        self._grew(goal, len(data))
-        return self._rel(goal, target)
+        self._grew(project, len(data))
+        return self._rel(project, target)
 
-    async def read_bytes(self, goal: int, path: str, limit: int) -> bytes:
-        target = self.path(goal, path)
+    async def read_bytes(self, project: int, path: str, limit: int) -> bytes:
+        target = self.path(project, path)
         if not target.is_file():
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier")
         with target.open("rb") as f:
             return f.read(max(0, limit))
 
-    async def edit(self, goal: int, path: str, old: str, new: str) -> str:
+    async def edit(self, project: int, path: str, old: str, new: str) -> str:
         """Remplacement exact et unique : une édition « à peu près » donne un
         fichier plausible et faux."""
-        target = self.path(goal, path, write=True)
+        target = self.path(project, path, write=True)
         if not target.is_file():
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier")
-        await self._room(goal)
-        await self._init(goal)
+        await self._room(project)
+        await self._init(project)
         # En octets, décodés strictement : un octet non UTF-8 deviendrait « � » sur le disque, et le mode
         # texte changerait les fins de ligne de tout le fichier. Hors du fragment, rien ne bouge.
         try:
@@ -420,8 +425,8 @@ class BwrapWorkshop:
         if n > 1:
             raise ValueError(f"fragment présent {n} fois dans {path} — donne un extrait plus large")
         target.write_bytes(text.replace(old, new, 1).encode("utf-8"))
-        self._grew(goal, len(new.encode()) - len(old.encode()))
-        return self._rel(goal, target)
+        self._grew(project, len(new.encode()) - len(old.encode()))
+        return self._rel(project, target)
 
     # ── l'exécution ──
     def _visible(self, program: str, root: Path) -> str | None:
@@ -483,7 +488,7 @@ class BwrapWorkshop:
         resource.setrlimit(resource.RLIMIT_NOFILE, (lim.files, lim.files))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
-    async def run(self, goal: int, argv: Sequence[str], *, timeout_s: float | None = None,
+    async def run(self, project: int, argv: Sequence[str], *, timeout_s: float | None = None,
                   network: bool = False, check_allowed: bool = True,
                   extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = (),
                   clip: bool = True) -> RunResult:
@@ -507,11 +512,11 @@ class BwrapWorkshop:
                 return RunResult(tuple(args), None, refused=NO_ISOLATED_NETWORK)
             mode = "isolated"
         if check_allowed:
-            full = self.full(goal)
+            full = self.full(project)
             if full and program not in CLEANING:
                 return RunResult(tuple(args), None, refused=full)
-            await self._init(goal)
-        root = self._open(goal).resolve()
+            await self._init(project)
+        root = self._open(project).resolve()
         exe = self._visible(args[0], root)
         if exe is None:
             return RunResult(tuple(args), None, refused=f"« {args[0]} » est absent de l'environnement isolé "
@@ -529,9 +534,9 @@ class BwrapWorkshop:
             job.cancel()  # l'exécution est annulée : ce qu'elle a lancé ne lui survit pas
             raise
         if check_allowed:
-            self._sizes[goal] = await loop.run_in_executor(None, self._measure, root)
-            if self.full(goal):
-                result = replace(result, notes=(*result.notes, f"Attention : {self.full(goal)}."))
+            self._sizes[project] = await loop.run_in_executor(None, self._measure, root)
+            if self.full(project):
+                result = replace(result, notes=(*result.notes, f"Attention : {self.full(project)}."))
         return result
 
     def _measure(self, root: Path) -> int:
@@ -635,24 +640,24 @@ class BwrapWorkshop:
         return timed_out, overflow, (out, err)
 
     # ── git ──
-    async def _git(self, goal: int, *args: str, network: bool = False, timeout_s: float = 30,
+    async def _git(self, project: int, *args: str, network: bool = False, timeout_s: float = 30,
                    extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = (),
                    clip: bool = True) -> RunResult:
-        return await self.run(goal, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
+        return await self.run(project, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
                               check_allowed=False, network=network,
                               extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets, clip=clip)
 
-    async def _init(self, goal: int) -> bool:
-        root = self._open(goal)
+    async def _init(self, project: int) -> bool:
+        root = self._open(project)
         if (root / ".git").exists():
             return True
-        r = await self._git(goal, "init", "-q")
+        r = await self._git(project, "init", "-q")
         if not r.ok:
             return False
         self._exclude(root)
         (root / ".gitignore").write_text(IGNORED, encoding="utf-8")
-        await self._git(goal, "add", "-A")
-        await self._git(goal, "commit", "-q", "-m", "atelier ouvert")
+        await self._git(project, "add", "-A")
+        await self._git(project, "commit", "-q", "-m", "atelier ouvert")
         return True
 
     @staticmethod
@@ -664,56 +669,56 @@ class BwrapWorkshop:
         info.mkdir(parents=True, exist_ok=True)
         (info / "exclude").write_text(IGNORED, encoding="utf-8")
 
-    async def commit(self, goal: int, message: str, paths: Sequence[str] = ()) -> str:
-        if not self.exists(goal) or not await self._init(goal):
+    async def commit(self, project: int, message: str, paths: Sequence[str] = ()) -> str:
+        if not self.exists(project) or not await self._init(project):
             return ""
         only = [f":(literal){p}" for p in paths if p]
         scope = ("--", *only) if only else ()
-        state = await self._git(goal, "status", "--porcelain", *scope)
+        state = await self._git(project, "status", "--porcelain", *scope)
         if not state.ok or not state.stdout.strip():
             return ""
-        await self._git(goal, "add", "-A", *scope)
+        await self._git(project, "add", "-A", *scope)
         title = re.sub(r"\s+", " ", (message or "travail")).strip()[:72] or "travail"
-        done = await self._git(goal, "commit", "-q", "-m", title, *scope)
+        done = await self._git(project, "commit", "-q", "-m", title, *scope)
         if not done.ok:
             return ""
-        sha = await self._git(goal, "rev-parse", "--short", "HEAD")
+        sha = await self._git(project, "rev-parse", "--short", "HEAD")
         return sha.stdout.strip() if sha.ok else ""
 
-    async def diff(self, goal: int) -> str:
+    async def diff(self, project: int) -> str:
         """Ce qui a changé depuis le dernier enregistrement : le diff des fichiers suivis, puis les fichiers nouveaux
         (que ``git diff`` ne montre pas)."""
-        if not (self.folder(goal) / ".git").exists():
+        if not self._has_git(project):
             return ""
-        r = await self._git(goal, "diff", "HEAD", "--stat", "-p")
-        new = [p[3:] for p in await self._status(goal) if p.startswith("??")]
+        r = await self._git(project, "diff", "HEAD", "--stat", "-p")
+        new = [p[3:] for p in await self._status(project) if p.startswith("??")]
         text = r.stdout if r.ok else ""
         if new:
             text += ("\n" if text else "") + "Fichiers nouveaux, pas encore enregistrés :\n" + \
                 "\n".join(f"+ {n}" for n in new[:200])
         return text
 
-    async def _status(self, goal: int) -> list[str]:
-        r = await self._git(goal, "status", "--porcelain", "--untracked-files=all", clip=False)
+    async def _status(self, project: int) -> list[str]:
+        r = await self._git(project, "status", "--porcelain", "--untracked-files=all", clip=False)
         return [line for line in r.stdout.splitlines() if line.strip()] if r.ok else []
 
-    async def pending(self, goal: int) -> list[str]:
-        if not (self.folder(goal) / ".git").exists():
+    async def pending(self, project: int) -> list[str]:
+        if not self._has_git(project):
             return []
-        return [line[3:] for line in await self._status(goal)]
+        return [line[3:] for line in await self._status(project)]
 
-    async def log(self, goal: int, n: int = 10, *, offset: int = 0) -> str:
-        if not (self.folder(goal) / ".git").exists():
+    async def log(self, project: int, n: int = 10, *, offset: int = 0) -> str:
+        if not self._has_git(project):
             return ""
-        r = await self._git(goal, "log", f"-{max(1, n)}", f"--skip={max(0, offset)}", "--format=%h %s")
+        r = await self._git(project, "log", f"-{max(1, n)}", f"--skip={max(0, offset)}", "--format=%h %s")
         return r.stdout if r.ok else ""
 
-    async def commits(self, goal: int, n: int = 25, *, offset: int = 0) -> list[Commit]:
-        if not (self.folder(goal) / ".git").exists():
+    async def commits(self, project: int, n: int = 25, *, offset: int = 0) -> list[Commit]:
+        if not self._has_git(project):
             return []
         # une entrée commence par un NUL (qu'un message de commit ne peut pas contenir) ; le titre vient en
         # dernier : un séparateur glissé dans un message ne fabrique ni une fausse ligne ni un faux auteur
-        r = await self._git(goal, "log", f"-{max(1, n)}", f"--skip={max(0, offset)}", "--shortstat",
+        r = await self._git(project, "log", f"-{max(1, n)}", f"--skip={max(0, offset)}", "--shortstat",
                             "--format=%x00%h%x1f%ct%x1f%an%x1f%s")
         if not r.ok:
             return []
@@ -730,45 +735,45 @@ class BwrapWorkshop:
                               minus))
         return out
 
-    async def count(self, goal: int) -> int:
-        if not (self.folder(goal) / ".git").exists():
+    async def count(self, project: int) -> int:
+        if not self._has_git(project):
             return 0
-        r = await self._git(goal, "rev-list", "--count", "HEAD")
+        r = await self._git(project, "rev-list", "--count", "HEAD")
         return int(r.stdout.strip()) if r.ok and r.stdout.strip().isdigit() else 0
 
-    async def head(self, goal: int) -> str:
+    async def head(self, project: int) -> str:
         """Le commit courant (complet), ou ``""``."""
-        if not (self.folder(goal) / ".git").exists():
+        if not self._has_git(project):
             return ""
-        r = await self._git(goal, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+        r = await self._git(project, "rev-parse", "--verify", "-q", "HEAD^{commit}")
         sha = r.stdout.strip()
         return sha if r.ok and _SHA.match(sha) else ""
 
-    async def branch(self, goal: int) -> str:
+    async def branch(self, project: int) -> str:
         """La branche courante, ou ``""`` (pas de dépôt, ou une tête détachée)."""
-        if not (self.folder(goal) / ".git").exists():
+        if not self._has_git(project):
             return ""
-        r = await self._git(goal, "symbolic-ref", "--short", "-q", "HEAD")
+        r = await self._git(project, "symbolic-ref", "--short", "-q", "HEAD")
         name = r.stdout.strip()
         return name if r.ok and _BRANCH.match(name) else ""
 
-    async def compare(self, goal: int, sha: str) -> tuple[int, int] | None:
+    async def compare(self, project: int, sha: str) -> tuple[int, int] | None:
         """(les enregistrements de l'atelier que ``sha`` n'a pas, ceux de ``sha`` qu'il n'a pas) ; ``None`` si
         l'atelier ne connaît pas ce commit (le distant a bougé sans lui)."""
-        if not _SHA.match(sha or "") or not (self.folder(goal) / ".git").exists():
+        if not _SHA.match(sha or "") or not self._has_git(project):
             return None
-        if not (await self._git(goal, "cat-file", "-e", f"{sha}^{{commit}}")).ok:
+        if not (await self._git(project, "cat-file", "-e", f"{sha}^{{commit}}")).ok:
             return None
-        r = await self._git(goal, "rev-list", "--left-right", "--count", f"HEAD...{sha}")
+        r = await self._git(project, "rev-list", "--left-right", "--count", f"HEAD...{sha}")
         counts = r.stdout.split()
         if not r.ok or len(counts) != 2 or not all(n.isdigit() for n in counts):
             return None
         return int(counts[0]), int(counts[1])
 
-    async def show(self, goal: int, sha: str) -> str:
-        if not _SHA.match(sha or "") or not (self.folder(goal) / ".git").exists():
+    async def show(self, project: int, sha: str) -> str:
+        if not _SHA.match(sha or "") or not self._has_git(project):
             return ""
-        r = await self._git(goal, "show", "--stat", "-p", "--format=%H%n%an, %cd%n%n%B", "--date=iso", sha)
+        r = await self._git(project, "show", "--stat", "-p", "--format=%H%n%an, %cd%n%n%B", "--date=iso", sha)
         if not r.ok:
             return ""
         text = r.stdout
@@ -797,16 +802,16 @@ class BwrapWorkshop:
                     "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
         return env, (token, basic), ""
 
-    async def _clean_config(self, goal: int) -> str:
+    async def _clean_config(self, project: int) -> str:
         """Ce qui, dans la configuration locale du dépôt, n'a rien à y faire (vide : rien) — on ne parle pas au
         distant avec une configuration qu'on n'a pas posée."""
-        r = await self._git(goal, "config", "--local", "--name-only", "--list")
+        r = await self._git(project, "config", "--local", "--name-only", "--list")
         if not r.ok:
             return "configuration locale illisible"
         odd = sorted({k for k in r.stdout.split() if k and k.lower() not in _LOCAL_KEYS})
         return f"configuration locale inattendue : {', '.join(odd[:5])}" if odd else ""
 
-    async def push(self, goal: int, url: str, branch: str, sha: str = "") -> RunResult:
+    async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
         try:
             url, branch = check_remote(url), check_branch(branch)
         except ValueError as exc:
@@ -814,51 +819,51 @@ class BwrapWorkshop:
         env, secrets, why = self._auth(url)
         if why:
             return RunResult(("git", "push"), None, refused=f"pas d'envoi : {why}")
-        if not await self._init(goal):
+        if not await self._init(project):
             return RunResult(("git", "push"), None, refused="le dépôt de l'atelier ne s'ouvre pas")
-        odd = await self._clean_config(goal)
+        odd = await self._clean_config(project)
         if odd:
             return RunResult(("git", "push"), None, refused=f"pas d'envoi : {odd}")
-        sha = sha or await self.head(goal)
-        if not _SHA.match(sha or "") or not (await self._git(goal, "cat-file", "-e", f"{sha}^{{commit}}")).ok:
+        sha = sha or await self.head(project)
+        if not _SHA.match(sha or "") or not (await self._git(project, "cat-file", "-e", f"{sha}^{{commit}}")).ok:
             return RunResult(("git", "push"), None, refused=f"le commit à envoyer est introuvable : {sha[:40]}")
-        r = await self._git(goal, *_REMOTE_GIT, "push", "--no-recurse-submodules", url,
+        r = await self._git(project, *_REMOTE_GIT, "push", "--no-recurse-submodules", url,
                             f"{sha}:refs/heads/{branch}", network=True, timeout_s=REMOTE_TIMEOUT_S, extra_env=env,
                             secrets=secrets)
         return replace(r, argv=("git", "push", url, f"{sha[:12]} → {branch}"))
 
-    async def pull(self, goal: int, url: str, branch: str) -> RunResult:
+    async def pull(self, project: int, url: str, branch: str) -> RunResult:
         try:
             url, branch = check_remote(url), check_branch(branch)
         except ValueError as exc:
             return RunResult(("git", "pull"), None, refused=str(exc))
         env, secrets, _ = self._auth(url)  # sans jeton (ou pour un autre hôte) : un dépôt public se récupère quand même
-        if not await self._init(goal):
+        if not await self._init(project):
             return RunResult(("git", "pull"), None, refused="le dépôt de l'atelier ne s'ouvre pas")
-        odd = await self._clean_config(goal)
+        odd = await self._clean_config(project)
         if odd:
             return RunResult(("git", "pull"), None, refused=f"pas de récupération : {odd}")
-        fetched = await self._git(goal, *_REMOTE_GIT, "fetch", "--no-tags", "--no-recurse-submodules", url, branch,
+        fetched = await self._git(project, *_REMOTE_GIT, "fetch", "--no-tags", "--no-recurse-submodules", url, branch,
                                   network=True, timeout_s=REMOTE_TIMEOUT_S, extra_env=env, secrets=secrets)
         if not fetched.ok:
             return replace(fetched, argv=("git", "fetch", url, branch))
         # les organes sont à la racine : le premier niveau suffit, et sa liste reste courte (une liste récursive
         # était coupée au milieu sur un gros dépôt)
-        listed = await self._git(goal, "ls-tree", "--name-only", "FETCH_HEAD", clip=False)
+        listed = await self._git(project, "ls-tree", "--name-only", "FETCH_HEAD", clip=False)
         organs = [n for n in listed.stdout.splitlines() if n in ORGANS]
         if not listed.ok or organs:
             return RunResult(("git", "pull", url, branch), None,
                              refused=f"le dépôt distant contient « {organs[0] if organs else '?'} », qui appartient à "
                                      "l'atelier lui-même : rien n'est récupéré")
-        state = await self._git(goal, "status", "--porcelain")
+        state = await self._git(project, "status", "--porcelain")
         if not state.ok:
             return RunResult(("git", "pull", url, branch), None, refused="l'état de l'atelier est illisible")
-        if await self.count(goal) <= 1 and not state.stdout.strip():
+        if await self.count(project) <= 1 and not state.stdout.strip():
             # un atelier vierge (l'amorce seule) prend l'histoire du dépôt distant, sans écraser aucun fichier
-            r = await self._git(goal, "reset", "-q", "--keep", "FETCH_HEAD")
+            r = await self._git(project, "reset", "-q", "--keep", "FETCH_HEAD")
         else:
-            r = await self._git(goal, "merge", "--ff-only", "FETCH_HEAD")
-        self._exclude(self.folder(goal))
+            r = await self._git(project, "merge", "--ff-only", "FETCH_HEAD")
+        self._exclude(self.folder(project))
         return replace(r, argv=("git", "pull", url, branch))
 
 

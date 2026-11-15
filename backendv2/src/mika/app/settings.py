@@ -295,10 +295,14 @@ class Settings:
     MAIL_SECRETS = ("password", "smtp_password")
 
     def email(self) -> MailConfig:
-        """Les comptes de courrier (mots de passe déchiffrés) ; une ancienne
-        configuration à un seul compte devient le compte « principal »."""
+        """Les comptes de courrier (mots de passe déchiffrés).
+
+        Une configuration gardée d'avant plusieurs boîtes (ADR 0027 : un seul compte, ses secrets scellés au premier
+        niveau) se lit encore comme le compte « principal » : ses secrets ouverts ici, le reste par ``from_stored``.
+        Cette branche part avec lui, quand une révision de données de la base ``mind`` aura réécrit les réglages
+        gardés à la forme du jour (audit du 2026-11-05)."""
         raw = dict(self._get(EMAIL_KEY) or {})
-        if "accounts" not in raw:  # l'ancienne forme : un compte, ses secrets au premier niveau
+        if "accounts" not in raw:  # la forme d'avant plusieurs boîtes : un compte, ses secrets au premier niveau
             raw = {**raw, **{k: self.box.open(raw.pop(f"{k}_sealed", "")) for k in self.MAIL_SECRETS}}
             data = from_stored(raw)
         else:
@@ -630,12 +634,16 @@ class Settings:
 
     def teams_keys(self) -> dict[str, dict[str, Any]]:
         """Compte → ``{digest, hint, created_at, by}`` de la clé de son extension : jamais la clé elle-même (un compte
-        absent : aucune). La clé unique d'avant l'ADR 0186 (``{digest, …}`` au premier niveau) est celle du compte
-        ``principal``."""
+        absent : aucune).
+
+        La clé unique d'avant l'ADR 0186 (un seul Teams, jusqu'au 2026-11-04 : ``{digest, …}`` au premier niveau)
+        se lit encore comme celle du compte ``principal`` — la reprise que promet l'ADR 0186. Cette branche part
+        quand une révision de données de la base ``mind`` aura réécrit les réglages gardés à la forme du jour (audit
+        du 2026-11-05), avec la voix à plat de ``TeamsConfig._from_flat_voice``."""
         got = self._get(TEAMS_KEYS_KEY)
         if not isinstance(got, dict):
             return {}
-        if "digest" in got:  # la forme d'avant : une seule clé
+        if "digest" in got:  # la forme d'avant l'ADR 0186 : une seule clé
             return {DEFAULT_TEAMS_ACCOUNT: dict(got)} if got.get("digest") else {}
         return {str(k): dict(v) for k, v in got.items() if isinstance(v, dict) and v.get("digest")}
 

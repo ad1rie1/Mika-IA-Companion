@@ -27,8 +27,9 @@ from typing import get_args
 
 import pytest
 
-from mika.adapters import forge as forge_adapter
-from mika.adapters.forge import ForgeHost, checked_headers, read_manifest
+from mika.adapters.forge import ForgeHost, read_manifest
+from mika.adapters.forge import http as forge_http
+from mika.adapters.forge.http import checked_headers
 from mika.adapters.forge.manifest import coherence, signatures
 from mika.app.composition import policies
 from mika.contracts import forge as forge_c
@@ -46,24 +47,20 @@ from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.inspect import size_fr
 from mika.kernel.state import FrozenDict
 from mika.plugins.forge import (
-    INSTALL,
     SWITCHED,
     TICKED,
     App,
     ForgeState,
-    WriteArgs,
-    _install_resolved,
     concerns,
-    forge_write,
     guide,
-    install_draft,
-    schema_text,
     written_draft,
 )
-from mika.plugins.forge import (
+from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
+from mika.plugins.forge.install import INSTALL, _install_resolved, install_draft
+from mika.plugins.forge.tools import (
     TestArgs as ForgeTestArgs,
 )
-from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
+from mika.plugins.forge.tools import WriteArgs, forge_write, schema_text
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.runtime.tool_offer import offer
 from mika.runtime.tools import ToolContext
@@ -638,22 +635,22 @@ def test_a_redirect_is_followed_and_a_key_does_not_follow_it_elsewhere(monkeypat
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    monkeypatch.setattr(forge_adapter, "resolve_public", lambda host, p=443: [ipaddress.ip_address("127.0.0.1")])
+    monkeypatch.setattr(forge_http, "resolve_public", lambda host, p=443: [ipaddress.ip_address("127.0.0.1")])
     try:
-        got = forge_adapter.real_http_get(f"http://cours.exemple.fr:{port}/cours", headers={"Authorization": "Bearer k"})
+        got = forge_http.real_http_get(f"http://cours.exemple.fr:{port}/cours", headers={"Authorization": "Bearer k"})
         assert got == '{"ok": 1}' and seen[-1][2] == "Bearer k"
-        moved = forge_adapter.real_http("GET", f"http://cours.exemple.fr:{port}/ailleurs",
-                                        headers={"Authorization": "Bearer k"})
+        moved = forge_http.real_http("GET", f"http://cours.exemple.fr:{port}/ailleurs",
+                                     headers={"Authorization": "Bearer k"})
         assert moved["status"] == 200 and moved["url"] == f"http://autre.exemple.fr:{port}/cours"
         assert seen[-1][1].startswith("autre.exemple.fr") and seen[-1][2] == ""  # la clé n'a pas suivi
-        posted = forge_adapter.real_http("POST", f"http://cours.exemple.fr:{port}/cours", body=b'{"q": 1}',
-                                         headers={"Content-Type": "application/json"})
+        posted = forge_http.real_http("POST", f"http://cours.exemple.fr:{port}/cours", body=b'{"q": 1}',
+                                      headers={"Content-Type": "application/json"})
         assert posted["status"] == 200 and seen[-1][0] == "POST" and seen[-1][3] == '{"q": 1}'
         assert posted["headers"]["content-type"].startswith("application/json")
-        missing = forge_adapter.real_http("GET", f"http://cours.exemple.fr:{port}/absent")
+        missing = forge_http.real_http("GET", f"http://cours.exemple.fr:{port}/absent")
         assert missing["status"] == 404 and missing["body"] == b"introuvable"
         with pytest.raises(RuntimeError, match="HTTP 404"):
-            forge_adapter.real_http_get(f"http://cours.exemple.fr:{port}/absent")
+            forge_http.real_http_get(f"http://cours.exemple.fr:{port}/absent")
     finally:
         server.shutdown()
 
@@ -693,7 +690,7 @@ def test_what_an_app_emits_reaches_the_apps_that_listen(tmp_path):
 
 
 def test_the_apps_section_carries_the_level_of_what_it_concerns():
-    from mika.plugins.forge import _section
+    from mika.plugins.forge.prompt import _section
 
     got = _section(ForgeState(), None, {"apps": {"lines": {"Suivi d'un cours": "CAC : 7300"}, "level": 2}})
     assert got.level == 2 and "CAC : 7300" in got.content
@@ -760,7 +757,7 @@ def test_an_app_written_by_a_run_that_failed_is_proven_by_the_next_runs_test(tmp
     l'avait écrite comptait. Une version de son projet qu'aucun essai n'a prouvée se prouve à l'essai suivant — une
     fois crédité par le compte rendu de son exécution ; une exécution qui n'aboutit pas ne consomme rien. Une app
     relancée après une panne se prouve dans l'épisode qui l'a relancée."""
-    from mika.plugins.forge import CommandArgs, forge_command, forge_test
+    from mika.plugins.forge.tools import CommandArgs, forge_command, forge_test
 
     kernel, clock, forge = _project_kernel(tmp_path)
 
@@ -874,7 +871,7 @@ def test_a_view_that_breaks_in_the_console_reaches_the_run_of_its_project(tmp_pa
 def test_an_address_shown_in_an_error_or_the_journal_never_carries_its_query():
     """Une app validée met souvent sa clé dans l'adresse (``?apikey=…``) : une erreur ou son journal l'auraient
     gardée pour toujours. Ils montrent le schéma, l'hôte et le chemin."""
-    from mika.adapters.forge import shown_url
+    from mika.adapters.forge.http import shown_url
 
     assert shown_url("https://api.exemple.fr/v1/cours?apikey=SECRET&d=EUR") == "https://api.exemple.fr/v1/cours?…"
     assert shown_url("https://moi:motdepasse@exemple.fr/flux#x") == "https://exemple.fr/flux?…"

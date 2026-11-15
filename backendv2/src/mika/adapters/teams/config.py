@@ -2,7 +2,8 @@
 chacun à quelqu'un (toi, elle, une personne qui a un compte), avec sa façon d'y écrire. La clé de l'extension d'un
 compte se génère à part (seule son empreinte est gardée, dans les réglages : ``Settings.teams_keys``).
 
-Une configuration d'avant (un seul Teams : sa voix au premier niveau) devient le compte ``principal``, à toi ; sans
+Une configuration gardée d'avant l'ADR 0186 (un seul Teams : sa voix au premier niveau) se lit encore comme le compte
+``principal``, à toi (``TeamsConfig._from_flat_voice``), tant qu'une révision n'a pas réécrit les réglages gardés ; sans
 aucun compte, ``principal`` est là aussi (une installation neuve a son Teams, comme avant)."""
 
 from __future__ import annotations
@@ -20,7 +21,8 @@ from mika.vocab.access import PERSON, SELF, Share
 HER = "{elle}"
 #: la signature proposée (elle dit qu'une IA a écrit)
 SIGNATURE = f"— rédigé avec {HER}"
-#: ce qu'une configuration d'avant gardait au premier niveau : la voix de son seul compte
+#: ce qu'une configuration d'avant l'ADR 0186 gardait au premier niveau : la voix de son seul compte (lue par
+#: ``TeamsConfig._from_flat_voice``, elle part avec lui)
 _LEGACY_VOICE = ("display_name", "tone", "instructions", "sign", "signature")
 
 
@@ -35,16 +37,18 @@ class TeamsAccount(BaseModel):
         label="Actif", group="Le compte", advanced=False, order=12,
         help="Décoché : son extension est refusée — rien n'arrive, rien ne part, elle n'y prépare rien ; ses "
              "conversations, ses réglages et sa clé restent.")] = True
+    # ADR 0186 : un Teams par personne, un compte sert à son propriétaire
     owner: Annotated[str, Knob(
         label="À qui", group="Le compte", advanced=False, order=4,
         help="À qui est ce Teams : toi (ses propriétaires), elle, ou une personne qui a un compte. Elle s'en sert "
              "avec son propriétaire — toi en privé et quand elle travaille, elle-même quand elle travaille, cette "
-             "personne en privé (ADR 0186). Ce qu'elle y prépare part de ce compte, sous le nom de sa personne.")] = ""
+             "personne en privé. Ce qu'elle y prépare part de ce compte, sous le nom de sa personne.")] = ""
+    # ADR 0188 : partager ce qui est à soi ; ADR 0210 : les partages se voient tous, un opérateur peut en retirer
     shares: Annotated[dict[str, Share], Knob(
         label="Partagé avec", group="Le compte", readonly=True, order=5,
-        help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
+        help="Réglé par son propriétaire dans Paramètres › Partages : pour chaque personne "
              "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne le voit sous son propre "
-             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages.")] = \
         Field(default_factory=dict)
     display_name: Annotated[str, Knob(
         label="Son nom", group="Écrire", advanced=False, order=20,
@@ -101,9 +105,16 @@ class TeamsConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _reprise(cls, data: Any) -> Any:
-        """Une configuration d'avant (sa voix au premier niveau) devient le compte ``principal`` ; sans compte,
-        ``principal`` est là."""
+    def _from_flat_voice(cls, data: Any) -> Any:
+        """La reprise que promet l'ADR 0186, et le compte par défaut.
+
+        La forme qu'il lit : celle d'avant l'ADR 0186 (un seul Teams, jusqu'au 2026-11-04), sa voix au premier
+        niveau (``_LEGACY_VOICE``) ; elle devient le compte ``principal``, à toi. Sans compte, ``principal`` est là
+        (une installation neuve a son Teams) : cette part-là reste.
+
+        La traduction de la voix part quand une révision de données de la base ``mind`` aura réécrit les réglages
+        gardés à la forme du jour (audit du 2026-11-05 : pas avant d'avoir vu ce que gardent les réglages en
+        service), avec la clé unique que lit ``Settings.teams_keys``."""
         if not isinstance(data, Mapping):
             return data
         data = dict(data)

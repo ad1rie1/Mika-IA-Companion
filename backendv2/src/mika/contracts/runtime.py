@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -305,6 +306,26 @@ def call_request(call: Mapping[str, Any], pinned: Iterable[str], *, request: str
         payload[DECIDER] = target
     payload["_apercu"] = call_digest(payload, pinned)
     return payload
+
+
+def proposal_args(args_json: str) -> dict[str, Any]:
+    """Les arguments d'une proposition (``EffectProposed.args_json``), lus une fois pour tous ses lecteurs : ``{}``
+    si le texte est vide, illisible ou n'est pas un objet JSON. Un réducteur qui les lit doit être total (ADR 0001) :
+    une charge mal formée ne le fait jamais lever, elle se lit comme une proposition sans arguments."""
+    try:
+        data = json.loads(args_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def arg_int(args: Mapping[str, Any], key: str) -> int:
+    """Un argument entier (un brouillon, une échéance en µs) : 0 si la clé manque ou ne se lit pas en entier (``"abc"``,
+    une liste, ``Infinity``). Totale pour la même raison que :func:`proposal_args`."""
+    try:
+        return int(args.get(key) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def still_pending(proposal: int) -> Guard:

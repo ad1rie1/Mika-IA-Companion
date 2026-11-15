@@ -7,7 +7,9 @@ seule suite, strictement croissante, stable aux reconstructions.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import cache
+from typing import Any
 
 from sqlalchemy import BigInteger, Boolean, Column, Double, Index, Table
 
@@ -77,6 +79,24 @@ def thread_table(sfx: str = "") -> Table:
         Index(f"{name}_room", "room", "id"),
         Index(f"{name}_strand", "person", "strand", "id"),
     )
+
+
+def thread_where(t: Table, *, handles: Sequence[str] = (), room: str | None = None,
+                 strand: str | None = None) -> tuple[Any, ...]:
+    """Les clauses du fil d'une conversation dans ``t`` (``thread_table()``), une seule règle pour qui le relit :
+    son historique (``transcript``) et ses redites (``expression``). Un salon : tout le salon, chacun sous son nom
+    (il prime). Un fil de travail (ADR 0164) : ses seuls messages, ceux de ``handles`` sur ce fil (un message d'un
+    fil de travail n'a jamais de salon). Sinon, le fil privé de ces adresses : ni ce qui s'est dit dans un salon
+    (hors de son contexte), ni ses fils de travail. Les adresses du fil privé d'une personne se prennent à
+    ``identity.thread_handles`` (le contrat d'identity lit celui-ci : la règle ne peut pas vivre ici)."""
+    if room:
+        return (t.c.room == room,)
+    if not handles:
+        raise ValueError("thread_where : ni salon ni adresse")
+    person = t.c.person == handles[0] if len(handles) == 1 else t.c.person.in_(list(handles))
+    if strand:
+        return (person, t.c.strand == strand)
+    return (person, t.c.room.is_(None), t.c.strand.is_(None))
 
 
 @cache

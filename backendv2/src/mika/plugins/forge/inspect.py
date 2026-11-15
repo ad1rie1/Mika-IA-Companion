@@ -26,7 +26,7 @@ import json
 import re
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -71,10 +71,7 @@ from mika.plugins.forge import (
     WRITTEN,
     App,
     ForgeState,
-    NoArgs,
     _next_tick,
-    app_lines,
-    calls_today,
     concerns,
     has_secrets,
     outcomes,
@@ -84,6 +81,9 @@ from mika.plugins.forge import (
     trusted,
     written_draft,
 )
+from mika.plugins.forge.access import app_lines
+from mika.plugins.forge.signals import calls_today
+from mika.plugins.forge.tools import NoArgs
 from mika.plugins.forge.views import (
     ACTION_TIMEOUT_S,
     VIEW_MAX_BYTES,
@@ -111,9 +111,9 @@ from mika.vocab.access import (
     KEEPS,
     NO,
     OWNER,
-    POLICIES,
     POLICY_WORDS,
-    TableArgs,
+    Keep,
+    ToolColumnsArgs,
     ToolRule,
     canal_words,
     moved,
@@ -248,7 +248,7 @@ def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: F
             ("dernier tour", _last_tick(name, ctx)),
             ("échecs d'affilée", app.failures),
             ("événements en attente", len(app.inbox)),
-            ("sa file de signaux (ADR 0105)", _queue_words(app, frame.now)),
+            ("sa file de signaux", _queue_words(app, frame.now)),  # ADR 0105
             ("dernier signal", ctx.when(app.signaled_at) if app.signaled_at else "jamais"),
         ]
     if info is not None:
@@ -394,9 +394,10 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
+# ses outils d'app, et de quoi lire ses pages (ADR 0104)
 @FORGE.inspect("outils_apps", title="Les outils de ses apps", hidden=True,
                description="Ce que ses apps lui donnent à faire : les outils qu'une app déclare, et de quoi lire ses "
-                           "pages si elle en a (ADR 0104). La console les montre sous les services branchés (Outils › "
+                           "pages si elle en a. La console les montre sous les services branchés (Outils › "
                            "Venus d'ailleurs) ; ils se règlent sur la fiche de l'app (sa promotion).")
 def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("forge")
@@ -1041,8 +1042,6 @@ APP_FLOORS = ("un outil, jamais dans un salon (des témoins), ni une action avec
 #: la ligne qu'on ajoute : toi, par tous les canaux, toujours, fermée
 NEW_APP_ROW = ToolRule(who=(OWNER,))
 MAX_APP_ROWS = 40
-_Policy = Literal["seule", "carte", "toi", "non"]
-_Keep = Literal["public", "perso", "prive", "rien"]
 
 
 def _app_tools(port: Any, name: str) -> list[tuple[str, bool]]:
@@ -1092,22 +1091,15 @@ def _tab_access(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]
     return blocks
 
 
-class AppAccessArgs(TableArgs):
-    """Le tableau « Accès » d'une app sans projet, d'un seul envoi (``vocab.access.TableArgs``) et ses colonnes :
-    ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde ; la ligne par défaut à part."""
+class AppAccessArgs(ToolColumnsArgs):
+    """Le tableau « Accès » d'une app sans projet, d'un seul envoi (``vocab.access.ToolColumnsArgs`` : ses lignes, ce
+    qu'elle fait d'un outil qui lit et d'un outil qui agit) et ce qu'elle en garde (``vocab.access.KEEPS``) ; la ligne
+    par défaut à part."""
 
-    lecture: Annotated[dict[str, _Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
+    garde: Annotated[dict[str, Keep], Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = \
         Field(default_factory=dict)
-    action: Annotated[dict[str, _Policy], Knob(label="Un outil qui agit", choices=POLICIES, advanced=False)] = \
-        Field(default_factory=dict)
-    garde: Annotated[dict[str, _Keep], Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = \
-        Field(default_factory=dict)
-    defaut_lecture: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
-                                            advanced=False)] = "non"
-    defaut_action: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
-                                           advanced=False)] = "non"
-    defaut_garde: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
-                                        advanced=False)] = "rien"
+    defaut_garde: Annotated[Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
+                                       advanced=False)] = "rien"
 
 
 def app_access_rows(args: AppAccessArgs) -> list[ToolRule]:
@@ -1164,9 +1156,10 @@ def _app_grants(s: ForgeState, frame: Frame, ctx: Any, audience: Any, kind: str)
     return out
 
 
+# une app sans projet a ses lignes d'accès, nées du minimum vital (``APP_VITAL``, ADR 0134)
 @FORGE.rights("apps", title="Apps sans projet", order=35, grants=_app_grants,
               description="Une app suit les lignes d'accès de son projet ; sans projet, elle a les siennes, nées du "
-                          "minimum vital (ADR 0134).")
+                          "minimum vital.")
 def _app_tables(s: ForgeState, frame: Frame, ctx: Any) -> list[RuleTable]:
     out = []
     for name, app in sorted(s.apps.items()):

@@ -1,17 +1,27 @@
 """Elle s'entend se répéter : une même ouverture, une même formule, un bonjour redit à quelqu'un qu'elle vient de
 saluer, ce que son dernier message disait déjà d'elle. La consigne de style ne suffit pas — un vrai modèle a ouvert quatre réponses sur cinq par « Adrien… Je
-t'entends dire que… » (sonde du 2026-10-02) : elle se relit, et le prompt le lui dit."""
+t'entends dire que… » (sonde du 2026-10-02) : elle se relit, et le prompt le lui dit. Elle se relit sur le fil que
+relit son historique : en privé, toutes les adresses confirmées de la personne quand sa fiche est ouverte."""
 
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace as NS
 
+from sqlalchemy import insert
+
+from mika.contracts import identity as identity_c
+from mika.contracts import transcript as transcript_c
 from mika.faculties.expression import pending_question, repeats, said_of_herself
+from mika.faculties.expression.habits import _own_openings, _own_words
+from mika.faculties.transcript import Thread
 from mika.kernel.clock import HOUR, MINUTE
 from mika.ports.llm import LLMResponse
+from mika.ports.paging import fold_text
 from mika.sim.clock import run_virtual
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, boot, build, connect, said
+from tests.fixtures.sqldb import SqlDB
 
 M = MINUTE
 
@@ -261,3 +271,29 @@ def test_what_she_said_of_herself_earlier_in_the_conversation_is_quoted_too():
     got = said_of_herself(said_, 3 * M)
     assert got == "Moi j'ai relu un chapitre de mon livre. » ; « Je traînais dans ma chambre sans but."
     assert said_of_herself(said_, 2 * HOUR) is None
+
+
+def test_her_repetitions_are_counted_on_every_address_her_history_rereads():
+    """Adrien a deux adresses dont la liaison est confirmée (son compte et une adresse qu'un opérateur lui a
+    reliée) : son historique relit les deux, ses redites aussi. Ce qu'elle lui a dit sur la première (son entrée en
+    matière, sa formule) se voit quand elle lui répond sur la seconde. Contre-exemple : quand l'audience n'ouvre pas
+    son fil privé, chaque adresse ne relit que le sien."""
+    db = SqlDB()
+    Thread().create(db, "")
+    rows = [(1, 0, "user", "user_1", "salut"), (2, M, "assistant", "user_1", "Yooo, Adrien ! Te voilà ~"),
+            (3, 5 * HOUR, "user", "ext_5", "re")]  # après un silence, sur son autre adresse
+    db.execute(insert(transcript_c.thread_table()), [
+        {"id": i, "at": at, "role": role, "person": who, "text": text, "folded": fold_text(text)}
+        for i, at, role, who, text in rows])
+    facts = {identity_c.THREAD("ext_5"): ("ext_5", "user_1")}
+
+    def frame(private_ok: bool) -> NS:
+        return NS(episode=NS(target="ext_5", attrs={}), audience=NS(private_ok=private_ok),
+                  get=lambda ref: facts[ref], env=NS(params_of=lambda *a: None), root=None)
+
+    opened = asyncio.run(_own_openings(None, frame(True), {"store": db}))
+    assert opened.said == ("Yooo, Adrien ! Te voilà ~",) and opened.opens
+    assert asyncio.run(_own_words(None, frame(True), {"store": db})) == ((M, "Yooo, Adrien ! Te voilà ~"),)
+    closed = asyncio.run(_own_openings(None, frame(False), {"store": db}))
+    assert closed.said == () and closed.opens
+    assert asyncio.run(_own_words(None, frame(False), {"store": db})) == ()

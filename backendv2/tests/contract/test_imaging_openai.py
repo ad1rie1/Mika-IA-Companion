@@ -23,9 +23,10 @@ import pytest
 
 from mika.adapters.imaging import openai_images as oi
 from mika.adapters.imaging.errors import ImagingError
-from mika.adapters.imaging.models import ListingFailed, list_image_models
+from mika.adapters.imaging.models import list_image_models
 from mika.adapters.imaging.openai_images import OpenAIImagesBackend
 from mika.adapters.imaging.pricing import price_usd
+from mika.adapters.listing import ListingFailed
 from mika.ports.imaging import OK, REFUSED, ImageRequest, Picture
 from tests.fixtures.fake_images import solid_png
 

@@ -1,18 +1,22 @@
-"""La machinerie des portes à clé (ADR 0213) : empreintes, fenêtres glissantes, nettoyage, une table de statuts,
-et la session du transport web, lue une seule fois."""
+"""La machinerie des portes à clé (ADR 0213) : empreintes, secrets comparés en octets, fenêtres glissantes, nettoyage,
+une table de statuts, les deux refus qui précèdent la clé, la lecture d'un corps, et la session du transport web, lue
+une seule fois."""
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
 from starlette.requests import Request
 
 from mika.adapters.web import app as web_app
-from mika.adapters.web import protocol, session
-from mika.adapters.web.app import GATE_STATUS, gate_reply
+from mika.adapters.web import auth_routes, protocol, session
+from mika.adapters.web.body import BODY_MAX_BYTES, PayloadTooLarge, json_fields, json_object, parsed
+from mika.adapters.web.doors import GATE_STATUS, door_refusal, gate_reply
 from mika.adapters.web.gate import (
     KEY_MAX,
     NOTHING,
@@ -24,9 +28,12 @@ from mika.adapters.web.gate import (
     one_line,
     plausible_ms,
     presented,
+    same_secret,
     token_digest,
 )
 from mika.ports import gate, phone, teams, wakeup
+
+SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 
 
 class Tick:
@@ -43,6 +50,14 @@ def test_an_empty_wanted_digest_never_opens():
     """Rien d'attendu ne s'ouvre, pas même une clé vide, dont l'empreinte est justement ``NOTHING``."""
     assert not matches(NOTHING, "") and not matches(token_digest("x"), "")
     assert matches(token_digest("x"), token_digest("x")) and not matches(token_digest("y"), token_digest("x"))
+
+
+def test_a_secret_is_compared_in_bytes_and_never_raises():
+    """Sur deux ``str``, ``compare_digest`` lève dès qu'un caractère n'est pas ASCII : un en-tête lu en latin-1, ou le
+    demi-caractère d'un JSON, faisaient tomber la requête en 500 au lieu d'un refus (reste du lot L22)."""
+    assert same_secret("abc", "abc") and not same_secret("abd", "abc") and not same_secret("", "abc")
+    assert same_secret("é", "é") and not same_secret("é", "a") and not same_secret("a", "é")
+    assert same_secret("\ud800", "\ud800") and not same_secret("\ud800", "abc")  # un demi-caractère seul
 
 
 def test_a_presented_key_has_the_shape_of_the_keys_of_its_door():
@@ -122,7 +137,8 @@ def test_keep_forgets_the_keys_that_are_gone():
 def test_a_window_has_one_name():
     """``RateLimiter`` et ``LoginThrottle`` n'étaient que deux autres noms de ``SlidingWindow`` (lot L22) : retirés,
     leurs lecteurs l'appellent par le sien (audit du 2026-11-05, LR2)."""
-    assert not hasattr(protocol, "RateLimiter") and not hasattr(web_app, "LoginThrottle")
+    assert not hasattr(protocol, "RateLimiter")
+    assert not any(hasattr(module, "LoginThrottle") for module in (web_app, auth_routes))
 
 
 def test_what_arrives_from_outside_is_cleaned():
@@ -199,7 +215,74 @@ def test_the_csrf_header_must_be_the_cookie_and_there_must_be_one():
     assert not session.csrf_header_ok(_request())
 
 
-def test_the_web_app_still_lends_the_names_others_read():
-    """L'API par personne, le monde et la console lisent encore ces noms depuis ``adapters/web/app.py``."""
-    assert web_app.SESSION_COOKIE is session.SESSION_COOKIE and web_app.CSRF_COOKIE is session.CSRF_COOKIE
-    assert web_app.bearer is session.bearer and web_app.native_token is session.native_token
+def test_a_csrf_header_that_is_not_ascii_is_refused_without_raising():
+    """Starlette lit un en-tête en latin-1 : un client y pose l'octet qu'il veut."""
+    request = Request({"type": "http", "headers": [(b"x-csrftoken", b"\xe9"), (b"cookie", b"csrftoken=abc")]})
+    assert request.headers["x-csrftoken"] == "é" and not session.csrf_header_ok(request)
+    both = Request({"type": "http", "headers": [(b"x-csrftoken", b"\xe9"), (b"cookie", "csrftoken=é".encode())]})
+    assert not session.csrf_header_ok(both)
+
+
+def test_a_door_refuses_a_foreign_origin_then_an_address_that_failed_too_often():
+    failures = SlidingWindow(1, 60.0, monotonic=Tick())
+    headers = {"Cache-Control": "no-store"}
+
+    def ask(**h: str):
+        return door_refusal(_request(**h), failures, headers, origin_ok=lambda origin: origin == "http://ici")
+
+    assert ask() is None and ask(origin="http://ici") is None  # sans ``Origin``, aucune à juger
+    foreign = ask(origin="http://ailleurs")
+    assert foreign.status_code == 403 and json.loads(foreign.body) == {"error": "Origine refusée."}
+    assert foreign.headers["cache-control"] == "no-store"
+    failures.fail("ip:?")  # une requête sans adresse connue
+    blocked = ask()
+    assert blocked.status_code == 429 and json.loads(blocked.body) == {"error": "Trop de tentatives."}
+    assert blocked.headers["retry-after"] == "60" and blocked.headers["cache-control"] == "no-store"
+    assert "Retry-After" not in headers and ask(origin="http://ailleurs").status_code == 403  # l'origine d'abord
+
+
+def _posted(body: bytes) -> Request:
+    sent = iter([{"type": "http.request", "body": body, "more_body": False}])
+
+    async def receive():
+        return next(sent)
+
+    return Request({"type": "http", "method": "POST", "headers": []}, receive)
+
+
+async def test_a_door_reads_one_json_object_or_says_why_not():
+    headers = {"Cache-Control": "no-store"}
+    assert await json_object(_posted(b'{"a": 1}'), 100, headers) == {"a": 1}
+    assert await json_object(_posted(b""), 100, headers) == {}  # un corps vide vaut un objet vide
+    for bad in (b"[1, 2]", b"pas du json", b"null", b"\xff"):
+        refused = await json_object(_posted(bad), 100, headers)
+        assert refused.status_code == 400 and json.loads(refused.body) == {"error": "Un objet JSON."}, bad
+        assert refused.headers["cache-control"] == "no-store"
+    big = await json_object(_posted(b"{" + b" " * 200 + b"}"), 100, headers)  # sans Content-Length : compté
+    assert big.status_code == 413 and json.loads(big.body) == {"error": "Requête trop grande."}
+    assert big.headers["cache-control"] == "no-store"
+
+
+async def test_an_ordinary_route_reads_an_object_or_nothing():
+    """Trop grand, ``PayloadTooLarge`` remonte au gestionnaire ``too_large`` (413) ; le reste qui n'est pas un objet
+    vaut ``{}``. Un réveil lit son texte sans refus : ``parsed`` rend ``None``."""
+    assert await json_fields(_posted(b'{"a": 1}')) == {"a": 1}
+    assert await json_fields(_posted(b"[1]")) == {} and await json_fields(_posted(b"{")) == {}
+    assert await json_fields(_posted(b"")) == {}
+    with pytest.raises(PayloadTooLarge):
+        await json_fields(_posted(b"x" * (BODY_MAX_BYTES + 1)))
+    assert parsed(b"un texte") is None and parsed(b"[1]") == [1]
+
+
+def test_the_session_names_are_read_from_session_py_only():
+    """Le monde lisait ``SESSION_COOKIE`` et ``bearer`` par ``adapters/web/app.py`` : il les prend à leur source, et
+    plus rien ne passe par ce détour (audit du 2026-11-05, K9-05)."""
+    importers = []
+    for path in sorted(SRC.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and node.module == "mika.adapters.web.app":
+                taken = {a.name for a in node.names} & {"SESSION_COOKIE", "CSRF_COOKIE", "bearer", "native_token",
+                                                        "account_of", "csrf_header_ok"}
+                if taken:
+                    importers.append((path.relative_to(SRC).as_posix(), sorted(taken)))
+    assert importers == []

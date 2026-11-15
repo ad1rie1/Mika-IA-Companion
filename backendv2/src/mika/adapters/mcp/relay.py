@@ -17,7 +17,6 @@ ses appels encore en attente par une erreur.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import itertools
 import secrets
 from collections.abc import Callable, Mapping, Sequence
@@ -25,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer, loopback
+from mika.adapters.web.gate import same_secret
 from mika.vocab.phrasebook import phrase
 
 PREFIX = "/mcp/relais"
@@ -145,6 +145,6 @@ class Relay:
         session = self._sessions.get(bits[0])
         if session is None or session.closed:
             return 404
-        if not hmac.compare_digest(bearer(scope), session.token):
+        if not same_secret(bearer(scope), session.token):
             return 401
         return session.parts[bits[1]]

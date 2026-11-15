@@ -27,6 +27,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     ActionSlot,
     Badge,
     Block,
@@ -79,6 +80,9 @@ SECTION = "teams"
 PAGE = 25
 #: le tableau de canal d'un compte (« teams:<clé> », ADR 0134) : pour qui elle prépare, comment ça part
 CANALS_PAGE = "canaux"
+#: le libellé de la ligne du bloc « Comment ça part » de l'onglet Réponses (et la clé de son aide) ; l'onglet
+#: dessiné lit ce bloc par son titre, pas ce libellé
+HOW_IT_GOES = "comment ses réponses partent"
 #: ses paramètres (« Actif », ses comptes) : une page de réglages, dans Teams, en haut à droite (ADR 0206)
 SETTINGS = "teams"
 NO_PORT = "Teams n'est pas branché ici."
@@ -261,13 +265,19 @@ def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
                    href=Ref.subject("reponse_teams", d.draft, title or d.draft),
                    tone="warn" if d.state == WAITING else "")
 
-    return [*navs, Note("Ce qu'elle prépare d'elle-même et comment ses réponses partent, conversation par "
-                        "conversation : Relations & échanges › Envoyer à ta place.", tone="info"),
+    # comment ses réponses partent : le tableau de canal du compte choisi (« teams:<clé> »), sinon celui de Teams
+    # (ADR 0134 : « Envoyer à ta place » est fondu dans les canaux) ; l'onglet dessiné le met en pied (ADR 0218)
+    canal = Ref.settings(CANALS_PAGE, "le tableau de ce compte (Réglages › Canaux)", canal=f"teams:{account}") \
+        if account else Ref.settings(CANALS_PAGE, "le tableau de Teams (Réglages › Canaux)", canal="teams")
+    return [*navs,
             Table((Column("conversation", role="title"), Column("réponse", role="body"), Column("pourquoi", "fit"),
                    Column("proposée", "fit"), Column("état", "fit", role="badge"),
                    Column("retouche", "fit", role="badge")), tuple(row(d) for d in page),
                   title=f"Réponses ({len(drafts)})", pager=pager, empty="aucune réponse préparée", layout="cards",
-                  link_label="Examiner la réponse")]
+                  link_label="Examiner la réponse"),
+            Fields(((HOW_IT_GOES, canal),), title="Comment ça part",
+                   hints=((HOW_IT_GOES, "Ce qu'elle prépare d'elle-même et comment ses réponses partent se règlent "
+                                        "dans le tableau de chaque compte Teams."),))]
 
 
 def _key_state(ctx: InspectContext, account: str) -> Any:
@@ -354,7 +364,7 @@ def _owns_accounts(s: TeamsState, person: str, frame: Frame) -> bool:
 
 
 @TEAMS.inspect("teams", title="Teams", subject="person", order=65, shown=_owns_accounts,
-               description="Les comptes Teams qui sont à cette personne (ADR 0186) : elle s'en sert avec elle seulement "
+               description="Les comptes Teams qui sont à cette personne : elle s'en sert avec elle seulement "
                            "— en tête-à-tête, reconnue ; les tiens, avec toi et quand elle travaille.")
 def _person_accounts(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("teams")
@@ -473,7 +483,7 @@ def _reply(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         label = STATE_LABEL.get(seen.state, (seen.state, ""))[0]
         note = ""
         if seen.note_ref:
-            note = ctx.store.content([seen.note_ref]).get(seen.note_ref, "(oublié)")
+            note = ctx.store.content([seen.note_ref]).get(seen.note_ref, FORGOTTEN)
         blocks.append(Note(f"État : {label}." + (f" Note : « {note or seen.note} »." if note or seen.note else ""),
                            tone="info"))
     return blocks
@@ -609,10 +619,11 @@ class WriteArgs(BaseModel):
     reply_to: Annotated[str, Knob(label="En réponse à", widget="hidden")] = Field(default="", max_length=400)
 
 
+# c'est toi qui l'envoies (ADR 0189) ; ses réponses qui attendaient ton accord n'ont plus lieu (ADR 0199)
 @TEAMS.action("ecrire", title="Écrire dans cette conversation", args=WriteArgs, emits=[WRITTEN],
               description="Ton message part par l'extension de ce compte, sous ton nom et sans sa signature : c'est "
-                          "toi qui l'envoies (ADR 0189). Elle le verra parti, comme tes autres messages ; ses réponses "
-                          "qui attendaient ton accord ici ne partiront plus (ADR 0199).")
+                          "toi qui l'envoies. Elle le verra parti, comme tes autres messages ; ses réponses "
+                          "qui attendaient ton accord ici ne partiront plus.")
 def _write(s: TeamsState, frame: Frame, args: WriteArgs, ctx: Any) -> Done:
     """Ce que la personne écrit elle-même : un brouillon à son nom (``author``), aussitôt en file pour être envoyé —
     son geste est l'envoi, aucun accord n'est à demander. L'extension le relève, l'envoie et l'accuse ; ses messages

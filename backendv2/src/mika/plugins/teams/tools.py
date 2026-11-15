@@ -223,7 +223,7 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
         capability=c.SEND, owner=c.OWNER, args_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)), approval=mode == "validation",
         context="teams", about=about))
-    after = {"brouillon": f"Elle sera posée dans Teams : {who} l'enverra, la retouchera ou la laissera.",
+    after = {"brouillon": phrase("teams.task.fate.brouillon", who=who),
              "validation": f"Elle partira quand {who} l'aura acceptée.",
              "autonome": "Elle part dans Teams, sous son nom."}[mode]
     if shown.blocked:

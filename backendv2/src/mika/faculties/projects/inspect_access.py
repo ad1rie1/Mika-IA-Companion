@@ -25,6 +25,7 @@ from mika.vocab.access import (
     POLICIES,
     POLICY_WORDS,
     STEERS,
+    Policy,
     TableArgs,
     canal_words,
     moved,
@@ -76,7 +77,6 @@ def _tab_access(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
 # ── L'action ──────────────────────────────────────────────────────────────
 
 _Steer = Literal["lecture", "accord", "modification", "non"]
-_Policy = Literal["seule", "carte", "toi", "non"]
 
 
 class AccessArgs(TableArgs):
@@ -88,18 +88,18 @@ class AccessArgs(TableArgs):
     piloter: Annotated[dict[str, _Steer], Knob(label="Piloter projet", choices=STEERS, advanced=False)] = \
         Field(default_factory=dict)
     fichiers: Annotated[dict[str, bool], Knob(label="Ses fichiers", advanced=False)] = Field(default_factory=dict)
-    lecture: Annotated[dict[str, _Policy], Knob(label="Apps : un outil qui lit", choices=POLICIES,
-                                                advanced=False)] = Field(default_factory=dict)
-    action: Annotated[dict[str, _Policy], Knob(label="Apps : un outil qui agit", choices=POLICIES,
+    lecture: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui lit", choices=POLICIES,
                                                advanced=False)] = Field(default_factory=dict)
+    action: Annotated[dict[str, Policy], Knob(label="Apps : un outil qui agit", choices=POLICIES,
+                                              advanced=False)] = Field(default_factory=dict)
     defaut_voir: Annotated[bool, Knob(label="Par défaut, le voir", advanced=False)] = False
     defaut_piloter: Annotated[_Steer, Knob(label="Par défaut, piloter projet", choices=STEERS, advanced=False)] = \
         "non"
     defaut_fichiers: Annotated[bool, Knob(label="Par défaut, ses fichiers", advanced=False)] = False
-    defaut_lecture: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
-                                            advanced=False)] = "non"
-    defaut_action: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
+    defaut_lecture: Annotated[Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
                                            advanced=False)] = "non"
+    defaut_action: Annotated[Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
+                                          advanced=False)] = "non"
 
 
 def access_rows(args: AccessArgs) -> list[c.ProjectAccess]:

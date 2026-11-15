@@ -23,13 +23,16 @@ import ipaddress
 import os
 import shutil
 import socket
+import time
 from pathlib import Path
 
+import httpx
 import pytest
 
-from mika.adapters import cage
+from mika.adapters import addresses, cage
 from mika.adapters import forge as forge_adapter
 from mika.adapters.forge import ForgeBases, ForgeHost, lint
+from mika.adapters.forge import http as forge_http
 from mika.ports.forge import ForgeRefused
 from tests.fixtures import backend
 
@@ -454,13 +457,13 @@ def test_a_slow_huge_or_invalid_view_becomes_a_note_and_the_app_lives_on(tmp_pat
     ("100.64.0.1", False),  # l'espace partagé d'un opérateur (CGNAT) : pas Internet
     ("::1", False), ("fd00::1", False), ("fe80::1", False),
     ("::ffff:10.0.0.1", False),  # une adresse privée déguisée en IPv6
-    ("64:ff9b::a00:1", False),  # …derrière le préfixe NAT64
+    ("64:ff9b::a00:1", False), ("64:ff9b::7f00:1", False),  # …derrière le préfixe NAT64 (10.0.0.1, 127.0.0.1)
     ("64:ff9b::5db8:d822", True),  # une adresse publique derrière NAT64, elle, l'est
     ("2002:a00:1::", False),  # 6to4 vers 10.0.0.1
     ("224.0.0.1", False), ("0.0.0.0", False),
 ])
 def test_only_an_internet_address_is_public(address, public):
-    assert forge_adapter.is_global(ipaddress.ip_address(address)) is public
+    assert addresses.is_global(ipaddress.ip_address(address)) is public
 
 
 def test_the_machine_itself_and_her_own_port_are_refused_even_when_public(monkeypatch):
@@ -469,17 +472,17 @@ def test_the_machine_itself_and_her_own_port_are_refused_even_when_public(monkey
     écoute, même sous une adresse qui n'est pas la sienne (une box qui relaie ce port vers elle)."""
     ip = ipaddress.ip_address
     public = ip("93.184.216.34")
-    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+    monkeypatch.setattr(socket, "getaddrinfo",
                         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (str(public), 443))])
-    assert forge_adapter.resolve_public("moi.exemple.fr", local=set(), server_ports=set()) == [public]
+    assert addresses.resolve_public("moi.exemple.fr", local=set(), server_ports=set()) == [public]
     with pytest.raises(ValueError, match="cette machine"):
-        forge_adapter.resolve_public("moi.exemple.fr", local={public, ip("::1")}, server_ports=set())
+        addresses.resolve_public("moi.exemple.fr", local={public, ip("::1")}, server_ports=set())
     with pytest.raises(ValueError, match="port"):
-        forge_adapter.resolve_public("moi.exemple.fr", 8001, local=set(), server_ports={8001})
+        addresses.resolve_public("moi.exemple.fr", 8001, local=set(), server_ports={8001})
     # les adresses de la machine : relues au plus toutes les ``LOCAL_REFRESH_S`` secondes
     clock, reads = {"t": 0.0}, []
-    local = forge_adapter.LocalAddresses(lambda: reads.append(1) or [public], ttl_s=300.0,
-                                         monotonic=lambda: clock["t"])
+    local = addresses.LocalAddresses(lambda: reads.append(1) or [public], ttl_s=300.0,
+                                     monotonic=lambda: clock["t"])
     assert local.get() == local.get() == frozenset({public}) and len(reads) == 1
     clock["t"] = 299.0
     assert local.get() and len(reads) == 1
@@ -493,7 +496,63 @@ def test_the_machine_itself_and_her_own_port_are_refused_even_when_public(monkey
                "3: tun0    inet6 pas-une-adresse/64\n")
     assert cage.parse_addresses(listing) == [ip("127.0.0.1"), ip("::1"), ip("203.0.113.7"), ip("2001:db8::7"),
                                              ip("fe80::1")]
-    assert forge_adapter.SERVER_PORTS == set() or 8001 in forge_adapter.SERVER_PORTS  # posé par ``serve`` seul
+    assert addresses.SERVER_PORTS == set() or 8001 in addresses.SERVER_PORTS  # posé par ``serve`` seul
+
+
+def test_addresses_already_resolved_are_judged_by_the_same_rule_and_say_why(monkeypatch):
+    """Les flux résolvent eux-mêmes : ``refusal`` dit laquelle des trois refuse ce qu'ils ont obtenu, par la règle de
+    la Forge (sans l'adresse, un flux la redit) ; ``check_public`` lève alors une ``ValueError`` simple, aux mots de
+    la Forge ; ``resolve_public`` refuse le port de Mika avant même de résoudre."""
+    ip = ipaddress.ip_address
+    public = ip("93.184.216.34")
+    assert addresses.refusal([public], 443, local=set(), server_ports=set()) is None
+    addresses.check_public("journal.example", [public], 443, local=set(), server_ports=set())
+    for ips, port, mine, ports, reason, said in [
+        ([public], 8001, set(), {8001}, addresses.PORT, "le port 8001 est celui du serveur lui-même : refusé"),
+        ([public, ip("64:ff9b::7f00:1")], 443, set(), set(), addresses.PRIVATE,  # une seule parmi les réponses suffit
+         "« journal.example » est une adresse privée : refusée"),
+        ([], 443, set(), set(), addresses.PRIVATE, "« journal.example » est une adresse privée : refusée"),
+        ([public], 443, {public}, set(), addresses.MACHINE, "« journal.example » est cette machine : refusée"),
+    ]:
+        assert addresses.refusal(ips, port, local=mine, server_ports=ports) == reason
+        with pytest.raises(ValueError) as refused:
+            addresses.check_public("journal.example", ips, port, local=mine, server_ports=ports)
+        assert type(refused.value) is ValueError and str(refused.value) == said
+    asked = []
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: asked.append(a) or [])
+    with pytest.raises(ValueError, match="port 8001 est celui du serveur"):
+        addresses.resolve_public("moi.exemple.fr", 8001, local=set(), server_ports={8001})
+    assert asked == []  # le port refusé ne coûte pas de résolution
+
+
+def test_a_refused_request_is_logged_as_the_forge_always_said_it(tmp_path, monkeypatch):
+    """Une requête d'une app que la règle refuse s'inscrit dans ``call.failed`` — que l'essai montre et que le
+    journal de l'app garde (ADR 0161) — comme avant que la règle quitte la Forge : « → ValueError: … », quel que
+    soit le refus (une adresse privée, la machine, le port de Mika)."""
+    public = "93.184.216.34"
+    answer = {"ip": "10.0.0.5"}
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answer["ip"], 80))])
+    h = host(tmp_path)
+    ip = ipaddress.ip_address
+
+    def failed(url):
+        call = forge_adapter._Call()
+        with pytest.raises(ValueError):
+            h._http("essai", "get", url, call)
+        return call.failed
+
+    monkeypatch.setattr(addresses, "SERVER_PORTS", set())
+    monkeypatch.setattr(addresses, "LOCAL", addresses.LocalAddresses(lambda: [ip(public)]))
+    assert failed("http://prive.exemple.fr/prix?cle=secret") == [
+        "GET http://prive.exemple.fr/prix?… → ValueError: « prive.exemple.fr » est une adresse privée : refusée"]
+    answer["ip"] = public
+    assert failed("http://moi.exemple.fr/") == [
+        "GET http://moi.exemple.fr/ → ValueError: « moi.exemple.fr » est cette machine : refusée"]
+    monkeypatch.setattr(addresses, "SERVER_PORTS", {8001})
+    assert failed("http://ailleurs.exemple.fr:8001/") == [
+        "GET http://ailleurs.exemple.fr:8001/ → ValueError: le port 8001 est celui du serveur lui-même : refusé"]
+    h.shutdown()
 
 
 def test_the_cage_forbids_nested_user_namespaces_and_her_folder_is_hers_alone(tmp_path):
@@ -545,26 +604,26 @@ def test_http_get_resolves_once_and_connects_to_the_address_it_checked(monkeypat
             seen.update(url=url, headers=headers, extensions=extensions)
             return _Answer([b"ok"])
 
-    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo", getaddrinfo)
-    monkeypatch.setattr(forge_adapter.httpx, "Client", Client)
-    assert forge_adapter.real_http_get("https://api.exemple.fr/prix?j=1") == "ok"
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(httpx, "Client", Client)
+    assert forge_http.real_http_get("https://api.exemple.fr/prix?j=1") == "ok"
     assert resolved == ["api.exemple.fr"]  # une seule résolution
     assert seen["url"] == "https://93.184.216.34:443/prix?j=1"
     assert seen["headers"]["Host"] == "api.exemple.fr" and seen["extensions"] == {"sni_hostname": "api.exemple.fr"}
     assert seen["client"]["follow_redirects"] is False and seen["client"]["trust_env"] is False
-    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+    monkeypatch.setattr(socket, "getaddrinfo",
                         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
                                          (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))])
     with pytest.raises(ValueError, match="privée"):  # une seule adresse privée parmi les réponses suffit
-        forge_adapter.real_http_get("https://melange.exemple.fr/")
+        forge_http.real_http_get("https://melange.exemple.fr/")
 
 
 def test_http_get_stops_at_the_call_deadline_not_per_read(monkeypatch):
     """Une réponse qui goutte (un octet de temps en temps, sans jamais dépasser le délai d'une lecture) s'arrête au
     délai de l'appel."""
     clock = iter(range(0, 10_000))
-    monkeypatch.setattr(forge_adapter.time, "monotonic", lambda: float(next(clock)))
-    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+    monkeypatch.setattr(time, "monotonic", lambda: float(next(clock)))
+    monkeypatch.setattr(socket, "getaddrinfo",
                         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
 
     class Client:
@@ -580,6 +639,6 @@ def test_http_get_stops_at_the_call_deadline_not_per_read(monkeypatch):
         def stream(self, method, url, headers=None, extensions=None):
             return _Answer([b"x"] * 1000)
 
-    monkeypatch.setattr(forge_adapter.httpx, "Client", Client)
+    monkeypatch.setattr(httpx, "Client", Client)
     with pytest.raises(RuntimeError, match="délai"):
-        forge_adapter.real_http_get("https://lent.exemple.fr/", deadline=20.0)
+        forge_http.real_http_get("https://lent.exemple.fr/", deadline=20.0)

@@ -27,9 +27,9 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Le stockage | 0004, 0101, 0212 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226 |
-| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160 |
+| Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161 |
-| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214 |
+| Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215 |
@@ -211,6 +211,8 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 - Seul l'ordonnanceur appelle `next_due` ; la console lit l'échéance qu'il a retenue (`Scheduler.due`).
 
 *Pourquoi :* chaque passe recalculait les 55 échéances, et huit processus au quantum de 60 s en imposaient une par minute : sur S05, 35 910 passes et 35,7 s sur 45,5, et la voie rapide passée de 48 à ~85 s du 4 au 19 octobre sans commit coupable (audit du 2026-11-05 : LT, K3-01, K3-02).
+
+*Révisée par 0227.*
 
 ## Le stockage
 
@@ -1049,6 +1051,15 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 *Révise 0053 (en partie : les rêveries d'intérêt), 0063 (en partie : `draw` toujours offert), 0098 (en partie : s'occuper seule), 0159 (en partie : sa chambre au banc).*
 
+### 0227 — Le corps dit l'instant de son sommeil paradoxal et la fin d'une nuit coupée
+
+- Le corps donne son sommeil paradoxal en cours ou le prochain (`body.rem` : le cycle, son début, sa fin), au réglage de son cycle (`cycle_us`), et la fin d'une nuit coupée par un message (`body.night_waking_until`, 0 sans nuit coupée). Personne d'autre ne recompte ses cycles : un tirage de rêve par cycle du corps.
+- Le rêve (`self.dream`) rend le début de son prochain sommeil paradoxal (ou la fin de l'écart de 45 min qui suit son dernier rêve, ou la fin de la phase quand son cycle est déjà tiré), et le réveil (`self.wake`) la fin de la nuit coupée : des instants absolus, au quantum par défaut (un filet), comme le veut 0223.
+
+*Pourquoi :* le rêve recopiait la durée d'un cycle (90 min) au lieu de la lire : réglée autrement, une phase paradoxale perdait son tirage ou en recevait deux ; et les deux processus se relisaient chaque minute, de jour comme de nuit, faute d'un instant que le corps calculait déjà (audit du 2026-11-05, K7-01, K7-02, décision K7-Q1).
+
+*Révise 0223 (en partie : le rêve et la fin d'une nuit coupée ont leur instant, plus un quantum d'une minute).*
+
 ## Buts, projets, Forge et atelier
 
 ### 0005 — La Forge hors du processus
@@ -1720,6 +1731,15 @@ trip » ; « Valhalla public d'abord, puis le portable ».
 *Pourquoi :* envoyer un document est l'une des premières choses qu'on vient faire dans un client de courrier, et il fallait passer par un autre. Une pièce envoyée suit le rangement de celles qu'on reçoit plutôt qu'un second chemin : mêmes bornes, même oubli.
 
 *Révise 0172 (en partie).*
+
+### 0228 — Une adresse venue du dehors se juge par une seule règle
+
+- **Une adresse publique, c'est Internet seulement** : ni la machine elle-même (ses adresses v4 et v6, relues au plus toutes les cinq minutes), ni le port où Mika écoute (même sous une adresse qui n'est pas la sienne : une box qui relaie ce port vers elle), ni le réseau local (la boucle locale, les réseaux privés, le lien local, l'espace partagé d'un opérateur, les plages réservées, la multidiffusion), ni une adresse privée déguisée en IPv6 (correspondance, 6to4, Teredo, NAT64). Toutes les adresses d'un nom doivent passer, et la connexion part vers l'une d'elles, jamais vers une seconde résolution.
+- **Trois lecteurs la suivent** : la Forge, à chaque saut d'une requête d'une app (0105) ; les flux, pour l'adresse d'un article à chaque saut et pour la redirection qui quitte l'hôte d'un flux (0037 ; un flux, choisi par un opérateur, garde le droit d'être local) ; l'API par personne, pour les serveurs qu'une personne qui n'est pas opératrice fait joindre, une boîte ou un service MCP (sur leurs adresses : l'hôte s'y donne sans le port).
+- **Elle vit dans `adapters/addresses.py`** : `is_global` juge une adresse, `refusal` dit laquelle des trois refuse des adresses déjà résolues (les flux résolvent eux-mêmes, en asynchrone, et redisent le refus sans l'adresse), `check_public` en fait une `ValueError` simple aux mots de la Forge (son journal garde « → ValueError: … »), `resolve_public` résout une fois puis juge ; `LOCAL` et `serving_on` tiennent les adresses de la machine et ses ports. Aucun lecteur ne la recopie.
+- **Gardent leur règle à part** : le serveur de recherche du plugin web, un programme lancé dans sa cage (0066) ; et la règle inverse des services MCP en http (`mcp/config.py`, `private_host` : du http seulement vers la machine ou le réseau local, pour que le jeton ne passe pas en clair ailleurs).
+
+*Pourquoi :* trois copies de la règle divergeaient. Les flux et `/api/moi` laissaient passer une adresse NAT64 de la boucle locale ou d'un réseau privé (`64:ff9b::7f00:1`, `64:ff9b::a00:1`), et ne refusaient ni la machine elle-même ni le port de Mika, que la Forge refusait déjà (audit du 2026-11-05, K9-02).
 
 ## Les fournisseurs de modèles
 

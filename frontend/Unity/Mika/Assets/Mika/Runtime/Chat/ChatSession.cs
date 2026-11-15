@@ -56,7 +56,7 @@ namespace Mika.Chat
         /// <summary>
         /// Au plus tant de messages partis sans accusé (<c>backendv2/docs/protocole-chat.md</c> §3 ;
         /// <c>MikaProtocol.MAX_IN_FLIGHT</c> sur Android, <c>MAX_IN_FLIGHT</c> dans le client web) : le serveur
-        /// refuse (<c>overloaded</c>) au-delà de 8 en attente sur une connexion (adapters/web/app.py
+        /// refuse (<c>overloaded</c>) au-delà de 8 en attente sur une connexion (adapters/web/chat_session.py
         /// <c>MAX_QUEUED_CHATS</c>), et une file rejouée d'un bloc à l'ouverture les dépassait. Chaque accusé fait
         /// partir le suivant.
         /// </summary>

@@ -55,14 +55,6 @@ from mika.vocab.episodes import project_of
 from mika.vocab.privacy import Sensitivity
 
 
-def _args(args_json: str) -> dict[str, Any]:
-    try:
-        got = json.loads(args_json or "{}")
-    except ValueError:
-        return {}
-    return got if isinstance(got, dict) else {}
-
-
 def _row(r: dict) -> HistoryRow:
     """Un message tel que la personne le relit (G-6) : ce qu'elle a tapé, et ses pièces jointes par leur nom — pas
     ce que les préprocesseurs en ont tiré (le contenu d'un PDF, cité sous la note ``kernel.prompt.UNTRUSTED_NOTE``),
@@ -498,14 +490,14 @@ class KernelPort:
         cards: list[dict[str, Any]] = []
         for view in frame.get(rt.PENDING_EFFECTS):
             pending = effects.get(view.proposal)
-            args = _args(pending.args_json) if pending is not None else {}
+            args = rt.proposal_args(pending.args_json) if pending is not None else {}
             if not handle or args.get(rt.DECIDER) != handle:
                 continue
             shown = await decisions.preview(self.kernel.mind, self.kernel.ports, pending.capability,
                                             pending.args_json)
             summary = self.kernel.mind.store.content([view.summary_ref]).get(view.summary_ref, "") \
                 if view.summary_ref else ""
-            expires = int(args.get(rt.EXPIRES) or 0)
+            expires = rt.arg_int(args, rt.EXPIRES)
             cards.append({"id": view.proposal, "title": summary[:400] or "Une demande d'accord",
                           "text": shown.text[:4000] if shown is not None else summary[:400],
                           "digest": shown.digest if shown is not None else "",
@@ -536,10 +528,10 @@ class KernelPort:
         pending = frame.state("runtime").effects.get(proposal)
         if pending is None:
             return decisions.UNKNOWN
-        args = _args(pending.args_json)
+        args = rt.proposal_args(pending.args_json)
         if not handle or args.get(rt.DECIDER) != handle:
             return "forbidden"
-        expires = int(args.get(rt.EXPIRES) or 0)
+        expires = rt.arg_int(args, rt.EXPIRES)
         if approved and expires and self.kernel.mind.clock.now() > expires:
             return "expired"
         if approved and not seen:

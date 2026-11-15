@@ -45,20 +45,12 @@ class Resolution:
     message: str = ""
 
 
-def _args(args_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(args_json or "{}")
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 async def preview(mind: Mind, ports: Mapping[str, Any], capability: str, args_json: str) -> Preview | None:
     """Ce qu'un effet ferait s'il partait maintenant (``None`` : la capacité ne le dit pas)."""
     spec = mind.registry.capabilities.get(capability)
     if spec is None or spec.preview is None:
         return None
-    got: Any = call(spec.preview, _args(args_json), ports, label=f"aperçu {capability}")
+    got: Any = call(spec.preview, rt.proposal_args(args_json), ports, label=f"aperçu {capability}")
     if not isinstance(got, Failed) and pyinspect.isawaitable(got):
         pending = got
         got = await acall(lambda: pending, label=f"aperçu {capability}")
@@ -77,7 +69,7 @@ async def prepare(mind: Mind, ports: Mapping[str, Any], proposal: int, approved:
         if shown is not None:
             if shown.blocked:
                 return Resolution(BLOCKED, message=f"Ça ne peut pas partir tel quel : {shown.blocked}.")
-            args = _args(args_json)
+            args = rt.proposal_args(args_json)
             wanted = seen or str(args.get(SEEN_KEY) or "")
             if wanted and wanted != shown.digest:
                 return Resolution(CHANGED, message=MESSAGES[CHANGED])

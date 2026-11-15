@@ -2,25 +2,25 @@
 ce qu'il dit de celui qu'on a choisi (sa fenêtre, sa plus longue réponse — ADR 0136).
 
 Un appel HTTP court, sur demande seulement (jamais au rendu d'une page). Un
-fournisseur injoignable ou une clé refusée donnent un message en français,
-jamais une exception : c'est justement quand on vient réparer la
-configuration qu'il ne répond pas. La clé n'apparaît dans aucun message.
+fournisseur injoignable ou une clé refusée donnent un ``ListingFailed`` au message
+en français : c'est justement quand on vient réparer la configuration qu'il ne
+répond pas. La clé n'apparaît dans aucun message. Le client HTTP et la lecture de
+la réponse sont ceux de ``adapters/listing.py``, que la liste des modèles d'images
+partage.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from mika.adapters.listing import LIMIT, ListingFailed, fetch_json, http_client
 from mika.adapters.llm.config import BackendSpec, LLMConfig, ModelLimits, tokens_fr
 
-TIMEOUT_S = 8.0
-LIMIT = 500
 #: ce que ``claude --model`` comprend sans rien demander ; vide : le modèle par défaut de la CLI
 CLAUDE_CODE_MODELS = ("fable", "haiku", "opus", "sonnet")
 #: où les fournisseurs disent la fenêtre d'un modèle et sa plus longue réponse (l'API Claude, OpenRouter, vLLM,
@@ -29,10 +29,6 @@ WINDOW_KEYS = ("max_input_tokens", "context_length", "max_model_len", "max_conte
 OUTPUT_KEYS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
 #: au-delà, un nombre de jetons dit par un fournisseur n'est pas cru
 MAX_TOKENS = 10_000_000
-
-
-class ListingFailed(Exception):
-    """Le fournisseur n'a pas donné sa liste (message en français, sans secret)."""
 
 
 def _endpoint(spec: BackendSpec) -> tuple[str, dict[str, str], str]:
@@ -93,32 +89,6 @@ def _entries(payload: Any, shape: str) -> list[tuple[str, ModelLimits]]:
     return sorted(found.items())
 
 
-@asynccontextmanager
-async def _http(client: httpx.AsyncClient | None) -> AsyncIterator[httpx.AsyncClient]:
-    if client is not None:
-        yield client
-        return
-    async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=False) as own:
-        yield own
-
-
-async def _fetch(http: httpx.AsyncClient, url: str, headers: dict[str, str], body: Any = None) -> Any:
-    """La réponse JSON du fournisseur (``body`` : en POST) ; lève ``ListingFailed``."""
-    try:
-        response = await (http.post(url, headers=headers, json=body) if body is not None
-                          else http.get(url, headers=headers))
-    except httpx.HTTPError as exc:
-        raise ListingFailed(f"Fournisseur injoignable ({type(exc).__name__}).") from None
-    if response.status_code in (401, 403):
-        raise ListingFailed("Clé refusée par le fournisseur.")
-    if response.status_code >= 400:
-        raise ListingFailed(f"Le fournisseur a répondu {response.status_code}.")
-    try:
-        return response.json()
-    except ValueError:
-        raise ListingFailed("Réponse illisible du fournisseur.") from None
-
-
 async def list_models(spec: BackendSpec, *,
                       client: httpx.AsyncClient | None = None) -> list[tuple[str, ModelLimits]]:
     """Les identifiants de modèles du fournisseur, chacun avec ce que la liste en dit (l'API Claude y donne
@@ -129,8 +99,8 @@ async def list_models(spec: BackendSpec, *,
     if spec.kind in ("claude",) and not spec.api_key:
         raise ListingFailed("Il faut une clé d'API pour lister les modèles.")
     url, headers, shape = _endpoint(spec)
-    async with _http(client) as http:
-        return _entries(await _fetch(http, url, headers), shape)
+    async with http_client(client) as http:
+        return _entries(await fetch_json(http, url, headers), shape)
 
 
 async def model_limits(spec: BackendSpec, *, client: httpx.AsyncClient | None = None) -> ModelLimits:
@@ -140,14 +110,14 @@ async def model_limits(spec: BackendSpec, *, client: httpx.AsyncClient | None = 
         return ModelLimits()
     if spec.kind == "claude" and not spec.api_key:
         raise ListingFailed("Il faut une clé d'API pour lire le modèle.")
-    async with _http(client) as http:
+    async with http_client(client) as http:
         if spec.kind == "claude":
             url = f"https://api.anthropic.com/v1/models/{quote(spec.model, safe='')}"
-            return _limits_of(await _fetch(http, url, _anthropic_headers(spec)))
+            return _limits_of(await fetch_json(http, url, _anthropic_headers(spec)))
         if spec.kind == "openai":
-            found = dict(_entries(await _fetch(http, f"{_openai_base(spec)}/models", _bearer(spec)), "data"))
+            found = dict(_entries(await fetch_json(http, f"{_openai_base(spec)}/models", _bearer(spec)), "data"))
             return found.get(spec.model, ModelLimits())
-        shown = await _fetch(http, f"{_ollama_host(spec)}/api/show", _ollama_headers(spec), {"model": spec.model})
+        shown = await fetch_json(http, f"{_ollama_host(spec)}/api/show", _ollama_headers(spec), {"model": spec.model})
     info = shown.get("model_info") if isinstance(shown, dict) else None
     window = next((n for k, v in info.items() if k.endswith(".context_length") and (n := _count(v))), 0) \
         if isinstance(info, dict) else 0
@@ -157,7 +127,7 @@ async def model_limits(spec: BackendSpec, *, client: httpx.AsyncClient | None = 
 async def settle_limits(cfg: LLMConfig, read: Callable[[BackendSpec], Awaitable[ModelLimits]] = model_limits
                         ) -> tuple[LLMConfig, list[str]]:
     """Chaque fournisseur dont le modèle n'a pas encore été demandé l'est (tous en même temps, chacun borné par
-    ``TIMEOUT_S``), et sa fiche le garde, contexte et sortie ramenés dessous (``BackendSpec.fitted``). Un
+    ``listing.TIMEOUT_S``), et sa fiche le garde, contexte et sortie ramenés dessous (``BackendSpec.fitted``). Un
     fournisseur qui ne répond pas garde sa fiche telle quelle : il sera redemandé au prochain enregistrement.
     Rend la configuration et ce qui a été lu ou changé, en mots."""
     asked = {n: s for n, s in cfg.backends.items() if s.model and s.detected_for != s.detection_key}

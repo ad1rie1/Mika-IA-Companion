@@ -3,10 +3,10 @@
 Une heuristique cherche, dans le code des facultés et des greffons, les chaînes qui ressemblent à de la prose
 française (au moins cinq mots, des mots-outils du français). Elle ignore ce qui n'est pas pour elle : les
 docstrings, les journaux techniques, les exceptions de programmation, les libellés des réglages (``Knob``), les
-raisons d'humeur (des codes gardés au journal), les expressions régulières, les vues de console (``inspect.py``,
-``inspect_<sujet>.py``, un paquet ``inspect/``) et le greffon Teams hors de son tri, de ce qu'elle en lit
-(``voice.py``, migré le 2026-10-28) et de ses outils (``tools.py`` : leurs descriptions migrées le 2026-11-13, le reste
-sous plafond) ; ses autres textes restent à migrer : lot 4 de ``docs/audit-2026-10-27-garde-fous.md``.
+raisons d'humeur (des codes gardés au journal), les expressions régulières et les vues de console (``inspect.py``,
+``inspect_<sujet>.py``, un paquet ``inspect/``). Tout le greffon Teams est compté depuis le 2026-11-15 : ses consignes
+de tâche, la description de son lot et la raison d'une échéance sont dans la voix (audit du 2026-11-05, K8-05) ; ce
+que rendent ses outils (``tools.py``) reste à migrer, sous plafond.
 
 Ce qui reste a été trié pendant la migration : des textes de la console de l'opératrice, des valeurs gardées au
 journal, des listes de mots, un serveur autonome (``plugins/web/server.py``) qui ne peut pas lire la voix. Le
@@ -23,8 +23,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 ROOTS = ("faculties", "plugins")
-SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|reglages)\.py$|inspect/|"
-                           r"teams/(?!(triage|voice|tools)\.py$))")
+SKIPPED_FILES = re.compile(r"(^|/)((inspect(_\w+)?|actions|params|reglages)\.py$|inspect/)")
 NOT_FOR_HER = {"debug", "info", "warning", "error", "exception", "critical", "log", "ValueError", "TypeError",
                "RuntimeError", "KeyError", "AssertionError", "Knob", "Setting", "Action", "Panel", "Row", "Column",
                "Appraisal", "compile"}
@@ -41,7 +40,6 @@ CEILING = {
     # liste de mots (``FRAMING`` : les tournures d'un récit sans nom, ADR 0092), pas une phrase ; venue de
     # ``vocab/retelling.py`` le 2026-11-13, qu'un seul propriétaire lisait (audit du 2026-11-05, K0-23)
     "faculties/memory/retelling.py": 1,
-    "faculties/presence/__init__.py": 2,  # panneau de console
     # résumés d'effets que l'opératrice approuve ; +9 le 2026-11-05 : l'aperçu d'un envoi au dépôt distant et d'une
     # récupération (``REMOTE`` : où, quel commit, ce qui partira ou arrivera), lu par l'opératrice dans « À valider »
     # avant son accord, pas par elle (audit du 2026-11-05, C1-07)
@@ -52,9 +50,10 @@ CEILING = {
     "faculties/projects/tend.py": 4,  # raisons de pause (pannes, cadrage sans plan), gardées au journal
     "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
-    "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
-    "plugins/forge/__init__.py": 4,  # capacité d'installation (console)
+    # capacité d'installation (console) ; venue de ``plugins/forge/__init__.py`` le 2026-11-15, avec la version qui
+    # attend un accord (audit du 2026-11-05, K8-04)
+    "plugins/forge/install.py": 4,
     # les erreurs de validation d'une vue forgée, chemin JSON compris (la note « Vue invalide » de la console,
     # forge_test), pas sa voix ; venues de ``kernel/envelope.py`` le 2026-11-14 (audit du 2026-11-05, K1-01)
     "plugins/forge/envelope.py": 43,
@@ -68,12 +67,11 @@ CEILING = {
     "plugins/imaging/tools.py": 1,
     "plugins/mcp/__init__.py": 1,  # aperçu d'une capacité (console)
     "plugins/mcp/calls.py": 4,  # capacité et résumé (console)
-    "plugins/rss/__init__.py": 16,  # panneaux de console
-    "plugins/sensors/__init__.py": 6,  # panneaux de console
     # ce que ses outils Teams rendent au modèle (refus, résultats) et l'aperçu d'un envoi (console) — à migrer ; les
     # descriptions des trois outils et de leurs arguments sont dans la voix depuis le 2026-11-13 (audit du
-    # 2026-11-05, LR2)
-    "plugins/teams/tools.py": 22,
+    # 2026-11-05, LR2) ; −2 le 2026-11-15 : le sort « brouillon » de teams_draft lit teams.task.fate.brouillon
+    # (un f-string compte deux fois : lui et son morceau de texte ; K8-05)
+    "plugins/teams/tools.py": 20,
     "plugins/wakeup/prompt.py": 6,  # « pourquoi pas maintenant » (console)
     "plugins/web/server.py": 30,  # serveur autonome dans sa cage : il ne peut pas lire la voix
 }
@@ -176,19 +174,15 @@ CONSOLE_FILES = re.compile(r"(^|/)(inspect(_\w+)?\.py$|inspect/)")
 
 def test_console_declarations_live_in_inspect() -> None:
     """Ce qu'un propriétaire montre à la console se déclare dans ses fichiers ``inspect`` ; ses actions aussi, ou à
-    part dans ``actions.py``. Seul un propriétaire qui tient en un fichier (presence, camera, rss, sensors) les garde
-    dans son ``__init__.py`` (ARCHITECTURE.md, « Écrire une faculté », point 3 ; audit du 2026-11-05, K11-14 : le
-    fil de transcript déclarait encore quatre vues dans son ``__init__.py``, à côté de son ``inspect.py``)."""
+    part dans ``actions.py`` — sans exception (ARCHITECTURE.md, « Écrire une faculté », point 3 ; audit du
+    2026-11-05, K11-14 : le fil de transcript déclarait encore quatre vues dans son ``__init__.py``, à côté de son
+    ``inspect.py`` ; K8-10 : presence, camera, rss et sensors, qui tenaient en un fichier, gardaient la leur dans
+    leur ``__init__.py``)."""
     astray = []
     for root in ROOTS:
         for path in sorted((SRC / root).rglob("*.py")):
             rel = str(path.relative_to(SRC))
             if "__pycache__" in path.parts or CONSOLE_FILES.search(rel):
-                continue
-            owner = SRC / root / path.relative_to(SRC / root).parts[0]
-            alone = path == owner / "__init__.py" and \
-                [p.name for p in owner.rglob("*.py") if "__pycache__" not in p.parts] == ["__init__.py"]
-            if alone:
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 for deco in getattr(node, "decorator_list", ()):

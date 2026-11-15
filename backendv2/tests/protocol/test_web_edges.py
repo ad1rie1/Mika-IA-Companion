@@ -582,6 +582,15 @@ def test_logout_closes_the_open_websockets_of_that_session(make):
         assert closed.value.code == 4401
 
 
+def test_a_csrf_header_that_is_not_ascii_is_refused_not_a_crash(make):
+    """Starlette lit un en-tête en latin-1 : comparé en ``str``, un octet non ASCII faisait lever ``compare_digest``,
+    et la connexion tombait en 500 avant toute authentification (reste du lot L22)."""
+    client, _ = make(Fake())
+    client.get("/auth/whoami")  # le cookie csrftoken est posé
+    r = client.post("/auth/login", json={"username": "adrien", "password": "x"}, headers={"X-CSRFToken": b"\xe9"})
+    assert r.status_code == 403 and r.json() == {"error": "Requête refusée (CSRF)."}
+
+
 def test_a_deactivated_account_loses_its_websocket(make):
     client, live = make(Fake())
     bootstrap(client)

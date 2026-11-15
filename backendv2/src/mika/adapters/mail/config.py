@@ -4,8 +4,9 @@ la place de son opérateur ; un ton, des consignes, une signature).
 
 Elle vit dans les réglages (le mot de passe scellé), jamais dans le journal ;
 l'adaptateur la relit à chaque appel (changer un compte ne demande pas de
-redémarrer). Une ancienne configuration à un seul compte devient le compte
-« principal ».
+redémarrer). Une configuration gardée d'avant plusieurs boîtes (un seul compte,
+à plat) se lit encore comme le compte « principal » (``from_stored``), tant
+qu'une révision n'a pas réécrit les réglages gardés.
 
 Une boîte entre par mot de passe, ou par un compte Microsoft (Hotmail,
 Outlook.com, Live ; Microsoft 365 si son administrateur le permet), où le mot
@@ -26,7 +27,8 @@ from mika.kernel.forms import Knob
 from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
 from mika.vocab.access import PERSON, SELF, Share
 
-#: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
+#: la clé du compte d'une configuration d'avant plusieurs boîtes (un seul compte, sans nom) ; aussi le compte que
+#: nomme ``mika mail set`` sans ``--compte`` : elle reste quand ``from_stored`` part
 LEGACY_ACCOUNT = "principal"
 ACCOUNT_KEY_RULE = "des minuscules, chiffres, - ou _ (40 au plus), en commençant par une lettre ou un chiffre"
 #: comment une boîte entre : par mot de passe, ou par un compte Microsoft (OAuth2, ADR 0166)
@@ -55,17 +57,19 @@ class MailAccount(BaseModel):
                                  group="La boîte", advanced=False, order=3)] = ""
     enabled: Annotated[bool, Knob(label="Actif", help="Décoché : ni relevé ni envoi, les réglages restent.",
                                   group="La boîte", advanced=False, order=12)] = True
+    # ADR 0185 : à qui est une boîte, elle sert à son propriétaire
     owner: Annotated[str, Knob(
         label="À qui", group="La boîte", advanced=False, order=4,
         help="À qui est cette boîte : toi (ses propriétaires), elle, ou une personne qui a un compte. Elle s'en sert "
              "avec son propriétaire — toi en privé et quand elle travaille, elle-même quand elle travaille, cette "
-             "personne en privé (ADR 0185). Les tiennes s'ouvrent à d'autres dans Outils › Ses propres outils › "
+             "personne en privé. Les tiennes s'ouvrent à d'autres dans Outils › Ses propres outils › "
              "Courrier.")] = ""
+    # ADR 0188 : partager ce qui est à soi ; ADR 0210 : les partages se voient tous, un opérateur peut en retirer
     shares: Annotated[dict[str, Share], Knob(
         label="Partagée avec", group="La boîte", readonly=True, order=5,
-        help="Réglé par son propriétaire dans Paramètres › Partages (ADR 0188) : pour chaque personne "
+        help="Réglé par son propriétaire dans Paramètres › Partages : pour chaque personne "
              "(« personne:<clé> »), lire, lire et préparer, ou s'en servir. La personne la voit sous son propre "
-             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+             "compte. Tous se voient et se retirent dans Réglages › Droits › Partages.")] = \
         Field(default_factory=dict)
     auth: Annotated[Literal["password", "microsoft"], Knob(
         label="Connexion", group="Connexion", choices=AUTHS, advanced=False, order=15,
@@ -243,13 +247,22 @@ class MailConfig(BaseModel):
     def ready(self) -> bool:
         return any(a.ready for a in self.accounts.values())
 
-    def first_ready(self) -> tuple[str, MailAccount] | None:
-        return next(((k, a) for k, a in sorted(self.accounts.items()) if a.ready), None)
-
 
 def from_stored(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Une configuration enregistrée, mise à la forme actuelle : une ancienne
-    configuration plate (un seul compte) devient le compte « principal »."""
+    """Une configuration enregistrée, mise à la forme du jour ; une forme du
+    jour (``accounts``) passe telle quelle.
+
+    La forme qu'il lit : celle d'avant plusieurs boîtes (ADR 0027, le
+    2026-09-30), un seul compte à plat — les champs de ``MailAccount`` au
+    premier niveau, un seul dossier (``folder``), ses secrets scellés au premier
+    niveau, que ``Settings.email`` ouvre avant de l'appeler. Elle devient le
+    compte ``LEGACY_ACCOUNT`` (« principal ») ; sans ``imap_host``, ``address``
+    ni ``smtp_host``, aucun compte.
+
+    Il part quand une révision de données de la base ``mind`` aura réécrit les
+    réglages gardés à la forme du jour (audit du 2026-11-05 : pas avant d'avoir
+    vu ce que gardent les réglages en service), avec la branche de
+    ``Settings.email`` qui l'appelle."""
     data = dict(data)
     if "accounts" in data:
         return {"accounts": dict(data["accounts"] or {})}

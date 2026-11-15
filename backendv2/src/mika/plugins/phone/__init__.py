@@ -178,23 +178,12 @@ def _drafted(s: PhoneState, e, cx) -> PhoneState:
     return replace(s, offers=_pruned(s.offers.set(e.seq, offer), OFFERS_KEPT))
 
 
-def _draft_of(args_json: str) -> int:
-    try:
-        data = json.loads(args_json or "{}")
-    except ValueError:
-        return 0
-    try:
-        return int(data.get("draft") or 0) if isinstance(data, dict) else 0
-    except (TypeError, ValueError):
-        return 0
-
-
 @PHONE.reducer(rt.EFFECT_PROPOSED)
 def _proposed(s: PhoneState, e, cx) -> PhoneState:
     d = e.data
     if d.owner != c.OWNER or d.capability != c.SEND:
         return s
-    found = s.offers.get(_draft_of(d.args_json))
+    found = s.offers.get(rt.arg_int(rt.proposal_args(d.args_json), "draft"))
     if found is None:
         return s
     return replace(s, offers=s.offers.set(found.seq, replace(found, proposal=e.seq)))

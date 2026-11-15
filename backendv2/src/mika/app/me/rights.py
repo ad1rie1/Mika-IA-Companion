@@ -34,7 +34,7 @@ from mika.inspector.names import Names
 from mika.inspector.pages.accounts import RIGHTS
 from mika.inspector.pages.tools import condition
 from mika.kernel.frame import Audience
-from mika.plugins import forge as forge_p
+from mika.plugins.forge import access as forge_access
 from mika.runtime.boundary import Failed, call
 from mika.runtime.inspection import Inspection
 from mika.runtime.tool_offer import FITS, NEEDS, WHEN, Judged, allowed, gate_of, judge
@@ -262,7 +262,7 @@ async def matrix(call_: Call) -> dict[str, Any]:
                     continue
                 # la lecture même de sa ligne : celle de son service, ou celle de son app (de son projet), ADR 0219
                 mirror = _service_allowance(g, offered, statuses, aud, kind, rights, close) if sort == "services" \
-                    else forge_p.resource_allowance(frame, resource, tool, spec.acts, aud, kind)
+                    else forge_access.resource_allowance(frame, resource, tool, spec.acts, aud, kind)
 
                 def said(level: str, g: Any = g, mirror: Allowance | None = mirror, aud: Audience = aud,
                          kind: str = kind, acts: bool = spec.acts, sort: str = sort) -> str:

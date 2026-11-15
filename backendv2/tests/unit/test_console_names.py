@@ -14,11 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
+from mika.adapters.listing import ListingFailed
 from mika.adapters.llm.claude_code import ClaudeCodeError
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.llm.gateway import UnconfiguredRole
-from mika.adapters.llm.models import ListingFailed
 from mika.adapters.mail.imap import ImapError
 from mika.adapters.store_sql.store import StoreSealed
 from mika.app import console
@@ -117,8 +116,7 @@ def test_the_kernel_alone_knows_no_adapter_failure():
 
 
 def test_outside_names_real_failures_of_the_adapters_and_ports():
-    raised = (UnconfiguredRole, MissingPersona, StoreSealed, ListingFailed, ImageListingFailed, ClaudeCodeError,
-              ImapError)
+    raised = (UnconfiguredRole, MissingPersona, StoreSealed, ListingFailed, ClaudeCodeError, ImapError)
     assert {kind.__name__ for kind in raised} == set(OUTSIDE)
     assert describe_error(UnconfiguredRole("reply")) == \
         "aucun modèle configuré : aucun modèle associé au rôle « reply »"

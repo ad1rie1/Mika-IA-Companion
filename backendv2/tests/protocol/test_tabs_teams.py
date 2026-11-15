@@ -67,7 +67,11 @@ def test_replies_waiting_for_you_come_first_facing_the_message(world):  # noqa: 
     assert pending.index("On se voit à 14 h ?") < pending.index("Oui, 14 h me va.")  # le message, puis sa réponse
     assert f'href="/inspecteur/fiche/reponse_teams/{draft.id}">Examiner et décider' in pending
     assert page.index("Attendent ton accord") < page.index("Ce qu'elles sont devenues")
-    assert 'href="/inspecteur/envoi"' in page  # « Envoyer à ta place », dit par le plugin, avec son lien
+    # en pied, comment elles partent : le tableau de Teams dans Réglages › Canaux, celui du seul compte (ADR 0134 :
+    # « Envoyer à ta place » y est fondu, sa page n'existe plus)
+    about = _between(page, 'class="person-tab-note teams-about"', "</p>")
+    assert 'href="/inspecteur/reglages/canaux?canal=teams%3Aprincipal"' in about and "Réglages › Canaux" in about
+    assert "/inspecteur/envoi" not in page and "Envoyer à ta place" not in page
     extension = drawn(client, "/inspecteur/teams/extension")
     band = _between(extension, 'class="person-tiles teams-band"', "</section>")
     # les chiffres d'un compte mènent aux onglets de ce compte (ADR 0186)

@@ -417,7 +417,8 @@ def test_the_story_links_the_views_of_apps_that_work_and_only_for_who_has_the_co
 def test_her_app_settings_say_what_is_in_force_and_never_a_secret():
     """Elle changeait un défaut du manifeste sans effet, une valeur de la console l'emportant ; une clé manquante
     restait muette."""
-    from mika.plugins.forge import App, settings_lines
+    from mika.plugins.forge import App
+    from mika.plugins.forge.tools import settings_lines
     from mika.ports.forge import form_field
 
     info = SimpleNamespace(config_fields=(form_field("ville", "text", "Ville", default="Paris"),

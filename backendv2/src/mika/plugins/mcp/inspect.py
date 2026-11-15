@@ -49,15 +49,12 @@ from mika.kernel.inspect import (
 from mika.kernel.operate import Done, Refused
 from mika.kernel.rights import Grant, RuleTable
 from mika.plugins.mcp import (
-    ALONE,
     ANSWERED,
     APPROVED,
-    CARD,
     EXPIRED,
     EXPIRER,
     FAILED,
     MCP,
-    NO,
     REFUSED,
     STATUS,
     WAITING,
@@ -71,13 +68,17 @@ from mika.ports.mcp import (
     Access,
 )
 from mika.vocab.access import (
+    ALONE,
+    CARD,
+    NO,
     OWNER,
     PERSON,
-    POLICIES,
     SELF,
     SOURCE_WORDS,
-    TableArgs,
+    Keep,
+    ToolColumnsArgs,
     canal_words,
+    moved,
     when_words,
     who_words,
 )
@@ -606,29 +607,15 @@ async def _test(s: McpState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     return Done(message=said, tone="ok" if ok else "danger", drafts=status_drafts(s, port))
 
 
-_Policy = Literal["seule", "carte", "toi", "non"]
-_Keep = Literal["public", "perso", "prive", "rien"]
+class AccessArgs(ToolColumnsArgs):
+    """Le tableau « Accès à ses outils », d'un seul envoi (ADR 0131, 0134 : ``vocab.access.ToolColumnsArgs`` — ses
+    lignes, qui, par où, quand, ses outils, ce qu'elle fait d'un outil qui lit et d'un outil qui agit) et ce qu'elle
+    en garde, dans les mots d'un service (``ports.mcp.KEEPS``) ; la ligne par défaut à part."""
 
-
-class AccessArgs(TableArgs):
-    """Le tableau « Accès à ses outils », d'un seul envoi (ADR 0131, 0134 : ``vocab.access.TableArgs`` — ses lignes,
-    qui, par où, quand, ses outils) et ses colonnes : ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce
-    qu'elle en garde ; la ligne par défaut à part."""
-
-    lecture: Annotated[dict[str, _Policy], Knob(label="Un outil qui lit", choices=POLICIES, advanced=False)] = \
+    garde: Annotated[dict[str, Keep], Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = \
         Field(default_factory=dict)
-    action: Annotated[dict[str, _Policy], Knob(label="Un outil qui agit", choices=POLICIES, advanced=False)] = \
-        Field(default_factory=dict)
-    garde: Annotated[dict[str, _Keep], Knob(label="Ce qu'elle en garde", choices=KEEPS, advanced=False)] = \
-        Field(default_factory=dict)
-    tous: Annotated[dict[str, bool], Knob(label="Tous ses outils", advanced=False)] = Field(default_factory=dict)
-    prend: Annotated[dict[str, bool], Knob(label="Ses outils", advanced=False)] = Field(default_factory=dict)
-    defaut_lecture: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", choices=POLICIES,
-                                            advanced=False)] = "non"
-    defaut_action: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", choices=POLICIES,
-                                           advanced=False)] = "non"
-    defaut_garde: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
-                                        advanced=False)] = "rien"
+    defaut_garde: Annotated[Keep, Knob(label="Par défaut, ce qu'elle en garde", choices=KEEPS,
+                                       advanced=False)] = "rien"
 
 
 def access_rows(args: AccessArgs, known: Sequence[str]) -> list[dict[str, Any]]:
@@ -643,29 +630,6 @@ def access_rows(args: AccessArgs, known: Sequence[str]) -> list[dict[str, Any]]:
             for r in sent]
 
 
-def moved(rows: list[dict[str, Any]], faire: str) -> tuple[list[dict[str, Any]], str]:
-    """Ce qu'un bouton du tableau demande : ajouter une ligne (au-dessus de la ligne par défaut), monter, descendre
-    ou retirer la ligne ``n`` ; et ce qu'on en dit."""
-    op, _, at = faire.partition(":")
-    i = int(at) - 1 if at.isdigit() else -1
-    rows = list(rows)
-    if op == "ajouter":
-        if len(rows) >= MAX_ROWS:
-            raise Refused(f"{MAX_ROWS} lignes au plus.")
-        rows.append(dict(NEW_ROW))
-        return rows, f"Ligne {len(rows)} ajoutée, fermée : règle-la, puis enregistre."
-    if op == "monter" and 0 < i < len(rows):
-        rows[i - 1], rows[i] = rows[i], rows[i - 1]
-        return rows, f"Ligne {i + 1} montée."
-    if op == "descendre" and 0 <= i < len(rows) - 1:
-        rows[i], rows[i + 1] = rows[i + 1], rows[i]
-        return rows, f"Ligne {i + 1} descendue."
-    if op == "retirer" and 0 <= i < len(rows):
-        del rows[i]
-        return rows, f"Ligne {i + 1} retirée."
-    return rows, "Accès enregistrés."
-
-
 @MCP.action("acces", title="Accès à ses outils", args=AccessArgs, emits=[STATUS], subject="serveur", order=15,
             inline=True, description="Ses lignes d'accès, lues de haut en bas, et la ligne par défaut : qui, quand, "
                                      "ce qu'elle fait d'un outil qui lit et d'un outil qui agit, ce qu'elle en garde, "
@@ -674,7 +638,10 @@ async def _access(s: McpState, frame: Frame, args: AccessArgs, ctx: Any) -> Done
     port = _port(ctx)
     st = port.status(ctx.subject)
     known = list(dict.fromkeys([*(t.remote for t in st.live), *st.reviews])) if st is not None else []
-    rows, said = moved(access_rows(args, known), args.faire.strip())
+    try:  # le moteur des lignes (``vocab.access.moved``), comme l'accès d'une app ou d'un projet
+        rows, said = moved(access_rows(args, known), args.faire.strip(), dict(NEW_ROW), MAX_ROWS)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
     try:
         await port.settle(ctx.subject, {"access": rows, "default_read": args.defaut_lecture,
                                         "default_act": args.defaut_action, "default_keep": args.defaut_garde})
@@ -837,9 +804,10 @@ def _service_grants(s: McpState, frame: Frame, ctx: Any, audience: Any, kind: st
     return out
 
 
+# les lignes d'accès de chaque service, lues de haut en bas comme les règles d'un pare-feu (ADR 0131)
 @MCP.rights("services", title="Services branchés", order=20, grants=_service_grants,
             description="Qui peut se servir des outils de chaque service, quand, ce qu'elle en fait et ce qu'elle "
-                        "en garde (ADR 0131).")
+                        "en garde.")
 def _service_tables(s: McpState, frame: Frame, ctx: Any) -> list[RuleTable]:
     port = ctx.ports.get("mcp")
     if port is None:

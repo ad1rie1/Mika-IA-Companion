@@ -9,7 +9,7 @@ refuse un projet inconnu.
 
 from __future__ import annotations
 
-from mika.adapters.web.app import WAKE_MAX_BYTES
+from mika.adapters.web.doors import WAKE_MAX_BYTES
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as c

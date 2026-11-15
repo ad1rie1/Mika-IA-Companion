@@ -1,6 +1,7 @@
 """``affect`` : l'humeur générale, la posture envers chacun, ce qu'une relation installe.
 
-Ce qui la fait bouger : la balise ``[EMOTION:nom:intensité]`` qu'elle écrit en
+Ce qui la fait bouger : la balise à facettes ``[EMOTION: sad 0.6, love 0.3]``
+(ADR 0093 ; l'ancienne forme ``[EMOTION:sad:0.6]`` est encore lue) qu'elle écrit en
 parlant à quelqu'un (répondre, prendre la parole), et ce que les événements
 des autres lui font ressentir (évaluations déclarées). Pas de balise, ou
 ``neutral`` → aucune impulsion : « rien de particulier » ne déplace rien. Ses
@@ -267,18 +268,15 @@ def _cause(m: ph.Mood, toward: Vec3, now: int, p: AffectParams) -> tuple[str, st
     return "", "", 0
 
 
-#: les causes qui sont des états, et ce qui y met fin : « personne ne t'a parlé » cesse d'être vrai dès qu'on lui
-#: parle ; « il ne se passe pas grand-chose », dès que quelque chose se passe (HUM-5)
-ENDED_BY_SOMEONE, ENDED_BY_ANYTHING = frozenset({"lonely"}), frozenset({"bored"})
-
-
 def over(cause: str, at: int, needs: Any) -> bool:
-    """La cause d'une humeur est-elle un état qui a pris fin depuis ?"""
+    """La cause d'une humeur est-elle un état qui a pris fin depuis ? Les causes qui sont des états, et ce qui y met
+    fin, sont déclarées une fois dans ``prose`` (``ENDED_BY_SOMEONE``, ``ENDED_BY_ANYTHING``), qui les dit au passé
+    (HUM-5)."""
     if needs is None or not at:
         return False
-    if cause in ENDED_BY_SOMEONE:
+    if cause in prose.ENDED_BY_SOMEONE:
         return needs.heard_at > at
-    if cause in ENDED_BY_ANYTHING:
+    if cause in prose.ENDED_BY_ANYTHING:
         return needs.idle_since > at
     return False
 

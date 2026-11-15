@@ -2,8 +2,9 @@
 
 Teams et les réveils (``/api/teams/…``, ``/api/wake/…``), les prêts et la console en MCP (``/mcp/pret/…``,
 ``/mcp/console``), les jetons de compte, les cadences du chat, du téléphone et de la connexion : l'empreinte d'un jeton
-et sa comparaison en temps constant, la fabrique d'une clé, les fenêtres glissantes, le nettoyage de ce qui arrive du
-dehors. C'est du code de sécurité : une correction faite ici vaut pour toutes.
+et sa comparaison en temps constant, celle d'un secret reçu tel quel (``same_secret`` : le jeton CSRF, le code de
+premier démarrage, la clé du relais MCP), la fabrique d'une clé, les fenêtres glissantes, le nettoyage de ce qui arrive
+du dehors. C'est du code de sécurité : une correction faite ici vaut pour toutes.
 
 **La réponse, elle, reste propre à chaque porte, et ne s'uniformise pas : elle suit son exposition.**
 
@@ -13,7 +14,7 @@ dehors. C'est du code de sécurité : une correction faite ici vaut pour toutes.
   (404), une mauvaise clé répond 401. Qui arrive là sait déjà ce qu'on a déclaré : il n'y a pas de nom à lui cacher.
 
 Les issues de Teams, du téléphone et des réveils sont dans ``ports/gate.py``, leur statut HTTP dans une seule table
-(``GATE_STATUS``, ``adapters/web/app.py``) ; les prêts et la console en MCP répondent leur statut eux-mêmes. Le texte
+(``GATE_STATUS``, ``adapters/web/doors.py``) ; les prêts et la console en MCP répondent leur statut eux-mêmes. Le texte
 d'une réponse, et le choix de ne rien dire, restent à chaque porte.
 """
 
@@ -54,6 +55,14 @@ def presented(key: str, prefix: str) -> str:
 def matches(given: str, wanted: str) -> bool:
     """Deux empreintes comparées en temps constant. Rien d'attendu ne s'ouvre jamais, et coûte le même calcul."""
     return hmac.compare_digest(given, wanted or NOTHING) and bool(wanted)
+
+
+def same_secret(given: str, wanted: str) -> bool:
+    """Un secret reçu tel quel, comparé en temps constant à celui qu'on attend, octet par octet. Sur deux ``str``,
+    ``hmac.compare_digest`` lève dès qu'un caractère n'est pas ASCII ; or un en-tête se lit en latin-1 (un client y met
+    l'octet qu'il veut) et un JSON peut porter un demi-caractère seul (d'où ``surrogatepass``) : la requête
+    tomberait en 500 au lieu d'être refusée. Ce que chaque lecteur exige en plus (un cookie présent) reste à lui."""
+    return hmac.compare_digest(given.encode("utf-8", "surrogatepass"), wanted.encode("utf-8", "surrogatepass"))
 
 
 class SlidingWindow:

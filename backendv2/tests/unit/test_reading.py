@@ -315,7 +315,9 @@ def test_her_mood_and_her_stance_follow_all_her_facets():
     mood = ph.Mood(ph.Osc((0.1, 0.1, 0.0), A.ORIGIN, 0))
     stance = ph.Stance(ph.Osc((0.1, 0.1, 0.0), A.ORIGIN, 0))
     alone, mixed = Declared(Emotion.SAD, 0.6), Declared.of((("sad", 0.6), ("angry", 0.4)))
-    assert ph.mood_target_of(mood, alone, p) == pytest.approx(ph.mood_target(mood, Emotion.SAD, 0.6, p))
+    # l'oracle, écrit ici : le rayon d'une balise d'avant, du repos et du fond vers la tristesse, à 0,6
+    before = A.lerp(A.add(mood.rest.position, ph.fond_of(mood, p)), A.ANCHORS[Emotion.SAD], 0.6)
+    assert ph.mood_target_of(mood, alone, p) == pytest.approx(before)
     assert ph.mood_target_of(mood, mixed, p) != pytest.approx(ph.mood_target_of(mood, alone, p))
     assert ph.stance_target_of(stance, mixed) != pytest.approx(ph.stance_target_of(stance, alone))
 

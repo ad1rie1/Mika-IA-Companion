@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
+from mika.adapters.llm.claude import AUTHS, EFFORTS
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig
 from mika.adapters.mcp.relay import Relay
@@ -252,11 +253,11 @@ def add_models(sub) -> None:  # type: ignore[no-untyped-def]
     lb.add_argument("--temperature", type=float, default=None, help="omise : la valeur actuelle")
     lb.add_argument("--think", action=argparse.BooleanOptionalAction, default=None,
                     help="ollama : laisser réfléchir (omis : la valeur actuelle)")
-    lb.add_argument("--auth", choices=["abonnement", "cle_api"], default=None,
+    lb.add_argument("--auth", choices=list(AUTHS), default=None,
                     help="claude_code : le login de la CLI (défaut) ou une clé d'API")
     lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
     lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
-    lb.add_argument("--effort", default=None, choices=["", "low", "medium", "high", "xhigh", "max"],
+    lb.add_argument("--effort", default=None, choices=list(EFFORTS),
                     help="claude_code : l'effort de réflexion (vide : le défaut de la CLI ; omis : la valeur actuelle)")
     im = sub.add_parser("images", help="fournisseurs d'images et rôles (aucun : elle n'en génère pas)")
     isub = im.add_subparsers(dest="images_cmd", required=True)

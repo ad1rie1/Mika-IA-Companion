@@ -3,12 +3,11 @@ des tentatives vit dans ``UI`` (``login_blocked``, ``login_failed``)."""
 
 from __future__ import annotations
 
-import hmac
-
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from mika.adapters.web.accounts import password_problems
+from mika.adapters.web.gate import same_secret
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 
 
@@ -70,8 +69,7 @@ class Auth:
             password = str((data or {}).get("password", ""))
             if data is None:
                 error = "Jeton de formulaire invalide : recharge la page."
-            elif code_required and not hmac.compare_digest(str(data.get("code", "")).strip(),
-                                                           self.ui.deps.bootstrap_code):
+            elif code_required and not same_secret(str(data.get("code", "")).strip(), self.ui.deps.bootstrap_code):
                 error = "Le code de premier démarrage ne correspond pas (il est dans le journal du serveur)."
             elif not username:
                 error = "Donne un identifiant."

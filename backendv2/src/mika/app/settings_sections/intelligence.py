@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from mika.adapters.imaging.config import ImagingConfig
-from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
 from mika.adapters.imaging.models import list_image_models
+from mika.adapters.listing import ListingFailed
 from mika.adapters.llm.config import KIND_LABELS, REPLY, ROLE_LABELS, BackendSpec, LLMConfig, tokens_fr
-from mika.adapters.llm.models import ListingFailed, list_models, settle_limits
+from mika.adapters.llm.models import list_models, settle_limits
 from mika.app.handmade import ago
 from mika.inspector.catalog import SettingsPage, SettingsSection
 from mika.kernel import forms
@@ -132,7 +132,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         try:
             names = await list_image_models(str(data.get("kind") or ""), api_key=str(data.get("api_key") or ""),
                                             base_url=str(data.get("base_url") or ""))
-        except ImageListingFailed as exc:
+        except ListingFailed as exc:
             raise ValueError(str(exc)) from None
         return [(name, name) for name in names]
 

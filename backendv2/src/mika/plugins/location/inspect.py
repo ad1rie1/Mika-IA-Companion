@@ -11,6 +11,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import location as c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     Block,
     Cell,
     Column,
@@ -24,13 +25,13 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    content_text,
 )
 from mika.plugins.location import LOCATION, Fix, LocationState
 from mika.vocab.people import is_internal
 
 #: une page de ce que les téléphones lui ont dit
 SHOWN = 50
-FORGOTTEN = "(oublié)"
 #: la vue de la console où vit la localisation (son filtre par personne y mène)
 PAGE = ("location", "positions")
 #: le paramètre qui ne garde qu'une personne
@@ -60,9 +61,8 @@ def _accuracy(m: int) -> str:
 
 
 def _text(content: Any) -> str:
-    if content is None:
-        return ""
-    return content.text if content.text is not None else FORGOTTEN
+    """Un texte relu au journal (``content_text``) ; rien quand l'événement n'en porte pas."""
+    return content_text(content) if content is not None else ""
 
 
 def _sent(e: Any, frame: Frame) -> Row:

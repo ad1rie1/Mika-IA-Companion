@@ -356,7 +356,7 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     assert none.status_code == 200 and client.portal.call(live.settings.llm).backends["autre"].api_key == ""
 
     async def broken(spec):
-        raise __import__("mika.adapters.llm.models", fromlist=["ListingFailed"]).ListingFailed("hôte injoignable")
+        raise __import__("mika.adapters.listing", fromlist=["ListingFailed"]).ListingFailed("hôte injoignable")
 
     monkeypatch.setattr("mika.app.settings_sections.intelligence.list_models", broken)
     failed = post(client, url, {**backend("local", kind="ollama", model=""), "_charger": "model"})

@@ -5,7 +5,8 @@
   vécus du calendrier — pas en durée — et sans dépendre de l'heure qu'il est :
   le début du prompt, en cache, ne bouge pas d'un tour à l'autre ;
 - le message auquel elle répond est situé par rapport au dernier échange ;
-- ses propres tours gardent leur balise d'émotion ;
+- ses propres tours gardent leur balise d'émotion, dans la forme que lui
+  demande sa consigne (« [EMOTION: happy 0.6] »), et elle se relit ;
 - dans un salon, chacun parle sous son nom, jamais sous son adresse ;
 - le budget compte ce qui part hors du composeur (persona, outils) ;
 - un de ses messages écrit avec ses outils dit lesquels (ADR 0108).
@@ -21,6 +22,7 @@ from mika.faculties.transcript import (
     gap_mark,
     opening_mark,
     read_late,
+    tagged,
     thread_turns,
     window_start,
 )
@@ -150,11 +152,24 @@ def test_a_friend_coming_back_the_next_day_is_placed_in_time(tmp_path):
     assert monday and all(not m.startswith("[") for m in monday), "lundi soir, tout se suivait"
     # ses tours gardent leur balise, et elle se relit
     mine = [m for m in later.messages[:-1] if m.role == "assistant"]
-    assert mine and all(m.content.endswith("[EMOTION:happy:0.6]") for m in mine)
+    assert mine and all(m.content.endswith("[EMOTION: happy 0.6]") for m in mine)
     assert parse_tag(mine[0].content).declared is not None
     # le cache : l'historique du tour suivant commence exactement par celui du tour d'avant
     before = [(m.role, m.content) for m in tuesday.messages[:-1]]
     assert [(m.role, m.content) for m in later.messages[:len(before)]] == before
+
+
+@pytest.mark.parametrize(("intensity", "written"), [(1.0, "1.0"), (0.35, "0.35"), (0.6, "0.6")])
+def test_her_tag_in_the_thread_is_the_form_she_is_asked_for_and_reads_back(intensity, written):
+    """La balise qu'elle relit au bout de ses tours est celle que lui demande sa consigne (« [EMOTION: amused 0.4] »,
+    ADR 0093), à une facette — la seule que le fil garde —, et elle se relit comme elle a été écrite."""
+    text = tagged({"text": "ah oui ?", "emotion": "happy", "emotion_intensity": intensity})
+    assert text == f"ah oui ? [EMOTION: happy {written}]"
+    got = parse_tag(text)
+    assert got.text == "ah oui ?"
+    assert got.declared is not None and got.declared.all == (("happy", intensity),)
+    # sans émotion gardée (un message d'avant, un texte vide) : rien n'est ajouté
+    assert tagged({"text": "ah oui ?", "emotion": None, "emotion_intensity": None}) == "ah oui ?"
 
 
 def test_midnight_does_not_move_what_was_already_said(tmp_path):

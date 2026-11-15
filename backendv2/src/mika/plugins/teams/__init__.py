@@ -35,7 +35,6 @@ range hors du journal (``teams.db``), sous ce compte ; ce plugin en fait ce qu'e
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
@@ -101,17 +100,20 @@ class TeamsParams(BaseModel):
         help="Réglé dans Teams › Paramètres : désactivé, elle ne prépare ni ne propose plus rien.")] = True
     canaux: Annotated[Canals, Knob(
         label="Les tableaux de ses canaux", group="Écrire", readonly=True,
-        help="Réglés dans Réglages › Canaux (ADR 0134) : le tableau de Teams, lu de haut en bas — qui écrit, préparer "
+        # les tableaux de canal (ADR 0134)
+        help="Réglés dans Réglages › Canaux : le tableau de Teams, lu de haut en bas — qui écrit, préparer "
              "d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
     owners: Annotated[dict[str, str], Knob(
         label="À qui sont ses comptes Teams", group="Écrire", readonly=True,
-        help="Réglé dans Teams › Paramètres (« À qui », ADR 0186) : un compte sert à son propriétaire — elle "
+        # « À qui » (ADR 0186)
+        help="Réglé dans Teams › Paramètres (« À qui ») : un compte sert à son propriétaire — elle "
              "(« elle »), une personne (« personne:<clé> ») ; absent ou vide, à toi.")] = Field(default_factory=dict)
     shares: Annotated[dict[str, dict[str, str]], Knob(
         label="Avec qui ses comptes Teams sont partagés", group="Écrire", readonly=True,
-        help="Réglé par le propriétaire d'un compte (Paramètres › Partages, ADR 0188) : par compte, chaque personne "
+        # les partages (ADR 0188), qui se voient tous dans Réglages › Droits › Partages (ADR 0210)
+        help="Réglé par le propriétaire d'un compte (Paramètres › Partages) : par compte, chaque personne "
              "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir. Tous se voient et se "
-             "retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+             "retirent dans Réglages › Droits › Partages.")] = \
         Field(default_factory=dict)
     accounts_off: Annotated[tuple[str, ...], Knob(
         label="Comptes Teams décochés", group="Écrire", readonly=True,
@@ -259,8 +261,7 @@ class Written(Payload):
 #: conversation (``DraftSeen.answered``, ADR 0199)
 TEAMS = Faculty("teams", state=TeamsState, init=lambda p: TeamsState(), params=TeamsParams, state_version=4)
 TEAMS.declare(*c.ALL)
-TEAMS.bundle(BUNDLE, "les conversations Teams de ses comptes (le tien, le sien, celui d'une personne) : les lister, "
-                     "relire un fil, préparer une réponse à la place de la personne du compte")
+TEAMS.bundle(BUNDLE, phrase("teams.bundle"))
 RECEIVED = TEAMS.event("received", Received)
 SETTLED = TEAMS.event("settled", Settled)
 WRITTEN = TEAMS.event("written", Written)
@@ -295,14 +296,6 @@ def _pruned(items: FrozenDict[Any, Any], keep: int, key: Any) -> FrozenDict[Any,
     for k, _ in sorted(items.items(), key=key)[: len(items) - keep]:
         items = items.delete(k)
     return items
-
-
-def draft_args(args_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(args_json or "{}")
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -395,12 +388,9 @@ def _proposed(s: TeamsState, e, cx) -> TeamsState:
     d = e.data
     if d.owner != c.OWNER or d.capability != c.SEND:
         return s
-    args = draft_args(d.args_json)
+    args = rt.proposal_args(d.args_json)
     message = str(args.get("message") or "")
-    try:
-        expires = int(args.get(rt.EXPIRES) or 0)
-    except (TypeError, ValueError):
-        expires = 0
+    expires = rt.arg_int(args, rt.EXPIRES)
     asked = bool(message) and message in s.asked
     # la personne a déjà répondu à ce message pendant qu'elle l'écrivait (ADR 0199) — pas si on la lui a demandée
     # après (sa demande vit encore) : relue au moment même de la proposer, comme au courrier (ADR 0188)

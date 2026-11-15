@@ -499,7 +499,7 @@ def test_without_anything_to_say_the_urge_alone_barely_counts(tmp_path):
     """L'envie de compagnie ne dit pas de quoi parler : sans matière, sa preuve
     ne garde qu'une part ; ce que la personne lui a dit d'elle-même, une pensée,
     ce qu'elle a fini — et la preuve est entière."""
-    from mika.faculties.needs import _matterless
+    from mika.faculties.needs.matter import _matterless
 
     async def scenario(kernel, script, out, llm):
         await befriend(kernel, "user_1", social_c.FRIEND)

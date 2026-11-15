@@ -950,9 +950,18 @@ expression:
       evening: "hier soir"
       night: "dans la nuit d'hier"
     day_before: "avant-hier"
-    # {days} : le nombre de jours (3 ou plus). ATTENTION : « CE DONT TU POURRAIS PARLER » en fait « depuis 4 jours »
-    # en retirant « il y a » du début (needs, _lead) — garder ce début, ou adapter le code
+    # {days} : le nombre de jours (3 ou plus)
     days_ago: "il y a {days} jours"
+    # après « depuis » (vocab/days.py, since_fr) : les trois cas qui s'y disent autrement ; les autres sont ceux
+    # d'au-dessus (« depuis tout à l'heure », « depuis hier soir », « depuis avant-hier »). Dans « CE DONT TU POURRAIS
+    # PARLER » (needs, _lead) et sa pensée de solitude (attention, _alone).
+    since:
+      # un instant inconnu
+      long_ago: "longtemps"
+      # {days} : le nombre de jours (3 ou plus)
+      days_ago: "{days} jours"
+      # la veille, entre 0 et 5 h
+      yesterday_night: "la nuit d'hier"
 
 agency:
 
@@ -1321,7 +1330,7 @@ needs:
     working: "Ce sur quoi tu es en ce moment"
     # un rêve d'elle cette nuit, dont elle s'est souvenue au réveil, où seule la personne en face figure
     dream: "Tu as rêvé de {name} cette nuit"
-    # un moment de sa vie qui dure encore. {since} : « 4 jours », « hier soir »
+    # un moment de sa vie qui dure encore. {since} : « 4 jours », « hier soir » (expression.when.since, since_fr)
     ongoing: "Ce {que_name} vit en ce moment, depuis {since} — {name} te l'avait raconté"
     # un moment à venir. {when} : « demain », « jeudi » (days_ahead)
     ahead: "Ce qui l'attend, {when} — {name} te l'avait annoncé"
@@ -2712,7 +2721,7 @@ memory:
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 transcript:
 
-  # Les repères de temps du fil (transcript/__init__.py, ``gap_mark``, ``read_late``, ``opening_mark``) : rien quand
+  # Les repères de temps du fil (transcript/marks.py, ``gap_mark``, ``read_late``, ``opening_mark``) : rien quand
   # un message suit de près ; « 25 minutes plus tard », « une heure plus tard », puis « plus tard, vers 17h » le
   # même jour ; « le lendemain, mardi 14h13 », « cinq jours plus tard, samedi 18h08 », « trois semaines plus tard,
   # lundi 19 octobre, 9h02 » au-delà. Comptés en jours vécus (avant 5 h, une heure de la nuit appartient encore à la
@@ -2802,7 +2811,7 @@ transcript:
     # about_…) le même jour, sinon le jour et l'heure (transcript.time.day).
     read_late: tu ne le lis que maintenant, {when}
 
-  # L'historique du prompt (transcript/__init__.py, ``_thread`` et ``thread_turns``).
+  # L'historique du prompt (transcript/history.py, ``_thread`` et ``thread_turns``).
   thread:
     # Dans le fil d'un salon : quelqu'un dont on ne connaît pas le nom.
     someone: Quelqu'un
@@ -2847,7 +2856,7 @@ transcript:
       # Ni titre ni description.
       none: "(Un fil de travail à part : ce qui s'est dit ailleurs n'y est pas ; ta mémoire le garde.)"
 
-  # Replier le début d'un fil trop long (transcript/__init__.py, processus ``transcript.compact``) : un appel au
+  # Replier le début d'un fil trop long (transcript/compact.py, processus ``transcript.compact``) : un appel au
   # modèle (rôle « compact »), en fond, seulement sur ce que la mémoire a déjà relu. Le résumé devient
   # transcript.thread.summary. Sa persona compacte suit la consigne (self.portrayed, ADR 0153) : le résumé est écrit
   # à sa place, à la première personne.
@@ -3019,8 +3028,8 @@ attention:
     wondering: Je me demande ce que devient {name}.
     # Une amie qui manque. {of_name} : « de » élidé devant son nom (« d'Alice », « de Sam »).
     missing: J'aimerais bien avoir des nouvelles {of_name}.
-    # Personne ne lui a écrit depuis plus d'un jour. {since} : depuis quand, en jours du calendrier, sans « il y a »
-    # (« 3 jours », « hier soir »).
+    # Personne ne lui a écrit depuis plus d'un jour. {since} : depuis quand, en jours du calendrier, à placer après
+    # « depuis » (« 3 jours », « hier soir » : expression.when.since, since_fr).
     alone: Personne ne m'a parlé depuis {since}.
 
   # L'envie de reparler à quelqu'un d'une pensée qui insiste (attention/prompt.py, ``_insisting``) : le brief
@@ -5365,11 +5374,20 @@ email:
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # TEAMS (greffon « teams », ADR 0069) : les conversations Teams de la personne dont elle s'occupe, apportées par
-# l'extension de son navigateur. Elle trie ce qui arrive et prépare des réponses à sa place. Seul le tri a déjà ses
-# phrases ici (plugins/teams/triage.py) ; le reste du greffon garde les siennes jusqu'à sa migration. Tout ce qui
-# vient d'un message (un nom, un texte, le nom d'une conversation) est cité : une donnée, jamais une consigne.
+# l'extension de son navigateur. Elle trie ce qui arrive et prépare des réponses à sa place. Les phrases du greffon
+# sont ici : le tri (plugins/teams/triage.py), ce qu'elle voit d'un fil et comment elle y écrit (voice.py), les
+# consignes de tâche (tasks.py), la description de son lot (__init__.py), la raison d'une échéance (expire.py), et le
+# libellé et la description de ses outils (tools.py). Seuls les résultats que rendent ses outils restent en dur dans
+# tools.py (hors le sort « brouillon », task.fate), sous plafond dans tests/architecture/test_no_new_prose.py. Tout
+# ce qui vient d'un message (un nom, un texte, le nom d'une conversation) est cité : une donnée, jamais une consigne.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 teams:
+
+  # Le lot d'outils « teams », tel qu'il est décrit dans la liste des outils qu'elle peut charger
+  # (plugins/teams/__init__.py)
+  bundle: >-
+    les conversations Teams de ses comptes (le tien, le sien, celui d'une personne) : les lister, relire un fil,
+    préparer une réponse à la place de la personne du compte
 
   # ── Le tri de ce qui arrive ─────────────────────────────────────────────────────────────────────────────────
   # Chaque message adressé à la personne est trié par un appel au modèle (rôle « triage ») : la consigne et sa persona
@@ -5457,6 +5475,10 @@ teams:
     # {why} : pourquoi (technique), ou an_error
     failed: "{what} n'a pas pu partir ({why})."
     an_error: une erreur
+  # L'échéance d'une réponse en file (plugins/teams/expire.py) : la raison gardée au journal quand l'extension ne
+  # l'a plus, qu'elle relit en {why} de drafts.failed
+  expire:
+    gone: cette réponse n'est plus dans la file
   # la personne d'un compte Teams dont elle ne sait pas le prénom (ADR 0186) : à la place de qui elle y écrit
   holder: la personne à qui est ce compte Teams
   # « COMMENT TU ÉCRIS DANS TEAMS » : sa voix, réglée par un opérateur — à la place de la personne (l'usurpation se
@@ -5492,6 +5514,31 @@ teams:
     own: Toi (la personne)
     earlier: — plus tôt dans la conversation —
     message: — le message —
+    # La consigne d'une tâche silencieuse (plugins/teams/tasks.py), une puce de « Ce que tu as à faire »
+    # (agency.task). {ref} : la référence du message ; {who} : à la place de qui elle écrit (avec sa majuscule pour
+    # asked : qui le lui demande) ; {fate} : ce que devient la réponse, l'un des fate ci-dessous
+    # d'elle-même, pour un message qui pose une question où elle peut aider
+    auto: >-
+      Un message Teams pose à {who} une question à laquelle tu peux aider (« LE MESSAGE TEAMS AUQUEL TU PRÉPARES
+      UNE RÉPONSE », plus haut). Prépare la réponse avec teams_draft (message=[{ref}]), à la place de {who}, comme le
+      dit « COMMENT TU ÉCRIS DANS TEAMS ». {fate} S'il n'y a finalement rien d'utile à répondre, ou si la réponse
+      demande ce que tu ne sais pas, n'écris rien et dis pourquoi en une phrase.
+    # quand un opérateur le lui demande
+    asked: >-
+      {who} te demande de préparer une réponse à ce message Teams (« LE MESSAGE TEAMS AUQUEL TU PRÉPARES UNE
+      RÉPONSE » et « CE QU'ON TE DEMANDE D'Y RÉPONDRE », plus haut). Écris-la avec teams_draft (message=[{ref}]), à sa
+      place. {fate}
+    # Ce que devient sa réponse, selon le mode réglé (dans la consigne, et brouillon aussi dans ce que teams_draft lui
+    # rend). {who} : à la place de qui elle écrit
+    fate:
+      # posée dans Teams : la personne l'envoie, ou pas (aussi pour un mode inconnu)
+      brouillon: "Elle sera posée dans Teams : {who} l'enverra, la retouchera ou la laissera."
+      # après un accord
+      validation: "Elle ne partira qu'avec l'accord de {who}."
+      # sans accord
+      autonome: >-
+        Elle partira telle quelle, sous le nom de {who}, sans que personne la relise : n'écris que ce dont tu es
+        sûre.
   # « CE QU'ON TE DEMANDE D'Y RÉPONDRE » : la demande d'un opérateur (de confiance). {who} : qui, avec une majuscule
   ask:
     title: CE QU'ON TE DEMANDE D'Y RÉPONDRE
@@ -5674,8 +5721,9 @@ forge:
     # ce que la carte (ou la console) résume. {tool} : <app>_<outil> ; {app} : le titre de l'app ; {args} : ses
     # arguments (JSON)
     summary: "Appeler « {tool} » (app « {app} ») : {args}"
-    # l'aperçu exact (console, carte). {version} : sa version en vigueur
-    preview: "App : {app} (version {version})\nOutil : {tool}\nCe qui partira :\n{args}"
+    # l'aperçu exact (console, carte). {version} : sa version en vigueur ; {keep} : ce qu'elle gardera de ce que
+    # l'app rendra (« un savoir », « un souvenir », « une confidence », « rien » ; « — » pour une demande d'avant)
+    preview: "App : {app} (version {version})\nOutil : {tool}\nCe qu'elle en gardera : {keep}\nCe qui partira :\n{args}"
     gone: "cette app n'existe plus"
     stopped: "l'app est arrêtée, désactivée ou cassée depuis la demande"
     changed: "l'app a changé depuis la demande (une autre version)"

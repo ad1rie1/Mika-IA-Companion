@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from mika.kernel.codec import canonical_json
 from mika.kernel.forms import Knob
 from mika.ports.mcp import KEEPS
-from mika.vocab.access import POLICIES, ToolRule
+from mika.vocab.access import POLICIES, Keep, Policy, ToolRule
 
 #: le nom d'un serveur : il entre dans le nom de ses outils (``mcp_<serveur>_<outil>``) et de son lot
 SERVER_NAME = re.compile(r"[a-z][a-z0-9_]{0,23}")
@@ -53,10 +53,6 @@ class AccessRule(ToolRule):
     tous) — le cadre commun (``vocab.access.ToolRule``)."""
 
 
-_Policy = Literal["seule", "carte", "toi", "non"]
-_Keep = Literal["public", "perso", "prive", "rien"]
-
-
 #: à qui est un service (ADR 0192) : une personne qui a un compte, par la clé de sa personne
 OWNER = re.compile(r"^personne:[A-Za-z0-9_.:@-]{1,120}$")
 
@@ -74,9 +70,10 @@ class McpServer(BaseModel):
     enabled: Annotated[bool, Knob(label="Actif", group="Pour elle", advanced=False, order=7,
                                   help="Décoché : il n'est ni joint ni offert ; ses réglages et ses outils "
                                        "approuvés restent.")] = True
+    # ADR 0192 : chacun branche ses services MCP
     owner: Annotated[str, Knob(
         label="À qui", group="Pour elle", readonly=True, order=8,
-        help="Branché par une personne, sous son propre compte (ADR 0192) : « personne:<clé> » ; vide, un des "
+        help="Branché par une personne, sous son propre compte : « personne:<clé> » ; vide, un des "
              "siens, réglé par un opérateur. Outils › Venus d'ailleurs et la fiche du service le disent par son nom. "
              "Ce qu'elle en fait reste dit par ses lignes d'accès.")] = ""
     transport: Annotated[Literal["distant", "local"], Knob(
@@ -129,12 +126,12 @@ class McpServer(BaseModel):
         label="Accès à ses outils", group="Accès", order=37,
         help="Les lignes se lisent de haut en bas : pour un outil, la première qui le concerne (qui, quand, ses "
              "outils) décide ; aucune, c'est la ligne par défaut. Jamais dans un salon ni avec une inconnue.")] = ()
-    default_read: Annotated[_Policy, Knob(label="Par défaut, un outil qui lit", group="Accès", choices=POLICIES,
-                                          order=38)] = "non"
-    default_act: Annotated[_Policy, Knob(label="Par défaut, un outil qui agit", group="Accès", choices=POLICIES,
-                                         order=39)] = "non"
-    default_keep: Annotated[_Keep, Knob(label="Par défaut, ce qu'elle en garde", group="Accès", choices=KEEPS,
-                                        order=40)] = "rien"
+    default_read: Annotated[Policy, Knob(label="Par défaut, un outil qui lit", group="Accès", choices=POLICIES,
+                                         order=38)] = "non"
+    default_act: Annotated[Policy, Knob(label="Par défaut, un outil qui agit", group="Accès", choices=POLICIES,
+                                        order=39)] = "non"
+    default_keep: Annotated[Keep, Knob(label="Par défaut, ce qu'elle en garde", group="Accès", choices=KEEPS,
+                                       order=40)] = "rien"
     timeout_s: Annotated[float, Knob(label="Délai d'un appel", group="Bornes", lo=1, hi=300, unit="s",
                                      order=40)] = 30.0
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,
@@ -146,7 +143,12 @@ class McpServer(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _without_retired(cls, data: Any) -> Any:
-        """Un réglage retiré, encore dans une configuration gardée, ne la rend pas illisible."""
+        """Un réglage retiré, encore dans une configuration gardée, ne la rend pas illisible.
+
+        La forme qu'il lit : un serveur d'avant l'ADR 0163 (2026-10-30), qui porte encore « Réponse lue »
+        (``max_result_chars``, ``RETIRED``) ; il se lit sans lui. Sans ce lecteur, ``Settings.mcp`` jugerait ce
+        serveur illisible et l'ignorerait (un champ inconnu est refusé) : il ne part qu'après une révision de
+        données de la base ``mind`` qui aura réécrit les réglages gardés à la forme du jour (audit du 2026-11-05)."""
         return {k: v for k, v in data.items() if k not in RETIRED} if isinstance(data, dict) else data
 
     @model_validator(mode="after")

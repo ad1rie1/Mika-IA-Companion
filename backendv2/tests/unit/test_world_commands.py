@@ -123,7 +123,22 @@ def test_ce_que_le_noyau_ne_sait_pas_encore_faire_est_dit(tmp_path):
 
     _, out = _run(tmp_path, script)
     assert out["act"].code is w.Refusal.UNSUPPORTED and out["act"].message
+    assert "ADR" not in out["act"].message  # lu par une opératrice : la règle en clair, sans numéro (ADR 0225)
     assert out["progress"].ok and out["progress_commit"] is None  # accepté, rien d'écrit
+
+
+def test_ce_que_l_editeur_ne_sait_pas_encore_faire_est_dit_en_clair(tmp_path):
+    """Retirer une pièce dépasse ce premier éditeur : refusé, dit en mots — sans numéro d'ADR, que l'opératrice
+    lit dans son client (ADR 0225) —, et rien n'est écrit."""
+    async def script(kernel, out):
+        defn = kernel.mind.frame().state("world").definition
+        out["room"] = defn.rooms[0].id
+        out["edit"], out["commit"] = await _submit(kernel, w.Edit(
+            cmd="e-1", base=defn.rev, changes=(w.DefRemove(of=w.DefKind.ROOM, id=out["room"]),)))
+
+    _, out = _run(tmp_path, script)
+    assert out["edit"].code is w.Refusal.UNSUPPORTED and out["commit"] is None
+    assert f"retirer la pièce « {out['room']} »" in out["edit"].message and "ADR" not in out["edit"].message
 
 
 def test_l_hote_et_l_echeance_ne_terminent_pas_deux_fois(tmp_path):

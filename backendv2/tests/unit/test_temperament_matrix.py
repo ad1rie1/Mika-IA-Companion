@@ -32,8 +32,8 @@ from mika.faculties.agency import derive as agency_derive
 from mika.faculties.attention.faculty import _met_felt, _missed_felt
 from mika.faculties.attention.faculty import derive as attention_derive
 from mika.faculties.body import derive as body_derive
-from mika.faculties.needs import _reunited_felt
 from mika.faculties.needs import derive as needs_derive
+from mika.faculties.needs.empty import _reunited_felt
 from mika.faculties.others.faculty import derive as others_derive
 from mika.faculties.self.character import told
 from mika.faculties.self.esteem import esteem

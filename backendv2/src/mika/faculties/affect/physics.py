@@ -261,11 +261,6 @@ def push_mood(m: Mood, target: Vec3, gain: float, p: AffectParams, mark: Mark) -
     return replace(m, gap=A.sub(moved, base), marks=_marked(m, mark))
 
 
-def mood_target(m: Mood, emotion: Emotion, intensity: float, p: AffectParams) -> Vec3:
-    """Sur le rayon qui va de là où elle en est (repos et fond) vers l'émotion."""
-    return A.lerp(A.add(m.rest.position, fond_of(m, p)), A.ANCHORS[emotion], max(0.0, min(1.0, intensity)))
-
-
 def blend(base: Vec3, felt: tuple[tuple[str, float], ...]) -> Vec3:
     """Le point que visent plusieurs facettes (ADR 0093) : sur le rayon de chacune (de ``base`` vers son ancre, à son
     intensité), pondéré par ces intensités. Une seule facette : son point, comme une balise d'avant."""

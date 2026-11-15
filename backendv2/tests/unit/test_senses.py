@@ -33,10 +33,11 @@ from mika.kernel.events import Origin
 from mika.kernel.prompt import UNTRUSTED_NOTE
 from mika.kernel.state import FrozenDict
 from mika.plugins.email import MENTION_TITLE, EmailParams
+from mika.plugins.email import tools as email_tools
 from mika.plugins.email.poll import heuristic, read_triage, triage_system
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse
-from mika.ports.mail import Mail
+from mika.ports.mail import Draft, Mail
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
@@ -295,28 +296,43 @@ def test_headlines_that_do_not_touch_her_go_unnoticed(tmp_path):
 
 
 def test_writing_a_mail_waits_for_approval_then_leaves(tmp_path):
+    """Un mail part d'un brouillon, tel que l'aperçu le montrait ; une proposition sans brouillon (la forme d'avant
+    les brouillons, que plus rien ne produit) est bloquée à l'aperçu et ne part jamais."""
     box = FakeMail()
 
     async def scenario(kernel, llm, mail_, feeds):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
-            capability=email_c.SEND, owner="email",
-            args_json=json.dumps({"to": "bob@exemple.fr", "subject": "Coucou", "body": "Ça va ?"}),
-            summary=_c("Envoyer à bob"), approval=True, context="email")], emitter="runtime", correlation="t",
-            origin=_tool())
+        draft = mail_.save_draft(Draft(id="", account="", to="bob@exemple.fr", subject="Coucou", body="Ça va ?"))
+        for args in ({"to": "bob@exemple.fr", "subject": "Sans brouillon", "body": "Ça part ?"},
+                     {"draft": draft.id, "_apercu": mail_.preview(draft.id).digest}):
+            await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
+                capability=email_c.SEND, owner="email", args_json=json.dumps(args),
+                summary=_c("Envoyer à bob"), approval=True, context="email")], emitter="runtime", correlation="t",
+                origin=_tool())
         await asyncio.sleep(MINUTE / US)
         before = list(mail_.sent)
-        pending = kernel.mind.frame().get(rt.PENDING_EFFECTS)
-        status = await KernelPort(kernel).resolve_effect(pending[0].proposal, True, by="user_1")
+        pending = sorted(p.proposal for p in kernel.mind.frame().get(rt.PENDING_EFFECTS))
+        port = KernelPort(kernel)
+        statuses = [await port.resolve_effect(n, True, by="user_1") for n in pending]
         await asyncio.sleep(MINUTE / US)
-        return before, status
+        return before, statuses
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box)
-    before, status = r.result
-    assert before == [] and status == "approved"
+    before, statuses = r.result
+    assert before == [] and statuses == ["blocked", "approved"]
     assert r.mail.sent == [("bob@exemple.fr", "Coucou", "Ça va ?", "")]
     done = r.of(rt.EFFECT_EXECUTED)
     assert len(done) == 1 and done[0].data.ok
+
+
+def test_a_mail_proposal_without_a_draft_never_leaves():
+    """La capacité elle-même refuse une proposition sans brouillon : rien ne part sans l'empreinte approuvée."""
+    box = FakeMail()
+    legacy = {"to": "bob@exemple.fr", "subject": "Coucou", "body": "Ça va ?"}
+    shown = email_tools.preview(legacy, {"mail": box})
+    assert shown is not None and shown.blocked and shown.digest == ""
+    assert asyncio.run(email_tools.send(legacy, "email", {"mail": box})) == (False, "pas de brouillon")
+    assert box.sent == []
 
 
 # ── Les flux ──────────────────────────────────────────────────────────────

@@ -38,8 +38,9 @@ from mika.faculties.projects.prompt import missing_tools
 from mika.kernel.faculty import proving_tools
 from mika.plugins import mcp as mcp_plugin
 from mika.plugins import web as web_plugin
-from mika.plugins.forge import Edit, ForgeParams, apply_edits, guide, timeout_of
+from mika.plugins.forge import ForgeParams, guide, timeout_of
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
+from mika.plugins.forge.tools import Edit, apply_edits
 from mika.ports.forge_args import arg_specs, args_schema, check_args
 from mika.runtime.tool_offer import admitted
 from tests.unit.test_forge_console import _content, _her_tool, install, run
@@ -384,8 +385,10 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
     from mika.kernel.events import Content, Origin
     from mika.kernel.frame import Audience
     from mika.kernel.prompt import UNTRUSTED_NOTE
-    from mika.plugins.forge import WriteArgs, _news, concerns, forge_write
+    from mika.plugins.forge import concerns
     from mika.plugins.forge.guide import WATCH_CODE, WATCH_MANIFEST
+    from mika.plugins.forge.prompt import _news
+    from mika.plugins.forge.tools import WriteArgs, forge_write
     from mika.sim.clock import run_virtual
     from mika.vocab.episodes import Kind, project_target
     from tests.fixtures.atelier import Atelier
@@ -446,7 +449,8 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
 def test_only_a_strong_recent_untold_finding_about_that_person_is_to_tell():
     from mika.kernel.clock import HOUR
     from mika.kernel.state import FrozenDict
-    from mika.plugins.forge import App, ForgeState, News, news_for
+    from mika.plugins.forge import App, ForgeState, News
+    from mika.plugins.forge.prompt import news_for
 
     s = ForgeState(apps=FrozenDict({a: App(a, 1) for a in ("fort", "faible", "vieux", "dit", "autre", "essaye")}),
                    news=FrozenDict({
@@ -501,7 +505,7 @@ def test_what_she_writes_for_mariadb_runs_on_sqlite_and_the_other_way_round(tmp_
 
 
 def test_a_list_given_as_json_text_is_read_as_a_list_and_a_text_stays_a_text():
-    from mika.plugins.forge import EditArgs, WriteArgs
+    from mika.plugins.forge.tools import EditArgs, WriteArgs
     from mika.runtime.tools import unquoted
 
     edit = SimpleNamespace(schema=None, args=EditArgs)

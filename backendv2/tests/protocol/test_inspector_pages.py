@@ -14,7 +14,9 @@ import pytest
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
+from mika.ports.mail import Draft as MailDraft
 from mika.runtime.inspection import Inspection
+from mika.sim.outside import FakeMail
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
@@ -183,16 +185,26 @@ def test_connected_apps_are_listed_without_secret_and_revocable(world):  # noqa:
 
 
 def test_an_operator_approves_from_the_inspector(world):  # noqa: F811
+    """Un mail proposé depuis un brouillon s'approuve depuis la page ; une proposition sans brouillon (la forme
+    d'avant les brouillons) ne peut pas partir telle quelle."""
     client, live, _ = world
     bootstrap(client)
     kernel = live.kernel
-    draft = rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email",
-                                     args_json=json.dumps({"to": "alice@exemple.fr", "subject": "Coucou"}),
-                                     summary=Content.of("Envoyer à alice@exemple.fr : « Coucou »"),
-                                     context="email")
-    commit = client.portal.call(lambda: kernel.mind.append([draft], emitter="runtime", correlation="test",
-                                                           origin=Origin.EXTERNAL))
-    proposal = commit.seqs[-1]
+    box = kernel.ports["mail"] = FakeMail()  # le montage n'a pas de boîte configurée : une boîte simulée
+    mail = box.save_draft(MailDraft(id="", account="", to="alice@exemple.fr", subject="Coucou", body="Bonjour !"))
+
+    def propose(args: dict) -> int:
+        draft = rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", args_json=json.dumps(args),
+                                         summary=Content.of("Envoyer à alice@exemple.fr : « Coucou »"),
+                                         context="email")
+        return client.portal.call(lambda: kernel.mind.append([draft], emitter="runtime", correlation="test",
+                                                             origin=Origin.EXTERNAL)).seqs[-1]
+
+    legacy = propose({"to": "alice@exemple.fr", "subject": "Coucou"})
+    blocked = post(client, "/inspecteur/approbations", proposal=str(legacy), decision="approve")
+    assert "Ça ne peut pas partir tel quel" in html_of(blocked) and box.sent == []
+    post(client, "/inspecteur/approbations", proposal=str(legacy), decision="reject")
+    proposal = propose({"draft": mail.id, "_apercu": box.preview(mail.id).digest})
     page = html_of(client.get("/inspecteur/approbations"))
     assert "alice@exemple.fr" in page and "Approuver" in page  # ce qui partira, tel quel
     r = post(client, "/inspecteur/approbations", proposal=str(proposal), decision="approve", note="ok")

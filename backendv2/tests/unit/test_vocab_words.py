@@ -7,7 +7,7 @@ import pytest
 
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.sim.lane import PARIS, at_paris
-from mika.vocab.days import ago_words, part_of_day, window_of
+from mika.vocab.days import ago_words, part_of_day, since_fr, when_fr, window_of
 from mika.vocab.phrasebook import family
 from mika.vocab.words import elided, fold, stems
 from tests.architecture.test_phrasebook import uses
@@ -61,6 +61,36 @@ def test_a_moment_said_in_words_is_found_in_time(text, expected):
 ])
 def test_how_long_ago_is_said_in_few_words(us, expected):
     assert ago_words(us) == expected
+
+
+NOW = at_paris(2026, 11, 15, 15, 0)  # le dimanche 15 novembre
+
+
+@pytest.mark.parametrize(("then", "when", "since"), [
+    (NOW - 4 * DAY, "il y a 4 jours", "4 jours"),
+    (0, "il y a longtemps", "longtemps"),  # un instant inconnu
+    (at_paris(2026, 11, 14, 3, 0), "dans la nuit d'hier", "la nuit d'hier"),
+    (at_paris(2026, 11, 14, 21, 0), "hier soir", "hier soir"),
+    (at_paris(2026, 11, 13, 10, 0), "avant-hier", "avant-hier"),
+    (at_paris(2026, 11, 15, 9, 0), "ce matin", "ce matin"),
+    (NOW - 20 * MINUTE, "tout à l'heure", "tout à l'heure"),
+])
+def test_since_is_said_after_depuis_without_cutting_a_phrase(then, when, since):
+    """« depuis 4 jours », « depuis la nuit d'hier » : ce qui suit « depuis » a ses cas à lui, lus sur l'instant.
+    Plus de « il y a » retiré du début d'une phrase de sa voix (« depuis dans la nuit d'hier » : audit du 2026-11-05,
+    K7-11) ; ``when_fr`` dit toujours la même chose."""
+    assert when_fr(then, NOW, PARIS) == when
+    assert since_fr(then, NOW, PARIS) == since
+
+
+def test_since_says_what_the_old_cut_said():
+    """Oracle : l'ancienne découpe de la pensée de solitude (attention, ``_alone``), sur un instant par heure pendant
+    dix jours, et l'instant inconnu. ``since_fr`` dit la même chose partout."""
+    def cut(when: str) -> str:
+        return when[len("il y a "):] if when.startswith("il y a ") else when.removeprefix("dans ")
+
+    for then in [0, *(NOW - h * HOUR for h in range(10 * 24 + 1))]:
+        assert since_fr(then, NOW, PARIS) == cut(when_fr(then, NOW, PARIS)), then
 
 
 def test_how_long_ago_is_counted_in_one_place():

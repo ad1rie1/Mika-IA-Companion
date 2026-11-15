@@ -23,7 +23,7 @@ from mika.inspector.pages import tools as catalog
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI, Overview, env
 from mika.kernel.inspect import Pager, Ref, When
-from mika.plugins.mcp import NO, access_for
+from mika.plugins.mcp import access_for
 from mika.plugins.mcp.inspect import (
     KEEP_WORDS,
     POLICY_WORDS,
@@ -43,7 +43,7 @@ from mika.plugins.mcp.inspect import (
 )
 from mika.ports.mcp import STATES
 from mika.runtime.tool_offer import deferred, gate_of
-from mika.vocab.access import MOMENTS, PERSON
+from mika.vocab.access import MOMENTS, NO, PERSON
 from mika.vocab.episodes import Kind
 
 KIND = "serveur"

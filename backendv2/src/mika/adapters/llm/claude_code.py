@@ -90,6 +90,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mika.adapters.llm.claude import AUTHS, checked_effort
 from mika.adapters.llm.openai_compat import volatile_system
 from mika.adapters.mcp.protocol import Outcome, Tool
 from mika.adapters.mcp.relay import Pending, Relay, RelaySession
@@ -99,9 +100,6 @@ from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.llm.claude_code")
 
-AUTHS = ("abonnement", "cle_api")
-#: les efforts de réflexion que la CLI accepte (``--effort``) ; vide : le sien par défaut
-EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 #: les seules variables du parent qui passent (HOME : la CLI y trouve son login)
 INHERITED = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR")
 #: jamais transmises, même si le processus de Mika les a
@@ -298,10 +296,8 @@ class ClaudeCodeBackend:
     ) -> None:
         if auth not in AUTHS:
             raise ValueError(f"mode d'authentification inconnu : {auth!r} (attendu : {' ou '.join(AUTHS)})")
-        if effort not in EFFORTS:
-            raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
-        #: l'effort de réflexion passé à la CLI (``--effort``) ; vide : son défaut
-        self.effort = effort
+        #: l'effort de réflexion passé à la CLI (``--effort``, ``claude.EFFORTS``) ; vide : son défaut
+        self.effort = checked_effort(effort)
         self.name = name
         self.model = model
         self.auth = auth

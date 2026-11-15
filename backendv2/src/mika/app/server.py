@@ -29,9 +29,10 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Mount, Route
 
+from mika.adapters.addresses import serving_on
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
-from mika.adapters.forge import ForgeBases, ForgeHost, serving_on
+from mika.adapters.forge import ForgeBases, ForgeHost
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -612,7 +613,7 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
                                                             bootstrap_code=secrets.token_urlsafe(9)))
     live.relay_base = relay_base(host, port)
     live.console_url = console_url(host, port)
-    serving_on(port)  # une app de la Forge ne joint pas Mika elle-même, même par une adresse relayée
+    serving_on(port)  # ni une app de la Forge ni un article d'un flux ne joignent Mika, même par une adresse relayée
     log.info("console : %s/", live.console_url)
     # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau. Les en-têtes de
     # mandataire ne sont crus que derrière un mandataire déclaré (local) ; ailleurs, l'adresse vue fait foi.

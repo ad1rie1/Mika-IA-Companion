@@ -6,15 +6,18 @@ d'une ligne, dits à qui n'est pas une de ses propriétaires."""
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import socket
 from collections import OrderedDict
 from types import SimpleNamespace as NS
 
 import pytest
 
+from mika.adapters import addresses
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.gate import SlidingWindow
-from mika.app.me import Call, Denied
+from mika.app.me import Call, Denied, hosts
 from mika.app.me import mail as mail_moi
 from mika.app.me import mcp as mcp_moi
 from mika.app.me import settings as settings_moi
@@ -280,3 +283,21 @@ def test_a_service_share_revoked_meanwhile_does_not_come_back(monkeypatch):
     assert shared["ok"], shared
     who = [tuple(a.who) for a in services.servers["notes"].access]
     assert (lea,) not in who and (paul,) in who and (me,) in who
+
+
+def test_a_server_she_has_it_reach_is_judged_by_the_forges_rule(monkeypatch):
+    """Une boîte ou un service qu'une personne qui n'est pas opératrice fait joindre : la règle
+    d'``adapters/addresses.py`` — ni le réseau local derrière le préfixe NAT64, ni une adresse de la machine elle-même
+    (donnée telle quelle ou par un nom) ; une adresse d'Internet passe, NAT64 compris."""
+    monkeypatch.setattr(addresses, "LOCAL", addresses.LocalAddresses(lambda: [ipaddress.ip_address("93.184.216.40")]))
+    names = {"maison.example.test": "93.184.216.40", "public.example.test": "93.184.216.34"}
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, *a, **k: [  # une adresse se résout en elle-même
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (names.get(host, host), 0))])
+
+    def local(host: str) -> bool:
+        return asyncio.run(hosts.local_host(host))
+
+    for host in ("64:ff9b::7f00:1", "[64:ff9b::a00:1]", "93.184.216.40", "maison.example.test", "127.0.0.1"):
+        assert local(host), host
+    for host in ("93.184.216.34", "public.example.test", "64:ff9b::808:808"):
+        assert not local(host), host

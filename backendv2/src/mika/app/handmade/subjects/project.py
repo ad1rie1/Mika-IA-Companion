@@ -48,7 +48,7 @@ from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import PREFIX, UI, Overview, env
 from mika.kernel.inspect import Pager
-from mika.plugins.forge import app_tool_names
+from mika.plugins.forge.access import app_tool_names
 from mika.vocab.access import MOMENTS, PERSON, when_words
 
 KIND = "project"

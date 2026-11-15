@@ -17,7 +17,8 @@ from mika.contracts import needs as needs_c
 from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import _met_felt
 from mika.faculties.memory.faculty import _moment_resolved_felt
-from mika.faculties.needs import NeedsParams, _toward
+from mika.faculties.needs import NeedsParams
+from mika.faculties.needs.matter import _toward
 from mika.faculties.others.faculty import OthersParams, OthersState, _contagion
 from mika.faculties.social.faculty import Contact, SocialParams, SocialState, _missed, _weight
 from mika.kernel.arbitration import RowView

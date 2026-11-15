@@ -1,8 +1,9 @@
 {# Relations & échanges › Teams › Réponses (app/handmade/tabs/teams.py, ADR 0177) : ce qu'elle a préparé à ta place.
    D'abord une file à valider — chaque réponse qui attend ton accord, le message auquel elle répond et, en face, ce
    qu'elle a écrit (comme sur sa fiche), « Examiner et décider » sur sa ligne — ; puis, en liste, ce que les autres
-   sont devenues. Ce que dit le plugin de « Envoyer à ta place » en pied, avec son lien. La pagination et la bascule
-   « Tableau » sont celles du plugin. #}
+   sont devenues. En pied, ce que dit la vue de comment elles partent (« Comment ça part ») : son aide et son lien vers
+   le tableau de Teams dans Réglages › Canaux (celui du compte choisi). La pagination et la bascule « Tableau » sont
+   celles du plugin. #}
 {% import "handmade/shared/tab.html" as tab with context %}
 {% import "handmade/teams/_teams.html" as tm %}
 <div class="now-page teams-tab teams-replies" data-tab="teams/reponses">
@@ -43,7 +44,7 @@
     {{ tab.empty(t.empty) }}
     {% endif %}
     {{ tab.pager(t) }}
-    {% if about %}<p class="person-tab-note teams-about">{{ about }} <a href="{{ PREFIX }}/envoi">Envoyer à ta place →</a></p>{% endif %}
+    {% if how %}<p class="person-tab-note teams-about">{% if how.about %}{{ how.about }} {% endif %}<a href="{{ how.href }}">{{ how.text }} →</a></p>{% endif %}
   </section>
   {% else %}
   {{ tm.unplugged(notes, False) }}

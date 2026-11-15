@@ -36,8 +36,8 @@ object MikaProtocol {
     const val MAX_OUTBOX_ATTEMPTS = 5
     /**
      * Au plus tant de messages partis sans accusé : le serveur refuse (`overloaded`) au-delà de 8 en
-     * attente sur une connexion (adapters/web/app.py `MAX_QUEUED_CHATS`), et une file rejouée d'un
-     * bloc au retour du réseau les dépassait. Chaque accusé fait partir le suivant.
+     * attente sur une connexion (adapters/web/chat_session.py `MAX_QUEUED_CHATS`), et une file
+     * rejouée d'un bloc au retour du réseau les dépassait. Chaque accusé fait partir le suivant.
      */
     const val MAX_IN_FLIGHT = 4
 
@@ -184,7 +184,7 @@ object MikaProtocol {
     const val ACK_CONNECTION_REFUSED = "connection_refused"
     const val ACK_FILES_MISSING = "files_missing"
 
-    // ── Cartes d'accord (ADR 0064 ; app/mindport.py::approval_cards, adapters/web/app.py::approval) ──
+    // ── Cartes d'accord (ADR 0064 ; app/mindport.py::approval_cards, adapters/web/chat_session.py::ChatSession.approval) ──
     const val DECISION_ACCEPT = "accept"
     const val DECISION_REFUSE = "refuse"
     const val APPROVAL_APPROVED = "approved"

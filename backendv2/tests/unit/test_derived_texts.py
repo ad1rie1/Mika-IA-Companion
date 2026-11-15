@@ -22,7 +22,9 @@ from mika.faculties.self.night import dream_hearable, journal_ref
 from mika.faculties.self.records import Dream, Journal
 from mika.faculties.social.faculty import SocialState, _portrait_sources, _profiled
 from mika.faculties.social.profile import Revise
-from mika.faculties.transcript import TranscriptState, _compact_lines, _compacted, _speaker_forgotten
+from mika.faculties.transcript import TranscriptState
+from mika.faculties.transcript.compact import _compact_lines
+from mika.faculties.transcript.faculty import _compacted, _speaker_forgotten
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.frame import Audience

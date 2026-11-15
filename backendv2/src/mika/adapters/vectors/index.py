@@ -172,7 +172,8 @@ class SqliteVectorIndex:
 
     async def dump(self, limit: int | None = None) -> tuple[list[int], list[str], list[tuple[str, ...]], np.ndarray]:
         """Tout l'index de ce modèle, rangé par clé — (clés, sortes, personnes, matrice (n, d)) : de quoi en tirer une
-        carte (``layout``). ``limit`` : seulement les ``limit`` clés les plus récentes (les plus grandes)."""
+        carte (celle de la constellation, ``app/constellation_layout.py``). ``limit`` : seulement les ``limit`` clés
+        les plus récentes (les plus grandes)."""
         t, model = self._t, self.model
         query = select(t.c.key, t.c.kind, t.c.persons, t.c.vec).where(t.c.model == model)
         if limit is not None:

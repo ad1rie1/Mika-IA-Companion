@@ -8,7 +8,6 @@ la même lecture que le transport web.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -23,12 +22,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from mika.adapters.web.accounts import Account, Accounts
-from mika.adapters.web.app import (
-    BODY_MAX_BYTES,
-    PayloadTooLarge,
-    bounded_stream,
-    read_bounded,
-)
+from mika.adapters.web.body import BODY_MAX_BYTES, PayloadTooLarge, bounded_stream, json_object
 from mika.adapters.web.gate import SlidingWindow
 from mika.adapters.web.session import account_of, csrf_header_ok, native_token
 from mika.contracts import identity as identity_c
@@ -356,20 +350,18 @@ class MeApiBase:
                                         status_code=403, headers=NO_STORE)
                 if not csrf_header_ok(request):
                     return JSONResponse({"error": "Requête refusée (CSRF)."}, status_code=403, headers=NO_STORE)
-                try:
-                    if upload and _is_multipart(request):
-                        parsed, files = await read_upload(request)
-                    else:
-                        parsed = json.loads(await read_bounded(request, BODY_MAX_BYTES) or b"{}")
-                except PayloadTooLarge:
-                    return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=NO_STORE)
-                except Denied as exc:
-                    return JSONResponse({"error": exc.message}, status_code=exc.status, headers=NO_STORE)
-                except (ValueError, RecursionError):
-                    parsed = None
-                if not isinstance(parsed, dict):
-                    return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=NO_STORE)
-                data = parsed
+                if upload and _is_multipart(request):
+                    try:
+                        data, files = await read_upload(request)
+                    except PayloadTooLarge:
+                        return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=NO_STORE)
+                    except Denied as exc:
+                        return JSONResponse({"error": exc.message}, status_code=exc.status, headers=NO_STORE)
+                else:  # trop grand, 413 ; illisible ou pas un objet, 400 ; vide, {}
+                    got_body = await json_object(request, BODY_MAX_BYTES, NO_STORE)
+                    if isinstance(got_body, JSONResponse):
+                        return got_body
+                    data = got_body
             req = Call(request, me_of(self.kernel.mind.frame(), account), self.kernel, data, self, files)
             try:
                 got = await handler(req)

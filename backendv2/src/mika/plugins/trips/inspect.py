@@ -20,6 +20,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import trips as c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     ActionSlot,
     Block,
     Column,
@@ -35,7 +36,6 @@ from mika.kernel.inspect import (
 )
 from mika.plugins.trips import TRIPS, TripsState, days_of, trips_of
 
-FORGOTTEN = "(oublié)"
 #: comment on s'y déplace, ce qu'il évite (``mika.ports.maps.MODES``, ``AVOIDS``), en mots
 MODE_FR = {"voiture": "en voiture", "velo": "à vélo", "pied": "à pied"}
 AVOID_FR = {"peages": "péages", "autoroutes": "autoroutes", "ferries": "ferries"}

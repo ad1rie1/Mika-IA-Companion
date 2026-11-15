@@ -9,7 +9,9 @@ viennent des séries mesurées toutes les dix minutes (``needs.social``,
 from __future__ import annotations
 
 from mika.contracts import needs as c
-from mika.faculties.needs import NEEDS, NeedsParams, NeedsState, _tau, busy, describe, occupied, params
+from mika.faculties.needs.faculty import NEEDS, PRESSING, NeedsState, _tau, describe
+from mika.faculties.needs.occupation import busy, occupied
+from mika.faculties.needs.params import NeedsParams, params
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -43,8 +45,6 @@ RELIEF = {
 FELT_FR = {c.LONELY: "de la solitude", c.BORED: "de l'ennui"}
 #: la clé de la série de chaque besoin
 SERIES = {c.SOCIAL: "social", c.EXPRESSION: "expression", c.CURIOSITY: "curiosite"}
-#: au-delà, un besoin se dit dans le prompt (voir ``describe``)
-PRESSING = 0.75
 
 PERIODS = (("24h", "24 h"), ("7j", "7 jours"))
 _SPANS = {"24h": DAY, "7j": 7 * DAY}

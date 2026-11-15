@@ -38,24 +38,17 @@ from mika.plugins.teams import (
 from mika.ports.teams import conversation_key
 from mika.vocab.access import SELF
 from mika.vocab.episodes import Kind, task_target
-
-BRIEF_AUTO = ("Un message Teams pose à {who} une question à laquelle tu peux aider (« LE MESSAGE TEAMS AUQUEL TU "
-              "PRÉPARES UNE RÉPONSE », plus haut). Prépare la réponse avec teams_draft (message=[{ref}]), à la place "
-              "de {who}, comme le dit « COMMENT TU ÉCRIS DANS TEAMS ». {fate} S'il n'y a finalement rien d'utile à "
-              "répondre, ou si la réponse demande ce que tu ne sais pas, n'écris rien et dis pourquoi en une phrase.")
-BRIEF_ASKED = ("{Who} te demande de préparer une réponse à ce message Teams (« LE MESSAGE TEAMS AUQUEL TU PRÉPARES "
-               "UNE RÉPONSE » et « CE QU'ON TE DEMANDE D'Y RÉPONDRE », plus haut). Écris-la avec teams_draft "
-               "(message=[{ref}]), à sa place. {fate}")
-FATE = {
-    "brouillon": "Elle sera posée dans Teams : {who} l'enverra, la retouchera ou la laissera.",
-    "validation": "Elle ne partira qu'avec l'accord de {who}.",
-    "autonome": "Elle partira telle quelle, sous le nom de {who}, sans que personne la relise : n'écris que ce dont "
-                "tu es sûre.",
-}
+from mika.vocab.phrasebook import phrase
 
 
 def fate(mode: str, who: str) -> str:
-    return FATE.get(mode, FATE["brouillon"]).replace("{who}", who)
+    """Ce que devient sa réponse selon le mode (``teams.task.fate.*`` : une clé écrite en entier, une clé construite
+    n'aurait pas droit au trou ``who``) ; un mode inconnu est un brouillon."""
+    if mode == "validation":
+        return phrase("teams.task.fate.validation", who=who)
+    if mode == "autonome":
+        return phrase("teams.task.fate.autonome", who=who)
+    return phrase("teams.task.fate.brouillon", who=who)
 
 
 def _today(s: TeamsState, now: int) -> int:
@@ -90,8 +83,8 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
                 or ask.account in p.accounts_off:
             continue
         asker = keeper_name(frame, ask.by)
-        brief = BRIEF_ASKED.replace("{Who}", asker[:1].upper() + asker[1:]).replace(
-            "{fate}", fate(mode_of(p, s, ref, ask.conversation, ask.account), writer_of(frame, ask.account)))
+        brief = phrase("teams.task.asked", who=asker[:1].upper() + asker[1:], ref=ref,
+                       fate=fate(mode_of(p, s, ref, ask.conversation, ask.account), writer_of(frame, ask.account)))
         out.append(_candidate(ref, ask.account, ask.conversation, p.asked_evidence, brief))
     budget = p.drafts_per_day - _today(s, frame.now)
     if budget <= 0:
@@ -108,8 +101,8 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
         if p.owners.get(m.account, "") not in ("", SELF):  # le compte d'une personne : rien d'elle-même (ADR 0186)
             continue
         who = writer_of(frame, m.account)
-        brief = BRIEF_AUTO.replace("{who}", who).replace(
-            "{fate}", fate(mode_of(p, s, ref, m.conversation, m.account), who))
+        brief = phrase("teams.task.auto", who=who, ref=ref,
+                       fate=fate(mode_of(p, s, ref, m.conversation, m.account), who))
         out.append(_candidate(ref, m.account, m.conversation, p.draft_evidence, brief))
         budget -= 1
     return out
@@ -118,5 +111,5 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
 def _candidate(ref: str, account: str, conversation: str, evidence: float, brief: str) -> Candidate:
     return Candidate(Kind.TASK, task_target("teams", ref), c.DRAFT, evidence,
                      resources=frozenset({f"teams:{conversation_key(account, conversation)}"}),
-                     args=FrozenDict({"bundles": "teams", "brief:teams": brief.replace("{ref}", ref), "message": ref,
+                     args=FrozenDict({"bundles": "teams", "brief:teams": brief, "message": ref,
                                       "conversation": conversation, "account": account}))

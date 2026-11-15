@@ -21,6 +21,7 @@ from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     ActionSlot,
     Badge,
     Block,
@@ -89,7 +90,7 @@ def _note(d: DraftSeen, ctx: InspectContext) -> str:
     """La note de qui a décidé : gardée à part (« (oublié) » une fois oubliée), en clair pour un journal ancien."""
     if not d.note_ref:
         return d.note
-    return ctx.store.content([d.note_ref]).get(d.note_ref, "(oublié)")
+    return ctx.store.content([d.note_ref]).get(d.note_ref, FORGOTTEN)
 
 
 def _seen_for(s: EmailState, draft_id: str) -> DraftSeen | None:
@@ -234,7 +235,7 @@ def _tab_why(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         pairs.append(("le mail", Ref.subject("mail", mail_key(ref), "ouvrir le mail")))
     if noticed is not None:
         text = ctx.store.content([noticed.summary_ref]).get(noticed.summary_ref, "") if noticed.summary_ref else ""
-        pairs.append(("ce qu'elle en avait retenu", Text(text or "(oublié)", clamp=300)))
+        pairs.append(("ce qu'elle en avait retenu", Text(text or FORGOTTEN, clamp=300)))
         pairs.append(("réponse attendue", "oui" if noticed.needs_reply else "non"))
     if seen is not None:
         pairs.append(("pourquoi", "tu le lui as demandé" if seen.asked else "d'elle-même (réponses préparées sur "

@@ -3,7 +3,10 @@
 Ce document est pour qui écrit un client de conversation : le frontend web, l'application Android
 (`frontend/Android/`), un client natif quelconque. Les décisions et leurs raisons sont les ADR 0038, 0051, 0056,
 0062 et 0077 de [`decisions.md`](decisions.md) ; le code fait foi dans
-[`adapters/web/app.py`](../src/mika/adapters/web/app.py) (routes), [`adapters/web/session.py`](../src/mika/adapters/web/session.py)
+[`adapters/web/app.py`](../src/mika/adapters/web/app.py) (l'assemblage des routes),
+[`adapters/web/auth_routes.py`](../src/mika/adapters/web/auth_routes.py) (la connexion, `/auth/*`),
+[`adapters/web/chat_session.py`](../src/mika/adapters/web/chat_session.py) (le dialogue de `/ws`),
+[`adapters/web/doors.py`](../src/mika/adapters/web/doors.py) (les portes à clé), [`adapters/web/session.py`](../src/mika/adapters/web/session.py)
 (session, CSRF), [`adapters/web/protocol.py`](../src/mika/adapters/web/protocol.py) (trames, limites) et [`adapters/web/hub.py`](../src/mika/adapters/web/hub.py) (qui reçoit quoi). Le monde 3D a son
 propre protocole : [`protocole-monde.md`](protocole-monde.md).
 

@@ -40,7 +40,7 @@ def is_silence(text: str) -> bool:
     return bool(_BARE_SILENCE.fullmatch(bare))
 
 
-#: les balises (``[EMOTION:happy:0.5]``, que le fil montré au modèle garde ; ``[SIGH]``, ``[PAUSE:500]``) et la
+#: les balises (``[EMOTION: happy 0.5]``, que le fil montré au modèle garde ; ``[SIGH]``, ``[PAUSE:500]``) et la
 #: ponctuation ne font pas une autre phrase
 _VOICE_TOKEN = re.compile(r"\[[^\[\]\n]{1,40}\]")
 _NOT_WORDS = re.compile(r"[^\w]+")

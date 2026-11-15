@@ -55,7 +55,7 @@ from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert, visible
-from mika.vocab.access import KINDS_OF
+from mika.vocab.access import ALONE, KEEP_FLOORS, KINDS_OF, NO
 
 # où elle s'en servirait, qui une ligne désigne, quand elle vaut : la règle partagée (ADR 0131, 0133)
 from mika.vocab.access import moment as moment
@@ -74,15 +74,6 @@ WATCH_EVERY = 15 * MINUTE
 FIRST_WATCH = MINUTE
 RULE = ("seulement tant que son serveur répond et que l'outil est celui qui a été approuvé ; ce qu'elle y met part "
         "de la machine ; selon qui lui parle, l'appel part aussitôt ou attend un accord")
-#: ce qu'on tire de ce qu'un service a rendu ne se dit jamais en dessous de ce plancher (ADR 0128) ; « rien » : rien
-#: ne s'en garde
-FLOORS = {"public": int(Sensitivity.NONE), "perso": int(Sensitivity.NONE), "prive": int(Sensitivity.CONFIDENCE),
-          "rien": int(Sensitivity.CONFIDENCE)}
-#: la sensibilité d'une réponse acceptée, journalisée pour qu'elle la dise
-ANSWER_LEVELS = {"public": int(Sensitivity.ANODYNE), "perso": int(Sensitivity.PERSONAL),
-                 "prive": int(Sensitivity.CONFIDENCE), "rien": int(Sensitivity.CONFIDENCE)}
-#: ce qu'un accord peut être (ADR 0128) : ``non`` retire l'outil
-NO, ALONE, CARD, OWNER_OK = "non", "seule", "carte", "toi"
 #: ce qui fait un appel : l'empreinte que la carte (ou l'opérateur) approuve porte sur ces champs
 PINNED = ("server", "remote", "fingerprint", "args")
 #: ce que la raison d'un échec montre d'elle, dans la boucle
@@ -164,13 +155,10 @@ def _proposed(s: McpState, e: Any, cx: Any) -> McpState:
     d = e.data
     if d.capability != c.CALL:
         return s
-    try:
-        args = json.loads(d.args_json or "{}")
-    except ValueError:
-        args = {}
+    args = rt.proposal_args(d.args_json)
     req = Request(proposal=e.seq, server=str(args.get("server") or ""), remote=str(args.get("remote") or ""),
                   target=str(args.get("target") or ""), approval=str(args.get("approval") or ""), at=e.at,
-                  expires=int(args.get(rt.EXPIRES) or 0), request=str(args.get("request") or ""),
+                  expires=rt.arg_int(args, rt.EXPIRES), request=str(args.get("request") or ""),
                   args_json=d.args_json, context=d.context, keep=str(args.get("keep") or ""),
                   status=WAITING if d.approval else APPROVED)
     return replace(s, requests=_keep(s.requests.set(e.seq, req)))
@@ -312,7 +300,7 @@ async def _call(t: Any, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
     # la boucle la cite et la borne à ce que lit l'épisode, coupée à une frontière (ADR 0163)
     return ToolResult(content=phrase("mcp.tools.answered", server=label(t.server)) + "\n"
                               + (visible(result.text).strip() or phrase("approvals.nothing")),
-                      floor=FLOORS.get(keep, 0), unkept=keep == "rien")
+                      floor=KEEP_FLOORS.get(keep, 0), unkept=keep == "rien")
 
 
 async def _ask(t: Any, level: str, args: ExternalArgs, ctx: Any, keep: str) -> ToolResult:
@@ -356,7 +344,7 @@ def _decided(req: Request, ctx: Any) -> ToolResult:
     if req.status == ANSWERED:
         return ToolResult(content=phrase("mcp.tools.answered", server=label(req.server)) + "\n"
                           + (visible(text).strip() or phrase("approvals.nothing")),
-                          floor=FLOORS.get(req.keep, 0), unkept=req.keep == "rien", provenance=told)
+                          floor=KEEP_FLOORS.get(req.keep, 0), unkept=req.keep == "rien", provenance=told)
     if req.status == FAILED:
         why = (phrase("approvals.section.failed_said", what=what) + "\n" + cite(text, WHY_CHARS) if text.strip()
                else phrase("approvals.section.failed", what=what))

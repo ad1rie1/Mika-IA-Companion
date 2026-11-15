@@ -31,28 +31,65 @@ def part_of_day(hour: int) -> str:
     return "night"
 
 
-def when_fr(then: int, now: int, tz: Any) -> str:
-    """« tout à l'heure », « ce matin », « hier soir », « avant-hier », « il y a 4 jours » — ``expression.when``
-    dans sa voix."""
+def _calendar(then: int, now: int, tz: Any) -> tuple[str, int, str]:
+    """Le cas d'un instant passé, en jours du calendrier, que ``when_fr`` et ``since_fr`` disent chacune à sa façon :
+    ``long_ago`` (instant inconnu), ``just_now`` (moins d'une heure), ``today``, ``yesterday``, ``day_before`` ou
+    ``days_ago`` (trois jours ou plus) ; avec le nombre de jours et le moment de la journée (``part_of_day``)."""
     if then <= 0:
-        return phrase("expression.when.long_ago")
+        return "long_ago", 0, ""
     if now - then < HOUR and now >= then:
-        return phrase("expression.when.just_now")
+        return "just_now", 0, ""
     a, b = local(then, tz), local(now, tz)
-    days = (b.date() - a.date()).days
+    days, part = (b.date() - a.date()).days, part_of_day(a.hour)
     if days <= 0:
-        return phrase(f"expression.when.today.{part_of_day(a.hour)}")
+        return "today", days, part
     if days == 1:
-        return phrase(f"expression.when.yesterday.{part_of_day(a.hour)}")
+        return "yesterday", days, part
     if days == 2:
+        return "day_before", days, part
+    return "days_ago", days, part
+
+
+def _when(case: str, days: int, part: str) -> str:
+    if case == "long_ago":
+        return phrase("expression.when.long_ago")
+    if case == "just_now":
+        return phrase("expression.when.just_now")
+    if case == "today":
+        return phrase(f"expression.when.today.{part}")
+    if case == "yesterday":
+        return phrase(f"expression.when.yesterday.{part}")
+    if case == "day_before":
         return phrase("expression.when.day_before")
     return phrase("expression.when.days_ago", days=days)
+
+
+def when_fr(then: int, now: int, tz: Any) -> str:
+    """« tout à l'heure », « ce matin », « hier soir », « avant-hier », « il y a 4 jours » — ``expression.when``
+    dans sa voix. Après « depuis », ``since_fr``."""
+    return _when(*_calendar(then, now, tz))
+
+
+def since_fr(then: int, now: int, tz: Any) -> str:
+    """Depuis quand, à placer après « depuis » : « 4 jours », « hier soir », « la nuit d'hier », « longtemps ». Les
+    mêmes cas que ``when_fr``, dans le même ordre ; trois se disent autrement après « depuis »
+    (``expression.when.since`` dans sa voix) : l'instant inconnu, trois jours ou plus, et la veille entre 0 et 5 h.
+    Les autres sont ceux de ``when_fr`` (« tout à l'heure », « ce matin », « avant-hier »). Le texte d'une phrase ne
+    se découpe jamais : le cas se lit sur l'instant."""
+    case, days, part = _calendar(then, now, tz)
+    if case == "long_ago":
+        return phrase("expression.when.since.long_ago")
+    if case == "days_ago":
+        return phrase("expression.when.since.days_ago", days=days)
+    if case == "yesterday" and part == "night":
+        return phrase("expression.when.since.yesterday_night")
+    return _when(case, days, part)
 
 
 def ago_words(us: int) -> str:
     """Depuis combien de temps, en peu de mots, à mettre après « il y a » ou « depuis » : en minutes jusqu'à deux
     heures, en heures jusqu'à deux jours, en jours au-delà — ``timespan.ago`` dans sa voix. Une durée, pas un moment :
-    pour le jour du calendrier, ``when_fr``."""
+    pour le jour du calendrier, ``when_fr`` (``since_fr`` après « depuis »)."""
     minutes = max(1, us // MINUTE)
     if minutes < 120:
         return phrase("timespan.ago.minutes", n=minutes)

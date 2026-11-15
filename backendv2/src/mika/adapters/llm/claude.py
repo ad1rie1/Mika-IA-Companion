@@ -96,14 +96,30 @@ _STOPS = {
 _THINKING = frozenset({"thinking", "redacted_thinking"})
 #: l'en-tête de l'espace de travail, pour une clé qui n'est attachée à aucun
 WORKSPACE_HEADER = "anthropic-workspace-id"
-#: les efforts de réflexion (ceux de la CLI) ; vide : pas de réflexion
-EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+#: les efforts de réflexion (ceux de la CLI, ``--effort``), chacun avec son libellé ; vide : pas de réflexion par
+#: l'API, le défaut de la CLI. Avec les modes de connexion de Claude Code, ils ne sont déclarés qu'ici : les deux
+#: fournisseurs Claude (cette API et la CLI, ``claude_code.py``), le réglage d'un fournisseur (``config.py``) et la
+#: commande ``mika llm backend`` les lisent — un effort nouveau s'ajoute à cette seule ligne
+EFFORT_LABELS = {"": "défaut de la CLI", "low": "faible", "medium": "moyen", "high": "élevé", "xhigh": "très élevé",
+                 "max": "maximal"}
+EFFORTS = tuple(EFFORT_LABELS)
+#: comment Claude Code se connecte (le login de la CLI, ou une clé d'API Console), chacun avec son libellé
+AUTH_LABELS = {"abonnement": "le login de la CLI (abonnement)", "cle_api": "une clé d'API Console"}
+AUTHS = tuple(AUTH_LABELS)
 #: avec la réflexion, la sortie (réflexion comprise) n'est jamais plafonnée en deçà
 THINKING_OUTPUT_TOKENS = 16_384
 #: la recherche d'outils côté serveur : les outils différés se chargent quand le modèle les cherche
 SEARCH_TOOL = {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}
 #: des blocs produits par le serveur, à rendre inchangés au tour suivant
 _SERVER = frozenset({"server_tool_use", "tool_search_tool_result"})
+
+
+def checked_effort(effort: str) -> str:
+    """L'effort de réflexion demandé, s'il fait partie d'``EFFORTS`` ; sinon ``ValueError`` (les deux fournisseurs
+    Claude le refusent au même message)."""
+    if effort not in EFFORTS:
+        raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
+    return effort
 
 
 class ClaudeBackend:
@@ -123,8 +139,7 @@ class ClaudeBackend:
     ) -> None:
         if cache_ttl not in CACHE_TTLS:
             raise ValueError(f"cache_ttl inconnu : {cache_ttl!r} (attendu : {' ou '.join(CACHE_TTLS)})")
-        if effort not in EFFORTS:
-            raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
+        checked_effort(effort)
         if client is None:
             if anthropic is None:
                 raise RuntimeError("ClaudeBackend exige le paquet « anthropic » (extra « llm »).")

@@ -22,7 +22,8 @@ from mika.contracts import memory as mc
 from mika.contracts import self_ as self_c
 from mika.faculties.goals.prompt import life_of
 from mika.faculties.memory.projections import Items, Told
-from mika.faculties.needs import NeedsState, _belief_changed, _learned_a_belief
+from mika.faculties.needs import NeedsState
+from mika.faculties.needs.faculty import _belief_changed, _learned_a_belief
 from mika.faculties.self import SelfParams
 from mika.faculties.self.narrative import material
 from mika.faculties.self.night import journal_ref

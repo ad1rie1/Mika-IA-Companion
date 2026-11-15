@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mika.adapters.web.accounts import Account, Accounts
-from mika.adapters.web.gate import SlidingWindow
+from mika.adapters.web.gate import SlidingWindow, same_secret
 from mika.adapters.web.session import CSRF_COOKIE, SESSION_COOKIE
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -664,7 +664,7 @@ class UI:
         data = await request.form()
         token = str(data.get("csrf") or "")
         cookie = request.cookies.get(CSRF_COOKIE, "")
-        if not cookie or not secrets.compare_digest(token, cookie):
+        if not cookie or not same_secret(token, cookie):
             return None
         lists: dict[str, list[Any]] = {}
         for k, v in data.multi_items():

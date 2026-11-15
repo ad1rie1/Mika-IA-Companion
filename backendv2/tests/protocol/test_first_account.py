@@ -39,6 +39,8 @@ def test_from_another_machine_the_first_account_needs_the_code(tmp_path):
         assert refused.status_code == 403 and "code" in refused.json()["error"]
         _, wrong = _bootstrap(client, code="pas-le-bon")
         assert wrong.status_code == 403
+        _, odd = _bootstrap(client, code="é")  # comparé en octets : un refus, pas un 500 (reste du lot L22)
+        assert odd.status_code == 403
         _, ok = _bootstrap(client, code=CODE)
         assert ok.status_code == 200 and ok.json()["operator"]
         assert client.get("/auth/whoami").json()["bootstrap_code_required"] is False

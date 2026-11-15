@@ -119,13 +119,6 @@ EXCUSED: frozenset[tuple[str, ...]] = frozenset({
     # les flux simulés n'ont pas de relevé à montrer : la console du plugin rss lit la santé par getattr et, sans
     # elle, montre les flux suivis sans état connu ; la compléter changerait ce que montre une vie simulée
     ("missing", "sim/outside.py", "FakeFeeds", "health"),
-    # la Forge nomme ``print_`` l'empreinte d'une version mise de côté (discard, staged, install) : ``fingerprint``
-    # est déjà la fonction du module qui la calcule, et ``staged`` l'appelle ; chaque appelant passe l'empreinte par
-    # position
-    ("renamed", "adapters/forge/__init__.py", "ForgeHost", "fingerprint", "print_"),
-    # l'atelier nomme ``goal`` l'identifiant du projet dans tout son module, du temps où un projet était un but ; chaque
-    # appelant le passe par position. Le renommer touche plus de cent lignes du bac à sable : à faire à part
-    ("renamed", "adapters/workshop/__init__.py", "BwrapWorkshop", "project", "goal"),
 })
 
 

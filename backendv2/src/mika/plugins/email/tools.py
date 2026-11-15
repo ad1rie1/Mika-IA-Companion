@@ -16,14 +16,14 @@
   l'adaptateur ; elle le **propose** (capacité ``email.send``) avec le
   condensé de ce qui partirait. Le journal ne garde que l'identifiant du
   brouillon et un résumé : jamais son texte.
-- **Partir** (la capacité) : exactement ce que l'aperçu montrait quand on l'a
-  approuvé ; retouché ensuite, il ne part pas. Parti, elle le sait
-  (``email.sent``), retouché ou non.
+- **Partir** (la capacité) : un brouillon, exactement ce que l'aperçu montrait
+  quand on l'a approuvé ; retouché ensuite, il ne part pas, et une proposition
+  sans brouillon ne part jamais. Parti, elle le sait (``email.sent``),
+  retouché ou non.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import replace
@@ -611,20 +611,15 @@ async def email_tidy(args: TidyArgs, ctx: Any) -> Any:
 # ── Ce qui part ───────────────────────────────────────────────────────────
 
 
-def _legacy_digest(args: Mapping[str, Any]) -> str:
-    kept = {k: v for k, v in args.items() if not str(k).startswith("_")}
-    return hashlib.sha256(json.dumps(kept, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:32]
-
-
 def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None:
-    """Exactement ce qui partirait (l'en-tête, le texte avec sa signature et sa citation)."""
+    """Exactement ce qui partirait (l'en-tête, le texte avec sa signature et sa citation). Un mail ne part que d'un
+    brouillon, dont l'empreinte est celle qu'on approuve : une proposition sans brouillon est bloquée."""
     port = ports.get("mail")
     if port is None:
         return None
     draft_id = str(args.get("draft") or "")
-    if not draft_id:  # une proposition d'avant les brouillons : ses arguments disent tout
-        text = f"À : {args.get('to', '')}\nObjet : {args.get('subject', '')}\n\n{args.get('body', '')}"
-        return Preview(text, _legacy_digest(args))
+    if not draft_id:
+        return Preview("(proposition sans brouillon)", "", blocked="proposition sans brouillon")
     shown = port.preview(draft_id)
     draft = port.draft(draft_id)
     if shown is None or draft is None:
@@ -644,12 +639,10 @@ async def send(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
     if port is None:
         return False, "pas de boîte aux lettres"
     draft_id = str(args.get("draft") or "")
+    if not draft_id:  # rien ne part sans le brouillon et l'empreinte qu'on a approuvés
+        return False, "pas de brouillon"
     try:
-        if draft_id:
-            sent = await port.send_draft(draft_id, digest=str(args.get("_apercu") or ""))
-        else:
-            sent = await port.send(str(args.get("to", "")), str(args.get("subject", "")), str(args.get("body", "")),
-                                   str(args.get("reply_to") or ""))
+        sent = await port.send_draft(draft_id, digest=str(args.get("_apercu") or ""))
     except (OSError, RuntimeError, ValueError) as exc:  # une erreur SMTP est une OSError
         return False, str(exc)[:300] or type(exc).__name__
     return True, f"envoyé ({sent})"

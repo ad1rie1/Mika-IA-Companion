@@ -5,6 +5,8 @@
   projet : toi et elle qui travaille ;
 - sur accord, l'appel est proposé (``forge.call``) : rien ne part avant le oui ; accepté, ce qu'il a rendu revient
   comme un contenu (``forge.answered``), qu'elle dit à qui l'avait demandé ;
+- ce qu'elle en garde (la ligne d'accès) tient seule comme sur accord : la réponse journalisée à sa sensibilité, la
+  section, la carte attendue et une page lue seule en portent le plancher, comme pour un service (ADR 0128) ;
 - « lit » se déclare par un booléen, rien d'autre.
 """
 
@@ -15,19 +17,22 @@ import asyncio
 import inspect
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 from mika.adapters.forge.manifest import read_manifest
 from mika.app.mindport import KernelPort
 from mika.contracts import forge as forge_c
 from mika.contracts import runtime as rt
+from mika.contracts.runtime import ANSWERED, REFUSED
 from mika.kernel.events import Origin
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
-from mika.plugins.forge import FORGE, calls, written_draft
+from mika.plugins.forge import ACCESS_SET, FORGE, AppCall, calls, written_draft
 from mika.plugins.forge.calls import _section, call_digest
 from mika.runtime.tool_offer import offer
-from mika.vocab.access import OWNER, PERSON
+from mika.vocab.access import CLOSED_TOOLS, OWNER, PERSON, ToolRule
 from mika.vocab.episodes import PRO, Kind
+from mika.vocab.privacy import Sensitivity
 from tests.fixtures.mika import connect, effect_preview
 from tests.unit.test_forge_console import ADRIEN, needs_bwrap, run
 from tests.unit.test_project_access import facing, set_access, talking
@@ -52,6 +57,17 @@ def tool_cours(api, args):
 
 def tool_rien(api, args):
     return {"cours": 7300}
+"""
+
+
+PAGES_MANIFEST = MANIFEST + """\
+views:
+  - {key: cours, label: Le cours}
+"""
+PAGES_CODE = CODE + """
+
+def view_cours(api, params):
+    return {"version": 2, "blocks": [{"type": "note", "text": "page du cours"}]}
 """
 
 
@@ -185,3 +201,85 @@ def test_in_pro_mode_her_app_call_waits_for_the_card_and_hands_back_what_came_ba
     result = out["result"]
     assert result.ok and "AAPL" in result.content and "« cours_cours » a rendu" in result.content
     assert result.provenance == (f"forge-call:{out['proposal']}",)
+
+
+@needs_bwrap
+def test_what_she_keeps_of_an_app_holds_on_approval_as_when_she_calls_it_alone(tmp_path):
+    """Audit du 2026-11-05, K8-01 : approuvé par une carte, un outil d'app perdait ce que sa ligne d'accès dit d'en
+    garder (la réponse revenait comme un souvenir personnel, sans plancher), et une page lue seule aussi. Comme pour
+    un service (ADR 0128) : la demande porte ``keep`` (hors de l'empreinte), l'aperçu le dit, la réponse est
+    journalisée à sa sensibilité, la section en porte le plancher."""
+    async def scenario(kernel, forge, store):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await connect(kernel, "user_2", "Camille")
+        await connect(kernel, "user_3", "Bruno")
+        await forge.write("solo", PAGES_MANIFEST, PAGES_CODE)
+        rows = (ToolRule(who=(PERSON + "user_2",), read="carte", act="carte", keep="rien"),
+                ToolRule(who=(PERSON + "user_3",), read="carte", act="carte", keep="prive"),
+                ToolRule(who=(OWNER,), read="seule", act="seule", keep="rien"))
+        await kernel.mind.append([written_draft(forge.info("solo")),
+                                  ACCESS_SET.draft(app="solo", rows=rows, default=CLOSED_TOOLS, by="user_1")],
+                                 emitter="forge", correlation="genese", origin=Origin.GENESIS)
+        kernel.refresh_tools()
+        port = KernelPort(kernel)
+        out, seen = {}, set()
+        for handle, keep in (("user_2", "rien"), ("user_3", "prive")):
+            audience = facing(handle)
+            spec = kernel.mind.registry.tools["solo_cours"]
+            asked = await spec.handler(spec.args(symbole="AAPL"), talking(kernel, handle, audience, tool="solo_cours"))
+            [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS)
+                         if v.capability == forge_c.CALL and v.proposal not in seen]
+            seen.add(pending.proposal)
+            preview = await effect_preview(kernel, pending.proposal)
+            await port.resolve_effect(pending.proposal, True, by=handle, seen=preview.digest)
+            for _ in range(30):
+                if len(events(kernel, forge_c.ANSWERED)) == len(seen):
+                    break
+                await asyncio.sleep(1)
+            answered = events(kernel, forge_c.ANSWERED)[-1]
+            mind = kernel.mind
+            frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, audience,
+                          talking(kernel, handle, audience).frame.episode)
+            body = _section(frame.state("forge"), frame, {"calls": {answered.data.text.ref: answered.data.text.text}})
+            out[keep] = {"asked": asked, "call": frame.state("forge").calls[pending.proposal], "preview": preview.text,
+                         "answered": answered, "section": body}
+        spec = kernel.mind.registry.tools["solo_pages"]
+        out["pages"] = await spec.handler(spec.args(), talking(kernel, "user_1", ADRIEN, tool="solo_pages"))
+        return out
+
+    out = run(tmp_path, scenario)
+    confidence = int(Sensitivity.CONFIDENCE)
+    for keep, said in (("rien", "rien"), ("prive", "une confidence")):
+        got = out[keep]
+        assert "Demandé, rien n'est encore parti" in got["asked"].content
+        assert got["call"].keep == keep and got["call"].status == ANSWERED
+        assert f"Ce qu'elle en gardera : {said}" in got["preview"]
+        answered = got["answered"]
+        assert answered.data.ok and "AAPL" in answered.data.text.text
+        assert answered.data.text.level == confidence  # plus jamais « personnel » quoi qu'en dise la ligne
+        assert got["section"] is not None and got["section"].floor == confidence
+        assert got["section"].unkept is (keep == "rien")
+    pages = out["pages"]  # toi, seule, une ligne qui ne garde rien
+    assert pages.ok and "page du cours" in pages.content and pages.proof is False
+    assert pages.floor == confidence and pages.unkept is True
+    # ce qu'elle en garde voyage avec la demande, hors de ce qu'on accepte : l'empreinte ne bouge pas
+    call = {"app": "cours", "function": "tool_cours", "fingerprint": "f1", "args": {"symbole": "ACME"},
+            rt.DECIDER: "user_1", "tool": "cours_cours"}
+    assert call_digest({**call, "keep": "rien"}) == call_digest(call)
+
+
+def test_a_card_awaited_in_pro_mode_hands_back_what_she_keeps_of_what_came_back():
+    """Audit du 2026-11-05, K8-01 : la carte attendue dans la boucle (ADR 0165) rend ce que l'app a rendu avec son
+    plancher, comme un service ; rien n'est parti, rien à garder ; une demande d'avant (sans ``keep``) : sans
+    plancher, comme avant."""
+    r = AppCall(proposal=7, app="solo", tool="solo_cours", target="user_2", approval="conversation", at=0, expires=0,
+                keep="rien", status=ANSWERED)
+    ctx = SimpleNamespace(ports={})
+    got = calls._decided(r, ctx)
+    assert got.ok and got.unkept is True and got.floor == int(Sensitivity.CONFIDENCE)
+    kept = calls._decided(replace(r, keep="prive"), ctx)
+    assert kept.floor == int(Sensitivity.CONFIDENCE) and kept.unkept is False
+    refused = calls._decided(replace(r, status=REFUSED), ctx)
+    assert not refused.ok and refused.floor == 0 and refused.unkept is False
+    before = calls._decided(replace(r, keep=""), ctx)
+    assert before.floor == 0 and before.unkept is False

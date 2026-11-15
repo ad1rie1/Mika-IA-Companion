@@ -21,7 +21,7 @@ from sqlalchemy import insert, select
 from mika.contracts import memory as mc
 from mika.contracts import social as sc
 from mika.contracts import transcript as tc
-from mika.faculties.expression import _own_openings
+from mika.faculties.expression.habits import _own_openings
 from mika.faculties.social.archive import Relations, recall_relations
 from mika.faculties.transcript import Compact, Thread, TranscriptParams, TranscriptState
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -45,7 +45,7 @@ def _thread(rows: list[tuple[int, int, str, str]]) -> SqlDB:
 
 
 def _openings(db: SqlDB) -> Any:
-    frame = NS(episode=NS(target="user_2", attrs={}), env=NS(params_of=lambda *a: None), root=None)
+    frame = NS(episode=NS(target="user_2", attrs={}), audience=None, env=NS(params_of=lambda *a: None), root=None)
     return asyncio.run(_own_openings(None, frame, {"store": db}))
 
 
@@ -126,7 +126,7 @@ def _compact(db: SqlDB, p: TranscriptParams) -> tuple[list[Any], list[Any]]:
 
 
 def test_keeping_more_than_the_fold_threshold_folds_nothing(monkeypatch):
-    monkeypatch.setattr("mika.faculties.transcript._compact_lines", lambda frame, person, rows, *a: "…")
+    monkeypatch.setattr("mika.faculties.transcript.compact._compact_lines", lambda frame, person, rows, *a: "…")
     rows = [(i, i * MINUTE, "user", f"message {i}") for i in range(1, 51)]
     calls, emitted = _compact(_thread(rows), TranscriptParams(compact_after=20, keep=200))
     assert calls == [] and emitted == []

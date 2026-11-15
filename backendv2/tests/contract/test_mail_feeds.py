@@ -9,6 +9,7 @@ réel a ses propres épreuves : ``test_mail_imap.py``).
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -96,9 +97,13 @@ def test_feeds_hand_new_entries_once_and_skip_the_archives(tmp_path, site):
 
 # ── Un flux peut mentir : un article ne mène jamais à une machine privée (EDG-4, CON-2) ──
 
-#: un faux DNS : des noms publics, un nom qui pointe vers le réseau local, un nom qui donne les deux
+#: un faux DNS : des noms publics, un nom qui pointe vers le réseau local, un nom qui donne les deux, un nom qui
+#: pointe vers une adresse publique de la machine elle-même (``MINE``)
 DNS = {"journal.example": ["93.184.216.34"], "cdn.example": ["151.101.1.69"], "interne.example": ["10.0.0.5"],
-       "rebind.example": ["93.184.216.35", "127.0.0.1"], "prive.example": ["93.184.216.36"]}
+       "rebind.example": ["93.184.216.35", "127.0.0.1"], "prive.example": ["93.184.216.36"],
+       "maison.example": ["93.184.216.40"]}
+#: les adresses de la machine (un serveur à adresse publique) et le port où Mika écoute
+MINE, HER_PORT = "93.184.216.40", 8001
 LIES = {  # l'article n° → son lien, tel que le flux le donne
     1: "https://journal.example/a/1",  # un vrai article public
     2: "https://journal.example/vers-local",  # redirige vers la machine elle-même
@@ -108,6 +113,10 @@ LIES = {  # l'article n° → son lien, tel que le flux le donne
     6: "https://journal.example/r1",  # quatre redirections
     7: "https://journal.example/vers-cdn",  # une redirection vers une autre machine publique
     8: "http://[::ffff:127.0.0.1]/secret",  # la boucle locale, déguisée en IPv6
+    9: "http://[64:ff9b::7f00:1]/secret",  # la boucle locale, derrière le préfixe NAT64
+    10: "http://[64:ff9b::a00:1]/admin",  # le réseau local (10.0.0.1), derrière le préfixe NAT64
+    11: "https://maison.example/admin",  # un nom public qui pointe vers la machine elle-même
+    12: f"https://journal.example:{HER_PORT}/inspecteur",  # une machine publique, sur le port où Mika écoute
 }
 
 
@@ -145,9 +154,12 @@ def lying_site(asked: list[tuple[str, str]]):
 
 
 def test_an_article_never_leads_to_a_private_machine_but_a_public_one_is_read(tmp_path):
+    """La règle de la Forge (``adapters/addresses.py``) : ni le réseau local, même déguisé en IPv6 (NAT64 compris),
+    ni la machine elle-même, ni le port où Mika écoute — et aucune requête ne part vers eux."""
     asked: list[tuple[str, str]] = []
     feeds = HttpFeeds(lambda: ["https://journal.example/flux.xml"], tmp_path / "f.db",
-                      client=lying_site(asked), resolve=resolver)
+                      client=lying_site(asked), resolve=resolver, local={ipaddress.ip_address(MINE)},
+                      server_ports={HER_PORT})
 
     async def main():
         await feeds.poll(30)
@@ -160,9 +172,12 @@ def test_an_article_never_leads_to_a_private_machine_but_a_public_one_is_read(tm
     assert texts[1] == "Le texte public de journal.example/a/1."
     assert ("93.184.216.34", "journal.example") in asked
     assert texts[7] == "Le texte public de cdn.example/b."  # une redirection vers une machine publique
-    for n in (2, 3, 4, 5, 6, 8):  # la boucle locale, les métadonnées, le réseau local, le DNS menteur, 4 sauts
+    # la boucle locale, les métadonnées, le réseau local, le DNS menteur, 4 sauts, NAT64, la machine, son port
+    for n in (2, 3, 4, 5, 6, 8, 9, 10, 11, 12):
         assert texts[n] == "", n
-    assert not any(ip in ("127.0.0.1", "169.254.169.254", "10.0.0.5", "::ffff:127.0.0.1") for ip, _ in asked)
+    assert not any(ip in ("127.0.0.1", "169.254.169.254", "10.0.0.5", "::ffff:127.0.0.1", "64:ff9b::7f00:1",
+                          "64:ff9b::a00:1", MINE) for ip, _ in asked)
+    assert not any(host.endswith(f":{HER_PORT}") for _, host in asked)
     assert all("CLE_INTERNE" not in t for t in texts.values())
 
 
@@ -179,6 +194,31 @@ def test_a_feed_that_redirects_to_the_local_network_is_refused_and_says_why(tmp_
     assert go(feeds.poll(10)) == []
     [health] = feeds.health()
     assert health["error"].startswith("refusé") and "privée" in health["error"]
+
+
+@pytest.mark.parametrize("location, said", [
+    ("http://[64:ff9b::7f00:1]/flux.xml", "refusé : cette adresse désigne une machine privée ou locale"),
+    ("https://maison.example/flux.xml", "refusé : cette adresse désigne cette machine elle-même"),
+    (f"https://cdn.example:{HER_PORT}/flux.xml", "refusé : ce port est celui du serveur lui-même"),
+])
+def test_a_feed_redirected_off_its_host_follows_the_same_rule_and_says_why_without_the_address(tmp_path, location,
+                                                                                                said):
+    import httpx
+
+    asked = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        asked.append(str(req.url))
+        if req.url.host == "journal.example":
+            return httpx.Response(302, headers={"location": location})
+        return httpx.Response(200, content=b"<rss><channel><title>Ailleurs</title></channel></rss>")
+
+    feeds = HttpFeeds(lambda: ["https://journal.example/flux.xml"], tmp_path / "f.db",
+                      client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), resolve=resolver,
+                      local={ipaddress.ip_address(MINE)}, server_ports={HER_PORT})
+    assert go(feeds.poll(10)) == []
+    [health] = feeds.health()
+    assert health["error"] == said and len(asked) == 1  # rien n'est parti vers la redirection
 
 
 def test_a_feed_without_a_title_is_never_named_by_its_token(tmp_path):

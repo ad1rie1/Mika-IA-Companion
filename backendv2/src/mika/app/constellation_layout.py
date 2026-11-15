@@ -1,5 +1,7 @@
 """La carte de l'index : chaque vecteur à une place sur la sphère, près de ses voisins de sens.
 
+Elle sert l'écran de la constellation (``app/constellation.py``), son seul lecteur.
+
 Rien n'y est inventé. La direction d'un point se tire de ses **plus proches voisins dans l'espace des
 plongements** (le produit scalaire de l'index, sur des vecteurs normalisés) : deux souvenirs proches au sens finissent
 proches sur la sphère, et les filaments qu'on trace sont ces voisins-là — calculés en pleine dimension, jamais ceux de

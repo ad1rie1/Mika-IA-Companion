@@ -9,7 +9,8 @@ c'est à lui de le décoder.
 
 Lecture seule : une vue lit le frame, les projections et les caches des
 ports, jamais n'écrit. Tout y est montré (la console est réservée aux
-opérateurs) ; un contenu oublié s'affiche comme tel.
+opérateurs) ; un contenu oublié s'affiche comme tel : ``FORGOTTEN``, et
+``content_text`` pour un ``Content`` relu au journal.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
+from mika.kernel.events import Content
 from mika.kernel.text import fold
 
 #: les tons d'une cellule, d'une ligne, d'une note
@@ -733,6 +735,19 @@ def short_day_fr(d: date, *, with_year: bool = False) -> str:
     (« lundi 28 septembre ») vient de sa voix : ``vocab.circadian.day_fr``."""
     text = f"{_DAYS_FR[d.weekday()]} {d.day} {_MONTHS_FR[d.month - 1]}"
     return f"{text} {d.year}" if with_year else text
+
+
+# ── Un texte oublié ───────────────────────────────────────────────────────
+
+#: ce que la console montre d'un texte oublié (son contenu effacé du magasin), à la place du texte
+FORGOTTEN = "(oublié)"
+
+
+def content_text(content: Content | None) -> str:
+    """Le texte d'un ``Content`` relu au journal, ou ``FORGOTTEN`` s'il a été oublié (ou s'il n'y en a pas)."""
+    if content is None or content.text is None:
+        return FORGOTTEN
+    return content.text
 
 
 #: ce que veut dire une erreur de Python ou du noyau, pour un opérateur (jamais un ``repr`` Python) ;

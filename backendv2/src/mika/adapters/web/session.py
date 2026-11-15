@@ -13,12 +13,12 @@ qu'un client natif n'a pas : rien n'est élargi.
 
 from __future__ import annotations
 
-import secrets
 from typing import Any
 
 from starlette.requests import Request
 
 from mika.adapters.web.accounts import Account, Accounts
+from mika.adapters.web.gate import same_secret
 
 SESSION_COOKIE = "sessionid"
 CSRF_COOKIE = "csrftoken"
@@ -48,7 +48,8 @@ def account_of(request: Request, accounts: Accounts) -> Account | None:
 
 
 def csrf_header_ok(request: Request) -> bool:
-    """Le jeton CSRF de l'en-tête est celui du cookie, et il y en a un."""
+    """Le jeton CSRF de l'en-tête est celui du cookie, et il y en a un (comparés en octets, ``same_secret`` : un en-tête
+    qui n'est pas ASCII est refusé, sans faire tomber la requête)."""
     cookie = request.cookies.get(CSRF_COOKIE, "")
     header = request.headers.get("x-csrftoken", "")
-    return bool(cookie) and secrets.compare_digest(cookie, header)
+    return bool(cookie) and same_secret(cookie, header)

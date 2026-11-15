@@ -24,7 +24,8 @@ from sqlalchemy import case, false, func, select
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
-from mika.faculties.transcript import _COLUMNS, TRANSCRIPT, TranscriptState, _messages_of
+from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState
+from mika.faculties.transcript.thread import _COLUMNS, _messages_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,

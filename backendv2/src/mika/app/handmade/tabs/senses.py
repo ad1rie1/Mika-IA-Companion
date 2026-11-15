@@ -48,10 +48,11 @@ from mika.contracts import location as location_c
 from mika.contracts import phone as phone_c
 from mika.inspector.ui import env
 from mika.kernel.clock import DAY
+from mika.kernel.inspect import FORGOTTEN
 from mika.plugins.location.inspect import PAGE as POSITIONS
 from mika.plugins.location.inspect import SHOWN as SAID
 from mika.plugins.location.inspect import by_person
-from mika.plugins.phone.inspect import APPS, FORGOTTEN, PER_PERSON, PER_THREAD, STATES, threads
+from mika.plugins.phone.inspect import APPS, PER_PERSON, PER_THREAD, STATES, threads
 from mika.plugins.phone.inspect import PAGE as MESSAGES
 from mika.vocab.people import is_internal
 

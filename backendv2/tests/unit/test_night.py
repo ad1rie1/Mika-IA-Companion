@@ -15,7 +15,9 @@
   une vraie menace ; ce que la nuit laisse se ressent au réveil ;
 - le sommeil se lit de l'instant : un rêve tombe dans la première minute du
   sommeil paradoxal, et une nuit coupée finit, sans événement, dans la minute
-  (ADR 0223) ;
+  (ADR 0223) ; leurs échéances sont les instants que dit le corps (le début de
+  la phase, la fin de la nuit coupée : ADR 0227) ; un tirage par cycle du
+  corps, à son réglage : chaque phase paradoxale a le sien ;
 - la nuit fond les souvenirs du jour presque identiques ;
 - rejouer la nuit redonne exactement le même état.
 """
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -44,12 +47,12 @@ from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
 from mika.faculties.self import night as self_night
 from mika.faculties.self.faculty import day_of, lived_date, lived_day_of, night_of, starts_of
-from mika.faculties.self.night import CYCLE, JournalArgs, dream_of, recall_chance, self_journal, vividness_of
+from mika.faculties.self.night import JournalArgs, dream_of, recall_chance, self_journal, vividness_of
 from mika.faculties.self.records import Dream
 from mika.faculties.world import WorldParams
 from mika.faculties.world import plan as world_plan
 from mika.faculties.world import timing as world_timing
-from mika.kernel.clock import DAY, MINUTE, US, instant
+from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.frame import Audience
@@ -395,8 +398,8 @@ def _nights(n: int) -> list[tuple[int, int, sl.Sleep]]:
 
 def _remembered_per_week(recall: float, nights: int = 210) -> float:
     """Ses nuits, avec les vraies fonctions : le sommeil paradoxal de chaque
-    cycle, une chance d'y rêver (deux rêves au plus), leur vivacité, le
-    souvenir au réveil."""
+    cycle du corps (``body.rem``), une chance d'y rêver (deux rêves au plus),
+    leur vivacité, le souvenir au réveil."""
     sp, bp = SelfParams(), BodyParams().sleep
     rng = random.Random(7)
     moods = [["happy", "curious"], ["happy", "playful", "amused"], ["sad", "happy"], ["curious"],
@@ -408,9 +411,9 @@ def _remembered_per_week(recall: float, nights: int = 210) -> float:
         tried: set[int] = set()
         t = onset
         while t < wake and len(tonight) < 2:
-            cycle = (t - onset) // CYCLE
-            if sl.phase(s, t, bp) is body_c.SleepPhase.REM and cycle not in tried:
-                tried.add(cycle)
+            rem = sl.rem_window(s, t, bp)
+            if rem is not None and rem.start <= t < rem.end and rem.cycle not in tried:
+                tried.add(rem.cycle)
                 if rng.random() < sp.dream_chance:
                     emotions = rng.choice(moods)
                     # la sorte, c'est le modèle qui la dit (ADR 0153) : aucun de ces vécus n'en fait un cauchemar
@@ -467,8 +470,8 @@ def test_the_dreamer_sees_what_each_fragment_made_her_feel_and_names_the_kind(tm
 
 def test_a_dream_comes_in_the_first_minute_of_her_rem_sleep(tmp_path):
     """Le sommeil paradoxal se lit de l'instant, aucun événement ne l'annonce : le rêve tombe dans la première minute
-    d'une phase, la cadence que lui donne son quantum d'une minute (ADR 0223). Relu « dans un quart d'heure », il
-    venait jusqu'à quinze minutes plus tard dans la phase, ou la manquait."""
+    d'une phase, à l'instant que dit le corps (``body.rem``, ADR 0223, 0227). Relu « dans un quart d'heure », il venait
+    jusqu'à quinze minutes plus tard dans la phase, ou la manquait."""
 
     async def scenario(kernel):
         await kernel.set_params("self", SelfParams(dream_chance=1.0))
@@ -487,10 +490,83 @@ def test_a_dream_comes_in_the_first_minute_of_her_rem_sleep(tmp_path):
     assert sl.phase(sleep, first - MINUTE, bp) is not body_c.SleepPhase.REM, "la phase avait commencé plus tôt"
 
 
+def test_her_dreams_count_the_cycles_of_her_body_as_it_is_set(tmp_path):
+    """Un tirage par cycle, au réglage du corps (``body.rem``) : avec des cycles d'une heure, le sommeil paradoxal du
+    deuxième cycle (118-120 min après l'endormissement) et celui du troisième (166-180 min) ont chacun le leur, et le
+    second rêve vient au début du troisième. Compté sur une copie de 90 min, les deux tombaient au même index
+    (166 // 90 = 1, déjà tiré) : le second rêve attendait le quatrième cycle (214 min)."""
+    hourly = BodyParams(sleep=sl.SleepParams(cycle_us=60 * MINUTE))
+
+    async def scenario(kernel):
+        await kernel.set_params("body", hourly)
+        await kernel.set_params("self", SelfParams(dream_chance=1.0))
+        await genesis(kernel, souvenir("Alice m'a appris à pétrir le pain", about=("user_1",)))
+        await until(kernel, at_paris(2026, 9, 29, 3, 0))
+        sleep = kernel.mind.frame().state("body").sleep
+        await until(kernel, at_paris(2026, 9, 29, 9, 0))
+        return sleep, events(kernel, self_c.DREAMT.name)
+
+    (sleep, dreams), _ = build_run(tmp_path, scenario)
+    assert sleep.asleep and len(dreams) == 2
+    windows = [sl.rem_window(sleep, d.at, hourly.sleep) for d in dreams]
+    assert [w.cycle for w in windows] == [1, 2]
+    assert all(w.start <= d.at < w.start + 2 * MINUTE for w, d in zip(windows, dreams, strict=True)), \
+        "chacun dans la première minute de sa phase"
+    assert 166 * MINUTE <= dreams[1].at - sleep.since < 168 * MINUTE
+
+
+def test_her_dream_is_due_when_her_body_says_her_rem_sleep_begins(tmp_path):
+    """L'échéance du rêve est l'instant que dit le corps (``body.rem``, ADR 0227), pas une relecture à la minute : en
+    sommeil léger ou profond, le début de la prochaine phase paradoxale (relu chaque minute, il ne rendait rien) ;
+    dedans, son début, déjà venu ; son cycle tiré, la fin de la phase, où ``body.rem`` dit la suivante. Après un rêve,
+    la fin de l'écart (45 min) quand elle tombe dans la phase, sinon la fin de la phase ; ses deux rêves faits, rien."""
+    dreaming = self_night.Dreaming
+
+    async def scenario(kernel):
+        await until(kernel, at_paris(2026, 9, 29, 1, 0))
+        frame = kernel.mind.frame()
+        since = frame.get(body_c.ASLEEP_SINCE)
+        sleep, bp = frame.state("body").sleep, body_params(frame.env.params_of("body", frame.root)).sleep
+        state, night = replace(frame.state("self"), dreams=()), night_of(frame, since)
+        seen = []
+        for t in range(since, since + 7 * HOUR, MINUTE):
+            at = kernel.mind.frame(now=t)
+            rem = at.get(body_c.REM)
+            done = dreaming()
+            done.tried.add((night, rem.cycle))
+            seen.append((t, sl.phase(sleep, t, bp), rem, dreaming().next_due(state, at, None),
+                         done.next_due(state, at, None)))
+
+        def dreamt(*ats):
+            return replace(state, dreams=tuple(
+                Dream(id=i + 1, night=night, text_ref="", kind=self_c.PLEASANT, vividness=0.5, emotion="",
+                      about=(), sensitivity=1, at=x) for i, x in enumerate(ats)))
+
+        at = kernel.mind.frame(now=since + 95 * MINUTE)  # en sommeil léger, au début de son deuxième cycle
+        w = at.get(body_c.REM)
+        after = [dreaming().next_due(dreamt(*ats), at, None)
+                 for ats in ((w.start - 30 * MINUTE,), (w.start - 5 * MINUTE,), (w.start - 3 * HOUR, w.start - HOUR))]
+        return seen, at.now, w, after
+
+    (seen, now, w, after), _ = build_run(tmp_path, scenario)
+    resting = [x for x in seen if x[1] in (body_c.SleepPhase.LIGHT_SLEEP, body_c.SleepPhase.DEEP_SLEEP)]
+    rem = [x for x in seen if x[1] is body_c.SleepPhase.REM]
+    assert resting and rem and len(resting) + len(rem) == len(seen)
+    assert all(t < r.start and due == r.start for t, _, r, due, _ in resting), "le début de la prochaine phase"
+    assert all(r.start <= t < r.end and due == r.start for t, _, r, due, _ in rem), "la phase en cours : son début"
+    assert all(done == r.end for _, _, r, _, done in seen), "son cycle tiré : la fin de la phase"
+    assert w.cycle == 1 and now < w.start and 15 * MINUTE < w.end - w.start <= 40 * MINUTE
+    spaced, late, both = after
+    assert spaced == w.start + 15 * MINUTE, "45 min après le rêve, dans la phase"
+    assert late == w.end, "l'écart passe la fin de la phase : la fin de la phase"
+    assert both is None, "ses deux rêves de la nuit"
+
+
 def test_a_night_cut_by_a_friend_ends_within_the_minute(tmp_path):
     """Une proche la tire du sommeil avant le matin et lui parle encore un peu : elle reste debout. Sa nuit finit au
     matin sans événement (``body.night_waking`` se lit de l'instant), et ce qu'elle en emporte (``self.woke_with``)
-    vient dans la minute qui suit (ADR 0223) — relu « dans un quart d'heure », jusqu'à quinze minutes plus tard."""
+    vient dans la minute qui suit, à l'instant que dit le corps (``body.night_waking_until``, ADR 0223, 0227) — relu
+    « dans un quart d'heure », jusqu'à quinze minutes plus tard."""
 
     async def scenario(kernel):
         await befriend(kernel, "user_1", "close")
@@ -514,6 +590,30 @@ def test_a_night_cut_by_a_friend_ends_within_the_minute(tmp_path):
     assert len(woke) == 1
     [(at, before, after)] = woke
     assert before and not after, "dans la minute qui suit la fin de sa nuit"
+
+
+def test_a_night_cut_short_is_due_at_the_end_her_body_says(tmp_path):
+    """Tirée du sommeil puis debout, l'échéance de son réveil est la fin de sa nuit coupée, l'instant que dit le corps
+    (``body.night_waking_until``, ADR 0227) : ``body.night_waking`` y tombe. Relue chaque minute, l'échéance ne
+    rendait rien tant que la nuit n'était pas finie."""
+
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", "close")
+        await until(kernel, at_paris(2026, 9, 29, 5, 30))
+        await (await kernel.perceive(said("user_1", "tu dors ?"))).reply
+        frame = kernel.mind.frame()
+        due = self_night.Wake().next_due(frame.state("self"), frame, None)
+
+        def waking(t):
+            return kernel.mind.frame(now=t).get(body_c.NIGHT_WAKING)
+
+        return frame.now, frame.get(body_c.NIGHT_WAKING), frame.get(body_c.NIGHT_WAKING_UNTIL), due, \
+            waking(due - 1) if due else None, waking(due) if due else None
+
+    (now, cut, end, due, before, after), _ = build_run(tmp_path, scenario)
+    assert cut and now < end, "tirée du sommeil, sa nuit pas finie"
+    assert due == end
+    assert before and not after, "sa nuit coupée finit à cet instant"
 
 
 def test_what_the_night_leaves_is_felt_on_waking_not_at_three(tmp_path):

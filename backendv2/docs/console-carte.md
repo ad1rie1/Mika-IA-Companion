@@ -292,7 +292,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
 - **Teams** (ADR 0069, `app/handmade/tabs/teams.py`) : Conversations, comme une messagerie (le dernier message,
   l'heure, une question sans réponse, une réponse en chemin ; sans extension, comment la brancher) ; Réponses, celles
   qui attendent ton accord d'abord, chacune en face du message auquel elle répond (« Examiner et décider »), puis ce
-  que les autres sont devenues ; Extension, où elle en est, ses chiffres (chacun mène à son onglet), ton compte
+  que les autres sont devenues, et en pied le tableau de Teams dans Réglages › Canaux (`?canal=teams:<clé>` pour le
+  compte choisi, ou le seul ; `?canal=teams` sinon), là où se règle ce qu'elle prépare et comment ça part ; Extension, où elle en est, ses chiffres (chacun mène à son onglet), ton compte
   Teams, la brancher pas à pas. Un compte par personne (ADR 0186) : chaque onglet commence par « Les comptes de »
   (tout le monde, toi, elle par son nom, chaque personne qui a un compte Teams, `?qui=`), puis « Comptes » s'il y en a
   plusieurs (`?compte=`) ; les conversations disent leur compte quand plusieurs sont mêlés. Extension : un compte par

@@ -1,4 +1,4 @@
-"""La carte de l'index (``adapters/vectors/layout.py``) : des voisins de sens qui restent voisins sur la sphère, une
+"""La carte de l'index (``app/constellation_layout.py``) : des voisins de sens qui restent voisins sur la sphère, une
 carte qui ne saute pas quand la mémoire grandit, rien d'inventé.
 
 Les données : des grappes gaussiennes en 64 dimensions, chacune un « sujet ». Une carte honnête garde ses voisins
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mika.adapters.vectors import layout as lay
+from mika.app import constellation_layout as lay
 
 
 def clusters(n: int = 360, topics: int = 9, dims: int = 64, spread: float = 0.6, seed: int = 1):

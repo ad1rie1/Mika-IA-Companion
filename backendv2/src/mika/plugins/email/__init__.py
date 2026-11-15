@@ -32,7 +32,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
@@ -133,7 +132,8 @@ class EmailParams(BaseModel):
              "dont elle s'est ravisée (« pas maintenant ») ne compte pas.")] = 2
     canaux: Annotated[Canals, Knob(
         label="Les tableaux de ses canaux", group="Envoyer", readonly=True,
-        help="Réglés dans Réglages › Canaux (ADR 0134) : chaque boîte a son tableau, lu de haut en bas — qui écrit, "
+        # les tableaux de canal (ADR 0134)
+        help="Réglés dans Réglages › Canaux : chaque boîte a son tableau, lu de haut en bas — qui écrit, "
              "préparer d'elle-même, comment ça part — puis sa ligne par défaut.")] = Canals()
     boxes_off: Annotated[tuple[str, ...], Knob(
         label="Boîtes décochées", group="Envoyer", readonly=True,
@@ -141,13 +141,15 @@ class EmailParams(BaseModel):
              "soient ses règles d'envoi.")] = ()
     owners: Annotated[dict[str, str], Knob(
         label="À qui sont ses boîtes", group="Envoyer", readonly=True,
-        help="Réglé dans Courrier › Paramètres (« À qui », ADR 0185) : une boîte sert à son propriétaire — elle "
+        # « À qui » (ADR 0185)
+        help="Réglé dans Courrier › Paramètres (« À qui ») : une boîte sert à son propriétaire — elle "
              "(« elle »), une personne (« personne:<clé> ») ; absente, à toi.")] = Field(default_factory=dict)
     shares: Annotated[dict[str, dict[str, str]], Knob(
         label="Avec qui ses boîtes sont partagées", group="Envoyer", readonly=True,
-        help="Réglé par le propriétaire d'une boîte (Paramètres › Partages, ADR 0188) : par boîte, chaque personne "
+        # les partages (ADR 0188), qui se voient tous dans Réglages › Droits › Partages (ADR 0210)
+        help="Réglé par le propriétaire d'une boîte (Paramètres › Partages) : par boîte, chaque personne "
              "(« personne:<clé> ») et ce qu'elle en a — lire, lire et préparer, s'en servir. Tous se voient et se "
-             "retirent dans Réglages › Droits › Partages (ADR 0210).")] = \
+             "retirent dans Réglages › Droits › Partages.")] = \
         Field(default_factory=dict)
     drafts_per_day: Annotated[int, Knob(
         label="Brouillons d'elle-même par jour", group="Brouillons", lo=0, hi=50,
@@ -428,21 +430,13 @@ def _settled(s: EmailState, e, cx) -> EmailState:
     return replace(s, mails=mails)
 
 
-def draft_args(args_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(args_json or "{}")
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 @EMAIL.reducer(rt.EFFECT_PROPOSED)
 def _proposed(s: EmailState, e, cx) -> EmailState:
     """Un brouillon qu'elle propose : il attend (ou part, sans accord requis)."""
     d = e.data
     if d.owner != c.OWNER or d.capability != c.SEND:
         return s
-    args = draft_args(d.args_json)
+    args = rt.proposal_args(d.args_json)
     mail = str(args.get("mail") or "")
     seen = DraftSeen(e.seq, str(args.get("draft") or ""), str(args.get("account") or ""), mail, e.at,
                      WAITING if d.approval else APPROVED, asked=bool(mail) and mail in s.asked)

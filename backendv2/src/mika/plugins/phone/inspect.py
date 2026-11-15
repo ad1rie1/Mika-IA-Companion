@@ -12,6 +12,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import phone as c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     Block,
     Cell,
     Column,
@@ -34,7 +35,6 @@ PER_PERSON = 8
 PER_THREAD = 30
 #: les réponses proposées montrées
 SHOWN = 60
-FORGOTTEN = "(oublié)"
 APPS = {"whatsapp": "WhatsApp", "whatsapp_business": "WhatsApp Business", "messages": "Messages",
         "samsung_messages": "Messages (Samsung)"}
 STATES = {c.PREPARED: "préparée", c.OFFERED: "sur le téléphone, attend un geste", "sent": "partie",

@@ -33,8 +33,8 @@ ALLOWED = {
                                     "d'où tout le reste le tient",
     ("adapters/feeds/__init__.py", "Mika/2 (lecteur de flux)"): "l'identifiant du logiciel auprès des serveurs de "
                                                                  "flux (User-Agent) : le programme, pas elle",
-    ("adapters/forge/__init__.py", "Mika-Forge/3"): "l'identifiant du logiciel auprès des sites que ses apps lisent "
-                                                    "(User-Agent) : le programme, pas elle",
+    ("adapters/forge/http.py", "Mika-Forge/3"): "l'identifiant du logiciel auprès des sites que ses apps lisent "
+                                                "(User-Agent) : le programme, pas elle",
     ("adapters/maps/tiles.py", "Mika/2 (carte de sa position)"): "l'identifiant du logiciel auprès des serveurs de "
                                                                  "carte (User-Agent, ADR 0193) : le programme, pas elle",
 }

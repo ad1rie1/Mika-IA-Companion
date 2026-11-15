@@ -5,9 +5,12 @@
 - elle n'est pas « fatiguée dès 22 h » : la fatigue vient dans l'heure qui
   précède le moment où elle s'endormirait, et se creuse si on la tient
   éveillée au-delà ;
+- son sommeil paradoxal en cours ou le prochain dit vrai avec sa phase, quelle
+  que soit la durée réglée d'un cycle ;
 - la nuit, seule une amie, une proche ou quelque chose d'urgent la réveille ;
   les autres messages attendent son réveil, et elle y répond le matin en
-  sachant qu'elle dormait (une seule réponse pour plusieurs messages) ;
+  sachant qu'elle dormait (une seule réponse pour plusieurs messages) ; la
+  nuit qu'un message a coupée finit à l'instant que dit son corps ;
 - son rythme dit la date et l'heure en clair, sans pourcentage ; « ce message
   t'a réveillée » se dit au premier tour, puis « tu émerges encore ».
 """
@@ -91,6 +94,49 @@ def test_kept_awake_past_her_bedtime_she_ends_up_falling_asleep_on_her_feet():
     assert near > past > late
     assert late < circadian.FALLING_ASLEEP_BELOW  # « tu tombes de sommeil »
     assert phrase("circadian.feel.falling_asleep") in circadian.energy_feel(late)
+
+
+def _rem_runs(s: sl.Sleep, p: sl.SleepParams, until: int) -> list[tuple[int, int]]:
+    """Ses plages de sommeil paradoxal, lues de sa phase minute par minute (l'oracle)."""
+    runs, start = [], None
+    for t in range(s.since, until, MINUTE):
+        if sl.phase(s, t, p) is body_c.SleepPhase.REM:
+            start = t if start is None else start
+        elif start is not None:
+            runs.append((start, t))
+            start = None
+    return runs
+
+
+def test_her_rem_window_follows_her_cycles_as_they_are_set():
+    """Son sommeil paradoxal en cours ou le prochain (``body.rem``, que le rêve compte par cycle) suit ses cycles tels
+    qu'ils sont réglés : minute par minute sur une nuit de neuf heures, la fenêtre contient l'instant exactement quand
+    sa phase est paradoxale, et c'est la prochaine sinon. Un cycle trop court pour en laisser un est sauté (30 min :
+    les quatre premiers) ; sans plus aucun dans ce sommeil, ou éveillée, rien. Un rêve qui comptait ses cycles sur une
+    copie de 90 min donnait à deux phases le même tirage, ou deux tirages à une seule."""
+    onset = instant(datetime(2026, 9, 28, 23, 0, tzinfo=TZ))
+    asleep = sl.Sleep(asleep=True, since=onset, pressure=0.7)
+    for minutes in (30, 60, 90, 120):
+        p = sl.SleepParams(cycle_us=minutes * MINUTE)
+        runs = _rem_runs(asleep, p, onset + 14 * HOUR)  # au-delà de la nuit : la prochaine phase y est entière
+        cycles = set()
+        for t in range(onset, onset + 9 * HOUR, MINUTE):
+            w = sl.rem_window(asleep, t, p)
+            assert w is not None, (minutes, (t - onset) // MINUTE)
+            assert (w.start <= t < w.end) == (sl.phase(asleep, t, p) is body_c.SleepPhase.REM)
+            assert (w.start, w.end) == next(r for r in runs if r[1] > t), (minutes, (t - onset) // MINUTE)
+            assert w.cycle == (w.start - onset) // p.cycle_us == (w.end - 1 - onset) // p.cycle_us
+            cycles.add(w.cycle)
+            if minutes == 90 and w.start <= t:  # au réglage par défaut, l'index d'avant : les mêmes rêves au rejeu
+                assert w.cycle == (t - onset) // (90 * MINUTE)
+        expected = {30: set(range(4, 18)), 60: set(range(1, 9)), 90: set(range(6)), 120: set(range(5))}[minutes]
+        assert cycles == expected, (minutes, sorted(cycles))
+    # un sommeil léger qui remplit chaque cycle : jamais de sommeil paradoxal
+    full = sl.SleepParams(cycle_us=30 * MINUTE, light_us=HOUR)
+    assert not _rem_runs(asleep, full, onset + 9 * HOUR)
+    assert all(sl.rem_window(asleep, t, full) is None for t in range(onset, onset + 9 * HOUR, 7 * MINUTE))
+    # éveillée : rien
+    assert sl.rem_window(sl.Sleep(asleep=False, since=onset), onset + 2 * HOUR, P.sleep) is None
 
 
 def test_her_rhythm_says_the_date_and_hour_plainly():
@@ -311,6 +357,33 @@ def test_a_restart_right_after_her_waking_counts_the_question_from_her_waking(tm
     ended, said_ = run_virtual(clock, second)
     assert not [e for e in ended if "trop tard" in (e.data.detail or "")]  # elle dormait : pas « trop tard »
     assert [e.data.outcome for e in ended] == ["cancelled", "done"] and len(said_) == 1  # la reprise lui répond
+
+
+def test_the_end_of_a_night_cut_short_is_said_by_her_body(tmp_path):
+    """Tirée du sommeil par une proche, sa nuit coupée finit au matin : le corps en dit l'instant
+    (``body.night_waking_until``, que le réveil de ``self`` attend, ADR 0227), le même à toute heure (il ne dépend que
+    de son état, de ses réglages et du fuseau), et ``body.night_waking`` est vrai exactement tant que maintenant est
+    avant. Le soir, éveillée sans nuit coupée, et endormie : 0."""
+
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", "close")
+        evening = kernel.mind.frame().get(body_c.NIGHT_WAKING_UNTIL)
+        await until(kernel, at_paris(2026, 9, 29, 3, 0))
+        asleep = kernel.mind.frame()
+        await (await kernel.perceive(said("user_1", "tu dors ?"))).reply
+        now = kernel.mind.clock.now()
+        seen = []
+        for t in range(now, now + 8 * HOUR, MINUTE):
+            frame = kernel.mind.frame(now=t)
+            seen.append((t, frame.get(body_c.NIGHT_WAKING), frame.get(body_c.NIGHT_WAKING_UNTIL)))
+        return evening, asleep.get(body_c.SLEEP), asleep.get(body_c.NIGHT_WAKING_UNTIL), now, seen
+
+    (evening, slept, asleep, now, seen), _ = run(tmp_path, scenario)
+    assert evening == 0 and slept is not body_c.SleepPhase.AWAKE and asleep == 0
+    [end] = {u for _, _, u in seen}
+    assert now < end, "tirée du sommeil, sa nuit pas finie"
+    assert all(waking == (0 < u and t < u) for t, waking, u in seen)
+    assert {waking for _, waking, _ in seen} == {True, False}, "sa nuit coupée finit dans ces huit heures"
 
 
 def test_a_woken_night_shows_in_her_last_transitions(tmp_path):

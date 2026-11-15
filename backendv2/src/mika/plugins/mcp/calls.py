@@ -22,8 +22,9 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.guards import Superseded
 from mika.kernel.operate import Preview
-from mika.plugins.mcp import ANSWER_KEPT, ANSWER_LEVELS, MCP, WAITING, McpState, call_digest
+from mika.plugins.mcp import ANSWER_KEPT, MCP, WAITING, McpState, call_digest
 from mika.ports.mcp import KEEPS
+from mika.vocab.access import KEEP_LEVELS
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
@@ -77,7 +78,7 @@ async def _came_back(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
         text = phrase("mcp.lost") if ev.data.ok else ev.data.result
     return [c.ANSWERED.draft(proposal=req.proposal, ok=ev.data.ok,
                              text=Content.of(text[:ANSWER_KEPT],
-                                             level=ANSWER_LEVELS.get(req.keep, int(Sensitivity.PERSONAL))),
+                                             level=KEEP_LEVELS.get(req.keep, int(Sensitivity.PERSONAL))),
                              about=(req.target,) if req.target else (), dedupe_key=f"mcp-rendu:{req.proposal}")]
 
 

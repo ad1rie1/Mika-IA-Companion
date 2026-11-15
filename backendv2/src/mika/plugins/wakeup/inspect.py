@@ -19,6 +19,7 @@ from mika.contracts import wakeup as c
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     ActionSlot,
     Badge,
     Block,
@@ -184,7 +185,7 @@ def _calls_table(calls: Any, s: WakeupState, frame: Frame, ctx: InspectContext, 
                                "son projet, peuvent encore le retenir un moment).", tone="muted"))
         if x.status == EXPIRED and x.reason:
             detail.append(Note(f"Il ne sera pas traité : {x.reason}.", tone="muted"))
-        detail.append(Prose(said[:TEXT_SHOWN] if said else "(oublié)",
+        detail.append(Prose(said[:TEXT_SHOWN] if said else FORGOTTEN,
                             title="Ce que l'appel apportait (une donnée venue d'ailleurs)", clamp=1200))
         if report:
             detail.append(Prose(report, title="Son compte rendu", clamp=1200))
@@ -209,7 +210,7 @@ def _calls_table(calls: Any, s: WakeupState, frame: Frame, ctx: InspectContext, 
         cells: tuple[Any, ...] = (When(x.at),)
         if with_endpoint:
             cells += (_endpoint_ref(x.endpoint),)
-        cells += (status_badge(x), Text(said or "(oublié)", clamp=140), episode)
+        cells += (status_badge(x), Text(said or FORGOTTEN, clamp=140), episode)
         rows.append(Row(cells, tone="danger" if x.status == FAILED else "", detail=tuple(detail)))
     columns: tuple[Any, ...] = (Column("reçu", "fit"),)
     if with_endpoint:

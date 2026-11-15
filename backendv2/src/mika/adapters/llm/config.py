@@ -21,7 +21,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mika.adapters.llm.claude import THINKING_OUTPUT_TOKENS
+from mika.adapters.llm.claude import AUTH_LABELS, EFFORT_LABELS, THINKING_OUTPUT_TOKENS
 from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, Trial, UnconfiguredRole
 from mika.kernel import forms
 from mika.kernel.clock import Clock
@@ -50,7 +50,6 @@ Kind = Literal["claude", "claude_code", "openai", "ollama", "ollama_cloud"]
 
 _KINDS = (("claude", "Claude (Anthropic)"), ("claude_code", "Claude Code (la CLI, son login)"),
           ("openai", "Compatible OpenAI"), ("ollama", "Ollama (local)"), ("ollama_cloud", "Ollama Cloud"))
-_AUTHS = (("abonnement", "le login de la CLI (abonnement)"), ("cle_api", "une clé d'API Console"))
 #: le nom d'un type de fournisseur, pour un opérateur (« Ollama Cloud »)
 KIND_LABELS = {"claude": "Claude, par l'API", "claude_code": "Claude Code (la CLI)", "openai": "Compatible OpenAI",
                "ollama": "Ollama, sur cette machine", "ollama_cloud": "Ollama Cloud"}
@@ -115,9 +114,11 @@ class BackendSpec(BaseModel):
                                       "pas encore demandé) ; un autre modèle les oublie.", widget="hidden",
                                       readonly=True, order=26)] = ""
 
+    # le type reste écrit à la main : un test le lie à ``claude.AUTHS``, d'où viennent ses choix
     auth: Annotated[Literal["abonnement", "cle_api"], Knob(
         label="Connexion", help="Le serveur ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
-                                "Console, la clé se déclare juste dessous.", group="Connexion", choices=_AUTHS,
+                                "Console, la clé se déclare juste dessous.", group="Connexion",
+        choices=tuple(AUTH_LABELS.items()),
         advanced=False, order=25, only=(("kind", ("claude_code",)),))] = "abonnement"
     api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée au repos, jamais réaffichée. Vide : inchangée.",
                                  group="Connexion", secret=True, advanced=False, order=30,
@@ -161,8 +162,7 @@ class BackendSpec(BaseModel):
     effort: Annotated[str, Knob(label="Effort de réflexion", help="Combien le modèle réfléchit avant de répondre "
                                 "(--effort de la CLI ; par l'API, la réflexion adaptative à cet effort). Vide : le "
                                 "défaut de la CLI, et pas de réflexion par l'API.",
-                                choices=(("", "défaut de la CLI"), ("low", "faible"), ("medium", "moyen"),
-                                         ("high", "élevé"), ("xhigh", "très élevé"), ("max", "maximal")),
+                                choices=tuple(EFFORT_LABELS.items()),
                                 group="Options avancées", order=115, only=(("kind", ("claude_code", "claude")),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
                                          "l'abonnement, ses appels de fond sont suspendus (la conversation "
@@ -184,7 +184,12 @@ class BackendSpec(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _retired_fallback(cls, data: Any) -> Any:
-        # Une ancienne fiche reste lisible ; la prochaine sauvegarde retire l'option.
+        """Une fiche d'avant l'ADR 0073 (2026-10-08 : aucun repli entre fournisseurs) reste lisible : son option
+        ``fallback`` est oubliée, et la prochaine sauvegarde la retire.
+
+        La forme qu'il lit est plus ancienne que la remise à zéro des réglages de l'ADR 0133 (2026-10-25) ; ce que
+        gardent les réglages en service ne se voit pas d'ici. Il part quand une révision de données de la base
+        ``mind`` aura réécrit les réglages gardés à la forme du jour (audit du 2026-11-05)."""
         if isinstance(data, Mapping) and "fallback" in data:
             return {k: v for k, v in data.items() if k != "fallback"}
         return data

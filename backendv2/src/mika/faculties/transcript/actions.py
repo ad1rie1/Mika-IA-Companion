@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from mika.contracts import transcript as c
-from mika.faculties.transcript import TRANSCRIPT, TranscriptState
+from mika.faculties.transcript.faculty import TRANSCRIPT, TranscriptState
 from mika.kernel.events import Content
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame

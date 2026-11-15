@@ -71,10 +71,10 @@ def handle(frame: Frame, command: Any, *, actor: str, handle: str | None, operat
         if not operator:
             return _refused(w.Refusal.NOT_CREATOR, "Seul un compte opérateur édite le monde.")
         return _edit(s, command, by=(handle or actor)[:96])
-    # le reste n'est pas encore là : une demande (elle attend sa réponse, par un outil à venir), un acte, la prose
-    # du créateur
-    return _refused(w.Refusal.UNSUPPORTED, "Ce noyau ne sait pas encore faire ça (ADR 0050 : les personnes dans le "
-                                           "monde et la prose du créateur arrivent ensuite).")
+    # le reste n'est pas encore là (ADR 0050) : une demande (elle attend sa réponse, par un outil à venir), un acte,
+    # la prose du créateur
+    return _refused(w.Refusal.UNSUPPORTED, "Ce noyau ne sait pas encore faire ça (les personnes dans le monde et la "
+                                           "prose du créateur arrivent ensuite).")
 
 
 #: Ce qu'un lieu qui existe laisse éditer (ADR 0050 §10) : sa position et son orientation — son nom, sa sorte, sa
@@ -113,8 +113,9 @@ def _edit(s: WorldState, e: w.Edit, *, by: str) -> Verdict:
         return _refused(w.Refusal.STALE, f"Ce lot est écrit sur la révision {e.base} ; le monde en est à la "
                                          f"{s.definition.rev} : relis-le, puis recommence.")
     if beyond := _beyond(s.definition, e.changes):
+        # ce que sait ce premier éditeur : ADR 0050 §10 (``PLACE_EDITABLE``, ``_beyond``)
         return _refused(w.Refusal.UNSUPPORTED, "Ce premier éditeur change les objets, les archétypes, et la position "
-                                               "ou l'orientation d'un lieu (ADR 0050) ; pas encore : "
+                                               "ou l'orientation d'un lieu ; pas encore : "
                                                + " ; ".join(beyond) + ". Rien n'a changé.")
     try:
         w.apply_changes(s.definition, e.changes)

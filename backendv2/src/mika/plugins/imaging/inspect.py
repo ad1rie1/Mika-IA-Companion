@@ -5,6 +5,7 @@ from __future__ import annotations
 from mika.contracts import imaging as c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    FORGOTTEN,
     Badge,
     Block,
     Column,
@@ -56,7 +57,7 @@ def _inspect(s: ImagingState, frame: Frame, ctx: InspectContext) -> list[Block]:
         rows.append((When(j.at), Text(j.person or j.target, kind="mono"), Badge(label, tone),
                      f"{QUALITY_FR.get(j.quality, j.quality)} · {j.aspect}" + (" · adulte" if j.adult else ""),
                      j.backend or "—", f"{j.seconds:.0f} s" if j.seconds else "—",
-                     Text(texts.get(j.prompt_ref, "(oublié)"), clamp=300), Text(said, clamp=300)))
+                     Text(texts.get(j.prompt_ref, FORGOTTEN), clamp=300), Text(said, clamp=300)))
     blocks.append(Table(
         (Column("demandé", "fit"), "pour", Column("où il en est", "fit"), "qualité", "fournisseur",
          Column("durée", "fit"), "ce qu'elle a demandé au fournisseur", "ce qu'elle y voit / pourquoi il a raté"),

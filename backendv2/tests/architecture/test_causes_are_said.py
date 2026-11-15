@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 from mika.contracts import attention as attention_c
 from mika.contracts import needs as needs_c
+from mika.faculties.affect import over, prose
 from mika.faculties.affect.prose import cause_line
 from mika.vocab import causes
+from mika.vocab.phrasebook import family
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 
@@ -80,3 +83,17 @@ def test_what_she_said_says_where_it_was_said():
 def test_a_phrase_that_is_not_a_cause_is_never_one():
     for name in causes.NOT_CAUSES - {"forge"}:
         assert cause_line(name) == ""
+
+
+def test_a_cause_that_has_ended_is_said_in_the_past():
+    """Les causes qui sont des états, et ce qui y met fin, sont déclarées une fois (``prose.ENDED_BY_SOMEONE``,
+    ``prose.ENDED_BY_ANYTHING``) : chacune prend fin quand ``over`` le voit, et se dit alors au passé
+    (``affect.cause_over``, HUM-5). Une cause ajoutée à l'une sans phrase au passé resterait muette."""
+    ended = prose.ENDED_BY_SOMEONE | prose.ENDED_BY_ANYTHING
+    assert ended == prose.CAUSES_OVER and {needs_c.LONELY, needs_c.BORED} <= ended
+    past = family("affect.cause_over")
+    since = SimpleNamespace(heard_at=20, idle_since=20)  # quelqu'un lui a parlé, quelque chose s'est passé depuis
+    for cause in ended:
+        assert over(cause, 10, since), cause
+        assert cause_line(cause, ended=True) == past[cause] != cause_line(cause)
+    assert not over(causes.TALK, 10, since)  # une cause qui n'est pas un état ne prend pas fin

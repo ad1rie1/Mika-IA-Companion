@@ -37,8 +37,8 @@ from mika.faculties.others.faculty import _check_in
 from mika.faculties.projects.faculty import Project
 from mika.faculties.projects.work import confidant as project_confidant
 from mika.kernel.clock import HOUR as ONE_HOUR
-from mika.plugins.forge import _address as forge_address
 from mika.plugins.forge.calls import _address as call_address
+from mika.plugins.forge.prompt import _address as forge_address
 from mika.plugins.imaging.prompt import _address as imaging_address
 from mika.plugins.mcp.prompt import _address as mcp_address
 from mika.plugins.rss import _address as rss_address

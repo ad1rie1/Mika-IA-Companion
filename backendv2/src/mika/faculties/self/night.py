@@ -23,7 +23,8 @@ en reste.
   encore (ADR 0058) — et d'une pensée qui insiste, chacun avec ce qu'il lui a
   fait ressentir ; c'est le modèle qui dit, en écrivant le rêve, de quelle
   sorte il est (cauchemar, doux, mélancolique…, ADR 0153). Tirés au sort par
-  cycle, d'un hasard dérivé de la nuit : le rejeu retombe sur les mêmes.
+  cycle du corps (``body.rem``), d'un hasard dérivé de la nuit : le rejeu
+  retombe sur les mêmes.
 - **Le réveil** (``self.woke_with``) : elle se souvient — une ou deux fois par
   semaine — du rêve le plus vif ; ce qu'il lui laisse et ce que la nuit a
   apaisé se ressentent à ce moment-là, pas en pleine nuit.
@@ -93,7 +94,6 @@ from mika.vocab.reading import untagged
 
 KEEP_JOURNALS = 14
 KEEP_DREAMS = 12
-CYCLE = 90 * MINUTE
 #: après son réveil, tant d'heures pendant lesquelles un rêve dont elle se souvient peut lui revenir
 DREAM_LINGERS = 7 * HOUR
 #: au-delà, un journal ne passe plus pour son « fil d'hier »
@@ -208,15 +208,15 @@ def recall_chance(dream: Dream, woke_at: int, recall: float, recent_us: int) -> 
     return min(1.0, recall * dream.vividness * (2.0 if fresh else 1.0))
 
 
-@SELF.process("self.wake", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=60)
+@SELF.process("self.wake", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE)
 class Wake:
     """Au réveil qui finit sa nuit (pas un message qui la tire du sommeil le
     temps de répondre), ce qu'elle emporte de sa nuit.
 
     Tirée du sommeil puis restée debout, sa nuit finit au matin sans
-    événement (``body.night_waking`` se lit de l'instant) : rien de prévu, et
-    son quantum d'une minute relit sa nuit. C'est la cadence d'avant, quand
-    les processus à la minute faisaient tout réévaluer (ADR 0223)."""
+    événement : le corps en dit l'instant (``body.night_waking_until``), qui
+    est son échéance ; rendormie avant, l'endormissement la redemande. Le
+    quantum par défaut n'est qu'un filet (ADR 0223, 0227)."""
 
     @staticmethod
     def _due(state: SelfState, frame: Frame) -> int:
@@ -229,7 +229,7 @@ class Wake:
         if not self._due(state, frame):
             return None
         if frame.get(body_c.NIGHT_WAKING):
-            return None  # tirée du sommeil : sa nuit n'est pas finie, le quantum la relit
+            return frame.get(body_c.NIGHT_WAKING_UNTIL)  # tirée du sommeil : sa nuit finit à cet instant
         return frame.now
 
     async def run(self, ctx: Any) -> None:
@@ -720,15 +720,18 @@ def vividness_of(rng: random.Random, kind: str, emotions: list[str]) -> float:
     return round(max(0.05, min(1.0, rng.betavariate(2, 4) + bonus)), 3)
 
 
-@SELF.process("self.dream", wake_on=[*body_c.ALL, c.DREAMT], lane="night", catch_up=CatchUp.SKIP,
-              max_quantum_s=60)
+@SELF.process("self.dream", wake_on=[*body_c.ALL, c.DREAMT], lane="night", catch_up=CatchUp.SKIP)
 class Dreaming:
-    """En sommeil paradoxal : peut-être un rêve (un tirage par cycle).
+    """En sommeil paradoxal : peut-être un rêve (un tirage par cycle du corps).
 
-    Le sommeil paradoxal se lit de l'instant (``body.sleep``), aucun
-    événement ne l'annonce : hors du bon moment, rien de prévu, et son
-    quantum d'une minute relit son sommeil. C'est la cadence d'avant, quand
-    les processus à la minute faisaient tout réévaluer (ADR 0223)."""
+    Le sommeil paradoxal se lit de l'instant, aucun événement ne l'annonce :
+    le corps dit la phase en cours ou la prochaine (``body.rem`` : le cycle
+    qu'elle clôt, son début, sa fin), et son début est l'échéance — ou la fin
+    de l'écart qui suit le dernier rêve, ou la fin de la phase quand son
+    cycle est déjà tiré, où ``body.rem`` dit la suivante. Le quantum par
+    défaut n'est qu'un filet (ADR 0223, 0227). Les cycles sont ceux du corps,
+    à son réglage (``cycle_us``) : réglés autrement que 90 min, chaque phase
+    garde son tirage, sans en perdre ni en recevoir deux."""
 
     PER_NIGHT = 2
     SPACING = 45 * MINUTE
@@ -736,23 +739,40 @@ class Dreaming:
     def __init__(self) -> None:
         self.tried: set[tuple[str, int]] = set()
 
-    def _moment(self, state: SelfState, frame: Frame) -> tuple[str, int] | None:
+    def _sleep(self, state: SelfState, frame: Frame) -> tuple[body_c.RemWindow, str, list[Dream]] | None:
+        """Sa phase paradoxale en cours ou la prochaine, la nuit qu'elle dort et ses rêves de cette nuit ; ``None``
+        éveillée, ou sans plus aucune phase dans ce sommeil."""
         asleep_since = frame.get(body_c.ASLEEP_SINCE)
-        if not asleep_since or frame.get(body_c.SLEEP) is not body_c.SleepPhase.REM:
+        rem: body_c.RemWindow | None = frame.get(body_c.REM)
+        if not asleep_since or rem is None:
             return None
         night = night_of(frame, asleep_since)
-        tonight = [d for d in state.dreams if d.night == night]
+        return rem, night, [d for d in state.dreams if d.night == night]
+
+    def _moment(self, state: SelfState, frame: Frame) -> tuple[str, int] | None:
+        got = self._sleep(state, frame)
+        if got is None:
+            return None
+        rem, night, tonight = got
+        if not rem.start <= frame.now < rem.end:
+            return None
         if len(tonight) >= self.PER_NIGHT or (tonight and frame.now - tonight[-1].at < self.SPACING):
             return None
-        cycle = (frame.now - asleep_since) // CYCLE
-        if (night, cycle) in self.tried:
+        if (night, rem.cycle) in self.tried:
             return None
-        return night, cycle
+        return night, rem.cycle
 
     def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
-        if not frame.get(body_c.ASLEEP_SINCE):
+        got = self._sleep(state, frame)
+        if got is None:
             return None
-        return frame.now if self._moment(state, frame) else None
+        rem, night, tonight = got
+        if len(tonight) >= self.PER_NIGHT:
+            return None  # ses rêves de la nuit : un endormissement redemande l'échéance
+        if (night, rem.cycle) in self.tried:
+            return rem.end  # à sa fin, ``body.rem`` dit la phase suivante
+        at = max(rem.start, tonight[-1].at + self.SPACING) if tonight else rem.start
+        return at if at < rem.end else rem.end
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
